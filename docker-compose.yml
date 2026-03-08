@@ -50,13 +50,14 @@ services:
       context: client/
       dockerfile: Dockerfile
     container_name: battlestats-react
+    user: "${UID:-1000}:${GID:-1000}"
     environment:
       - PORT=3001
     ports:
       - "3001:3001"
     volumes:
       - ./client:/app
-    command: npm run dev
+    command: npm run dev -- --port 3001
 
   task-runner:
     container_name: battlestats-celery

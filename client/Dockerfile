@@ -1,5 +1,5 @@
-# Use the official Node.js image.
-FROM node:18
+# Use a Node.js release that satisfies the current Next.js runtime floor.
+FROM node:20.19.1
 
 # Create and change to the app directory.
 WORKDIR /app
