@@ -4,8 +4,8 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-django = "*"
-requests = "*"
+django = "==5.1.15"
+requests = "==2.32.4"
 python-dateutil = "*"
 pdbpp = "*"
 gunicorn = "*"
@@ -23,6 +23,8 @@ djangorestframework = "*"
 kombu = "*"
 amqp = "*"
 langgraph = "*"
+urllib3 = "==2.6.3"
+sqlparse = "==0.5.4"
 
 [dev-packages]
 
