@@ -6,8 +6,9 @@ from django.db.models.functions import Cast
 from django.http import Http404
 from rest_framework import generics, permissions, viewsets
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django.utils import timezone
 from warships.models import Player, Clan, Ship
 from warships.api.players import _fetch_player_id_by_name
@@ -19,6 +20,9 @@ from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data,
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
+
+
+PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
 
 
 class PlayerViewSet(viewsets.ModelViewSet):
@@ -133,24 +137,28 @@ def _validated_list_response(data, serializer_class):
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def tier_data(request, player_id: str) -> Response:
     data = fetch_tier_data(player_id)
     return _validated_list_response(data, TierDataSerializer)
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def activity_data(request, player_id: str) -> Response:
     data = fetch_activity_data(player_id)
     return _validated_list_response(data, ActivityDataSerializer)
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def type_data(request, player_id: str) -> Response:
     data = fetch_type_data(player_id)
     return _validated_list_response(data, TypeDataSerializer)
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def randoms_data(request, player_id: str) -> Response:
     fetch_all = request.query_params.get('all', '').lower() in ('true', '1')
 
@@ -186,6 +194,7 @@ def randoms_data(request, player_id: str) -> Response:
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def ranked_data(request, player_id: str) -> Response:
     data = fetch_ranked_data(player_id)
     response = _validated_list_response(data, RankedDataSerializer)
@@ -198,6 +207,7 @@ def ranked_data(request, player_id: str) -> Response:
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def clan_members(request, clan_id: str) -> Response:
     if not clan_id or clan_id in {"null", "None", "undefined"}:
         return Response([])
@@ -223,6 +233,7 @@ def clan_members(request, clan_id: str) -> Response:
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def clan_data(request, clan_filter: str) -> Response:
     if ':' in clan_filter:
         clan_id, filter_type = clan_filter.split(':', 1)
@@ -240,12 +251,14 @@ def clan_data(request, clan_filter: str) -> Response:
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def clan_battle_seasons(request, clan_id: str) -> Response:
     data = fetch_clan_battle_seasons(clan_id)
     return _validated_list_response(data, ClanBattleSeasonSummarySerializer)
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def landing_clans(request) -> Response:
     def _fetch_landing_clans():
         qs = Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
@@ -268,6 +281,7 @@ def landing_clans(request) -> Response:
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def landing_players(request) -> Response:
     def _fetch_landing_players():
         return list(
@@ -281,6 +295,7 @@ def landing_players(request) -> Response:
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def landing_recent_players(request) -> Response:
     def _fetch_recent_players():
         return list(
@@ -295,6 +310,7 @@ def landing_recent_players(request) -> Response:
 
 
 @api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def player_name_suggestions(request) -> Response:
     query = (request.query_params.get('q') or '').strip()
     if len(query) < 2:

@@ -7,15 +7,15 @@ import socket
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# print the BASE_DIR
-print(f"BASE_DIR: {BASE_DIR}")
-
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('true', '1', 't')
 
-ALLOWED_HOSTS = os.getenv(
-    'DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost,battlestats.io,159.89.242.69,138.197.75.47').split(',')
+ALLOWED_HOSTS = [
+    host.strip() for host in os.getenv(
+        'DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost,battlestats.io,159.89.242.69,138.197.75.47'
+    ).split(',') if host.strip()
+]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -75,12 +75,6 @@ DATABASES = {
         'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
-
-# print the db name, user, host, and port
-print(f"DB_NAME: {DATABASES['default']['NAME']}")
-print(f"DB_USER: {DATABASES['default']['USER']}")
-print(f"DB_HOST: {DATABASES['default']['HOST']}")
-print(f"DB_PORT: {DATABASES['default']['PORT']}")
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -152,7 +146,22 @@ else:
 CORS_EXPOSE_HEADERS = [
     'X-Randoms-Updated-At',
     'X-Battles-Updated-At',
+    'X-Ranked-Updated-At',
 ]
+
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_REFERRER_POLICY = 'same-origin'
+
+DEFAULT_RENDERER_CLASSES = [
+    'rest_framework.renderers.JSONRenderer',
+]
+if DEBUG:
+    DEFAULT_RENDERER_CLASSES.append('rest_framework.renderers.BrowsableAPIRenderer')
 
 LOGGING_CONFIG = None
 
@@ -221,8 +230,13 @@ CELERY_WORKER_MAX_TASKS_PER_CHILD = int(
 
 REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'warships.exceptions.custom_exception_handler',
-    'DEFAULT_RENDERER_CLASSES': [
-        'rest_framework.renderers.JSONRenderer',
-        'rest_framework.renderers.BrowsableAPIRenderer',
-    ]
+    'DEFAULT_RENDERER_CLASSES': DEFAULT_RENDERER_CLASSES,
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': os.getenv('DRF_THROTTLE_ANON_RATE', '120/minute'),
+        'user': os.getenv('DRF_THROTTLE_USER_RATE', '600/minute'),
+    },
 }

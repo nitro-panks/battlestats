@@ -1,12 +1,28 @@
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.core.cache import cache
+from django.test import TestCase, override_settings
 
 from warships.api.ships import _fetch_ship_info
 from warships.models import Ship
 
 
+LOCMEM_CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'TIMEOUT': 60,
+    }
+}
+
+
+@override_settings(CACHES=LOCMEM_CACHES)
 class ShipInfoApiTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
     @patch("warships.api.ships._make_api_request")
     def test_fetch_ship_info_refreshes_incomplete_existing_ship(self, mock_make_api_request):
         Ship.objects.create(

@@ -2,10 +2,11 @@ from unittest.mock import patch
 from datetime import timedelta
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.models import Player, Clan
+from warships.views import PUBLIC_API_THROTTLES, landing_players
 
 
 class PlayerViewSetTests(TestCase):
@@ -260,6 +261,11 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.json()[0]["season_id"], 50)
         self.assertEqual(response.json()[0]["participants"], 7)
         self.assertEqual(response.json()[0]["roster_battles"], 128)
+
+
+class ApiThrottleTests(TestCase):
+    def test_landing_players_endpoint_declares_public_api_throttles(self):
+        self.assertEqual(landing_players.cls.throttle_classes, PUBLIC_API_THROTTLES)
 
     def test_landing_recent_players_orders_by_last_lookup_desc_and_limits_to_40(self):
         cache.delete('landing:recent_players')

@@ -1,22 +1,17 @@
 import logging
-import os
-import requests
 from typing import Optional, Dict
+
 from django.core.cache import cache
+
+from warships.api.client import make_api_request
 from warships.models import Ship
 
 
 logging.basicConfig(level=logging.INFO)
 
-BASE_URL = "https://api.worldofwarships.com/wows/"
-APP_ID = os.environ.get('WG_APP_ID')
-REQUEST_TIMEOUT_SECONDS = 20
-
-
 def _fetch_ship_stats_for_player(player_id: str) -> Dict:
     """Fetch all competitive data for all ships for a given player_id."""
     params = {
-        "application_id": APP_ID,
         "account_id": player_id
     }
     logging.info(
@@ -47,8 +42,10 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
 
     cache_key = f'ship:{clean_ship_id}'
     cached = cache.get(cache_key)
-    if cached is not None:
+    if cached is not None and cached.name and cached.ship_type and cached.tier is not None:
         return cached
+    if cached is not None:
+        cache.delete(cache_key)
 
     ship, created = Ship.objects.get_or_create(ship_id=clean_ship_id)
     needs_refresh = created or not ship.name or not ship.ship_type or ship.tier is None
@@ -58,7 +55,6 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
         return ship
     if needs_refresh:
         params = {
-            "application_id": APP_ID,
             "ship_id": ship_id
         }
         logging.info(f' ---> Remote fetching ship info for id: {ship_id}')
@@ -88,24 +84,5 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
 
 def _make_api_request(endpoint: str, params: Dict) -> Optional[Dict]:
     """Helper function to make API requests and handle responses."""
-    try:
-        response = requests.get(
-            BASE_URL + endpoint,
-            params=params,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        data = response.json()
-    except requests.RequestException as error:
-        logging.error(
-            f"HTTP request failed for endpoint '{endpoint}': {error}")
-        return None
-    except ValueError as error:
-        logging.error(f"Invalid JSON from endpoint '{endpoint}': {error}")
-        return None
-
-    if data.get('status') != 'ok':
-        logging.error(f"Error in response: {data}")
-        return None
-
-    return data.get('data', {})
+    data = make_api_request(endpoint, params)
+    return data if isinstance(data, dict) or isinstance(data, list) else None

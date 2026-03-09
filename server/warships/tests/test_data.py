@@ -4,8 +4,8 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data
-from warships.models import Player, Snapshot
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data
+from warships.models import Player, Snapshot, Clan
 
 
 class SnapshotDataTests(TestCase):
@@ -112,3 +112,74 @@ class RandomsDataRefreshTests(TestCase):
         self.assertEqual(rows[0]["ship_name"], "Fresh Ship")
         mock_update_battle_data.assert_called_once_with(player.player_id)
         mock_update_randoms_data.assert_called_once_with(player.player_id)
+
+
+class PlayerDataHardeningTests(TestCase):
+    @patch("warships.data._fetch_clan_membership_for_player")
+    @patch("warships.data._fetch_player_personal_data")
+    def test_update_player_data_hidden_profile_clears_cached_views(
+        self,
+        mock_fetch_player_personal_data,
+        mock_fetch_clan_membership,
+    ):
+        player = Player.objects.create(
+            name="VisibleCaptain",
+            player_id=8080,
+            is_hidden=False,
+            total_battles=100,
+            pvp_battles=90,
+            pvp_wins=50,
+            pvp_losses=40,
+            pvp_ratio=55.5,
+            battles_json=[{"ship_name": "Old Ship"}],
+            randoms_json=[{"ship_name": "Old Ship"}],
+            ranked_json=[{"season_id": 1}],
+        )
+        mock_fetch_player_personal_data.return_value = {
+            "account_id": 8080,
+            "nickname": "VisibleCaptain",
+            "hidden_profile": True,
+        }
+        mock_fetch_clan_membership.return_value = {}
+
+        update_player_data(player, force_refresh=True)
+
+        player.refresh_from_db()
+        self.assertTrue(player.is_hidden)
+        self.assertEqual(player.total_battles, 0)
+        self.assertIsNone(player.battles_json)
+        self.assertIsNone(player.randoms_json)
+        self.assertIsNone(player.ranked_json)
+
+    @patch("warships.data._fetch_player_personal_data")
+    def test_update_player_data_does_not_overwrite_on_empty_upstream_response(self, mock_fetch_player_personal_data):
+        player = Player.objects.create(
+            name="StableCaptain",
+            player_id=9090,
+            total_battles=77,
+            last_fetch=timezone.now() - timedelta(days=2),
+        )
+        mock_fetch_player_personal_data.return_value = {}
+
+        update_player_data(player, force_refresh=True)
+
+        player.refresh_from_db()
+        self.assertEqual(player.name, "StableCaptain")
+        self.assertEqual(player.total_battles, 77)
+
+    @patch("warships.data._fetch_clan_data")
+    def test_update_clan_data_does_not_blank_existing_clan_on_empty_upstream_response(self, mock_fetch_clan_data):
+        clan = Clan.objects.create(
+            clan_id=555,
+            name="ExistingClan",
+            tag="EC",
+            members_count=33,
+        )
+        mock_fetch_clan_data.return_value = {}
+
+        update_clan_data(clan.clan_id)
+
+        clan.refresh_from_db()
+        self.assertEqual(clan.name, "ExistingClan")
+        self.assertEqual(clan.tag, "EC")
+        self.assertEqual(clan.members_count, 33)

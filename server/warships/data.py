@@ -778,6 +778,10 @@ def update_clan_data(clan_id: str) -> None:
         return
 
     data = _fetch_clan_data(clan_id)
+    if not data:
+        logging.warning("Skipping clan update because upstream returned no data for clan_id=%s", clan_id)
+        return
+
     clan.members_count = data.get('members_count', 0)
     clan.tag = data.get('tag', '')
     clan.name = data.get('name', '')
@@ -808,6 +812,13 @@ def update_clan_members(clan_id: str) -> None:
     clan = Clan.objects.get(clan_id=clan_id)
     member_ids = _fetch_clan_member_ids(clan_id)
 
+    if not member_ids and clan.members_count:
+        logging.warning(
+            "Skipping clan member refresh because upstream returned no member ids for clan_id=%s",
+            clan_id,
+        )
+        return
+
     for member_id in member_ids:
         player, created = Player.objects.get_or_create(player_id=member_id)
         if created:
@@ -835,6 +846,12 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
         return
 
     player_data = _fetch_player_personal_data(player.player_id)
+    if not player_data:
+        logging.warning(
+            "Skipping player update because upstream returned no data for player_id=%s",
+            player.player_id,
+        )
+        return
 
     # Map basic fields
     player.name = player_data.get("nickname", "")
@@ -848,10 +865,13 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
     else:
         player.clan = None
 
+    created_at = player_data.get("created_at")
     player.creation_date = datetime.fromtimestamp(
-        player_data.get("created_at", 0), tz=timezone.utc)
+        created_at, tz=timezone.utc) if created_at else None
+
+    last_battle_time = player_data.get("last_battle_time")
     player.last_battle_date = datetime.fromtimestamp(
-        player_data.get("last_battle_time", 0), tz=timezone.utc).date()
+        last_battle_time, tz=timezone.utc).date() if last_battle_time else None
 
     # Calculate days since last battle
     if player.last_battle_date:
@@ -859,13 +879,13 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
             timezone.utc).date() - player.last_battle_date).days
 
     # Check if the player's profile is hidden
-    if player_data.get('hidden_profile'):
-        player.is_hidden = True
+    player.is_hidden = bool(player_data.get('hidden_profile'))
 
     # If the player is not hidden, map additional statistics
     if not player.is_hidden:
+        stats_updated_at = player_data.get("stats_updated_at")
         player.battles_updated_at = datetime.fromtimestamp(
-            player_data.get("stats_updated_at", 0), tz=timezone.utc)
+            stats_updated_at, tz=timezone.utc) if stats_updated_at else None
         stats = player_data.get("statistics", {})
         player.total_battles = stats.get("battles", 0)
         pvp_stats = stats.get("pvp", {})
@@ -880,6 +900,26 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
             "survived_battles", 0) / player.pvp_battles) * 100, 2) if player.pvp_battles else 0
         player.wins_survival_rate = round((pvp_stats.get(
             "survived_wins", 0) / player.pvp_wins) * 100, 2) if player.pvp_wins else 0
+    else:
+        player.total_battles = 0
+        player.pvp_battles = 0
+        player.pvp_wins = 0
+        player.pvp_losses = 0
+        player.pvp_ratio = None
+        player.pvp_survival_rate = None
+        player.wins_survival_rate = None
+        player.battles_json = None
+        player.battles_updated_at = None
+        player.tiers_json = None
+        player.tiers_updated_at = None
+        player.activity_json = None
+        player.activity_updated_at = None
+        player.type_json = None
+        player.type_updated_at = None
+        player.randoms_json = None
+        player.randoms_updated_at = None
+        player.ranked_json = None
+        player.ranked_updated_at = None
 
     player.last_fetch = datetime.now()
     player.save()
