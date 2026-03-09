@@ -55,6 +55,10 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
         let attempts = 0;
 
         const fetchSeasons = async () => {
+            // Clear previous timeout ref so the finally block can detect
+            // whether a NEW timeout was scheduled during this iteration.
+            timeoutId = null;
+
             if (!cancelled && attempts === 0) {
                 setLoading(true);
                 setError('');
@@ -87,10 +91,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
                     setError('Unable to load clan battles seasons.');
                 }
             } finally {
-                if (!cancelled && attempts === 0) {
-                    setLoading(false);
-                }
-                if (!cancelled && attempts > 0 && !timeoutId) {
+                if (!cancelled && !timeoutId) {
                     setLoading(false);
                 }
             }

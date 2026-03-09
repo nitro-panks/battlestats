@@ -414,3 +414,33 @@ class ClanBattleSummaryCacheTests(TestCase):
 
         self.assertEqual(result, [])
         mock_delay.assert_called_once_with(clan_id="91")
+
+    @patch("warships.data.refresh_clan_battle_seasons_cache")
+    def test_fetch_clan_battle_seasons_refreshes_stale_empty_cache_for_populated_clan(self, mock_refresh):
+        from warships.data import fetch_clan_battle_seasons, _get_clan_battle_summary_cache_key
+
+        clan = Clan.objects.create(
+            clan_id=92, name="PopulatedClan", tag="PC", members_count=2)
+        Player.objects.create(name="One", player_id=9201, clan=clan)
+        Player.objects.create(name="Two", player_id=9202, clan=clan)
+        cache.set(_get_clan_battle_summary_cache_key("92"), [], 3600)
+
+        mock_refresh.return_value = [{
+            "season_id": 50,
+            "season_name": "Valhalla",
+            "season_label": "S50",
+            "start_date": "2026-01-01",
+            "end_date": "2026-02-01",
+            "ship_tier_min": 10,
+            "ship_tier_max": 10,
+            "participants": 2,
+            "roster_battles": 30,
+            "roster_wins": 15,
+            "roster_losses": 15,
+            "roster_win_rate": 50.0,
+        }]
+
+        result = fetch_clan_battle_seasons("92")
+
+        self.assertEqual(result[0]["season_id"], 50)
+        mock_refresh.assert_called_once_with("92")

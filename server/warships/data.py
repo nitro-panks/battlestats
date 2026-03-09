@@ -711,6 +711,19 @@ def fetch_clan_battle_seasons(clan_id: str) -> list:
     cache_key = _get_clan_battle_summary_cache_key(clan_id)
     cached = cache.get(cache_key)
     if cached is not None:
+        if cached:
+            return cached
+
+        try:
+            clan = Clan.objects.get(clan_id=clan_id)
+        except Clan.DoesNotExist:
+            return []
+
+        has_populated_roster = clan.members_count > 0 and clan.player_set.exclude(
+            name='').exclude(player_id__isnull=True).exists()
+        if has_populated_roster:
+            return refresh_clan_battle_seasons_cache(clan_id)
+
         return cached
 
     from warships.tasks import update_clan_battle_summary_task

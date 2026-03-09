@@ -147,6 +147,7 @@ CORS_EXPOSE_HEADERS = [
     'X-Randoms-Updated-At',
     'X-Battles-Updated-At',
     'X-Ranked-Updated-At',
+    'X-Clan-Battles-Pending',
 ]
 
 if not DEBUG:
