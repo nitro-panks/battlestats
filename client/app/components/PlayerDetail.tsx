@@ -119,7 +119,13 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     {player.clan_id ? (
                         <>
                             <div id="clan_plot_container" className="mb-5">
-                                <ClanSVG clanId={player.clan_id} onSelectMember={onSelectMember} svgHeight={280} />
+                                <ClanSVG
+                                    clanId={player.clan_id}
+                                    onSelectMember={onSelectMember}
+                                    highlightedPlayerName={player.name}
+                                    svgHeight={280}
+                                />
+                                <p className="mt-2 text-xs text-[#6baed6]">Pulsing ring marks {player.name} on the clan chart.</p>
                             </div>
                             <DeferredSection
                                 className="pt-5"

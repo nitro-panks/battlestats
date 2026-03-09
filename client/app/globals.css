@@ -14,6 +14,39 @@ body {
   min-height: 100vh;
 }
 
+.clan-player-dot {
+  filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.45));
+}
+
+.clan-player-pulse-ring {
+  transform-origin: center;
+  animation: clan-player-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes clan-player-pulse {
+  0% {
+    opacity: 0.28;
+    transform: scale(0.92);
+  }
+
+  50% {
+    opacity: 0.92;
+    transform: scale(1.18);
+  }
+
+  100% {
+    opacity: 0.28;
+    transform: scale(0.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clan-player-pulse-ring {
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

@@ -4,6 +4,7 @@ import * as d3 from 'd3';
 interface ClanProps {
     clanId: number;
     onSelectMember?: (memberName: string) => void;
+    highlightedPlayerName?: string;
     svgWidth?: number;
     svgHeight?: number;
 }
@@ -46,6 +47,7 @@ const drawClanPlot = (
     containerElement: HTMLDivElement,
     clanId: number,
     onSelectMember: ClanProps['onSelectMember'],
+    highlightedPlayerName: ClanProps['highlightedPlayerName'],
     svgWidth: number,
     svgHeight: number,
 ) => {
@@ -136,6 +138,7 @@ const drawClanPlot = (
             const max = (d3.max(data, (datum: ClanData) => datum.pvp_battles) || 0) + 50;
             const ymax = (d3.max(data, (datum: ClanData) => datum.pvp_ratio) || 0) + 2;
             const ymin = (d3.min(data, (datum: ClanData) => datum.pvp_ratio) || 0) - 2;
+            const normalizedHighlightedPlayerName = highlightedPlayerName?.trim().toLowerCase() || null;
 
             svg.selectAll('*').remove();
 
@@ -157,13 +160,29 @@ const drawClanPlot = (
                 .style('color', '#6b7280')
                 .call(d3.axisLeft(y).ticks(5).tickSizeOuter(0));
 
-            svg.append('g')
-                .selectAll('dot')
+            const points = svg.append('g')
+                .selectAll('g')
                 .data(data)
                 .enter()
+                .append('g')
+                .attr('transform', (datum: ClanData) => `translate(${x(datum.pvp_battles)}, ${y(datum.pvp_ratio)})`);
+
+            points
+                .filter((datum: ClanData) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase())
                 .append('circle')
-                .attr('cx', (datum: ClanData) => x(datum.pvp_battles))
-                .attr('cy', (datum: ClanData) => y(datum.pvp_ratio))
+                .attr('class', 'clan-player-pulse-ring')
+                .attr('r', 7)
+                .attr('fill', 'none')
+                .attr('stroke', '#f59e0b')
+                .attr('stroke-width', 1.75)
+                .attr('stroke-linecap', 'round')
+                .style('pointer-events', 'none');
+
+            points
+                .append('circle')
+                .attr('cx', 0)
+                .attr('cy', 0)
+                .attr('class', (datum: ClanData) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase() ? 'clan-player-dot' : null)
                 .attr('r', 4)
                 .style('stroke', '#444')
                 .style('stroke-width', 1.25)
@@ -186,6 +205,10 @@ const drawClanPlot = (
                         .duration(50)
                         .attr('fill', selectClanColorByWR(datum.pvp_ratio));
                 });
+
+            points
+                .filter((datum: ClanData) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase())
+                .raise();
         })
         .catch(() => {
             svg.selectAll('*').remove();
@@ -198,14 +221,14 @@ const drawClanPlot = (
         });
 };
 
-const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, svgWidth = 320, svgHeight = 280 }) => {
+const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (containerRef.current) {
-            drawClanPlot(containerRef.current, clanId, onSelectMember, svgWidth, svgHeight);
+            drawClanPlot(containerRef.current, clanId, onSelectMember, highlightedPlayerName, svgWidth, svgHeight);
         }
-    }, [clanId, onSelectMember, svgWidth, svgHeight]);
+    }, [clanId, onSelectMember, highlightedPlayerName, svgWidth, svgHeight]);
 
     return <div ref={containerRef}></div>;
 };
