@@ -4,14 +4,87 @@ from datetime import datetime, timezone, timedelta
 import logging
 from django.core.cache import cache
 from warships.models import Player, Snapshot, Clan
-from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info
-from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data
+from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player
+from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
     _fetch_clan_battle_seasons_info, _fetch_clan_battle_season_stats
 from warships.tasks import update_tiers_data_task, update_type_data_task
 
 logging.basicConfig(level=logging.INFO)
 
+def _ranked_rows_have_top_ship(rows: Any) -> bool:
+    if not isinstance(rows, list):
+        return False
+
+    return all(isinstance(row, dict) and 'top_ship_name' in row for row in rows)
+
+
+def _extract_ranked_ship_battles(season_stats: Any) -> int:
+    if not isinstance(season_stats, dict):
+        return 0
+
+    if 'battles' in season_stats:
+        return int(season_stats.get('battles', 0) or 0)
+
+    total_battles = 0
+    for mode_key in ('rank_solo', 'rank_div2', 'rank_div3'):
+        mode_stats = season_stats.get(mode_key)
+        if not isinstance(mode_stats, dict):
+            continue
+        total_battles += int(mode_stats.get('battles', 0) or 0)
+
+    return total_battles
+
+
+def _build_top_ranked_ship_names_by_season(ranked_ship_stats_rows: Any, requested_season_ids: list[int]) -> dict[int, Optional[str]]:
+    if not isinstance(ranked_ship_stats_rows, list):
+        return {}
+
+    top_ship_ids_by_season: dict[int, int] = {}
+    top_ship_battles_by_season: dict[int, int] = {}
+
+    for row in ranked_ship_stats_rows:
+        if not isinstance(row, dict):
+            continue
+
+        try:
+            ship_id = int(row.get('ship_id'))
+        except (TypeError, ValueError):
+            continue
+
+        seasons_payload = row.get('seasons')
+        if isinstance(seasons_payload, dict):
+            season_items = seasons_payload.items()
+        elif len(requested_season_ids) == 1:
+            season_items = [(requested_season_ids[0], row)]
+        else:
+            season_items = []
+
+        for season_id_raw, season_stats in season_items:
+            try:
+                season_id = int(season_id_raw)
+            except (TypeError, ValueError):
+                continue
+
+            battles = _extract_ranked_ship_battles(season_stats)
+            if battles <= 0:
+                continue
+
+            current_best_battles = top_ship_battles_by_season.get(season_id, -1)
+            current_best_ship_id = top_ship_ids_by_season.get(season_id)
+            if battles > current_best_battles or (battles == current_best_battles and (current_best_ship_id is None or ship_id < current_best_ship_id)):
+                top_ship_battles_by_season[season_id] = battles
+                top_ship_ids_by_season[season_id] = ship_id
+
+    ship_names_by_id: dict[int, Optional[str]] = {}
+    for ship_id in set(top_ship_ids_by_season.values()):
+        ship = _fetch_ship_info(str(ship_id))
+        ship_names_by_id[ship_id] = ship.name if ship else None
+
+    return {
+        season_id: ship_names_by_id.get(ship_id)
+        for season_id, ship_id in top_ship_ids_by_season.items()
+    }
 
 def _extract_randoms_rows(battles_json: Any, limit: Optional[int] = 20) -> list[dict]:
     if not isinstance(battles_json, list):
@@ -549,7 +622,7 @@ def refresh_clan_battle_seasons_cache(clan_id: str) -> list:
     return result
 
 
-def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict) -> list:
+def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict, top_ship_names_by_season: Optional[dict[int, Optional[str]]] = None) -> list:
     """
     Transform the WG API rank_info structure into a flat list of per-season summaries.
 
@@ -643,6 +716,7 @@ def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict) -> list:
             'total_battles': total_battles,
             'total_wins': total_wins,
             'win_rate': win_rate,
+            'top_ship_name': (top_ship_names_by_season or {}).get(sid),
             'best_sprint': best_sprint,
             'sprints': sorted(sprint_details, key=lambda x: x['sprint_number']),
         })
@@ -662,8 +736,9 @@ def fetch_ranked_data(player_id: str) -> list:
     # Return cached if fresh
     if player.ranked_json and player.ranked_updated_at and \
             datetime.now() - player.ranked_updated_at < timedelta(hours=1):
-        logging.info(f'Ranked data cache fresh for {player.name}')
-        return player.ranked_json
+        if _ranked_rows_have_top_ship(player.ranked_json):
+            logging.info(f'Ranked data cache fresh for {player.name}')
+            return player.ranked_json
 
     logging.info(f'Fetching ranked data for {player.name}')
     update_ranked_data(player_id)
@@ -673,8 +748,6 @@ def fetch_ranked_data(player_id: str) -> list:
 
 def update_ranked_data(player_id) -> None:
     """Fetch ranked data from WG API, aggregate, and cache on Player model."""
-    from warships.api.players import _fetch_ranked_account_info
-
     player = Player.objects.get(player_id=player_id)
 
     # Get season metadata (cached globally)
@@ -691,8 +764,17 @@ def update_ranked_data(player_id) -> None:
         player.save()
         return
 
+    requested_season_ids = sorted(
+        int(season_id) for season_id in rank_info.keys() if str(season_id).isdigit()
+    )
+    top_ship_names_by_season = _build_top_ranked_ship_names_by_season(
+        _fetch_ranked_ship_stats_for_player(int(player_id), season_ids=requested_season_ids),
+        requested_season_ids,
+    )
+
     # Aggregate into per-season summaries
-    result = _aggregate_ranked_seasons(rank_info, season_meta)
+    result = _aggregate_ranked_seasons(
+        rank_info, season_meta, top_ship_names_by_season=top_ship_names_by_season)
 
     player.ranked_json = result
     player.ranked_updated_at = datetime.now()

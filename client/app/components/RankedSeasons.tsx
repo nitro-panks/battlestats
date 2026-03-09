@@ -26,12 +26,12 @@ interface RankedSeason {
     total_battles: number;
     total_wins: number;
     win_rate: number;
-    sprints_played: number;
+    top_ship_name?: string | null;
     best_sprint: RankedSprint | null;
     sprints: RankedSprint[];
 }
 
-type SortKey = 'season' | 'highestRank' | 'sprints' | 'battles' | 'wins' | 'winRate';
+type SortKey = 'season' | 'highestRank' | 'battles' | 'wins' | 'winRate';
 type SortDirection = 'asc' | 'desc';
 
 const leagueColors: Record<string, string> = {
@@ -141,8 +141,6 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
             comparison = left.season_id - right.season_id;
         } else if (sortKey === 'highestRank') {
             comparison = getRankOrderValue(left.highest_league_name, left.highest_league) - getRankOrderValue(right.highest_league_name, right.highest_league);
-        } else if (sortKey === 'sprints') {
-            comparison = left.sprints_played - right.sprints_played;
         } else if (sortKey === 'battles') {
             comparison = left.total_battles - right.total_battles;
         } else if (sortKey === 'wins') {
@@ -204,10 +202,8 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                                                     Highest Rank <span aria-hidden="true">{getSortMarker('highestRank')}</span>
                                                 </button>
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
-                                                <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('sprints')}>
-                                                    Sprints <span aria-hidden="true">{getSortMarker('sprints')}</span>
-                                                </button>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                                Top Ship
                                             </th>
                                             <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
                                                 <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('battles')}>
@@ -241,7 +237,9 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                                                             {season.highest_league_name}
                                                         </span>
                                                     </td>
-                                                    <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.sprints_played}</td>
+                                                    <td className="px-3 py-3 text-[#084594]">
+                                                        <span className="font-medium">{season.top_ship_name || '—'}</span>
+                                                    </td>
                                                     <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.total_battles.toLocaleString()}</td>
                                                     <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.total_wins.toLocaleString()}</td>
                                                     <td className={`px-3 py-3 text-right font-semibold ${getWinRateColorClass(season.win_rate)}`}>{formatWinRate(season.win_rate)}</td>

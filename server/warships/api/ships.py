@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 from django.core.cache import cache
 
@@ -8,6 +8,26 @@ from warships.models import Ship
 
 
 logging.basicConfig(level=logging.INFO)
+
+
+def _fetch_ranked_ship_stats_for_player(player_id: int, season_ids: Optional[list[int]] = None) -> list[dict[str, Any]]:
+    """Fetch ranked ship stats for a player, optionally scoped to one or more seasons."""
+    params = {
+        "account_id": player_id,
+    }
+    if season_ids:
+        params["season_id"] = ",".join(str(season_id) for season_id in season_ids)
+
+    logging.info(
+        f' ---> Remote fetching ranked ship stats for player_id: {player_id}')
+    data = _make_api_request("seasons/shipstats/", params)
+
+    try:
+        rows = data[str(player_id)]
+    except (KeyError, TypeError):
+        rows = []
+
+    return rows if isinstance(rows, list) else []
 
 def _fetch_ship_stats_for_player(player_id: str) -> Dict:
     """Fetch all competitive data for all ships for a given player_id."""

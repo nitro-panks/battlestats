@@ -85,7 +85,7 @@ class RankedDataSerializer(serializers.Serializer):
     total_battles = serializers.IntegerField()
     total_wins = serializers.IntegerField()
     win_rate = serializers.FloatField()
-    sprints_played = serializers.IntegerField()
+    top_ship_name = serializers.CharField(allow_null=True, required=False)
     best_sprint = RankedSprintSerializer(allow_null=True)
     sprints = RankedSprintSerializer(many=True)
 
