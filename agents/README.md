@@ -9,6 +9,7 @@ See `agents/langgraph-usage-note.md` for when it makes sense to use the repo's L
 - One role spec per file (already set up).
 - One shared process contract (this file).
 - One durable knowledge base under `agents/knowledge/` for research write-ups, verified system notes, and investigation handoffs.
+- One dedicated runbook directory under `agents/runbooks/` for reusable operational and implementation guides.
 - One set of shared templates under `agents/templates/` (optional next step).
 
 ## Current Roles
@@ -73,3 +74,8 @@ Instead of only role markdown files, add these lightweight controls:
 - Store reusable findings under `agents/knowledge/` when they would save future investigation time.
 - Prefer one topic per file with a clear title, verification date, evidence summary, current conclusion, and next checks.
 - Use this for upstream API behavior, environment quirks, architectural decisions, and repeated debugging outcomes.
+
+## Runbooks
+
+- Store reusable execution guides under `agents/runbooks/`.
+- Keep runbooks task-oriented: include context, exact commands, validation steps, and rollback notes when applicable.
