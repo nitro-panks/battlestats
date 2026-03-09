@@ -58,6 +58,19 @@ def _extract_ranked_ship_battles(season_stats: Any) -> int:
             continue
         total_battles += int(mode_stats.get('battles', 0) or 0)
 
+    if total_battles > 0:
+        return total_battles
+
+    # WG API nests stats under sprint keys ("0", "1", …); sum across sprints.
+    for key, sprint_stats in season_stats.items():
+        if not isinstance(sprint_stats, dict):
+            continue
+        for mode_key in ('rank_solo', 'rank_div2', 'rank_div3'):
+            mode_stats = sprint_stats.get(mode_key)
+            if not isinstance(mode_stats, dict):
+                continue
+            total_battles += int(mode_stats.get('battles', 0) or 0)
+
     return total_battles
 
 
