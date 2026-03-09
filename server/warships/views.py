@@ -446,3 +446,15 @@ def player_name_suggestions(request) -> Response:
         )[:8]
     )
     return Response(suggestions)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def db_stats(request) -> Response:
+    def _fetch_db_stats():
+        return {
+            'players': Player.objects.count(),
+            'clans': Clan.objects.count(),
+        }
+    data = cache.get_or_set('db:stats', _fetch_db_stats, 300)
+    return Response(data)
