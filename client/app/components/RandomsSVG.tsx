@@ -17,6 +17,127 @@ interface RandomsRow {
 
 const TOP_N = 20;
 
+const selectRandomsColorByWr = (winRatio: number): string => {
+    if (winRatio > 0.65) return '#810c9e';
+    if (winRatio >= 0.60) return '#D042F3';
+    if (winRatio >= 0.56) return '#3182bd';
+    if (winRatio >= 0.54) return '#74c476';
+    if (winRatio >= 0.52) return '#a1d99b';
+    if (winRatio >= 0.50) return '#fed976';
+    if (winRatio >= 0.45) return '#fd8d3c';
+    if (winRatio >= 0.40) return '#e6550d';
+    return '#a50f15';
+};
+
+const drawBattlePlot = (containerElement: HTMLDivElement, data: RandomsRow[]) => {
+    const margin = { top: 10, right: 20, bottom: 30, left: 140 };
+    const width = 500 - margin.left - margin.right;
+    const height = 500 - margin.top - margin.bottom;
+
+    const svg = d3.select(containerElement)
+        .append('svg')
+        .attr('width', width + margin.left + margin.right)
+        .attr('height', height + margin.top + margin.bottom)
+        .append('g')
+        .attr('transform', `translate(${margin.left}, ${margin.top})`);
+
+    const max = Math.max(d3.max(data, (datum: RandomsRow) => +datum.pvp_battles) || 0, 15);
+
+    const x = d3.scaleLinear()
+        .domain([0, max])
+        .range([1, width]);
+    svg.append('g')
+        .attr('transform', `translate(0, ${height})`)
+        .call(d3.axisBottom(x))
+        .selectAll('text')
+        .attr('transform', 'translate(-10,0)rotate(-45)')
+        .style('text-anchor', 'end');
+
+    const y = d3.scaleBand()
+        .range([0, height])
+        .domain(data.map((datum: RandomsRow) => datum.ship_name))
+        .padding(.1);
+    svg.append('g')
+        .call(d3.axisLeft(y));
+
+    svg.append('text')
+        .attr('class', 'f6 lh-copy bar1')
+        .attr('text-anchor', 'end')
+        .attr('x', width)
+        .attr('y', height - 6)
+        .text('Random Battles');
+
+    const showDetails = (datum: RandomsRow) => {
+        const startX = 200;
+        const startY = 320;
+        const xOffset = 10;
+        const winPercentage = ((datum.wins / datum.pvp_battles) * 100).toFixed(2);
+
+        const detailGroup = svg.append('g')
+            .classed('details', true);
+        detailGroup.append('text')
+            .attr('x', startX)
+            .attr('y', startY)
+            .attr('font-weight', '700')
+            .text(datum.ship_name);
+
+        detailGroup.append('text')
+            .attr('x', startX + xOffset)
+            .attr('y', startY + 25)
+            .style('font-size', '16px')
+            .text(winPercentage);
+        detailGroup.append('text')
+            .attr('x', startX + xOffset + 45)
+            .attr('y', startY + 25)
+            .style('font-size', '12px')
+            .text('% Win Rate');
+
+        detailGroup.append('text')
+            .attr('x', startX + xOffset)
+            .attr('y', startY + 47)
+            .style('font-size', '16px')
+            .text(datum.pvp_battles);
+    };
+
+    const hideDetails = () => {
+        svg.selectAll('.details').remove();
+    };
+
+    const nodes = svg.selectAll('.rect')
+        .data(data)
+        .enter()
+        .append('g')
+        .classed('rect', true);
+
+    nodes.append('rect')
+        .attr('x', x(0))
+        .attr('y', (datum: RandomsRow) => (y(datum.ship_name) ?? 0) + 3)
+        .attr('width', (datum: RandomsRow) => x(datum.pvp_battles))
+        .attr('height', y.bandwidth() * .7)
+        .attr('fill', '#d9d9d9');
+
+    nodes.append('rect')
+        .attr('x', x(0))
+        .attr('y', (datum: RandomsRow) => y(datum.ship_name) ?? 0)
+        .attr('width', (datum: RandomsRow) => x(datum.wins))
+        .attr('height', y.bandwidth())
+        .style('stroke', '#444')
+        .style('stroke-width', 0.75)
+        .attr('fill', (datum: RandomsRow) => selectRandomsColorByWr(datum.win_ratio))
+        .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, datum: RandomsRow) {
+            showDetails(datum);
+            d3.select(this).transition()
+                .duration(50)
+                .attr('fill', '#bcbddc');
+        })
+        .on('mouseout', function (this: SVGRectElement, _event: MouseEvent, datum: RandomsRow) {
+            hideDetails();
+            d3.select(this).transition()
+                .duration(50)
+                .attr('fill', selectRandomsColorByWr(datum.win_ratio));
+        });
+};
+
 const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId, isLoading = false }) => {
     const [allShips, setAllShips] = useState<RandomsRow[]>([]);
     const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
@@ -63,130 +184,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId, isLoading = false }) 
         if (!containerRef.current) return;
         d3.select(containerRef.current).selectAll("*").remove();
         if (chartData.length > 0) {
-            drawBattlePlot(chartData);
+            drawBattlePlot(containerRef.current, chartData);
         }
     }, [chartData]);
-
-    const drawBattlePlot = (data: RandomsRow[]) => {
-        const margin = { top: 10, right: 20, bottom: 30, left: 140 };
-        const width = 500 - margin.left - margin.right;
-        const height = 500 - margin.top - margin.bottom;
-
-        const svg = d3.select(containerRef.current)
-            .append("svg")
-            .attr("width", width + margin.left + margin.right)
-            .attr("height", height + margin.top + margin.bottom)
-            .append("g")
-            .attr("transform", `translate(${margin.left}, ${margin.top})`);
-
-        const max = Math.max(d3.max(data, (d: RandomsRow) => +d.pvp_battles) || 0, 15);
-
-        // X axis
-        const x = d3.scaleLinear()
-            .domain([0, max])
-            .range([1, width]);
-        svg.append("g")
-            .attr("transform", `translate(0, ${height})`)
-            .call(d3.axisBottom(x))
-            .selectAll("text")
-            .attr("transform", "translate(-10,0)rotate(-45)")
-            .style("text-anchor", "end");
-
-        // Y axis
-        const y = d3.scaleBand()
-            .range([0, height])
-            .domain(data.map((d) => d.ship_name))
-            .padding(.1);
-        svg.append("g")
-            .call(d3.axisLeft(y));
-
-        svg.append("text")
-            .attr("class", "f6 lh-copy bar1")
-            .attr("text-anchor", "end")
-            .attr("x", width)
-            .attr("y", height - 6)
-            .text("Random Battles");
-
-        const nodes = svg.selectAll(".rect")
-            .data(data)
-            .enter()
-            .append("g")
-            .classed('rect', true);
-
-        nodes.append("rect")
-            .attr("x", x(0))
-            .attr("y", (d: RandomsRow) => (y(d.ship_name) ?? 0) + 3)
-            .attr("width", (d: RandomsRow) => x(d.pvp_battles))
-            .attr("height", (y.bandwidth() * .7))
-            .attr("fill", "#d9d9d9");
-
-        nodes.append("rect")
-            .attr("x", x(0))
-            .attr("y", (d: RandomsRow) => y(d.ship_name) ?? 0)
-            .attr("width", (d: RandomsRow) => x(d.wins))
-            .attr("height", y.bandwidth())
-            .style("stroke", "#444")
-            .style("stroke-width", 0.75)
-            .attr("fill", (d: RandomsRow) => selectColorByWr(d.win_ratio))
-            .on('mouseover', function (this: SVGRectElement, event: MouseEvent, d: RandomsRow) {
-                showDetails(d, svg);
-                d3.select(this).transition()
-                    .duration(50)
-                    .attr('fill', '#bcbddc');
-            })
-            .on('mouseout', function (this: SVGRectElement, event: MouseEvent, d: RandomsRow) {
-                hideDetails(svg);
-                d3.select(this).transition()
-                    .duration(50)
-                    .attr("fill", selectColorByWr(d.win_ratio));
-            });
-    };
-
-    const showDetails = (d: any, svg: any) => {
-        const start_x = 200, start_y = 320, x_offset = 10;
-        const win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
-
-        const detailGroup = svg.append("g")
-            .classed('details', true);
-        detailGroup.append("text")
-            .attr("x", start_x)
-            .attr("y", start_y)
-            .attr("font-weight", "700")
-            .text(d.ship_name);
-
-        detailGroup.append("text")
-            .attr("x", start_x + x_offset)
-            .attr("y", start_y + 25)
-            .style("font-size", "16px")
-            .text(win_percentage);
-        detailGroup.append("text")
-            .attr("x", start_x + x_offset + 45)
-            .attr("y", start_y + 25)
-            .style("font-size", "12px")
-            .text("% Win Rate");
-
-        detailGroup.append("text")
-            .attr("x", start_x + x_offset)
-            .attr("y", start_y + 47)
-            .style("font-size", "16px")
-            .text(d.pvp_battles);
-    };
-
-    const hideDetails = (svg: any) => {
-        svg.selectAll('.details').remove();
-    };
-
-    const selectColorByWr = (win_ratio: number): string => {
-        if (win_ratio > 0.65) return "#810c9e"; // super unicum
-        if (win_ratio >= 0.60) return "#D042F3"; // regular ol unicorn
-        if (win_ratio >= 0.56) return "#3182bd"; // great
-        if (win_ratio >= 0.54) return "#74c476"; // very good
-        if (win_ratio >= 0.52) return "#a1d99b"; // good
-        if (win_ratio >= 0.50) return "#fed976"; // average
-        if (win_ratio >= 0.45) return "#fd8d3c"; // below average
-        if (win_ratio >= 0.40) return "#e6550d"; // bad
-        return "#a50f15"; // super bad
-    };
 
     const availableTypes = Array.from(new Set(allShips.map((row) => row.ship_type)));
     const availableTiers = Array.from(new Set(allShips.map((row) => row.ship_tier))).sort((a, b) => b - a);

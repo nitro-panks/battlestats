@@ -61,6 +61,7 @@ const SEARCH_SUGGESTION_LIMIT = 8;
 const SEARCH_DEBOUNCE_MS = 180;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
+const SEARCH_SUGGESTIONS_ID = 'player-search-suggestions';
 
 const PlayerSearch: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
@@ -354,7 +355,13 @@ const PlayerSearch: React.FC = () => {
                     <form onSubmit={handleSubmit} className="space-y-2">
                         <label htmlFor="search" className="block text-sm font-medium text-[#2171b5]">Search:</label>
                         <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-                            <div className="relative w-full sm:w-1/3">
+                            <div
+                                className="relative w-full sm:w-1/3"
+                                role="combobox"
+                                aria-expanded={isSuggestionListOpen && searchSuggestions.length > 0}
+                                aria-controls={SEARCH_SUGGESTIONS_ID}
+                                aria-haspopup="listbox"
+                            >
                                 <input
                                     type="text"
                                     id="search"
@@ -368,20 +375,20 @@ const PlayerSearch: React.FC = () => {
                                     onKeyDown={handleSearchInputKeyDown}
                                     autoComplete="off"
                                     aria-autocomplete="list"
-                                    aria-expanded={isSuggestionListOpen && searchSuggestions.length > 0}
-                                    aria-controls="player-search-suggestions"
+                                    aria-controls={SEARCH_SUGGESTIONS_ID}
+                                    aria-activedescendant={highlightedSuggestionIndex >= 0 ? `player-search-suggestion-${highlightedSuggestionIndex}` : undefined}
                                     className="block w-full px-3 py-2 border border-[#c6dbef] rounded-md shadow-sm focus:outline-none focus:ring-[#4292c6] focus:border-[#4292c6] sm:text-sm"
                                 />
                                 {isSuggestionListOpen && searchSuggestions.length > 0 && (
                                     <ul
-                                        id="player-search-suggestions"
+                                        id={SEARCH_SUGGESTIONS_ID}
                                         className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-[#c6dbef] bg-white py-1 shadow-lg"
                                         role="listbox"
                                     >
                                         {searchSuggestions.map((player, index) => {
                                             const isHighlighted = index === highlightedSuggestionIndex;
                                             return (
-                                                <li key={`suggestion-${player.name}`} role="option" aria-selected={isHighlighted}>
+                                                <li id={`player-search-suggestion-${index}`} key={`suggestion-${player.name}`} role="option" aria-selected={isHighlighted}>
                                                     <button
                                                         type="button"
                                                         onMouseDown={() => handleSuggestionMouseDown(player.name)}
