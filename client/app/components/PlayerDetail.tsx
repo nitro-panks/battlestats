@@ -95,6 +95,19 @@ const selectColorByWR = (winRatio: number): string => {
     return "#a50f15";                       // bad
 };
 
+const PLAYSTYLE_HELPER_TEXT: Record<string, string> = {
+    Assassin: 'Wins relentlessly, wastes little, and closes games with intent.',
+    Warrior: 'Performs well, stays alive, and keeps steady pressure on the fight.',
+    Stalwart: 'Steady under pressure, useful in every phase, and good for more than raw damage.',
+    Daredevil: 'Pushes recklessly, burns brightly, and still finds ways to win.',
+    Flotsam: 'Stays afloat, contributes enough, and remains useful in most fights.',
+    Jetsam: 'Gets chewed up early, loses impact fast, and rarely turns the match.',
+    Survivor: 'Stays alive, avoids disaster, but mostly delays the loss.',
+    Potato: 'Sinks early, lands little, and leaves the team short-handed.',
+    'Hot Potato': 'Explodes early, blames loudly, and gets dumped on the team like a problem nobody wanted.',
+    Recruit: 'Has too few battles to read; the story is just beginning.',
+};
+
 const PlayerDetail: React.FC<PlayerDetailProps> = ({
     player,
     onBack,
@@ -211,13 +224,18 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     <p className="mb-2 text-xs text-[#6baed6]">Design 2 uses a true bivariate view: darker tiles mean more players, the dark ridge shows the population trend, and the marker shows whether this player survives more or less often than peers with a similar win rate. The prior overlay view is preserved in code as design 1.</p>
                                     <WRDistributionSVG playerWR={player.pvp_ratio} playerSurvivalRate={player.pvp_survival_rate} />
                                     {player.verdict && (
-                                        <p className="mt-2 text-sm font-medium text-[#334155]">Playstyle: <span className="font-semibold text-[#084594]">{player.verdict}</span></p>
+                                        <div className="mt-2">
+                                            <p className="text-sm font-medium text-[#334155]">Playstyle: <span className="font-semibold text-[#084594]">{player.verdict}</span></p>
+                                            {PLAYSTYLE_HELPER_TEXT[player.verdict] ? (
+                                                <p className="mt-1 text-xs text-[#6baed6]">{PLAYSTYLE_HELPER_TEXT[player.verdict]}</p>
+                                            ) : null}
+                                        </div>
                                     )}
                                 </div>
                             </DeferredSection>
 
                             <DeferredSection
-                                className="mt-4"
+                                className="mt-6"
                                 minHeight={204}
                                 placeholder={<LoadingPanel label="Preparing battles distribution..." minHeight={204} />}
                             >

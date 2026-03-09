@@ -275,9 +275,14 @@ class RankedDataRefreshTests(TestCase):
 
 
 class PlayerDataHardeningTests(TestCase):
-    def test_compute_player_verdict_uses_assassin_for_unicum_band(self):
+    def test_compute_player_verdict_uses_new_playstyle_bands(self):
         self.assertEqual(compute_player_verdict(500, 60.0, 34.0), "Assassin")
         self.assertEqual(compute_player_verdict(500, 64.8, 28.0), "Assassin")
+        self.assertEqual(compute_player_verdict(500, 57.1, 35.0), "Warrior")
+        self.assertEqual(compute_player_verdict(500, 55.0, 35.0), "Stalwart")
+        self.assertEqual(compute_player_verdict(500, 54.2, 28.0), "Daredevil")
+        self.assertEqual(compute_player_verdict(500, 41.0, 24.0), "Hot Potato")
+        self.assertEqual(compute_player_verdict(500, 42.0, 24.0), "Potato")
 
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
@@ -390,6 +395,41 @@ class PlayerDataHardeningTests(TestCase):
         player.refresh_from_db()
         self.assertEqual(player.pvp_ratio, 60.0)
         self.assertEqual(player.verdict, "Assassin")
+
+    @patch("warships.data._fetch_clan_membership_for_player")
+    @patch("warships.data._fetch_player_personal_data")
+    def test_update_player_data_assigns_stalwart_for_good_non_warrior_band(
+        self,
+        mock_fetch_player_personal_data,
+        mock_fetch_clan_membership,
+    ):
+        player = Player.objects.create(
+            name="StalwartCandidate",
+            player_id=9393,
+            last_fetch=timezone.now() - timedelta(days=2),
+        )
+        mock_fetch_player_personal_data.return_value = {
+            "account_id": 9393,
+            "nickname": "StalwartCandidate",
+            "hidden_profile": False,
+            "statistics": {
+                "battles": 1200,
+                "pvp": {
+                    "battles": 1000,
+                    "wins": 550,
+                    "losses": 450,
+                    "survived_battles": 360,
+                    "survived_wins": 240,
+                },
+            },
+        }
+        mock_fetch_clan_membership.return_value = {}
+
+        update_player_data(player, force_refresh=True)
+
+        player.refresh_from_db()
+        self.assertEqual(player.pvp_ratio, 55.0)
+        self.assertEqual(player.verdict, "Stalwart")
 
 
 class PlayerExplorerSummaryTests(TestCase):
@@ -541,7 +581,7 @@ class PlayerExplorerSummaryTests(TestCase):
         summary = PlayerExplorerSummary.objects.get(player=player)
 
         self.assertEqual(player.clan, clan)
-        self.assertEqual(player.verdict, "Warrior")
+        self.assertEqual(player.verdict, "Stalwart")
         self.assertEqual(summary.player, player)
         self.assertEqual(summary.battles_last_29_days, 0)
         self.assertIsNone(summary.ships_played_total)
@@ -573,6 +613,33 @@ class PlayerExplorerSummaryTests(TestCase):
         player = Player.objects.get(player_id=9916)
         self.assertEqual(player.pvp_ratio, 62.0)
         self.assertEqual(player.verdict, "Assassin")
+
+    def test_clan_crawl_save_player_assigns_hot_potato_to_bottom_shelf_players(self):
+        clan = Clan.objects.create(clan_id=9917, name="HotPotatoClan", tag="HP")
+
+        save_player(
+            {
+                "account_id": 9917,
+                "nickname": "HotPotatoCrawler",
+                "created_at": int((timezone.now() - timedelta(days=300)).timestamp()),
+                "last_battle_time": int((timezone.now() - timedelta(days=1)).timestamp()),
+                "hidden_profile": False,
+                "statistics": {
+                    "battles": 700,
+                    "pvp": {
+                        "battles": 600,
+                        "wins": 240,
+                        "losses": 360,
+                        "survived_battles": 120,
+                    },
+                },
+            },
+            clan,
+        )
+
+        player = Player.objects.get(player_id=9917)
+        self.assertEqual(player.pvp_ratio, 40.0)
+        self.assertEqual(player.verdict, "Hot Potato")
 
     @patch("warships.data._fetch_clan_data")
     def test_update_clan_data_does_not_blank_existing_clan_on_empty_upstream_response(self, mock_fetch_clan_data):

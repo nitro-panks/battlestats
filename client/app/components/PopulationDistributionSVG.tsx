@@ -93,7 +93,22 @@ const uniqueSortedEdges = (bins: DistributionBin[]): number[] => Array.from(
     new Set(bins.flatMap((bin) => [bin.bin_min, bin.bin_max])),
 ).sort((left, right) => left - right);
 
+const domainTickValues = (
+    payload: DistributionPayload,
+    overlayPayload: DistributionPayload | null,
+    domain: [number, number],
+): number[] => uniqueSortedEdges([
+    ...payload.bins,
+    ...(overlayPayload && overlayPayload.scale === payload.scale ? overlayPayload.bins : []),
+]).filter((value) => value >= domain[0] && value <= domain[1]);
+
 const payloadDomain = (payload: DistributionPayload): [number, number] => {
+    if (payload.scale === 'log' && payload.bins.length) {
+        const firstPoint = midpointForBin(payload.bins[0], payload.scale);
+        const lastPoint = midpointForBin(payload.bins[payload.bins.length - 1], payload.scale);
+        return [firstPoint, lastPoint];
+    }
+
     const minValue = payload.bins[0]?.bin_min ?? 0;
     const maxValue = payload.bins[payload.bins.length - 1]?.bin_max ?? 1;
     return [minValue, maxValue];
@@ -347,12 +362,8 @@ const drawDistribution = (
 
     const xAxis = primaryPayload.scale === 'log'
         ? d3.axisBottom(x as LogScale)
-            .tickValues(
-                uniqueSortedEdges([
-                    ...primaryPayload.bins,
-                    ...(overlayPayload && overlayPayload.scale === primaryPayload.scale ? overlayPayload.bins : []),
-                ]).filter((_, index, edges) => edges.length <= 7 || index % 2 === 0),
-            )
+            .tickValues(domainTickValues(primaryPayload, overlayPayload, xDomain)
+                .filter((_, index, edges) => edges.length <= 7 || index % 2 === 0))
             .tickFormat((value: number) => formatAxisTick(primaryPayload, Number(value)))
             .tickSizeOuter(0)
         : d3.axisBottom(x as LinearScale)

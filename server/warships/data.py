@@ -16,8 +16,10 @@ logging.basicConfig(level=logging.INFO)
 
 PLAYSTYLE_RECRUIT_BATTLES_THRESHOLD = 100
 PLAYSTYLE_ASSASSIN_WR_THRESHOLD = 60.0
-PLAYSTYLE_WARRIOR_WR_THRESHOLD = 52.0
+PLAYSTYLE_WARRIOR_WR_THRESHOLD = 56.0
+PLAYSTYLE_STALWART_WR_THRESHOLD = 52.0
 PLAYSTYLE_FLOTSAM_WR_THRESHOLD = 48.0
+PLAYSTYLE_HOT_POTATO_WR_THRESHOLD = 42.0
 PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD = 33.0
 
 
@@ -33,13 +35,19 @@ def compute_player_verdict(pvp_battles: int, pvp_ratio: Optional[float], pvp_sur
     if pvp_ratio >= PLAYSTYLE_ASSASSIN_WR_THRESHOLD:
         return 'Assassin'
 
-    if pvp_ratio > PLAYSTYLE_WARRIOR_WR_THRESHOLD:
+    if pvp_ratio >= PLAYSTYLE_WARRIOR_WR_THRESHOLD:
         return 'Daredevil' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Warrior'
+
+    if pvp_ratio >= PLAYSTYLE_STALWART_WR_THRESHOLD:
+        return 'Daredevil' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Stalwart'
 
     if pvp_ratio >= PLAYSTYLE_FLOTSAM_WR_THRESHOLD:
         return 'Jetsam' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Flotsam'
 
-    return 'Potato' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Survivor'
+    if pvp_ratio >= PLAYSTYLE_HOT_POTATO_WR_THRESHOLD:
+        return 'Potato' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Survivor'
+
+    return 'Hot Potato' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Survivor'
 
 
 def _coerce_activity_rows(activity_rows: Any) -> list[dict]:
