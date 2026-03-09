@@ -8,14 +8,13 @@ interface PlayerExplorerRow {
     name: string;
     player_id: number;
     is_hidden: boolean;
-    days_since_last_battle: number | null;
     pvp_ratio: number | null;
     pvp_battles: number | null;
     account_age_days: number | null;
-    battles_last_29_days: number | null;
-    active_days_last_29_days: number | null;
     ships_played_total: number | null;
     ranked_seasons_participated: number | null;
+    kill_ratio: number | null;
+    pvp_survival_rate: number | null;
 }
 
 interface PlayerExplorerResponse {
@@ -25,7 +24,7 @@ interface PlayerExplorerResponse {
     results: PlayerExplorerRow[];
 }
 
-type SortKey = 'days_since_last_battle' | 'battles_last_29_days' | 'active_days_last_29_days' | 'pvp_ratio' | 'pvp_battles' | 'account_age_days' | 'ships_played_total' | 'ranked_seasons_participated';
+type SortKey = 'pvp_ratio' | 'pvp_battles' | 'account_age_days' | 'ships_played_total' | 'ranked_seasons_participated' | 'kill_ratio' | 'pvp_survival_rate';
 type SortDirection = 'asc' | 'desc';
 type HiddenFilter = 'all' | 'visible' | 'hidden';
 type RankedFilter = 'all' | 'yes' | 'no';
@@ -45,7 +44,13 @@ const formatWinRate = (value: number | null | undefined): string => {
     if (value == null) {
         return '—';
     }
+    return `${value.toFixed(1)}%`;
+};
 
+const formatPercent = (value: number | null | undefined): string => {
+    if (value == null) {
+        return '—';
+    }
     return `${value.toFixed(1)}%`;
 };
 
@@ -54,7 +59,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
     const [hiddenFilter, setHiddenFilter] = useState<HiddenFilter>('visible');
     const [rankedFilter, setRankedFilter] = useState<RankedFilter>('all');
     const [activityBucket, setActivityBucket] = useState<ActivityBucket>('30d');
-    const [sort, setSort] = useState<SortKey>('battles_last_29_days');
+    const [sort, setSort] = useState<SortKey>('pvp_battles');
     const [direction, setDirection] = useState<SortDirection>('desc');
     const [page, setPage] = useState(1);
     const [data, setData] = useState<PlayerExplorerResponse | null>(null);
@@ -179,11 +184,10 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                         }}
                         className="w-full rounded-md border border-[#c6dbef] px-3 py-2 text-sm"
                     >
-                        <option value="battles_last_29_days">Recent battles</option>
-                        <option value="active_days_last_29_days">Active days</option>
-                        <option value="days_since_last_battle">Recency</option>
                         <option value="pvp_ratio">PvP WR</option>
-                        <option value="pvp_battles">PvP battles</option>
+                        <option value="pvp_battles">Total battles</option>
+                        <option value="pvp_survival_rate">Survive %</option>
+                        <option value="kill_ratio">Kill Ratio</option>
                         <option value="account_age_days">Account age</option>
                         <option value="ships_played_total">Ships played</option>
                         <option value="ranked_seasons_participated">Ranked seasons</option>
@@ -211,11 +215,10 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                     <thead className="bg-[#f0f7ff]">
                         <tr>
                             <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Player</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">29D Battles</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Active Days</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Days Away</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Total Battles</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Survive %</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Kill Ratio</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">PvP WR</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">PvP Battles</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Ships</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Ranked</th>
                         </tr>
@@ -235,18 +238,17 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                                         <p className="mt-1 text-xs uppercase tracking-wide text-[#6baed6]">Hidden</p>
                                     ) : null}
                                 </td>
-                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.battles_last_29_days)}</td>
-                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.active_days_last_29_days)}</td>
-                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.days_since_last_battle)}</td>
-                                <td className="px-3 py-3 text-right font-medium text-[#084594]">{formatWinRate(row.pvp_ratio)}</td>
                                 <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.pvp_battles)}</td>
+                                <td className="px-3 py-3 text-right text-[#084594]">{formatPercent(row.pvp_survival_rate)}</td>
+                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.kill_ratio)}</td>
+                                <td className="px-3 py-3 text-right font-medium text-[#084594]">{formatWinRate(row.pvp_ratio)}</td>
                                 <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.ships_played_total)}</td>
                                 <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.ranked_seasons_participated)}</td>
                             </tr>
                         ))}
                         {!isLoading && (data?.results.length || 0) === 0 ? (
                             <tr>
-                                <td colSpan={8} className="px-3 py-6 text-center text-sm text-gray-500">No players matched the current explorer filters.</td>
+                                <td colSpan={7} className="px-3 py-6 text-center text-sm text-gray-500">No players matched the current explorer filters.</td>
                             </tr>
                         ) : null}
                     </tbody>

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 
 interface ClanDatum {
@@ -299,25 +299,20 @@ const drawLandingClanChart = (
         svgRoot.select('.details').remove();
     };
 
-    const circles = svg.append('g')
+    svg.append('g')
         .selectAll('dot')
         .data(plotData)
         .enter()
         .append('circle')
-        .attr('cx', x(0))
-        .attr('cy', height)
+        .attr('cx', (datum: PlotDatum) => x(datum.total_battles))
+        .attr('cy', (datum: PlotDatum) => y(datum.total_wins))
         .attr('r', 5)
         .style('cursor', onSelectClan ? 'pointer' : 'default')
         .attr('fill', (datum: PlotDatum) => selectLandingClanColorByWR(datum.clan_wr))
         .attr('stroke', '#444')
         .attr('stroke-width', 1.25);
 
-    circles
-        .transition()
-        .duration(800)
-        .ease(d3.easeCubicOut)
-        .attr('cx', (datum: PlotDatum) => x(datum.total_battles))
-        .attr('cy', (datum: PlotDatum) => y(datum.total_wins));
+    const circles = svg.selectAll('circle');
 
     circles
         .on('click', function (_event: MouseEvent, datum: PlotDatum) {
@@ -343,6 +338,13 @@ const LandingClanSVG: React.FC<LandingClanSVGProps> = ({
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerWidth, setContainerWidth] = useState(320);
+    const [isChartReady, setIsChartReady] = useState(false);
+    const resolvedHeatmapClans = heatmapClans ?? clans;
+    const chartSignature = useMemo(() => JSON.stringify({
+        clans: clans.map((clan) => [clan.clan_id, clan.clan_wr, clan.total_battles, clan.members_count]),
+        heatmapClans: resolvedHeatmapClans.map((clan) => [clan.clan_id, clan.clan_wr, clan.total_battles, clan.members_count]),
+        svgHeight,
+    }), [clans, resolvedHeatmapClans, svgHeight]);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -358,10 +360,15 @@ const LandingClanSVG: React.FC<LandingClanSVGProps> = ({
 
     useEffect(() => {
         if (!containerRef.current || containerWidth < 100) return;
-        drawLandingClanChart(containerRef.current, clans, heatmapClans ?? clans, onSelectClan, containerWidth, svgHeight);
-    }, [clans, heatmapClans, containerWidth, onSelectClan, svgHeight]);
+        setIsChartReady(false);
+        drawLandingClanChart(containerRef.current, clans, resolvedHeatmapClans, onSelectClan, containerWidth, svgHeight);
+        const frameId = window.requestAnimationFrame(() => {
+            setIsChartReady(true);
+        });
+        return () => window.cancelAnimationFrame(frameId);
+    }, [chartSignature, clans, containerWidth, onSelectClan, resolvedHeatmapClans, svgHeight]);
 
-    return <div ref={containerRef} className="pr-8 md:pr-16"></div>;
+    return <div ref={containerRef} className={`pr-8 transition-opacity duration-150 md:pr-16 ${isChartReady ? 'opacity-100' : 'opacity-0'}`}></div>;
 };
 
 export default LandingClanSVG;

@@ -99,6 +99,43 @@ class LandingClansCacheTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.json()), 2)
 
+    @patch("warships.views.random.sample")
+    def test_prioritize_landing_clans_frontloads_random_high_volume_sample_sorted_by_wr(self, mock_sample):
+        from warships.views import _prioritize_landing_clans
+
+        rows = [
+            {"clan_id": 101, "name": "Alpha",
+                "clan_wr": 54.2, "total_battles": 180000},
+            {"clan_id": 102, "name": "Bravo",
+                "clan_wr": 51.0, "total_battles": 210000},
+            {"clan_id": 103, "name": "Charlie",
+                "clan_wr": 47.5, "total_battles": 125000},
+            {"clan_id": 104, "name": "Delta",
+                "clan_wr": 58.0, "total_battles": 90000},
+        ]
+        mock_sample.return_value = [rows[0], rows[2]]
+
+        ranked = _prioritize_landing_clans(rows, sample_size=2)
+
+        self.assertEqual([row["clan_id"] for row in ranked[:2]], [103, 101])
+        self.assertEqual([row["clan_id"] for row in ranked[2:]], [102, 104])
+        mock_sample.assert_called_once_with(rows[:3], k=2)
+
+    @patch("warships.views.random.sample")
+    def test_prioritize_landing_clans_returns_original_order_when_no_clan_meets_threshold(self, mock_sample):
+        from warships.views import _prioritize_landing_clans
+
+        rows = [
+            {"clan_id": 201, "name": "Echo", "clan_wr": 49.2, "total_battles": 99000},
+            {"clan_id": 202, "name": "Foxtrot",
+                "clan_wr": None, "total_battles": 130000},
+        ]
+
+        ranked = _prioritize_landing_clans(rows, sample_size=2)
+
+        self.assertEqual(ranked, rows)
+        mock_sample.assert_not_called()
+
 
 @override_settings(CACHES=LOCMEM_CACHES)
 class ShipInfoCacheTests(TestCase):

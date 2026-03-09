@@ -1,4 +1,5 @@
 import logging
+import random
 from datetime import timedelta
 from django.core.cache import cache
 from django.db.models import Sum, F, FloatField, Case, When, Value, IntegerField
@@ -26,6 +27,28 @@ logging.basicConfig(level=logging.INFO)
 
 
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
+LANDING_CLAN_FEATURED_COUNT = 40
+LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
+
+
+def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COUNT, min_total_battles: int = LANDING_CLAN_MIN_TOTAL_BATTLES):
+    eligible = [
+        row for row in rows
+        if (row.get('total_battles') or 0) >= min_total_battles and row.get('clan_wr') is not None
+    ]
+    if not eligible:
+        return rows
+
+    featured = random.sample(eligible, k=min(sample_size, len(eligible)))
+    featured.sort(key=lambda row: (
+        row.get('clan_wr') if row.get('clan_wr') is not None else float('inf'),
+        (row.get('name') or '').lower(),
+        row.get('clan_id') or 0,
+    ))
+
+    featured_ids = {row.get('clan_id') for row in featured}
+    remainder = [row for row in rows if row.get('clan_id') not in featured_ids]
+    return featured + remainder
 
 
 class PlayerViewSet(viewsets.ModelViewSet):
@@ -277,6 +300,8 @@ def players_explorer(request) -> Response:
         'days_since_last_battle',
         'pvp_ratio',
         'pvp_battles',
+        'pvp_survival_rate',
+        'kill_ratio',
         'account_age_days',
         'battles_last_29_days',
         'active_days_last_29_days',
@@ -403,7 +428,7 @@ def landing_clans(request) -> Response:
         ).values(
             'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles'
         ).order_by(F('last_lookup').desc(nulls_last=True))
-        return list(qs)
+        return _prioritize_landing_clans(list(qs))
 
     data = cache.get_or_set('landing:clans', _fetch_landing_clans, 60)
     return Response(data)

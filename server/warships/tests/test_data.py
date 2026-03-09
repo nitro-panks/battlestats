@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import save_player
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
 
 
@@ -384,12 +384,61 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(summary.battles_last_29_days, 6)
         self.assertEqual(summary.wins_last_29_days, 4)
         self.assertEqual(summary.active_days_last_29_days, 2)
+        self.assertEqual(summary.kill_ratio, 0.0)
         self.assertEqual(summary.ships_played_total, 2)
         self.assertEqual(summary.ship_type_spread, 2)
         self.assertEqual(summary.tier_spread, 2)
         self.assertEqual(summary.ranked_seasons_participated, 1)
         self.assertEqual(summary.latest_ranked_battles, 12)
         self.assertEqual(summary.highest_ranked_league_recent, "Silver")
+
+    def test_refresh_player_explorer_summary_calculates_weighted_kill_ratio_from_kdr_rows(self):
+        player = Player.objects.create(
+            name="ExplorerKRCaptain",
+            player_id=9914,
+            is_hidden=False,
+            pvp_battles=30,
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 10, "kdr": 1.5},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 20, "kdr": 0.5},
+            ],
+        )
+
+        summary = refresh_player_explorer_summary(player)
+
+        self.assertEqual(summary.kill_ratio, 0.83)
+        self.assertEqual(summary.ships_played_total, 2)
+
+    def test_fetch_player_explorer_rows_refreshes_stale_battle_metrics(self):
+        player = Player.objects.create(
+            name="ExplorerStaleSummary",
+            player_id=9915,
+            is_hidden=False,
+            pvp_battles=30,
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 10, "kdr": 1.5},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 20, "kdr": 0.5},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=player,
+            ships_played_total=0,
+            kill_ratio=None,
+        )
+
+        rows = fetch_player_explorer_rows(query="ExplorerStaleSummary", hidden="visible")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["kill_ratio"], 0.83)
+        self.assertEqual(rows[0]["ships_played_total"], 2)
+
+        summary = PlayerExplorerSummary.objects.get(player=player)
+        self.assertEqual(summary.kill_ratio, 0.83)
+        self.assertEqual(summary.ships_played_total, 2)
 
     def test_update_player_data_hidden_profile_clears_denormalized_summary_values(self):
         player = Player.objects.create(
@@ -455,7 +504,8 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(player.clan, clan)
         self.assertEqual(summary.player, player)
         self.assertEqual(summary.battles_last_29_days, 0)
-        self.assertEqual(summary.ships_played_total, 0)
+        self.assertIsNone(summary.ships_played_total)
+        self.assertIsNone(summary.kill_ratio)
 
     @patch("warships.data._fetch_clan_data")
     def test_update_clan_data_does_not_blank_existing_clan_on_empty_upstream_response(self, mock_fetch_clan_data):

@@ -500,6 +500,50 @@ class ApiContractTests(TestCase):
         self.assertTrue(PlayerExplorerSummary.objects.filter(
             player=player).exists())
 
+    def test_players_explorer_sorts_by_kill_ratio_desc(self):
+        now = timezone.now()
+        Player.objects.create(
+            name="ExplorerKRAlpha",
+            player_id=9104,
+            is_hidden=False,
+            pvp_ratio=52.0,
+            pvp_battles=30,
+            creation_date=now - timedelta(days=100),
+            days_since_last_battle=1,
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 10, "kdr": 1.5},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 20, "kdr": 0.5},
+            ],
+            ranked_json=[],
+        )
+        Player.objects.create(
+            name="ExplorerKRBravo",
+            player_id=9105,
+            is_hidden=False,
+            pvp_ratio=54.0,
+            pvp_battles=20,
+            creation_date=now - timedelta(days=90),
+            days_since_last_battle=2,
+            battles_json=[
+                {"ship_name": "Ship C", "ship_type": "Battleship",
+                    "ship_tier": 9, "pvp_battles": 20, "kdr": 1.2},
+            ],
+            ranked_json=[],
+        )
+
+        response = self.client.get(
+            "/api/players/explorer/?sort=kill_ratio&direction=desc&q=ExplorerKR")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["results"][0]["name"], "ExplorerKRBravo")
+        self.assertEqual(payload["results"][0]["kill_ratio"], 1.2)
+        self.assertEqual(payload["results"][1]["name"], "ExplorerKRAlpha")
+        self.assertEqual(payload["results"][1]["kill_ratio"], 0.83)
+
     @patch("warships.views.fetch_clan_battle_seasons")
     def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):
         mock_fetch.return_value = [
