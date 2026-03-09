@@ -350,6 +350,68 @@ class ApiContractTests(TestCase):
         self.assertIn("X-Randoms-Updated-At", response)
         self.assertIn("X-Battles-Updated-At", response)
 
+    @patch("warships.views.fetch_ranked_data")
+    def test_ranked_data_returns_serialized_rows_and_refresh_header(self, mock_fetch_ranked_data):
+        now = timezone.now()
+        Player.objects.create(
+            name="RankedHeaderPlayer",
+            player_id=777,
+            ranked_updated_at=now,
+        )
+        mock_fetch_ranked_data.return_value = [
+            {
+                "season_id": 1025,
+                "season_name": "Season 25",
+                "season_label": "S25",
+                "start_date": "2026-01-10",
+                "end_date": "2026-02-10",
+                "highest_league": 1,
+                "highest_league_name": "Gold",
+                "total_battles": 34,
+                "total_wins": 20,
+                "win_rate": 0.5882,
+                "sprints_played": 3,
+                "best_sprint": {
+                    "sprint_number": 2,
+                    "league": 1,
+                    "league_name": "Gold",
+                    "rank": 4,
+                    "best_rank": 4,
+                    "battles": 12,
+                    "wins": 8,
+                },
+                "sprints": [
+                    {
+                        "sprint_number": 1,
+                        "league": 2,
+                        "league_name": "Silver",
+                        "rank": 6,
+                        "best_rank": 6,
+                        "battles": 10,
+                        "wins": 6,
+                    },
+                    {
+                        "sprint_number": 2,
+                        "league": 1,
+                        "league_name": "Gold",
+                        "rank": 4,
+                        "best_rank": 4,
+                        "battles": 12,
+                        "wins": 8,
+                    },
+                ],
+            }
+        ]
+
+        response = self.client.get("/api/fetch/ranked_data/777/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("X-Ranked-Updated-At", response)
+        payload = response.json()
+        self.assertEqual(payload[0]["season_id"], 1025)
+        self.assertEqual(payload[0]["highest_league_name"], "Gold")
+        self.assertEqual(payload[0]["best_sprint"]["sprint_number"], 2)
+
     @patch("warships.views._fetch_player_id_by_name", return_value=None)
     def test_missing_player_lookup_uses_standard_drf_error_shape(self, _mock_lookup):
         response = self.client.get("/api/player/PlayerThatWillNeverExist/")

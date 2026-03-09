@@ -188,7 +188,13 @@ def randoms_data(request, player_id: str) -> Response:
 @api_view(["GET"])
 def ranked_data(request, player_id: str) -> Response:
     data = fetch_ranked_data(player_id)
-    return _validated_list_response(data, RankedDataSerializer)
+    response = _validated_list_response(data, RankedDataSerializer)
+
+    player = Player.objects.filter(player_id=player_id).first()
+    if player and player.ranked_updated_at:
+        response["X-Ranked-Updated-At"] = player.ranked_updated_at.isoformat()
+
+    return response
 
 
 @api_view(["GET"])

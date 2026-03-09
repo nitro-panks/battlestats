@@ -2,6 +2,7 @@ import React from 'react';
 import TierSVG from './TierSVG';
 import TypeSVG from './TypeSVG';
 import RandomsSVG from './RandomsSVG';
+import RankedSeasons from './RankedSeasons';
 import ClanMembers from './ClanMembers';
 import ClanSVG from './ClanSVG';
 
@@ -145,6 +146,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Top Ships (Random Battles)</h3>
                                 <p className="mb-2 text-xs text-[#6baed6]">Compares wins and total battles for the most-played ships.</p>
                                 <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
+                            </div>
+                            <div className="mt-4">
+                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Seasons</h3>
+                                <p className="mb-2 text-xs text-[#6baed6]">Recent ranked season performance, including league finish and best sprint.</p>
+                                <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
                             </div>
                             <div className="mt-4">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Tier</h3>
