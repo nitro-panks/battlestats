@@ -72,6 +72,11 @@ const TypeSVG = dynamic(() => import('./TypeSVG'), {
     loading: () => <LoadingPanel label="Loading ship type chart..." minHeight={210} />,
 });
 
+const WRDistributionSVG = dynamic(() => import('./WRDistributionSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading win rate distribution..." minHeight={240} />,
+});
+
 const selectColorByWR = (winRatio: number): string => {
     if (winRatio > 65) return "#810c9e";  // super unicum
     if (winRatio >= 60) return "#D042F3";  // unicum
@@ -188,6 +193,18 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <p>Last Battle Date: <span className="font-medium text-[#2171b5]">{player.last_battle_date}</span></p>
                                 <p>PvP Losses: <span className="font-medium text-[#2171b5]">{player.pvp_losses.toLocaleString()}</span></p>
                             </div>
+
+                            <DeferredSection
+                                className="mt-4"
+                                minHeight={264}
+                                placeholder={<LoadingPanel label="Preparing win rate distribution..." minHeight={264} />}
+                            >
+                                <div>
+                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Win Rate Distribution</h3>
+                                    <p className="mb-2 text-xs text-[#6baed6]">Where this player falls among all tracked players (100+ battles).</p>
+                                    <WRDistributionSVG playerWR={player.pvp_ratio} />
+                                </div>
+                            </DeferredSection>
 
                             <div className="mt-4">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Top Ships (Random Battles)</h3>

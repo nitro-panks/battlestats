@@ -602,6 +602,38 @@ def update_activity_data(player_id: int) -> None:
 # ──────────────────────────────────────────────────────────
 
 LEAGUE_NAMES = {1: 'Gold', 2: 'Silver', 3: 'Bronze'}
+
+
+def fetch_wr_distribution() -> list[dict]:
+    """Return a histogram of player WR distribution, cached for 1 hour."""
+    cached = cache.get(WR_DISTRIBUTION_CACHE_KEY)
+    if cached is not None:
+        return cached
+
+    MIN_BATTLES = 100
+    BIN_WIDTH = 1.0
+    WR_MIN = 35.0
+    WR_MAX = 75.0
+
+    qs = Player.objects.filter(
+        is_hidden=False,
+        pvp_battles__gte=MIN_BATTLES,
+        pvp_ratio__isnull=False,
+    )
+
+    bins: list[dict] = []
+    wr = WR_MIN
+    while wr < WR_MAX:
+        hi = round(wr + BIN_WIDTH, 1)
+        count = qs.filter(pvp_ratio__gte=wr, pvp_ratio__lt=hi).count()
+        bins.append({'wr_min': wr, 'wr_max': hi, 'count': count})
+        wr = hi
+
+    cache.set(WR_DISTRIBUTION_CACHE_KEY, bins, WR_DISTRIBUTION_CACHE_TTL)
+    return bins
+WR_DISTRIBUTION_CACHE_KEY = 'wr:distribution:histogram'
+WR_DISTRIBUTION_CACHE_TTL = 3600  # 1 hour
+
 RANKED_SEASONS_CACHE_KEY = 'ranked:seasons:metadata'
 RANKED_SEASONS_CACHE_TTL = 86400  # 24 hours in seconds
 CLAN_BATTLE_SEASONS_CACHE_KEY = 'clan_battles:seasons:metadata'

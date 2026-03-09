@@ -140,6 +140,12 @@ class PlayerSummarySerializer(serializers.Serializer):
     highest_ranked_league_recent = serializers.CharField(allow_null=True)
 
 
+class WRDistributionBinSerializer(serializers.Serializer):
+    wr_min = serializers.FloatField()
+    wr_max = serializers.FloatField()
+    count = serializers.IntegerField()
+
+
 class PlayerExplorerRowSerializer(serializers.Serializer):
     name = serializers.CharField()
     player_id = serializers.IntegerField()

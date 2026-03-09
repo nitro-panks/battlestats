@@ -192,30 +192,30 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                                 <table className="min-w-full divide-y divide-[#dbe9f6] text-sm">
                                     <thead className="sticky top-0 bg-[#f0f7ff]">
                                         <tr>
-                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[#2171b5]">
                                                 <button type="button" className="inline-flex items-center gap-1" onClick={() => handleSort('season')}>
                                                     Season <span aria-hidden="true">{getSortMarker('season')}</span>
                                                 </button>
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[#2171b5]">
                                                 <button type="button" className="inline-flex items-center gap-1" onClick={() => handleSort('highestRank')}>
                                                     Highest Rank <span aria-hidden="true">{getSortMarker('highestRank')}</span>
                                                 </button>
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[#2171b5]">
                                                 Top Ship
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold tracking-wide text-[#2171b5]">
                                                 <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('battles')}>
                                                     Battles <span aria-hidden="true">{getSortMarker('battles')}</span>
                                                 </button>
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold tracking-wide text-[#2171b5]">
                                                 <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('wins')}>
                                                     Wins <span aria-hidden="true">{getSortMarker('wins')}</span>
                                                 </button>
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold tracking-wide text-[#2171b5]">
                                                 <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('winRate')}>
                                                     WR <span aria-hidden="true">{getSortMarker('winRate')}</span>
                                                 </button>
