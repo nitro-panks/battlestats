@@ -5,6 +5,14 @@ interface ClanMembersProps {
     onSelectMember: (memberName: string) => void;
 }
 
+interface ClanMemberData {
+    name: string;
+    is_hidden: boolean;
+    pvp_ratio: number | null;
+    days_since_last_battle: number | null;
+    activity_bucket: 'active_7d' | 'active_30d' | 'cooling_90d' | 'dormant_180d' | 'inactive_180d_plus' | 'unknown';
+}
+
 const wrColor = (r: number | null): string => {
     if (r == null) return '#c6dbef';
     if (r > 65) return '#810c9e';
@@ -17,8 +25,15 @@ const wrColor = (r: number | null): string => {
     return '#a50f15';
 };
 
+const formatRecency = (daysSinceLastBattle: number | null): string => {
+    if (daysSinceLastBattle == null) return 'activity unknown';
+    if (daysSinceLastBattle === 0) return 'played today';
+    if (daysSinceLastBattle === 1) return '1 day idle';
+    return `${daysSinceLastBattle} days idle`;
+};
+
 const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => {
-    const [members, setMembers] = useState<{ name: string; is_hidden: boolean; pvp_ratio: number | null }[]>([]);
+    const [members, setMembers] = useState<ClanMemberData[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -50,19 +65,22 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => 
                             {member.is_hidden ? (
                                 <span
                                     className="mr-3 inline-flex items-center gap-1 font-medium text-gray-500"
-                                    title="Player profile is hidden"
+                                    title={formatRecency(member.days_since_last_battle)}
                                 >
                                     <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
                                     {member.name}
+                                    <span className="text-xs font-normal text-gray-400">{formatRecency(member.days_since_last_battle)}</span>
                                 </span>
                             ) : (
                                 <button
                                     onClick={() => onSelectMember(member.name)}
                                     className="mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
                                     aria-label={`Show player ${member.name}`}
+                                    title={formatRecency(member.days_since_last_battle)}
                                 >
                                     <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
                                     {member.name}
+                                    <span className="text-xs font-normal text-gray-400">{formatRecency(member.days_since_last_battle)}</span>
                                 </button>
                             )}
                         </React.Fragment>

@@ -28,6 +28,11 @@ const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 
     loading: () => <LoadingPanel label="Loading clan chart..." minHeight={400} />,
 });
 
+const ClanActivityHistogram = dynamic(() => resilientDynamicImport(() => import('./ClanActivityHistogram'), 'ClanDetail-ClanActivityHistogram'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading clan activity..." minHeight={240} />,
+});
+
 const ClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./ClanBattleSeasons'), 'ClanDetail-ClanBattleSeasons'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={240} />,
@@ -51,6 +56,10 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
             </div>
 
             <div className="mt-4">
+                <ClanActivityHistogram clanId={clan.clan_id} memberCount={clan.members_count} />
+            </div>
+
+            <div className="mt-8 border-t border-gray-100 pt-6">
                 <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={400} />
             </div>
 

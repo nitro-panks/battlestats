@@ -1,5 +1,5 @@
 from unittest.mock import patch
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings
@@ -293,15 +293,89 @@ class ClanMembersEndpointTests(TestCase):
     ):
         clan = Clan.objects.create(
             clan_id=42, name="Test Clan", members_count=1)
-        Player.objects.create(name="MemberOne", player_id=1, clan=clan)
+        Player.objects.create(
+            name="MemberOne",
+            player_id=1,
+            clan=clan,
+            days_since_last_battle=6,
+            last_battle_date=timezone.now().date() - timedelta(days=6),
+        )
 
         response = self.client.get("/api/fetch/clan_members/42/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [
-                         {"name": "MemberOne", "is_hidden": False, "pvp_ratio": None}])
+                         {
+                             "name": "MemberOne",
+                             "is_hidden": False,
+                             "pvp_ratio": None,
+                             "days_since_last_battle": 6,
+                             "activity_bucket": "active_7d",
+                         }])
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
+
+    def test_clan_members_exposes_activity_buckets_for_histogram(self):
+        clan = Clan.objects.create(
+            clan_id=78, name="Activity Clan", members_count=5)
+        today = timezone.now().date()
+        Player.objects.create(
+            name="VeryActive",
+            player_id=7801,
+            clan=clan,
+            pvp_ratio=58.2,
+            days_since_last_battle=2,
+            last_battle_date=today - timedelta(days=2),
+        )
+        Player.objects.create(
+            name="Warm",
+            player_id=7802,
+            clan=clan,
+            pvp_ratio=55.0,
+            days_since_last_battle=12,
+            last_battle_date=today - timedelta(days=12),
+        )
+        Player.objects.create(
+            name="Cooling",
+            player_id=7803,
+            clan=clan,
+            pvp_ratio=53.1,
+            days_since_last_battle=60,
+            last_battle_date=today - timedelta(days=60),
+        )
+        Player.objects.create(
+            name="Dormant",
+            player_id=7804,
+            clan=clan,
+            pvp_ratio=50.4,
+            days_since_last_battle=120,
+            last_battle_date=today - timedelta(days=120),
+        )
+        Player.objects.create(
+            name="GoneDark",
+            player_id=7805,
+            clan=clan,
+            pvp_ratio=47.8,
+            days_since_last_battle=280,
+            last_battle_date=today - timedelta(days=280),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/78/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {
+                row["name"]: row["activity_bucket"]
+                for row in response.json()
+            },
+            {
+                "VeryActive": "active_7d",
+                "Warm": "active_30d",
+                "Cooling": "cooling_90d",
+                "Dormant": "dormant_180d",
+                "GoneDark": "inactive_180d_plus",
+            },
+        )
 
     def test_clan_members_orders_by_player_score_desc(self):
         clan = Clan.objects.create(
@@ -386,7 +460,149 @@ class ApiContractTests(TestCase):
         self.assertIn("VisibleLandingPlayer", names)
         self.assertNotIn("HiddenLandingPlayer", names)
 
+    def test_landing_activity_attrition_returns_monthly_cohorts(self):
+        cache.clear()
+
+        def shift_month_start(month_start, month_delta):
+            absolute_month = (month_start.year * 12) + \
+                month_start.month - 1 + month_delta
+            return timezone.make_aware(datetime(absolute_month // 12, (absolute_month % 12) + 1, 15))
+
+        now = timezone.now()
+        current_month_start = now.date().replace(day=1)
+        latest_complete_month = (
+            current_month_start - timedelta(days=1)).replace(day=1)
+
+        for month_delta in range(-11, 1):
+            creation_date = shift_month_start(
+                latest_complete_month, month_delta)
+            month_key = creation_date.strftime('%Y-%m-01')
+
+            if month_delta == 0:
+                Player.objects.create(
+                    name=f"AttritionActive-{month_delta}",
+                    player_id=4500 + (month_delta + 11) * 10,
+                    is_hidden=False,
+                    creation_date=creation_date,
+                    days_since_last_battle=9,
+                    last_battle_date=now.date() - timedelta(days=9),
+                )
+                Player.objects.create(
+                    name=f"AttritionCooling-{month_delta}",
+                    player_id=4501 + (month_delta + 11) * 10,
+                    is_hidden=False,
+                    creation_date=creation_date,
+                    days_since_last_battle=45,
+                    last_battle_date=now.date() - timedelta(days=45),
+                )
+                Player.objects.create(
+                    name=f"AttritionDormant-{month_delta}",
+                    player_id=4502 + (month_delta + 11) * 10,
+                    is_hidden=False,
+                    creation_date=creation_date,
+                    days_since_last_battle=140,
+                    last_battle_date=now.date() - timedelta(days=140),
+                )
+            elif month_delta >= -5:
+                Player.objects.create(
+                    name=f"RecentActiveA-{month_delta}",
+                    player_id=4600 + (month_delta + 11) * 10,
+                    is_hidden=False,
+                    creation_date=creation_date,
+                    days_since_last_battle=8,
+                    last_battle_date=now.date() - timedelta(days=8),
+                )
+                Player.objects.create(
+                    name=f"RecentActiveB-{month_delta}",
+                    player_id=4601 + (month_delta + 11) * 10,
+                    is_hidden=False,
+                    creation_date=creation_date,
+                    days_since_last_battle=15,
+                    last_battle_date=now.date() - timedelta(days=15),
+                )
+                Player.objects.create(
+                    name=f"RecentCooling-{month_delta}",
+                    player_id=4602 + (month_delta + 11) * 10,
+                    is_hidden=False,
+                    creation_date=creation_date,
+                    days_since_last_battle=50,
+                    last_battle_date=now.date() - timedelta(days=50),
+                )
+            else:
+                Player.objects.create(
+                    name=f"PriorCooling-{month_delta}",
+                    player_id=4700 + (month_delta + 11) * 10,
+                    is_hidden=False,
+                    creation_date=creation_date,
+                    days_since_last_battle=55,
+                    last_battle_date=now.date() - timedelta(days=55),
+                )
+                Player.objects.create(
+                    name=f"PriorDormantA-{month_delta}",
+                    player_id=4701 + (month_delta + 11) * 10,
+                    is_hidden=False,
+                    creation_date=creation_date,
+                    days_since_last_battle=130,
+                    last_battle_date=now.date() - timedelta(days=130),
+                )
+                Player.objects.create(
+                    name=f"PriorDormantB-{month_delta}",
+                    player_id=4702 + (month_delta + 11) * 10,
+                    is_hidden=False,
+                    creation_date=creation_date,
+                    days_since_last_battle=190,
+                    last_battle_date=now.date() - timedelta(days=190),
+                )
+
+        Player.objects.create(
+            name="AttritionHidden",
+            player_id=4991,
+            is_hidden=True,
+            creation_date=shift_month_start(latest_complete_month, 0),
+            days_since_last_battle=5,
+            last_battle_date=now.date() - timedelta(days=5),
+        )
+        Player.objects.create(
+            name="AttritionNoCreation",
+            player_id=4992,
+            is_hidden=False,
+            creation_date=None,
+            days_since_last_battle=5,
+            last_battle_date=now.date() - timedelta(days=5),
+        )
+        Player.objects.create(
+            name="CurrentMonthExcluded",
+            player_id=4993,
+            is_hidden=False,
+            creation_date=timezone.make_aware(
+                datetime(current_month_start.year, current_month_start.month, 15)),
+            days_since_last_battle=5,
+            last_battle_date=now.date() - timedelta(days=5),
+        )
+
+        response = self.client.get("/api/landing/activity-attrition/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["metric"], "landing_activity_attrition")
+        self.assertEqual(payload["tracked_population"], 36)
+        self.assertEqual(len(payload["months"]), 18)
+        self.assertEqual(payload["summary"]["population_signal"], "growing")
+        self.assertEqual(payload["summary"]["latest_month"],
+                         latest_complete_month.isoformat())
+
+        latest_row = next(
+            row for row in payload["months"]
+            if row["month"] == latest_complete_month.isoformat()
+        )
+        self.assertEqual(latest_row["total_players"], 3)
+        self.assertEqual(latest_row["active_players"], 1)
+        self.assertEqual(latest_row["cooling_players"], 1)
+        self.assertEqual(latest_row["dormant_players"], 1)
+        self.assertAlmostEqual(latest_row["active_share"], 33.3)
+
     def test_landing_players_orders_by_player_score_desc(self):
+        cache.clear()
         today = timezone.now().date()
         high = Player.objects.create(
             name="LandingHighScore",
@@ -421,6 +637,7 @@ class ApiContractTests(TestCase):
         )
 
     def test_landing_recent_players_orders_recent_slice_by_player_score_desc(self):
+        cache.clear()
         now = timezone.now()
         recent_high = Player.objects.create(
             name="RecentHighScore",

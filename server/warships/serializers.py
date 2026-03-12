@@ -114,10 +114,29 @@ class ClanDataSerializer(serializers.Serializer):
     pvp_ratio = serializers.FloatField()
 
 
+def _classify_clan_member_activity(days_since_last_battle):
+    if days_since_last_battle is None:
+        return 'unknown'
+    if days_since_last_battle <= 7:
+        return 'active_7d'
+    if days_since_last_battle <= 30:
+        return 'active_30d'
+    if days_since_last_battle <= 90:
+        return 'cooling_90d'
+    if days_since_last_battle <= 180:
+        return 'dormant_180d'
+    return 'inactive_180d_plus'
+
+
 class ClanMemberSerializer(serializers.Serializer):
     name = serializers.CharField()
     is_hidden = serializers.BooleanField()
     pvp_ratio = serializers.FloatField(allow_null=True)
+    days_since_last_battle = serializers.IntegerField(allow_null=True)
+    activity_bucket = serializers.SerializerMethodField()
+
+    def get_activity_bucket(self, obj):
+        return _classify_clan_member_activity(obj.days_since_last_battle)
 
 
 class ClanBattleSeasonSummarySerializer(serializers.Serializer):
@@ -244,6 +263,36 @@ class PlayerTierTypeCorrelationSerializer(serializers.Serializer):
     tiles = PlayerTierTypeTileSerializer(many=True)
     trend = PlayerTierTypeTrendSerializer(many=True)
     player_cells = PlayerTierTypeCellSerializer(many=True)
+
+
+class LandingActivityAttritionMonthSerializer(serializers.Serializer):
+    month = serializers.DateField()
+    total_players = serializers.IntegerField()
+    active_players = serializers.IntegerField()
+    cooling_players = serializers.IntegerField()
+    dormant_players = serializers.IntegerField()
+    active_share = serializers.FloatField()
+
+
+class LandingActivityAttritionSummarySerializer(serializers.Serializer):
+    latest_month = serializers.DateField()
+    population_signal = serializers.CharField()
+    signal_delta_pct = serializers.FloatField(allow_null=True)
+    recent_active_avg = serializers.FloatField()
+    prior_active_avg = serializers.FloatField()
+    recent_new_avg = serializers.FloatField()
+    prior_new_avg = serializers.FloatField()
+    months_compared = serializers.IntegerField()
+
+
+class LandingActivityAttritionSerializer(serializers.Serializer):
+    metric = serializers.CharField()
+    label = serializers.CharField()
+    x_label = serializers.CharField()
+    y_label = serializers.CharField()
+    tracked_population = serializers.IntegerField()
+    months = LandingActivityAttritionMonthSerializer(many=True)
+    summary = LandingActivityAttritionSummarySerializer()
 
 
 class PlayerExplorerRowSerializer(serializers.Serializer):
