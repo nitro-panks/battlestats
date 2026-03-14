@@ -123,6 +123,52 @@ const ClanTagGrid: React.FC<{
     </div>
 );
 
+const PlayerNameGrid: React.FC<{
+    players: LandingPlayer[];
+    onSelectMember: (playerName: string) => void;
+    ariaLabelPrefix: string;
+}> = ({ players, onSelectMember, ariaLabelPrefix }) => (
+    <div
+        className="mt-4 grid max-w-[900px] gap-x-4 gap-y-2 text-sm"
+        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))' }}
+    >
+        {players.map((player) => {
+            const label = player.name;
+            const color = wrColor(player.pvp_ratio);
+
+            if (player.is_hidden) {
+                return (
+                    <span
+                        key={`${ariaLabelPrefix}-${label}`}
+                        className="inline-flex min-w-0 items-center gap-1 font-medium"
+                        style={{ color }}
+                        aria-label={`${label} has hidden stats`}
+                        title={label}
+                    >
+                        <span style={{ color }} aria-hidden="true">{"\u25C6"}</span>
+                        <span className="truncate">{label}</span>
+                    </span>
+                );
+            }
+
+            return (
+                <button
+                    key={`${ariaLabelPrefix}-${label}`}
+                    type="button"
+                    onClick={() => onSelectMember(label)}
+                    className="inline-flex min-w-0 items-center gap-1 font-medium underline-offset-2 hover:underline"
+                    style={{ color }}
+                    aria-label={`${ariaLabelPrefix} player ${label}`}
+                    title={label}
+                >
+                    <span style={{ color }} aria-hidden="true">{"\u25C6"}</span>
+                    <span className="truncate">{label}</span>
+                </button>
+            );
+        })}
+    </div>
+);
+
 const LandingClanSVG = dynamic(
     () => resilientDynamicImport(() => import('./LandingClanSVG'), 'LandingClanSVG'),
     {
@@ -624,49 +670,19 @@ const PlayerSearch: React.FC = () => {
                     {players.length > 0 && (
                         <div className="mt-6 border-t border-[#c6dbef] pt-6">
                             <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Active Players</h3>
-                            <p className="mt-2 text-sm leading-7 text-[#4292c6]">
-                                {players.slice(0, LANDING_LIMIT).map((player) => (
-                                    player.is_hidden ? (
-                                        <span
-                                            key={player.name}
-                                            className="mr-3 inline-flex items-center gap-1 font-medium"
-                                            style={{ color: wrColor(player.pvp_ratio) }}
-                                            aria-label={`${player.name} has hidden stats`}
-                                        >
-                                            <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
-                                            {player.name}
-                                        </span>
-                                    ) : (
-                                        <button
-                                            key={player.name}
-                                            onClick={() => handleSelectMember(player.name)}
-                                            className="mr-3 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
-                                            style={{ color: wrColor(player.pvp_ratio) }}
-                                            aria-label={`Show player ${player.name}`}
-                                        >
-                                            <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
-                                            {player.name}
-                                        </button>
-                                    )
-                                ))}
-                            </p>
+                            <PlayerNameGrid
+                                players={players.slice(0, LANDING_LIMIT)}
+                                onSelectMember={handleSelectMember}
+                                ariaLabelPrefix="Show"
+                            />
 
                             <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Recently Viewed</h3>
                             {recentPlayers.length > 0 ? (
-                                <p className="mt-2 text-sm leading-7 text-[#4292c6]">
-                                    {recentPlayers.slice(0, LANDING_LIMIT).map((player) => (
-                                        <button
-                                            key={`recent-${player.name}`}
-                                            onClick={() => handleSelectMember(player.name)}
-                                            className="mr-3 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
-                                            style={{ color: wrColor(player.pvp_ratio) }}
-                                            aria-label={`Show recent player ${player.name}`}
-                                        >
-                                            <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
-                                            {player.name}
-                                        </button>
-                                    ))}
-                                </p>
+                                <PlayerNameGrid
+                                    players={recentPlayers.slice(0, LANDING_LIMIT)}
+                                    onSelectMember={handleSelectMember}
+                                    ariaLabelPrefix="Show recent"
+                                />
                             ) : (
                                 <p className="mt-2 text-sm text-[#6baed6]">No recently viewed players yet.</p>
                             )}
