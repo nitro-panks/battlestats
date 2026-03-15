@@ -168,6 +168,23 @@ def _extract_run_summary(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         verification_source.get("checks_passed"), bool) else None
     boundary_ok = verification_source.get("boundary_ok") if isinstance(
         verification_source.get("boundary_ok"), bool) else None
+    design_review_passed = verification_source.get("design_review_passed") if isinstance(
+        verification_source.get("design_review_passed"), bool) else None
+    api_review_passed = verification_source.get("api_review_passed") if isinstance(
+        verification_source.get("api_review_passed"), bool) else None
+    api_review_required = verification_source.get("api_review_required") if isinstance(
+        verification_source.get("api_review_required"), bool) else False
+    doctrine_notes = verification_source.get("doctrine_notes") if isinstance(
+        verification_source.get("doctrine_notes"), list) else []
+    guidance_notes = verification_source.get("guidance_notes") if isinstance(
+        verification_source.get("guidance_notes"), list) else []
+    retrieved_guidance = verification_source.get("retrieved_guidance") if isinstance(
+        verification_source.get("retrieved_guidance"), list) else []
+    guidance_paths = [
+        str(item.get("path"))
+        for item in retrieved_guidance
+        if isinstance(item, dict) and item.get("path")
+    ]
 
     return {
         "workflow_id": str(payload.get("workflow_id") or verification_source.get("workflow_id") or path.stem),
@@ -180,10 +197,16 @@ def _extract_run_summary(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "summary": [str(item) for item in summary[:3]],
         "checks_passed": checks_passed,
         "boundary_ok": boundary_ok,
+        "design_review_passed": design_review_passed,
+        "api_review_passed": api_review_passed,
+        "api_review_required": api_review_required,
         "issue_count": len(issues),
         "command_failure_count": len([result for result in command_results if not result.get("ok")]),
         "verification_command_count": len(verification_commands),
         "touched_file_count": len(touched_files),
+        "doctrine_note_count": len(doctrine_notes),
+        "guidance_match_count": len(guidance_paths),
+        "guidance_paths": guidance_paths,
         "langsmith_trace_url": trace_url,
         "run_log_path": _relative_path(path),
     }
@@ -248,6 +271,10 @@ def get_agentic_trace_dashboard(limit: int = 12) -> dict[str, Any]:
             "total_runs": len(runs),
             "runs_with_trace_urls": sum(1 for run in runs if run.get("langsmith_trace_url")),
             "boundary_block_count": sum(1 for run in runs if run.get("boundary_ok") is False),
+            "runs_with_doctrine": sum(1 for run in runs if int(run.get("doctrine_note_count") or 0) > 0),
+            "runs_with_guidance": sum(1 for run in runs if int(run.get("guidance_match_count") or 0) > 0),
+            "design_review_fail_count": sum(1 for run in runs if run.get("design_review_passed") is False),
+            "api_review_fail_count": sum(1 for run in runs if run.get("api_review_required") and run.get("api_review_passed") is False),
             "verification_pass_rate": verification_pass_rate,
             "engine_mix": dict(Counter(run["selected_engine"] for run in runs)),
             "status_mix": dict(Counter(run["status"] for run in runs)),
@@ -258,6 +285,11 @@ def get_agentic_trace_dashboard(limit: int = 12) -> dict[str, Any]:
             "common_verification_commands": _common_entries(verification_commands),
             "common_touched_files": _common_entries(touched_files),
             "common_route_rationales": _common_entries(route_rationales),
+            "common_guidance_paths": _common_entries([
+                path
+                for run in runs
+                for path in run.get("guidance_paths", [])
+            ]),
             "chart_tuning_notes": [_build_ranked_heatmap_learning_note()],
         },
     }

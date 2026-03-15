@@ -1929,6 +1929,7 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
 
+    @override_settings(SECRET_KEY="test-secret")
     @patch("warships.views.get_agentic_trace_dashboard")
     def test_agentic_trace_dashboard_endpoint_returns_summary(self, mock_get_agentic_trace_dashboard):
         cache.delete('agentic:trace_dashboard:v2')
@@ -1937,9 +1938,27 @@ class ApiThrottleTests(TestCase):
             "tracing_enabled": True,
             "api_key_configured": True,
             "api_host": None,
-            "recent_runs": [{"workflow_id": "run-1", "status": "completed"}],
-            "diagnostics": {"total_runs": 1},
-            "learning": {"recurring_issues": [], "chart_tuning_notes": [{"slug": "ranked_wr_battles_heatmap"}]},
+            "recent_runs": [{
+                "workflow_id": "run-1",
+                "status": "completed",
+                "design_review_passed": True,
+                "api_review_required": True,
+                "api_review_passed": True,
+                "guidance_match_count": 2,
+                "doctrine_note_count": 1,
+            }],
+            "diagnostics": {
+                "total_runs": 1,
+                "runs_with_doctrine": 1,
+                "runs_with_guidance": 1,
+                "design_review_fail_count": 0,
+                "api_review_fail_count": 0,
+            },
+            "learning": {
+                "recurring_issues": [],
+                "common_guidance_paths": [{"label": "agents/runbooks/runbook-langgraph-opinionated-workflow.md", "count": 1}],
+                "chart_tuning_notes": [{"slug": "ranked_wr_battles_heatmap"}],
+            },
         }
 
         response = self.client.get("/api/agentic/traces/")
@@ -1947,6 +1966,8 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["project_name"], "trace-lab")
         self.assertEqual(response.json()["diagnostics"]["total_runs"], 1)
+        self.assertEqual(response.json()["diagnostics"]["runs_with_guidance"], 1)
+        self.assertTrue(response.json()["recent_runs"][0]["design_review_passed"])
         self.assertEqual(response.json()[
                          "learning"]["chart_tuning_notes"][0]["slug"], "ranked_wr_battles_heatmap")
         mock_get_agentic_trace_dashboard.assert_called_once_with(limit=12)

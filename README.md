@@ -26,7 +26,11 @@ optional JSON output:
 python manage.py run_agent_graph "add API caching around player detail fetch" --json
 ```
 
-the current graph is a guarded workflow with planning, implementation notes, tool-boundary checks, verification gates, retry routing, and run summary.
+the current graph is a guarded workflow with doctrine loading, curated guidance retrieval from battlestats runbooks and QA reviews, planning, design/API review gates, implementation notes, tool-boundary checks, verification gates, retry routing, and run summary.
+
+the default battlestats doctrine now lives in `agents/knowledge/agentic-team-doctrine.json`. you can still layer per-run overrides with workflow context keys like `team_doctrine` and `team_style_snippets` when you want to test a stronger opinion during a specific run.
+
+see `agents/runbooks/runbook-langgraph-opinionated-workflow.md` for the operator runbook covering doctrine sources, guidance retrieval, review-gate behavior, validation commands, and extension rules.
 
 optional LangSmith tracing is also supported for the agent workflows. if you want trace URLs in workflow output and on the in-app trace dashboard, set:
 
@@ -91,6 +95,13 @@ python scripts/run_agent_graph.py \
 	--context-file scripts/agent_context.example.json \
 	--json
 ```
+
+the context file can now also include opinionated-workflow controls such as:
+
+- `team_doctrine`
+- `team_style_snippets`
+- `max_design_review_retries`
+- `max_api_review_retries`
 
 ## run with docker
 

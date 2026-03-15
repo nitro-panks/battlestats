@@ -39,6 +39,34 @@ Use this shape when you want the workflow to be explicit:
 
 LangGraph is not automatically triggered by normal user-facing app flows today.
 
+## Current Enrichments
+
+The battlestats graph is no longer only a plan-then-verify shell.
+
+It now enriches runs with:
+
+- repo-backed doctrine loading from `agents/knowledge/agentic-team-doctrine.json`
+- runtime doctrine overrides via workflow context
+- curated guidance retrieval from battlestats runbooks and QA reviews
+- a `design_pattern_review` gate
+- an `api_contract_review` gate
+
+The important architectural point is that these are graph behaviors, not just prompt flourishes. Plans can now be revised before implementation when they miss rollback, contract, documentation, or regression expectations.
+
+See `agents/runbooks/runbook-langgraph-opinionated-workflow.md` for the operator details.
+
+## Useful Context Keys
+
+When you want to shape the graph more explicitly, pass context such as:
+
+- `team_doctrine`
+- `team_style_snippets`
+- `verification_commands`
+- `max_design_review_retries`
+- `max_api_review_retries`
+
+These keys let you test stronger team opinions without rewriting the repo-default doctrine.
+
 ## Optional LangSmith Tracing
 
 If you want trace visibility for the agent workflows, set:

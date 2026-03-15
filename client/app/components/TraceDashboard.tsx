@@ -18,10 +18,16 @@ interface TraceRunSummary {
     summary: string[];
     checks_passed: boolean | null;
     boundary_ok: boolean | null;
+    design_review_passed: boolean | null;
+    api_review_required: boolean;
+    api_review_passed: boolean | null;
     issue_count: number;
     command_failure_count: number;
     verification_command_count: number;
     touched_file_count: number;
+    doctrine_note_count: number;
+    guidance_match_count: number;
+    guidance_paths: string[];
     langsmith_trace_url: string | null;
     run_log_path: string;
 }
@@ -30,6 +36,10 @@ interface TraceDiagnostics {
     total_runs: number;
     runs_with_trace_urls: number;
     boundary_block_count: number;
+    runs_with_doctrine: number;
+    runs_with_guidance: number;
+    design_review_fail_count: number;
+    api_review_fail_count: number;
     verification_pass_rate: number | null;
     engine_mix: Record<string, number>;
     status_mix: Record<string, number>;
@@ -54,6 +64,7 @@ interface TraceLearning {
     common_verification_commands: CountEntry[];
     common_touched_files: CountEntry[];
     common_route_rationales: CountEntry[];
+    common_guidance_paths: CountEntry[];
     chart_tuning_notes: TraceLearningNote[];
 }
 
@@ -71,11 +82,23 @@ const panelClasses = "rounded-xl border border-[#dbe9f6] bg-[#f7fbff] shadow-sm"
 
 const normalizePayload = (data: TraceDashboardPayload): TraceDashboardPayload => ({
     ...data,
-    recent_runs: Array.isArray(data.recent_runs) ? data.recent_runs : [],
+    recent_runs: Array.isArray(data.recent_runs) ? data.recent_runs.map((run) => ({
+        ...run,
+        design_review_passed: run.design_review_passed ?? null,
+        api_review_required: run.api_review_required ?? false,
+        api_review_passed: run.api_review_passed ?? null,
+        doctrine_note_count: run.doctrine_note_count ?? 0,
+        guidance_match_count: run.guidance_match_count ?? 0,
+        guidance_paths: Array.isArray(run.guidance_paths) ? run.guidance_paths : [],
+    })) : [],
     diagnostics: {
         total_runs: data.diagnostics?.total_runs ?? 0,
         runs_with_trace_urls: data.diagnostics?.runs_with_trace_urls ?? 0,
         boundary_block_count: data.diagnostics?.boundary_block_count ?? 0,
+        runs_with_doctrine: data.diagnostics?.runs_with_doctrine ?? 0,
+        runs_with_guidance: data.diagnostics?.runs_with_guidance ?? 0,
+        design_review_fail_count: data.diagnostics?.design_review_fail_count ?? 0,
+        api_review_fail_count: data.diagnostics?.api_review_fail_count ?? 0,
         verification_pass_rate: data.diagnostics?.verification_pass_rate ?? null,
         engine_mix: data.diagnostics?.engine_mix ?? {},
         status_mix: data.diagnostics?.status_mix ?? {},
@@ -86,6 +109,7 @@ const normalizePayload = (data: TraceDashboardPayload): TraceDashboardPayload =>
         common_verification_commands: Array.isArray(data.learning?.common_verification_commands) ? data.learning.common_verification_commands : [],
         common_touched_files: Array.isArray(data.learning?.common_touched_files) ? data.learning.common_touched_files : [],
         common_route_rationales: Array.isArray(data.learning?.common_route_rationales) ? data.learning.common_route_rationales : [],
+        common_guidance_paths: Array.isArray(data.learning?.common_guidance_paths) ? data.learning.common_guidance_paths : [],
         chart_tuning_notes: Array.isArray(data.learning?.chart_tuning_notes) ? data.learning.chart_tuning_notes : [],
     },
 });
@@ -120,6 +144,16 @@ const statusTone = (status: string): string => {
         return "bg-[#eff3ff] text-[#2171b5] border-[#bdd7e7]";
     }
     return "bg-white text-[#636363] border-[#d9d9d9]";
+};
+
+const reviewTone = (passed: boolean | null): string => {
+    if (passed === true) {
+        return "bg-[#e5f5e0] text-[#238b45]";
+    }
+    if (passed === false) {
+        return "bg-[#fff5eb] text-[#d94801]";
+    }
+    return "bg-[#f3f4f6] text-[#6b7280]";
 };
 
 const CountList: React.FC<{ items: CountEntry[]; emptyLabel: string }> = ({ items, emptyLabel }) => {
@@ -299,11 +333,28 @@ const TraceDashboard: React.FC = () => {
                                     <div className="mt-4 flex flex-wrap gap-2 text-xs text-[#4b5563]">
                                         <span className="rounded-full bg-[#f7fbff] px-2 py-1">checks: {run.checks_passed === null ? "n/a" : run.checks_passed ? "pass" : "fail"}</span>
                                         <span className="rounded-full bg-[#f7fbff] px-2 py-1">boundaries: {run.boundary_ok === null ? "n/a" : run.boundary_ok ? "pass" : "fail"}</span>
+                                        <span className={`rounded-full px-2 py-1 ${reviewTone(run.design_review_passed)}`}>design review: {run.design_review_passed === null ? "n/a" : run.design_review_passed ? "pass" : "revise"}</span>
+                                        <span className={`rounded-full px-2 py-1 ${reviewTone(run.api_review_required ? run.api_review_passed : null)}`}>api review: {!run.api_review_required ? "not needed" : run.api_review_passed === null ? "n/a" : run.api_review_passed ? "pass" : "revise"}</span>
+                                        <span className="rounded-full bg-[#f7fbff] px-2 py-1">doctrine notes: {run.doctrine_note_count}</span>
+                                        <span className="rounded-full bg-[#f7fbff] px-2 py-1">guidance matches: {run.guidance_match_count}</span>
                                         <span className="rounded-full bg-[#f7fbff] px-2 py-1">issues: {run.issue_count}</span>
                                         <span className="rounded-full bg-[#f7fbff] px-2 py-1">command failures: {run.command_failure_count}</span>
                                         <span className="rounded-full bg-[#f7fbff] px-2 py-1">verification commands: {run.verification_command_count}</span>
                                         <span className="rounded-full bg-[#f7fbff] px-2 py-1">touched files: {run.touched_file_count}</span>
                                     </div>
+
+                                    {run.guidance_paths.length ? (
+                                        <div className="mt-4">
+                                            <p className="text-xs font-semibold uppercase tracking-wide text-[#6baed6]">Retrieved guidance</p>
+                                            <div className="mt-2 flex flex-wrap gap-2 text-xs text-[#4b5563]">
+                                                {run.guidance_paths.map((path) => (
+                                                    <span key={`${run.workflow_id}-${path}`} className="rounded-full bg-[#eff3ff] px-2 py-1 text-[#2171b5]">
+                                                        {path}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ) : null}
 
                                     <div className="mt-4 flex flex-wrap gap-4 text-sm">
                                         <span className="text-[#6b7280]">log: {run.run_log_path}</span>
@@ -332,6 +383,26 @@ const TraceDashboard: React.FC = () => {
                             <div className="rounded-lg border border-[#dbe9f6] bg-white p-4">
                                 <p className="text-xs font-semibold uppercase tracking-wide text-[#6baed6]">Boundary Blocks</p>
                                 <p className="mt-2 text-2xl font-semibold text-[#084594]">{payload.diagnostics.boundary_block_count}</p>
+                            </div>
+                            <div className="rounded-lg border border-[#dbe9f6] bg-white p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-[#6baed6]">Doctrine Coverage</p>
+                                <p className="mt-2 text-2xl font-semibold text-[#084594]">{payload.diagnostics.runs_with_doctrine}</p>
+                                <p className="mt-2 text-sm text-[#6b7280]">Runs that recorded doctrine notes during planning or review.</p>
+                            </div>
+                            <div className="rounded-lg border border-[#dbe9f6] bg-white p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-[#6baed6]">Guidance Retrieval</p>
+                                <p className="mt-2 text-2xl font-semibold text-[#084594]">{payload.diagnostics.runs_with_guidance}</p>
+                                <p className="mt-2 text-sm text-[#6b7280]">Runs that matched curated runbooks or review notes.</p>
+                            </div>
+                            <div className="rounded-lg border border-[#dbe9f6] bg-white p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-[#6baed6]">Design Revisions</p>
+                                <p className="mt-2 text-2xl font-semibold text-[#084594]">{payload.diagnostics.design_review_fail_count}</p>
+                                <p className="mt-2 text-sm text-[#6b7280]">Runs that failed the design-pattern review gate at least once.</p>
+                            </div>
+                            <div className="rounded-lg border border-[#dbe9f6] bg-white p-4">
+                                <p className="text-xs font-semibold uppercase tracking-wide text-[#6baed6]">API Revisions</p>
+                                <p className="mt-2 text-2xl font-semibold text-[#084594]">{payload.diagnostics.api_review_fail_count}</p>
+                                <p className="mt-2 text-sm text-[#6b7280]">Runs that required API review and still needed plan revision.</p>
                             </div>
                         </div>
                         <div className="mt-5 grid gap-5">
@@ -372,6 +443,10 @@ const TraceDashboard: React.FC = () => {
                             <div>
                                 <p className="mb-2 text-sm font-semibold text-[#084594]">Route rationale patterns</p>
                                 <CountList items={payload.learning.common_route_rationales} emptyLabel="No route rationales recorded yet." />
+                            </div>
+                            <div>
+                                <p className="mb-2 text-sm font-semibold text-[#084594]">Common guidance sources</p>
+                                <CountList items={payload.learning.common_guidance_paths} emptyLabel="No retrieved guidance sources recorded yet." />
                             </div>
                             <div>
                                 <p className="mb-2 text-sm font-semibold text-[#084594]">Chart tuning notes</p>

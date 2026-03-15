@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "preferred_patterns": [
+    "Prefer incremental evolution over big-bang rewrites.",
+    "Prefer additive API changes when existing consumers must remain stable.",
+    "Reuse existing fetch paths, shared components, and validation patterns when practical.",
+    "Favor non-blocking background hydration over synchronous page-load fan-out.",
+    "Keep rollback steps, validation evidence, and operating notes close to each material change."
+  ],
+  "discouraged_patterns": [
+    "Avoid new browser-triggered WG API calls when stored or server-fetched data already exists.",
+    "Avoid unbounded polling, queue fan-out, or retry loops.",
+    "Avoid large unscoped refactors during feature delivery.",
+    "Avoid undocumented payload drift between code, tests, and runbooks.",
+    "Avoid changing public payload shape without explicit contract review and regression coverage."
+  ],
+  "review_priorities": [
+    "Correctness before optimization.",
+    "Observable failure modes and validation evidence.",
+    "Bounded local and upstream API load.",
+    "Rollback clarity and migration safety.",
+    "Consistency with existing battlestats UX and contracts."
+  ],
+  "decision_rules": [
+    "Prefer the smallest safe vertical slice.",
+    "Prefer reversible changes over clever shortcuts.",
+    "Validate touched areas with focused tests before widening scope.",
+    "Preserve current user-facing behavior unless the task explicitly changes it.",
+    "When an endpoint or payload changes, update contract docs and API-facing tests in the same tranche."
+  ]
+}

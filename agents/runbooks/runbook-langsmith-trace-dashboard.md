@@ -20,6 +20,12 @@ Operate and validate the battlestats `/trace` dashboard that summarizes LangSmit
 - Aggregated diagnostics and learning signals derived from those run payloads.
 - Ranked heatmap tuning metadata derived from the current `ranked_wr_battles` backend correlation config.
 
+When the stored run came from the enriched LangGraph workflow, recent-run summaries can now also reflect doctrine-aware review outcomes such as:
+
+- design review pass or fail
+- API review pass or fail
+- retrieved battlestats guidance references through the run summary text
+
 ## Execution Steps
 
 1. Generate or refresh workflow data.
@@ -29,8 +35,9 @@ Operate and validate the battlestats `/trace` dashboard that summarizes LangSmit
 3. Open `/trace` in the client.
 4. Confirm the connection-status section reflects the server environment.
 5. Confirm recent runs show the latest workflow execution.
-6. Confirm the learning section includes the ranked heatmap chart-tuning note and points at the ranked heatmap granularity runbook.
-7. If trace URLs are present, open one and verify it resolves to the expected LangSmith run.
+6. For a recent LangGraph run, confirm the summary reflects doctrine-aware gates when relevant.
+7. Confirm the learning section includes the ranked heatmap chart-tuning note and points at the ranked heatmap granularity runbook.
+8. If trace URLs are present, open one and verify it resolves to the expected LangSmith run.
 
 ## Validation Commands
 
@@ -52,9 +59,16 @@ Operate and validate the battlestats `/trace` dashboard that summarizes LangSmit
 - The project name matches the resolved environment value.
 - API key presence is shown as present/absent, never as the secret value.
 - Recent runs show engine, status, task, and summary.
+- LangGraph summaries can now mention doctrine loading, guidance retrieval, and design or API review outcomes when those gates are triggered.
 - Learning cards show recurring issues and common commands when logs exist.
 - The chart tuning note reflects the current ranked heatmap config, including the cache version and the linked runbook path.
 - Layout remains readable on a narrow viewport.
+
+## Useful Companion Docs
+
+- `agents/runbooks/runbook-langgraph-opinionated-workflow.md`
+- `agents/langgraph-usage-note.md`
+- `agents/work-items/langgraph-opinionated-workflow-roadmap.md`
 
 ## Rollback
 

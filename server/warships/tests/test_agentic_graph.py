@@ -174,6 +174,161 @@ class AgenticGraphTests(TestCase):
         self.assertTrue(result["command_results"])
         self.assertEqual(result["command_results"][0]["returncode"], 2)
 
+    def test_run_graph_loads_default_team_doctrine(self):
+        result = run_graph(
+            "Fix clan hydration in player page",
+            context={
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                }
+            },
+        )
+
+        self.assertIn("preferred_patterns", result["team_doctrine"])
+        self.assertIn("review_priorities", result["team_doctrine"])
+        self.assertTrue(result["doctrine_notes"])
+        self.assertTrue(any(
+            "battlestats doctrine" in note.lower()
+            for note in result["doctrine_notes"]
+        ))
+
+    def test_run_graph_applies_team_doctrine_overrides_and_style_snippets(self):
+        result = run_graph(
+            "Design a safer player detail caching flow",
+            context={
+                "team_doctrine": {
+                    "preferred_patterns": [
+                        "Prefer feature-flagged rollout for user-visible cache changes.",
+                    ],
+                    "decision_rules": [
+                        "Prefer reversible cache invalidation changes.",
+                    ],
+                },
+                "team_style_snippets": [
+                    "Bias toward additive diagnostics when touching agent workflows.",
+                ],
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+            },
+        )
+
+        self.assertIn(
+            "Prefer feature-flagged rollout for user-visible cache changes.",
+            result["team_doctrine"]["preferred_patterns"],
+        )
+        self.assertIn(
+            "Prefer reversible cache invalidation changes.",
+            result["team_doctrine"]["decision_rules"],
+        )
+        self.assertIn(
+            "Bias toward additive diagnostics when touching agent workflows.",
+            result["team_doctrine"]["review_priorities"],
+        )
+        self.assertTrue(any(
+            "doctrine overrides" in note.lower()
+            for note in result["doctrine_notes"]
+        ))
+
+    def test_run_graph_design_review_revises_risky_plan_before_implementation(self):
+        result = run_graph(
+            "Add cache hydration guardrails for ranked API",
+            context={
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+            },
+        )
+
+        self.assertTrue(result["design_review_passed"])
+        self.assertIn(
+            "Add rollback, guardrail, and bounded-load checks before implementation.",
+            result["plan"],
+        )
+        self.assertTrue(any(
+            "revised the plan after design review findings" in note.lower()
+            for note in result["doctrine_notes"]
+        ))
+
+    def test_run_graph_retrieves_guidance_for_matching_task(self):
+        result = run_graph(
+            "Review the LangSmith trace dashboard rollout and validation plan",
+            context={
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+            },
+        )
+
+        self.assertTrue(result["retrieved_guidance"])
+        self.assertTrue(any(
+            "trace" in item["path"]
+            for item in result["retrieved_guidance"]
+        ))
+        self.assertTrue(any(
+            "retrieved battlestats guidance" in note.lower()
+            for note in result["guidance_notes"]
+        ))
+
+    def test_run_graph_api_review_revises_plan_before_implementation(self):
+        result = run_graph(
+            "Change player summary API response payload",
+            context={
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+            },
+        )
+
+        self.assertTrue(result["api_review_required"])
+        self.assertTrue(result["api_review_passed"])
+        self.assertIn(
+            "Add API contract, serializer, and backward-compatibility checks for touched endpoints.",
+            result["plan"],
+        )
+        self.assertIn(
+            "Add API documentation updates and payload regression tests for user-facing endpoint changes.",
+            result["plan"],
+        )
+
+    def test_run_graph_stops_when_api_review_cannot_retry(self):
+        result = run_graph(
+            "Change player summary API response payload",
+            context={
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+                "max_api_review_retries": 0,
+            },
+        )
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertTrue(result["api_review_required"])
+        self.assertFalse(result["api_review_passed"])
+        self.assertTrue(result["api_review_notes"])
+
+    def test_run_graph_stops_when_design_review_cannot_retry(self):
+        result = run_graph(
+            "Add cache hydration guardrails for ranked API",
+            context={
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+                "max_design_review_retries": 0,
+            },
+        )
+
+        self.assertEqual(result["status"], "needs_attention")
+        self.assertFalse(result["design_review_passed"])
+        self.assertTrue(result["design_review_notes"])
+
     @patch("warships.agentic.graph.get_langsmith_project_name", return_value="battlestats-agentic")
     @patch("warships.agentic.graph.get_current_trace_url", return_value="https://smith.example/runs/graph-1")
     @patch("warships.agentic.graph.trace_block")

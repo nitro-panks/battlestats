@@ -11,6 +11,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from .checkpoints import get_graph_checkpointer
+from .doctrine import merge_team_doctrine, summarize_team_doctrine
+from .retrieval import retrieve_doctrine_guidance
 from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
 
 
@@ -27,6 +29,21 @@ class AgentState(TypedDict, total=False):
     implementation_notes: list[str]
     execution_notes: list[str]
     role_context: dict[str, str]
+    doctrine_overrides: dict[str, Any]
+    team_style_snippets: list[str]
+    team_doctrine: dict[str, list[str]]
+    doctrine_notes: list[str]
+    retrieved_guidance: list[dict[str, Any]]
+    guidance_notes: list[str]
+    design_review_notes: list[str]
+    design_review_passed: bool
+    design_review_retry_count: int
+    max_design_review_retries: int
+    api_review_notes: list[str]
+    api_review_passed: bool
+    api_review_required: bool
+    api_review_retry_count: int
+    max_api_review_retries: int
     verification_commands: list[str]
     verification_cwd: str
     command_results: list[dict[str, Any]]
@@ -138,8 +155,60 @@ def _is_clan_hydration_use_case(task: str) -> bool:
     return "clan" in normalized and "hydrate" in normalized
 
 
+def _load_team_doctrine(state: AgentState) -> dict:
+    overrides = state.get("doctrine_overrides", {})
+    style_snippets = list(state.get("team_style_snippets", []))
+    doctrine = merge_team_doctrine(
+        overrides=overrides,
+        team_style_snippets=style_snippets,
+    )
+    doctrine_summary = summarize_team_doctrine(doctrine)
+
+    notes = [
+        "Loaded battlestats team doctrine into workflow state.",
+        f"Preferred patterns: {doctrine_summary.get('preferred_patterns', 'None recorded.')}",
+        f"Review priorities: {doctrine_summary.get('review_priorities', 'None recorded.')}",
+    ]
+    if overrides:
+        notes.append(
+            "Applied doctrine overrides for: " + ", ".join(sorted(overrides.keys()))
+        )
+    if style_snippets:
+        notes.append(
+            f"Applied {len(style_snippets)} team-style snippet(s) as dynamic review priorities."
+        )
+
+    return {
+        "team_doctrine": doctrine,
+        "doctrine_notes": notes,
+        "status": "doctrine_loaded",
+        "transition_log": _append_transition(state, "load_team_doctrine"),
+    }
+
+
+def _retrieve_guidance(state: AgentState) -> dict:
+    task = state.get("task", "")
+    guidance = retrieve_doctrine_guidance(task, limit=3)
+    notes = list(state.get("guidance_notes", []))
+    if guidance:
+        notes.append(
+            "Retrieved battlestats guidance from: " + ", ".join(item["path"] for item in guidance)
+        )
+    else:
+        notes.append("No closely matched battlestats guidance documents were retrieved for this task.")
+
+    return {
+        "retrieved_guidance": guidance,
+        "guidance_notes": notes,
+        "status": "guidance_loaded",
+        "transition_log": _append_transition(state, "retrieve_guidance"),
+    }
+
+
 def _plan_task(state: AgentState) -> dict:
     task = state["task"].strip() or "No task provided"
+    doctrine = state.get("team_doctrine", {})
+    doctrine_summary = summarize_team_doctrine(doctrine)
 
     if _is_clan_hydration_use_case(task):
         plan = [
@@ -147,6 +216,7 @@ def _plan_task(state: AgentState) -> dict:
             "Add bounded player re-fetch in the frontend while clan hydration is pending",
             "Force a backend refresh task when clan is missing to avoid fresh-cache lock",
             "Add tests for forced refresh behavior and run focused test suite",
+            f"Check the approach against review priorities: {doctrine_summary.get('review_priorities', 'None recorded.')}",
         ]
         target_files = [
             "client/app/components/PlayerSearch.tsx",
@@ -159,15 +229,233 @@ def _plan_task(state: AgentState) -> dict:
             f"Clarify acceptance criteria for: {task}",
             "Identify files and tests affected by the task",
             "Implement the smallest safe change and validate",
+            f"Review the approach against battlestats doctrine: {doctrine_summary.get('decision_rules', 'None recorded.')}",
         ]
         target_files = []
+
+    doctrine_notes = list(state.get("doctrine_notes", []))
+    guidance = list(state.get("retrieved_guidance", []))
+    guidance_notes = list(state.get("guidance_notes", []))
+    doctrine_notes.append(
+        "Planning used battlestats doctrine for review priorities and decision rules."
+    )
+    if guidance:
+        plan.append(
+            "Review relevant battlestats guidance artifacts before implementation: "
+            + ", ".join(item["title"] for item in guidance)
+        )
+        guidance_notes.append(
+            f"Planning referenced {len(guidance)} retrieved guidance artifact(s)."
+        )
 
     return {
         "plan": plan,
         "target_files": target_files,
         "role_context": _read_role_files(),
+        "doctrine_notes": doctrine_notes,
+        "guidance_notes": guidance_notes,
         "status": "planned",
         "transition_log": _append_transition(state, "plan_task"),
+    }
+
+
+def _plan_has_validation_step(plan: list[str]) -> bool:
+    return any(
+        any(token in step.lower() for token in ("test", "validat", "verify"))
+        for step in plan
+    )
+
+
+def _plan_has_risk_control_step(plan: list[str]) -> bool:
+    return any(
+        not step.lower().startswith("clarify acceptance criteria for:")
+        and not step.lower().startswith("review the approach against battlestats doctrine:")
+        and any(token in step.lower() for token in ("rollback", "guardrail", "monitor", "bound", "load"))
+        for step in plan
+    )
+
+
+def _task_needs_risk_controls(task: str) -> bool:
+    normalized = task.lower()
+    return any(
+        token in normalized
+        for token in ("migrate", "schema", "cache", "hydrate", "queue", "api", "ranked", "trace")
+    )
+
+
+def _task_needs_api_contract_review(task: str) -> bool:
+    normalized = task.lower()
+    return any(
+        token in normalized
+        for token in ("api", "endpoint", "payload", "serializer", "schema", "response", "route", "contract", "fetch")
+    )
+
+
+def _plan_has_api_contract_step(plan: list[str]) -> bool:
+    return any(
+        not step.lower().startswith("clarify acceptance criteria for:")
+        and not step.lower().startswith("review the approach against battlestats doctrine:")
+        and not step.lower().startswith("review relevant battlestats guidance artifacts before implementation:")
+        and
+        any(token in step.lower() for token in ("contract", "payload", "serializer", "schema", "response", "endpoint", "backward", "compat"))
+        for step in plan
+    )
+
+
+def _plan_has_docs_and_api_test_step(plan: list[str]) -> bool:
+    has_docs = any(
+        not step.lower().startswith("review relevant battlestats guidance artifacts before implementation:")
+        and any(token in step.lower() for token in ("documentation", "docs", "runbook", "readme"))
+        for step in plan
+    )
+    has_tests = any(
+        not step.lower().startswith("implement the smallest safe change and validate")
+        and not step.lower().startswith("identify files and tests affected by the task")
+        and any(token in step.lower() for token in ("test", "validat", "regression"))
+        for step in plan
+    )
+    return has_docs and has_tests
+
+
+def _design_pattern_review(state: AgentState) -> dict:
+    plan = list(state.get("plan", []))
+    task = state.get("task", "")
+    review_notes: list[str] = []
+
+    if not plan:
+        review_notes.append("Design review: plan is empty and needs concrete implementation steps.")
+
+    if not _plan_has_validation_step(plan):
+        review_notes.append(
+            "Design review: plan needs an explicit validation or regression step."
+        )
+
+    if _task_needs_risk_controls(task) and not _plan_has_risk_control_step(plan):
+        review_notes.append(
+            "Design review: risky tasks should include rollback, guardrail, or load-control planning."
+        )
+
+    design_review_passed = not review_notes
+    doctrine_notes = list(state.get("doctrine_notes", []))
+    if design_review_passed:
+        doctrine_notes.append(
+            "Design pattern review passed against battlestats doctrine."
+        )
+    else:
+        doctrine_notes.append(
+            f"Design pattern review found {len(review_notes)} issue(s) that require plan revision."
+        )
+
+    return {
+        "design_review_notes": review_notes,
+        "design_review_passed": design_review_passed,
+        "doctrine_notes": doctrine_notes,
+        "status": "design_review_passed" if design_review_passed else "design_review_failed",
+        "transition_log": _append_transition(state, "design_pattern_review"),
+    }
+
+
+def _revise_plan(state: AgentState) -> dict:
+    plan = list(state.get("plan", []))
+    notes = list(state.get("design_review_notes", []))
+    retry_count = int(state.get("design_review_retry_count", 0)) + 1
+
+    if any("validation" in note.lower() for note in notes):
+        remediation = "Add focused validation commands and regression coverage for touched surfaces."
+        if remediation not in plan:
+            plan.append(remediation)
+
+    if any(
+        any(token in note.lower() for token in ("rollback", "guardrail", "load-control", "load control"))
+        for note in notes
+    ):
+        remediation = "Add rollback, guardrail, and bounded-load checks before implementation."
+        if remediation not in plan:
+            plan.append(remediation)
+
+    if any("plan is empty" in note.lower() for note in notes):
+        remediation = "Identify concrete implementation files and acceptance checks before coding."
+        if remediation not in plan:
+            plan.append(remediation)
+
+    doctrine_notes = list(state.get("doctrine_notes", []))
+    doctrine_notes.append(
+        f"Revised the plan after design review findings (attempt {retry_count})."
+    )
+
+    return {
+        "plan": plan,
+        "design_review_retry_count": retry_count,
+        "doctrine_notes": doctrine_notes,
+        "status": "plan_revised",
+        "transition_log": _append_transition(state, "revise_plan"),
+    }
+
+
+def _api_contract_review(state: AgentState) -> dict:
+    task = state.get("task", "")
+    plan = list(state.get("plan", []))
+    review_required = _task_needs_api_contract_review(task)
+    review_notes: list[str] = []
+
+    if review_required and not _plan_has_api_contract_step(plan):
+        review_notes.append(
+            "API review: API-facing tasks need an explicit contract or payload compatibility step."
+        )
+
+    if review_required and not _plan_has_docs_and_api_test_step(plan):
+        review_notes.append(
+            "API review: API-facing tasks should include documentation updates and regression coverage in the same tranche."
+        )
+
+    api_review_passed = not review_notes
+    doctrine_notes = list(state.get("doctrine_notes", []))
+    if review_required:
+        if api_review_passed:
+            doctrine_notes.append("API contract review passed against battlestats doctrine.")
+        else:
+            doctrine_notes.append(
+                f"API contract review found {len(review_notes)} issue(s) that require plan revision."
+            )
+    else:
+        doctrine_notes.append("API contract review skipped because the task does not appear API-facing.")
+
+    return {
+        "api_review_notes": review_notes,
+        "api_review_passed": api_review_passed,
+        "api_review_required": review_required,
+        "doctrine_notes": doctrine_notes,
+        "status": "api_review_passed" if api_review_passed else "api_review_failed",
+        "transition_log": _append_transition(state, "api_contract_review"),
+    }
+
+
+def _revise_plan_after_api_review(state: AgentState) -> dict:
+    plan = list(state.get("plan", []))
+    notes = list(state.get("api_review_notes", []))
+    retry_count = int(state.get("api_review_retry_count", 0)) + 1
+
+    if any("contract or payload compatibility" in note.lower() for note in notes):
+        remediation = "Add API contract, serializer, and backward-compatibility checks for touched endpoints."
+        if remediation not in plan:
+            plan.append(remediation)
+
+    if any("documentation updates and regression coverage" in note.lower() for note in notes):
+        remediation = "Add API documentation updates and payload regression tests for user-facing endpoint changes."
+        if remediation not in plan:
+            plan.append(remediation)
+
+    doctrine_notes = list(state.get("doctrine_notes", []))
+    doctrine_notes.append(
+        f"Revised the plan after API contract review findings (attempt {retry_count})."
+    )
+
+    return {
+        "plan": plan,
+        "api_review_retry_count": retry_count,
+        "doctrine_notes": doctrine_notes,
+        "status": "api_plan_revised",
+        "transition_log": _append_transition(state, "revise_plan_after_api_review"),
     }
 
 
@@ -324,13 +612,23 @@ def _retry_verification(state: AgentState) -> dict:
 
 
 def _summarize(state: AgentState) -> dict:
+    api_review_required = state.get("api_review_required", False)
+    api_review_label = "n/a" if not api_review_required else ("pass" if state.get("api_review_passed", False) else "fail")
     summary = [
         f"Task: {state.get('task', '')}",
         f"Plan steps: {len(state.get('plan', []))}",
         f"Touched files: {len(state.get('touched_files', []))}",
+        f"Design review: {'pass' if state.get('design_review_passed', False) else 'fail'}",
+        f"API review: {api_review_label}",
         f"Boundary gate: {'pass' if state.get('boundary_ok', False) else 'fail'}",
         f"Verification gate: {'pass' if state.get('checks_passed', False) else 'fail'}",
     ]
+    doctrine_notes = list(state.get("doctrine_notes", []))
+    if doctrine_notes:
+        summary.append("Doctrine: " + " | ".join(doctrine_notes[:2]))
+    guidance_notes = list(state.get("guidance_notes", []))
+    if guidance_notes:
+        summary.append("Guidance: " + " | ".join(guidance_notes[:1]))
     if state.get("issues"):
         summary.append("Issues: " + " | ".join(state.get("issues", [])))
 
@@ -346,6 +644,32 @@ def _summarize(state: AgentState) -> dict:
 def _route_after_boundaries(state: AgentState) -> Literal["run_verification_commands", "summarize"]:
     if state.get("boundary_ok", False):
         return "run_verification_commands"
+    return "summarize"
+
+
+def _route_after_design_review(
+    state: AgentState,
+) -> Literal["api_contract_review", "revise_plan", "summarize"]:
+    if state.get("design_review_passed", False):
+        return "api_contract_review"
+
+    retry_count = int(state.get("design_review_retry_count", 0))
+    max_retries = int(state.get("max_design_review_retries", 1))
+    if retry_count < max_retries:
+        return "revise_plan"
+    return "summarize"
+
+
+def _route_after_api_review(
+    state: AgentState,
+) -> Literal["implement_task", "revise_plan_after_api_review", "summarize"]:
+    if state.get("api_review_passed", False):
+        return "implement_task"
+
+    retry_count = int(state.get("api_review_retry_count", 0))
+    max_retries = int(state.get("max_api_review_retries", 1))
+    if retry_count < max_retries:
+        return "revise_plan_after_api_review"
     return "summarize"
 
 
@@ -389,7 +713,13 @@ def build_graph(checkpointer: Any | None = None):
 
     graph_builder = StateGraph(AgentState)
 
+    graph_builder.add_node("load_team_doctrine", _load_team_doctrine)
+    graph_builder.add_node("retrieve_guidance", _retrieve_guidance)
     graph_builder.add_node("plan_task", _plan_task)
+    graph_builder.add_node("design_pattern_review", _design_pattern_review)
+    graph_builder.add_node("revise_plan", _revise_plan)
+    graph_builder.add_node("api_contract_review", _api_contract_review)
+    graph_builder.add_node("revise_plan_after_api_review", _revise_plan_after_api_review)
     graph_builder.add_node("implement_task", _implement_task)
     graph_builder.add_node("enforce_tool_boundaries", _enforce_tool_boundaries)
     graph_builder.add_node("run_verification_commands",
@@ -398,8 +728,20 @@ def build_graph(checkpointer: Any | None = None):
     graph_builder.add_node("retry_verification", _retry_verification)
     graph_builder.add_node("summarize", _summarize)
 
-    graph_builder.add_edge(START, "plan_task")
-    graph_builder.add_edge("plan_task", "implement_task")
+    graph_builder.add_edge(START, "load_team_doctrine")
+    graph_builder.add_edge("load_team_doctrine", "retrieve_guidance")
+    graph_builder.add_edge("retrieve_guidance", "plan_task")
+    graph_builder.add_edge("plan_task", "design_pattern_review")
+    graph_builder.add_conditional_edges(
+        "design_pattern_review",
+        _route_after_design_review,
+    )
+    graph_builder.add_edge("revise_plan", "design_pattern_review")
+    graph_builder.add_conditional_edges(
+        "api_contract_review",
+        _route_after_api_review,
+    )
+    graph_builder.add_edge("revise_plan_after_api_review", "api_contract_review")
     graph_builder.add_edge("implement_task", "enforce_tool_boundaries")
     graph_builder.add_conditional_edges(
         "enforce_tool_boundaries",
@@ -439,6 +781,21 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
             "implementation_notes": [],
             "execution_notes": [],
             "role_context": {},
+            "doctrine_overrides": dict(context.get("team_doctrine", {})),
+            "team_style_snippets": list(context.get("team_style_snippets", [])),
+            "team_doctrine": {},
+            "doctrine_notes": [],
+            "retrieved_guidance": [],
+            "guidance_notes": [],
+            "design_review_notes": [],
+            "design_review_passed": False,
+            "design_review_retry_count": int(context.get("design_review_retry_count", 0)),
+            "max_design_review_retries": int(context.get("max_design_review_retries", 1)),
+            "api_review_notes": [],
+            "api_review_passed": False,
+            "api_review_required": False,
+            "api_review_retry_count": int(context.get("api_review_retry_count", 0)),
+            "max_api_review_retries": int(context.get("max_api_review_retries", 1)),
             "verification_commands": list(context.get("verification_commands", [])),
             "verification_cwd": str(context.get("verification_cwd", "")),
             "command_results": [],

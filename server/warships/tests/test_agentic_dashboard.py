@@ -25,6 +25,15 @@ class AgenticDashboardTests(TestCase):
                     "task": "Evaluate trace dashboard spec",
                     "checks_passed": True,
                     "boundary_ok": True,
+                    "design_review_passed": True,
+                    "api_review_required": True,
+                    "api_review_passed": True,
+                    "doctrine_notes": ["Loaded repo doctrine from agents/knowledge/agentic-team-doctrine.json."],
+                    "guidance_notes": ["Retrieved 2 guidance documents from runbooks/reviews."],
+                    "retrieved_guidance": [
+                        {"path": "agents/runbooks/runbook-langgraph-opinionated-workflow.md"},
+                        {"path": "agents/reviews/architect-analysis.md"},
+                    ],
                     "issues": [],
                     "verification_commands": ["python -m pytest warships/tests/test_views.py -q"],
                     "touched_files": ["server/warships/views.py", "client/app/trace/page.tsx"],
@@ -41,6 +50,12 @@ class AgenticDashboardTests(TestCase):
                 "task": "Fix trace dashboard endpoint",
                 "checks_passed": False,
                 "boundary_ok": False,
+                "design_review_passed": False,
+                "api_review_required": False,
+                "api_review_passed": None,
+                "doctrine_notes": ["Loaded repo doctrine from agents/knowledge/agentic-team-doctrine.json."],
+                "guidance_notes": [],
+                "retrieved_guidance": [],
                 "issues": ["Verification failed: required checks did not pass"],
                 "verification_commands": ["python -m pytest warships/tests/test_agentic_dashboard.py -q"],
                 "touched_files": ["server/warships/agentic/dashboard.py"],
@@ -63,9 +78,21 @@ class AgenticDashboardTests(TestCase):
         self.assertEqual(payload["diagnostics"]["total_runs"], 2)
         self.assertEqual(payload["diagnostics"]["runs_with_trace_urls"], 1)
         self.assertEqual(payload["diagnostics"]["boundary_block_count"], 1)
+        self.assertEqual(payload["diagnostics"]["runs_with_doctrine"], 2)
+        self.assertEqual(payload["diagnostics"]["runs_with_guidance"], 1)
+        self.assertEqual(payload["diagnostics"]["design_review_fail_count"], 1)
+        self.assertEqual(payload["diagnostics"]["api_review_fail_count"], 0)
         self.assertEqual(payload["diagnostics"]
                          ["verification_pass_rate"], 50.0)
         self.assertEqual(payload["recent_runs"][0]["workflow_id"], "run-1")
+        self.assertEqual(payload["recent_runs"][0]["guidance_match_count"], 2)
+        self.assertEqual(payload["recent_runs"][0]["doctrine_note_count"], 1)
+        self.assertTrue(payload["recent_runs"][0]["design_review_passed"])
+        self.assertTrue(payload["recent_runs"][0]["api_review_passed"])
+        self.assertEqual(
+            payload["learning"]["common_guidance_paths"][0]["label"],
+            "agents/runbooks/runbook-langgraph-opinionated-workflow.md",
+        )
         self.assertEqual(
             payload["learning"]["chart_tuning_notes"][0]["runbook_path"],
             "agents/runbooks/runbook-ranked-wr-battles-heatmap-granularity.md",
@@ -91,6 +118,7 @@ class AgenticDashboardTests(TestCase):
         self.assertEqual(payload["recent_runs"], [])
         self.assertEqual(payload["diagnostics"]["total_runs"], 0)
         self.assertEqual(payload["learning"]["recurring_issues"], [])
+        self.assertEqual(payload["learning"]["common_guidance_paths"], [])
         self.assertEqual(payload["learning"]["chart_tuning_notes"]
                          [0]["slug"], "ranked_wr_battles_heatmap")
 
