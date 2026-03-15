@@ -287,11 +287,6 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                             <p className="mt-2 text-lg font-semibold text-[#084594]">{bestTierBandByScore}</p>
                             <p className="mt-1 text-xs text-[#6baed6]">Built from rows with usable tier metadata</p>
                         </div>
-                        <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
-                            <p className="text-xs uppercase tracking-wide text-[#4292c6]">Profile Shape</p>
-                            <p className="mt-2 text-lg font-semibold text-[#084594]">{badgeBreadthLabel}</p>
-                            <p className="mt-1 text-xs text-[#6baed6]">{rowsWithMetadata.length} of {rows.length} rows usable for class or tier rollups</p>
-                        </div>
                     </div>
                     <div className="mt-4 max-h-[332px] overflow-auto rounded-md border border-[#dbe9f6] bg-white">
                         <table className="min-w-full divide-y divide-[#dbe9f6] text-sm">
