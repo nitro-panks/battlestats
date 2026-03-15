@@ -11,7 +11,7 @@ from django.test import TestCase, override_settings
 from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
 from warships.signals import ensure_daily_clan_crawl_schedule
-from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, warm_clan_battle_summaries_task
+from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_ranked_data_refresh_pending, queue_ranked_data_refresh, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_ranked_data_task, warm_clan_battle_summaries_task
 
 
 @override_settings(
@@ -226,6 +226,36 @@ class RefreshTaskLockTests(TestCase):
         self.assertEqual(result, {"status": "skipped",
                          "reason": "already-running"})
         mock_refresh_summary.assert_not_called()
+
+    def test_queue_ranked_data_refresh_sets_pending_marker_until_task_finishes(self):
+        with patch("warships.tasks.update_ranked_data_task.delay") as mock_delay:
+            result = queue_ranked_data_refresh(1234)
+
+        self.assertEqual(result, {"status": "queued"})
+        self.assertTrue(is_ranked_data_refresh_pending(1234))
+        mock_delay.assert_called_once_with(player_id=1234)
+
+    def test_queue_ranked_data_refresh_skips_when_already_pending(self):
+        cache.add("warships:tasks:update_ranked_data_dispatch:1234",
+                  "queued", timeout=60)
+
+        with patch("warships.tasks.update_ranked_data_task.delay") as mock_delay:
+            result = queue_ranked_data_refresh(1234)
+
+        self.assertEqual(
+            result, {"status": "skipped", "reason": "already-queued"})
+        mock_delay.assert_not_called()
+
+    def test_ranked_refresh_task_clears_pending_marker(self):
+        cache.add("warships:tasks:update_ranked_data_dispatch:4567",
+                  "queued", timeout=60)
+
+        with patch("warships.data.update_ranked_data") as mock_update_ranked_data:
+            result = update_ranked_data_task.run(player_id=4567)
+
+        self.assertEqual(result, {"status": "completed"})
+        mock_update_ranked_data.assert_called_once_with(player_id=4567)
+        self.assertFalse(is_ranked_data_refresh_pending(4567))
 
     def test_post_migrate_updates_existing_periodic_task(self):
         schedule = CrontabSchedule.objects.create(

@@ -1,6 +1,7 @@
 from pathlib import Path
+from contextlib import contextmanager
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from warships.agentic import resolve_crewai_policy, route_agent_workflow, run_routed_workflow
 from warships.agentic.router import _prepare_langgraph_context
@@ -50,3 +51,32 @@ class AgenticRouterTests(TestCase):
         self.assertEqual(result["selected_engine"], "crewai")
         self.assertTrue(result["run_log_path"])
         self.assertTrue(Path(result["run_log_path"]).exists())
+
+    @patch("warships.agentic.router.get_langsmith_project_name", return_value="battlestats-agentic")
+    @patch("warships.agentic.router.get_current_trace_url", return_value="https://smith.example/runs/router-1")
+    @patch("warships.agentic.router.trace_block")
+    @patch("warships.agentic.router.write_agent_run_log")
+    @patch("warships.agentic.router.run_graph")
+    def test_run_routed_workflow_includes_langsmith_trace_url_when_available(self, mock_run_graph, mock_write_agent_run_log, mock_trace_block, _mock_trace_url, _mock_project):
+        fake_trace = Mock()
+        fake_trace.metadata = {}
+
+        @contextmanager
+        def fake_trace_context(*args, **kwargs):
+            yield fake_trace
+
+        mock_trace_block.side_effect = fake_trace_context
+        mock_run_graph.return_value = {
+            "workflow_id": "graph-1",
+            "status": "completed",
+            "summary": ["graph"],
+        }
+        mock_write_agent_run_log.return_value = "/tmp/langgraph.json"
+
+        result = run_routed_workflow(
+            "implement routed tracing", engine="langgraph")
+
+        self.assertEqual(result["langsmith_trace_url"],
+                         "https://smith.example/runs/router-1")
+        self.assertEqual(result["langsmith_project"], "battlestats-agentic")
+        fake_trace.end.assert_called_once()

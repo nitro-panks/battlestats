@@ -11,6 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from .checkpoints import get_graph_checkpointer
+from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
 
 
 class AgentState(TypedDict, total=False):
@@ -361,6 +362,28 @@ def _route_after_verification(
     return "summarize"
 
 
+def _graph_trace_inputs(task: str, context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "task": task,
+        "workflow_id": context.get("workflow_id"),
+        "context_keys": sorted(context.keys()),
+        "touched_file_count": len(context.get("touched_files", [])),
+        "verification_command_count": len(context.get("verification_commands", [])),
+        "checkpoint_backend": context.get("checkpoint_backend"),
+    }
+
+
+def _graph_trace_outputs(result: AgentState) -> dict[str, Any]:
+    return {
+        "workflow_id": result.get("workflow_id"),
+        "status": result.get("status"),
+        "boundary_ok": result.get("boundary_ok"),
+        "checks_passed": result.get("checks_passed"),
+        "issue_count": len(result.get("issues", [])),
+        "summary": result.get("summary", []),
+    }
+
+
 def build_graph(checkpointer: Any | None = None):
     """Build and compile the guarded LangGraph workflow."""
 
@@ -397,36 +420,53 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
     """Run the graph from an incoming task string and optional context."""
 
     context = context or {}
-    workflow_id = context.get(
-        "workflow_id") or f"run-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
-    initial_state: AgentState = {
-        "workflow_id": workflow_id,
-        "task": task,
-        "status": "queued",
-        "plan": [],
-        "target_files": list(context.get("target_files", [])),
-        "allowed_paths": list(context.get("allowed_paths", DEFAULT_ALLOWED_PATHS)),
-        "touched_files": list(context.get("touched_files", [])),
-        "implementation_notes": [],
-        "execution_notes": [],
-        "role_context": {},
-        "verification_commands": list(context.get("verification_commands", [])),
-        "verification_cwd": str(context.get("verification_cwd", "")),
-        "command_results": [],
-        "verification": dict(context.get("verification", {})),
-        "verification_notes": [],
-        "issues": [],
-        "summary": [],
-        "retry_count": int(context.get("retry_count", 0)),
-        "max_retries": int(context.get("max_retries", 1)),
-        "checks_passed": False,
-        "boundary_ok": False,
-        "transition_log": [],
-    }
+    with trace_block(
+        "LangGraph Implementation Workflow",
+        inputs=_graph_trace_inputs(task, context),
+        metadata={"component": "agentic", "engine": "langgraph"},
+        tags=["agentic", "langgraph"],
+    ) as trace_run:
+        workflow_id = context.get(
+            "workflow_id") or f"run-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+        initial_state: AgentState = {
+            "workflow_id": workflow_id,
+            "task": task,
+            "status": "queued",
+            "plan": [],
+            "target_files": list(context.get("target_files", [])),
+            "allowed_paths": list(context.get("allowed_paths", DEFAULT_ALLOWED_PATHS)),
+            "touched_files": list(context.get("touched_files", [])),
+            "implementation_notes": [],
+            "execution_notes": [],
+            "role_context": {},
+            "verification_commands": list(context.get("verification_commands", [])),
+            "verification_cwd": str(context.get("verification_cwd", "")),
+            "command_results": [],
+            "verification": dict(context.get("verification", {})),
+            "verification_notes": [],
+            "issues": [],
+            "summary": [],
+            "retry_count": int(context.get("retry_count", 0)),
+            "max_retries": int(context.get("max_retries", 1)),
+            "checks_passed": False,
+            "boundary_ok": False,
+            "transition_log": [],
+        }
 
-    with get_graph_checkpointer(context=context) as checkpointer:
-        compiled = build_graph(checkpointer=checkpointer)
-        return compiled.invoke(
-            initial_state,
-            config={"configurable": {"thread_id": workflow_id}},
-        )
+        with get_graph_checkpointer(context=context) as checkpointer:
+            compiled = build_graph(checkpointer=checkpointer)
+            result = compiled.invoke(
+                initial_state,
+                config={"configurable": {"thread_id": workflow_id}},
+            )
+
+        trace_url = get_current_trace_url()
+        if trace_url:
+            result["langsmith_trace_url"] = trace_url
+            result["langsmith_project"] = get_langsmith_project_name()
+
+        if trace_run is not None:
+            trace_run.metadata["workflow_id"] = workflow_id
+            trace_run.end(outputs=_graph_trace_outputs(result))
+
+        return result

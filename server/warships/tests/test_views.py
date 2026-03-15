@@ -2,6 +2,7 @@ from unittest.mock import patch
 from datetime import datetime, timedelta
 from kombu.exceptions import OperationalError as KombuOperationalError
 
+from django.conf import settings
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -82,6 +83,73 @@ class PlayerViewSetTests(TestCase):
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_exposes_efficiency_and_randoms_rows(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=955,
+            name="Badge View Clan",
+            members_count=1,
+            last_fetch=now,
+        )
+        Player.objects.create(
+            name="BadgeViewPlayer",
+            player_id=9055,
+            clan=clan,
+            last_fetch=now,
+            pvp_battles=40,
+            pvp_ratio=55.0,
+            pvp_survival_rate=40.0,
+            battles_json=[{
+                "ship_name": "Badge Ship",
+                "ship_type": "Cruiser",
+                "ship_tier": 8,
+                "pvp_battles": 40,
+                "wins": 22,
+                "kdr": 1.1,
+            }],
+            randoms_json=[{
+                "ship_name": "Badge Ship",
+                "ship_chart_name": "Badge Ship",
+                "ship_type": "Cruiser",
+                "ship_tier": 8,
+                "pvp_battles": 40,
+                "wins": 22,
+                "win_ratio": 0.55,
+            }],
+            efficiency_json=[{
+                "ship_id": 111,
+                "top_grade_class": 1,
+                "top_grade_label": "Expert",
+                "badge_label": "Expert",
+                "ship_name": "Badge Ship",
+                "ship_chart_name": "Badge Ship",
+                "ship_type": "Cruiser",
+                "ship_tier": 8,
+                "nation": "usa",
+            }],
+        )
+
+        response = self.client.get("/api/player/BadgeViewPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["efficiency_json"][0]
+                         ["top_grade_label"], "Expert")
+        self.assertEqual(payload["efficiency_json"]
+                         [0]["badge_label"], "Expert")
+        self.assertEqual(payload["randoms_json"][0]["ship_name"], "Badge Ship")
+        mock_update_player_task.assert_not_called()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
     def test_player_lookup_updates_last_lookup_timestamp(
         self,
         _mock_update_player_task,
@@ -144,6 +212,7 @@ class PlayerViewSetTests(TestCase):
 
     def test_clan_members_lookup_updates_clan_last_lookup_timestamp(self):
         cache.clear()
+        request_started_at = timezone.now()
         clan = Clan.objects.create(
             clan_id=952,
             name="RecentClanLookup",
@@ -164,9 +233,8 @@ class PlayerViewSetTests(TestCase):
         self.assertEqual(response.status_code, 200)
         clan.refresh_from_db()
         self.assertIsNotNone(clan.last_lookup)
-        self.assertLess(
-            abs((timezone.now() - clan.last_lookup).total_seconds()), 5,
-        )
+        self.assertGreaterEqual(clan.last_lookup, request_started_at)
+        self.assertLessEqual(clan.last_lookup, timezone.now())
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
@@ -311,8 +379,10 @@ class PlayerViewSetTests(TestCase):
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.data.update_player_data")
     def test_player_lookup_does_not_enqueue_when_data_is_fresh(
         self,
+        mock_update_player_data,
         mock_update_player_task,
         mock_update_clan_task,
         mock_update_clan_members_task,
@@ -334,6 +404,46 @@ class PlayerViewSetTests(TestCase):
         response = self.client.get("/api/player/FreshPlayer/")
 
         self.assertEqual(response.status_code, 200)
+        mock_update_player_data.assert_not_called()
+        mock_update_player_task.assert_not_called()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.data.update_player_data")
+    def test_player_lookup_force_refreshes_when_efficiency_data_is_missing(
+        self,
+        mock_update_player_data,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=903,
+            name="EfficiencyClan",
+            members_count=1,
+            last_fetch=now,
+        )
+        player = Player.objects.create(
+            name="EfficiencyGapPlayer",
+            player_id=9004,
+            clan=clan,
+            last_fetch=now,
+            pvp_battles=25,
+            pvp_ratio=52.0,
+            pvp_survival_rate=38.0,
+            battles_json=[{"ship_name": "Stub Ship", "pvp_battles": 25}],
+            efficiency_json=None,
+        )
+
+        response = self.client.get("/api/player/EfficiencyGapPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        mock_update_player_data.assert_called_once_with(
+            player=player, force_refresh=True)
         mock_update_player_task.assert_not_called()
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
@@ -407,6 +517,24 @@ class PlayerViewSetTests(TestCase):
 
 
 class ClanMembersEndpointTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.queue_clan_ranked_hydration_patcher = patch(
+            "warships.data.queue_clan_ranked_hydration",
+            return_value={
+                "pending_player_ids": set(),
+                "queued_player_ids": set(),
+                "deferred_player_ids": set(),
+                "eligible_player_ids": set(),
+                "max_in_flight": 8,
+            },
+        )
+        self.mock_queue_clan_ranked_hydration = self.queue_clan_ranked_hydration_patcher.start()
+
+    def tearDown(self):
+        self.queue_clan_ranked_hydration_patcher.stop()
+        super().tearDown()
+
     def test_clan_members_null_returns_empty_list(self):
         response = self.client.get("/api/fetch/clan_members/null/")
 
@@ -443,10 +571,99 @@ class ClanMembersEndpointTests(TestCase):
                              "is_pve_player": False,
                              "is_ranked_player": False,
                              "highest_ranked_league": None,
+                             "ranked_hydration_pending": False,
+                             "ranked_updated_at": None,
                              "activity_bucket": "active_7d",
                          }])
+        self.assertEqual(response["X-Ranked-Hydration-Queued"], "0")
+        self.assertEqual(response["X-Ranked-Hydration-Deferred"], "0")
+        self.assertEqual(response["X-Ranked-Hydration-Pending"], "0")
+        self.assertEqual(response["X-Ranked-Hydration-Max-In-Flight"], "8")
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
+
+    def test_clan_members_exposes_ranked_hydration_metadata(self):
+        self.mock_queue_clan_ranked_hydration.return_value = {
+            "pending_player_ids": {7901},
+            "queued_player_ids": {7901},
+            "deferred_player_ids": set(),
+            "eligible_player_ids": {7901, 7902},
+            "max_in_flight": 8,
+        }
+        ranked_updated_at = timezone.now() - timedelta(hours=3)
+        clan = Clan.objects.create(
+            clan_id=791,
+            name="Ranked Hydration Clan",
+            members_count=2,
+        )
+        Player.objects.create(
+            name="PendingRankedHydration",
+            player_id=7901,
+            clan=clan,
+            ranked_updated_at=None,
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="FreshRankedHydration",
+            player_id=7902,
+            clan=clan,
+            ranked_updated_at=ranked_updated_at,
+            last_battle_date=timezone.now().date(),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/791/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = {row["name"]: row for row in response.json()}
+        self.assertTrue(payload["PendingRankedHydration"]
+                        ["ranked_hydration_pending"])
+        self.assertIsNone(
+            payload["PendingRankedHydration"]["ranked_updated_at"])
+        self.assertFalse(payload["FreshRankedHydration"]
+                         ["ranked_hydration_pending"])
+        self.assertEqual(response["X-Ranked-Hydration-Queued"], "1")
+        self.assertEqual(response["X-Ranked-Hydration-Deferred"], "0")
+        self.assertEqual(response["X-Ranked-Hydration-Pending"], "1")
+        self.assertEqual(response["X-Ranked-Hydration-Max-In-Flight"], "8")
+        self.assertEqual(
+            payload["FreshRankedHydration"]["ranked_updated_at"],
+            ranked_updated_at.isoformat().replace(
+                "+00:00", "Z") if ranked_updated_at.tzinfo else ranked_updated_at.isoformat(),
+        )
+
+    def test_clan_members_exposes_deferred_ranked_hydration_count_in_headers(self):
+        self.mock_queue_clan_ranked_hydration.return_value = {
+            "pending_player_ids": {7921, 7922},
+            "queued_player_ids": {7921},
+            "deferred_player_ids": {7922},
+            "eligible_player_ids": {7921, 7922},
+            "max_in_flight": 1,
+        }
+        clan = Clan.objects.create(
+            clan_id=792,
+            name="Deferred Ranked Hydration Clan",
+            members_count=2,
+        )
+        Player.objects.create(
+            name="QueuedMember",
+            player_id=7921,
+            clan=clan,
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="DeferredMember",
+            player_id=7922,
+            clan=clan,
+            last_battle_date=timezone.now().date(),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/792/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Ranked-Hydration-Queued"], "1")
+        self.assertEqual(response["X-Ranked-Hydration-Deferred"], "1")
+        self.assertEqual(response["X-Ranked-Hydration-Pending"], "2")
+        self.assertEqual(response["X-Ranked-Hydration-Max-In-Flight"], "1")
 
     def test_clan_members_marks_leader_by_name_when_leader_id_missing(self):
         clan = Clan.objects.create(
@@ -750,7 +967,11 @@ class ApiContractTests(TestCase):
         def shift_month_start(month_start, month_delta):
             absolute_month = (month_start.year * 12) + \
                 month_start.month - 1 + month_delta
-            return timezone.make_aware(datetime(absolute_month // 12, (absolute_month % 12) + 1, 15))
+            shifted = datetime(absolute_month // 12,
+                               (absolute_month % 12) + 1, 15)
+            if settings.USE_TZ:
+                return timezone.make_aware(shifted)
+            return shifted
 
         now = timezone.now()
         current_month_start = now.date().replace(day=1)
@@ -858,8 +1079,14 @@ class ApiContractTests(TestCase):
             name="CurrentMonthExcluded",
             player_id=4993,
             is_hidden=False,
-            creation_date=timezone.make_aware(
-                datetime(current_month_start.year, current_month_start.month, 15)),
+            creation_date=(
+                timezone.make_aware(
+                    datetime(current_month_start.year,
+                             current_month_start.month, 15)
+                )
+                if settings.USE_TZ
+                else datetime(current_month_start.year, current_month_start.month, 15)
+            ),
             days_since_last_battle=5,
             last_battle_date=now.date() - timedelta(days=5),
         )
@@ -1417,11 +1644,11 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["player_point"]["y"], 56.67)
         self.assertTrue(any(tile["count"] > 0 for tile in payload["tiles"]))
         self.assertTrue(any(
-            tile["x_min"] == 50.0 and tile["x_max"] == 71.0 and tile["count"] == 1
+            tile["x_min"] == 59.0 and tile["x_max"] == 71.0 and tile["y_min"] == 56.0 and tile["y_max"] == 56.75 and tile["count"] == 1
             for tile in payload["tiles"]
         ))
         self.assertTrue(any(
-            tile["x_min"] == 100.0 and tile["x_max"] == 141.0 and tile["count"] == 1
+            tile["x_min"] == 119.0 and tile["x_max"] == 141.0 and tile["y_min"] == 59.75 and tile["y_max"] == 60.5 and tile["count"] == 1
             for tile in payload["tiles"]
         ))
         self.assertTrue(any(point["count"] > 0 for point in payload["trend"]))
@@ -1701,6 +1928,28 @@ class ApiThrottleTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
+
+    @patch("warships.views.get_agentic_trace_dashboard")
+    def test_agentic_trace_dashboard_endpoint_returns_summary(self, mock_get_agentic_trace_dashboard):
+        cache.delete('agentic:trace_dashboard:v2')
+        mock_get_agentic_trace_dashboard.return_value = {
+            "project_name": "trace-lab",
+            "tracing_enabled": True,
+            "api_key_configured": True,
+            "api_host": None,
+            "recent_runs": [{"workflow_id": "run-1", "status": "completed"}],
+            "diagnostics": {"total_runs": 1},
+            "learning": {"recurring_issues": [], "chart_tuning_notes": [{"slug": "ranked_wr_battles_heatmap"}]},
+        }
+
+        response = self.client.get("/api/agentic/traces/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["project_name"], "trace-lab")
+        self.assertEqual(response.json()["diagnostics"]["total_runs"], 1)
+        self.assertEqual(response.json()[
+                         "learning"]["chart_tuning_notes"][0]["slug"], "ranked_wr_battles_heatmap")
+        mock_get_agentic_trace_dashboard.assert_called_once_with(limit=12)
 
     def test_activity_data_returns_activity_rows(self):
         now = timezone.now()

@@ -1,0 +1,99 @@
+id: wows.encyclopedia.info
+provider: Wargaming
+service: World of Warships Public API
+endpoint: /wows/encyclopedia/info/
+purpose: Return global encyclopedia dictionaries and metadata for ship types, nations, languages, modifications, icons, and current game version.
+docs_url: https://developers.wargaming.net/reference/all/wows/encyclopedia/info/
+
+hosts:
+  default: https://api.worldofwarships.com
+  realms:
+    eu: https://api.worldofwarships.eu
+    na: https://api.worldofwarships.com
+    asia: https://api.worldofwarships.asia
+
+request:
+  method: GET
+  query_params:
+    application_id:
+      required: true
+      type: string
+      description: Wargaming application ID.
+    language:
+      required: false
+      type: string
+      description: Localization language.
+    fields:
+      required: false
+      type: string
+      description: Comma-separated response field selection.
+
+response:
+  envelope:
+    status: string
+    meta:
+      count: integer
+    data:
+      type: object
+  expected_data_shape:
+    ships_updated_at: timestamp
+    ship_types:
+      keyed_object: true
+      values: localized_string
+    languages:
+      keyed_object: true
+      values: localized_string
+    ship_modifications:
+      keyed_object: true
+      values: localized_string
+    ship_modules:
+      keyed_object: true
+      values: localized_string
+    ship_type_images:
+      keyed_object: true
+      values:
+        image: url
+        image_premium: url
+        image_elite: url
+    ship_nations:
+      keyed_object: true
+      values: localized_string
+    game_version: string
+
+observed_behavior:
+  last_verified: 2026-03-15
+  docs_notes:
+    - This endpoint behaves like a lightweight encyclopedia metadata dictionary rather than a catalog listing.
+  live_notes:
+    - Verified live response returned `meta.count = 8` and populated the expected dictionary fields.
+    - `ships_updated_at` appears to be a coarse ship-catalog freshness marker.
+    - `ship_type_images` exposes standard, premium, and elite icon URLs by ship class.
+    - Current smoke coverage uses this endpoint as the low-cost reachability check for WG API availability.
+
+trust:
+  rating: high
+  suitable_for:
+    - lightweight upstream reachability checks
+    - game-version display
+    - language list discovery
+    - nation and ship-type label dictionaries
+    - ship-type icon lookups
+    - ship-catalog freshness hints
+  not_suitable_for:
+    - per-ship detailed metadata
+    - module stat lookup
+  recommendation: Treat as the global encyclopedia reference dictionary for the repo, with heavier ship detail delegated to `encyclopedia/ships`.
+
+repo_usage:
+  current_state:
+    - Used by the WG API smoke script as the reachability endpoint.
+    - Not yet used directly by frontend or backend product payloads.
+  code_refs:
+    - server/scripts/smoke_test_wg_api.py
+
+evidence_refs:
+  knowledge_notes:
+    - agents/knowledge/wows-encyclopedia-surface.md
+    - agents/knowledge/wows-api-contract-strategy.md
+  reproduced_with:
+    - curl against https://api.worldofwarships.com/wows/encyclopedia/info/

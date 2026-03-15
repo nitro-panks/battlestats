@@ -3,6 +3,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCrown, faRobot, faStar } from '@fortawesome/free-solid-svg-icons';
 import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
+import PlayerEfficiencyBadges from './PlayerEfficiencyBadges';
+import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getHighestRankedLeagueName, getRankedLeagueTooltip, getRankedLeagueColor, type RankedLeagueName } from './rankedLeague';
 
@@ -35,6 +37,26 @@ interface PlayerDetailProps {
         is_clan_leader?: boolean;
         highest_ranked_league?: RankedLeagueName | null;
         verdict: string | null;
+        randoms_json?: Array<{
+            ship_name?: string | null;
+            ship_chart_name?: string | null;
+            ship_type?: string | null;
+            ship_tier?: number | null;
+            pvp_battles?: number | null;
+            wins?: number | null;
+            win_ratio?: number | null;
+        }> | null;
+        efficiency_json?: Array<{
+            ship_id?: number | null;
+            top_grade_class?: number | null;
+            top_grade_label?: string | null;
+            badge_label?: string | null;
+            ship_name?: string | null;
+            ship_chart_name?: string | null;
+            ship_type?: string | null;
+            ship_tier?: number | null;
+            nation?: string | null;
+        }> | null;
         ranked_json?: Array<{
             total_battles?: number | null;
             total_wins?: number | null;
@@ -130,19 +152,19 @@ const formatKillRatio = (killRatio: number | null): string => {
 const PLAYSTYLE_HELPER_TEXT: Record<string, string> = {
     Sealord: 'Owns the map, dictates the pace, dominates, turns tables and wins.',
     Assassin: 'Wins relentlessly, wastes little, and closes games with intent.',
-    Kraken: 'Wins violently, cashes in every opening, and stacks kills before the enemy can recover.',
+    Kraken: 'Wins violently,and stacks kills before disappearing into the depths.',
     Stalwart: 'Steady under pressure, useful in every phase, and good for more than raw damage.',
     Daredevil: 'Pushes recklessly, burns brightly, and still finds ways to win.',
     Warrior: 'Performs well, stays alive, and keeps steady pressure on the fight.',
     Raider: 'Strikes where the line is thin, trades fast, and lives off opportunism more than control.',
     Flotsam: 'Stays afloat, contributes enough, and remains useful in most fights.',
-    Jetsam: 'Gets chewed up early, loses impact fast, and rarely turns the match.',
-    Survivor: 'Stays alive, avoids disaster, but mostly delays the loss.',
+    Jetsam: 'Gets chewed up early, loses impact fast, and rarely shapes the outcome.',
+    Survivor: 'Stays alive, avoids disaster, sometimes the deciding factor.',
     Drifter: 'Floats through the match, avoids some danger, but rarely shapes the outcome.',
-    Pirate: 'Hangs around longer than expected, steals value where it can, and survives on nuisance more than strength.',
+    Pirate: 'Hangs around longer than expected, steals value, and survives on nuisance more than strength.',
     Potato: 'Sinks early, lands little, and leaves the team short-handed.',
-    'Hot Potato': 'Stays alive longer than it should, sheds pressure onto everyone else, and leaves the real work unfinished.',
-    'Leroy Jenkins': 'Charges in blind, detonates early, and turns bad fights into worse ones for the whole team.',
+    'Hot Potato': 'Stays alive longer than they should, given the circumstances.',
+    'Leroy Jenkins': 'Charges in blind, detonates early, and flames the whole team in chat for the rest of the game.',
     Recruit: 'Has too few battles to read; the story is just beginning.',
 };
 
@@ -343,8 +365,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 placeholder={<LoadingPanel label="Preparing win rate and survival chart..." minHeight={268} />}
                             >
                                 <div>
-                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Win Rate vs Survival</h3>
-                                    <p className="mb-2 text-xs text-[#6baed6]">Design 2 uses a true bivariate view: darker tiles mean more players, the dark ridge shows the population trend, and the marker shows whether this player survives more or less often than peers with a similar win rate. The prior overlay view is preserved in code as design 1.</p>
+                                    <SectionHeadingWithTooltip
+                                        title="Win Rate vs Survival"
+                                        description="This scatter plot shows how this player's win rate and survival rate compare to the broader tracked player base. Each dot represents a player, positioned by PvP win rate on the x-axis and PvP survival rate on the y-axis. Darker areas indicate denser player clusters, and the outlined marker shows where this player sits in that field."
+                                        className="mb-2"
+                                    />
                                     <WRDistributionSVG playerWR={player.pvp_ratio} playerSurvivalRate={player.pvp_survival_rate} />
                                 </div>
                             </DeferredSection>
@@ -356,22 +381,37 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     placeholder={<LoadingPanel label="Preparing battles distribution..." minHeight={204} />}
                                 >
                                     <div>
-                                        <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Battles Played Distribution</h3>
-                                        <p className="mb-2 text-xs text-[#6baed6]">Shows where this player&apos;s PvP battle count falls across the tracked player base.</p>
+                                        <SectionHeadingWithTooltip
+                                            title="Battles Played Distribution"
+                                            description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
+                                            className="mb-2"
+                                        />
                                         <BattlesDistributionSVG playerBattles={player.pvp_battles} />
                                     </div>
                                 </DeferredSection>
                             ) : null}
 
                             <div className="mt-4">
-                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Top Ships (Random Battles)</h3>
-                                <p className="mb-2 text-xs text-[#6baed6]">Returns to the wins-versus-battles bar design, but with cleaner axis treatment, inline summary text, and styling aligned with the other player-page charts.</p>
+                                <SectionHeadingWithTooltip
+                                    title="Top Ships (Random Battles)"
+                                    description="This chart highlights the player's most-played random-battle ships, pairing battle volume with wins so you can see which ships dominate their recent visible mix."
+                                    className="mb-2"
+                                />
                                 <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
+                            </div>
+                            <div className="mt-4">
+                                <PlayerEfficiencyBadges
+                                    efficiencyRows={player.efficiency_json}
+                                    randomsRows={player.randoms_json}
+                                />
                             </div>
                             {showRankedHeatmap ? (
                                 <div className="mt-4">
-                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Games vs Win Rate</h3>
-                                    <p className="mb-3 text-xs text-[#6baed6]">Each tile shows how many ranked players fall into a total-games and win-rate pocket. The outlined marker places this captain against that field.</p>
+                                    <SectionHeadingWithTooltip
+                                        title="Ranked Games vs Win Rate"
+                                        description="Each tile represents a pocket of ranked players grouped by total ranked games and overall ranked win rate. The outlined marker shows where this player lands inside that broader field."
+                                        className="mb-3"
+                                    />
                                     <RankedWRBattlesHeatmapSVG
                                         playerId={player.player_id}
                                         isLoading={isLoading}
@@ -380,8 +420,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 </div>
                             ) : null}
                             <div className="mt-4">
-                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Seasons</h3>
-                                <p className="mb-3 text-xs text-[#6baed6]">Historical ranked season performance, including league finish.</p>
+                                <SectionHeadingWithTooltip
+                                    title="Ranked Seasons"
+                                    description="This table summarizes the player's historical ranked-season results, including total battles, win rate, and the best league finish reached in each season."
+                                    className="mb-3"
+                                />
                                 <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
                             </div>
                             <DeferredSection
@@ -390,8 +433,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 placeholder={<LoadingPanel label="Preparing tier chart..." minHeight={360} />}
                             >
                                 <div>
-                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Tier</h3>
-                                    <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate grouped by ship tier.</p>
+                                    <SectionHeadingWithTooltip
+                                        title="Performance by Tier"
+                                        description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
+                                        className="mb-2"
+                                    />
                                     <TierSVG playerId={player.player_id} />
                                 </div>
                             </DeferredSection>
@@ -401,8 +447,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 placeholder={<LoadingPanel label="Preparing ship type chart..." minHeight={236} />}
                             >
                                 <div>
-                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Ship Type</h3>
-                                    <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate across classes.</p>
+                                    <SectionHeadingWithTooltip
+                                        title="Performance by Ship Type"
+                                        description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
+                                        className="mb-2"
+                                    />
                                     <TypeSVG playerId={player.player_id} />
                                 </div>
                             </DeferredSection>
@@ -412,8 +461,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 placeholder={<LoadingPanel label="Preparing tier vs type heatmap..." minHeight={332} />}
                             >
                                 <div>
-                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Tier vs Type Profile</h3>
-                                    <p className="mb-2 text-xs text-[#6baed6]">Darker tiles show where the tracked player base clusters by tier and ship type. The player circles show where this captain spends most of their battles, so you can compare their ship mix with the broader population trend.</p>
+                                    <SectionHeadingWithTooltip
+                                        title="Tier vs Type Profile"
+                                        description="This heatmap shows where the tracked player base clusters by ship tier and type. The player markers show where this captain spends most of their battles, so you can compare their ship mix with the broader population trend."
+                                        className="mb-2"
+                                    />
                                     <TierTypeHeatmapSVG playerId={player.player_id} />
                                 </div>
                             </DeferredSection>

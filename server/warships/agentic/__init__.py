@@ -6,6 +6,7 @@ from .crewai_runner import build_crewai_crew, build_crewai_plan, run_crewai_work
 from .router import route_agent_workflow, run_routed_workflow
 from .policy import resolve_crewai_policy
 from .personas import get_persona_sequence, get_persona_specs, persona_keys
+from .tracing import get_langsmith_project_name, is_langsmith_tracing_enabled
 
 __all__ = [
     "AgentState",
@@ -22,4 +23,6 @@ __all__ = [
     "get_persona_sequence",
     "get_persona_specs",
     "persona_keys",
+    "get_langsmith_project_name",
+    "is_langsmith_tracing_enabled",
 ]

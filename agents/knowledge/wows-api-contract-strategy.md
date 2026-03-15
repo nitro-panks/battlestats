@@ -129,6 +129,7 @@ The strategy is now partially implemented in repo artifacts instead of only bein
 
 - ODCS contracts now exist for `player_daily_snapshots`, `player_summary`, and `player_explorer_rows`.
 - Upstream endpoint profiles now exist for `account/info`, `account/list`, `account/statsbydate`, and `clans/accountinfo`.
+- Encyclopedia endpoint coverage now includes verified upstream profiles for `encyclopedia/info`, `encyclopedia/ships`, and `encyclopedia/modules`, plus a player-scoped ship-surface profile for `ships/badges` and narrative notes for the broader encyclopedia/ship namespace.
 - The backend test suite includes contract-alignment checks for upstream endpoint field usage and serializer-backed payload behavior for player summary, explorer, clan membership, and ranked-history surfaces.
 - Recent development expanded stable internal semantics around ranked-history retention and roster markers, which reinforces the need to keep derived contracts tied to current serializer/API output rather than upstream schemas alone.
 
@@ -154,5 +155,6 @@ These are the places where the repo most needs consistent semantics across backe
 
 - Keep the ODCS contracts in sync with serializer fields when player-summary or explorer payloads change.
 - Add upstream YAML profiles for additional relied-on endpoints such as ranked and clan-battle endpoints as their product importance increases.
+- Add upstream YAML profiles for `encyclopedia/ships` and `encyclopedia/modules` if ship-reference or build-comparison features start depending on them directly.
 - Validate derived payloads in tests against contract expectations so contract drift fails in CI rather than in documentation review.
 - Add knowledge notes when live endpoint behavior changes or when repo logic adopts a new upstream fallback strategy.

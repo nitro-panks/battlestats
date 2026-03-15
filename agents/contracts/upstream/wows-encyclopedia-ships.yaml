@@ -1,0 +1,138 @@
+id: wows.encyclopedia.ships
+provider: Wargaming
+service: World of Warships Public API
+endpoint: /wows/encyclopedia/ships/
+purpose: Return detailed ship encyclopedia rows including catalog metadata, art, module trees, default profile stats, upgrade slots, and progression links.
+docs_url: https://developers.wargaming.net/reference/all/wows/encyclopedia/ships/
+
+hosts:
+  default: https://api.worldofwarships.com
+  realms:
+    eu: https://api.worldofwarships.eu
+    na: https://api.worldofwarships.com
+    asia: https://api.worldofwarships.asia
+
+request:
+  method: GET
+  query_params:
+    application_id:
+      required: true
+      type: string
+      description: Wargaming application ID.
+    ship_id:
+      required: false
+      type: integer_or_csv_of_integers
+      description: One or more ship IDs when targeting specific ships.
+    nation:
+      required: false
+      type: string
+      description: Nation filter.
+    type:
+      required: false
+      type: string
+      description: Ship type filter.
+    tier:
+      required: false
+      type: integer
+      description: Ship tier filter.
+    limit:
+      required: false
+      type: integer
+      description: Page size for catalog traversal.
+    page_no:
+      required: false
+      type: integer
+      description: 1-based page number for pagination.
+    language:
+      required: false
+      type: string
+      description: Localization language.
+    fields:
+      required: false
+      type: string
+      description: Comma-separated response field selection.
+
+response:
+  envelope:
+    status: string
+    meta:
+      count: integer
+      page_total: integer
+      total: integer
+      limit: integer
+      page: integer
+    data:
+      ship_id_keyed_object: true
+  expected_data_shape:
+    base_fields:
+      ship_id: integer
+      ship_id_str: string
+      name: string
+      description: string_or_null
+      nation: string
+      tier: integer
+      type: string
+      is_premium: boolean
+      is_special: boolean
+      mod_slots: integer
+    images:
+      small: url
+      medium: url
+      large: url
+      contour: url
+    modules:
+      typed_module_id_lists: true
+    modules_tree:
+      module_id_keyed_object: true
+      values:
+        module_id: integer
+        module_id_str: string
+        name: string
+        type: string
+        is_default: boolean
+        price_xp: integer
+        price_credit: integer
+        next_modules: array_or_null
+        next_ships: object_or_null
+    default_profile:
+      dynamic_nested_profile: true
+    upgrades:
+      type: array_of_integers
+    next_ships:
+      type: object
+
+observed_behavior:
+  last_verified: 2026-03-15
+  docs_notes:
+    - This endpoint is the detailed ship encyclopedia catalog, not just a lightweight name/tier listing.
+  live_notes:
+    - Verified paginated response returned `meta.page_total`, `meta.total`, and `data` keyed by `ship_id`.
+    - Live sampled rows included rich sections such as `images`, `modules_tree`, `default_profile`, `upgrades`, and `next_ships`.
+    - The repo already relies on a narrow field subset of this endpoint for ship metadata hydration and ship catalog sync.
+
+trust:
+  rating: high
+  suitable_for:
+    - ship metadata hydration
+    - ship catalog sync
+    - ship art and description lookups
+    - module-tree and stock-profile reference
+    - patch-aware ship reference features
+  not_suitable_for:
+    - lightweight availability smoke checks when a cheaper endpoint is sufficient
+  recommendation: Treat as the authoritative encyclopedia source for ship-level metadata and capability reference, with narrow field selection when only catalog basics are needed.
+
+repo_usage:
+  current_state:
+    - Used by `_fetch_ship_info()` for per-ship metadata refresh.
+    - Used by `sync_ship_catalog()` for paginated ship catalog sync.
+  code_refs:
+    - server/warships/api/ships.py
+    - server/warships/management/commands/sync_ship_catalog.py
+
+evidence_refs:
+  knowledge_notes:
+    - agents/knowledge/wows-encyclopedia-surface.md
+    - agents/knowledge/wows-api-contract-strategy.md
+  reproduced_with:
+    - curl against https://api.worldofwarships.com/wows/encyclopedia/ships/

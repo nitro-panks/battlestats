@@ -67,6 +67,9 @@ class Command(BaseCommand):
         for line in result.get("summary", []):
             self.stdout.write(f"- {line}")
 
+        if result.get("langsmith_trace_url"):
+            self.stdout.write(f"Trace: {result['langsmith_trace_url']}")
+
         if result.get("issues"):
             self.stdout.write("Issues:")
             for issue in result.get("issues", []):

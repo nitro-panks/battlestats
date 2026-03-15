@@ -28,6 +28,16 @@ python manage.py run_agent_graph "add API caching around player detail fetch" --
 
 the current graph is a guarded workflow with planning, implementation notes, tool-boundary checks, verification gates, retry routing, and run summary.
 
+optional LangSmith tracing is also supported for the agent workflows. if you want trace URLs in workflow output and on the in-app trace dashboard, set:
+
+```bash
+export LANGSMITH_TRACING_V2=true
+export LANGSMITH_API_KEY=your_langsmith_api_key
+export BATTLESTATS_LANGSMITH_PROJECT=battlestats-agentic
+```
+
+when enabled, routed, LangGraph, and CrewAI workflow runs can include `langsmith_trace_url` in their JSON and CLI output.
+
 ## agentic bootstrap (crewai)
 
 the repo now also includes a CrewAI adapter that turns the existing role markdown files under `agents/` into a runnable crew plan.
@@ -59,6 +69,8 @@ for automatic engine selection across LangGraph, CrewAI, and hybrid execution:
 ```bash
 python scripts/run_agent_workflow.py "plan and implement CrewAI integration" --engine auto --json
 ```
+
+the app now also includes a local trace dashboard at `/trace`. it is backed by `GET /api/agentic/traces/`, summarizes LangSmith configuration plus recent local workflow logs under `server/logs/agentic/`, and links to LangSmith only when a stored run already includes a trace URL. see `agents/runbooks/runbook-langsmith-trace-dashboard.md` for validation and operating notes.
 
 when Postgres settings are available, the graph now uses durable Postgres checkpoints instead of in-memory-only state. you can pin a run to a durable thread with `--workflow-id`:
 
@@ -193,6 +205,16 @@ python scripts/incremental_ranked_data.py --limit 100 --status-only
 the scheduled daily incremental task is created via `django-celery-beat` as `daily-ranked-incrementals`, defaulting to `10:30 UTC`, which is intentionally offset from the default `03:00 UTC` clan crawl. it also skips execution if the clan crawl lock is active.
 
 the docker workflow now tunes the daily ranked incremental defaults to stay conservative on upstream request volume: `RANKED_INCREMENTAL_LIMIT=150`, `RANKED_INCREMENTAL_SKIP_FRESH_HOURS=24`, `RANKED_INCREMENTAL_KNOWN_LIMIT=300`, and `RANKED_INCREMENTAL_DISCOVERY_LIMIT=75`. the queue now interleaves discovery candidates among known-ranked refreshes, so `known-limit` and `discovery-limit` control the approximate mix within a run instead of discovery always waiting behind the full known backlog. adjust those environment variables on the `server` and `task-runner` services if you want a faster or broader sweep.
+
+clan roster reads now also support bounded ranked hydration. `/api/fetch/clan_members/<clan_id>/` can queue ranked refresh work for stale or missing ranked rows and returns additive metadata plus lightweight response headers describing queued, deferred, pending, and max-in-flight counts. the shared `ClanMembers.tsx` client polls the same endpoint briefly so ranked stars can appear after initial paint without per-member browser fetches. see `agents/runbooks/runbook-clan-ranked-hydration.md` for the full flow.
+
+if you need to repair already-cached impossible ranked rows from early seasons, use the resumable repair command from `server/`:
+
+```bash
+python manage.py repair_ranked_overcount --state-file logs/repair_ranked_overcount_state.json
+```
+
+use `--audit-only` first if you want to scan for affected players without rewriting caches. the command resumes from its JSON checkpoint and retries failed player ids on the next run. background and validation details are captured in `agents/work-items/thehindmost-ranked-season-overcount-report.md`.
 
 Charts:
 

@@ -10,6 +10,7 @@ from crewai import Agent, Crew, Process, Task
 from .personas import PersonaSpec, get_persona_sequence, persona_keys, read_persona_markdown
 from .policy import resolve_crewai_policy
 from .runlog import write_agent_run_log
+from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
 
 
 DEFAULT_CREW_PROCESS = "hierarchical"
@@ -139,6 +140,38 @@ def build_crewai_crew(
     )
 
 
+def _crewai_trace_inputs(
+    task: str,
+    context: dict[str, Any] | None,
+    process: str | None,
+    roles: list[str] | None,
+    llm: str | None,
+    workflow_id: str | None,
+    dry_run: bool,
+) -> dict[str, Any]:
+    resolved_context = context or {}
+    return {
+        "task": task,
+        "workflow_id": workflow_id,
+        "process": process or DEFAULT_CREW_PROCESS,
+        "roles": roles or [],
+        "llm": llm,
+        "dry_run": dry_run,
+        "context_keys": sorted(resolved_context.keys()),
+    }
+
+
+def _crewai_trace_outputs(result: dict[str, Any]) -> dict[str, Any]:
+    crew_plan = result.get("crew_plan") or {}
+    return {
+        "workflow_id": result.get("workflow_id"),
+        "status": result.get("status"),
+        "summary": result.get("summary", []),
+        "process": crew_plan.get("process"),
+        "role_count": len(crew_plan.get("roles", [])),
+    }
+
+
 def run_crewai_workflow(
     task: str,
     context: dict[str, Any] | None = None,
@@ -149,57 +182,82 @@ def run_crewai_workflow(
     verbose: bool = False,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    plan = build_crewai_plan(
-        task,
-        context=context,
-        process=process,
-        roles=roles,
-        llm=llm,
-        workflow_id=workflow_id,
-    )
-    resolved_llm = plan.get("llm")
-    if dry_run or not resolved_llm:
-        summary = [
-            f"Prepared CrewAI workflow with {len(plan['roles'])} persona(s).",
-            f"Process mode: {plan['process']}",
-        ]
-        if not resolved_llm:
-            summary.append(
-                "No CrewAI LLM configured; returning the orchestration plan without kickoff.")
-        return {
-            "workflow_id": plan["workflow_id"],
-            "status": "planned",
-            "summary": summary,
-            "crew_plan": plan,
-            "available_roles": persona_keys(),
-            "started_at": datetime.utcnow().isoformat() + "Z",
-            "run_log_path": write_agent_run_log("crewai", {
+    with trace_block(
+        "CrewAI Persona Workflow",
+        inputs=_crewai_trace_inputs(
+            task,
+            context,
+            process,
+            roles,
+            llm,
+            workflow_id,
+            dry_run,
+        ),
+        metadata={"component": "agentic", "engine": "crewai"},
+        tags=["agentic", "crewai"],
+    ) as trace_run:
+        plan = build_crewai_plan(
+            task,
+            context=context,
+            process=process,
+            roles=roles,
+            llm=llm,
+            workflow_id=workflow_id,
+        )
+        resolved_llm = plan.get("llm")
+        if dry_run or not resolved_llm:
+            summary = [
+                f"Prepared CrewAI workflow with {len(plan['roles'])} persona(s).",
+                f"Process mode: {plan['process']}",
+            ]
+            if not resolved_llm:
+                summary.append(
+                    "No CrewAI LLM configured; returning the orchestration plan without kickoff.")
+            result = {
                 "workflow_id": plan["workflow_id"],
                 "status": "planned",
-                "crew_plan": plan,
                 "summary": summary,
-            }),
-        }
+                "crew_plan": plan,
+                "available_roles": persona_keys(),
+                "started_at": datetime.utcnow().isoformat() + "Z",
+                "run_log_path": write_agent_run_log("crewai", {
+                    "workflow_id": plan["workflow_id"],
+                    "status": "planned",
+                    "crew_plan": plan,
+                    "summary": summary,
+                }),
+            }
+        else:
+            crew = build_crewai_crew(
+                task,
+                context=context,
+                process=process,
+                roles=roles,
+                llm=resolved_llm,
+                verbose=verbose,
+            )
+            output = crew.kickoff(
+                inputs={"task": task, "context": context or {}})
+            result = {
+                "workflow_id": plan["workflow_id"],
+                "status": "completed",
+                "summary": [
+                    f"CrewAI workflow completed with process={plan['process']}.",
+                    f"Participating personas: {', '.join(role['label'] for role in plan['roles'])}",
+                ],
+                "crew_plan": plan,
+                "output": str(output),
+                "started_at": datetime.utcnow().isoformat() + "Z",
+            }
+            result["run_log_path"] = write_agent_run_log("crewai", result)
 
-    crew = build_crewai_crew(
-        task,
-        context=context,
-        process=process,
-        roles=roles,
-        llm=resolved_llm,
-        verbose=verbose,
-    )
-    output = crew.kickoff(inputs={"task": task, "context": context or {}})
-    result = {
-        "workflow_id": plan["workflow_id"],
-        "status": "completed",
-        "summary": [
-            f"CrewAI workflow completed with process={plan['process']}.",
-            f"Participating personas: {', '.join(role['label'] for role in plan['roles'])}",
-        ],
-        "crew_plan": plan,
-        "output": str(output),
-        "started_at": datetime.utcnow().isoformat() + "Z",
-    }
-    result["run_log_path"] = write_agent_run_log("crewai", result)
-    return result
+        trace_url = get_current_trace_url()
+        if trace_url:
+            result["langsmith_trace_url"] = trace_url
+            result["langsmith_project"] = get_langsmith_project_name()
+
+        if trace_run is not None:
+            trace_run.metadata["workflow_id"] = plan["workflow_id"]
+            trace_run.end(outputs=_crewai_trace_outputs(result))
+
+        return result

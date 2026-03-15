@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import save_player
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data
-from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_ranked_hydration
+from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 
 
 class SnapshotDataTests(TestCase):
@@ -338,6 +338,45 @@ class RankedDataRefreshTests(TestCase):
         self.assertEqual([row["season_id"]
                          for row in result], list(range(1001, 1013)))
 
+    def test_aggregate_ranked_seasons_ignores_impossible_zero_battle_victories(self):
+        result = _aggregate_ranked_seasons(
+            {
+                "1002": {
+                    "1": {
+                        "3": {"battles": 0, "victories": 33, "rank": 1, "best_rank_in_sprint": 1},
+                    },
+                    "2": {
+                        "2": {"battles": 0, "victories": 35, "rank": 1, "best_rank_in_sprint": 1},
+                    },
+                    "3": {
+                        "1": {"battles": 0, "victories": 45, "rank": 4, "best_rank_in_sprint": 4},
+                    },
+                    "4": {
+                        "1": {"battles": 22, "victories": 12, "rank": 4, "best_rank_in_sprint": 4},
+                    },
+                    "5": {
+                        "1": {"battles": 0, "victories": 29, "rank": 6, "best_rank_in_sprint": 6},
+                    },
+                },
+            },
+            {
+                1002: {"name": "The Second Season", "label": "S2", "start_date": "2021-02-17", "end_date": "2021-05-14"},
+            },
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["season_id"], 1002)
+        self.assertEqual(result[0]["highest_league"], 1)
+        self.assertEqual(result[0]["total_battles"], 22)
+        self.assertEqual(result[0]["total_wins"], 12)
+        self.assertAlmostEqual(result[0]["win_rate"], 0.5455)
+        self.assertEqual(result[0]["best_sprint"]["sprint_number"], 4)
+        self.assertEqual(result[0]["best_sprint"]["wins"], 12)
+        self.assertEqual(
+            [sprint["wins"] for sprint in result[0]["sprints"]],
+            [0, 0, 0, 12, 0],
+        )
+
     @patch("warships.data.update_ranked_data")
     def test_fetch_ranked_data_uses_fresh_cache_even_without_top_ship_enrichment(self, mock_update_ranked_data):
         now = timezone.now()
@@ -405,6 +444,118 @@ class RankedDataRefreshTests(TestCase):
 
         self.assertEqual(player.ranked_json[0]["top_ship_name"], "Stalingrad")
 
+    def test_clan_ranked_hydration_needs_refresh_for_missing_timestamp(self):
+        player = Player.objects.create(
+            name="MissingRankedTimestamp", player_id=7101)
+
+        self.assertTrue(clan_ranked_hydration_needs_refresh(player))
+
+    def test_clan_ranked_hydration_needs_refresh_respects_24_hour_budget(self):
+        fresh_player = Player.objects.create(
+            name="FreshRankedHydration",
+            player_id=7102,
+            ranked_json=[],
+            ranked_updated_at=timezone.now() - timedelta(hours=6),
+        )
+        stale_player = Player.objects.create(
+            name="StaleRankedHydration",
+            player_id=7103,
+            ranked_json=[],
+            ranked_updated_at=timezone.now() - timedelta(days=2),
+        )
+
+        self.assertFalse(clan_ranked_hydration_needs_refresh(fresh_player))
+        self.assertTrue(clan_ranked_hydration_needs_refresh(stale_player))
+
+    @override_settings(USE_TZ=True)
+    def test_clan_ranked_hydration_needs_refresh_handles_aware_timestamps(self):
+        fresh_player = Player.objects.create(
+            name="AwareFreshRankedHydration",
+            player_id=7109,
+            ranked_json=[],
+            ranked_updated_at=timezone.now() - timedelta(hours=3),
+        )
+        stale_player = Player.objects.create(
+            name="AwareStaleRankedHydration",
+            player_id=7110,
+            ranked_json=[],
+            ranked_updated_at=timezone.now() - timedelta(days=2),
+        )
+
+        self.assertFalse(clan_ranked_hydration_needs_refresh(fresh_player))
+        self.assertTrue(clan_ranked_hydration_needs_refresh(stale_player))
+
+    @patch("warships.tasks.queue_ranked_data_refresh")
+    @patch("warships.tasks.is_ranked_data_refresh_pending")
+    def test_queue_clan_ranked_hydration_only_enqueues_missing_or_stale_players(
+        self,
+        mock_is_ranked_data_refresh_pending,
+        mock_queue_ranked_data_refresh,
+    ):
+        fresh_player = Player.objects.create(
+            name="FreshRankedMember",
+            player_id=7104,
+            ranked_json=[],
+            ranked_updated_at=timezone.now() - timedelta(hours=2),
+        )
+        missing_player = Player.objects.create(
+            name="MissingRankedMember",
+            player_id=7105,
+            ranked_json=None,
+            ranked_updated_at=None,
+        )
+        queued_player = Player.objects.create(
+            name="AlreadyQueuedRankedMember",
+            player_id=7106,
+            ranked_json=None,
+            ranked_updated_at=timezone.now() - timedelta(days=2),
+        )
+
+        mock_is_ranked_data_refresh_pending.side_effect = lambda player_id: player_id == queued_player.player_id
+        mock_queue_ranked_data_refresh.return_value = {"status": "queued"}
+
+        hydration_state = queue_clan_ranked_hydration(
+            [fresh_player, missing_player, queued_player]
+        )
+
+        self.assertEqual(hydration_state["pending_player_ids"], {7105, 7106})
+        self.assertEqual(hydration_state["queued_player_ids"], {7105})
+        self.assertEqual(hydration_state["deferred_player_ids"], set())
+        mock_queue_ranked_data_refresh.assert_called_once_with(7105)
+
+    @patch("warships.tasks.queue_ranked_data_refresh")
+    @patch("warships.tasks.is_ranked_data_refresh_pending")
+    @patch("warships.data.CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT", 1)
+    def test_queue_clan_ranked_hydration_defers_when_in_flight_budget_is_full(
+        self,
+        mock_is_ranked_data_refresh_pending,
+        mock_queue_ranked_data_refresh,
+    ):
+        already_pending_player = Player.objects.create(
+            name="AlreadyPendingRankedMember",
+            player_id=7107,
+            ranked_json=None,
+            ranked_updated_at=timezone.now() - timedelta(days=2),
+        )
+        deferred_player = Player.objects.create(
+            name="DeferredRankedMember",
+            player_id=7108,
+            ranked_json=None,
+            ranked_updated_at=timezone.now() - timedelta(days=2),
+        )
+
+        mock_is_ranked_data_refresh_pending.side_effect = lambda player_id: player_id == already_pending_player.player_id
+
+        hydration_state = queue_clan_ranked_hydration(
+            [already_pending_player, deferred_player]
+        )
+
+        self.assertEqual(hydration_state["pending_player_ids"], {7107, 7108})
+        self.assertEqual(hydration_state["queued_player_ids"], set())
+        self.assertEqual(hydration_state["deferred_player_ids"], {7108})
+        self.assertEqual(hydration_state["max_in_flight"], 1)
+        mock_queue_ranked_data_refresh.assert_not_called()
+
 
 class PlayerDataHardeningTests(TestCase):
     def test_compute_player_verdict_uses_new_playstyle_bands(self):
@@ -445,6 +596,7 @@ class PlayerDataHardeningTests(TestCase):
             battles_json=[{"ship_name": "Old Ship"}],
             randoms_json=[{"ship_name": "Old Ship"}],
             ranked_json=[{"season_id": 1}],
+            efficiency_json=[{"ship_id": 1, "top_grade_class": 1}],
         )
         mock_fetch_player_personal_data.return_value = {
             "account_id": 8080,
@@ -461,6 +613,65 @@ class PlayerDataHardeningTests(TestCase):
         self.assertIsNone(player.battles_json)
         self.assertIsNone(player.randoms_json)
         self.assertIsNone(player.ranked_json)
+        self.assertIsNone(player.efficiency_json)
+
+    @patch("warships.data._fetch_efficiency_badges_for_player")
+    @patch("warships.data._fetch_clan_membership_for_player")
+    @patch("warships.data._fetch_player_personal_data")
+    def test_update_player_data_hydrates_efficiency_badges(
+        self,
+        mock_fetch_player_personal_data,
+        mock_fetch_clan_membership,
+        mock_fetch_efficiency_badges,
+    ):
+        Ship.objects.create(
+            ship_id=111,
+            name="Badge Ship",
+            chart_name="Badge Ship",
+            nation="usa",
+            ship_type="Cruiser",
+            tier=8,
+        )
+        player = Player.objects.create(
+            name="BadgeCaptain",
+            player_id=9291,
+            last_fetch=timezone.now() - timedelta(days=2),
+        )
+        mock_fetch_player_personal_data.return_value = {
+            "account_id": 9291,
+            "nickname": "BadgeCaptain",
+            "hidden_profile": False,
+            "statistics": {
+                "battles": 120,
+                "pvp": {
+                    "battles": 100,
+                    "wins": 55,
+                    "losses": 45,
+                    "survived_battles": 30,
+                    "survived_wins": 20,
+                },
+            },
+        }
+        mock_fetch_clan_membership.return_value = {}
+        mock_fetch_efficiency_badges.return_value = [
+            {"ship_id": 111, "top_grade_class": 1},
+        ]
+
+        update_player_data(player, force_refresh=True)
+
+        player.refresh_from_db()
+        self.assertEqual(player.efficiency_json, [{
+            "ship_id": 111,
+            "top_grade_class": 1,
+            "top_grade_label": "Expert",
+            "badge_label": "Expert",
+            "ship_name": "Badge Ship",
+            "ship_chart_name": "Badge Ship",
+            "ship_type": "Cruiser",
+            "ship_tier": 8,
+            "nation": "usa",
+        }])
+        self.assertIsNotNone(player.efficiency_updated_at)
 
     @patch("warships.data._fetch_player_personal_data")
     def test_update_player_data_does_not_overwrite_on_empty_upstream_response(self, mock_fetch_player_personal_data):
@@ -478,12 +689,14 @@ class PlayerDataHardeningTests(TestCase):
         self.assertEqual(player.name, "StableCaptain")
         self.assertEqual(player.total_battles, 77)
 
+    @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
     def test_update_player_data_invalidates_landing_players_cache(
         self,
         mock_fetch_player_personal_data,
         mock_fetch_clan_membership,
+        _mock_fetch_efficiency_badges,
     ):
         player = Player.objects.create(
             name="CachedCaptain",
@@ -503,12 +716,14 @@ class PlayerDataHardeningTests(TestCase):
 
         self.assertIsNone(cache.get("landing:players"))
 
+    @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
     def test_update_player_data_assigns_assassin_playstyle_at_unicum_threshold(
         self,
         mock_fetch_player_personal_data,
         mock_fetch_clan_membership,
+        _mock_fetch_efficiency_badges,
     ):
         player = Player.objects.create(
             name="AssassinCandidate",
@@ -538,12 +753,14 @@ class PlayerDataHardeningTests(TestCase):
         self.assertEqual(player.pvp_ratio, 60.0)
         self.assertEqual(player.verdict, "Assassin")
 
+    @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
     def test_update_player_data_assigns_sealord_playstyle_above_super_unicum_threshold(
         self,
         mock_fetch_player_personal_data,
         mock_fetch_clan_membership,
+        _mock_fetch_efficiency_badges,
     ):
         player = Player.objects.create(
             name="SealordCandidate",
@@ -573,12 +790,14 @@ class PlayerDataHardeningTests(TestCase):
         self.assertEqual(player.pvp_ratio, 65.5)
         self.assertEqual(player.verdict, "Sealord")
 
+    @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
     def test_update_player_data_assigns_warrior_playstyle_for_good_band(
         self,
         mock_fetch_player_personal_data,
         mock_fetch_clan_membership,
+        _mock_fetch_efficiency_badges,
     ):
         player = Player.objects.create(
             name="StalwartCandidate",
@@ -608,12 +827,14 @@ class PlayerDataHardeningTests(TestCase):
         self.assertEqual(player.pvp_ratio, 55.0)
         self.assertEqual(player.verdict, "Warrior")
 
+    @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
     def test_update_player_data_assigns_flotsam_to_average_band_players(
         self,
         mock_fetch_player_personal_data,
         mock_fetch_clan_membership,
+        _mock_fetch_efficiency_badges,
     ):
         player = Player.objects.create(
             name="AverageCandidate",
@@ -706,7 +927,7 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(summary.wins_last_29_days, 4)
         self.assertEqual(summary.active_days_last_29_days, 2)
         self.assertEqual(summary.kill_ratio, 0.0)
-        self.assertEqual(summary.player_score, 3.16)
+        self.assertEqual(summary.player_score, 3.15)
         self.assertEqual(summary.ships_played_total, 2)
         self.assertEqual(summary.ship_type_spread, 2)
         self.assertEqual(summary.tier_spread, 2)
@@ -918,25 +1139,26 @@ class PlayerExplorerSummaryTests(TestCase):
     def test_clan_crawl_save_player_creates_explorer_summary_row(self):
         clan = Clan.objects.create(clan_id=9913, name="CrawlerClan", tag="CC")
 
-        save_player(
-            {
-                "account_id": 9913,
-                "nickname": "CrawlerCaptain",
-                "created_at": int((timezone.now() - timedelta(days=400)).timestamp()),
-                "last_battle_time": int((timezone.now() - timedelta(days=2)).timestamp()),
-                "hidden_profile": False,
-                "statistics": {
-                    "battles": 250,
-                    "pvp": {
-                        "battles": 200,
-                        "wins": 110,
-                        "losses": 90,
-                        "survived_battles": 70,
+        with patch("warships.data._fetch_efficiency_badges_for_player", return_value=[]):
+            save_player(
+                {
+                    "account_id": 9913,
+                    "nickname": "CrawlerCaptain",
+                    "created_at": int((timezone.now() - timedelta(days=400)).timestamp()),
+                    "last_battle_time": int((timezone.now() - timedelta(days=2)).timestamp()),
+                    "hidden_profile": False,
+                    "statistics": {
+                        "battles": 250,
+                        "pvp": {
+                            "battles": 200,
+                            "wins": 110,
+                            "losses": 90,
+                            "survived_battles": 70,
+                        },
                     },
                 },
-            },
-            clan,
-        )
+                clan,
+            )
 
         player = Player.objects.get(player_id=9913)
         summary = PlayerExplorerSummary.objects.get(player=player)
@@ -947,6 +1169,53 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(summary.battles_last_29_days, 0)
         self.assertIsNone(summary.ships_played_total)
         self.assertIsNone(summary.kill_ratio)
+
+    def test_clan_crawl_save_player_hydrates_efficiency_badges(self):
+        clan = Clan.objects.create(
+            clan_id=9921, name="BadgeCrawlerClan", tag="BC")
+        Ship.objects.create(
+            ship_id=222,
+            name="Crawler Badge Ship",
+            chart_name="Crawler Badge",
+            nation="japan",
+            ship_type="Destroyer",
+            tier=10,
+        )
+
+        with patch("warships.data._fetch_efficiency_badges_for_player", return_value=[{"ship_id": 222, "top_grade_class": 2}]):
+            save_player(
+                {
+                    "account_id": 9921,
+                    "nickname": "BadgeCrawler",
+                    "created_at": int((timezone.now() - timedelta(days=250)).timestamp()),
+                    "last_battle_time": int((timezone.now() - timedelta(days=1)).timestamp()),
+                    "hidden_profile": False,
+                    "statistics": {
+                        "battles": 800,
+                        "pvp": {
+                            "battles": 700,
+                            "wins": 385,
+                            "losses": 315,
+                            "survived_battles": 210,
+                        },
+                    },
+                },
+                clan,
+            )
+
+        player = Player.objects.get(player_id=9921)
+        self.assertEqual(player.efficiency_json, [{
+            "ship_id": 222,
+            "top_grade_class": 2,
+            "top_grade_label": "Grade I",
+            "badge_label": "Grade I",
+            "ship_name": "Crawler Badge Ship",
+            "ship_chart_name": "Crawler Badge",
+            "ship_type": "Destroyer",
+            "ship_tier": 10,
+            "nation": "japan",
+        }])
+        self.assertIsNotNone(player.efficiency_updated_at)
 
     def test_clan_crawl_save_player_assigns_assassin_to_top_end_players(self):
         clan = Clan.objects.create(clan_id=9916, name="AssassinClan", tag="AC")

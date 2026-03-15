@@ -1,7 +1,7 @@
 import os
 from contextlib import contextmanager
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from warships.agentic import run_graph
 from warships.agentic.checkpoints import get_graph_checkpointer, get_langgraph_checkpoint_postgres_url
@@ -77,7 +77,8 @@ class AgenticGraphTests(TestCase):
             with get_graph_checkpointer({"checkpoint_backend": "postgres"}) as saver:
                 self.assertIs(saver, captured["saver"])
 
-        self.assertEqual(captured["conn_string"], "postgresql://example/checkpoints")
+        self.assertEqual(captured["conn_string"],
+                         "postgresql://example/checkpoints")
         self.assertFalse(captured["pipeline"])
         self.assertTrue(captured["saver"].setup_called)
 
@@ -172,3 +173,29 @@ class AgenticGraphTests(TestCase):
         self.assertFalse(result["checks_passed"])
         self.assertTrue(result["command_results"])
         self.assertEqual(result["command_results"][0]["returncode"], 2)
+
+    @patch("warships.agentic.graph.get_langsmith_project_name", return_value="battlestats-agentic")
+    @patch("warships.agentic.graph.get_current_trace_url", return_value="https://smith.example/runs/graph-1")
+    @patch("warships.agentic.graph.trace_block")
+    def test_run_graph_includes_langsmith_trace_url_when_available(self, mock_trace_block, _mock_trace_url, _mock_project):
+        fake_trace = Mock()
+        fake_trace.metadata = {}
+
+        @contextmanager
+        def fake_trace_context(*args, **kwargs):
+            yield fake_trace
+
+        mock_trace_block.side_effect = fake_trace_context
+
+        result = run_graph(
+            "simple verification command",
+            context={
+                "verification_commands": ["python -c \"print('ok')\""],
+                "verification_cwd": "server",
+            },
+        )
+
+        self.assertEqual(result["langsmith_trace_url"],
+                         "https://smith.example/runs/graph-1")
+        self.assertEqual(result["langsmith_project"], "battlestats-agentic")
+        fake_trace.end.assert_called_once()

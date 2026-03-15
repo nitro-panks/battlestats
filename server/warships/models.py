@@ -40,6 +40,9 @@ class Player(models.Model):
     ranked_json = models.JSONField(null=True, blank=True)
     ranked_updated_at = models.DateTimeField(null=True, blank=True)
 
+    efficiency_json = models.JSONField(null=True, blank=True)
+    efficiency_updated_at = models.DateTimeField(null=True, blank=True)
+
     verdict = models.CharField(max_length=20, null=True, blank=True)
 
     def __str__(self):

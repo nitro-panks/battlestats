@@ -39,6 +39,8 @@ def main() -> int:
     print(f"Engine: {result.get('selected_engine', result.get('status'))}")
     for line in result.get("summary", []):
         print(f"- {line}")
+    if result.get("langsmith_trace_url"):
+        print(f"Trace: {result['langsmith_trace_url']}")
     return 0
 
 

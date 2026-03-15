@@ -91,6 +91,26 @@ interface PlayerData {
     clan_tag: string | null;
     clan_id: number;
     verdict: string | null;
+    randoms_json?: Array<{
+        ship_name?: string | null;
+        ship_chart_name?: string | null;
+        ship_type?: string | null;
+        ship_tier?: number | null;
+        pvp_battles?: number | null;
+        wins?: number | null;
+        win_ratio?: number | null;
+    }> | null;
+    efficiency_json?: Array<{
+        ship_id?: number | null;
+        top_grade_class?: number | null;
+        top_grade_label?: string | null;
+        badge_label?: string | null;
+        ship_name?: string | null;
+        ship_chart_name?: string | null;
+        ship_type?: string | null;
+        ship_tier?: number | null;
+        nation?: string | null;
+    }> | null;
 }
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (

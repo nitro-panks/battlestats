@@ -1,0 +1,100 @@
+id: wows.encyclopedia.modules
+provider: Wargaming
+service: World of Warships Public API
+endpoint: /wows/encyclopedia/modules/
+purpose: Return module encyclopedia rows including module identity, art, type, pricing, and module-specific stat fragments.
+docs_url: https://developers.wargaming.net/reference/all/wows/encyclopedia/modules/
+
+hosts:
+  default: https://api.worldofwarships.com
+  realms:
+    eu: https://api.worldofwarships.eu
+    na: https://api.worldofwarships.com
+    asia: https://api.worldofwarships.asia
+
+request:
+  method: GET
+  query_params:
+    application_id:
+      required: true
+      type: string
+      description: Wargaming application ID.
+    module_id:
+      required: false
+      type: integer_or_csv_of_integers
+      description: One or more module IDs when targeting specific modules.
+    type:
+      required: false
+      type: string
+      description: Module type filter.
+    limit:
+      required: false
+      type: integer
+      description: Page size for catalog traversal.
+    page_no:
+      required: false
+      type: integer
+      description: 1-based page number for pagination.
+    language:
+      required: false
+      type: string
+      description: Localization language.
+    fields:
+      required: false
+      type: string
+      description: Comma-separated response field selection.
+
+response:
+  envelope:
+    status: string
+    meta:
+      count: integer
+      page_total: integer
+      total: integer
+      limit: integer
+      page: integer
+    data:
+      module_id_keyed_object: true
+  expected_data_shape:
+    module_id: integer
+    module_id_str: string
+    name: string
+    type: string
+    tag: string_or_null
+    image: url_or_null
+    price_credit: integer_or_null
+    profile:
+      dynamic_nested_profile: true
+
+observed_behavior:
+  last_verified: 2026-03-15
+  docs_notes:
+    - Module rows are typed and the useful stat payload lives under a dynamic `profile` object.
+  live_notes:
+    - Verified paginated response returned `data` keyed by `module_id`.
+    - Sample torpedo module row included `module_id_str`, `type`, `tag`, `image`, and `profile.torpedoes` stats such as speed, damage, and distance.
+    - This endpoint pairs naturally with `encyclopedia/ships.modules_tree` for richer module explanations.
+
+trust:
+  rating: medium_high
+  suitable_for:
+    - module label and art lookups
+    - ship module-tree enrichment
+    - feature work that needs typed stock-module stat fragments
+  not_suitable_for:
+    - assuming one fixed `profile` schema across all module types
+  recommendation: Use as a typed module-reference surface, but keep consumers defensive because the shape of `profile` varies by module type.
+
+repo_usage:
+  current_state:
+    - Not yet used directly in current product code.
+    - Verified as the next natural companion surface for any future ship-module or build features.
+  code_refs:
+    - server/warships/api/ships.py
+
+evidence_refs:
+  knowledge_notes:
+    - agents/knowledge/wows-encyclopedia-surface.md
+    - agents/knowledge/wows-api-contract-strategy.md
+  reproduced_with:
+    - curl against https://api.worldofwarships.com/wows/encyclopedia/modules/

@@ -209,6 +209,25 @@ def _fetch_ranked_ship_stats_for_player(player_id: int, season_ids: Optional[lis
     return rows if isinstance(rows, list) else []
 
 
+def _fetch_efficiency_badges_for_player(player_id: int) -> list[dict[str, Any]]:
+    """Fetch per-ship efficiency badge classes for a player."""
+    params = {
+        "account_id": player_id,
+    }
+    logging.info(
+        ' ---> Remote fetching efficiency badges for player_id: %s',
+        player_id,
+    )
+    data = _make_api_request("ships/badges/", params)
+
+    try:
+        rows = data[str(player_id)]
+    except (KeyError, TypeError):
+        rows = []
+
+    return rows if isinstance(rows, list) else []
+
+
 def _fetch_ship_stats_for_player(player_id: str) -> Dict:
     """Fetch all competitive data for all ships for a given player_id."""
     params = {

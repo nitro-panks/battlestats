@@ -92,11 +92,18 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 - `account/list` is discovery-only and must be post-filtered with local exact-name verification.
 - `clans/accountinfo` absence is a valid no-membership state, not necessarily an error.
 - `account/statsbydate` is documented but currently returns unusable `pvp: null` for tested active public accounts; treat it as non-reliable.
+- `encyclopedia/info` is a trustworthy lightweight metadata dictionary for languages, ship types, nations, modification labels, ship-type icons, and game version.
+- `encyclopedia/ships` is the main detailed ship encyclopedia catalog already used for ship metadata hydration and ship catalog sync.
+- `encyclopedia/modules` is live and returns typed module metadata plus module-specific profile fragments.
+- `encyclopedia/consumables` is broader than the name implies; verified live results can include `type: Skin` rows.
+- `ships/badges` is a player-scoped ship-statistics endpoint returning `ship_id` plus `top_grade_class`, useful for mastery-style badge enrichment.
 - current upstream contracts exist for:
   - `account/info`
   - `account/list`
   - `account/statsbydate`
   - `clans/accountinfo`
+  - `encyclopedia/info`
+  - `ships/badges`
 
 ## Public API Surface
 
@@ -310,6 +317,7 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 - list router endpoints for player/clan/ship are unpaginated and too slow for smoke; client does not rely on them.
 - older ranked fixtures/tests may accidentally trigger remote ranked refresh if `ranked_updated_at` is absent or cached ranked rows lack expected shape.
 - ship encyclopedia metadata can be missing for ship IDs present in battle rows; battle refresh uses fallback ship metadata rather than dropping rows.
+- the WG API smoke script currently uses `encyclopedia/info` as the low-cost reachability probe for upstream availability.
 - activity endpoint/chart exists and is implemented, but is not yet a first-class mounted player-detail section.
 
 ## Update Policy
@@ -325,7 +333,7 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 
 ## Pointers
 
-- upstream behavior: `agents/knowledge/wows-account-hydration-notes.md`, `agents/knowledge/wows-statsbydate-status.md`, `agents/knowledge/wows-api-contract-strategy.md`
+- upstream behavior: `agents/knowledge/wows-account-hydration-notes.md`, `agents/knowledge/wows-statsbydate-status.md`, `agents/knowledge/wows-encyclopedia-surface.md`, `agents/knowledge/wows-api-contract-strategy.md`
 - ranked/player hardening: `agents/runbooks/runbook-player-detail-ranked-hardening.md`, `agents/runbooks/runbook-ranked-top-ship.md`
 - API and smoke coverage: `agents/runbooks/runbook-api-surface.md`
 - scoring/activity semantics: `agents/runbooks/runbook-player-activity-measurement.md`, `agents/runbooks/runbook-player-kill-ratio.md`

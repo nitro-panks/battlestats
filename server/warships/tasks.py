@@ -27,6 +27,7 @@ CLAN_CRAWL_HEARTBEAT_STALE_AFTER = 15 * 60
 RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
 RANKED_INCREMENTAL_LOCK_KEY = "warships:tasks:incremental_ranked_data:lock"
 RANKED_INCREMENTAL_LOCK_TIMEOUT = 6 * 60 * 60
+RANKED_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 
 
 def _configured_clan_battle_warm_ids(raw_value=None):
@@ -37,6 +38,10 @@ def _configured_clan_battle_warm_ids(raw_value=None):
 
 def _task_lock_key(task_name: str, resource_id: object) -> str:
     return f"warships:tasks:{task_name}:{resource_id}:lock"
+
+
+def _ranked_refresh_dispatch_key(player_id: object) -> str:
+    return f"warships:tasks:update_ranked_data_dispatch:{player_id}"
 
 
 def _run_locked_task(task_name: str, resource_id: object, request_id: str, callback):
@@ -54,6 +59,28 @@ def _run_locked_task(task_name: str, resource_id: object, request_id: str, callb
         return {"status": "completed"}
     finally:
         cache.delete(lock_key)
+
+
+def is_ranked_data_refresh_pending(player_id: object) -> bool:
+    return bool(cache.get(_ranked_refresh_dispatch_key(player_id)))
+
+
+def queue_ranked_data_refresh(player_id: object):
+    dispatch_key = _ranked_refresh_dispatch_key(player_id)
+    if not cache.add(dispatch_key, "queued", timeout=RANKED_REFRESH_DISPATCH_TIMEOUT):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        update_ranked_data_task.delay(player_id=player_id)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        logger.warning(
+            "Skipping ranked refresh enqueue for player_id=%s because broker dispatch failed: %s",
+            player_id,
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
 
 
 @app.task(bind=True, **TASK_OPTS)
@@ -152,6 +179,22 @@ def update_type_data_task(player_id):
     from warships.data import update_type_data
     logger.info("Starting update_type_data_task for player_id=%s", player_id)
     update_type_data(player_id=player_id)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def update_ranked_data_task(self, player_id):
+    from warships.data import update_ranked_data
+
+    logger.info("Starting update_ranked_data_task for player_id=%s", player_id)
+    try:
+        return _run_locked_task(
+            "update_ranked_data",
+            player_id,
+            self.request.id,
+            lambda: update_ranked_data(player_id=player_id),
+        )
+    finally:
+        cache.delete(_ranked_refresh_dispatch_key(player_id))
 
 
 @app.task(bind=True, **TASK_OPTS)

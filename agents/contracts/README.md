@@ -33,6 +33,10 @@ Use `agents/knowledge/` instead when the main value is narrative investigation, 
 - `upstream/wows-account-list.yaml`
 - `upstream/wows-account-statsbydate.yaml`
 - `upstream/wows-clans-accountinfo.yaml`
+- `upstream/wows-encyclopedia-info.yaml`
+- `upstream/wows-encyclopedia-ships.yaml`
+- `upstream/wows-encyclopedia-modules.yaml`
+- `upstream/wows-ships-badges.yaml`
 
 The current contract set now covers the main derived player activity dataset, the player summary/detail payload, the explorer row payload, and the most relied-on upstream account and clan-membership endpoints.
 

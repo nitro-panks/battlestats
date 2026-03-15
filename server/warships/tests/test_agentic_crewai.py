@@ -1,5 +1,6 @@
 from unittest import TestCase
-from unittest.mock import patch
+from contextlib import contextmanager
+from unittest.mock import Mock, patch
 
 from warships.agentic import build_crewai_plan, persona_keys, run_crewai_workflow
 
@@ -57,3 +58,27 @@ class AgenticCrewAITests(TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["output"], "crew output")
         fake_crew.kickoff.assert_called_once()
+
+    @patch("warships.agentic.crewai_runner.get_langsmith_project_name", return_value="battlestats-agentic")
+    @patch("warships.agentic.crewai_runner.get_current_trace_url", return_value="https://smith.example/runs/crew-1")
+    @patch("warships.agentic.crewai_runner.trace_block")
+    def test_run_crewai_workflow_includes_langsmith_trace_url_when_available(self, mock_trace_block, _mock_trace_url, _mock_project):
+        fake_trace = Mock()
+        fake_trace.metadata = {}
+
+        @contextmanager
+        def fake_trace_context(*args, **kwargs):
+            yield fake_trace
+
+        mock_trace_block.side_effect = fake_trace_context
+
+        result = run_crewai_workflow(
+            "Add CrewAI integration",
+            context={"scope": "agentic framework"},
+            dry_run=True,
+        )
+
+        self.assertEqual(result["langsmith_trace_url"],
+                         "https://smith.example/runs/crew-1")
+        self.assertEqual(result["langsmith_project"], "battlestats-agentic")
+        fake_trace.end.assert_called_once()

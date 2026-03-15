@@ -1,13 +1,15 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Iterable
 from datetime import datetime, timezone, timedelta, date
 import logging
 import math
+import os
 from django.core.cache import cache
 from django.db.models import Count, Q
 from django.db.models.functions import TruncMonth
+from django.utils import timezone as django_timezone
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
-from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, build_ship_chart_name
+from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, _fetch_efficiency_badges_for_player, build_ship_chart_name
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
     _fetch_clan_battle_seasons_info, _fetch_clan_battle_season_stats
@@ -46,6 +48,16 @@ PLAYER_SCORE_LOW_TIER_WEIGHT = 0.02
 PLAYER_SCORE_MID_TIER_WEIGHT = 0.60
 PLAYER_SCORE_HIGH_TIER_WEIGHT = 1.0
 PLAYER_SCORE_LOW_TIER_FLOOR = 0.25
+CLAN_RANKED_HYDRATION_STALE_AFTER = timedelta(hours=24)
+PLAYER_EFFICIENCY_STALE_AFTER = timedelta(hours=24)
+EFFICIENCY_BADGE_CLASS_LABELS = {
+    1: 'Expert',
+    2: 'Grade I',
+    3: 'Grade II',
+    4: 'Grade III',
+}
+CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT = max(
+    1, int(os.getenv('CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT', '8')))
 
 
 def compute_player_verdict(pvp_battles: int, pvp_ratio: Optional[float], pvp_survival_rate: Optional[float]) -> Optional[str]:
@@ -108,6 +120,156 @@ def _coerce_ranked_rows(ranked_rows: Any) -> list[dict]:
 
     rows = [row for row in ranked_rows if isinstance(row, dict)]
     return sorted(rows, key=lambda row: int(row.get('season_id', 0) or 0), reverse=True)
+
+
+def clan_ranked_hydration_needs_refresh(
+    player: Player,
+    stale_after: timedelta = CLAN_RANKED_HYDRATION_STALE_AFTER,
+) -> bool:
+    ranked_updated_at = player.ranked_updated_at
+    if ranked_updated_at is None:
+        return True
+
+    return django_timezone.now() - ranked_updated_at >= stale_after
+
+
+def player_efficiency_needs_refresh(
+    player: Player,
+    stale_after: timedelta = PLAYER_EFFICIENCY_STALE_AFTER,
+) -> bool:
+    if player.is_hidden:
+        return False
+
+    if player.efficiency_json is None:
+        return True
+
+    updated_at = player.efficiency_updated_at
+    if updated_at is None:
+        return True
+
+    return django_timezone.now() - updated_at >= stale_after
+
+
+def _build_efficiency_badge_rows(raw_rows: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_rows, list):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    ship_ids: list[int] = []
+
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            continue
+
+        try:
+            ship_id = int(row.get('ship_id') or 0)
+            badge_class = int(row.get('top_grade_class') or 0)
+        except (TypeError, ValueError):
+            continue
+
+        if ship_id <= 0 or badge_class <= 0:
+            continue
+
+        ship_ids.append(ship_id)
+        label = EFFICIENCY_BADGE_CLASS_LABELS.get(badge_class)
+        rows.append({
+            'ship_id': ship_id,
+            'top_grade_class': badge_class,
+            'top_grade_label': label,
+            'badge_label': label,
+        })
+
+    ships_by_id = Ship.objects.in_bulk(
+        ship_ids, field_name='ship_id') if ship_ids else {}
+    for row in rows:
+        ship = ships_by_id.get(row['ship_id'])
+        if ship is None:
+            continue
+
+        row['ship_name'] = ship.name
+        row['ship_chart_name'] = ship.chart_name
+        row['ship_type'] = ship.ship_type
+        row['ship_tier'] = ship.tier
+        row['nation'] = ship.nation
+
+    rows.sort(
+        key=lambda row: (
+            int(row.get('top_grade_class') or 99),
+            int(row.get('ship_tier') or 99),
+            str(row.get('ship_name') or ''),
+            int(row.get('ship_id') or 0),
+        )
+    )
+    return rows
+
+
+def update_player_efficiency_data(player: Player, force_refresh: bool = False) -> list[dict[str, Any]]:
+    if player.is_hidden:
+        if player.efficiency_json is not None or player.efficiency_updated_at is not None:
+            player.efficiency_json = None
+            player.efficiency_updated_at = None
+            player.save(update_fields=[
+                        'efficiency_json', 'efficiency_updated_at'])
+        return []
+
+    if not force_refresh and not player_efficiency_needs_refresh(player):
+        return player.efficiency_json or []
+
+    if (player.pvp_battles or 0) <= 0:
+        player.efficiency_json = []
+        player.efficiency_updated_at = django_timezone.now()
+        player.save(update_fields=['efficiency_json', 'efficiency_updated_at'])
+        return []
+
+    rows = _build_efficiency_badge_rows(
+        _fetch_efficiency_badges_for_player(player.player_id)
+    )
+    player.efficiency_json = rows
+    player.efficiency_updated_at = django_timezone.now()
+    player.save(update_fields=['efficiency_json', 'efficiency_updated_at'])
+    return rows
+
+
+def queue_clan_ranked_hydration(players: Iterable[Player]) -> dict[str, Any]:
+    from warships.tasks import is_ranked_data_refresh_pending, queue_ranked_data_refresh
+
+    eligible_players = [
+        player for player in players if clan_ranked_hydration_needs_refresh(player)
+    ]
+    pending_player_ids: set[int] = set()
+    queued_player_ids: set[int] = set()
+    deferred_player_ids: set[int] = set()
+
+    for player in eligible_players:
+        if is_ranked_data_refresh_pending(player.player_id):
+            pending_player_ids.add(player.player_id)
+
+    available_slots = max(
+        0, CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT - len(pending_player_ids))
+
+    for player in eligible_players:
+        if player.player_id in pending_player_ids:
+            continue
+
+        if available_slots <= 0:
+            deferred_player_ids.add(player.player_id)
+            continue
+
+        enqueue_result = queue_ranked_data_refresh(player.player_id)
+        if enqueue_result.get("status") == "queued":
+            pending_player_ids.add(player.player_id)
+            queued_player_ids.add(player.player_id)
+            available_slots -= 1
+
+    pending_player_ids.update(deferred_player_ids)
+
+    return {
+        'pending_player_ids': pending_player_ids,
+        'queued_player_ids': queued_player_ids,
+        'deferred_player_ids': deferred_player_ids,
+        'eligible_player_ids': {player.player_id for player in eligible_players},
+        'max_in_flight': CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT,
+    }
 
 
 def _ranked_rows_have_top_ship(rows: Any) -> bool:
@@ -1329,11 +1491,12 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG = {
     'y_scale': 'linear',
     'min_battles': 50,
     'base_x_edges': [50],
-    'x_bin_growth_factor': math.sqrt(2),
+    'x_bin_growth_factor': math.sqrt(math.sqrt(2)),
     'y_min': 35.0,
     'y_max': 75.0,
-    'y_bin_width': 1.5,
+    'y_bin_width': 0.75,
 }
+PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION = 'ranked_wr_battles:v6'
 
 PLAYER_TIER_TYPE_CORRELATION_CONFIG = {
     'label': 'Tier vs Ship Type',
@@ -1443,7 +1606,7 @@ def fetch_landing_activity_attrition() -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)                          :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -1926,7 +2089,8 @@ def fetch_player_wr_survival_correlation() -> dict:
 
 
 def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
-    cache_key = _player_correlation_cache_key('ranked_wr_battles:v4')
+    cache_key = _player_correlation_cache_key(
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -1957,7 +2121,8 @@ def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
         config['base_x_edges'],
         config['x_bin_growth_factor'],
     )
-    major_x_ticks = _build_doubling_bin_edges(max_battles, config['base_x_edges'])
+    major_x_ticks = _build_doubling_bin_edges(
+        max_battles, config['base_x_edges'])
     tile_counts: dict[tuple[int, int], int] = {}
     trend_sum_y = [0.0 for _ in range(len(x_edges) - 1)]
     trend_counts = [0 for _ in range(len(x_edges) - 1)]
@@ -2336,11 +2501,16 @@ def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict, top_ship_names
                 except (ValueError, TypeError):
                     continue
 
-                b = sprint_data.get('battles', 0) or 0
-                w = sprint_data.get('victories', 0) or 0
+                b = int(sprint_data.get('battles', 0) or 0)
+                w = int(sprint_data.get('victories', 0) or 0)
                 rank = sprint_data.get('rank', 99)
                 best_rank_in_sprint = sprint_data.get(
                     'best_rank_in_sprint', sprint_data.get('rank_best', 99))
+
+                # Older WG ranked seasons can report archived sprint victories while zeroing
+                # the corresponding battle counts. Ignore those impossible totals in aggregates.
+                if b <= 0 and w > 0:
+                    w = 0
 
                 sprint_battles += b
                 sprint_wins += w
@@ -2369,7 +2539,8 @@ def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict, top_ship_names
             # Determine best sprint (highest league, then lowest rank, then most wins)
             if best_sprint is None or \
                     sprint_best_league < best_sprint['league'] or \
-                    (sprint_best_league == best_sprint['league'] and sprint_best_rank < best_sprint['best_rank']):
+                    (sprint_best_league == best_sprint['league'] and sprint_best_rank < best_sprint['best_rank']) or \
+                    (sprint_best_league == best_sprint['league'] and sprint_best_rank == best_sprint['best_rank'] and sprint_wins > best_sprint['wins']):
                 best_sprint = sprint_detail
 
         if total_battles == 0:
@@ -2740,10 +2911,14 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
         player.randoms_updated_at = None
         player.ranked_json = None
         player.ranked_updated_at = None
+        player.efficiency_json = None
+        player.efficiency_updated_at = None
         player.verdict = None
 
     player.last_fetch = datetime.now()
     player.save()
+    if not player.is_hidden:
+        update_player_efficiency_data(player, force_refresh=force_refresh)
     refresh_player_explorer_summary(player)
     cache.delete('landing:players')
     logging.info(f"Updated player personal data: {player.name}")

@@ -145,6 +145,8 @@ class ClanMemberSerializer(serializers.Serializer):
     is_pve_player = serializers.BooleanField()
     is_ranked_player = serializers.BooleanField()
     highest_ranked_league = serializers.CharField(allow_null=True)
+    ranked_hydration_pending = serializers.BooleanField()
+    ranked_updated_at = serializers.DateTimeField(allow_null=True)
     activity_bucket = serializers.SerializerMethodField()
 
     def get_activity_bucket(self, obj):

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCrown, faRobot, faStar } from '@fortawesome/free-solid-svg-icons';
 import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
@@ -18,8 +18,17 @@ interface ClanMemberData {
     is_pve_player: boolean;
     is_ranked_player: boolean;
     highest_ranked_league: RankedLeagueName | null;
+    ranked_hydration_pending: boolean;
+    ranked_updated_at: string | null;
     activity_bucket: 'active_7d' | 'active_30d' | 'cooling_90d' | 'dormant_180d' | 'inactive_180d_plus' | 'unknown';
 }
+
+const RANKED_HYDRATION_POLL_LIMIT = 6;
+const RANKED_HYDRATION_POLL_INTERVAL_MS = 2500;
+
+const isAbortError = (error: unknown): boolean => {
+    return error instanceof DOMException && error.name === 'AbortError';
+};
 
 const wrColor = (r: number | null): string => {
     if (r == null) return '#c6dbef';
@@ -71,22 +80,65 @@ const RankedStar: React.FC<{ league: RankedLeagueName | null }> = ({ league }) =
 const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember, layout = 'inline' }) => {
     const [members, setMembers] = useState<ClanMemberData[]>([]);
     const [loading, setLoading] = useState(true);
+    const rankedHydrationAttemptsRef = useRef(0);
 
     useEffect(() => {
-        const fetchMembers = async () => {
-            setLoading(true);
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let activeController: AbortController | null = null;
+        rankedHydrationAttemptsRef.current = 0;
+
+        const fetchMembers = async (showLoading: boolean, attempt: number) => {
+            if (showLoading) {
+                setLoading(true);
+            }
+
+            activeController?.abort();
+            const controller = new AbortController();
+            activeController = controller;
+
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/clan_members/${clanId}/`);
-                const data = await response.json();
+                const response = await fetch(`http://localhost:8888/api/fetch/clan_members/${clanId}/`, {
+                    signal: controller.signal,
+                });
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch clan members for clan ${clanId}`);
+                }
+
+                const data: ClanMemberData[] = await response.json();
+                if (controller.signal.aborted) {
+                    return;
+                }
+
                 setMembers(data);
+
+                const hasPendingRankedHydration = data.some((member) => member.ranked_hydration_pending);
+                if (hasPendingRankedHydration && attempt < RANKED_HYDRATION_POLL_LIMIT) {
+                    rankedHydrationAttemptsRef.current = attempt + 1;
+                    timeoutId = setTimeout(() => {
+                        void fetchMembers(false, attempt + 1);
+                    }, RANKED_HYDRATION_POLL_INTERVAL_MS);
+                }
             } catch (error) {
+                if (isAbortError(error)) {
+                    return;
+                }
+
                 console.error('Error fetching clan members:', error);
             } finally {
-                setLoading(false);
+                if (showLoading && !controller.signal.aborted) {
+                    setLoading(false);
+                }
             }
         };
 
-        fetchMembers();
+        void fetchMembers(true, 0);
+
+        return () => {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+            activeController?.abort();
+        };
     }, [clanId]);
 
     return (

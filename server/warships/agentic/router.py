@@ -6,6 +6,7 @@ from typing import Any
 from .crewai_runner import run_crewai_workflow
 from .graph import run_graph
 from .runlog import write_agent_run_log
+from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
 
 
 def _prepare_langgraph_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -60,6 +61,33 @@ def route_agent_workflow(task: str, context: dict[str, Any] | None = None, engin
     }
 
 
+def _route_trace_inputs(
+    task: str,
+    context: dict[str, Any] | None,
+    engine: str,
+    dry_run: bool,
+    llm: str | None,
+) -> dict[str, Any]:
+    resolved_context = context or {}
+    return {
+        "task": task,
+        "requested_engine": engine,
+        "dry_run": dry_run,
+        "llm": llm,
+        "context_keys": sorted(resolved_context.keys()),
+        "verification_command_count": len(resolved_context.get("verification_commands", [])),
+    }
+
+
+def _route_trace_outputs(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "workflow_id": result.get("workflow_id"),
+        "status": result.get("status"),
+        "selected_engine": result.get("selected_engine"),
+        "summary": result.get("summary", []),
+    }
+
+
 def run_routed_workflow(
     task: str,
     context: dict[str, Any] | None = None,
@@ -67,41 +95,57 @@ def run_routed_workflow(
     dry_run: bool = False,
     llm: str | None = None,
 ) -> dict[str, Any]:
-    route = route_agent_workflow(task, context=context, engine=engine)
-    resolved_context = context or {}
+    with trace_block(
+        "Agentic Routed Workflow",
+        inputs=_route_trace_inputs(task, context, engine, dry_run, llm),
+        metadata={"component": "agentic", "engine": "router"},
+        tags=["agentic", "router"],
+    ) as trace_run:
+        route = route_agent_workflow(task, context=context, engine=engine)
+        resolved_context = context or {}
 
-    if route["engine"] == "langgraph":
-        result = run_graph(
-            task, context=_prepare_langgraph_context(resolved_context))
-        result["selected_engine"] = "langgraph"
-        result["route_rationale"] = route["rationale"]
-        result["run_log_path"] = write_agent_run_log("langgraph", result)
+        if trace_run is not None:
+            trace_run.metadata["selected_engine"] = route["engine"]
+
+        if route["engine"] == "langgraph":
+            result = run_graph(
+                task, context=_prepare_langgraph_context(resolved_context))
+            result["selected_engine"] = "langgraph"
+            result["route_rationale"] = route["rationale"]
+            result["run_log_path"] = write_agent_run_log("langgraph", result)
+        elif route["engine"] == "crewai":
+            result = run_crewai_workflow(
+                task, context=resolved_context, dry_run=dry_run, llm=llm)
+            result["selected_engine"] = "crewai"
+            result["route_rationale"] = route["rationale"]
+            result["run_log_path"] = write_agent_run_log("crewai", result)
+        else:
+            crew_result = run_crewai_workflow(
+                task, context=resolved_context, dry_run=True, llm=llm)
+            graph_result = run_graph(
+                task, context=_prepare_langgraph_context(resolved_context))
+            result = {
+                "workflow_id": graph_result.get("workflow_id"),
+                "status": "completed" if graph_result.get("status") == "completed" else "needs_attention",
+                "selected_engine": "hybrid",
+                "route_rationale": route["rationale"],
+                "summary": [
+                    "Hybrid workflow executed: CrewAI planning plus LangGraph guarded execution.",
+                    f"CrewAI status: {crew_result.get('status')}",
+                    f"LangGraph status: {graph_result.get('status')}",
+                ],
+                "crew_result": crew_result,
+                "langgraph_result": graph_result,
+            }
+            result["run_log_path"] = write_agent_run_log("hybrid", result)
+
+        trace_url = get_current_trace_url()
+        if trace_url:
+            result["langsmith_trace_url"] = trace_url
+            result["langsmith_project"] = get_langsmith_project_name()
+
+        if trace_run is not None:
+            trace_run.metadata["workflow_id"] = result.get("workflow_id")
+            trace_run.end(outputs=_route_trace_outputs(result))
+
         return result
-
-    if route["engine"] == "crewai":
-        result = run_crewai_workflow(
-            task, context=resolved_context, dry_run=dry_run, llm=llm)
-        result["selected_engine"] = "crewai"
-        result["route_rationale"] = route["rationale"]
-        result["run_log_path"] = write_agent_run_log("crewai", result)
-        return result
-
-    crew_result = run_crewai_workflow(
-        task, context=resolved_context, dry_run=True, llm=llm)
-    graph_result = run_graph(
-        task, context=_prepare_langgraph_context(resolved_context))
-    result = {
-        "workflow_id": graph_result.get("workflow_id"),
-        "status": "completed" if graph_result.get("status") == "completed" else "needs_attention",
-        "selected_engine": "hybrid",
-        "route_rationale": route["rationale"],
-        "summary": [
-            "Hybrid workflow executed: CrewAI planning plus LangGraph guarded execution.",
-            f"CrewAI status: {crew_result.get('status')}",
-            f"LangGraph status: {graph_result.get('status')}",
-        ],
-        "crew_result": crew_result,
-        "langgraph_result": graph_result,
-    }
-    result["run_log_path"] = write_agent_run_log("hybrid", result)
-    return result

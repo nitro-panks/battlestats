@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, landing_activity_attrition, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats
+from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, landing_activity_attrition, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats, agentic_trace_dashboard
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -57,6 +57,8 @@ urlpatterns = [
          player_correlation_distribution, name='fetch_player_correlation_distribution'),
     path('api/stats/',
          db_stats, name='db_stats'),
+    path('api/agentic/traces/',
+         agentic_trace_dashboard, name='agentic_trace_dashboard'),
 
 ]
 

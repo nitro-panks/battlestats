@@ -39,6 +39,16 @@ Use this shape when you want the workflow to be explicit:
 
 LangGraph is not automatically triggered by normal user-facing app flows today.
 
+## Optional LangSmith Tracing
+
+If you want trace visibility for the agent workflows, set:
+
+- `LANGSMITH_TRACING_V2=true`
+- `LANGSMITH_API_KEY=...`
+- optionally `BATTLESTATS_LANGSMITH_PROJECT=...` or `LANGSMITH_PROJECT=...`
+
+When tracing is enabled, the workflow result payload now includes `langsmith_trace_url`.
+
 It is currently invoked through explicit entrypoints:
 
 - `server/scripts/run_agent_graph.py`

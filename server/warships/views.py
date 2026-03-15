@@ -1,5 +1,6 @@
 import logging
 import random
+from functools import partial
 from datetime import timedelta
 from kombu.exceptions import OperationalError as KombuOperationalError
 from django.core.cache import cache
@@ -24,6 +25,7 @@ from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data,
     fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
     fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, is_pve_player, is_ranked_player, \
     get_highest_ranked_league_name
+from warships.agentic.dashboard import get_agentic_trace_dashboard
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
 
@@ -118,6 +120,11 @@ class PlayerViewSet(viewsets.ModelViewSet):
             update_battle_data(obj.player_id)
             obj.refresh_from_db()
 
+        if not obj.is_hidden and obj.efficiency_json is None and (obj.pvp_battles or 0) > 0:
+            from warships.data import update_player_data
+            update_player_data(player=obj, force_refresh=True)
+            obj.refresh_from_db()
+
         self.check_object_permissions(self.request, obj)
 
         now = timezone.now()
@@ -154,7 +161,8 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 force_refresh=True,
             )
         elif player_refresh_stale:
-            _delay_task_safely(update_player_data_task, player_id=obj.player_id)
+            _delay_task_safely(update_player_data_task,
+                               player_id=obj.player_id)
 
         if obj.clan:
             clan = obj.clan
@@ -168,7 +176,8 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 _delay_task_safely(update_clan_data_task, clan_id=clan.clan_id)
 
             if clan_refresh_stale or clan_members_incomplete:
-                _delay_task_safely(update_clan_members_task, clan_id=clan.clan_id)
+                _delay_task_safely(update_clan_members_task,
+                                   clan_id=clan.clan_id)
         return obj
 
 
@@ -439,7 +448,7 @@ def clan_members(request, clan_id: str) -> Response:
 
     _record_clan_lookup(clan)
 
-    from warships.data import update_clan_data, update_clan_members
+    from warships.data import update_clan_data, update_clan_members, queue_clan_ranked_hydration
     if not clan.members_count or (clan.leader_id is None and not clan.leader_name):
         update_clan_data(clan_id=clan_id)
         clan.refresh_from_db()
@@ -450,6 +459,10 @@ def clan_members(request, clan_id: str) -> Response:
         update_clan_members(clan_id=clan_id)
         members = clan.player_set.exclude(name='').order_by(
             *_player_score_ordering('last_battle_date'))
+
+    members = list(members)
+    hydration_state = queue_clan_ranked_hydration(members)
+    pending_player_ids = hydration_state['pending_player_ids']
 
     leader_name = (clan.leader_name or '').strip().lower()
     member_rows = [
@@ -465,12 +478,23 @@ def clan_members(request, clan_id: str) -> Response:
             'is_pve_player': is_pve_player(member.total_battles, member.pvp_battles),
             'is_ranked_player': is_ranked_player(member.ranked_json),
             'highest_ranked_league': get_highest_ranked_league_name(member.ranked_json),
+            'ranked_hydration_pending': member.player_id in pending_player_ids,
+            'ranked_updated_at': member.ranked_updated_at,
         }
         for member in members
     ]
 
     serializer = ClanMemberSerializer(member_rows, many=True)
-    return Response(serializer.data)
+    response = Response(serializer.data)
+    response['X-Ranked-Hydration-Queued'] = str(
+        len(hydration_state['queued_player_ids']))
+    response['X-Ranked-Hydration-Deferred'] = str(
+        len(hydration_state['deferred_player_ids']))
+    response['X-Ranked-Hydration-Pending'] = str(
+        len(hydration_state['pending_player_ids']))
+    response['X-Ranked-Hydration-Max-In-Flight'] = str(
+        hydration_state['max_in_flight'])
+    return response
 
 
 @api_view(["GET"])
@@ -650,4 +674,15 @@ def db_stats(request) -> Response:
             'clans': Clan.objects.count(),
         }
     data = cache.get_or_set('db:stats', _fetch_db_stats, 300)
+    return Response(data)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def agentic_trace_dashboard(request) -> Response:
+    data = cache.get_or_set(
+        'agentic:trace_dashboard:v2',
+        partial(get_agentic_trace_dashboard, limit=12),
+        15,
+    )
     return Response(data)

@@ -6,16 +6,22 @@ from pathlib import Path
 from typing import Any
 
 
-def _repo_root() -> Path:
+def _project_root() -> Path:
     current = Path(__file__).resolve()
     for candidate in current.parents:
         if (candidate / "docker-compose.yml").exists():
+            return candidate
+    for candidate in current.parents:
+        if (candidate / "manage.py").exists():
             return candidate
     return current.parents[3]
 
 
 def _log_root() -> Path:
-    return _repo_root() / "server" / "logs" / "agentic"
+    project_root = _project_root()
+    if (project_root / "manage.py").exists():
+        return project_root / "logs" / "agentic"
+    return project_root / "server" / "logs" / "agentic"
 
 
 def write_agent_run_log(engine: str, payload: dict[str, Any]) -> str:

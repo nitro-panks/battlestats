@@ -1,0 +1,120 @@
+id: wows.ships.badges
+provider: Wargaming
+service: World of Warships Public API
+endpoint: /wows/ships/badges/
+purpose: Return ship mastery badge classes for a player's ships.
+docs_url: https://developers.wargaming.net/reference/all/wows/ships/badges/
+
+hosts:
+  default: https://api.worldofwarships.com
+  realms:
+    eu: https://api.worldofwarships.eu
+    na: https://api.worldofwarships.com
+    asia: https://api.worldofwarships.asia
+
+request:
+  method: GET
+  query_params:
+    application_id:
+      required: true
+      type: string
+      description: Wargaming application ID.
+    account_id:
+      required: true
+      type: integer
+      description: Player account ID.
+    ship_id:
+      required: false
+      type: integer_or_csv_of_integers
+      description: One or more player ship IDs. Docs state a maximum limit of 100.
+    fields:
+      required: false
+      type: string
+      description: Comma-separated response field selection.
+    language:
+      required: false
+      type: string
+      description: Localization language.
+
+response:
+  envelope:
+    status: string
+    meta:
+      count: integer
+      hidden: integer_or_null
+    data:
+      account_id_keyed_array: true
+  expected_item_shape:
+    ship_id: integer
+    top_grade_class: integer
+  field_notes:
+    top_grade_class:
+      description: Numeric Efficiency Badge rank for the player's ship.
+      mapping:
+        1: Expert
+        2: Grade I
+        3: Grade II
+        4: Grade III
+      caveats:
+        - The API exposes only the numeric class, not the human-readable badge label.
+        - No badge row is returned for performances outside the official top-50-percent threshold.
+
+observed_behavior:
+  last_verified: 2026-03-15
+  docs_notes:
+    - Docs describe the endpoint as returning badges for player's ships.
+    - Docs list `account_id` as required and `ship_id` as an optional filter with a documented max of 100.
+    - Official World of Warships article describes these as Efficiency Badges awarded from Base XP earned in a single Random Battle on a Tier V+ ship.
+  live_notes:
+    - Calling the endpoint without `account_id` returned `status: error` with code `402` and message `ACCOUNT_ID_NOT_SPECIFIED`.
+    - Calling it with a real active account returned `data[account_id]` as an array of rows with `ship_id` and `top_grade_class`.
+    - The returned shape is player-scoped ship-performance metadata, not static encyclopedia metadata.
+    - The live endpoint does not return badge names, percentile cutoffs, or calculation details alongside `top_grade_class`.
+  semantics:
+    official_badge_thresholds:
+      expert:
+        class: 1
+        percentile: top_1_percent
+      grade_i:
+        class: 2
+        percentile: top_5_percent
+      grade_ii:
+        class: 3
+        percentile: top_20_percent
+      grade_iii:
+        class: 4
+        percentile: top_50_percent
+    official_rules:
+      - Badge qualification is based on Base XP earned in a single Random Battle.
+      - Comparison is against other players who recently played the same ship under the same conditions.
+      - Only Tier V or higher ships are eligible.
+      - Only the highest badge achieved for a ship is displayed.
+      - Badges are retained once earned.
+
+trust:
+  rating: medium_high
+  suitable_for:
+    - per-player ship mastery badge overlays
+    - augmenting top-ship or ship-detail surfaces with badge classes
+    - filtering to a small known ship subset for a player
+  not_suitable_for:
+    - static ship metadata
+    - global ship catalogs without an account context
+  recommendation: Treat as a player-specific enrichment endpoint that should be joined with local ship metadata if used in product surfaces.
+
+repo_usage:
+  current_state:
+    - Used by backend player refreshes and clan crawl saves to persist per-player efficiency badge rows.
+  code_refs:
+    - server/warships/api/ships.py
+    - server/warships/data.py
+    - server/warships/clan_crawl.py
+
+evidence_refs:
+  knowledge_notes:
+    - agents/knowledge/wows-encyclopedia-surface.md
+    - agents/knowledge/wows-api-contract-strategy.md
+  external_refs:
+    - https://worldofwarships.eu/en/news/general-news/efficiency-badges-put-your-skill-on-display/
+  reproduced_with:
+    - curl against https://api.worldofwarships.com/wows/ships/badges/
