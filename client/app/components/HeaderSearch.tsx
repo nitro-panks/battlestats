@@ -3,6 +3,7 @@
 import React, { startTransition, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { buildPlayerPath } from "../lib/entityRoutes";
+import HiddenAccountIcon from "./HiddenAccountIcon";
 
 interface HeaderSearchSuggestion {
     name: string;
@@ -63,16 +64,7 @@ const HeaderSearch: React.FC = () => {
     useEffect(() => {
         const currentQuery = (searchParams.get("q") || "").trim();
         if (!currentQuery) {
-            if (pathname.startsWith('/player/')) {
-                const segment = pathname.split('/')[2] || '';
-                setQuery(decodeURIComponent(segment));
-                return;
-            }
-
-            if (pathname === '/') {
-                setQuery('');
-            }
-
+            setQuery("");
             return;
         }
 
@@ -232,10 +224,8 @@ const HeaderSearch: React.FC = () => {
                                         <span className="inline-flex items-center gap-2">
                                             <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u{1F79C}"}</span>
                                             <span>{player.name}</span>
+                                            {player.is_hidden ? <HiddenAccountIcon /> : null}
                                         </span>
-                                        {player.is_hidden && (
-                                            <span className="text-xs uppercase tracking-wide text-[#6baed6]">Hidden</span>
-                                        )}
                                     </button>
                                 </li>
                             );

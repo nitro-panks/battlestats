@@ -8,6 +8,7 @@ import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getHighestRankedLeagueName, getRankedLeagueTooltip, getRankedLeagueColor, type RankedLeagueName } from './rankedLeague';
 import { useClanMembers } from './useClanMembers';
+import HiddenAccountIcon from './HiddenAccountIcon';
 
 interface PlayerDetailProps {
     player: {
@@ -253,6 +254,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     onSelectClan,
     isLoading = false,
 }) => {
+    const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
     const isPveEnjoyer = player.total_battles > 500 && pveBattles > player.pvp_battles;
     const isSleepyPlayer = player.days_since_last_battle > 365;
@@ -276,6 +278,28 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     useEffect(() => {
         setClanBattleSummary(null);
     }, [player.player_id]);
+
+    useEffect(() => {
+        if (shareState === 'idle') {
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setShareState('idle');
+        }, 1800);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [shareState]);
+
+    const handleShare = async () => {
+        try {
+            await navigator.clipboard.writeText(window.location.href);
+            setShareState('copied');
+        } catch (error) {
+            console.error('Failed to copy player URL:', error);
+            setShareState('failed');
+        }
+    };
 
     return (
         <div className="relative overflow-hidden bg-white p-6">
@@ -410,15 +434,34 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                 {/* Second Column */}
                 <div className="min-w-0 text-left border-l border-[#c6dbef] pl-4">
                     <div className="mb-3 border-b border-[#c6dbef] pb-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
-                                {player.name}
-                            </h1>
-                            {player.is_clan_leader ? <HeaderLeaderCrown /> : null}
-                            {isPveEnjoyer ? <HeaderPveRobot /> : null}
-                            {isSleepyPlayer ? <HeaderSleepyBed /> : null}
-                            {isRankedEnjoyer ? <HeaderRankedStar league={highestRankedLeague} /> : null}
-                            {isClanBattleEnjoyer && clanBattleSummary ? <HeaderClanBattleShield winRate={clanBattleSummary.overallWinRate} /> : null}
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
+                                    {player.name}
+                                </h1>
+                                {player.is_hidden ? <HiddenAccountIcon className="text-sm text-[#6baed6]" /> : null}
+                                {player.is_clan_leader ? <HeaderLeaderCrown /> : null}
+                                {isPveEnjoyer ? <HeaderPveRobot /> : null}
+                                {isSleepyPlayer ? <HeaderSleepyBed /> : null}
+                                {isRankedEnjoyer ? <HeaderRankedStar league={highestRankedLeague} /> : null}
+                                {isClanBattleEnjoyer && clanBattleSummary ? <HeaderClanBattleShield winRate={clanBattleSummary.overallWinRate} /> : null}
+                            </div>
+                            <div className="flex items-center gap-2 self-start">
+                                <button
+                                    type="button"
+                                    onClick={handleShare}
+                                    className="rounded-md border border-[#c6dbef] px-3 py-1.5 text-sm font-medium text-[#2171b5] transition-colors hover:bg-[#eff3ff]"
+                                    aria-label="Copy shareable player URL"
+                                >
+                                    Share
+                                </button>
+                                {shareState === 'copied' ? (
+                                    <span className="text-xs font-medium text-[#2171b5]">Copied</span>
+                                ) : null}
+                                {shareState === 'failed' ? (
+                                    <span className="text-xs font-medium text-[#b91c1c]">Copy failed</span>
+                                ) : null}
+                            </div>
                         </div>
                         <p className="mt-1 text-sm text-[#4292c6]">
                             Last played {player.days_since_last_battle} days ago

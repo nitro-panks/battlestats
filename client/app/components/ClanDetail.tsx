@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
@@ -40,14 +40,55 @@ const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMem
 });
 
 const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember }) => {
+    const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const { members, loading: membersLoading, error: membersError } = useClanMembers(clan.clan_id);
+
+    useEffect(() => {
+        if (shareState === 'idle') {
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setShareState('idle');
+        }, 1800);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [shareState]);
+
+    const handleShare = async () => {
+        try {
+            await navigator.clipboard.writeText(window.location.href);
+            setShareState('copied');
+        } catch (error) {
+            console.error('Failed to copy clan URL:', error);
+            setShareState('failed');
+        }
+    };
 
     return (
         <div className="bg-white p-6">
             <div className="mb-3 pb-3">
-                <h1 className="text-3xl font-semibold tracking-tight text-gray-900">
-                    [{clan.tag}] {clan.name}
-                </h1>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <h1 className="text-3xl font-semibold tracking-tight text-gray-900">
+                        [{clan.tag}] {clan.name}
+                    </h1>
+                    <div className="flex items-center gap-2 self-start">
+                        <button
+                            type="button"
+                            onClick={handleShare}
+                            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                            aria-label="Copy shareable clan URL"
+                        >
+                            Share
+                        </button>
+                        {shareState === 'copied' ? (
+                            <span className="text-xs font-medium text-[#2171b5]">Copied</span>
+                        ) : null}
+                        {shareState === 'failed' ? (
+                            <span className="text-xs font-medium text-[#b91c1c]">Copy failed</span>
+                        ) : null}
+                    </div>
+                </div>
                 <p className="mt-1 text-sm text-gray-500">
                     {clan.members_count} members
                 </p>

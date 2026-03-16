@@ -12,7 +12,7 @@ LANDING_CACHE_TTL = 60
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v3'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
 LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v4'
-LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v9:namespace'
+LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v10:namespace'
 LANDING_CLAN_FEATURED_COUNT = 40
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_PLAYER_LIMIT = 40
@@ -76,7 +76,7 @@ def _bump_landing_players_cache_namespace() -> int:
 
 def landing_player_cache_key(mode: str, limit: int) -> str:
     namespace = _get_landing_players_cache_namespace()
-    return f'landing:players:v9:n{namespace}:{mode}:{limit}'
+    return f'landing:players:v10:n{namespace}:{mode}:{limit}'
 
 
 def normalize_landing_player_mode(mode: str | None) -> str:
@@ -226,24 +226,32 @@ def _build_best_landing_players(limit: int) -> list[dict]:
         Player.objects.exclude(name='').filter(
             is_hidden=False,
             days_since_last_battle__lte=180,
-            pvp_battles__gt=LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES,
+            pvp_battles__gt=LANDING_PLAYER_BEST_MIN_PVP_BATTLES,
         ).exclude(
             last_battle_date__isnull=True
         ).values(
             'name', 'player_id', 'pvp_ratio', 'is_hidden', 'days_since_last_battle', 'total_battles', 'pvp_battles', 'battles_json', 'ranked_json'
-        ).order_by(*_player_score_ordering('last_battle_date'))[:LANDING_PLAYER_BEST_CANDIDATE_LIMIT]
+        ).order_by(
+            F('pvp_ratio').desc(nulls_last=True),
+            F('last_battle_date').desc(nulls_last=True),
+            'name',
+        )[:LANDING_PLAYER_BEST_CANDIDATE_LIMIT]
     )
     rows = _serialize_landing_player_rows(candidate_rows)
     rows = [
         {
             **row,
-            'pvp_ratio': row.get('high_tier_pvp_ratio') if row.get('high_tier_pvp_ratio') is not None else row.get('pvp_ratio'),
+            'pvp_ratio': (
+                row.get('high_tier_pvp_ratio')
+                if (row.get('high_tier_pvp_battles') or 0) > LANDING_PLAYER_BEST_MIN_PVP_BATTLES and row.get('high_tier_pvp_ratio') is not None
+                else row.get('pvp_ratio')
+            ),
         }
         for row in rows
-        if (row.get('high_tier_pvp_battles') or 0) > LANDING_PLAYER_BEST_MIN_PVP_BATTLES
+        if (row.get('pvp_battles') or 0) > LANDING_PLAYER_BEST_MIN_PVP_BATTLES
     ]
     rows.sort(key=lambda row: (
-        -(row.get('high_tier_pvp_ratio') if row.get('high_tier_pvp_ratio')
+        -(row.get('pvp_ratio') if row.get('pvp_ratio')
           is not None else float('-inf')),
         row.get('name') or '',
     ))

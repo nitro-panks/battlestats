@@ -32,6 +32,12 @@ The client now supports route-based detail views:
 
 Shared helpers for those URLs live in `app/lib/entityRoutes.ts`. Shared player and clan TypeScript models live in `app/components/entityTypes.ts`.
 
+The header search box only mirrors explicit search query usage. Visiting a player route directly no longer injects that player name into the global search input.
+
+Both routed detail headers now include a `Share` button that copies the current player or clan URL.
+
+Hidden accounts now use a shared mask icon treatment across suggestions, landing lists, explorer rows, clan members, and player detail headers.
+
 ## Player Detail Notes
 
 The player detail surface is intentionally split across two columns.
@@ -40,6 +46,23 @@ The player detail surface is intentionally split across two columns.
 - The right column focuses on broader comparison views: summary cards, top ships, ranked sections, tier-vs-type profile, and the ship-type chart.
 
 Recent UI tightening also reduced the badge-table body font size, simplified the efficiency summary cards, added inline badge totals in the section header, and limited the clan battle seasons table viewport to five visible rows before scroll.
+
+The clan activity chart render path was also narrowed so icon-only hydration updates do not trigger full D3 redraws. That removes the flicker that previously appeared while ranked or clan-battle badges were hydrating in the background.
+
+The landing-page `Best` active-player mode is now resilient to sparse high-tier history. When a player has a strong recent overall PvP sample but not enough high-tier battle history, the landing payload falls back to overall PvP win rate instead of excluding the player entirely.
+
+## Testing
+
+The client now has a small Jest + React Testing Library regression layer.
+
+Run it with:
+
+```bash
+npm test -- --runInBand
+npm run test:ci
+```
+
+Current coverage is intentionally focused on route loaders, route helpers, header search behavior, compact efficiency badge rendering/sorting, and clan-chart redraw signatures.
 
 ## Font Awesome
 

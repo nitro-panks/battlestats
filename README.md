@@ -179,6 +179,16 @@ the client now supports direct detail routes for both players and clans:
 
 the landing-page search box, clan-member links, and clan selection controls now navigate through those routes instead of relying on in-page-only state. this makes player and clan detail pages linkable and reload-safe.
 
+the header search input now only reflects explicit `q` query usage. simply navigating to a player detail route no longer backfills the viewed player name into the global search box.
+
+player and clan detail headers now also expose a `Share` action that copies the current route URL, so the route-based pages are easy to hand off without manual URL copying.
+
+hidden accounts are now signaled consistently with a mask icon across search suggestions, landing-player rows, clan member rows, explorer rows, and player detail headers.
+
+the clan activity SVG now ignores icon-only async member hydration changes when deciding whether to redraw, which removes the visible flicker that previously showed up on both clan detail and player detail pages.
+
+the landing-page `Best` active-player mode now falls back to overall PvP win rate when high-tier history is sparse, instead of collapsing the list to a near-empty result set.
+
 ### player detail layout
 
 the player detail page is now split so the left column carries the clan-specific and badge summary context first:
@@ -225,6 +235,15 @@ this command:
 - runs the Next.js production build in the Dockerized client environment
 - warms the clan-battle smoke fixture cache for the verified Naumachia test clan
 - runs the API smoke suite
+
+for focused frontend regression coverage during local UI work, the client now also has a Jest + React Testing Library harness:
+
+```bash
+cd client && npm test -- --runInBand
+cd client && npm run test:ci
+```
+
+the current targeted client coverage includes route loaders, route helper utilities, header search behavior, compact efficiency badge rendering/sorting, and clan-chart redraw signatures.
 
 if the script is not executable in your shell, run:
 

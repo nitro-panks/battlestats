@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import HiddenAccountIcon from './HiddenAccountIcon';
 
 interface PlayerExplorerProps {
     onSelectMember: (memberName: string) => void;
@@ -233,13 +234,11 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                                     <button
                                         type="button"
                                         onClick={() => onSelectMember(row.name)}
-                                        className="text-left font-semibold underline-offset-2 hover:underline"
+                                        className="inline-flex items-center gap-1 text-left font-semibold underline-offset-2 hover:underline"
                                     >
                                         {row.name}
+                                        {row.is_hidden ? <HiddenAccountIcon /> : null}
                                     </button>
-                                    {row.is_hidden ? (
-                                        <p className="mt-1 text-xs uppercase tracking-wide text-[#6baed6]">Hidden</p>
-                                    ) : null}
                                 </td>
                                 <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.player_score)}</td>
                                 <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.pvp_battles)}</td>

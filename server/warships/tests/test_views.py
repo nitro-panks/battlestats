@@ -1085,17 +1085,25 @@ class ApiContractTests(TestCase):
         self.assertNotEqual(payload[0]["name"], "AlphaCaptain")
 
     def test_landing_players_excludes_hidden_players(self):
+        cache.clear()
+        today = timezone.now().date()
         Player.objects.create(
             name="HiddenLandingPlayer",
             player_id=4242,
             is_hidden=True,
-            last_battle_date=timezone.now().date(),
+            pvp_ratio=61.5,
+            pvp_battles=900,
+            days_since_last_battle=2,
+            last_battle_date=today,
         )
         Player.objects.create(
             name="VisibleLandingPlayer",
             player_id=4243,
             is_hidden=False,
-            last_battle_date=timezone.now().date(),
+            pvp_ratio=58.2,
+            pvp_battles=950,
+            days_since_last_battle=1,
+            last_battle_date=today,
         )
 
         response = self.client.get("/api/landing/players/")
@@ -1329,6 +1337,104 @@ class ApiContractTests(TestCase):
             item for item in payload if item["name"] == "LandingTierFilter")
         self.assertEqual(row["high_tier_pvp_battles"], 1800)
         self.assertEqual(row["high_tier_pvp_ratio"], 53.33)
+
+    def test_landing_players_best_mode_falls_back_to_overall_wr_when_high_tier_history_is_missing(self):
+        cache.clear()
+        today = timezone.now().date()
+        Player.objects.create(
+            name="LandingOverallFallback",
+            player_id=4314,
+            is_hidden=False,
+            pvp_ratio=68.4,
+            pvp_battles=4100,
+            last_battle_date=today - timedelta(days=2),
+            battles_json=None,
+        )
+
+        response = self.client.get("/api/landing/players/?mode=best&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        row = next(
+            item for item in payload if item["name"] == "LandingOverallFallback")
+        self.assertEqual(row["pvp_ratio"], 68.4)
+        self.assertEqual(row["high_tier_pvp_battles"], 0)
+        self.assertIsNone(row["high_tier_pvp_ratio"])
+
+    def test_landing_players_best_mode_returns_all_eligible_players_up_to_limit(self):
+        cache.clear()
+        today = timezone.now().date()
+
+        eligible_names = []
+        for index in range(5):
+            name = f"LandingBestCount{index}"
+            eligible_names.append(name)
+            Player.objects.create(
+                name=name,
+                player_id=4320 + index,
+                is_hidden=False,
+                pvp_ratio=60.0 + index,
+                pvp_battles=3000 + (index * 100),
+                days_since_last_battle=10 + index,
+                last_battle_date=today - timedelta(days=10 + index),
+                battles_json=None,
+            )
+
+        Player.objects.create(
+            name="LandingBestTooSmall",
+            player_id=4330,
+            is_hidden=False,
+            pvp_ratio=72.0,
+            pvp_battles=2200,
+            days_since_last_battle=4,
+            last_battle_date=today - timedelta(days=4),
+        )
+        Player.objects.create(
+            name="LandingBestHidden",
+            player_id=4331,
+            is_hidden=True,
+            pvp_ratio=75.0,
+            pvp_battles=4800,
+            days_since_last_battle=3,
+            last_battle_date=today - timedelta(days=3),
+        )
+        Player.objects.create(
+            name="LandingBestInactive",
+            player_id=4332,
+            is_hidden=False,
+            pvp_ratio=77.0,
+            pvp_battles=4900,
+            days_since_last_battle=240,
+            last_battle_date=today - timedelta(days=240),
+        )
+
+        response = self.client.get("/api/landing/players/?mode=best&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 5)
+        self.assertEqual({row["name"] for row in payload}, set(eligible_names))
+
+    def test_landing_players_best_mode_caps_results_to_requested_limit(self):
+        cache.clear()
+        today = timezone.now().date()
+
+        for index in range(45):
+            Player.objects.create(
+                name=f"LandingBestLimit{index:02d}",
+                player_id=4340 + index,
+                is_hidden=False,
+                pvp_ratio=70.0 - (index * 0.1),
+                pvp_battles=4000 + index,
+                days_since_last_battle=5,
+                last_battle_date=today - timedelta(days=(index % 7)),
+                battles_json=None,
+            )
+
+        response = self.client.get("/api/landing/players/?mode=best&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 40)
 
     def test_landing_players_only_include_recently_active_players(self):
         cache.clear()

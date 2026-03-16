@@ -34,6 +34,28 @@ const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T
 };
 
 
+const normalizeClanRoutePayload = (data: Partial<LandingClan> | null | undefined, fallbackClanId: number): LandingClan | null => {
+    if (!data || typeof data !== 'object') {
+        return null;
+    }
+
+    const clanId = Number(data.clan_id || fallbackClanId);
+    if (!Number.isInteger(clanId) || clanId <= 0) {
+        return null;
+    }
+
+    return {
+        clan_id: clanId,
+        name: typeof data.name === 'string' ? data.name : 'Clan',
+        tag: typeof data.tag === 'string' ? data.tag : '',
+        members_count: Number(data.members_count || 0),
+        clan_wr: data.clan_wr ?? null,
+        total_battles: data.total_battles ?? null,
+        active_members: data.active_members ?? null,
+    };
+};
+
+
 interface ClanRouteViewProps {
     clanSlug: string;
 }
@@ -61,10 +83,12 @@ const ClanRouteView: React.FC<ClanRouteViewProps> = ({ clanSlug }) => {
             setError('');
 
             try {
-                const response = await fetch(`http://localhost:8888/api/clans/${clanId}/`);
-                const data = await readJsonOrThrow<LandingClan>(response, `Clan ${clanId}`);
+                const response = await fetch(`http://localhost:8888/api/clan/${clanId}/`);
+                const data = await readJsonOrThrow<Partial<LandingClan>>(response, `Clan ${clanId}`);
+                const normalizedClan = normalizeClanRoutePayload(data, clanId);
                 if (!cancelled) {
-                    setClanData(data);
+                    setClanData(normalizedClan);
+                    setError(normalizedClan ? '' : 'Clan not found.');
                 }
             } catch (fetchError) {
                 console.error('Error loading clan route:', fetchError);

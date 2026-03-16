@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import * as d3 from 'd3';
 import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
+import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
 
 interface ClanProps {
     clanId: number;
@@ -84,8 +85,6 @@ const selectClanColorByWR = (winRatio: number) => {
     return '#a50f15';
 };
 
-const normalizeName = (value: string): string => value.trim().toLowerCase();
-
 const buildActivitySegments = (points: ClanPlotPoint[]): ActivitySegment[] => {
     const total = points.length;
 
@@ -106,7 +105,7 @@ const drawClanPlot = (
     highlightedPlayerName: ClanProps['highlightedPlayerName'],
     svgWidth: number,
     svgHeight: number,
-    membersData: ClanMemberData[],
+    chartMembers: ClanChartMemberActivity[],
 ) => {
     const margin = { top: 64, right: 16, bottom: 32, left: 38 };
     const width = svgWidth - margin.left - margin.right;
@@ -186,13 +185,13 @@ const drawClanPlot = (
                 return;
             }
 
-            const membersByName = new Map<string, ClanMemberData>();
-            membersData.forEach((member) => {
-                membersByName.set(normalizeName(member.name), member);
+            const membersByName = new Map<string, ClanChartMemberActivity>();
+            chartMembers.forEach((member) => {
+                membersByName.set(member.normalizedName, member);
             });
 
             const data: ClanPlotPoint[] = plotData.map((datum) => {
-                const member = membersByName.get(normalizeName(datum.player_name));
+                const member = membersByName.get(datum.player_name.trim().toLowerCase());
                 return {
                     ...datum,
                     activity_bucket: member?.activity_bucket || 'unknown',
@@ -436,16 +435,41 @@ const drawClanPlot = (
         });
 };
 
-const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [] }) => {
+const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [] }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const onSelectMemberRef = useRef(onSelectMember);
+    const chartMemberActivitySignature = useMemo(() => buildClanChartMemberActivitySignature(membersData), [membersData]);
+    const chartMemberActivity = useMemo(() => buildClanChartMemberActivity(membersData), [chartMemberActivitySignature]);
+
+    useEffect(() => {
+        onSelectMemberRef.current = onSelectMember;
+    }, [onSelectMember]);
 
     useEffect(() => {
         if (containerRef.current) {
-            drawClanPlot(containerRef.current, clanId, onSelectMember, highlightedPlayerName, svgWidth, svgHeight, membersData);
+            drawClanPlot(
+                containerRef.current,
+                clanId,
+                (memberName) => onSelectMemberRef.current?.(memberName),
+                highlightedPlayerName,
+                svgWidth,
+                svgHeight,
+                chartMemberActivity,
+            );
         }
-    }, [clanId, membersData, onSelectMember, highlightedPlayerName, svgWidth, svgHeight]);
+    }, [clanId, chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, svgWidth, svgHeight]);
 
     return <div ref={containerRef}></div>;
 };
+
+const areClanSvgPropsEqual = (previousProps: ClanProps, nextProps: ClanProps): boolean => {
+    return previousProps.clanId === nextProps.clanId
+        && previousProps.highlightedPlayerName === nextProps.highlightedPlayerName
+        && (previousProps.svgWidth ?? 320) === (nextProps.svgWidth ?? 320)
+        && (previousProps.svgHeight ?? 280) === (nextProps.svgHeight ?? 280)
+        && buildClanChartMemberActivitySignature(previousProps.membersData ?? []) === buildClanChartMemberActivitySignature(nextProps.membersData ?? []);
+};
+
+const ClanSVG = React.memo(ClanSVGComponent, areClanSvgPropsEqual);
 
 export default ClanSVG;

@@ -9,6 +9,7 @@ import { resilientDynamicImport } from './resilientDynamicImport';
 import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
 import type { LandingClan, PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
+import HiddenAccountIcon from './HiddenAccountIcon';
 
 interface LandingPlayer {
     name: string;
@@ -172,6 +173,7 @@ const PlayerNameGrid: React.FC<{
                         >
                             {label}
                         </span>
+                        <HiddenAccountIcon />
                         {iconRow}
                     </span>
                 );

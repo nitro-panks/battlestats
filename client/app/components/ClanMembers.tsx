@@ -3,6 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBed, faCrown, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
 import { getRankedLeagueColor, getRankedLeagueTooltip } from './rankedLeague';
 import type { ClanMemberData } from './clanMembersShared';
+import HiddenAccountIcon from './HiddenAccountIcon';
 
 interface ClanMembersProps {
     members: ClanMemberData[];
@@ -98,6 +99,7 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                                 >
                                     <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
                                     {member.name}
+                                    <HiddenAccountIcon className="text-[11px] text-[#6baed6]" />
                                     {member.is_leader && <LeaderCrown />}
                                     {member.is_pve_player && <PveRobot />}
                                     {member.is_sleepy_player && <SleepyBed />}
