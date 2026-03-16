@@ -2,21 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBed, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import ClanDetail from './ClanDetail';
 import PlayerDetail from './PlayerDetail';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
-
-interface LandingClan {
-    clan_id: number;
-    name: string;
-    tag: string;
-    members_count: number;
-    clan_wr: number | null;
-    total_battles: number | null;
-    active_members?: number | null;
-}
+import type { LandingClan, PlayerData } from './entityTypes';
+import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 
 interface LandingPlayer {
     name: string;
@@ -43,54 +35,6 @@ const wrColor = (r: number | null): string => {
     if (r >= 50) return '#fed976';
     if (r >= 45) return '#fd8d3c';
     return '#a50f15';
-};
-
-interface PlayerData {
-    id: number;
-    name: string;
-    player_id: number;
-    kill_ratio: number | null;
-    player_score: number | null;
-    total_battles: number;
-    pvp_battles: number;
-    pvp_wins: number;
-    pvp_losses: number;
-    pvp_ratio: number;
-    pvp_survival_rate: number;
-    wins_survival_rate: number | null;
-    creation_date: string;
-    days_since_last_battle: number;
-    last_battle_date: string;
-    recent_games: object;
-    is_hidden: boolean;
-    stats_updated_at: string;
-    last_fetch: string;
-    last_lookup: string | null;
-    clan: number;
-    clan_name: string;
-    clan_tag: string | null;
-    clan_id: number;
-    verdict: string | null;
-    randoms_json?: Array<{
-        ship_name?: string | null;
-        ship_chart_name?: string | null;
-        ship_type?: string | null;
-        ship_tier?: number | null;
-        pvp_battles?: number | null;
-        wins?: number | null;
-        win_ratio?: number | null;
-    }> | null;
-    efficiency_json?: Array<{
-        ship_id?: number | null;
-        top_grade_class?: number | null;
-        top_grade_label?: string | null;
-        badge_label?: string | null;
-        ship_name?: string | null;
-        ship_chart_name?: string | null;
-        ship_type?: string | null;
-        ship_tier?: number | null;
-        nation?: string | null;
-    }> | null;
 }
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -299,9 +243,9 @@ const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T
 };
 
 const PlayerSearch: React.FC = () => {
+    const router = useRouter();
     const searchParams = useSearchParams();
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
-    const [selectedClan, setSelectedClan] = useState<LandingClan | null>(null);
     const [error, setError] = useState('');
     const [isLoadingPlayer, setIsLoadingPlayer] = useState(false);
     const [clans, setClans] = useState<LandingClan[]>([]);
@@ -346,7 +290,6 @@ const PlayerSearch: React.FC = () => {
 
     const handleBack = useCallback(() => {
         setPlayerData(null);
-        setSelectedClan(null);
         setError('');
         setIsLoadingPlayer(false);
         clanHydrationAttemptsRef.current = {};
@@ -384,7 +327,6 @@ const PlayerSearch: React.FC = () => {
         try {
             const data = await fetchPlayerByName(trimmedPlayerName);
             setPlayerData(data);
-            setSelectedClan(null);
         } catch (err) {
             setError('Player not found');
             setPlayerData(null);
@@ -394,41 +336,11 @@ const PlayerSearch: React.FC = () => {
     }, []);
 
     const handleSelectClan = useCallback((clan: LandingClan) => {
-        setSelectedClan(clan);
-        setPlayerData(null);
-        setError('');
-    }, []);
+        router.push(buildClanPath(clan.clan_id, clan.name || clan.tag));
+    }, [router]);
 
     const handleSelectClanById = async (clanId: number, clanName: string) => {
-        const existingClan = clans.find((clan) => clan.clan_id === clanId);
-        if (existingClan) {
-            handleSelectClan(existingClan);
-            return;
-        }
-
-        try {
-            const response = await fetch(`http://localhost:8888/api/clans/${clanId}/`);
-            const data = await readJsonOrThrow<Record<string, unknown>>(response, `Clan ${clanId}`);
-            const hydratedClan: LandingClan = {
-                clan_id: Number(data.clan_id || clanId),
-                name: String(data.name || clanName),
-                tag: String(data.tag || ''),
-                members_count: Number(data.members_count || 0),
-                clan_wr: typeof data.clan_wr === 'number' ? data.clan_wr : null,
-                total_battles: typeof data.total_battles === 'number' ? data.total_battles : null,
-            };
-            handleSelectClan(hydratedClan);
-        } catch (_err) {
-            // Fall back to a minimal clan model so navigation still works.
-            handleSelectClan({
-                clan_id: clanId,
-                name: clanName || 'Clan',
-                tag: '',
-                members_count: 0,
-                clan_wr: null,
-                total_battles: null,
-            });
-        }
+        router.push(buildClanPath(clanId, clanName));
     };
 
     const visibleLandingClans = useMemo(() => {
@@ -464,8 +376,8 @@ const PlayerSearch: React.FC = () => {
     }, [clanMode, clans]);
 
     const handleSelectMember = useCallback(async (memberName: string) => {
-        await executePlayerSearch(memberName);
-    }, [executePlayerSearch]);
+        router.push(buildPlayerPath(memberName));
+    }, [router]);
 
     useEffect(() => {
         const query = (searchParams.get('q') || '').trim();
@@ -549,8 +461,6 @@ const PlayerSearch: React.FC = () => {
                     onSelectClan={handleSelectClanById}
                     isLoading={isLoadingPlayer}
                 />
-            ) : selectedClan ? (
-                <ClanDetail clan={selectedClan} onBack={handleBack} onSelectMember={handleSelectMember} />
             ) : (
                 <div>
                     {error && <p className="text-red-600">{error}</p>}

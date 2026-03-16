@@ -2,6 +2,7 @@
 
 import React, { startTransition, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { buildPlayerPath } from "../lib/entityRoutes";
 
 interface HeaderSearchSuggestion {
     name: string;
@@ -48,16 +49,10 @@ const HeaderSearch: React.FC = () => {
         setSuggestions([]);
         setHighlightedSuggestionIndex(-1);
 
-        const targetPath = `/?q=${encodeURIComponent(trimmedQuery)}`;
+        const targetPath = buildPlayerPath(trimmedQuery);
         startTransition(() => {
             router.push(targetPath);
         });
-
-        if (pathname === "/") {
-            window.dispatchEvent(new CustomEvent("navSearch", {
-                detail: { query: trimmedQuery },
-            }));
-        }
     };
 
     const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -68,11 +63,21 @@ const HeaderSearch: React.FC = () => {
     useEffect(() => {
         const currentQuery = (searchParams.get("q") || "").trim();
         if (!currentQuery) {
+            if (pathname.startsWith('/player/')) {
+                const segment = pathname.split('/')[2] || '';
+                setQuery(decodeURIComponent(segment));
+                return;
+            }
+
+            if (pathname === '/') {
+                setQuery('');
+            }
+
             return;
         }
 
         setQuery(currentQuery);
-    }, [searchParams]);
+    }, [pathname, searchParams]);
 
     useEffect(() => {
         return () => {

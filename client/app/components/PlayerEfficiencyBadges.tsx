@@ -161,10 +161,14 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
     const rows = normalizeBadgeRows(efficiencyRows);
     const rowsWithMetadata = rows.filter((row) => row.shipType || row.shipTier != null);
-    const expertShips = rows.filter((row) => row.badgeClass === 1).length;
-    const gradeIPlusShips = rows.filter((row) => row.badgeClass <= 2).length;
     const highestBadgeClass = rows[0]?.badgeClass || null;
     const highestBadgeLabel = highestBadgeClass ? (rows[0]?.badgeLabel || BADGE_LABELS[highestBadgeClass]) : '—';
+    const badgeCounts = {
+        1: rows.filter((row) => row.badgeClass === 1).length,
+        2: rows.filter((row) => row.badgeClass === 2).length,
+        3: rows.filter((row) => row.badgeClass === 3).length,
+        4: rows.filter((row) => row.badgeClass === 4).length,
+    };
 
     const classScores = new Map<string, number>();
     const tierScores = new Map<string, number>();
@@ -218,11 +222,47 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
 
     return (
         <div>
-            <SectionHeadingWithTooltip
-                title="Efficiency Badges"
-                description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. This section adds a peak-performance lens to the broader ship, tier, and class views by surfacing which ships have earned the strongest badge classes."
-                className="mb-3"
-            />
+            <div className="mb-3 flex items-center gap-3">
+                <SectionHeadingWithTooltip
+                    title="Efficiency Badges"
+                    description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. This section adds a peak-performance lens to the broader ship, tier, and class views by surfacing which ships have earned the strongest badge classes."
+                />
+                {rows.length > 0 ? (
+                    <div className="ml-auto flex items-center gap-1 text-[11px] font-semibold">
+                        <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 ${BADGE_CHIP_CLASSNAMES[1]}`}
+                            title={`Expert badges: ${badgeCounts[1]}`}
+                            aria-label={`Expert badges ${badgeCounts[1]}`}
+                        >
+                            {badgeCounts[1]}
+                        </span>
+                        <span className="text-[#9ca3af]">-</span>
+                        <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 ${BADGE_CHIP_CLASSNAMES[2]}`}
+                            title={`Grade I badges: ${badgeCounts[2]}`}
+                            aria-label={`Grade I badges ${badgeCounts[2]}`}
+                        >
+                            {badgeCounts[2]}
+                        </span>
+                        <span className="text-[#9ca3af]">-</span>
+                        <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 ${BADGE_CHIP_CLASSNAMES[3]}`}
+                            title={`Grade II badges: ${badgeCounts[3]}`}
+                            aria-label={`Grade II badges ${badgeCounts[3]}`}
+                        >
+                            {badgeCounts[3]}
+                        </span>
+                        <span className="text-[#9ca3af]">-</span>
+                        <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 ${BADGE_CHIP_CLASSNAMES[4]}`}
+                            title={`Grade III badges: ${badgeCounts[4]}`}
+                            aria-label={`Grade III badges ${badgeCounts[4]}`}
+                        >
+                            {badgeCounts[4]}
+                        </span>
+                    </div>
+                ) : null}
+            </div>
             {rows.length === 0 ? (
                 <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3 text-sm text-[#4292c6]">
                     No Efficiency Badge data is stored for this player yet, or no qualifying ships have earned a badge.
@@ -233,21 +273,18 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                         <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
                             <p className="text-xs uppercase tracking-wide text-[#4292c6]">Highest Badge</p>
                             <p className="mt-2 text-lg font-semibold text-[#084594]">{highestBadgeLabel}</p>
-                            <p className="mt-1 text-xs text-[#6baed6]">{expertShips} E ships, {gradeIPlusShips} I+ ships</p>
                         </div>
                         <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
                             <p className="text-xs uppercase tracking-wide text-[#4292c6]">Strongest Class</p>
                             <p className="mt-2 text-lg font-semibold text-[#084594]">{bestClassByScore}</p>
-                            <p className="mt-1 text-xs text-[#6baed6]">Weighted from badge strength, not ship volume</p>
                         </div>
                         <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
                             <p className="text-xs uppercase tracking-wide text-[#4292c6]">Strongest Tier Band</p>
                             <p className="mt-2 text-lg font-semibold text-[#084594]">{bestTierBandByScore}</p>
-                            <p className="mt-1 text-xs text-[#6baed6]">Built from rows with usable tier metadata</p>
                         </div>
                     </div>
                     <div className="mt-4 max-h-[332px] overflow-auto rounded-md border border-[#dbe9f6] bg-white">
-                        <table className="min-w-full divide-y divide-[#dbe9f6] text-sm">
+                        <table className="min-w-full divide-y divide-[#dbe9f6]">
                             <thead className="sticky top-0 bg-[#f7fbff] text-[#2171b5]">
                                 <tr>
                                     <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide">
@@ -264,14 +301,14 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-[#eff3ff]">
+                            <tbody className="divide-y divide-[#eff3ff] text-xs">
                                 {sortedRows.map((row) => (
                                     <tr key={`${row.shipId}-${row.badgeClass}`} className="align-top">
                                         <td className="px-3 py-3 text-[#084594]">
                                             <div className="font-medium">{row.shipName}</div>
                                         </td>
                                         <td className="px-3 py-3">
-                                            <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${BADGE_CHIP_CLASSNAMES[row.badgeClass] || BADGE_CHIP_CLASSNAMES[4]}`}>
+                                            <span className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${BADGE_CHIP_CLASSNAMES[row.badgeClass] || BADGE_CHIP_CLASSNAMES[4]}`}>
                                                 <span style={isRomanBadgeLabel(row.badgeLabel) ? { fontFamily: 'Georgia, Times New Roman, serif' } : undefined}>
                                                     {row.badgeLabel}
                                                 </span>

@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 
 interface TypeSVGProps {
     playerId: number;
+    svgHeight?: number;
 }
 
 interface TypeRow {
@@ -33,24 +34,30 @@ const selectTypeColorByWr = (winRatio: number): string => {
     return '#a50f15';
 };
 
-const drawTypePlot = (playerId: number) => {
-    const container = document.getElementById('type_svg_container');
-    if (!container) {
-        return;
-    }
+const drawTypePlot = (container: HTMLDivElement, playerId: number, svgHeight: number) => {
+    const containerWidth = Math.max(container.clientWidth || 0, 280);
+    const compact = containerWidth < 420;
 
     d3.select(container).selectAll('*').remove();
 
-    const totalSvgWidth = Math.max(container.clientWidth || 0, 680);
-    const totalSvgHeight = 210;
-    const margin = { top: 28, right: 96, bottom: 48, left: 68 };
+    const totalSvgWidth = containerWidth;
+    const totalSvgHeight = compact ? Math.min(svgHeight, 192) : svgHeight;
+    const margin = compact
+        ? { top: 28, right: 14, bottom: 42, left: 62 }
+        : { top: 28, right: 96, bottom: 48, left: 68 };
     const width = totalSvgWidth - margin.left - margin.right;
     const height = totalSvgHeight - margin.top - margin.bottom;
+    const detailFontSize = compact ? '9px' : '10px';
+    const detailTitleSize = compact ? '10px' : '11px';
+    const axisFontSize = compact ? '9px' : '10px';
 
     const svgRoot = d3.select(container)
         .append('svg')
         .attr('width', totalSvgWidth)
-        .attr('height', totalSvgHeight);
+        .attr('height', totalSvgHeight)
+        .attr('viewBox', `0 0 ${totalSvgWidth} ${totalSvgHeight}`)
+        .style('display', 'block')
+        .style('max-width', '100%');
 
     const svg = svgRoot
         .append('g')
@@ -89,26 +96,26 @@ const drawTypePlot = (playerId: number) => {
                 .style('color', '#64748b')
                 .call(d3.axisBottom(x).ticks(6).tickFormat((value: number) => d3.format(',')(Number(value))).tickSizeOuter(0))
                 .selectAll('text')
-                .style('font-size', '10px');
+                .style('font-size', axisFontSize);
 
             svg.append('g')
                 .style('color', '#475569')
                 .call(d3.axisLeft(y).tickSize(0).tickPadding(6))
                 .selectAll('text')
-                .style('font-size', '10px')
+                .style('font-size', axisFontSize)
                 .style('font-weight', '500');
 
             svg.selectAll('.domain').style('stroke', '#cbd5e1');
 
             svg.append('text')
                 .attr('x', width)
-                .attr('y', height + 38)
+                .attr('y', height + (compact ? 32 : 38))
                 .attr('text-anchor', 'end')
-                .style('font-size', '10px')
+                .style('font-size', axisFontSize)
                 .style('fill', '#64748b')
                 .text('Random battles');
 
-            const detailGroup = svgRoot.append('g').attr('transform', `translate(${margin.left + width - 6}, 16)`);
+            const detailGroup = svgRoot.append('g').attr('transform', `translate(${margin.left + width - 4}, 12)`);
 
             const renderDetails = (datum: TypeRow | null) => {
                 detailGroup.selectAll('*').remove();
@@ -120,46 +127,47 @@ const drawTypePlot = (playerId: number) => {
                     .attr('x', 0)
                     .attr('y', 0)
                     .attr('text-anchor', 'end')
-                    .attr('dominant-baseline', 'hanging');
+                    .attr('dominant-baseline', 'hanging')
+                    .style('display', compact ? 'none' : null);
 
                 detailText.append('tspan')
-                    .style('font-size', '11px')
+                    .style('font-size', detailTitleSize)
                     .style('font-weight', '700')
                     .style('fill', '#084594')
                     .text(datum.ship_type);
 
                 detailText.append('tspan')
-                    .style('font-size', '10px')
+                    .style('font-size', detailFontSize)
                     .style('font-weight', '400')
                     .style('fill', '#94a3b8')
                     .text('  •  ');
 
                 detailText.append('tspan')
-                    .style('font-size', '10px')
+                    .style('font-size', detailFontSize)
                     .style('font-weight', '400')
                     .style('fill', '#475569')
                     .text(`${datum.pvp_battles.toLocaleString()} battles`);
 
                 detailText.append('tspan')
-                    .style('font-size', '10px')
+                    .style('font-size', detailFontSize)
                     .style('font-weight', '400')
                     .style('fill', '#94a3b8')
                     .text('  •  ');
 
                 detailText.append('tspan')
-                    .style('font-size', '10px')
+                    .style('font-size', detailFontSize)
                     .style('font-weight', '400')
                     .style('fill', '#475569')
                     .text(`${datum.wins.toLocaleString()} wins`);
 
                 detailText.append('tspan')
-                    .style('font-size', '10px')
+                    .style('font-size', detailFontSize)
                     .style('font-weight', '400')
                     .style('fill', '#94a3b8')
                     .text('  •  ');
 
                 detailText.append('tspan')
-                    .style('font-size', '10px')
+                    .style('font-size', detailFontSize)
                     .style('font-weight', '700')
                     .style('fill', '#475569')
                     .text(`${(datum.win_ratio * 100).toFixed(1)}% win rate`);
@@ -208,7 +216,7 @@ const drawTypePlot = (playerId: number) => {
                     return labelX > width - 4 ? width - 4 : labelX;
                 })
                 .attr('y', (datum: TypeRow) => (y(datum.ship_type) ?? 0) + (y.bandwidth() / 2) + 3)
-                .style('font-size', '10px')
+                .style('font-size', axisFontSize)
                 .style('fill', '#64748b')
                 .attr('text-anchor', (datum: TypeRow) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
                 .text((datum: TypeRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
@@ -220,12 +228,28 @@ const drawTypePlot = (playerId: number) => {
         });
 };
 
-const TypeSVG: React.FC<TypeSVGProps> = ({ playerId }) => {
-    useEffect(() => {
-        drawTypePlot(playerId);
-    }, [playerId]);
+const TypeSVG: React.FC<TypeSVGProps> = ({ playerId, svgHeight = 210 }) => {
+    const containerRef = useRef<HTMLDivElement | null>(null);
 
-    return <div id="type_svg_container"></div>;
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) {
+            return;
+        }
+
+        const render = () => {
+            drawTypePlot(container, playerId, svgHeight);
+        };
+
+        render();
+        window.addEventListener('resize', render);
+
+        return () => {
+            window.removeEventListener('resize', render);
+        };
+    }, [playerId, svgHeight]);
+
+    return <div ref={containerRef} className="w-full"></div>;
 };
 
 export default TypeSVG;

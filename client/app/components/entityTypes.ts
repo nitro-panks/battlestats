@@ -1,0 +1,70 @@
+import type { RankedLeagueName } from './rankedLeague';
+
+
+export interface LandingClan {
+    clan_id: number;
+    name: string;
+    tag: string;
+    members_count: number;
+    clan_wr: number | null;
+    total_battles: number | null;
+    active_members?: number | null;
+}
+
+
+export interface PlayerData {
+    id: number;
+    name: string;
+    player_id: number;
+    kill_ratio: number | null;
+    player_score: number | null;
+    total_battles: number;
+    pvp_battles: number;
+    pvp_wins: number;
+    pvp_losses: number;
+    pvp_ratio: number;
+    pvp_survival_rate: number;
+    wins_survival_rate: number | null;
+    creation_date: string;
+    days_since_last_battle: number;
+    last_battle_date: string;
+    recent_games: object;
+    is_hidden: boolean;
+    stats_updated_at: string;
+    last_fetch: string;
+    last_lookup: string | null;
+    clan: number;
+    clan_name: string;
+    clan_tag: string | null;
+    clan_id: number;
+    verdict: string | null;
+    highest_ranked_league?: RankedLeagueName | null;
+    is_clan_leader?: boolean;
+    randoms_json?: Array<{
+        ship_name?: string | null;
+        ship_chart_name?: string | null;
+        ship_type?: string | null;
+        ship_tier?: number | null;
+        pvp_battles?: number | null;
+        wins?: number | null;
+        win_ratio?: number | null;
+    }> | null;
+    efficiency_json?: Array<{
+        ship_id?: number | null;
+        top_grade_class?: number | null;
+        top_grade_label?: string | null;
+        badge_label?: string | null;
+        ship_name?: string | null;
+        ship_chart_name?: string | null;
+        ship_type?: string | null;
+        ship_tier?: number | null;
+        nation?: string | null;
+    }> | null;
+    ranked_json?: Array<{
+        total_battles?: number | null;
+        total_wins?: number | null;
+        win_rate?: number | null;
+        highest_league?: number | null;
+        highest_league_name?: RankedLeagueName | null;
+    }> | null;
+}

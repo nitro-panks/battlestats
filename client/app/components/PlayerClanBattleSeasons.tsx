@@ -19,6 +19,10 @@ interface PlayerClanBattleSeasonsProps {
     onSummaryChange?: (summary: PlayerClanBattleSummary | null) => void;
 }
 
+const CLAN_BATTLE_TABLE_VISIBLE_ROWS = 5;
+const CLAN_BATTLE_TABLE_HEADER_HEIGHT_REM = 2.25;
+const CLAN_BATTLE_TABLE_ROW_HEIGHT_REM = 3.25;
+
 export interface PlayerClanBattleSummary {
     seasonsPlayed: number;
     totalBattles: number;
@@ -136,7 +140,13 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                         </div>
                     </div>
 
-                    <div className="mt-3 max-h-[24rem] overflow-y-auto overflow-x-auto rounded-sm">
+                    <div className="mt-3 overflow-x-auto rounded-sm">
+                        <div
+                            className="overflow-y-auto"
+                            style={{
+                                maxHeight: `calc(${CLAN_BATTLE_TABLE_HEADER_HEIGHT_REM}rem + (${CLAN_BATTLE_TABLE_VISIBLE_ROWS} * ${CLAN_BATTLE_TABLE_ROW_HEIGHT_REM}rem))`,
+                            }}
+                        >
                         <table className="min-w-full border-collapse text-xs tabular-nums text-gray-700">
                             <thead>
                                 <tr className="border-b border-gray-200 bg-white uppercase tracking-[0.12em] text-gray-500">
@@ -162,6 +172,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </>
             )}

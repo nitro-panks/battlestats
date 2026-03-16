@@ -113,12 +113,12 @@ const RankedWRBattlesHeatmapSVG = dynamic(() => resilientDynamicImport(() => imp
 
 const TierSVG = dynamic(() => resilientDynamicImport(() => import('./TierSVG'), 'PlayerDetail-TierSVG'), {
     ssr: false,
-    loading: () => <LoadingPanel label="Loading tier chart..." minHeight={334} />,
+    loading: () => <LoadingPanel label="Loading tier chart..." minHeight={300} />,
 });
 
 const TypeSVG = dynamic(() => resilientDynamicImport(() => import('./TypeSVG'), 'PlayerDetail-TypeSVG'), {
     ssr: false,
-    loading: () => <LoadingPanel label="Loading ship type chart..." minHeight={210} />,
+    loading: () => <LoadingPanel label="Loading ship type chart..." minHeight={192} />,
 });
 
 const TierTypeHeatmapSVG = dynamic(() => resilientDynamicImport(() => import('./TierTypeHeatmapSVG'), 'PlayerDetail-TierTypeHeatmapSVG'), {
@@ -348,6 +348,25 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     </div>
                                 </DeferredSection>
                             ) : null}
+                            {!player.is_hidden ? (
+                                <DeferredSection
+                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
+                                    minHeight={300}
+                                    placeholder={<LoadingPanel label="Preparing tier chart..." minHeight={300} />}
+                                >
+                                    <div>
+                                        <SectionHeadingWithTooltip
+                                            title="Performance by Tier"
+                                            description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
+                                            className="mb-2"
+                                        />
+                                        <TierSVG playerId={player.player_id} svgHeight={300} />
+                                    </div>
+                                </DeferredSection>
+                            ) : null}
+                            {!player.is_hidden ? (
+                                null
+                            ) : null}
                         </>
                     ) : (
                         <>
@@ -364,6 +383,25 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                         />
                                     </div>
                                 </DeferredSection>
+                            ) : null}
+                            {!player.is_hidden ? (
+                                <DeferredSection
+                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
+                                    minHeight={300}
+                                    placeholder={<LoadingPanel label="Preparing tier chart..." minHeight={300} />}
+                                >
+                                    <div>
+                                        <SectionHeadingWithTooltip
+                                            title="Performance by Tier"
+                                            description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
+                                            className="mb-2"
+                                        />
+                                        <TierSVG playerId={player.player_id} svgHeight={300} />
+                                    </div>
+                                </DeferredSection>
+                            ) : null}
+                            {!player.is_hidden ? (
+                                null
                             ) : null}
                         </>
                     )}
@@ -507,34 +545,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
                             </div>
                             <DeferredSection
-                                className="mt-8"
-                                minHeight={360}
-                                placeholder={<LoadingPanel label="Preparing tier chart..." minHeight={360} />}
-                            >
-                                <div>
-                                    <SectionHeadingWithTooltip
-                                        title="Performance by Tier"
-                                        description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
-                                        className="mb-2"
-                                    />
-                                    <TierSVG playerId={player.player_id} />
-                                </div>
-                            </DeferredSection>
-                            <DeferredSection
-                                className="mt-4"
-                                minHeight={236}
-                                placeholder={<LoadingPanel label="Preparing ship type chart..." minHeight={236} />}
-                            >
-                                <div>
-                                    <SectionHeadingWithTooltip
-                                        title="Performance by Ship Type"
-                                        description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
-                                        className="mb-2"
-                                    />
-                                    <TypeSVG playerId={player.player_id} />
-                                </div>
-                            </DeferredSection>
-                            <DeferredSection
                                 className="mt-4"
                                 minHeight={332}
                                 placeholder={<LoadingPanel label="Preparing tier vs type heatmap..." minHeight={332} />}
@@ -546,6 +556,20 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                         className="mb-2"
                                     />
                                     <TierTypeHeatmapSVG playerId={player.player_id} />
+                                </div>
+                            </DeferredSection>
+                            <DeferredSection
+                                className="mt-4"
+                                minHeight={192}
+                                placeholder={<LoadingPanel label="Preparing ship type chart..." minHeight={192} />}
+                            >
+                                <div>
+                                    <SectionHeadingWithTooltip
+                                        title="Performance by Ship Type"
+                                        description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
+                                        className="mb-2"
+                                    />
+                                    <TypeSVG playerId={player.player_id} svgHeight={192} />
                                 </div>
                             </DeferredSection>
                         </>

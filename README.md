@@ -170,6 +170,34 @@ LANDING_WARMUP_START_DELAY_SECONDS=5
 - rabbitmq management ui: <http://localhost:15672> (default user/pass: `guest` / `guest`)
 - postgresql: `localhost:5432` (database: `battlestats`, user: `django`, password from `server/.env` -> `DB_PASSWORD`)
 
+### route-based navigation
+
+the client now supports direct detail routes for both players and clans:
+
+- player detail: `/player/<encoded-player-name>`
+- clan detail: `/clan/<clan_id>-<optional-slug>`
+
+the landing-page search box, clan-member links, and clan selection controls now navigate through those routes instead of relying on in-page-only state. this makes player and clan detail pages linkable and reload-safe.
+
+### player detail layout
+
+the player detail page is now split so the left column carries the clan-specific and badge summary context first:
+
+- clan plot and clan members
+- clan battle seasons
+- efficiency badges
+- performance by tier
+
+the right column carries the broader profile and comparison views:
+
+- summary stats and playstyle
+- win-rate and battle-distribution charts
+- top ships and ranked sections
+- tier-vs-type profile
+- performance by ship type
+
+the clan battle seasons table viewport is tuned to show five visible season rows before scrolling, and the efficiency badge section uses a denser compact layout with inline badge totals in the header.
+
 ### stop the stack
 
 ```bash

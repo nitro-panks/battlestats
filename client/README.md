@@ -1,4 +1,4 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+This is the Next.js client for battlestats.
 
 ## Getting Started
 
@@ -16,9 +16,30 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+In the full Docker stack used by this repo, the client is exposed at [http://localhost:3001](http://localhost:3001).
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+
+## Routes
+
+The client now supports route-based detail views:
+
+- `/` renders the landing experience and search-driven discovery surfaces.
+- `/player/<encoded-player-name>` renders a reload-safe player detail page.
+- `/clan/<clan_id>-<optional-slug>` renders a reload-safe clan detail page.
+
+Shared helpers for those URLs live in `app/lib/entityRoutes.ts`. Shared player and clan TypeScript models live in `app/components/entityTypes.ts`.
+
+## Player Detail Notes
+
+The player detail surface is intentionally split across two columns.
+
+- The left column focuses on clan context and compact performance summaries: clan plot, clan members, clan battle seasons, efficiency badges, and the tier chart.
+- The right column focuses on broader comparison views: summary cards, top ships, ranked sections, tier-vs-type profile, and the ship-type chart.
+
+Recent UI tightening also reduced the badge-table body font size, simplified the efficiency summary cards, added inline badge totals in the section header, and limited the clan battle seasons table viewport to five visible rows before scroll.
 
 ## Font Awesome
 
