@@ -335,9 +335,37 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     </div>
                                 </DeferredSection>
                             ) : null}
+                            {!player.is_hidden ? (
+                                <DeferredSection
+                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
+                                    minHeight={240}
+                                    placeholder={<LoadingPanel label="Preparing efficiency badges..." minHeight={240} />}
+                                >
+                                    <div id="player_efficiency_badges_container">
+                                        <PlayerEfficiencyBadges
+                                            efficiencyRows={player.efficiency_json}
+                                        />
+                                    </div>
+                                </DeferredSection>
+                            ) : null}
                         </>
                     ) : (
-                        <p className="text-sm text-gray-500">No clan data available</p>
+                        <>
+                            <p className="text-sm text-gray-500">No clan data available</p>
+                            {!player.is_hidden ? (
+                                <DeferredSection
+                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
+                                    minHeight={240}
+                                    placeholder={<LoadingPanel label="Preparing efficiency badges..." minHeight={240} />}
+                                >
+                                    <div id="player_efficiency_badges_container">
+                                        <PlayerEfficiencyBadges
+                                            efficiencyRows={player.efficiency_json}
+                                        />
+                                    </div>
+                                </DeferredSection>
+                            ) : null}
+                        </>
                     )}
                 </div>
 
@@ -455,12 +483,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     className="mb-2"
                                 />
                                 <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
-                            </div>
-                            <div className="mt-4">
-                                <PlayerEfficiencyBadges
-                                    efficiencyRows={player.efficiency_json}
-                                    randomsRows={player.randoms_json}
-                                />
                             </div>
                             {showRankedHeatmap ? (
                                 <div className="mt-4">

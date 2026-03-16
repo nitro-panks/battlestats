@@ -13,22 +13,11 @@ interface EfficiencyRowInput {
     nation?: string | null;
 }
 
-interface RandomsRowInput {
-    ship_name?: string | null;
-    ship_chart_name?: string | null;
-    ship_type?: string | null;
-    ship_tier?: number | null;
-    pvp_battles?: number | null;
-    wins?: number | null;
-    win_ratio?: number | null;
-}
-
 interface PlayerEfficiencyBadgesProps {
     efficiencyRows?: EfficiencyRowInput[] | null;
-    randomsRows?: RandomsRowInput[] | null;
 }
 
-type SortKey = 'badge' | 'ship' | 'type' | 'tier' | 'topShips';
+type SortKey = 'badge' | 'ship' | 'type' | 'tier';
 
 interface NormalizedBadgeRow {
     shipId: number;
@@ -38,15 +27,13 @@ interface NormalizedBadgeRow {
     shipTier: number | null;
     badgeClass: number;
     badgeLabel: string;
-    topShipOverlap: boolean;
-    randomBattles: number;
 }
 
 const BADGE_LABELS: Record<number, string> = {
-    1: 'Expert',
-    2: 'Grade I',
-    3: 'Grade II',
-    4: 'Grade III',
+    1: 'E',
+    2: 'I',
+    3: 'II',
+    4: 'III',
 };
 
 const BADGE_CHIP_CLASSNAMES: Record<number, string> = {
@@ -56,10 +43,22 @@ const BADGE_CHIP_CLASSNAMES: Record<number, string> = {
     4: 'border-[#cbd5e1] bg-[#f8fafc] text-[#64748b]',
 };
 
-const normalizeShipKey = (value: string | null | undefined): string => {
-    return (value || '').trim().toLowerCase();
+const SHIP_TYPE_LABELS: Record<string, string> = {
+    battleship: 'BB',
+    cruiser: 'CA',
+    destroyer: 'DD',
+    carrier: 'CV',
+    submarine: 'Sub',
+    sub: 'Sub',
 };
 
+const getShipTypeLabel = (shipType: string | null | undefined): string => {
+    if (!shipType) {
+        return 'Unknown';
+    }
+
+    return SHIP_TYPE_LABELS[shipType.trim().toLowerCase()] || shipType;
+};
 const getBadgeScore = (badgeClass: number): number => {
     if (badgeClass < 1 || badgeClass > 4) {
         return 0;
@@ -74,49 +73,31 @@ const getTierBand = (tier: number | null): string | null => {
     }
 
     if (tier <= 7) {
-        return 'Tier V-VII';
+        return 'V-VII';
     }
 
     if (tier === 8) {
-        return 'Tier VIII';
+        return 'VIII';
     }
 
-    return 'Tier IX-X';
+    return 'IX-X';
 };
 
 const getDefaultSortDirection = (sortKey: SortKey): 'asc' | 'desc' => {
-    if (sortKey === 'badge' || sortKey === 'tier' || sortKey === 'topShips') {
+    if (sortKey === 'badge' || sortKey === 'tier') {
         return 'asc';
     }
 
     return 'asc';
 };
 
+const isRomanBadgeLabel = (badgeLabel: string): boolean => {
+    return badgeLabel === 'I' || badgeLabel === 'II' || badgeLabel === 'III';
+};
+
 const normalizeBadgeRows = (
     efficiencyRows?: EfficiencyRowInput[] | null,
-    randomsRows?: RandomsRowInput[] | null,
 ): NormalizedBadgeRow[] => {
-    const randomsByShipName = new Map<string, RandomsRowInput>();
-    const randomsByChartName = new Map<string, RandomsRowInput>();
-
-    if (Array.isArray(randomsRows)) {
-        for (const row of randomsRows) {
-            if (!row || typeof row !== 'object') {
-                continue;
-            }
-
-            const shipNameKey = normalizeShipKey(row.ship_name);
-            const chartNameKey = normalizeShipKey(row.ship_chart_name);
-
-            if (shipNameKey && !randomsByShipName.has(shipNameKey)) {
-                randomsByShipName.set(shipNameKey, row);
-            }
-            if (chartNameKey && !randomsByChartName.has(chartNameKey)) {
-                randomsByChartName.set(chartNameKey, row);
-            }
-        }
-    }
-
     const rows: NormalizedBadgeRow[] = [];
     if (!Array.isArray(efficiencyRows)) {
         return rows;
@@ -135,31 +116,21 @@ const normalizeBadgeRows = (
 
         const shipName = (row.ship_name || '').trim();
         const shipChartName = (row.ship_chart_name || shipName).trim();
-        const matchedRandomRow = randomsByShipName.get(normalizeShipKey(shipName))
-            || randomsByChartName.get(normalizeShipKey(shipChartName));
 
         rows.push({
             shipId,
             shipName: shipName || `Ship ${shipId}`,
             shipChartName: shipChartName || shipName || `Ship ${shipId}`,
-            shipType: row.ship_type || null,
+            shipType: getShipTypeLabel(row.ship_type || null),
             shipTier: row.ship_tier == null ? null : Number(row.ship_tier),
             badgeClass,
-            badgeLabel: row.top_grade_label || row.badge_label || BADGE_LABELS[badgeClass] || `Class ${badgeClass}`,
-            topShipOverlap: Boolean(matchedRandomRow),
-            randomBattles: Number(matchedRandomRow?.pvp_battles || 0),
+            badgeLabel: BADGE_LABELS[badgeClass] || row.top_grade_label || row.badge_label || `Class ${badgeClass}`,
         });
     }
 
     rows.sort((left, right) => {
         if (left.badgeClass !== right.badgeClass) {
             return left.badgeClass - right.badgeClass;
-        }
-        if (left.topShipOverlap !== right.topShipOverlap) {
-            return left.topShipOverlap ? -1 : 1;
-        }
-        if (left.randomBattles !== right.randomBattles) {
-            return right.randomBattles - left.randomBattles;
         }
         return left.shipName.localeCompare(right.shipName);
     });
@@ -185,11 +156,10 @@ const SortButton: React.FC<{
 
 const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
     efficiencyRows,
-    randomsRows,
 }) => {
     const [sortKey, setSortKey] = useState<SortKey>('badge');
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-    const rows = normalizeBadgeRows(efficiencyRows, randomsRows);
+    const rows = normalizeBadgeRows(efficiencyRows);
     const rowsWithMetadata = rows.filter((row) => row.shipType || row.shipTier != null);
     const expertShips = rows.filter((row) => row.badgeClass === 1).length;
     const gradeIPlusShips = rows.filter((row) => row.badgeClass <= 2).length;
@@ -211,12 +181,6 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
 
     const bestClassByScore = Array.from(classScores.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] || '—';
     const bestTierBandByScore = Array.from(tierScores.entries()).sort((left, right) => right[1] - left[1])[0]?.[0] || '—';
-    const badgeBreadthLabel = rows.length <= 3
-        ? 'Concentrated'
-        : classScores.size >= 3
-            ? 'Broad'
-            : 'Mixed';
-
     const sortedRows = [...rows].sort((left, right) => {
         const direction = sortDirection === 'asc' ? 1 : -1;
 
@@ -224,10 +188,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
             if (left.badgeClass !== right.badgeClass) {
                 return (left.badgeClass - right.badgeClass) * direction;
             }
-            if (left.topShipOverlap !== right.topShipOverlap) {
-                return (left.topShipOverlap ? -1 : 1) * direction;
-            }
-            return (right.randomBattles - left.randomBattles) * direction;
+            return left.shipName.localeCompare(right.shipName) * direction;
         }
 
         if (sortKey === 'ship') {
@@ -242,10 +203,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
             return (((left.shipTier || 0) - (right.shipTier || 0)) || left.shipName.localeCompare(right.shipName)) * direction;
         }
 
-        if (left.topShipOverlap !== right.topShipOverlap) {
-            return (left.topShipOverlap ? -1 : 1) * direction;
-        }
-        return (left.randomBattles - right.randomBattles) * direction;
+        return left.shipName.localeCompare(right.shipName) * direction;
     });
 
     const updateSort = (nextSortKey: SortKey) => {
@@ -262,7 +220,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
         <div>
             <SectionHeadingWithTooltip
                 title="Efficiency Badges"
-                description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. This section adds a peak-performance lens to the existing top-ships and tier or type views by surfacing which ships have earned the strongest badge classes."
+                description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. This section adds a peak-performance lens to the broader ship, tier, and class views by surfacing which ships have earned the strongest badge classes."
                 className="mb-3"
             />
             {rows.length === 0 ? (
@@ -271,11 +229,11 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                 </div>
             ) : (
                 <>
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="grid gap-3 md:grid-cols-3">
                         <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
                             <p className="text-xs uppercase tracking-wide text-[#4292c6]">Highest Badge</p>
                             <p className="mt-2 text-lg font-semibold text-[#084594]">{highestBadgeLabel}</p>
-                            <p className="mt-1 text-xs text-[#6baed6]">{expertShips} expert ships, {gradeIPlusShips} Grade I+ ships</p>
+                            <p className="mt-1 text-xs text-[#6baed6]">{expertShips} E ships, {gradeIPlusShips} I+ ships</p>
                         </div>
                         <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
                             <p className="text-xs uppercase tracking-wide text-[#4292c6]">Strongest Class</p>
@@ -304,9 +262,6 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                                     <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide">
                                         <SortButton label="Tier" active={sortKey === 'tier'} direction={sortDirection} onClick={() => updateSort('tier')} />
                                     </th>
-                                    <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide">
-                                        <SortButton label="Top Ships" active={sortKey === 'topShips'} direction={sortDirection} onClick={() => updateSort('topShips')} />
-                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#eff3ff]">
@@ -317,12 +272,13 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                                         </td>
                                         <td className="px-3 py-3">
                                             <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${BADGE_CHIP_CLASSNAMES[row.badgeClass] || BADGE_CHIP_CLASSNAMES[4]}`}>
-                                                {row.badgeLabel}
+                                                <span style={isRomanBadgeLabel(row.badgeLabel) ? { fontFamily: 'Georgia, Times New Roman, serif' } : undefined}>
+                                                    {row.badgeLabel}
+                                                </span>
                                             </span>
                                         </td>
                                         <td className="px-3 py-3 text-[#084594]">{row.shipType || 'Unknown'}</td>
                                         <td className="px-3 py-3 text-[#084594]">{row.shipTier != null ? row.shipTier : '—'}</td>
-                                        <td className="px-3 py-3 text-[#084594]">{row.topShipOverlap ? 'Yes' : 'No'}</td>
                                     </tr>
                                 ))}
                             </tbody>
