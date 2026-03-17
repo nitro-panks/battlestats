@@ -9,6 +9,8 @@ from warships.models import Clan, Player
 
 
 LANDING_CACHE_TTL = 60
+LANDING_CLAN_CACHE_TTL = 60 * 60
+LANDING_PLAYER_CACHE_TTL = 60 * 60
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v3'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
 LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v5'
@@ -80,6 +82,12 @@ def landing_player_cache_key(mode: str, limit: int) -> str:
     return f'landing:players:v11:n{namespace}:{mode}:{limit}'
 
 
+def landing_player_cache_ttl(mode: str) -> int:
+    if mode in LANDING_PLAYER_MODES:
+        return LANDING_PLAYER_CACHE_TTL
+    return LANDING_CACHE_TTL
+
+
 def normalize_landing_player_mode(mode: str | None) -> str:
     normalized_mode = (mode or 'random').strip().lower()
     if normalized_mode not in LANDING_PLAYER_MODES:
@@ -120,7 +128,21 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
     )
     players_by_id = {
         player.player_id: player
-        for player in Player.objects.filter(player_id__in=player_ids).select_related('explorer_summary')
+        for player in Player.objects.filter(player_id__in=player_ids).select_related('explorer_summary').only(
+            'player_id',
+            'is_hidden',
+            'pvp_battles',
+            'efficiency_updated_at',
+            'battles_updated_at',
+            'explorer_summary__efficiency_rank_percentile',
+            'explorer_summary__efficiency_rank_tier',
+            'explorer_summary__has_efficiency_rank_icon',
+            'explorer_summary__efficiency_rank_population_size',
+            'explorer_summary__efficiency_rank_updated_at',
+            'explorer_summary__eligible_ship_count',
+            'explorer_summary__efficiency_badge_rows_total',
+            'explorer_summary__badge_rows_unmapped',
+        )
     }
 
     for row in rows:
@@ -174,7 +196,7 @@ def _build_landing_clans() -> list[dict]:
 
 
 def get_landing_clans_payload() -> list[dict]:
-    return cache.get_or_set(LANDING_CLANS_CACHE_KEY, _build_landing_clans, LANDING_CACHE_TTL)
+    return cache.get_or_set(LANDING_CLANS_CACHE_KEY, _build_landing_clans, LANDING_CLAN_CACHE_TTL)
 
 
 def _build_recent_clans() -> list[dict]:
@@ -294,11 +316,15 @@ def _build_sigma_landing_players(limit: int) -> list[dict]:
     )
 
     rows = _serialize_landing_player_rows(candidate_rows)
-    rows = [row for row in rows if row.get('efficiency_rank_percentile') is not None]
+    rows = [row for row in rows if row.get(
+        'efficiency_rank_percentile') is not None]
     rows.sort(key=lambda row: (
-        -(row.get('efficiency_rank_percentile') if row.get('efficiency_rank_percentile') is not None else float('-inf')),
-        -(row.get('player_score') if row.get('player_score') is not None else float('-inf')),
-        -(row.get('pvp_ratio') if row.get('pvp_ratio') is not None else float('-inf')),
+        -(row.get('efficiency_rank_percentile')
+          if row.get('efficiency_rank_percentile') is not None else float('-inf')),
+        -(row.get('player_score') if row.get('player_score')
+          is not None else float('-inf')),
+        -(row.get('pvp_ratio') if row.get('pvp_ratio')
+          is not None else float('-inf')),
         row.get('name') or '',
     ))
 
@@ -318,7 +344,7 @@ def get_landing_players_payload(mode: str = 'random', limit: int = LANDING_PLAYE
         builder = _build_sigma_landing_players
     else:
         builder = _build_random_landing_players
-    return cache.get_or_set(cache_key, lambda: builder(normalized_limit), LANDING_CACHE_TTL)
+    return cache.get_or_set(cache_key, lambda: builder(normalized_limit), landing_player_cache_ttl(normalized_mode))
 
 
 def _build_recent_players() -> list[dict]:

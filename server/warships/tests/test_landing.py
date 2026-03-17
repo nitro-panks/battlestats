@@ -1,7 +1,9 @@
+from unittest.mock import patch
+
 from django.core.cache import cache
 from django.test import TestCase
 
-from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_player_cache_key, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import LANDING_CLAN_CACHE_TTL, LANDING_CLANS_CACHE_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, get_landing_clans_payload, get_landing_players_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_player_cache_key, normalize_landing_player_limit, normalize_landing_player_mode
 
 
 class LandingHelperTests(TestCase):
@@ -55,3 +57,24 @@ class LandingHelperTests(TestCase):
         self.assertIsNone(cache.get(refreshed_random_key))
         self.assertIsNone(cache.get(refreshed_best_key))
         self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
+
+    @patch('warships.landing.cache.get_or_set')
+    def test_landing_clans_use_one_hour_cache_ttl(self, mock_get_or_set):
+        mock_get_or_set.return_value = []
+
+        get_landing_clans_payload()
+
+        self.assertEqual(mock_get_or_set.call_args[0][2], LANDING_CLAN_CACHE_TTL)
+
+    @patch('warships.landing.cache.get_or_set')
+    def test_all_landing_player_modes_use_one_hour_cache_ttl(self, mock_get_or_set):
+        mock_get_or_set.return_value = []
+
+        get_landing_players_payload('random', 40)
+        self.assertEqual(mock_get_or_set.call_args_list[0][0][2], LANDING_PLAYER_CACHE_TTL)
+
+        get_landing_players_payload('best', 40)
+        self.assertEqual(mock_get_or_set.call_args_list[1][0][2], LANDING_PLAYER_CACHE_TTL)
+
+        get_landing_players_payload('sigma', 40)
+        self.assertEqual(mock_get_or_set.call_args_list[2][0][2], LANDING_PLAYER_CACHE_TTL)
