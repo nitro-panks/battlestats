@@ -146,31 +146,31 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                 maxHeight: `calc(${CLAN_BATTLE_TABLE_HEADER_HEIGHT_REM}rem + (${CLAN_BATTLE_TABLE_VISIBLE_ROWS} * ${CLAN_BATTLE_TABLE_ROW_HEIGHT_REM}rem))`,
                             }}
                         >
-                        <table className="min-w-full border-collapse text-xs tabular-nums text-gray-700">
-                            <thead>
-                                <tr className="border-b border-gray-200 bg-white uppercase tracking-[0.12em] text-gray-500">
-                                    <th className="sticky top-0 bg-white py-2 pr-3 text-left font-semibold">Season</th>
-                                    <th className="sticky top-0 bg-white py-2 pr-3 text-left font-semibold">Ships</th>
-                                    <th className="sticky top-0 bg-white py-2 pr-3 text-right font-semibold">Battles</th>
-                                    <th className="sticky top-0 bg-white py-2 text-right font-semibold">WR</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {seasons.map((season) => (
-                                    <tr key={season.season_id} className="border-b border-gray-100 align-top last:border-b-0">
-                                        <td className="py-2 pr-3 text-left text-[#084594]">
-                                            <div className="font-medium">{season.season_label}</div>
-                                            <div className="text-[11px] text-gray-500">{season.start_date || season.season_name}</div>
-                                        </td>
-                                        <td className="py-2 pr-3 text-left text-gray-600">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
-                                        <td className="py-2 pr-3 text-right">{season.battles.toLocaleString()}</td>
-                                        <td className="py-2 text-right font-medium" style={{ color: selectColorByWR(season.win_rate) }}>
-                                            {season.win_rate.toFixed(1)}%
-                                        </td>
+                            <table className="min-w-full border-collapse text-xs tabular-nums text-gray-700">
+                                <thead>
+                                    <tr className="border-b border-gray-200 bg-white uppercase tracking-[0.12em] text-gray-500">
+                                        <th className="sticky top-0 bg-white py-2 pr-3 text-left font-semibold">Season</th>
+                                        <th className="sticky top-0 bg-white py-2 pr-3 text-left font-semibold">Ships</th>
+                                        <th className="sticky top-0 bg-white py-2 pr-3 text-right font-semibold">Battles</th>
+                                        <th className="sticky top-0 bg-white py-2 text-right font-semibold">WR</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {seasons.map((season) => (
+                                        <tr key={season.season_id} className="border-b border-gray-100 align-top last:border-b-0">
+                                            <td className="py-2 pr-3 text-left text-[#084594]">
+                                                <div className="font-medium">{season.season_label}</div>
+                                                <div className="text-[11px] text-gray-500">{season.start_date || season.season_name}</div>
+                                            </td>
+                                            <td className="py-2 pr-3 text-left text-gray-600">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
+                                            <td className="py-2 pr-3 text-right">{season.battles.toLocaleString()}</td>
+                                            <td className="py-2 text-right font-medium" style={{ color: selectColorByWR(season.win_rate) }}>
+                                                {season.win_rate.toFixed(1)}%
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </>

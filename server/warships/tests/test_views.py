@@ -1932,7 +1932,8 @@ class ApiContractTests(TestCase):
         response = self.client.get("/api/landing/players/?mode=sigma&limit=40")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([row["name"] for row in response.json()], ["LandingSigmaVisible"])
+        self.assertEqual([row["name"]
+                         for row in response.json()], ["LandingSigmaVisible"])
 
     def test_landing_players_sigma_mode_caps_results_to_requested_limit(self):
         cache.clear()
@@ -2106,14 +2107,17 @@ class ApiContractTests(TestCase):
             last_lookup=looked_up_at - timedelta(minutes=1),
         )
 
-        landing_response = self.client.get("/api/landing/players/?mode=random&limit=40")
+        landing_response = self.client.get(
+            "/api/landing/players/?mode=random&limit=40")
         recent_response = self.client.get("/api/landing/recent/")
 
         self.assertEqual(landing_response.status_code, 200)
         self.assertEqual(recent_response.status_code, 200)
 
-        landing_rows = {row["name"]: row["is_pve_player"] for row in landing_response.json() if row["name"] in {"LandingPveYes", "LandingPveNoHighAbsolute"}}
-        recent_rows = {row["name"]: row["is_pve_player"] for row in recent_response.json() if row["name"] in {"LandingPveYes", "LandingPveNoHighAbsolute"}}
+        landing_rows = {row["name"]: row["is_pve_player"] for row in landing_response.json(
+        ) if row["name"] in {"LandingPveYes", "LandingPveNoHighAbsolute"}}
+        recent_rows = {row["name"]: row["is_pve_player"] for row in recent_response.json(
+        ) if row["name"] in {"LandingPveYes", "LandingPveNoHighAbsolute"}}
 
         self.assertEqual(landing_rows, {
             "LandingPveYes": True,
@@ -2192,7 +2196,8 @@ class ApiContractTests(TestCase):
             efficiency_rank_updated_at=now - timedelta(hours=1),
         )
 
-        landing_response = self.client.get("/api/landing/players/?mode=random&limit=40")
+        landing_response = self.client.get(
+            "/api/landing/players/?mode=random&limit=40")
         recent_response = self.client.get("/api/landing/recent/")
 
         self.assertEqual(landing_response.status_code, 200)
@@ -2209,23 +2214,38 @@ class ApiContractTests(TestCase):
             if row["name"] in {"LandingEfficiencyExpert", "LandingEfficiencyGradeTwo", "LandingEfficiencyHidden"}
         }
 
-        self.assertEqual(landing_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
-        self.assertEqual(landing_rows["LandingEfficiencyExpert"]["efficiency_rank_percentile"], 0.97)
-        self.assertTrue(landing_rows["LandingEfficiencyExpert"]["has_efficiency_rank_icon"])
-        self.assertEqual(landing_rows["LandingEfficiencyExpert"]["efficiency_rank_population_size"], 367)
-        self.assertIsNotNone(landing_rows["LandingEfficiencyExpert"]["efficiency_rank_updated_at"])
+        self.assertEqual(
+            landing_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
+        self.assertEqual(
+            landing_rows["LandingEfficiencyExpert"]["efficiency_rank_percentile"], 0.97)
+        self.assertTrue(
+            landing_rows["LandingEfficiencyExpert"]["has_efficiency_rank_icon"])
+        self.assertEqual(
+            landing_rows["LandingEfficiencyExpert"]["efficiency_rank_population_size"], 367)
+        self.assertIsNotNone(
+            landing_rows["LandingEfficiencyExpert"]["efficiency_rank_updated_at"])
 
-        self.assertEqual(landing_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_tier"], "II")
-        self.assertEqual(landing_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_percentile"], 0.81)
-        self.assertTrue(landing_rows["LandingEfficiencyGradeTwo"]["has_efficiency_rank_icon"])
+        self.assertEqual(
+            landing_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_tier"], "II")
+        self.assertEqual(
+            landing_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_percentile"], 0.81)
+        self.assertTrue(
+            landing_rows["LandingEfficiencyGradeTwo"]["has_efficiency_rank_icon"])
 
-        self.assertEqual(recent_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
-        self.assertEqual(recent_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_tier"], "II")
-        self.assertIsNone(recent_rows["LandingEfficiencyHidden"]["efficiency_rank_percentile"])
-        self.assertIsNone(recent_rows["LandingEfficiencyHidden"]["efficiency_rank_tier"])
-        self.assertFalse(recent_rows["LandingEfficiencyHidden"]["has_efficiency_rank_icon"])
-        self.assertIsNone(recent_rows["LandingEfficiencyHidden"]["efficiency_rank_population_size"])
-        self.assertIsNone(recent_rows["LandingEfficiencyHidden"]["efficiency_rank_updated_at"])
+        self.assertEqual(
+            recent_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
+        self.assertEqual(
+            recent_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_tier"], "II")
+        self.assertIsNone(
+            recent_rows["LandingEfficiencyHidden"]["efficiency_rank_percentile"])
+        self.assertIsNone(
+            recent_rows["LandingEfficiencyHidden"]["efficiency_rank_tier"])
+        self.assertFalse(
+            recent_rows["LandingEfficiencyHidden"]["has_efficiency_rank_icon"])
+        self.assertIsNone(
+            recent_rows["LandingEfficiencyHidden"]["efficiency_rank_population_size"])
+        self.assertIsNone(
+            recent_rows["LandingEfficiencyHidden"]["efficiency_rank_updated_at"])
 
     def test_landing_players_reject_invalid_mode(self):
         response = self.client.get("/api/landing/players/?mode=invalid")

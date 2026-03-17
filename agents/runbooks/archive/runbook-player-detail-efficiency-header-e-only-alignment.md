@@ -38,7 +38,7 @@ In scope:
 
 1. [client/app/components/PlayerDetail.tsx](client/app/components/PlayerDetail.tsx)
 2. [client/app/components/EfficiencyRankIcon.tsx](client/app/components/EfficiencyRankIcon.tsx)
-3. [client/app/components/__tests__/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
+3. [client/app/components/**tests**/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
 4. [client/README.md](client/README.md)
 5. [README.md](README.md)
 
@@ -115,7 +115,7 @@ Implementation landed in:
 
 1. [client/app/components/PlayerDetail.tsx](client/app/components/PlayerDetail.tsx)
 2. [client/app/components/EfficiencyRankIcon.tsx](client/app/components/EfficiencyRankIcon.tsx)
-3. [client/app/components/__tests__/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
+3. [client/app/components/**tests**/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
 4. [client/README.md](client/README.md)
 5. [README.md](README.md)
 

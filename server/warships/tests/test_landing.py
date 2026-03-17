@@ -64,17 +64,21 @@ class LandingHelperTests(TestCase):
 
         get_landing_clans_payload()
 
-        self.assertEqual(mock_get_or_set.call_args[0][2], LANDING_CLAN_CACHE_TTL)
+        self.assertEqual(
+            mock_get_or_set.call_args[0][2], LANDING_CLAN_CACHE_TTL)
 
     @patch('warships.landing.cache.get_or_set')
     def test_all_landing_player_modes_use_one_hour_cache_ttl(self, mock_get_or_set):
         mock_get_or_set.return_value = []
 
         get_landing_players_payload('random', 40)
-        self.assertEqual(mock_get_or_set.call_args_list[0][0][2], LANDING_PLAYER_CACHE_TTL)
+        self.assertEqual(
+            mock_get_or_set.call_args_list[0][0][2], LANDING_PLAYER_CACHE_TTL)
 
         get_landing_players_payload('best', 40)
-        self.assertEqual(mock_get_or_set.call_args_list[1][0][2], LANDING_PLAYER_CACHE_TTL)
+        self.assertEqual(
+            mock_get_or_set.call_args_list[1][0][2], LANDING_PLAYER_CACHE_TTL)
 
         get_landing_players_payload('sigma', 40)
-        self.assertEqual(mock_get_or_set.call_args_list[2][0][2], LANDING_PLAYER_CACHE_TTL)
+        self.assertEqual(
+            mock_get_or_set.call_args_list[2][0][2], LANDING_PLAYER_CACHE_TTL)

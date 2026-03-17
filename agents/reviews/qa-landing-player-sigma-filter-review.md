@@ -8,7 +8,7 @@ _Reviewed: 2026-03-17_
 - [client/app/components/PlayerSearch.tsx](client/app/components/PlayerSearch.tsx)
 - [server/warships/landing.py](server/warships/landing.py)
 - [server/warships/tests/test_views.py](server/warships/tests/test_views.py)
-- [client/app/components/__tests__/PlayerSearch.test.tsx](client/app/components/__tests__/PlayerSearch.test.tsx)
+- [client/app/components/**tests**/PlayerSearch.test.tsx](client/app/components/__tests__/PlayerSearch.test.tsx)
 
 ## QA Verdict
 

@@ -98,7 +98,7 @@ No new copy is needed for this revert.
 In scope:
 
 1. player-detail header efficiency-icon visibility in [client/app/components/PlayerDetail.tsx](client/app/components/PlayerDetail.tsx),
-2. player-detail client tests in [client/app/components/__tests__/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx),
+2. player-detail client tests in [client/app/components/**tests**/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx),
 3. durable docs that currently describe the broader all-tier or stored-badge-fallback header behavior,
 4. any spec, runbook, or QA artifacts needed to record the revert.
 
@@ -231,7 +231,7 @@ Focused client validation should cover:
 
 Suggested target:
 
-1. [client/app/components/__tests__/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
+1. [client/app/components/**tests**/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
 
 ## Non-Goals
 

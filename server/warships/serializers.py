@@ -85,7 +85,8 @@ class PlayerSerializer(serializers.ModelSerializer):
         return self._get_efficiency_rank_payload(obj)['efficiency_rank_updated_at']
 
     def _get_clan_battle_header_payload(self, obj):
-        payload_cache = getattr(self, '_clan_battle_header_payload_cache', None)
+        payload_cache = getattr(
+            self, '_clan_battle_header_payload_cache', None)
         if payload_cache is None:
             payload_cache = {}
             self._clan_battle_header_payload_cache = payload_cache

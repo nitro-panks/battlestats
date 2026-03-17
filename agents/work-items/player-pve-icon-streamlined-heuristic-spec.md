@@ -59,13 +59,13 @@ The user-provided examples make that clear.
 
 Using the current local player API, the relevant totals for the requested example players are:
 
-| Player | Total Battles | PvP Battles | Derived PvE Battles | PvE Share of Total | PvE / PvP | Desired Outcome |
-| --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Mebuki | 23,851 | 19,629 | 4,222 | 17.7% | 0.215 | No |
-| Hungria15 | 4,951 | 464 | 4,487 | 90.6% | 9.670 | Yes |
-| ShrimpDance | 34,540 | 29,047 | 5,493 | 15.9% | 0.189 | No |
-| UnitedShipcare | 9,576 | 3,111 | 6,465 | 67.5% | 2.078 | Yes |
-| eisenhowers | 14,344 | 9,549 | 4,795 | 33.4% | 0.502 | Yes |
+| Player         | Total Battles | PvP Battles | Derived PvE Battles | PvE Share of Total | PvE / PvP | Desired Outcome |
+| -------------- | ------------: | ----------: | ------------------: | -----------------: | --------: | --------------- |
+| Mebuki         |        23,851 |      19,629 |               4,222 |              17.7% |     0.215 | No              |
+| Hungria15      |         4,951 |         464 |               4,487 |              90.6% |     9.670 | Yes             |
+| ShrimpDance    |        34,540 |      29,047 |               5,493 |              15.9% |     0.189 | No              |
+| UnitedShipcare |         9,576 |       3,111 |               6,465 |              67.5% |     2.078 | Yes             |
+| eisenhowers    |        14,344 |       9,549 |               4,795 |              33.4% |     0.502 | Yes             |
 
 These examples show why the `>= 4000 PvE battles` exception should not stand on its own:
 

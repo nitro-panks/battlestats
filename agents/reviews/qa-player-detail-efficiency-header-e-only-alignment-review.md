@@ -8,7 +8,7 @@ _Reviewed: 2026-03-17_
 - [client/app/components/PlayerDetail.tsx](client/app/components/PlayerDetail.tsx)
 - [client/app/components/ClanMembers.tsx](client/app/components/ClanMembers.tsx)
 - [client/app/components/PlayerSearch.tsx](client/app/components/PlayerSearch.tsx)
-- [client/app/components/__tests__/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
+- [client/app/components/**tests**/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
 
 ## QA Verdict
 
