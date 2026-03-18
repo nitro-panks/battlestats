@@ -344,6 +344,47 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
+    @patch("warships.data._fetch_clan_battle_season_stats")
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_prefers_durable_clan_battle_header_fields_when_cache_missing(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+        mock_fetch_clan_battle_season_stats,
+    ):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="ClanBattleHeaderDurable",
+            player_id=9060,
+            last_fetch=now,
+            is_hidden=False,
+            pvp_battles=500,
+        )
+        PlayerExplorerSummary.objects.create(
+            player=player,
+            clan_battle_total_battles=43,
+            clan_battle_seasons_participated=2,
+            clan_battle_overall_win_rate=55.8,
+            clan_battle_summary_updated_at=now - timedelta(minutes=10),
+        )
+
+        response = self.client.get("/api/player/ClanBattleHeaderDurable/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["clan_battle_header_eligible"])
+        self.assertEqual(payload["clan_battle_header_total_battles"], 43)
+        self.assertEqual(payload["clan_battle_header_seasons_played"], 2)
+        self.assertEqual(payload["clan_battle_header_overall_win_rate"], 55.8)
+        self.assertIsNotNone(payload["clan_battle_header_updated_at"])
+        mock_fetch_clan_battle_season_stats.assert_not_called()
+        mock_update_player_task.assert_called_once()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
@@ -2224,6 +2265,48 @@ class ApiContractTests(TestCase):
         )
         recent_row = next(
             row for row in recent_response.json() if row["name"] == "LandingClanBattleMain"
+        )
+
+        self.assertTrue(landing_row["is_clan_battle_player"])
+        self.assertEqual(landing_row["clan_battle_win_rate"], 56.8)
+        self.assertTrue(recent_row["is_clan_battle_player"])
+        self.assertEqual(recent_row["clan_battle_win_rate"], 56.8)
+
+    def test_landing_players_and_recent_players_prefer_durable_clan_battle_summary_when_cache_missing(self):
+        cache.clear()
+        today = timezone.now().date()
+        looked_up_at = timezone.now() - timedelta(minutes=1)
+        player = Player.objects.create(
+            name="LandingClanBattleDurable",
+            player_id=4411,
+            is_hidden=False,
+            pvp_ratio=57.0,
+            total_battles=4200,
+            pvp_battles=3800,
+            last_battle_date=today,
+            last_lookup=looked_up_at,
+        )
+        PlayerExplorerSummary.objects.create(
+            player=player,
+            player_score=7.4,
+            clan_battle_total_battles=44,
+            clan_battle_seasons_participated=2,
+            clan_battle_overall_win_rate=56.8,
+            clan_battle_summary_updated_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        landing_response = self.client.get(
+            "/api/landing/players/?mode=random&limit=40")
+        recent_response = self.client.get("/api/landing/recent/")
+
+        self.assertEqual(landing_response.status_code, 200)
+        self.assertEqual(recent_response.status_code, 200)
+
+        landing_row = next(
+            row for row in landing_response.json() if row["name"] == "LandingClanBattleDurable"
+        )
+        recent_row = next(
+            row for row in recent_response.json() if row["name"] == "LandingClanBattleDurable"
         )
 
         self.assertTrue(landing_row["is_clan_battle_player"])

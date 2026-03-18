@@ -1314,6 +1314,40 @@ def summarize_clan_battle_seasons(season_rows: Any) -> dict[str, Any]:
     }
 
 
+def get_published_clan_battle_summary_payload(
+    player: Optional[Player],
+    fallback_summary: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    payload = {
+        'seasons_participated': int((fallback_summary or {}).get('seasons_participated') or 0),
+        'total_battles': int((fallback_summary or {}).get('total_battles') or 0),
+        'win_rate': (fallback_summary or {}).get('win_rate'),
+        'updated_at': None,
+    }
+    if player is None or player.is_hidden:
+        return payload
+
+    explorer_summary = getattr(player, 'explorer_summary', None)
+    if explorer_summary is None:
+        return payload
+
+    has_durable_summary = (
+        explorer_summary.clan_battle_summary_updated_at is not None
+        or explorer_summary.clan_battle_total_battles is not None
+        or explorer_summary.clan_battle_seasons_participated is not None
+        or explorer_summary.clan_battle_overall_win_rate is not None
+    )
+    if not has_durable_summary:
+        return payload
+
+    return {
+        'seasons_participated': int(explorer_summary.clan_battle_seasons_participated or 0),
+        'total_battles': int(explorer_summary.clan_battle_total_battles or 0),
+        'win_rate': explorer_summary.clan_battle_overall_win_rate,
+        'updated_at': explorer_summary.clan_battle_summary_updated_at,
+    }
+
+
 def is_clan_battle_enjoyer(
     total_battles: Optional[int],
     seasons_participated: Optional[int],
@@ -3410,6 +3444,42 @@ def get_player_clan_battle_summaries(account_ids: Iterable[Optional[int]], allow
     }
 
 
+def _persist_player_clan_battle_summary(
+    account_id: int,
+    summary: dict[str, Any],
+) -> None:
+    player = Player.objects.filter(player_id=account_id).first()
+    if player is None:
+        return
+
+    explorer_summary, _ = PlayerExplorerSummary.objects.get_or_create(
+        player=player)
+    total_battles = int(summary.get('total_battles') or 0)
+    seasons_participated = int(summary.get('seasons_participated') or 0)
+    win_rate = summary.get('win_rate')
+    payload_changed = any([
+        explorer_summary.clan_battle_total_battles != total_battles,
+        explorer_summary.clan_battle_seasons_participated != seasons_participated,
+        explorer_summary.clan_battle_overall_win_rate != win_rate,
+    ])
+
+    explorer_summary.clan_battle_total_battles = total_battles
+    explorer_summary.clan_battle_seasons_participated = seasons_participated
+    explorer_summary.clan_battle_overall_win_rate = win_rate
+    explorer_summary.clan_battle_summary_updated_at = django_timezone.now()
+    explorer_summary.save(update_fields=[
+        'clan_battle_total_battles',
+        'clan_battle_seasons_participated',
+        'clan_battle_overall_win_rate',
+        'clan_battle_summary_updated_at',
+    ])
+
+    if payload_changed:
+        from warships.landing import invalidate_landing_player_caches
+
+        invalidate_landing_player_caches(include_recent=True)
+
+
 def fetch_player_clan_battle_seasons(account_id: int) -> list:
     """Return a single player's clan battle seasons enriched with season metadata."""
     if not account_id:
@@ -3417,6 +3487,10 @@ def fetch_player_clan_battle_seasons(account_id: int) -> list:
 
     season_meta = _get_clan_battle_seasons_metadata()
     seasons = _get_player_clan_battle_season_stats(int(account_id))
+    _persist_player_clan_battle_summary(
+        int(account_id),
+        summarize_clan_battle_seasons(seasons),
+    )
     result = []
 
     for season in seasons:

@@ -162,6 +162,12 @@ class PlayerExplorerSummary(models.Model):
     latest_ranked_battles = models.IntegerField(null=True, blank=True)
     highest_ranked_league_recent = models.CharField(
         max_length=32, null=True, blank=True)
+    clan_battle_seasons_participated = models.IntegerField(
+        null=True, blank=True)
+    clan_battle_total_battles = models.IntegerField(null=True, blank=True)
+    clan_battle_overall_win_rate = models.FloatField(null=True, blank=True)
+    clan_battle_summary_updated_at = models.DateTimeField(
+        null=True, blank=True)
     refreshed_at = models.DateTimeField(auto_now=True)
 
     class Meta:

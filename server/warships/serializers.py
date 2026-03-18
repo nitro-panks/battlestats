@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Player, Clan, Ship
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, _get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_player_clan_battle_summary, is_clan_battle_enjoyer, is_pve_player
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, _get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_player_clan_battle_summary, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player
 
 
 class PlayerSerializer(serializers.ModelSerializer):
@@ -107,9 +107,12 @@ class PlayerSerializer(serializers.ModelSerializer):
                     'clan_battle_header_updated_at': None,
                 }
             else:
-                summary = get_player_clan_battle_summary(
-                    obj.player_id,
-                    allow_fetch=False,
+                summary = get_published_clan_battle_summary_payload(
+                    obj,
+                    fallback_summary=get_player_clan_battle_summary(
+                        obj.player_id,
+                        allow_fetch=False,
+                    ),
                 )
                 payload_cache[cache_key] = {
                     'clan_battle_header_eligible': is_clan_battle_enjoyer(
@@ -119,7 +122,7 @@ class PlayerSerializer(serializers.ModelSerializer):
                     'clan_battle_header_total_battles': int(summary.get('total_battles') or 0),
                     'clan_battle_header_seasons_played': int(summary.get('seasons_participated') or 0),
                     'clan_battle_header_overall_win_rate': summary.get('win_rate'),
-                    'clan_battle_header_updated_at': None,
+                    'clan_battle_header_updated_at': summary.get('updated_at'),
                 }
 
         return payload_cache[cache_key]

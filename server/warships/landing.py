@@ -7,7 +7,7 @@ from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
 from django.db.models.functions import Cast
 from django.utils import timezone
 
-from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, get_player_clan_battle_summaries, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player
+from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, get_player_clan_battle_summaries, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player
 from warships.models import Clan, Player
 
 
@@ -17,8 +17,8 @@ LANDING_PLAYER_CACHE_TTL = 60 * 60
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v3'
 LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v3:meta'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
-LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v5'
-LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v11:namespace'
+LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v6'
+LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v12:namespace'
 LANDING_CLAN_FEATURED_COUNT = 40
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_PLAYER_LIMIT = 40
@@ -199,12 +199,12 @@ def _bump_landing_players_cache_namespace() -> int:
 
 def landing_player_cache_key(mode: str, limit: int) -> str:
     namespace = _get_landing_players_cache_namespace()
-    return f'landing:players:v11:n{namespace}:{mode}:{limit}'
+    return f'landing:players:v12:n{namespace}:{mode}:{limit}'
 
 
 def landing_player_cache_metadata_key(mode: str, limit: int) -> str:
     namespace = _get_landing_players_cache_namespace()
-    return f'landing:players:v11:n{namespace}:{mode}:{limit}:meta'
+    return f'landing:players:v12:n{namespace}:{mode}:{limit}:meta'
 
 
 def landing_player_cache_ttl(mode: str) -> int:
@@ -318,6 +318,10 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             'explorer_summary__eligible_ship_count',
             'explorer_summary__efficiency_badge_rows_total',
             'explorer_summary__badge_rows_unmapped',
+            'explorer_summary__clan_battle_seasons_participated',
+            'explorer_summary__clan_battle_total_battles',
+            'explorer_summary__clan_battle_overall_win_rate',
+            'explorer_summary__clan_battle_summary_updated_at',
         )
     }
 
@@ -328,9 +332,12 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             minimum_tier=5,
         )
         ranked_rows = row.pop('ranked_json', None)
-        clan_battle_summary = clan_battle_summaries.get(
-            player_id,
-            {'total_battles': 0, 'seasons_participated': 0, 'win_rate': None},
+        clan_battle_summary = get_published_clan_battle_summary_payload(
+            players_by_id.get(player_id),
+            fallback_summary=clan_battle_summaries.get(
+                player_id,
+                {'total_battles': 0, 'seasons_participated': 0, 'win_rate': None},
+            ),
         )
         row['high_tier_pvp_battles'] = high_tier_battles
         row['high_tier_pvp_ratio'] = high_tier_ratio
@@ -613,9 +620,12 @@ def _build_recent_players() -> list[dict]:
     for row in rows:
         player_id = int(row.get('player_id') or 0)
         ranked_rows = row.pop('ranked_json', None)
-        clan_battle_summary = clan_battle_summaries.get(
-            player_id,
-            {'total_battles': 0, 'seasons_participated': 0, 'win_rate': None},
+        clan_battle_summary = get_published_clan_battle_summary_payload(
+            players_by_id.get(player_id),
+            fallback_summary=clan_battle_summaries.get(
+                player_id,
+                {'total_battles': 0, 'seasons_participated': 0, 'win_rate': None},
+            ),
         )
         row['is_pve_player'] = is_pve_player(
             row.get('total_battles'), row.get('pvp_battles'))

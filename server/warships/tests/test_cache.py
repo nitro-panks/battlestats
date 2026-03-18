@@ -4,7 +4,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.models import Player, Clan, Ship
+from warships.models import Player, Clan, PlayerExplorerSummary, Ship
 
 
 LOCMEM_CACHES = {
@@ -373,6 +373,53 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
         self.assertEqual(result[0]["season_name"], "Later Legacy Season")
         self.assertEqual(result[0]["win_rate"], 66.7)
         self.assertEqual(result[1]["ship_tier_min"], 8)
+
+    @patch("warships.data._get_player_clan_battle_season_stats")
+    @patch("warships.data._get_clan_battle_seasons_metadata")
+    def test_fetch_player_clan_battle_seasons_persists_durable_summary_and_invalidates_landing_caches(self, mock_meta, mock_player_stats):
+        from warships.data import fetch_player_clan_battle_seasons
+        from warships.landing import LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key
+
+        player = Player.objects.create(
+            name="DurableClanBattlePlayer",
+            player_id=5510,
+            is_hidden=False,
+            pvp_battles=700,
+            last_battle_date=timezone.now().date(),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=player,
+            clan_battle_total_battles=0,
+            clan_battle_seasons_participated=0,
+        )
+        mock_meta.return_value = {
+            31: {
+                "name": "Earlier Season",
+                "label": "S31",
+                "start_date": "2025-08-01",
+                "end_date": "2025-09-01",
+                "ship_tier_min": 8,
+                "ship_tier_max": 8,
+            },
+        }
+        mock_player_stats.return_value = [
+            {"season_id": 31, "battles": 42, "wins": 23, "losses": 19},
+            {"season_id": 32, "battles": 18, "wins": 9, "losses": 9},
+        ]
+        original_random_key = landing_player_cache_key('random', 40)
+        cache.set(original_random_key, [{'name': 'stale'}], 60)
+        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY, [{'name': 'recent-stale'}], 60)
+
+        result = fetch_player_clan_battle_seasons(5510)
+
+        self.assertEqual(len(result), 2)
+        player.refresh_from_db()
+        self.assertEqual(player.explorer_summary.clan_battle_total_battles, 60)
+        self.assertEqual(player.explorer_summary.clan_battle_seasons_participated, 2)
+        self.assertEqual(player.explorer_summary.clan_battle_overall_win_rate, 53.3)
+        self.assertIsNotNone(player.explorer_summary.clan_battle_summary_updated_at)
+        self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
+        self.assertNotEqual(original_random_key, landing_player_cache_key('random', 40))
 
 
 @override_settings(CACHES=LOCMEM_CACHES)
