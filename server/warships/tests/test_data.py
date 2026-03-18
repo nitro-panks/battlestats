@@ -91,6 +91,29 @@ class ClanCrawlPublicationTests(TestCase):
 class ActivityDataRefreshTests(TestCase):
     @patch("warships.data.update_activity_data")
     @patch("warships.data.update_snapshot_data")
+    def test_fetch_activity_data_keeps_fresh_all_zero_cache(
+        self,
+        mock_update_snapshot_data,
+        mock_update_activity_data,
+    ):
+        player = Player.objects.create(
+            name="QuietUser",
+            player_id=332,
+            activity_json=[
+                {"date": "2026-03-01", "battles": 0, "wins": 0},
+                {"date": "2026-03-02", "battles": 0, "wins": 0},
+            ],
+            activity_updated_at=timezone.now(),
+        )
+
+        rows = fetch_activity_data(player.player_id)
+
+        self.assertEqual(len(rows), 2)
+        mock_update_snapshot_data.assert_not_called()
+        mock_update_activity_data.assert_not_called()
+
+    @patch("warships.data.update_activity_data")
+    @patch("warships.data.update_snapshot_data")
     def test_fetch_activity_data_refreshes_cumulative_spike_cache(
         self,
         mock_update_snapshot_data,
@@ -1718,7 +1741,7 @@ class PlayerExplorerSummaryTests(TestCase):
 
         self.assertEqual(summary.player_score, 0.47)
 
-    def test_fetch_player_explorer_rows_refreshes_stale_battle_metrics(self):
+    def test_fetch_player_explorer_rows_preserves_existing_denormalized_summary_values(self):
         player = Player.objects.create(
             name="ExplorerStaleSummary",
             player_id=9915,
@@ -1741,12 +1764,12 @@ class PlayerExplorerSummaryTests(TestCase):
             query="ExplorerStaleSummary", hidden="visible")
 
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["kill_ratio"], 0.78)
-        self.assertEqual(rows[0]["ships_played_total"], 2)
+        self.assertIsNone(rows[0]["kill_ratio"])
+        self.assertEqual(rows[0]["ships_played_total"], 0)
 
         summary = PlayerExplorerSummary.objects.get(player=player)
-        self.assertEqual(summary.kill_ratio, 0.78)
-        self.assertEqual(summary.ships_played_total, 2)
+        self.assertIsNone(summary.kill_ratio)
+        self.assertEqual(summary.ships_played_total, 0)
 
     def test_update_player_data_hidden_profile_clears_denormalized_summary_values(self):
         player = Player.objects.create(

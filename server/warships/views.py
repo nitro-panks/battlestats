@@ -2,6 +2,7 @@ import logging
 import random
 from functools import partial
 from datetime import timedelta
+from hashlib import sha256
 from kombu.exceptions import OperationalError as KombuOperationalError
 from django.core.cache import cache
 from django.db.models import Sum, F, FloatField, Case, When, Value, IntegerField, Count, Q
@@ -22,7 +23,7 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
     PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer, TopEntitiesQuerySerializer, TopEntityVisitSerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
-    fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
+    fetch_player_explorer_page, fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
     fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, _get_published_efficiency_rank_payload, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, get_player_clan_battle_summaries, get_player_clan_battle_summary, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
     is_sleepy_player, get_highest_ranked_league_name
 from warships.landing import get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_player_limit, normalize_landing_player_mode
@@ -59,6 +60,7 @@ LANDING_PLAYER_LIMIT = 40
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 400
+PLAYER_EXPLORER_RESPONSE_CACHE_TTL = 60
 
 
 def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COUNT, min_total_battles: int = LANDING_CLAN_MIN_TOTAL_BATTLES):
@@ -235,6 +237,15 @@ def _validated_single_response(data, serializer_class):
     return Response(serializer.data)
 
 
+def _player_explorer_response_cache_key(params: dict[str, object]) -> str:
+    parts = [
+        f"{key}={params[key]}"
+        for key in sorted(params)
+    ]
+    digest = sha256('&'.join(parts).encode('utf-8')).hexdigest()
+    return f'players:explorer:response:v1:{digest}'
+
+
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def tier_data(request, player_id: str) -> Response:
@@ -360,9 +371,9 @@ def players_explorer(request) -> Response:
         'activity_bucket') or 'all').strip().lower()
     ranked = (request.query_params.get('ranked') or 'all').strip().lower()
     sort = (request.query_params.get('sort')
-            or 'days_since_last_battle').strip()
+            or 'player_score').strip()
     direction = (request.query_params.get(
-        'direction') or 'asc').strip().lower()
+        'direction') or 'desc').strip().lower()
 
     try:
         min_pvp_battles = max(
@@ -406,38 +417,51 @@ def players_explorer(request) -> Response:
     if direction not in {'asc', 'desc'}:
         return Response({'detail': 'direction must be asc or desc.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    rows = fetch_player_explorer_rows(
+    cache_key = _player_explorer_response_cache_key({
+        'activity_bucket': activity_bucket,
+        'direction': direction,
+        'hidden': hidden,
+        'min_pvp_battles': min_pvp_battles,
+        'page': page,
+        'page_size': page_size,
+        'q': query,
+        'ranked': ranked,
+        'sort': sort,
+    })
+    cached_payload = cache.get(cache_key)
+    if cached_payload is not None:
+        response = Response(cached_payload)
+        response['X-Players-Explorer-Cache'] = 'hit'
+        response['X-Players-Explorer-Cache-TTL-Seconds'] = str(
+            PLAYER_EXPLORER_RESPONSE_CACHE_TTL)
+        return response
+
+    total_count, page_rows = fetch_player_explorer_page(
         query=query,
         hidden=hidden,
         activity_bucket=activity_bucket,
         ranked=ranked,
         min_pvp_battles=min_pvp_battles,
+        sort=sort,
+        direction=direction,
+        page=page,
+        page_size=page_size,
     )
-
-    reverse = direction == 'desc'
-    if sort == 'name':
-        rows.sort(key=lambda row: (row.get('name')
-                  or '').lower(), reverse=reverse)
-    else:
-        rows.sort(
-            key=lambda row: (row.get(sort) is None, row.get(
-                sort) if row.get(sort) is not None else 0),
-            reverse=reverse,
-        )
-
-    total_count = len(rows)
-    start = (page - 1) * page_size
-    end = start + page_size
-    page_rows = rows[start:end]
 
     serializer = PlayerExplorerRowSerializer(data=page_rows, many=True)
     serializer.is_valid(raise_exception=True)
-    return Response({
+    payload = {
         'count': total_count,
         'page': page,
         'page_size': page_size,
         'results': serializer.data,
-    })
+    }
+    cache.set(cache_key, payload, PLAYER_EXPLORER_RESPONSE_CACHE_TTL)
+    response = Response(payload)
+    response['X-Players-Explorer-Cache'] = 'miss'
+    response['X-Players-Explorer-Cache-TTL-Seconds'] = str(
+        PLAYER_EXPLORER_RESPONSE_CACHE_TTL)
+    return response
 
 
 @api_view(["GET"])

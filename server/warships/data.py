@@ -7,8 +7,8 @@ import math
 import os
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Count, Q
-from django.db.models.functions import TruncMonth
+from django.db.models import Count, F, Q
+from django.db.models.functions import Lower, TruncMonth
 from django.utils import timezone as django_timezone
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 from warships.models import PlayerAchievementStat
@@ -53,6 +53,7 @@ PLAYER_SCORE_LOW_TIER_WEIGHT = 0.02
 PLAYER_SCORE_MID_TIER_WEIGHT = 0.60
 PLAYER_SCORE_HIGH_TIER_WEIGHT = 1.0
 PLAYER_SCORE_LOW_TIER_FLOOR = 0.25
+PLAYER_EXPLORER_ON_READ_BACKFILL_MAX = 200
 CLAN_BATTLE_ENJOYER_MIN_BATTLES = 40
 CLAN_BATTLE_ENJOYER_MIN_SEASONS = 2
 SLEEPY_PLAYER_DAYS_THRESHOLD = 365
@@ -1735,17 +1736,6 @@ def build_player_summary(
         'latest_ranked_battles': None,
         'highest_ranked_league_recent': None,
     }
-    normalized_battles_rows = _coerce_battle_rows(
-        battles_rows if battles_rows is not None else player.battles_json
-    )
-    has_battle_data = _summary_has_battle_data(player, normalized_battles_rows)
-    summary['kill_ratio'] = _calculate_player_kill_ratio(
-        normalized_battles_rows) if has_battle_data else None
-    summary.update(_build_efficiency_rank_inputs(
-        player,
-        battle_rows=normalized_battles_rows,
-    ))
-
     if player.is_hidden:
         return summary
 
@@ -1776,6 +1766,17 @@ def build_player_summary(
             'highest_ranked_league_recent': explorer_summary.highest_ranked_league_recent,
         })
         return summary
+
+    normalized_battles_rows = _coerce_battle_rows(
+        battles_rows if battles_rows is not None else player.battles_json
+    )
+    has_battle_data = _summary_has_battle_data(player, normalized_battles_rows)
+    summary['kill_ratio'] = _calculate_player_kill_ratio(
+        normalized_battles_rows) if has_battle_data else None
+    summary.update(_build_efficiency_rank_inputs(
+        player,
+        battle_rows=normalized_battles_rows,
+    ))
 
     normalized_activity_rows = _coerce_activity_rows(
         player.activity_json if activity_rows is None else activity_rows)
@@ -1922,8 +1923,78 @@ def fetch_player_explorer_rows(
     ranked: str = 'all',
     min_pvp_battles: int = 0,
 ) -> list[dict]:
-    players = Player.objects.exclude(
-        name='').select_related('explorer_summary').all()
+    players = _build_player_explorer_queryset(
+        query=query,
+        hidden=hidden,
+        activity_bucket=activity_bucket,
+        ranked=ranked,
+        min_pvp_battles=min_pvp_battles,
+    )
+
+    rows = []
+    for player in players:
+        if getattr(player, 'explorer_summary', None) is None:
+            refresh_player_explorer_summary(player)
+        rows.append(build_player_summary(player))
+
+    if ranked == 'yes':
+        rows = [row for row in rows if (
+            row.get('ranked_seasons_participated') or 0) > 0]
+    elif ranked == 'no':
+        rows = [row for row in rows if (
+            row.get('ranked_seasons_participated') or 0) == 0]
+
+    return rows
+
+
+def _player_explorer_base_queryset():
+    return Player.objects.exclude(name='').select_related('explorer_summary').only(
+        'id',
+        'name',
+        'player_id',
+        'is_hidden',
+        'days_since_last_battle',
+        'last_battle_date',
+        'creation_date',
+        'pvp_ratio',
+        'pvp_battles',
+        'pvp_survival_rate',
+        'explorer_summary__id',
+        'explorer_summary__player_id',
+        'explorer_summary__battles_last_29_days',
+        'explorer_summary__wins_last_29_days',
+        'explorer_summary__active_days_last_29_days',
+        'explorer_summary__recent_win_rate',
+        'explorer_summary__activity_trend_direction',
+        'explorer_summary__kill_ratio',
+        'explorer_summary__player_score',
+        'explorer_summary__ships_played_total',
+        'explorer_summary__ship_type_spread',
+        'explorer_summary__tier_spread',
+        'explorer_summary__eligible_ship_count',
+        'explorer_summary__efficiency_badge_rows_total',
+        'explorer_summary__badge_rows_unmapped',
+        'explorer_summary__expert_count',
+        'explorer_summary__grade_i_count',
+        'explorer_summary__grade_ii_count',
+        'explorer_summary__grade_iii_count',
+        'explorer_summary__raw_badge_points',
+        'explorer_summary__normalized_badge_strength',
+        'explorer_summary__ranked_seasons_participated',
+        'explorer_summary__latest_ranked_battles',
+        'explorer_summary__highest_ranked_league_recent',
+    )
+
+
+def _build_player_explorer_queryset(
+    query: str = '',
+    hidden: str = 'all',
+    activity_bucket: str = 'all',
+    ranked: str = 'all',
+    min_pvp_battles: int = 0,
+    apply_ranked_filter: bool = True,
+):
+    players = _player_explorer_base_queryset()
 
     if query:
         players = players.filter(name__icontains=query)
@@ -1945,20 +2016,114 @@ def fetch_player_explorer_rows(
     elif activity_bucket == 'dormant90plus':
         players = players.filter(days_since_last_battle__gt=90)
 
+    if apply_ranked_filter:
+        if ranked == 'yes':
+            players = players.filter(
+                explorer_summary__ranked_seasons_participated__gt=0)
+        elif ranked == 'no':
+            players = players.filter(
+                Q(explorer_summary__ranked_seasons_participated__isnull=True)
+                | Q(explorer_summary__ranked_seasons_participated=0)
+            )
+
+    return players
+
+
+def _player_explorer_sort_uses_summary(sort: str) -> bool:
+    return sort in {
+        'kill_ratio',
+        'player_score',
+        'battles_last_29_days',
+        'active_days_last_29_days',
+        'ships_played_total',
+        'ranked_seasons_participated',
+    }
+
+
+def _backfill_player_explorer_summaries(players) -> None:
+    for player in players.filter(explorer_summary__isnull=True):
+        refresh_player_explorer_summary(player)
+
+
+def _build_player_explorer_ordering(sort: str, direction: str):
+    if sort == 'account_age_days':
+        creation_date_order = F('creation_date').asc(nulls_last=True)
+        if direction == 'asc':
+            creation_date_order = F('creation_date').desc(nulls_last=True)
+        return [creation_date_order, Lower('name').asc(), 'player_id']
+
+    field_map = {
+        'name': 'name',
+        'days_since_last_battle': 'days_since_last_battle',
+        'pvp_ratio': 'pvp_ratio',
+        'pvp_battles': 'pvp_battles',
+        'pvp_survival_rate': 'pvp_survival_rate',
+        'kill_ratio': 'explorer_summary__kill_ratio',
+        'player_score': 'explorer_summary__player_score',
+        'battles_last_29_days': 'explorer_summary__battles_last_29_days',
+        'active_days_last_29_days': 'explorer_summary__active_days_last_29_days',
+        'ships_played_total': 'explorer_summary__ships_played_total',
+        'ranked_seasons_participated': 'explorer_summary__ranked_seasons_participated',
+    }
+    field_name = field_map[sort]
+    primary_order = F(field_name).asc(nulls_last=True)
+    if direction == 'desc':
+        primary_order = F(field_name).desc(nulls_last=True)
+
+    if sort == 'name':
+        return [Lower('name').desc() if direction == 'desc' else Lower('name').asc(), 'player_id']
+
+    return [primary_order, Lower('name').asc(), 'player_id']
+
+
+def fetch_player_explorer_page(
+    query: str = '',
+    hidden: str = 'all',
+    activity_bucket: str = 'all',
+    ranked: str = 'all',
+    min_pvp_battles: int = 0,
+    sort: str = 'player_score',
+    direction: str = 'desc',
+    page: int = 1,
+    page_size: int = 25,
+) -> tuple[int, list[dict]]:
+    players = _build_player_explorer_queryset(
+        query=query,
+        hidden=hidden,
+        activity_bucket=activity_bucket,
+        ranked=ranked,
+        min_pvp_battles=min_pvp_battles,
+        apply_ranked_filter=False,
+    )
+
+    should_backfill = ranked != 'all' or _player_explorer_sort_uses_summary(
+        sort)
+    if should_backfill and players.count() <= PLAYER_EXPLORER_ON_READ_BACKFILL_MAX:
+        _backfill_player_explorer_summaries(players)
+
+    if ranked == 'yes':
+        players = players.filter(
+            explorer_summary__ranked_seasons_participated__gt=0)
+    elif ranked == 'no':
+        players = players.filter(
+            Q(explorer_summary__ranked_seasons_participated__isnull=True)
+            | Q(explorer_summary__ranked_seasons_participated=0)
+        )
+
+    players = players.order_by(
+        *_build_player_explorer_ordering(sort, direction))
+
+    total_count = players.count()
+    start = (page - 1) * page_size
+    end = start + page_size
+
     rows = []
-    for player in players:
-        if _explorer_summary_needs_refresh(player):
+    for player in players[start:end]:
+        if getattr(player, 'explorer_summary', None) is None:
             refresh_player_explorer_summary(player)
         rows.append(build_player_summary(player))
 
-    if ranked == 'yes':
-        rows = [row for row in rows if (
-            row.get('ranked_seasons_participated') or 0) > 0]
-    elif ranked == 'no':
-        rows = [row for row in rows if (
-            row.get('ranked_seasons_participated') or 0) == 0]
-
-    return rows
+    return total_count, rows
 
 
 def _extract_randoms_rows(battles_json: Any, limit: Optional[int] = 20) -> list[dict]:
@@ -2227,9 +2392,7 @@ def fetch_activity_data(player_id: str) -> list:
     player = Player.objects.get(player_id=player_id)
 
     def _is_empty_activity(activity_rows: Any) -> bool:
-        if not isinstance(activity_rows, list) or not activity_rows:
-            return True
-        return all((row.get('battles', 0) or 0) == 0 for row in activity_rows)
+        return not isinstance(activity_rows, list) or not activity_rows
 
     def _looks_like_cumulative_spike(activity_rows: Any) -> bool:
         if not isinstance(activity_rows, list) or not activity_rows:
@@ -2469,8 +2632,7 @@ def fetch_landing_activity_attrition() -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
-                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(

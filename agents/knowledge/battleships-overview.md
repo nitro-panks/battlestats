@@ -225,12 +225,13 @@ Future agent sessions need one high-density bootstrap file that explains the liv
   - longevity
   - competitive intensity
 - `kill_ratio` is not literal K/D; it is a weighted, smoothed per-ship kill-rate aggregate.
+- `actual_kdr` is now persisted separately on `Player` as literal PvP kills divided by deaths and is the value shown on player detail.
 - current `kill_ratio` weighting:
   - tiers `1-4` -> `0.15`
   - tiers `5-7` -> `0.65`
   - tiers `8-11` -> `1.0`
   - per-ship smoothing prior toward `0.7` over `12` battles
-- `player_score` blends WR, weighted KDR/kill-rate, survival, battle volume, and recent activity into a detail/explorer summary number.
+- `player_score` blends WR, weighted KDR/kill-rate, survival, battle volume, and recent activity into a ranking/explorer summary number.
 - dormant account rule exists for `player_score`: very inactive accounts are forced into a weak but non-zero band.
 - playstyle verdicts use `compute_player_verdict()`.
 - playstyle verdicts now use a `$WR \times survivability$` matrix:

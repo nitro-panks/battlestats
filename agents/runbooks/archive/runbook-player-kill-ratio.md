@@ -1,5 +1,15 @@
 # Runbook: Player Weighted KDR And Score
 
+## Historical Status
+
+This archived runbook is still accurate about the meaning of weighted `kill_ratio` and the construction of `player_score`, but it is no longer accurate about player-detail presentation.
+
+Current product reality:
+
+1. player detail now shows literal `actual_kdr`, not weighted `kill_ratio`,
+2. weighted `kill_ratio` still exists for explorer sorting and `player_score`,
+3. the follow-up runbook is [agents/runbooks/runbook-player-kdr-alignment.md](../runbook-player-kdr-alignment.md).
+
 ## Goal
 
 Keep the weighted kill metric in place and add a new synthetic `player_score` that blends long-term skill and recency into a single detail-view score.
@@ -106,7 +116,8 @@ Final score:
 ## Product Placement
 
 - Player detail:
-  - keep weighted KDR in the four summary cards
+  - historical plan: keep weighted KDR in the four summary cards
+  - current product: the four-card detail strip now shows `actual_kdr` instead
   - render `Player Score` right-aligned on the player-name row as a compact summary badge
 - Player explorer:
   - keep the sortable field key as `kill_ratio`, but update copy so users understand it is tier-weighted rather than a plain average

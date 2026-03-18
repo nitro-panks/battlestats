@@ -1898,6 +1898,32 @@ class ApiContractTests(TestCase):
         self.assertTrue(response["X-Landing-Clans-Cache-Cached-At"])
         self.assertTrue(response["X-Landing-Clans-Cache-Expires-At"])
 
+    def test_landing_clans_support_gzip_for_large_json_payloads(self):
+        cache.clear()
+        for index in range(120):
+            clan = Clan.objects.create(
+                clan_id=5000 + index,
+                name=f"LandingGzipClan{index}",
+                tag=f"G{index}",
+                members_count=30,
+            )
+            Player.objects.create(
+                name=f"LandingGzipPlayer{index}",
+                player_id=700000 + index,
+                clan=clan,
+                pvp_battles=5000,
+                pvp_wins=2600,
+                days_since_last_battle=3,
+            )
+
+        response = self.client.get(
+            "/api/landing/clans/",
+            HTTP_ACCEPT_ENCODING="gzip",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get("Content-Encoding"), "gzip")
+
     def test_landing_players_sigma_mode_orders_by_efficiency_percentile(self):
         cache.clear()
         now = timezone.now()
@@ -2597,7 +2623,8 @@ class ApiContractTests(TestCase):
             pvp_survival_rate=40.0,
             creation_date=now - timedelta(days=180),
             battles_json=[
-                {"ship_name": "Ship A", "ship_type": "Destroyer", "ship_tier": 8, "pvp_battles": 30, "kdr": 1.0},
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 8, "pvp_battles": 30, "kdr": 1.0},
             ],
             efficiency_json=[],
             actual_kdr=None,
@@ -2608,7 +2635,8 @@ class ApiContractTests(TestCase):
             player.pvp_frags = 45
             player.pvp_survived_battles = 10
             player.pvp_deaths = 20
-            player.save(update_fields=["actual_kdr", "pvp_frags", "pvp_survived_battles", "pvp_deaths"])
+            player.save(update_fields=[
+                        "actual_kdr", "pvp_frags", "pvp_survived_battles", "pvp_deaths"])
 
         mock_update_player_data.side_effect = hydrate_player
 
@@ -3093,7 +3121,8 @@ class ApiContractTests(TestCase):
                 {"date": "2026-03-06", "battles": 2, "wins": 1},
             ],
             battles_json=[
-                {"ship_name": "Ship A", "ship_type": "Destroyer", "ship_tier": 10, "pvp_battles": 18, "kdr": 1.2},
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 18, "kdr": 1.2},
             ],
             ranked_json=[],
         )
@@ -3112,7 +3141,8 @@ class ApiContractTests(TestCase):
                 {"date": "2026-03-09", "battles": 5, "wins": 4},
             ],
             battles_json=[
-                {"ship_name": "Ship B", "ship_type": "Cruiser", "ship_tier": 9, "pvp_battles": 20, "kdr": 1.4},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 9, "pvp_battles": 20, "kdr": 1.4},
             ],
             ranked_json=[],
         )
@@ -3124,6 +3154,82 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["count"], 2)
         self.assertEqual(payload["results"][0]["name"], "ExplorerDefaultBravo")
         self.assertEqual(payload["results"][1]["name"], "ExplorerDefaultAlpha")
+
+    def test_players_explorer_builds_only_requested_page_rows(self):
+        from warships.data import build_player_summary as real_build_player_summary
+
+        now = timezone.now()
+        players = [
+            Player.objects.create(
+                name=f"ExplorerPaged{name}",
+                player_id=player_id,
+                is_hidden=False,
+                pvp_ratio=50.0 + index,
+                pvp_battles=1000 + index,
+                pvp_survival_rate=35.0 + index,
+                creation_date=now - timedelta(days=100 + index),
+                days_since_last_battle=index,
+            )
+            for index, (name, player_id) in enumerate([
+                ("Alpha", 9120),
+                ("Bravo", 9121),
+                ("Charlie", 9122),
+            ], start=1)
+        ]
+        for index, player in enumerate(players, start=1):
+            PlayerExplorerSummary.objects.create(
+                player=player,
+                player_score=float(index),
+                ships_played_total=index,
+                ranked_seasons_participated=0,
+            )
+
+        with patch("warships.data.build_player_summary", wraps=real_build_player_summary) as mock_build_player_summary:
+            response = self.client.get(
+                "/api/players/explorer/?q=ExplorerPaged&sort=name&direction=asc&page=2&page_size=1"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 3)
+        self.assertEqual(len(payload["results"]), 1)
+        self.assertEqual(payload["results"][0]["name"], "ExplorerPagedBravo")
+        self.assertEqual(mock_build_player_summary.call_count, 1)
+
+    @patch("warships.views.fetch_player_explorer_page")
+    def test_players_explorer_reuses_cached_response_payload(self, mock_fetch_player_explorer_page):
+        cache.clear()
+        mock_fetch_player_explorer_page.return_value = (
+            1,
+            [{
+                "name": "ExplorerCacheCaptain",
+                "player_id": 9801,
+                "is_hidden": False,
+                "days_since_last_battle": 2,
+                "pvp_ratio": 55.2,
+                "pvp_battles": 4000,
+                "pvp_survival_rate": 41.5,
+                "account_age_days": 365,
+                "kill_ratio": 1.22,
+                "player_score": 6.3,
+                "battles_last_29_days": 12,
+                "active_days_last_29_days": 4,
+                "ships_played_total": 8,
+                "ranked_seasons_participated": 2,
+            }],
+        )
+
+        first = self.client.get(
+            "/api/players/explorer/?q=ExplorerCacheCaptain&page_size=5")
+        second = self.client.get(
+            "/api/players/explorer/?q=ExplorerCacheCaptain&page_size=5")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first["X-Players-Explorer-Cache"], "miss")
+        self.assertEqual(second["X-Players-Explorer-Cache"], "hit")
+        self.assertEqual(first.json(), second.json())
+        mock_fetch_player_explorer_page.assert_called_once()
 
     @patch("warships.views.fetch_clan_battle_seasons")
     def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):

@@ -2,7 +2,9 @@
 
 _Drafted: 2026-03-16_
 
-_Status: Active planning runbook_
+_Status: Implemented historical runbook_
+
+This file captures the original rollout plan for the first efficiency-rank tranche. The backend snapshot command, player-detail payload contract, and header icon work described here have since landed, with later follow-up expanding the same rank contract onto additional player surfaces.
 
 ## Goal
 

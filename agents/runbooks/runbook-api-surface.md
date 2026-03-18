@@ -1,6 +1,6 @@
 # Runbook: API Surface Coverage
 
-_Last updated: 2026-03-16_
+_Last updated: 2026-03-17_
 
 _Status: Active operational reference_
 
@@ -34,13 +34,14 @@ docker compose exec -T server python scripts/smoke_test_site_endpoints.py
 | `/api/player/<name>/` | GET (404)    | `player_missing_404`     | Yes                                       |
 | `/api/player/`        | GET (list)   | —                        | Skipped (unpaginated, too slow for smoke) |
 
-**Key fields validated**: `name`, `pvp_ratio`, `pvp_survival_rate`, `verdict`, `kill_ratio`, `player_score`, `is_clan_leader`, `highest_ranked_league`
+**Key fields validated**: `name`, `pvp_ratio`, `pvp_survival_rate`, `verdict`, `kill_ratio`, `actual_kdr`, `player_score`, `is_clan_leader`, `highest_ranked_league`
 
 **Behavior notes**:
 
 - Detail reads should return `200` for existing players even when background task enqueue fails because the broker is unavailable.
 - Background refresh is best-effort only; request-time payload delivery takes priority over async enqueue success.
 - Player detail now exposes best historical ranked league semantics instead of relying only on the latest ranked season.
+- Player detail now exposes `actual_kdr` as the literal kills-over-deaths metric while `kill_ratio` remains the weighted explorer/scoring signal.
 
 ### Player Fetch Endpoints
 
@@ -149,3 +150,4 @@ docker compose exec -T server python scripts/smoke_test_site_endpoints.py
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-03-10 | Added: player_suggestions, player_list, player_detail (with verdict), clan_list, clan_detail, ship_list, players_explorer, player_distribution_survival_rate. Reorganized test cases by category.         |
 | 2026-03-14 | Added behavior context for player-detail broker-failure tolerance, clan-member roster markers, full ranked-history reads, ranked maintenance split, and contract-backed player summary/explorer surfaces. |
+| 2026-03-17 | Updated player-detail contract notes to include `actual_kdr` and clarified that `kill_ratio` remains a weighted metric rather than literal K/D.                                                           |

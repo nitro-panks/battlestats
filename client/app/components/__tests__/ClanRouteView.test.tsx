@@ -4,6 +4,7 @@ import ClanRouteView from '../ClanRouteView';
 
 const pushMock = jest.fn();
 const trackEntityDetailViewMock = jest.fn();
+const capturedProps: { current: null | Record<string, unknown> } = { current: null };
 
 jest.mock('next/navigation', () => ({
     useRouter: () => ({
@@ -16,7 +17,9 @@ jest.mock('../../lib/visitAnalytics', () => ({
 }));
 
 jest.mock('../ClanDetail', () => {
-    return function MockClanDetail({ clan }: { clan: { clan_id: number; name: string; tag: string; members_count: number } }) {
+    return function MockClanDetail(props: { clan: { clan_id: number; name: string; tag: string; members_count: number } }) {
+        capturedProps.current = props;
+        const { clan } = props;
         return (
             <div data-testid="clan-detail">
                 <span>{clan.clan_id}</span>
@@ -29,13 +32,21 @@ jest.mock('../ClanDetail', () => {
 });
 
 describe('ClanRouteView', () => {
+    let consoleErrorSpy: jest.SpyInstance;
+
     beforeEach(() => {
         pushMock.mockReset();
         trackEntityDetailViewMock.mockReset();
+        capturedProps.current = null;
         global.fetch = jest.fn();
+        consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     });
 
-    it('loads clan details from the singular clan API route', async () => {
+    afterEach(() => {
+        consoleErrorSpy.mockRestore();
+    });
+
+    it('loads clan details from the singular clan API route and wires callbacks', async () => {
         (global.fetch as jest.Mock).mockResolvedValue({
             ok: true,
             headers: {
@@ -65,6 +76,35 @@ describe('ClanRouteView', () => {
             entityName: 'Test Clan',
             entitySlug: '1000067803-test-clan',
         });
+
+        const props = capturedProps.current as {
+            onBack: () => void;
+            onSelectMember: (memberName: string) => void;
+        };
+
+        props.onBack();
+        props.onSelectMember('Player One');
+
+        expect(pushMock).toHaveBeenNthCalledWith(1, '/');
+        expect(pushMock).toHaveBeenNthCalledWith(2, '/player/Player%20One');
+    });
+
+    it('normalizes sparse clan payloads using route fallbacks', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+            ok: true,
+            headers: {
+                get: (headerName: string) => headerName === 'content-type' ? 'application/json' : null,
+            },
+            json: async () => ({
+                clan_id: 1000067803,
+            }),
+        });
+
+        render(<ClanRouteView clanSlug="1000067803-test-clan" />);
+
+        expect(await screen.findByTestId('clan-detail')).toBeInTheDocument();
+        expect(screen.getByText('Clan')).toBeInTheDocument();
+        expect(screen.getByText('0')).toBeInTheDocument();
     });
 
     it('shows a not found state for an invalid clan slug without fetching', async () => {
@@ -72,6 +112,23 @@ describe('ClanRouteView', () => {
 
         expect(await screen.findByText('Clan not found.')).toBeInTheDocument();
         expect(global.fetch).not.toHaveBeenCalled();
+        expect(trackEntityDetailViewMock).not.toHaveBeenCalled();
+    });
+
+    it('shows a not found state when the clan payload cannot be normalized', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+            ok: true,
+            headers: {
+                get: (headerName: string) => headerName === 'content-type' ? 'application/json' : null,
+            },
+            json: async () => ({
+                clan_id: 'not-a-number',
+            }),
+        });
+
+        render(<ClanRouteView clanSlug="1000067803-test-clan" />);
+
+        expect(await screen.findByText('Clan not found.')).toBeInTheDocument();
         expect(trackEntityDetailViewMock).not.toHaveBeenCalled();
     });
 });

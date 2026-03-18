@@ -117,7 +117,8 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(warm_schedule.every, 30)
         self.assertEqual(warm_schedule.period, IntervalSchedule.MINUTES)
 
-        landing_warm_task = PeriodicTask.objects.get(name="landing-page-warmer")
+        landing_warm_task = PeriodicTask.objects.get(
+            name="landing-page-warmer")
         self.assertEqual(
             landing_warm_task.task,
             "warships.tasks.warm_landing_page_content_task",
@@ -128,7 +129,8 @@ class ClanCrawlSchedulerTests(TestCase):
         landing_warm_schedule = IntervalSchedule.objects.get(
             id=landing_warm_task.interval_id)
         self.assertEqual(landing_warm_schedule.every, 55)
-        self.assertEqual(landing_warm_schedule.period, IntervalSchedule.MINUTES)
+        self.assertEqual(landing_warm_schedule.period,
+                         IntervalSchedule.MINUTES)
 
     def test_watchdog_stays_idle_when_not_running(self):
         with patch("warships.tasks.crawl_all_clans_task.delay") as mock_delay:
@@ -171,7 +173,8 @@ class ClanCrawlSchedulerTests(TestCase):
 
     def test_warm_landing_page_content_task_invalidates_then_warms(self):
         with patch("warships.landing.invalidate_landing_recent_player_cache") as mock_invalidate_recent_players, patch("warships.tasks.cache.delete") as mock_cache_delete, patch("warships.landing.warm_landing_page_content") as mock_warm:
-            mock_warm.return_value = {"status": "completed", "warmed": {"players_sigma": 40}}
+            mock_warm.return_value = {
+                "status": "completed", "warmed": {"players_sigma": 40}}
 
             result = warm_landing_page_content_task.run(include_recent=True)
 
@@ -187,7 +190,8 @@ class ClanCrawlSchedulerTests(TestCase):
         with patch("warships.landing.warm_landing_page_content") as mock_warm:
             result = warm_landing_page_content_task.run(include_recent=True)
 
-        self.assertEqual(result, {"status": "skipped", "reason": "already-running"})
+        self.assertEqual(result, {"status": "skipped",
+                         "reason": "already-running"})
         mock_warm.assert_not_called()
 
     def test_force_refresh_rebuilds_landing_cache_without_manual_invalidation(self):
@@ -202,7 +206,8 @@ class ClanCrawlSchedulerTests(TestCase):
             battles_json=[{"ship_tier": 8, "pvp_battles": 3200, "wins": 1984}],
         )
 
-        first_names = [row["name"] for row in get_landing_players_payload("best", 40)]
+        first_names = [row["name"]
+                       for row in get_landing_players_payload("best", 40)]
         self.assertIn("LandingWarmOld", first_names)
 
         Player.objects.create(
@@ -212,18 +217,22 @@ class ClanCrawlSchedulerTests(TestCase):
             pvp_ratio=68.0,
             pvp_battles=3600,
             last_battle_date=today,
-            battles_json=[{"ship_tier": 10, "pvp_battles": 3600, "wins": 2448}],
+            battles_json=[
+                {"ship_tier": 10, "pvp_battles": 3600, "wins": 2448}],
         )
 
         cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY, ["stale"], timeout=60)
         cache.set(LANDING_RECENT_CLANS_CACHE_KEY, ["stale"], timeout=60)
         result = warm_landing_page_content_task.run(include_recent=True)
 
-        refreshed_names = [row["name"] for row in get_landing_players_payload("best", 40)]
+        refreshed_names = [row["name"]
+                           for row in get_landing_players_payload("best", 40)]
         self.assertEqual(result["status"], "completed")
         self.assertIn("LandingWarmNew", refreshed_names)
-        self.assertNotEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), ["stale"])
-        self.assertNotEqual(cache.get(LANDING_RECENT_CLANS_CACHE_KEY), ["stale"])
+        self.assertNotEqual(
+            cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), ["stale"])
+        self.assertNotEqual(
+            cache.get(LANDING_RECENT_CLANS_CACHE_KEY), ["stale"])
 
     def test_incremental_ranked_task_skips_when_crawl_lock_exists(self):
         cache.add(CLAN_CRAWL_LOCK_KEY, "crawl-run", timeout=60)

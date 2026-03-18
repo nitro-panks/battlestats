@@ -267,7 +267,7 @@ def get_landing_clans_payload_with_cache_metadata(force_refresh: bool = False) -
 def normalize_landing_player_mode(mode: str | None) -> str:
     normalized_mode = (mode or 'random').strip().lower()
     if normalized_mode not in LANDING_PLAYER_MODES:
-        raise ValueError('mode must be one of: random, best')
+        raise ValueError('mode must be one of: random, best, sigma')
     return normalized_mode
 
 
@@ -441,10 +441,13 @@ def _build_best_landing_players(limit: int) -> list[dict]:
             last_battle_date__isnull=True
         ).annotate(
             player_score=F('explorer_summary__player_score'),
-            efficiency_rank_percentile=F('explorer_summary__efficiency_rank_percentile'),
-            shrunken_efficiency_strength=F('explorer_summary__shrunken_efficiency_strength'),
+            efficiency_rank_percentile=F(
+                'explorer_summary__efficiency_rank_percentile'),
+            shrunken_efficiency_strength=F(
+                'explorer_summary__shrunken_efficiency_strength'),
             latest_ranked_battles=F('explorer_summary__latest_ranked_battles'),
-            highest_ranked_league_recent=F('explorer_summary__highest_ranked_league_recent'),
+            highest_ranked_league_recent=F(
+                'explorer_summary__highest_ranked_league_recent'),
         ).values(
             'name',
             'player_id',

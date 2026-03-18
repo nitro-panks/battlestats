@@ -129,6 +129,8 @@ this starts:
 - rabbitmq
 - postgresql (dockerized)
 
+the server and client images now also install `ripgrep` (`rg`), so fast workspace searches are available inside the project containers after rebuild.
+
 ### first-time setup (`server/.env`)
 
 before first run, make sure `server/.env` exists and contains at least:

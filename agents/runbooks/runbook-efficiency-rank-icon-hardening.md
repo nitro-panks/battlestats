@@ -2,7 +2,9 @@
 
 _Drafted: 2026-03-16_
 
-_Status: Active planning runbook_
+_Status: Implemented historical runbook_
+
+This file remains useful as the rationale for the published tiered efficiency-rank contract and its hardening constraints. The tiered icon system, serializer payload caching, and partial-publication safeguards described here have since been implemented.
 
 ## Purpose
 

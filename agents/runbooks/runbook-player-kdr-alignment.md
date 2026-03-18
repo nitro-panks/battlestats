@@ -12,11 +12,11 @@ Align KDR usage across the product so that:
 2. the Best-player ranking can consider KDR in a defensible way without double-counting or reintroducing low-tier distortion,
 3. player lists on clan and player-centric ranking surfaces are ordered by player ranking, not by KDR or weighted KDR.
 
-## Current-State Findings
+## Historical Findings Before Implementation
 
-### 1. The player detail page does not currently show actual KDR
+### 1. Before this tranche, the player detail page did not show actual KDR
 
-The four-card stat strip in [client/app/components/PlayerDetail.tsx](../../client/app/components/PlayerDetail.tsx) renders a card labeled `Weighted KDR` and reads from `player.kill_ratio`.
+Before implementation, the four-card stat strip in [client/app/components/PlayerDetail.tsx](../../client/app/components/PlayerDetail.tsx) rendered a card labeled `Weighted KDR` and read from `player.kill_ratio`.
 
 That field is not literal kills divided by deaths.
 
@@ -32,7 +32,13 @@ Conclusion:
 2. It should not be relabeled as actual KDR.
 3. If the product wants actual KDR on player detail, it needs a separate field.
 
-### 2. Actual KDR is not currently persisted at player level
+Current state:
+
+1. the player detail summary card now renders `KDR`,
+2. it reads from `actual_kdr`,
+3. `kill_ratio` remains a separate weighted ranking metric.
+
+### 2. Before this tranche, actual KDR was not persisted at player level
 
 The current player ingest in [server/warships/data.py](../../server/warships/data.py) persists:
 
@@ -55,6 +61,12 @@ Conclusion:
 1. the clean implementation path is to extend player-level ingest to store the numerator and denominator for actual KDR,
 2. swapping the player detail card should be an additive contract change, not a reinterpretation of `kill_ratio`.
 
+Current state:
+
+1. `Player` now stores `pvp_frags`, `pvp_survived_battles`, `pvp_deaths`, and `actual_kdr`,
+2. player refresh computes those values directly from player-level PvP stats,
+3. hidden-profile refresh clears those additive fields.
+
 ### 3. Clan roster ordering is already ranking-first
 
 The clan members endpoint in [server/warships/views.py](../../server/warships/views.py) orders members with `_player_score_ordering('last_battle_date')`, which means:
@@ -70,7 +82,7 @@ Conclusion:
 1. the clan page is already aligned with the desired ranking behavior,
 2. the task here is to preserve and harden that behavior, not redesign it.
 
-### 4. Player Explorer is not KDR-ordered by default, but it is also not ranking-first
+### 4. Before this tranche, Player Explorer was not KDR-ordered by default, but it was also not ranking-first
 
 The Player Explorer in [client/app/components/PlayerExplorer.tsx](../../client/app/components/PlayerExplorer.tsx) currently defaults to:
 
@@ -83,6 +95,11 @@ Conclusion:
 
 1. the explorer is not incorrectly ordered by weighted KDR today,
 2. if the desired product rule is `player-centric ranking views should default to player ranking`, then the explorer default should move to `player_score DESC`.
+
+Current state:
+
+1. Player Explorer now defaults to `player_score DESC`,
+2. `kill_ratio` remains available as an explicit opt-in sort.
 
 ### 5. Best-player ranking already avoids weighted-KDR-first ordering
 

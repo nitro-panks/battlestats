@@ -1,8 +1,22 @@
 # Runbook: Player Activity and Evaluation
 
-_Last updated: 2026-03-09_
+_Last updated: 2026-03-17_
 
-_Status: Current-state planning runbook_
+_Status: Historical strategy runbook; partially superseded by shipped explorer and summary work_
+
+This runbook still contains useful framing for activity and evaluation semantics, but several items that were future work on 2026-03-09 are now live.
+
+Already shipped since the original draft:
+
+1. `PlayerExplorerSummary` now persists derived recent-activity and comparison fields such as `battles_last_29_days`, `active_days_last_29_days`, `recent_win_rate`, and `player_score`.
+2. The dataset now has a live Player Explorer surface and API endpoint for sorting and filtering known players.
+3. Player ranking surfaces already use `player_score` as a first-class signal.
+
+Still not fully shipped from the original direction:
+
+1. the recent activity chart component is still not mounted as a first-class section on player detail,
+2. dataset-wide population overview analytics are still separate from the main player-detail flow,
+3. percentile-heavy evaluation claims still need careful denominator and refresh semantics.
 
 ## Purpose
 
@@ -18,12 +32,14 @@ This revision updates the runbook against the live codebase as of 2026-03-09. It
 
 ## Revision Status
 
-- Revision date: 2026-03-09
-- Status: current-state planning runbook only
+- Revision date: 2026-03-17
+- Status: historical strategy note with partial implementation already landed
 - Ranked status: live on player detail via ranked seasons table
 - Randoms status: live on player detail via filterable top-ships chart
 - Activity-series status: backend endpoint and chart component exist, but recent activity is not yet a first-class player-detail section in the current UI
 - Clan battle status: live at clan-roster season summary level only, not player-grain participation history
+- Player Explorer status: live via `/api/players/explorer/` and the client explorer surface
+- Derived player-summary metrics status: live on `PlayerExplorerSummary` for recent activity, breadth, longevity, ranked participation, weighted `kill_ratio`, and `player_score`
 
 ## Questions This Runbook Must Answer
 
@@ -35,9 +51,9 @@ This revision updates the runbook against the live codebase as of 2026-03-09. It
 
 ## Executive Recommendation
 
-Do not jump directly to a single opaque "player score."
+Do not treat a single score as the whole player story.
 
-The current codebase already supports a strong descriptive model if the product stays explicit about dimensions:
+The current codebase now supports both a bounded `player_score` summary signal and a stronger descriptive model if the product stays explicit about dimensions:
 
 1. **Activeness:** how recently and how often the player has played.
 2. **Performance:** how well the player performs in aggregate and recent windows.
@@ -49,7 +65,7 @@ This should be built in phases:
 
 1. Strengthen the descriptive player model.
 2. Add dataset-wide comparison surfaces.
-3. Add composite evaluation only after the inputs are queryable, stable, and explainable.
+3. Keep composite evaluation subordinate to explicit underlying metrics, not a replacement for them.
 
 ## Current Product and Data Reality
 
@@ -60,9 +76,10 @@ The current application already provides these user-facing surfaces:
 | Surface                     | Current Support                                     | Notes                                                               |
 | --------------------------- | --------------------------------------------------- | ------------------------------------------------------------------- |
 | Player search               | live                                                | Name search with suggestions and hidden-profile labeling            |
+| Player Explorer             | live                                                | Dataset-wide sorting and filtering across known players             |
 | Active players landing list | live                                                | Ordered by `last_battle_date`, useful for discovery, not evaluation |
 | Recently viewed list        | live                                                | Viewer behavior only, not gameplay behavior                         |
-| Player detail stat cards    | live                                                | PvP battles, PvP WR, survival, recency                              |
+| Player detail stat cards    | live                                                | PvP battles, PvP WR, survival, actual KDR                           |
 | Randoms top-ships chart     | live                                                | Filterable across all ships via `randoms_data?all=true`             |
 | Performance by tier         | live                                                | Derived from `battles_json`                                         |
 | Performance by ship type    | live                                                | Derived from `battles_json`                                         |
@@ -79,6 +96,7 @@ The current application already provides these user-facing surfaces:
 | `days_since_last_battle`                                                  | derived recency display             | high                                                     |
 | `creation_date`                                                           | account longevity                   | high                                                     |
 | `pvp_battles`, `pvp_wins`, `pvp_losses`, `pvp_ratio`, `pvp_survival_rate` | aggregate performance context       | high                                                     |
+| `actual_kdr`                                                              | literal PvP kills-over-deaths       | high                                                     |
 | `activity_json`                                                           | 29-day daily recent activity series | high for recent activity                                 |
 | `battles_json`                                                            | per-ship base dataset               | high for breadth/composition derivations                 |
 | `randoms_json`                                                            | top random-battle ship view         | high for top-ship storytelling, partial for full breadth |
@@ -148,22 +166,22 @@ Today the product supports lookup by name, but not true comparative placement.
 ### What Does Not Exist Yet
 
 1. Ranking or percentile placement by WR, activity, longevity, or breadth.
-2. Filterable player explorer across the dataset.
-3. Cohort comparisons such as "among players with 5k+ battles" or "among players active in the last 30 days."
-4. A dedicated dataset query endpoint for player comparison.
+2. Cohort comparisons such as "among players with 5k+ battles" or "among players active in the last 30 days."
+3. Population-level percentile framing for the main evaluation metrics.
+4. A first-class population overview surface that sits beside Player Explorer rather than requiring ad hoc analysis.
 
 ### Recommendation
 
-Add a first-class **Player Explorer** surface before attempting a composite player score.
+Use the shipped **Player Explorer** as the baseline comparison surface, then add clearer activity storytelling and population views before expanding prestige-oriented scoring.
 
-The explorer should support:
+The current explorer already supports or partially supports:
 
 1. search by name,
 2. sorting by explicit numeric metrics,
 3. filters for activity, ranked participation, account age, and hidden status,
 4. a detail jump from any row into player detail.
 
-This is the cleanest path to answering "where does this player sit in the dataset?"
+The next product gap is not explorer existence; it is better interpretation around cohorts, recent activity, and population context.
 
 ### 3. "How can I evaluate players by a combination of performance, engagement, activeness, longevity, number of ships, etc.?"
 
@@ -284,7 +302,7 @@ The runbook should anchor future implementation around clear stories, not only m
 ### Ship First
 
 1. An explicit **Player Activity Summary** on player detail.
-2. A **Player Explorer** for sorting and filtering known players.
+2. Continued expansion of the live **Player Explorer** for sorting and filtering known players.
 3. Dataset overview analytics that show distributions and cohorts.
 4. A decomposed evaluation model with clearly labeled ingredients.
 
@@ -306,7 +324,7 @@ Recommended additions:
 3. Keep ranked separate as competitive context, not a hidden component of a universal score.
 4. Use randoms, tier, and type charts to explain breadth and concentration.
 
-### Phase 2: Add Dataset-Wide Comparison Surface
+### Phase 2: Extend The Dataset-Wide Comparison Surface
 
 Create a Player Explorer table or grid with:
 
@@ -327,6 +345,10 @@ Best first columns:
 7. account age,
 8. ships played total,
 9. latest ranked league or ranked participation flag.
+
+Implementation note:
+
+Much of this already exists in the current explorer stack. Remaining work is mostly around widening the filter/storytelling model rather than inventing the surface from scratch.
 
 ### Phase 3: Add Population Overview
 
@@ -367,15 +389,15 @@ Recommended first derived fields or computed API payload values:
 10. `latest_ranked_battles`
 11. `account_age_days`
 
-### Phase 2: Make Dataset Queries Cheap and Explicit
+### Phase 2: Keep Dataset Queries Cheap and Explicit
 
-The current data model is good for player detail, but not ideal for dataset-wide ranking because several useful signals live inside JSON blobs.
+The current data model is materially better than it was when this runbook was drafted because `PlayerExplorerSummary` now persists several comparison fields already.
 
 Recommended engineering direction:
 
-1. Add a denormalized player-summary model or persisted summary fields.
-2. Recompute those summaries when player data refreshes.
-3. Expose a dedicated explorer endpoint with sorting and filtering.
+1. Continue using the denormalized player-summary layer rather than raw JSON parsing on request.
+2. Add new comparison metrics to the persisted summary only when they have clear product use.
+3. Keep the explorer endpoint as the canonical dataset-comparison API.
 4. Avoid computing dataset-wide rankings directly from JSON fields on request.
 
 ### Phase 3: Build Comparison and Storytelling Surfaces
@@ -413,18 +435,19 @@ Hidden profiles clear cached detailed views. Missing data here is expected and s
 | `active_days_last_29_days`    | captures cadence better than total alone           |
 | `recent_win_rate`             | simple recent-performance companion metric         |
 | `pvp_ratio`                   | stable lifetime effectiveness metric               |
+| `actual_kdr`                  | literal kill/death context                         |
 | `account_age_days`            | useful longevity context                           |
 | `ranked_seasons_participated` | current competitive engagement indicator           |
 | `ships_played_total`          | breadth measure derivable from current ship rows   |
 
 ### Ship Later With Care
 
-| Metric                                     | Why It Needs More Work                                      |
-| ------------------------------------------ | ----------------------------------------------------------- |
-| composite player score                     | needs transparent weighting and validation                  |
-| percentile rank                            | needs stable dataset denominator and refresh semantics      |
-| mode-mix score                             | current data does not have complete daily cross-mode parity |
-| recent-vs-career overperformance indicator | possible, but requires careful interpretation copy          |
+| Metric                                     | Why It Needs More Work                                       |
+| ------------------------------------------ | ------------------------------------------------------------ |
+| composite player score as a prestige claim | the stored score exists, but still needs careful explanation |
+| percentile rank                            | needs stable dataset denominator and refresh semantics       |
+| mode-mix score                             | current data does not have complete daily cross-mode parity  |
+| recent-vs-career overperformance indicator | possible, but requires careful interpretation copy           |
 
 ### Defer
 
@@ -446,7 +469,7 @@ Push evaluation summaries into a dedicated derived layer. Do not build a compari
 
 ### Engineer (Web Dev)
 
-Reuse the existing activity endpoint and chart for player-detail recent activity. Add dataset-wide comparison only after the backend exposes explicit sortable metrics.
+Reuse the existing activity endpoint and chart for player-detail recent activity. The backend already exposes explicit sortable explorer metrics; the next step is better player-detail storytelling and cohort framing.
 
 ### UX
 
@@ -468,8 +491,8 @@ Do not imply value judgments from missing or partial data. Keep operational fres
 
 - [ ] Confirm the product wants a descriptive framework before a composite score.
 - [ ] Add recent activity as a first-class player-detail section.
-- [ ] Define and expose derived summary metrics for player evaluation.
-- [ ] Design a Player Explorer for dataset-wide search, sorting, and filtering.
+- [ ] Extend the current derived summary metrics only where the product needs clearer comparison or explanation.
+- [ ] Extend the current Player Explorer with clearer cohort filters and comparison framing.
 - [ ] Keep clan battle data excluded from player-level scoring.
 - [ ] Add clear hidden-profile handling for all evaluation surfaces.
 - [ ] Revisit weighting only after the derived metrics are live and queryable.
@@ -479,7 +502,7 @@ Do not imply value judgments from missing or partial data. Keep operational fres
 Revisit this runbook when any of the following happens:
 
 1. The player detail page ships the recent activity section.
-2. A dataset-wide player explorer endpoint is introduced.
+2. The Player Explorer adds cohort or percentile framing beyond raw sorting/filtering.
 3. Derived player-summary fields are added to the model or API.
 4. Player-level clan battle participation becomes available.
 5. The product chooses to ship a composite score or percentile system.
@@ -488,7 +511,7 @@ Revisit this runbook when any of the following happens:
 
 This runbook revision is complete when:
 
-1. It reflects the live codebase instead of a hypothetical future state.
+1. It reflects the live codebase instead of freezing the 2026-03-09 pre-explorer state.
 2. It distinguishes single-player detail capability from dataset-wide analytics capability.
 3. It identifies which metrics are ready, derivable, unsuitable, and deferred.
 4. It proposes concrete stories, visuals, and engineering phases.

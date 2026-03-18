@@ -1,24 +1,34 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import PlayerDetail from '../PlayerDetail';
 
 const mockUseClanMembers = jest.fn();
+const mockClipboardWriteText = jest.fn();
 let mockClanBattleSummary:
     | { seasonsPlayed: number; totalBattles: number; overallWinRate: number; }
     | null
     | undefined;
+let mockRankedHeatmapVisibility: boolean | undefined;
 
 jest.mock('next/dynamic', () => {
-    return () => function MockDynamicComponent(props: { playerId?: number; onSummaryChange?: (summary: { seasonsPlayed: number; totalBattles: number; overallWinRate: number; } | null) => void }) {
+    return () => function MockDynamicComponent(props: {
+        playerId?: number;
+        onSummaryChange?: (summary: { seasonsPlayed: number; totalBattles: number; overallWinRate: number; } | null) => void;
+        onVisibilityChange?: (isVisible: boolean) => void;
+        title?: string;
+    }) {
         const React = require('react');
 
         React.useEffect(() => {
             if (typeof props?.onSummaryChange === 'function' && props?.playerId && mockClanBattleSummary !== undefined) {
                 props.onSummaryChange(mockClanBattleSummary);
             }
+            if (typeof props?.onVisibilityChange === 'function' && mockRankedHeatmapVisibility !== undefined) {
+                props.onVisibilityChange(mockRankedHeatmapVisibility);
+            }
         }, [props?.onSummaryChange, props?.playerId]);
 
-        return null;
+        return <div data-testid="dynamic-component" />;
     };
 });
 
@@ -84,13 +94,27 @@ const basePlayer = {
 };
 
 describe('PlayerDetail efficiency-rank icon', () => {
+    let consoleErrorSpy: jest.SpyInstance;
+
     beforeEach(() => {
         mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: null });
         mockClanBattleSummary = undefined;
+        mockRankedHeatmapVisibility = undefined;
+        mockClipboardWriteText.mockReset();
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: {
+                writeText: mockClipboardWriteText,
+            },
+        });
+        consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        jest.useRealTimers();
     });
 
     afterEach(() => {
         mockUseClanMembers.mockClear();
+        consoleErrorSpy.mockRestore();
+        jest.useRealTimers();
     });
 
     it('loads clan members through the shared hook using the player clan id', () => {
@@ -410,5 +434,167 @@ describe('PlayerDetail efficiency-rank icon', () => {
         );
 
         expect(screen.getByLabelText(/clan battle enjoyer 56\.3 percent WR/i)).toBeInTheDocument();
+    });
+
+    it('wires clan and back navigation controls from the rendered detail view', () => {
+        const onBack = jest.fn();
+        const onSelectClan = jest.fn();
+
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    clan_id: 4444,
+                    clan_name: 'Fixture Clan',
+                    clan_tag: 'FX',
+                }}
+                onBack={onBack}
+                onSelectMember={() => undefined}
+                onSelectClan={onSelectClan}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Open clan page for Fixture Clan' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Return to landing page' }));
+
+        expect(onSelectClan).toHaveBeenCalledWith(4444, 'Fixture Clan');
+        expect(onBack).toHaveBeenCalled();
+    });
+
+    it('renders no-clan messaging and omits the clan route button for clanless players', () => {
+        render(
+            <PlayerDetail
+                player={basePlayer}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByText('No Clan')).toBeInTheDocument();
+        expect(screen.getByText('No clan data available')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /Open clan page/i })).not.toBeInTheDocument();
+    });
+
+    it('renders hidden-player messaging and suppresses detail-only sections', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    is_hidden: true,
+                    clan_id: 4444,
+                    clan_name: 'Fixture Clan',
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByText("This player's stats are hidden.")).toBeInTheDocument();
+        expect(screen.queryByText('Win Rate')).not.toBeInTheDocument();
+        expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
+    });
+
+    it('renders header markers for leader, ranked, sleepy, and known playstyle states', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    is_clan_leader: true,
+                    days_since_last_battle: 500,
+                    highest_ranked_league: 'Gold',
+                    ranked_json: [{ total_battles: 120, total_wins: 70, highest_league_name: 'Gold' }],
+                    verdict: 'Warrior',
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByLabelText('Clan leader')).toBeInTheDocument();
+        expect(screen.getByLabelText('inactive for over a year')).toBeInTheDocument();
+        expect(screen.getByLabelText(/ranked enjoyer/i)).toBeInTheDocument();
+        expect(screen.getByText('Playstyle:')).toBeInTheDocument();
+        expect(screen.getByText('Warrior')).toBeInTheDocument();
+    });
+
+    it('copies the player URL and clears the copied state after the timeout', async () => {
+        jest.useFakeTimers();
+        mockClipboardWriteText.mockResolvedValue(undefined);
+
+        render(
+            <PlayerDetail
+                player={basePlayer}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable player URL' }));
+
+        await waitFor(() => {
+            expect(mockClipboardWriteText).toHaveBeenCalled();
+        });
+        expect(await screen.findByText('Copied')).toBeInTheDocument();
+
+        await act(async () => {
+            jest.advanceTimersByTime(1800);
+        });
+
+        await waitFor(() => {
+            expect(screen.queryByText('Copied')).not.toBeInTheDocument();
+        });
+    });
+
+    it('shows a share failure state when clipboard copying fails', async () => {
+        mockClipboardWriteText.mockRejectedValue(new Error('no clipboard'));
+
+        render(
+            <PlayerDetail
+                player={basePlayer}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable player URL' }));
+
+        expect(await screen.findByText('Copy failed')).toBeInTheDocument();
+        expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('omits the ranked heatmap when the player has no known ranked games', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    ranked_json: [{ total_battles: 0, total_wins: 0 }],
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.queryByText('Ranked Games vs Win Rate')).not.toBeInTheDocument();
+        expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
+    });
+
+    it('shows the loading overlay when the player detail is refreshing', () => {
+        render(
+            <PlayerDetail
+                player={basePlayer}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+                isLoading
+            />,
+        );
+
+        expect(screen.getByText('Loading player...')).toBeInTheDocument();
     });
 });
