@@ -18,6 +18,7 @@ interface PlayerDetailProps {
         name: string;
         player_id: number;
         kill_ratio: number | null;
+        actual_kdr?: number | null;
         player_score: number | null;
         total_battles: number;
         pvp_battles: number;
@@ -596,9 +597,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     </div>
                                 </div>
                                 <div className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3">
-                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">Weighted KDR</p>
+                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">KDR</p>
                                     <div className="flex flex-1 items-center justify-center">
-                                        <p className="text-center text-2xl font-semibold text-[#084594]">{formatKillRatio(player.kill_ratio)}</p>
+                                        <p className="text-center text-2xl font-semibold text-[#084594]">{formatKillRatio(player.actual_kdr)}</p>
                                     </div>
                                 </div>
                             </div>

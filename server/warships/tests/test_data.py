@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from warships.clan_crawl import run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_battle_hydration, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_battle_hydration, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
 from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key
 from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship
 
@@ -930,6 +930,24 @@ class RankedDataRefreshTests(TestCase):
 
 
 class PlayerDataHardeningTests(TestCase):
+    def test_calculate_actual_kdr_uses_kills_over_deaths(self):
+        deaths, actual_kdr = _calculate_actual_kdr(120, 180, 30)
+
+        self.assertEqual(deaths, 90)
+        self.assertEqual(actual_kdr, 2.0)
+
+    def test_calculate_actual_kdr_returns_null_without_battles(self):
+        deaths, actual_kdr = _calculate_actual_kdr(0, 0, 0)
+
+        self.assertEqual(deaths, 0)
+        self.assertIsNone(actual_kdr)
+
+    def test_calculate_actual_kdr_returns_null_without_deaths(self):
+        deaths, actual_kdr = _calculate_actual_kdr(12, 24, 12)
+
+        self.assertEqual(deaths, 0)
+        self.assertIsNone(actual_kdr)
+
     def test_compute_player_verdict_uses_new_playstyle_bands(self):
         self.assertEqual(compute_player_verdict(500, 65.1, 34.0), "Sealord")
         self.assertEqual(compute_player_verdict(500, 65.0, 34.0), "Assassin")
@@ -982,10 +1000,54 @@ class PlayerDataHardeningTests(TestCase):
         player.refresh_from_db()
         self.assertTrue(player.is_hidden)
         self.assertEqual(player.total_battles, 0)
+        self.assertEqual(player.pvp_frags, 0)
+        self.assertEqual(player.pvp_survived_battles, 0)
+        self.assertEqual(player.pvp_deaths, 0)
+        self.assertIsNone(player.actual_kdr)
         self.assertIsNone(player.battles_json)
         self.assertIsNone(player.randoms_json)
         self.assertIsNone(player.ranked_json)
         self.assertIsNone(player.efficiency_json)
+
+    @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
+    @patch("warships.data._fetch_clan_membership_for_player")
+    @patch("warships.data._fetch_player_personal_data")
+    def test_update_player_data_computes_actual_kdr(
+        self,
+        mock_fetch_player_personal_data,
+        mock_fetch_clan_membership,
+        _mock_fetch_efficiency_badges,
+    ):
+        player = Player.objects.create(
+            name="KdrCaptain",
+            player_id=8081,
+            last_fetch=timezone.now() - timedelta(days=2),
+        )
+        mock_fetch_player_personal_data.return_value = {
+            "account_id": 8081,
+            "nickname": "KdrCaptain",
+            "hidden_profile": False,
+            "statistics": {
+                "battles": 200,
+                "pvp": {
+                    "battles": 120,
+                    "wins": 70,
+                    "losses": 50,
+                    "frags": 180,
+                    "survived_battles": 30,
+                    "survived_wins": 20,
+                },
+            },
+        }
+        mock_fetch_clan_membership.return_value = {}
+
+        update_player_data(player, force_refresh=True)
+
+        player.refresh_from_db()
+        self.assertEqual(player.pvp_frags, 180)
+        self.assertEqual(player.pvp_survived_battles, 30)
+        self.assertEqual(player.pvp_deaths, 90)
+        self.assertEqual(player.actual_kdr, 2.0)
 
     @patch("warships.data._fetch_efficiency_badges_for_player")
     @patch("warships.data._fetch_clan_membership_for_player")

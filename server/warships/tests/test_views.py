@@ -1767,7 +1767,8 @@ class ApiContractTests(TestCase):
                 days_since_last_battle=10 + index,
                 last_battle_date=today - timedelta(days=10 + index),
                 battles_json=[
-                    {"ship_tier": 8, "pvp_battles": 3000 + (index * 100), "wins": 1650 + (index * 70)},
+                    {"ship_tier": 8, "pvp_battles": 3000 +
+                        (index * 100), "wins": 1650 + (index * 70)},
                 ],
             )
 
@@ -1841,7 +1842,8 @@ class ApiContractTests(TestCase):
                 days_since_last_battle=5,
                 last_battle_date=today - timedelta(days=(index % 7)),
                 battles_json=[
-                    {"ship_tier": 8, "pvp_battles": 4000 + index, "wins": 2600 - (index * 4)},
+                    {"ship_tier": 8, "pvp_battles": 4000 +
+                        index, "wins": 2600 - (index * 4)},
                 ],
             )
 
@@ -2502,6 +2504,10 @@ class ApiContractTests(TestCase):
             is_hidden=False,
             pvp_ratio=53.0,
             pvp_battles=30,
+            pvp_frags=45,
+            pvp_survived_battles=10,
+            pvp_deaths=20,
+            actual_kdr=2.25,
             pvp_survival_rate=40.0,
             creation_date=now - timedelta(days=180),
             battles_json=[
@@ -2516,6 +2522,7 @@ class ApiContractTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["kill_ratio"], 0.78)
+        self.assertEqual(response.json()["actual_kdr"], 2.25)
         self.assertEqual(response.json()["player_score"], 3.22)
 
     def test_player_detail_exposes_highest_ranked_league_from_history(self):
@@ -2548,6 +2555,10 @@ class ApiContractTests(TestCase):
             is_hidden=False,
             pvp_ratio=53.0,
             pvp_battles=30,
+            pvp_frags=45,
+            pvp_survived_battles=10,
+            pvp_deaths=20,
+            actual_kdr=2.25,
             pvp_survival_rate=40.0,
             creation_date=now - timedelta(days=180),
             battles_json=[
@@ -2567,11 +2578,45 @@ class ApiContractTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["kill_ratio"], 0.78)
+        self.assertEqual(response.json()["actual_kdr"], 2.25)
         self.assertEqual(response.json()["player_score"], 3.22)
 
         player.refresh_from_db()
         self.assertEqual(player.explorer_summary.kill_ratio, 0.78)
         self.assertEqual(player.explorer_summary.player_score, 3.22)
+
+    @patch("warships.data.update_player_data")
+    def test_player_detail_backfills_missing_actual_kdr_from_player_refresh(self, mock_update_player_data):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="DetailActualKdrBackfill",
+            player_id=8184,
+            is_hidden=False,
+            pvp_ratio=53.0,
+            pvp_battles=30,
+            pvp_survival_rate=40.0,
+            creation_date=now - timedelta(days=180),
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer", "ship_tier": 8, "pvp_battles": 30, "kdr": 1.0},
+            ],
+            efficiency_json=[],
+            actual_kdr=None,
+        )
+
+        def hydrate_player(*args, **kwargs):
+            player.actual_kdr = 2.25
+            player.pvp_frags = 45
+            player.pvp_survived_battles = 10
+            player.pvp_deaths = 20
+            player.save(update_fields=["actual_kdr", "pvp_frags", "pvp_survived_battles", "pvp_deaths"])
+
+        mock_update_player_data.side_effect = hydrate_player
+
+        response = self.client.get("/api/player/DetailActualKdrBackfill/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["actual_kdr"], 2.25)
+        mock_update_player_data.assert_called_once()
 
     def test_player_distribution_returns_survival_payload(self):
         Player.objects.create(
@@ -3031,6 +3076,54 @@ class ApiContractTests(TestCase):
         self.assertGreater(
             payload["results"][0]["player_score"], payload["results"][1]["player_score"])
         self.assertEqual(payload["results"][1]["name"], "ExplorerScoreBravo")
+
+    def test_players_explorer_defaults_to_player_score_desc(self):
+        now = timezone.now()
+        Player.objects.create(
+            name="ExplorerDefaultAlpha",
+            player_id=9110,
+            is_hidden=False,
+            total_battles=3000,
+            pvp_ratio=53.0,
+            pvp_battles=1700,
+            pvp_survival_rate=36.0,
+            creation_date=now - timedelta(days=250),
+            days_since_last_battle=5,
+            activity_json=[
+                {"date": "2026-03-06", "battles": 2, "wins": 1},
+            ],
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer", "ship_tier": 10, "pvp_battles": 18, "kdr": 1.2},
+            ],
+            ranked_json=[],
+        )
+        Player.objects.create(
+            name="ExplorerDefaultBravo",
+            player_id=9111,
+            is_hidden=False,
+            total_battles=4000,
+            pvp_ratio=57.0,
+            pvp_battles=1600,
+            pvp_survival_rate=45.0,
+            creation_date=now - timedelta(days=320),
+            days_since_last_battle=2,
+            activity_json=[
+                {"date": "2026-03-08", "battles": 7, "wins": 5},
+                {"date": "2026-03-09", "battles": 5, "wins": 4},
+            ],
+            battles_json=[
+                {"ship_name": "Ship B", "ship_type": "Cruiser", "ship_tier": 9, "pvp_battles": 20, "kdr": 1.4},
+            ],
+            ranked_json=[],
+        )
+
+        response = self.client.get("/api/players/explorer/?q=ExplorerDefault")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["results"][0]["name"], "ExplorerDefaultBravo")
+        self.assertEqual(payload["results"][1]["name"], "ExplorerDefaultAlpha")
 
     @patch("warships.views.fetch_clan_battle_seasons")
     def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):

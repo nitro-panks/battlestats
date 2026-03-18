@@ -55,6 +55,7 @@ const basePlayer = {
     name: 'Rank Captain',
     player_id: 101,
     kill_ratio: 1.22,
+    actual_kdr: 1.67,
     player_score: 5.15,
     total_battles: 1000,
     pvp_battles: 800,
@@ -107,6 +108,21 @@ describe('PlayerDetail efficiency-rank icon', () => {
         );
 
         expect(mockUseClanMembers).toHaveBeenCalledWith(4444);
+    });
+
+    it('renders actual KDR in the summary cards instead of weighted KDR', () => {
+        render(
+            <PlayerDetail
+                player={basePlayer}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByText('KDR')).toBeInTheDocument();
+        expect(screen.getByText('1.67')).toBeInTheDocument();
+        expect(screen.queryByText('Weighted KDR')).not.toBeInTheDocument();
     });
 
     it('does not render the icon for non-Expert tracked-player ranks on player detail', () => {

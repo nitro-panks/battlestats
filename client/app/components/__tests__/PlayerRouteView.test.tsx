@@ -56,6 +56,7 @@ describe('PlayerRouteView', () => {
                 name: 'Player One',
                 player_id: 77,
                 kill_ratio: null,
+                actual_kdr: null,
                 player_score: null,
                 total_battles: 100,
                 pvp_battles: 80,

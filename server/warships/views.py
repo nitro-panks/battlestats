@@ -125,7 +125,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
             update_battle_data(obj.player_id)
             obj.refresh_from_db()
 
-        if not obj.is_hidden and obj.efficiency_json is None and (obj.pvp_battles or 0) > 0:
+        if not obj.is_hidden and (obj.efficiency_json is None or obj.actual_kdr is None) and (obj.pvp_battles or 0) > 0:
             from warships.data import update_player_data
             update_player_data(player=obj, force_refresh=True)
             obj.refresh_from_db()

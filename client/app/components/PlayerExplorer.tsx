@@ -61,7 +61,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
     const [hiddenFilter, setHiddenFilter] = useState<HiddenFilter>('visible');
     const [rankedFilter, setRankedFilter] = useState<RankedFilter>('all');
     const [activityBucket, setActivityBucket] = useState<ActivityBucket>('30d');
-    const [sort, setSort] = useState<SortKey>('pvp_battles');
+    const [sort, setSort] = useState<SortKey>('player_score');
     const [direction, setDirection] = useState<SortDirection>('desc');
     const [page, setPage] = useState(1);
     const [data, setData] = useState<PlayerExplorerResponse | null>(null);

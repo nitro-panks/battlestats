@@ -26,6 +26,11 @@ class PlayerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Player
         fields = '__all__'
+        extra_kwargs = {
+            'pvp_frags': {'write_only': True},
+            'pvp_survived_battles': {'write_only': True},
+            'pvp_deaths': {'write_only': True},
+        }
 
     def get_clan_name(self, obj):
         return obj.clan.name if obj.clan else None

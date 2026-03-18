@@ -17,6 +17,7 @@ export interface PlayerData {
     name: string;
     player_id: number;
     kill_ratio: number | null;
+    actual_kdr?: number | null;
     player_score: number | null;
     total_battles: number;
     pvp_battles: number;

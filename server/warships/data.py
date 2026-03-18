@@ -1175,6 +1175,25 @@ def _extract_row_kill_rate(row: dict, battles: int) -> Optional[float]:
     return float(row.get('kdr') or 0)
 
 
+def _calculate_actual_kdr(
+    pvp_battles: int | None,
+    pvp_frags: int | None,
+    pvp_survived_battles: int | None,
+) -> tuple[int, Optional[float]]:
+    battles = max(int(pvp_battles or 0), 0)
+    frags = max(int(pvp_frags or 0), 0)
+    survived_battles = max(int(pvp_survived_battles or 0), 0)
+
+    if battles <= 0:
+        return 0, None
+
+    deaths = max(battles - min(survived_battles, battles), 0)
+    if deaths <= 0:
+        return deaths, None
+
+    return deaths, round(frags / deaths, 2)
+
+
 def _calculate_player_kill_ratio(battle_rows: list[dict]) -> Optional[float]:
     weighted_sum = 0.0
     total_weight = 0.0
@@ -3800,6 +3819,13 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
         player.pvp_battles = pvp_stats.get("battles", 0)
         player.pvp_wins = pvp_stats.get("wins", 0)
         player.pvp_losses = pvp_stats.get("losses", 0)
+        player.pvp_frags = pvp_stats.get("frags", 0)
+        player.pvp_survived_battles = pvp_stats.get("survived_battles", 0)
+        player.pvp_deaths, player.actual_kdr = _calculate_actual_kdr(
+            player.pvp_battles,
+            player.pvp_frags,
+            player.pvp_survived_battles,
+        )
 
         # Calculate PvP ratios
         player.pvp_ratio = round(
@@ -3819,7 +3845,11 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
         player.pvp_battles = 0
         player.pvp_wins = 0
         player.pvp_losses = 0
+        player.pvp_frags = 0
+        player.pvp_survived_battles = 0
+        player.pvp_deaths = 0
         player.pvp_ratio = None
+        player.actual_kdr = None
         player.pvp_survival_rate = None
         player.wins_survival_rate = None
         player.battles_json = None
