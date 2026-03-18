@@ -214,8 +214,7 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
     summary.append('text')
         .style('font-size', '10px')
         .style('font-weight', '600')
-        .style('fill', '#475569')
-        .text(`${payload.tracked_population.toLocaleString()} ranked players tracked`);
+        .style('fill', '#475569');
 
     if (payload.player_point) {
         summary.append('text')
