@@ -18,6 +18,9 @@ class AgenticDoctrineTests(TestCase):
                 "decision_rules": [
                     "Keep API contract updates in the same tranche as payload changes.",
                 ],
+                "pre_commit_requirements": [
+                    "Always reconcile docs and focused tests before commit.",
+                ],
             }), encoding="utf-8")
 
             doctrine = load_repo_team_doctrine(str(doctrine_path))
@@ -30,6 +33,10 @@ class AgenticDoctrineTests(TestCase):
             "Keep API contract updates in the same tranche as payload changes.",
             doctrine["decision_rules"],
         )
+        self.assertIn(
+            "Always reconcile docs and focused tests before commit.",
+            doctrine["pre_commit_requirements"],
+        )
 
     def test_merge_team_doctrine_applies_runtime_overrides(self):
         doctrine = merge_team_doctrine(
@@ -37,10 +44,12 @@ class AgenticDoctrineTests(TestCase):
                 "preferred_patterns": ["Prefer additive API changes."],
                 "discouraged_patterns": [],
                 "review_priorities": [],
+                "pre_commit_requirements": [],
                 "decision_rules": [],
             },
             overrides={
                 "preferred_patterns": ["Prefer reversible migrations."],
+                "pre_commit_requirements": ["Always archive superseded runbooks before commit."],
             },
             team_style_snippets=["Bias toward explicit validation evidence."],
         )
@@ -51,6 +60,8 @@ class AgenticDoctrineTests(TestCase):
                       doctrine["preferred_patterns"])
         self.assertIn("Bias toward explicit validation evidence.",
                       doctrine["review_priorities"])
+        self.assertIn("Always archive superseded runbooks before commit.",
+                      doctrine["pre_commit_requirements"])
 
 
 class AgenticRetrievalTests(TestCase):

@@ -12,12 +12,14 @@ DEFAULT_TEAM_DOCTRINE: dict[str, list[str]] = {
         "Prefer additive API changes when existing consumers must remain stable.",
         "Reuse existing fetch paths, shared components, and validation patterns when practical.",
         "Favor non-blocking background hydration over synchronous page-load fan-out.",
+        "Keep rollback steps, validation evidence, and operating notes close to each material change.",
     ],
     "discouraged_patterns": [
         "Avoid new browser-triggered WG API calls when stored or server-fetched data already exists.",
         "Avoid unbounded polling, queue fan-out, or retry loops.",
         "Avoid large unscoped refactors during feature delivery.",
         "Avoid undocumented payload drift between code, tests, and runbooks.",
+        "Avoid changing public payload shape without explicit contract review and regression coverage.",
     ],
     "review_priorities": [
         "Correctness before optimization.",
@@ -26,11 +28,19 @@ DEFAULT_TEAM_DOCTRINE: dict[str, list[str]] = {
         "Rollback clarity and migration safety.",
         "Consistency with existing battlestats UX and contracts.",
     ],
+    "pre_commit_requirements": [
+        "Before every commit, review changed project documentation and update or synthesize the durable docs that describe the new behavior, contract, workflow, or operational state.",
+        "When documentation is uncertain or lags reality, check the docs against the live code and tests before committing.",
+        "Before every commit, ensure the touched behavior has appropriate automated coverage; add or update focused tests when the current suite no longer proves the changed behavior.",
+        "Before every commit, move superseded or historical runbooks out of agents/runbooks/ into agents/runbooks/archive/ so active runbooks remain the current source of truth.",
+    ],
     "decision_rules": [
         "Prefer the smallest safe vertical slice.",
         "Prefer reversible changes over clever shortcuts.",
         "Validate touched areas with focused tests before widening scope.",
         "Preserve current user-facing behavior unless the task explicitly changes it.",
+        "When an endpoint or payload changes, update contract docs and API-facing tests in the same tranche.",
+        "Do not commit until documentation review, code-vs-doc reconciliation for uncertainties, appropriate test updates, and runbook archiving have been completed.",
     ],
 }
 

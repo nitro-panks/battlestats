@@ -167,7 +167,9 @@ def _load_team_doctrine(state: AgentState) -> dict:
     notes = [
         "Loaded battlestats team doctrine into workflow state.",
         f"Preferred patterns: {doctrine_summary.get('preferred_patterns', 'None recorded.')}",
+        f"Discouraged patterns: {doctrine_summary.get('discouraged_patterns', 'None recorded.')}",
         f"Review priorities: {doctrine_summary.get('review_priorities', 'None recorded.')}",
+        f"Pre-commit requirements: {doctrine_summary.get('pre_commit_requirements', 'None recorded.')}",
     ]
     if overrides:
         notes.append(
@@ -219,7 +221,9 @@ def _plan_task(state: AgentState) -> dict:
             "Add bounded player re-fetch in the frontend while clan hydration is pending",
             "Force a backend refresh task when clan is missing to avoid fresh-cache lock",
             "Add tests for forced refresh behavior and run focused test suite",
+            f"Avoid doctrine anti-patterns while revising the flow: {doctrine_summary.get('discouraged_patterns', 'None recorded.')}",
             f"Check the approach against review priorities: {doctrine_summary.get('review_priorities', 'None recorded.')}",
+            f"Confirm the change can clear pre-commit doctrine requirements: {doctrine_summary.get('pre_commit_requirements', 'None recorded.')}",
         ]
         target_files = [
             "client/app/components/PlayerSearch.tsx",
@@ -232,7 +236,9 @@ def _plan_task(state: AgentState) -> dict:
             f"Clarify acceptance criteria for: {task}",
             "Identify files and tests affected by the task",
             "Implement the smallest safe change and validate",
+            f"Avoid battlestats doctrine anti-patterns: {doctrine_summary.get('discouraged_patterns', 'None recorded.')}",
             f"Review the approach against battlestats doctrine: {doctrine_summary.get('decision_rules', 'None recorded.')}",
+            f"Confirm the change can clear pre-commit doctrine requirements: {doctrine_summary.get('pre_commit_requirements', 'None recorded.')}",
         ]
         target_files = []
 
@@ -240,7 +246,7 @@ def _plan_task(state: AgentState) -> dict:
     guidance = list(state.get("retrieved_guidance", []))
     guidance_notes = list(state.get("guidance_notes", []))
     doctrine_notes.append(
-        "Planning used battlestats doctrine for review priorities and decision rules."
+        "Planning used battlestats doctrine for discouraged patterns, review priorities, decision rules, and pre-commit requirements."
     )
     if guidance:
         plan.append(
