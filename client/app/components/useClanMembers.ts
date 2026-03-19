@@ -24,14 +24,14 @@ const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T
     return response.json() as Promise<T>;
 };
 
-export const useClanMembers = (clanId: number | null | undefined) => {
+export const useClanMembers = (clanId: number | null | undefined, enabled = true) => {
     const [members, setMembers] = useState<ClanMemberData[]>([]);
-    const [loading, setLoading] = useState(Boolean(clanId));
+    const [loading, setLoading] = useState(Boolean(clanId && enabled));
     const [error, setError] = useState('');
     const attemptsRef = useRef(0);
 
     useEffect(() => {
-        if (!clanId) {
+        if (!clanId || !enabled) {
             setMembers([]);
             setLoading(false);
             setError('');
@@ -98,7 +98,7 @@ export const useClanMembers = (clanId: number | null | undefined) => {
             }
             activeController?.abort();
         };
-    }, [clanId]);
+    }, [clanId, enabled]);
 
     return { members, loading, error };
 };

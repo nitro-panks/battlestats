@@ -131,7 +131,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(mockUseClanMembers).toHaveBeenCalledWith(4444);
+        expect(mockUseClanMembers).toHaveBeenCalledWith(4444, false);
     });
 
     it('renders actual KDR in the summary cards instead of weighted KDR', () => {

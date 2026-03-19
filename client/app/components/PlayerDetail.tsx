@@ -11,6 +11,14 @@ import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
+import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
+
+declare global {
+    interface Window {
+        requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+        cancelIdleCallback?: (handle: number) => void;
+    }
+}
 
 interface PlayerDetailProps {
     player: {
@@ -344,8 +352,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         : true;
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
     const [clanBattleSummary, setClanBattleSummary] = useState<PlayerClanBattleSummary | null>(() => getInitialClanBattleHeaderState(player));
+    const [shouldLoadClanMembers, setShouldLoadClanMembers] = useState(false);
     const isClanBattleEnjoyer = clanBattleSummary !== null;
-    const { members: clanMembers, loading: clanMembersLoading, error: clanMembersError } = useClanMembers(player.clan_id || null);
+    const { members: clanMembers, loading: clanMembersLoading, error: clanMembersError } = useClanMembers(player.clan_id || null, shouldLoadClanMembers);
+
+    usePlayerRouteDiagnostics(player.player_id, player.name);
 
     useEffect(() => {
         setShowRankedHeatmap(hasKnownRankedGames);
@@ -362,6 +373,35 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     ]);
 
     useEffect(() => {
+        if (!player.clan_id) {
+            setShouldLoadClanMembers(false);
+            return;
+        }
+
+        setShouldLoadClanMembers(false);
+
+        let timeoutId: number | null = null;
+        let idleCallbackId: number | null = null;
+        const activateClanMembers = () => setShouldLoadClanMembers(true);
+
+        if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+            idleCallbackId = window.requestIdleCallback(activateClanMembers, { timeout: 1200 });
+        } else if (typeof window !== 'undefined') {
+            timeoutId = window.setTimeout(activateClanMembers, 250);
+        }
+
+        return () => {
+            if (idleCallbackId != null && typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+                window.cancelIdleCallback(idleCallbackId);
+            }
+
+            if (timeoutId != null && typeof window !== 'undefined') {
+                window.clearTimeout(timeoutId);
+            }
+        };
+    }, [player.clan_id, player.player_id]);
+
+    useEffect(() => {
         if (shareState === 'idle') {
             return;
         }
@@ -372,6 +412,18 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 
         return () => window.clearTimeout(timeoutId);
     }, [shareState]);
+
+    useEffect(() => {
+        dispatchPlayerRouteSectionRendered('player-header', player.player_id, 'immediate');
+
+        if (!player.is_hidden) {
+            dispatchPlayerRouteSectionRendered('summary-cards', player.player_id, 'immediate');
+        }
+
+        if (player.clan_id) {
+            dispatchPlayerRouteSectionRendered('clan-plot', player.player_id, 'immediate');
+        }
+    }, [player.clan_id, player.is_hidden, player.player_id]);
 
     const handleShare = async () => {
         try {
@@ -423,7 +475,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     </div>
                     {player.clan_id ? (
                         <>
-                            <div id="clan_plot_container" className="mb-5">
+                            <div id="clan_plot_container" className="mb-5 min-h-[280px]" data-perf-section="clan-plot">
                                 <ClanSVG
                                     clanId={player.clan_id}
                                     onSelectMember={onSelectMember}
@@ -437,6 +489,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 className="pt-5"
                                 minHeight={96}
                                 placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
+                                playerId={player.player_id}
+                                rootMargin="80px 0px"
+                                sectionId="clan-members"
                             >
                                 <div id="clan_members_container">
                                     <ClanMembers members={clanMembers} loading={clanMembersLoading} error={clanMembersError} onSelectMember={onSelectMember} layout="stacked" />
@@ -447,6 +502,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     className="mt-5 border-t border-[#dbe9f6] pt-5"
                                     minHeight={180}
                                     placeholder={<LoadingPanel label="Preparing clan battle seasons..." minHeight={180} />}
+                                    playerId={player.player_id}
+                                    rootMargin="80px 0px"
+                                    sectionId="clan-battle-seasons"
                                 >
                                     <div id="player_clan_battle_seasons_container">
                                         <PlayerClanBattleSeasons playerId={player.player_id} onSummaryChange={handleClanBattleSummaryChange} />
@@ -458,6 +516,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     className="mt-5 border-t border-[#dbe9f6] pt-5"
                                     minHeight={240}
                                     placeholder={<LoadingPanel label="Preparing efficiency badges..." minHeight={240} />}
+                                    playerId={player.player_id}
+                                    rootMargin="80px 0px"
+                                    sectionId="efficiency-badges"
                                 >
                                     <div id="player_efficiency_badges_container">
                                         <PlayerEfficiencyBadges
@@ -471,6 +532,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     className="mt-5 border-t border-[#dbe9f6] pt-5"
                                     minHeight={300}
                                     placeholder={<LoadingPanel label="Preparing tier chart..." minHeight={300} />}
+                                    playerId={player.player_id}
+                                    rootMargin="80px 0px"
+                                    sectionId="tier-chart"
                                 >
                                     <div>
                                         <SectionHeadingWithTooltip
@@ -494,6 +558,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     className="mt-5 border-t border-[#dbe9f6] pt-5"
                                     minHeight={240}
                                     placeholder={<LoadingPanel label="Preparing efficiency badges..." minHeight={240} />}
+                                    playerId={player.player_id}
+                                    rootMargin="80px 0px"
+                                    sectionId="efficiency-badges"
                                 >
                                     <div id="player_efficiency_badges_container">
                                         <PlayerEfficiencyBadges
@@ -507,6 +574,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     className="mt-5 border-t border-[#dbe9f6] pt-5"
                                     minHeight={300}
                                     placeholder={<LoadingPanel label="Preparing tier chart..." minHeight={300} />}
+                                    playerId={player.player_id}
+                                    rootMargin="80px 0px"
+                                    sectionId="tier-chart"
                                 >
                                     <div>
                                         <SectionHeadingWithTooltip
@@ -527,7 +597,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 
                 {/* Second Column */}
                 <div className="min-w-0 text-left border-l border-[#c6dbef] pl-4">
-                    <div className="mb-3 border-b border-[#c6dbef] pb-3">
+                    <div className="mb-3 border-b border-[#c6dbef] pb-3" data-perf-section="player-header">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                             <div className="flex min-w-0 flex-wrap items-center gap-2">
                                 <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
@@ -574,7 +644,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                         </div>
                     ) : (
                         <>
-                            <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
+                            <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4" data-perf-section="summary-cards">
                                 <div
                                     className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3"
                                     style={{ border: `1px solid ${selectColorByWR(player.pvp_ratio)}` }}
@@ -624,6 +694,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 className="mt-4"
                                 minHeight={268}
                                 placeholder={<LoadingPanel label="Preparing win rate and survival chart..." minHeight={268} />}
+                                playerId={player.player_id}
+                                rootMargin="80px 0px"
+                                sectionId="wr-distribution"
                             >
                                 <div>
                                     <SectionHeadingWithTooltip
@@ -640,6 +713,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     className="mt-6"
                                     minHeight={204}
                                     placeholder={<LoadingPanel label="Preparing battles distribution..." minHeight={204} />}
+                                    playerId={player.player_id}
+                                    rootMargin="80px 0px"
+                                    sectionId="battles-distribution"
                                 >
                                     <div>
                                         <SectionHeadingWithTooltip
@@ -652,40 +728,70 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 </DeferredSection>
                             ) : null}
 
-                            <div className="mt-4">
-                                <SectionHeadingWithTooltip
-                                    title="Top Ships (Random Battles)"
-                                    description="This chart highlights the player's most-played random-battle ships, pairing battle volume with wins so you can see which ships dominate their recent visible mix."
-                                    className="mb-2"
-                                />
-                                <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
-                            </div>
-                            {showRankedHeatmap ? (
-                                <div className="mt-4">
+                            <DeferredSection
+                                className="mt-4"
+                                minHeight={532}
+                                placeholder={<LoadingPanel label="Preparing top ships..." minHeight={532} />}
+                                playerId={player.player_id}
+                                rootMargin="32px 0px"
+                                sectionId="randoms-top-ships"
+                            >
+                                <div>
                                     <SectionHeadingWithTooltip
-                                        title="Ranked Games vs Win Rate"
-                                        description="Each tile represents a pocket of ranked players grouped by total ranked games and overall ranked win rate. The outlined marker shows where this player lands inside that broader field."
+                                        title="Top Ships (Random Battles)"
+                                        description="This chart highlights the player's most-played random-battle ships, pairing battle volume with wins so you can see which ships dominate their recent visible mix."
+                                        className="mb-2"
+                                    />
+                                    <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
+                                </div>
+                            </DeferredSection>
+                            {showRankedHeatmap ? (
+                                <DeferredSection
+                                    className="mt-4"
+                                    minHeight={312}
+                                    placeholder={<LoadingPanel label="Preparing ranked heatmap..." minHeight={312} />}
+                                    playerId={player.player_id}
+                                    rootMargin="32px 0px"
+                                    sectionId="ranked-heatmap"
+                                >
+                                    <div>
+                                        <SectionHeadingWithTooltip
+                                            title="Ranked Games vs Win Rate"
+                                            description="Each tile represents a pocket of ranked players grouped by total ranked games and overall ranked win rate. The outlined marker shows where this player lands inside that broader field."
+                                            className="mb-3"
+                                        />
+                                        <RankedWRBattlesHeatmapSVG
+                                            playerId={player.player_id}
+                                            isLoading={isLoading}
+                                            onVisibilityChange={setShowRankedHeatmap}
+                                        />
+                                    </div>
+                                </DeferredSection>
+                            ) : null}
+                            <DeferredSection
+                                className="mt-4"
+                                minHeight={252}
+                                placeholder={<LoadingPanel label="Preparing ranked seasons..." minHeight={252} />}
+                                playerId={player.player_id}
+                                rootMargin="32px 0px"
+                                sectionId="ranked-seasons"
+                            >
+                                <div>
+                                    <SectionHeadingWithTooltip
+                                        title="Ranked Seasons"
+                                        description="This table summarizes the player's historical ranked-season results, including total battles, win rate, and the best league finish reached in each season."
                                         className="mb-3"
                                     />
-                                    <RankedWRBattlesHeatmapSVG
-                                        playerId={player.player_id}
-                                        isLoading={isLoading}
-                                        onVisibilityChange={setShowRankedHeatmap}
-                                    />
+                                    <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
                                 </div>
-                            ) : null}
-                            <div className="mt-4">
-                                <SectionHeadingWithTooltip
-                                    title="Ranked Seasons"
-                                    description="This table summarizes the player's historical ranked-season results, including total battles, win rate, and the best league finish reached in each season."
-                                    className="mb-3"
-                                />
-                                <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
-                            </div>
+                            </DeferredSection>
                             <DeferredSection
                                 className="mt-4"
                                 minHeight={332}
                                 placeholder={<LoadingPanel label="Preparing tier vs type heatmap..." minHeight={332} />}
+                                playerId={player.player_id}
+                                rootMargin="48px 0px"
+                                sectionId="tier-type-heatmap"
                             >
                                 <div>
                                     <SectionHeadingWithTooltip
@@ -700,6 +806,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 className="mt-4"
                                 minHeight={192}
                                 placeholder={<LoadingPanel label="Preparing ship type chart..." minHeight={192} />}
+                                playerId={player.player_id}
+                                rootMargin="48px 0px"
+                                sectionId="type-chart"
                             >
                                 <div>
                                     <SectionHeadingWithTooltip
