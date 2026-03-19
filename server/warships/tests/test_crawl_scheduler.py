@@ -72,7 +72,7 @@ class ClanCrawlSchedulerTests(TestCase):
     def test_post_migrate_creates_daily_periodic_task(self):
         app_config = apps.get_app_config("warships")
 
-        with patch.dict(os.environ, {}, clear=False):
+        with patch.dict(os.environ, {"ENABLE_CRAWLER_SCHEDULES": "1"}, clear=False):
             ensure_daily_clan_crawl_schedule(sender=app_config)
 
         task = PeriodicTask.objects.get(name="daily-clan-crawl")
@@ -131,6 +131,25 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(landing_warm_schedule.every, 55)
         self.assertEqual(landing_warm_schedule.period,
                          IntervalSchedule.MINUTES)
+
+    def test_post_migrate_disables_crawler_tasks_when_schedules_disabled(self):
+        app_config = apps.get_app_config("warships")
+
+        with patch.dict(os.environ, {"ENABLE_CRAWLER_SCHEDULES": "0"}, clear=False):
+            ensure_daily_clan_crawl_schedule(sender=app_config)
+
+        self.assertFalse(PeriodicTask.objects.get(
+            name="daily-clan-crawl").enabled)
+        self.assertFalse(PeriodicTask.objects.get(
+            name="incremental-player-refresh-am").enabled)
+        self.assertFalse(PeriodicTask.objects.get(
+            name="incremental-player-refresh-pm").enabled)
+        self.assertFalse(PeriodicTask.objects.get(
+            name="daily-ranked-incrementals").enabled)
+        self.assertFalse(PeriodicTask.objects.get(
+            name="clan-crawl-watchdog").enabled)
+        self.assertTrue(PeriodicTask.objects.get(
+            name="landing-page-warmer").enabled)
 
     def test_watchdog_stays_idle_when_not_running(self):
         with patch("warships.tasks.crawl_all_clans_task.delay") as mock_delay:
@@ -263,7 +282,7 @@ class ClanCrawlSchedulerTests(TestCase):
             },
         )
 
-        with patch.dict(os.environ, {"CLAN_BATTLE_WARM_CLAN_IDS": ""}, clear=False):
+        with patch.dict(os.environ, {"CLAN_BATTLE_WARM_CLAN_IDS": "", "ENABLE_CRAWLER_SCHEDULES": "1"}, clear=False):
             ensure_daily_clan_crawl_schedule(sender=app_config)
 
         self.assertFalse(PeriodicTask.objects.get(
@@ -459,7 +478,8 @@ class RefreshTaskLockTests(TestCase):
         task.save()
 
         app_config = apps.get_app_config("warships")
-        ensure_daily_clan_crawl_schedule(sender=app_config)
+        with patch.dict(os.environ, {"ENABLE_CRAWLER_SCHEDULES": "1"}, clear=False):
+            ensure_daily_clan_crawl_schedule(sender=app_config)
 
         task = PeriodicTask.objects.get(name="daily-clan-crawl")
         self.assertEqual(task.task, "warships.tasks.crawl_all_clans_task")

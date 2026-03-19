@@ -112,6 +112,12 @@ else
   echo 'CELERY_RESULT_BACKEND=rpc://' >> /etc/battlestats-server.env
 fi
 
+if grep -q '^ENABLE_CRAWLER_SCHEDULES=' /etc/battlestats-server.env; then
+  sed -i 's|^ENABLE_CRAWLER_SCHEDULES=.*|ENABLE_CRAWLER_SCHEDULES=1|' /etc/battlestats-server.env
+else
+  echo 'ENABLE_CRAWLER_SCHEDULES=1' >> /etc/battlestats-server.env
+fi
+
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"
 

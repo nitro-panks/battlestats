@@ -7,6 +7,13 @@ from django.db.models.signals import post_migrate
 from django.dispatch import receiver
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _configured_clan_battle_warm_ids():
     raw_value = os.getenv("CLAN_BATTLE_WARM_CLAN_IDS", "1000055908")
     return [clan_id.strip() for clan_id in raw_value.split(",") if clan_id.strip()]
@@ -18,6 +25,8 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         return
 
     from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
+
+    crawler_schedules_enabled = _env_flag("ENABLE_CRAWLER_SCHEDULES", False)
 
     hour = os.getenv("CLAN_CRAWL_SCHEDULE_HOUR", "3")
     minute = os.getenv("CLAN_CRAWL_SCHEDULE_MINUTE", "0")
@@ -36,7 +45,7 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         defaults={
             "task": "warships.tasks.crawl_all_clans_task",
             "crontab": schedule,
-            "enabled": True,
+            "enabled": crawler_schedules_enabled,
             "args": json.dumps([]),
             "kwargs": json.dumps({"resume": False}),
             "description": "Daily full crawl of clans and players from the Wargaming API.",
@@ -61,7 +70,7 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         defaults={
             "task": "warships.tasks.incremental_player_refresh_task",
             "crontab": player_am_schedule,
-            "enabled": True,
+            "enabled": crawler_schedules_enabled,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
             "description": "Morning incremental refresh of active player data.",
@@ -82,7 +91,7 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         defaults={
             "task": "warships.tasks.incremental_player_refresh_task",
             "crontab": player_pm_schedule,
-            "enabled": True,
+            "enabled": crawler_schedules_enabled,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
             "description": "Afternoon incremental refresh of active player data.",
@@ -105,7 +114,7 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         defaults={
             "task": "warships.tasks.incremental_ranked_data_task",
             "crontab": ranked_schedule,
-            "enabled": True,
+            "enabled": crawler_schedules_enabled,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
             "description": "Daily incremental refresh of ranked history, scheduled away from the clan crawl.",
@@ -123,7 +132,7 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         defaults={
             "task": "warships.tasks.ensure_crawl_all_clans_running_task",
             "interval": watchdog_schedule,
-            "enabled": True,
+            "enabled": crawler_schedules_enabled,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
             "description": "Checks every few minutes for a stale clan-crawl lock and resumes interrupted crawls only.",

@@ -95,28 +95,6 @@ services:
       - rabbitmq
       - redis
 
-  task-scheduler:
-    container_name: battlestats-beat
-    build:
-      context: server/
-      dockerfile: Dockerfile
-    volumes:
-      - ./server:/usr/src/app
-      - ./agents:/usr/src/agents:ro
-    command: celery -A battlestats beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    env_file:
-      - server/.env
-      - server/.env.secrets
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - RANKED_INCREMENTAL_LIMIT=150
-      - RANKED_INCREMENTAL_SKIP_FRESH_HOURS=24
-      - RANKED_INCREMENTAL_KNOWN_LIMIT=300
-      - RANKED_INCREMENTAL_DISCOVERY_LIMIT=75
-    depends_on:
-      - task-runner
-      - rabbitmq
-
 volumes:
   postgres_data:
   client_node_modules:
