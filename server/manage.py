@@ -2,14 +2,17 @@
 """Django's command-line utility for administrative tasks."""
 import os
 import sys
-from battlestats.env import load_env_file
+from pathlib import Path
+
+from battlestats.env import load_default_env_files
 
 
 def main():
-    path = '.env'
-    print(f'Loading environment variables from {path}')
-
-    load_env_file(path)
+    base_dir = Path(__file__).resolve().parent
+    loaded_paths = load_default_env_files(base_dir)
+    loaded_names = ', '.join(
+        path.name for path in loaded_paths) or 'no env files found'
+    print(f'Loading environment variables from {loaded_names}')
     """Run administrative tasks."""
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'battlestats.settings')
     try:

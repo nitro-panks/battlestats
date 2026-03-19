@@ -67,6 +67,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'battlestats.wsgi.application'
 
+db_sslmode = os.getenv('DB_SSLMODE', '').strip()
+db_sslrootcert = os.getenv('DB_SSLROOTCERT', '').strip()
+db_options = {}
+
+if db_sslmode:
+    db_options['sslmode'] = db_sslmode
+
+if db_sslrootcert:
+    db_options['sslrootcert'] = db_sslrootcert
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.{}'.format(
@@ -77,6 +87,7 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD', 'XVIB58E5rWnAsU6'),
         'HOST': resolve_db_host(),
         'PORT': os.getenv('DB_PORT', '5432'),
+        'OPTIONS': db_options,
     }
 }
 

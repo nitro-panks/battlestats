@@ -4,6 +4,9 @@ from pathlib import Path
 import dotenv
 
 
+DEFAULT_ENV_FILE_NAMES = ('.env', '.env.secrets')
+
+
 def load_env_file(path: str) -> None:
     if hasattr(dotenv, 'read_dotenv'):
         dotenv.read_dotenv(path)
@@ -11,6 +14,20 @@ def load_env_file(path: str) -> None:
 
     if hasattr(dotenv, 'load_dotenv'):
         dotenv.load_dotenv(path)
+
+
+def load_default_env_files(base_dir: str | Path) -> list[Path]:
+    resolved_base_dir = Path(base_dir)
+    loaded_paths: list[Path] = []
+
+    for file_name in DEFAULT_ENV_FILE_NAMES:
+        candidate = resolved_base_dir / file_name
+        if not candidate.exists():
+            continue
+        load_env_file(str(candidate))
+        loaded_paths.append(candidate)
+
+    return loaded_paths
 
 
 def running_in_container() -> bool:

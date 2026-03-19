@@ -1,7 +1,7 @@
 from unittest import TestCase
 from unittest.mock import patch
 
-from battlestats.env import load_env_file, resolve_db_host, resolve_db_user
+from battlestats.env import load_default_env_files, load_env_file, resolve_db_host, resolve_db_user
 
 
 class EnvBootstrapTests(TestCase):
@@ -26,6 +26,27 @@ class EnvBootstrapTests(TestCase):
             load_env_file('.env')
 
         mock_load.assert_called_once_with('.env')
+
+    @patch('battlestats.env.load_env_file')
+    def test_load_default_env_files_loads_existing_base_and_secret_files_in_order(self, mock_load_env_file):
+        loaded_paths = load_default_env_files('/tmp')
+
+        self.assertEqual(loaded_paths, [])
+        mock_load_env_file.assert_not_called()
+
+    @patch('battlestats.env.load_env_file')
+    @patch('pathlib.Path.exists')
+    def test_load_default_env_files_returns_existing_files(self, mock_exists, mock_load_env_file):
+        mock_exists.side_effect = [True, True]
+
+        loaded_paths = load_default_env_files('/tmp')
+
+        self.assertEqual([path.name for path in loaded_paths], [
+                         '.env', '.env.secrets'])
+        self.assertEqual(
+            [call.args[0] for call in mock_load_env_file.call_args_list],
+            ['/tmp/.env', '/tmp/.env.secrets'],
+        )
 
     @patch.dict('os.environ', {'DB_HOST': 'db'}, clear=False)
     @patch('battlestats.env.running_in_container', return_value=False)

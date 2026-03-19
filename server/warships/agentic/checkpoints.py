@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from typing import Any, Iterator, Literal
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 
 from langgraph.checkpoint.memory import MemorySaver
 
@@ -34,10 +34,13 @@ def get_langgraph_checkpoint_postgres_url() -> str | None:
         return None
 
     db_name = os.getenv('DB_NAME', 'battlestats').strip()
-    db_user = (os.getenv('DB_USERNAME') or os.getenv('DB_USER') or 'django').strip()
+    db_user = (os.getenv('DB_USERNAME') or os.getenv(
+        'DB_USER') or 'django').strip()
     db_password = os.getenv('DB_PASSWORD', '').strip()
     db_host = os.getenv('DB_HOST', '127.0.0.1').strip()
     db_port = os.getenv('DB_PORT', '5432').strip()
+    db_sslmode = os.getenv('DB_SSLMODE', '').strip()
+    db_sslrootcert = os.getenv('DB_SSLROOTCERT', '').strip()
 
     if not all([db_name, db_user, db_host, db_port]):
         return None
@@ -45,12 +48,19 @@ def get_langgraph_checkpoint_postgres_url() -> str | None:
     quoted_user = quote_plus(db_user)
     quoted_password = quote_plus(db_password)
     password_segment = f':{quoted_password}' if db_password else ''
-    return f'postgresql://{quoted_user}{password_segment}@{db_host}:{db_port}/{db_name}'
+    query_params: dict[str, str] = {}
+    if db_sslmode:
+        query_params['sslmode'] = db_sslmode
+    if db_sslrootcert:
+        query_params['sslrootcert'] = db_sslrootcert
+    query_string = f'?{urlencode(query_params)}' if query_params else ''
+    return f'postgresql://{quoted_user}{password_segment}@{db_host}:{db_port}/{db_name}{query_string}'
 
 
 def get_checkpoint_backend_name(context: dict[str, Any] | None = None) -> CheckpointBackend:
     context = context or {}
-    backend_override = str(context.get('checkpoint_backend', '')).strip().lower()
+    backend_override = str(context.get(
+        'checkpoint_backend', '')).strip().lower()
 
     if backend_override == 'memory':
         return 'memory'

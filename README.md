@@ -113,6 +113,23 @@ from the repository root:
 docker compose up -d
 ```
 
+the default stack is now cloud-db-first: it starts the app, worker, beat, rabbitmq, and redis without automatically starting a local Postgres container.
+
+to switch the backend between the managed cloud database and the optional local Postgres service with one command:
+
+```bash
+./server/scripts/switch_db_target.sh cloud
+./server/scripts/switch_db_target.sh local
+```
+
+see `agents/runbooks/runbook-db-target-switching.md` for the operator runbook.
+
+if you want the old local-Postgres development path, start it explicitly:
+
+```bash
+docker compose --profile local-db up -d db
+```
+
 the server now warms the landing-page caches automatically a few seconds after startup, so the first browser hit after a `bounce` or fresh `docker compose up` does not have to build the landing payloads cold.
 
 to trigger the same warm-up manually:
@@ -127,33 +144,43 @@ this starts:
 - django/gunicorn server
 - celery worker + beat scheduler
 - rabbitmq
-- postgresql (dockerized)
+- redis
+
+optional local-only service:
+
+- postgresql (dockerized) via `--profile local-db`
 
 the server and client images now also install `ripgrep` (`rg`), so fast workspace searches are available inside the project containers after rebuild.
 
-### first-time setup (`server/.env`)
+### first-time setup (`server/.env` + `server/.env.secrets`)
 
-before first run, make sure `server/.env` exists and contains at least:
+before first run, make sure `server/.env` exists with the non-secret connection values:
+
+```env
+DB_ENGINE=postgresql_psycopg2
+DB_NAME=defaultdb
+DB_USER=doadmin
+DB_HOST=your-managed-postgres-host
+DB_PORT=25060
+DB_SSLMODE=require
+DB_SSLROOTCERT=ca-certificate.crt
+DJANGO_ALLOWED_HOSTS=localhost
+```
+
+store secrets separately in `server/.env.secrets`:
 
 ```env
 WG_APP_ID=your_wargaming_app_id
 DB_PASSWORD=your_db_password
-DB_ENGINE=postgresql_psycopg2
-DB_NAME=battlestats
-DB_USER=django
-DB_HOST=db
-DB_PORT=5432
-DJANGO_ALLOWED_HOSTS=localhost
 DJANGO_SECRET_KEY=your_django_secret_key
 ```
 
 notes:
 
-- `DB_HOST` must be `db` for Docker networking.
-- Host-based `python manage.py ...` runs automatically remap `DB_HOST=db` to `127.0.0.1`, so the same `server/.env` works after activating the virtualenv.
-- `DB_PORT` should be `5432`.
-- `DB_NAME`/`DB_USER` should match compose defaults (`battlestats` / `django`).
-- `DB_PASSWORD` must match the password used by the Postgres container.
+- host-side `python manage.py ...` and the Docker services now load both `server/.env` and `server/.env.secrets` automatically.
+- keep `server/.env.secrets` out of version control; it is intended to be machine-local.
+- when you want to use the optional local Postgres container instead, start `docker compose --profile local-db up -d db` and set `DB_HOST=db`, `DB_PORT=5432`, `DB_NAME=battlestats`, and `DB_USER=django`.
+- when `DB_HOST=db` is used outside containers, host-side `python manage.py ...` runs still remap it to `127.0.0.1`.
 
 optional startup warm-up knobs for the landing page:
 
@@ -179,7 +206,7 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID=your_ga4_measurement_id
 - frontend app: <http://localhost:3001>
 - django backend: <http://localhost:8888>
 - rabbitmq management ui: <http://localhost:15672> (default user/pass: `guest` / `guest`)
-- postgresql: `localhost:5432` (database: `battlestats`, user: `django`, password from `server/.env` -> `DB_PASSWORD`)
+- local optional postgresql: `localhost:5432` only when started with `docker compose --profile local-db up -d db`
 
 ### route-based navigation
 

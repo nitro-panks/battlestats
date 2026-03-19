@@ -60,11 +60,12 @@ def main() -> int:
     if str(base_dir) not in sys.path:
         sys.path.insert(0, str(base_dir))
 
-    from battlestats.env import load_env_file
+    from battlestats.env import load_default_env_files
 
-    env_path = base_dir / '.env'
-    print(f'Loading environment variables from {env_path.name}')
-    load_env_file(env_path)
+    loaded_paths = load_default_env_files(base_dir)
+    loaded_names = ', '.join(
+        path.name for path in loaded_paths) or 'no env files found'
+    print(f'Loading environment variables from {loaded_names}')
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'battlestats.settings')
 
     state_path = Path(args.state_file)

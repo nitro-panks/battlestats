@@ -1,5 +1,7 @@
 services:
   db:
+    profiles:
+      - local-db
     container_name: battlestats-db
     image: postgres:15
     environment:
@@ -40,6 +42,7 @@ services:
       - ./agents:/usr/src/agents:ro
     env_file:
       - server/.env
+      - server/.env.secrets
     environment:
       - REDIS_URL=redis://redis:6379/0
       - WARM_LANDING_PAGE_ON_STARTUP=1
@@ -49,7 +52,6 @@ services:
       - RANKED_INCREMENTAL_KNOWN_LIMIT=300
       - RANKED_INCREMENTAL_DISCOVERY_LIMIT=75
     depends_on:
-      - db
       - rabbitmq
       - redis
     ports:
@@ -82,6 +84,7 @@ services:
     command: celery -A battlestats worker -l INFO --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle
     env_file:
       - server/.env
+      - server/.env.secrets
     environment:
       - REDIS_URL=redis://redis:6379/0
       - RANKED_INCREMENTAL_LIMIT=150
@@ -89,7 +92,6 @@ services:
       - RANKED_INCREMENTAL_KNOWN_LIMIT=300
       - RANKED_INCREMENTAL_DISCOVERY_LIMIT=75
     depends_on:
-      - db
       - rabbitmq
       - redis
 
@@ -104,6 +106,7 @@ services:
     command: celery -A battlestats beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
     env_file:
       - server/.env
+      - server/.env.secrets
     environment:
       - REDIS_URL=redis://redis:6379/0
       - RANKED_INCREMENTAL_LIMIT=150

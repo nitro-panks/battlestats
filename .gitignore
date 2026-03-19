@@ -10,6 +10,11 @@ htmlcov/
 env/
 .venv/
 .env
+server/.env.secrets
+server/.env.secrets.cloud
+server/.env.secrets.local
+server/.env.local-postgres.backup
+server/ca-certificate.crt
 
 .vscode/
 .idea/
