@@ -2892,6 +2892,7 @@ class ApiContractTests(TestCase):
 
     def test_player_correlation_distribution_returns_ranked_wr_battles_payload(self):
         cache.clear()
+        from warships.data import warm_player_ranked_wr_battles_population_correlation
 
         Player.objects.create(
             name="RankedHeatmapOne",
@@ -2936,6 +2937,8 @@ class ApiContractTests(TestCase):
             ],
         )
 
+        warm_player_ranked_wr_battles_population_correlation()
+
         response = self.client.get(
             "/api/fetch/player_correlation/ranked_wr_battles/8841/")
 
@@ -2968,6 +2971,34 @@ class ApiContractTests(TestCase):
             "/api/fetch/player_correlation/ranked_wr_battles/999999/")
 
         self.assertEqual(response.status_code, 404)
+
+    @patch("warships.tasks.queue_player_ranked_wr_battles_correlation_refresh")
+    def test_player_correlation_distribution_returns_fallback_when_ranked_population_cache_is_cold(self, mock_queue_refresh):
+        cache.clear()
+
+        Player.objects.create(
+            name="ColdRankedHeatmap",
+            player_id=8845,
+            is_hidden=False,
+            ranked_updated_at=timezone.now(),
+            ranked_json=[
+                {"season_id": 10, "total_battles": 90,
+                    "total_wins": 54, "win_rate": 0.6, "top_ship_name": None},
+            ],
+        )
+
+        response = self.client.get(
+            "/api/fetch/player_correlation/ranked_wr_battles/8845/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["metric"], "ranked_wr_battles")
+        self.assertEqual(payload["tracked_population"], 0)
+        self.assertEqual(payload["tiles"], [])
+        self.assertEqual(payload["trend"], [])
+        self.assertEqual(payload["player_point"]["x"], 90.0)
+        self.assertEqual(payload["player_point"]["y"], 60.0)
+        mock_queue_refresh.assert_called_once_with()
 
     def test_player_correlation_distribution_returns_404_for_missing_tier_type_player(self):
         response = self.client.get(

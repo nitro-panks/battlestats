@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface TierSVGProps {
     playerId: number;
@@ -63,9 +65,11 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
         .append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
-    fetch(`http://localhost:8888/api/fetch/tier_data/${playerId}`)
-        .then((response) => response.json())
-        .then((data: unknown) => {
+    fetchSharedJson<unknown>(`http://localhost:8888/api/fetch/tier_data/${playerId}/`, {
+        label: `Tier data ${playerId}`,
+        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+    })
+        .then(({ data }) => {
             const rows = normalizeTierRows(data).sort((left, right) => right.ship_tier - left.ship_tier);
             if (rows.length === 0) {
                 return;

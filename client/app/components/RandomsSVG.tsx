@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
+import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface RandomsSVGProps {
     playerId: number;
@@ -505,10 +507,14 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         const fetchData = async () => {
             setIsChartLoading(true);
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/randoms_data/${playerId}/?all=true`);
-                const result = normalizeRandomsRows(await response.json());
+                const { data, headers } = await fetchSharedJson<unknown>(`http://localhost:8888/api/fetch/randoms_data/${playerId}/?all=true`, {
+                    label: `Randoms data ${playerId}`,
+                    responseHeaders: ['X-Randoms-Updated-At'],
+                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                });
+                const result = normalizeRandomsRows(data);
                 setAllShips(result);
-                setRandomsUpdatedAt(response.headers.get('X-Randoms-Updated-At'));
+                setRandomsUpdatedAt(headers['X-Randoms-Updated-At'] ?? null);
 
                 const types = Array.from(new Set(result.map((r) => r.ship_type)));
                 const tiers = Array.from(new Set(result.map((r) => r.ship_tier))).sort((a, b) => b - a);

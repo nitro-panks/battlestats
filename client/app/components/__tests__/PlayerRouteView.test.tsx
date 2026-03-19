@@ -84,7 +84,7 @@ describe('PlayerRouteView', () => {
         render(<PlayerRouteView playerName="Player One" />);
 
         await waitFor(() => {
-            expect(global.fetch).toHaveBeenCalledWith('http://localhost:8888/api/player/Player%20One/');
+            expect(global.fetch).toHaveBeenCalledWith('http://localhost:8888/api/player/Player%20One/', undefined);
         });
 
         expect(await screen.findByTestId('player-detail')).toBeInTheDocument();

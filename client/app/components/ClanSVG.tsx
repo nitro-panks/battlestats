@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import * as d3 from 'd3';
 import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
 import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface ClanProps {
     clanId: number;
@@ -17,22 +19,6 @@ interface ClanData {
     pvp_battles: number;
     pvp_ratio: number;
 }
-
-const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {
-    const contentType = response.headers.get('content-type') || '';
-
-    if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`${label} failed with ${response.status}: ${body.slice(0, 120)}`);
-    }
-
-    if (!contentType.toLowerCase().includes('application/json')) {
-        const body = await response.text();
-        throw new Error(`${label} returned non-JSON content: ${body.slice(0, 120)}`);
-    }
-
-    return response.json() as Promise<T>;
-};
 
 interface ClanPlotPoint extends ClanData {
     activity_bucket: ActivityBucketKey;
@@ -172,9 +158,11 @@ const drawClanPlot = (
             .attr('rx', 6)
             .attr('fill', 'rgba(255, 255, 255, 0.94)');
     };
-    fetch(plotPath)
-        .then((plotResponse) => readJsonOrThrow<ClanData[]>(plotResponse, 'Clan plot data'))
-        .then((plotData) => {
+    fetchSharedJson<ClanData[]>(plotPath, {
+        label: 'Clan plot data',
+        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+    })
+        .then(({ data: plotData }) => {
             if (!plotData.length) {
                 svg.append('text')
                     .attr('x', 0)

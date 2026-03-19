@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
+import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface RankedWRBattlesHeatmapSVGProps {
     playerId: number;
@@ -250,12 +252,10 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
 
         const fetchAndDraw = async () => {
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`);
-                if (!response.ok) {
-                    throw new Error('Unable to load ranked correlation data.');
-                }
-
-                const payload: RankedWRBattlesPayload = await response.json();
+                const { data: payload } = await fetchSharedJson<RankedWRBattlesPayload>(`http://localhost:8888/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`, {
+                    label: `Ranked correlation ${playerId}`,
+                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                });
                 if (!isMounted || !containerRef.current) {
                     return;
                 }

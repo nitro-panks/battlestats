@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface RankedSeasonsProps {
     playerId: number;
@@ -113,14 +115,18 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 let result: RankedSeason[] | null = null;
 
                 for (let attempt = 0; attempt < 2; attempt += 1) {
-                    const response = await fetch(`http://localhost:8888/api/fetch/ranked_data/${playerId}/`);
-                    if (response.ok) {
-                        result = await response.json();
+                    try {
+                        const payload = await fetchSharedJson<RankedSeason[]>(`http://localhost:8888/api/fetch/ranked_data/${playerId}/`, {
+                            label: `Ranked data ${playerId}`,
+                            ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                        });
+                        result = payload.data;
                         break;
-                    }
-
-                    if (attempt === 0) {
-                        await delay(RANKED_FETCH_RETRY_DELAY_MS);
+                    } catch {
+                        if (attempt === 0) {
+                            await delay(RANKED_FETCH_RETRY_DELAY_MS);
+                            continue;
+                        }
                     }
                 }
 

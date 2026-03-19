@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface PlayerClanBattleSeason {
     season_id: number;
@@ -60,12 +62,10 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
             setLoading(true);
             setError('');
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/player_clan_battle_seasons/${playerId}/`);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch player clan battle seasons: ${response.status}`);
-                }
-
-                const data = await response.json();
+                const { data } = await fetchSharedJson<unknown>(`http://localhost:8888/api/fetch/player_clan_battle_seasons/${playerId}/`, {
+                    label: `Player clan battle seasons ${playerId}`,
+                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                });
                 if (!cancelled) {
                     setSeasons(Array.isArray(data) ? data : []);
                 }

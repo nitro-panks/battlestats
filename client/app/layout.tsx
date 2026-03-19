@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Script from "next/script";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import "@fortawesome/fontawesome-svg-core/styles.css";
@@ -47,7 +48,9 @@ export default function RootLayout({
           <header className="flex flex-col gap-4 bg-white py-5 pl-5 md:flex-row md:items-center md:justify-between md:py-6">
             <Logo />
             <div className="flex w-full justify-end pr-2 md:w-auto">
-              <HeaderSearch />
+              <Suspense fallback={null}>
+                <HeaderSearch />
+              </Suspense>
             </div>
           </header>
           <main className="pt-6 pb-8">{children}</main>

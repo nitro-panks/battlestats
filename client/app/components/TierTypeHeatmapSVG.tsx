@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
+import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 type SvgGroupSelection = ReturnType<typeof d3.select>;
 
@@ -374,20 +376,16 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
 
         const load = async () => {
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/player_correlation/tier_type/${playerId}/`, {
-                    signal: abortController.signal,
+                const { data } = await fetchSharedJson<TierTypePayload>(`http://localhost:8888/api/fetch/player_correlation/tier_type/${playerId}/`, {
+                    label: `Tier type correlation ${playerId}`,
+                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                 });
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-
-                const payload: TierTypePayload = await response.json();
                 if (abortController.signal.aborted) {
                     return;
                 }
 
                 const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
-                drawChart(containerElement, payload, resolvedSvgWidth, svgHeight);
+                drawChart(containerElement, data, resolvedSvgWidth, svgHeight);
             } catch {
                 if (!abortController.signal.aborted) {
                     const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));

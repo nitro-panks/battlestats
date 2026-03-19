@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import PlayerDetail from './PlayerDetail';
 import type { PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
+import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { trackEntityDetailView } from '../lib/visitAnalytics';
 
 
@@ -16,23 +18,6 @@ const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, 
         {label}
     </div>
 );
-
-
-const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {
-    const contentType = response.headers.get('content-type') || '';
-
-    if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`${label} failed with ${response.status}: ${body.slice(0, 120)}`);
-    }
-
-    if (!contentType.toLowerCase().includes('application/json')) {
-        const body = await response.text();
-        throw new Error(`${label} returned non-JSON content: ${body.slice(0, 120)}`);
-    }
-
-    return response.json() as Promise<T>;
-};
 
 
 interface PlayerRouteViewProps {
@@ -55,8 +40,10 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
             setError('');
 
             try {
-                const response = await fetch(`http://localhost:8888/api/player/${encodeURIComponent(playerName)}/`);
-                const data = await readJsonOrThrow<PlayerData>(response, `Player ${playerName}`);
+                const { data } = await fetchSharedJson<PlayerData>(`http://localhost:8888/api/player/${encodeURIComponent(playerName)}/`, {
+                    label: `Player ${playerName}`,
+                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                });
                 if (!cancelled) {
                     setPlayerData(data);
                 }

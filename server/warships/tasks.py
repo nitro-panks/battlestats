@@ -33,6 +33,7 @@ RANKED_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 CLAN_BATTLE_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_SNAPSHOT_REFRESH_DISPATCH_TIMEOUT = 15 * 60
+PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 LANDING_PAGE_WARM_LOCK_KEY = "warships:tasks:warm_landing_page_content:lock"
 LANDING_PAGE_WARM_LOCK_TIMEOUT = 20 * 60
@@ -64,6 +65,10 @@ def _efficiency_snapshot_refresh_dispatch_key() -> str:
     return "warships:tasks:refresh_efficiency_rank_snapshot_dispatch"
 
 
+def _player_ranked_wr_battles_correlation_refresh_dispatch_key() -> str:
+    return "warships:tasks:warm_player_ranked_wr_battles_correlation_dispatch"
+
+
 def _ranked_refresh_failure_key() -> str:
     return "warships:tasks:update_ranked_data_dispatch:cooldown"
 
@@ -78,6 +83,10 @@ def _efficiency_refresh_failure_key() -> str:
 
 def _efficiency_snapshot_refresh_failure_key() -> str:
     return "warships:tasks:refresh_efficiency_rank_snapshot_dispatch:cooldown"
+
+
+def _player_ranked_wr_battles_correlation_refresh_failure_key() -> str:
+    return "warships:tasks:warm_player_ranked_wr_battles_correlation_dispatch:cooldown"
 
 
 def touch_clan_crawl_heartbeat(timestamp: float | None = None) -> float:
@@ -211,6 +220,28 @@ def queue_efficiency_rank_snapshot_refresh():
                   timeout=BROKER_DISPATCH_FAILURE_COOLDOWN)
         logger.warning(
             "Skipping efficiency-rank snapshot refresh enqueue because broker dispatch failed: %s",
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def queue_player_ranked_wr_battles_correlation_refresh():
+    if cache.get(_player_ranked_wr_battles_correlation_refresh_failure_key()):
+        return {"status": "skipped", "reason": "broker-unavailable"}
+
+    dispatch_key = _player_ranked_wr_battles_correlation_refresh_dispatch_key()
+    if not cache.add(dispatch_key, "queued", timeout=PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        warm_player_ranked_wr_battles_correlation_task.delay()
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        cache.set(_player_ranked_wr_battles_correlation_refresh_failure_key(), True,
+                  timeout=BROKER_DISPATCH_FAILURE_COOLDOWN)
+        logger.warning(
+            "Skipping ranked heatmap correlation refresh enqueue because broker dispatch failed: %s",
             error,
         )
         return {"status": "skipped", "reason": "enqueue-failed"}
@@ -386,6 +417,23 @@ def refresh_efficiency_rank_snapshot_task(self):
         )
     finally:
         cache.delete(_efficiency_snapshot_refresh_dispatch_key())
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_player_ranked_wr_battles_correlation_task(self):
+    from warships.data import warm_player_ranked_wr_battles_population_correlation
+
+    logger.info("Starting warm_player_ranked_wr_battles_correlation_task")
+    try:
+        return _run_locked_task(
+            "warm_player_ranked_wr_battles_correlation",
+            "population",
+            self.request.id,
+            warm_player_ranked_wr_battles_population_correlation,
+        )
+    finally:
+        cache.delete(
+            _player_ranked_wr_battles_correlation_refresh_dispatch_key())
 
 
 @app.task(bind=True, **TASK_OPTS)

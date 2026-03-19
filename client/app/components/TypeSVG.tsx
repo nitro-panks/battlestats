@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface TypeSVGProps {
     playerId: number;
@@ -63,9 +65,11 @@ const drawTypePlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
         .append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
-    fetch(`http://localhost:8888/api/fetch/type_data/${playerId}`)
-        .then((response) => response.json())
-        .then((data: unknown) => {
+    fetchSharedJson<unknown>(`http://localhost:8888/api/fetch/type_data/${playerId}/`, {
+        label: `Type data ${playerId}`,
+        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+    })
+        .then(({ data }) => {
             const rows = normalizeTypeRows(data).sort((left, right) => right.pvp_battles - left.pvp_battles);
             if (rows.length === 0) {
                 return;

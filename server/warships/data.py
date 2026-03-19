@@ -3117,6 +3117,43 @@ def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
     if cached is not None:
         return cached
 
+    payload = _build_player_ranked_wr_battles_population_correlation_payload()
+    cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
+    return payload
+
+
+def _build_empty_player_ranked_wr_battles_population_correlation_payload() -> dict:
+    config = PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG
+    seed_edges = config['base_x_edges']
+    base_edge = float(seed_edges[0]) if seed_edges else 1.0
+    x_max = float(max(base_edge * 2, base_edge + 1))
+
+    return {
+        'metric': 'ranked_wr_battles',
+        'label': config['label'],
+        'x_label': config['x_label'],
+        'y_label': config['y_label'],
+        'x_scale': config['x_scale'],
+        'y_scale': config['y_scale'],
+        'x_ticks': [base_edge, x_max],
+        'tracked_population': 0,
+        'correlation': None,
+        'x_domain': {
+            'min': base_edge,
+            'max': x_max,
+            'bin_width': None,
+        },
+        'y_domain': {
+            'min': config['y_min'],
+            'max': config['y_max'],
+            'bin_width': config['y_bin_width'],
+        },
+        'tiles': [],
+        'trend': [],
+    }
+
+
+def _build_player_ranked_wr_battles_population_correlation_payload() -> dict:
     config = PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG
     y_min = config['y_min']
     y_max = config['y_max']
@@ -3196,7 +3233,7 @@ def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
             'count': count,
         })
 
-    payload = {
+    return {
         'metric': 'ranked_wr_battles',
         'label': config['label'],
         'x_label': config['x_label'],
@@ -3220,15 +3257,27 @@ def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
         'trend': trend,
     }
 
+
+def warm_player_ranked_wr_battles_population_correlation() -> dict:
+    payload = _build_player_ranked_wr_battles_population_correlation_payload()
+    cache_key = _player_correlation_cache_key(
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
     return payload
 
 
 def fetch_player_ranked_wr_battles_correlation(player_id: str) -> dict:
+    from warships.tasks import queue_player_ranked_wr_battles_correlation_refresh
+
     player = Player.objects.get(player_id=player_id)
-    ranked_rows = fetch_ranked_data(player_id)
+    ranked_rows = player.ranked_json if player.ranked_json is not None else []
     total_battles, win_rate = _calculate_ranked_record(ranked_rows)
-    population_payload = _fetch_player_ranked_wr_battles_population_correlation()
+    cache_key = _player_correlation_cache_key(
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+    population_payload = cache.get(cache_key)
+    if population_payload is None:
+        queue_player_ranked_wr_battles_correlation_refresh()
+        population_payload = _build_empty_player_ranked_wr_battles_population_correlation_payload()
 
     return {
         **population_payload,
