@@ -37,6 +37,8 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 LANDING_PAGE_WARM_LOCK_KEY = "warships:tasks:warm_landing_page_content:lock"
 LANDING_PAGE_WARM_LOCK_TIMEOUT = 20 * 60
+HOT_ENTITY_CACHE_WARM_LOCK_KEY = "warships:tasks:warm_hot_entity_caches:lock"
+HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_KEY = "warships:tasks:landing_random_player_queue_refill:dispatch"
 LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
 LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_KEY = "warships:tasks:landing_random_clan_queue_refill:dispatch"
@@ -340,6 +342,19 @@ def update_player_data_task(self, player_id, force_refresh=False):
     )
 
 
+@app.task(bind=True, **TASK_OPTS)
+def update_battle_data_task(self, player_id):
+    from warships.data import update_battle_data
+
+    logger.info("Starting update_battle_data_task for player_id=%s", player_id)
+    return _run_locked_task(
+        "update_battle_data",
+        player_id,
+        self.request.id,
+        lambda: update_battle_data(player_id=player_id),
+    )
+
+
 @app.task(**TASK_OPTS)
 def preload_battles_json_task():
     from warships.data import preload_battles_json
@@ -544,6 +559,35 @@ def warm_landing_page_content_task(self, include_recent=True):
         return result
     finally:
         cache.delete(LANDING_PAGE_WARM_LOCK_KEY)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_hot_entity_caches_task(self, player_limit=None, clan_limit=None, force_refresh=False):
+    from warships.data import HOT_ENTITY_CLAN_LIMIT, HOT_ENTITY_PLAYER_LIMIT, warm_hot_entity_caches
+
+    logger.info(
+        "Starting warm_hot_entity_caches_task player_limit=%s clan_limit=%s force_refresh=%s",
+        player_limit,
+        clan_limit,
+        force_refresh,
+    )
+
+    if not cache.add(HOT_ENTITY_CACHE_WARM_LOCK_KEY, self.request.id, timeout=HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_hot_entity_caches_task because another hot cache warm is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        result = warm_hot_entity_caches(
+            player_limit=int(player_limit or HOT_ENTITY_PLAYER_LIMIT),
+            clan_limit=int(clan_limit or HOT_ENTITY_CLAN_LIMIT),
+            force_refresh=bool(force_refresh),
+        )
+        logger.info("Finished warm_hot_entity_caches_task: %s", result)
+        return result
+    finally:
+        cache.delete(HOT_ENTITY_CACHE_WARM_LOCK_KEY)
 
 
 @app.task(bind=True, **TASK_OPTS)

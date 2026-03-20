@@ -7,8 +7,8 @@ import math
 import os
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Count, F, Q
-from django.db.models.functions import Lower, TruncMonth
+from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
+from django.db.models.functions import Cast, Lower, TruncMonth
 from django.utils import timezone as django_timezone
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 from warships.models import PlayerAchievementStat
@@ -18,7 +18,7 @@ from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info, _fetch_player_achievements
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
     _fetch_clan_battle_seasons_info, _fetch_clan_battle_season_stats
-from warships.tasks import update_tiers_data_task, update_type_data_task
+from warships.tasks import update_activity_data_task, update_battle_data_task, update_randoms_data_task, update_snapshot_data_task, update_tiers_data_task, update_type_data_task
 
 logging.basicConfig(level=logging.INFO)
 
@@ -97,6 +97,118 @@ EFFICIENCY_RANK_TIER_LABELS = {
 }
 CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT', '8')))
+PLAYER_DETAIL_STALE_AFTER = timedelta(minutes=15)
+PLAYER_BATTLE_DATA_STALE_AFTER = timedelta(minutes=15)
+PLAYER_ACTIVITY_DATA_STALE_AFTER = timedelta(minutes=15)
+PLAYER_DERIVED_DATA_STALE_AFTER = timedelta(days=1)
+PLAYER_RANKED_DATA_STALE_AFTER = timedelta(hours=1)
+CLAN_DETAIL_STALE_AFTER = timedelta(hours=12)
+HOT_ENTITY_PLAYER_LIMIT = max(
+    1, int(os.getenv('HOT_ENTITY_PLAYER_LIMIT', '20')))
+HOT_ENTITY_CLAN_LIMIT = max(
+    1, int(os.getenv('HOT_ENTITY_CLAN_LIMIT', '10')))
+CLAN_PLOT_DATA_CACHE_TTL = 15 * 60
+
+
+def _dispatch_async_refresh(task, *args, **kwargs) -> None:
+    try:
+        task.delay(*args, **kwargs)
+    except Exception as error:
+        logging.warning(
+            'Skipping async refresh for %s because broker dispatch failed: %s',
+            getattr(task, 'name', repr(task)),
+            error,
+        )
+
+
+def _is_stale_timestamp(updated_at: Optional[datetime], stale_after: timedelta) -> bool:
+    if updated_at is None:
+        return True
+
+    if django_timezone.is_aware(updated_at):
+        current_time = datetime.now(timezone.utc)
+        normalized_updated_at = updated_at
+    else:
+        current_time = datetime.now()
+        normalized_updated_at = updated_at
+
+    return current_time - normalized_updated_at >= stale_after
+
+
+def player_detail_needs_refresh(
+    player: Player,
+    stale_after: timedelta = PLAYER_DETAIL_STALE_AFTER,
+) -> bool:
+    return _is_stale_timestamp(player.last_fetch, stale_after)
+
+
+def player_battle_data_needs_refresh(
+    player: Player,
+    stale_after: timedelta = PLAYER_BATTLE_DATA_STALE_AFTER,
+) -> bool:
+    if player.battles_json is None:
+        return True
+    return _is_stale_timestamp(player.battles_updated_at, stale_after)
+
+
+def player_activity_data_needs_refresh(
+    player: Player,
+    stale_after: timedelta = PLAYER_ACTIVITY_DATA_STALE_AFTER,
+) -> bool:
+    activity_rows = player.activity_json
+    if activity_rows is None:
+        return True
+
+    updated_at = player.activity_updated_at
+    if updated_at is None:
+        return True
+
+    def _is_empty_activity(rows: Any) -> bool:
+        return not isinstance(rows, list) or not rows
+
+    def _looks_like_cumulative_spike(rows: Any) -> bool:
+        if not isinstance(rows, list) or not rows:
+            return False
+        non_zero_days = [row for row in rows if (
+            row.get('battles', 0) or 0) > 0]
+        total_battles = sum((row.get('battles', 0) or 0) for row in rows)
+        return len(non_zero_days) == 1 and total_battles > 1000
+
+    if _is_empty_activity(activity_rows) or _looks_like_cumulative_spike(activity_rows):
+        return True
+
+    return _is_stale_timestamp(updated_at, stale_after)
+
+
+def player_derived_chart_data_needs_refresh(
+    updated_at: Optional[datetime],
+    stale_after: timedelta = PLAYER_DERIVED_DATA_STALE_AFTER,
+) -> bool:
+    return _is_stale_timestamp(updated_at, stale_after)
+
+
+def player_ranked_data_needs_refresh(
+    player: Player,
+    stale_after: timedelta = PLAYER_RANKED_DATA_STALE_AFTER,
+) -> bool:
+    if player.ranked_json is None:
+        return True
+    return _is_stale_timestamp(player.ranked_updated_at, stale_after)
+
+
+def clan_detail_needs_refresh(
+    clan: Clan,
+    stale_after: timedelta = CLAN_DETAIL_STALE_AFTER,
+) -> bool:
+    return _is_stale_timestamp(clan.last_fetch, stale_after)
+
+
+def clan_members_missing_or_incomplete(clan: Clan, member_count: Optional[int] = None) -> bool:
+    if not clan.members_count:
+        return True
+    if member_count is None:
+        member_count = clan.player_set.exclude(name='').count()
+    return member_count < clan.members_count
 
 
 def compute_player_verdict(pvp_battles: int, pvp_ratio: Optional[float], pvp_survival_rate: Optional[float]) -> Optional[str]:
@@ -1896,19 +2008,43 @@ def refresh_player_explorer_summary(
 
 def fetch_player_summary(player_id: str) -> dict:
     player = Player.objects.get(player_id=player_id)
-    activity_rows = fetch_activity_data(player_id)
-    ranked_rows = fetch_ranked_data(player_id)
 
-    if not player.is_hidden and not player.battles_json:
-        update_battle_data(player_id)
-
-    player.refresh_from_db()
-    refresh_player_explorer_summary(
-        player,
-        activity_rows=activity_rows,
-        ranked_rows=ranked_rows,
-        battles_rows=player.battles_json,
+    needs_bootstrap = (
+        not player.is_hidden
+        and player.battles_json is None
+        and player.activity_json is None
+        and player.ranked_json is None
+        and getattr(player, 'explorer_summary', None) is None
     )
+    if needs_bootstrap:
+        _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+        _dispatch_async_refresh(update_snapshot_data_task, player_id)
+        from warships.tasks import queue_ranked_data_refresh
+
+        queue_ranked_data_refresh(player_id)
+        return build_player_summary(player)
+
+    if not player.is_hidden and player.battles_json is not None and player_battle_data_needs_refresh(player):
+        _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+
+    if not player.is_hidden and player.activity_json is not None and player_activity_data_needs_refresh(player):
+        _dispatch_async_refresh(update_snapshot_data_task, player_id)
+        _dispatch_async_refresh(update_activity_data_task, player_id)
+
+    if not player.is_hidden and player.ranked_json is not None and player_ranked_data_needs_refresh(player):
+        from warships.tasks import queue_ranked_data_refresh
+
+        queue_ranked_data_refresh(player_id)
+
+    if getattr(player, 'explorer_summary', None) is None and (
+        player.battles_json is not None or player.activity_json is not None or player.ranked_json is not None
+    ):
+        refresh_player_explorer_summary(player)
+    elif _explorer_summary_needs_refresh(player) and (
+        player.battles_json is not None or player.activity_json is not None or player.ranked_json is not None
+    ):
+        refresh_player_explorer_summary(player)
+
     return build_player_summary(player)
 
 
@@ -2260,6 +2396,9 @@ def update_battle_data(player_id: str) -> None:
     player.battles_updated_at = datetime.now()
     player.battles_json = sorted_data
     player.save()
+    update_tiers_data(player.player_id)
+    update_type_data(player.player_id)
+    update_randoms_data(player.player_id)
     refresh_player_explorer_summary(player, battles_rows=sorted_data)
     logging.info(f"Updated battles_json data: {player.name}")
 
@@ -2280,20 +2419,23 @@ def fetch_tier_data(player_id: str) -> list:
     try:
         player = Player.objects.get(player_id=player_id)
         if not player.battles_json:
-            update_battle_data(player_id)
+            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+            return player.tiers_json or []
     except Player.DoesNotExist:
         return []
 
-    player = Player.objects.get(player_id=player_id)
+    if player.tiers_json is not None:
+        battles_stale = player_battle_data_needs_refresh(player)
+        tiers_stale = player_derived_chart_data_needs_refresh(
+            player.tiers_updated_at)
+        if battles_stale:
+            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+        elif tiers_stale:
+            _dispatch_async_refresh(update_tiers_data_task, player_id)
+        return player.tiers_json
 
-    if player.tiers_json:
-        if not player.tiers_updated_at or datetime.now() - player.tiers_updated_at > timedelta(days=1):
-            update_tiers_data_task.delay(player_id)
-        return player.tiers_json
-    else:
-        update_tiers_data(player_id)
-        player = Player.objects.get(player_id=player_id)
-        return player.tiers_json
+    _dispatch_async_refresh(update_tiers_data_task, player_id)
+    return []
 
 
 def update_tiers_data(player_id: str) -> list:
@@ -2381,6 +2523,7 @@ def update_snapshot_data(player_id: int) -> None:
         previous_battles = snap.battles
         previous_wins = snap.wins
 
+    update_activity_data(player_id)
     logging.info(f'Updated snapshot data for player {player.name}')
 
 
@@ -2390,41 +2533,22 @@ def fetch_activity_data(player_id: str) -> list:
     except Player.DoesNotExist:
         return []
 
-    def _is_empty_activity(activity_rows: Any) -> bool:
-        return not isinstance(activity_rows, list) or not activity_rows
-
-    def _looks_like_cumulative_spike(activity_rows: Any) -> bool:
-        if not isinstance(activity_rows, list) or not activity_rows:
-            return False
-        non_zero_days = [row for row in activity_rows if (
-            row.get('battles', 0) or 0) > 0]
-        total_battles = sum((row.get('battles', 0) or 0)
-                            for row in activity_rows)
-        return len(non_zero_days) == 1 and total_battles > 1000
-
-    if player.activity_json:
+    if player.activity_json is not None:
         logging.info(f'Activity data exists for player {player.name}')
-        is_stale = not player.activity_updated_at or datetime.now(
-        ) - player.activity_updated_at > timedelta(minutes=15)
-        is_empty = _is_empty_activity(player.activity_json)
-        is_cumulative_spike = _looks_like_cumulative_spike(
-            player.activity_json)
-
-        if is_stale or is_empty or is_cumulative_spike:
+        if player_activity_data_needs_refresh(player):
             logging.info(
-                f'Activity data refresh required (stale={is_stale}, empty={is_empty}, cumulative_spike={is_cumulative_spike}) for {player.name} : {player.player_id}')
-            update_snapshot_data(player.player_id)
-            update_activity_data(player.player_id)
-            player.refresh_from_db()
+                'Scheduling async activity refresh for %s : %s',
+                player.name,
+                player.player_id,
+            )
+            _dispatch_async_refresh(update_snapshot_data_task, player.player_id)
         else:
             logging.info(
                 f'Activity fetch datetime is fresh: returning cached data for player {player.name}')
         return player.activity_json
-    else:
-        update_snapshot_data(player_id)
-        update_activity_data(player_id)
-        player = Player.objects.get(player_id=player_id)
-        return player.activity_json
+
+    _dispatch_async_refresh(update_snapshot_data_task, player.player_id)
+    return []
 
 
 def update_activity_data(player_id: int) -> None:
@@ -2631,7 +2755,8 @@ def fetch_landing_activity_attrition() -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
+                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -3746,9 +3871,13 @@ def fetch_ranked_data(player_id: str) -> list:
         return []
 
     # Return cached if fresh
-    if player.ranked_json is not None and player.ranked_updated_at and \
-            datetime.now() - player.ranked_updated_at < timedelta(hours=1):
-        logging.info(f'Ranked data cache fresh for {player.name}')
+    if player.ranked_json is not None:
+        if player_ranked_data_needs_refresh(player):
+            from warships.tasks import queue_ranked_data_refresh
+
+            queue_ranked_data_refresh(player_id)
+        else:
+            logging.info(f'Ranked data cache fresh for {player.name}')
         return player.ranked_json
 
     logging.info(f'Fetching ranked data for {player.name}')
@@ -3808,18 +3937,23 @@ def fetch_type_data(player_id: str) -> list:
     try:
         player = Player.objects.get(player_id=player_id)
         if not player.battles_json:
-            update_battle_data(player_id)
+            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+            return player.type_json or []
     except Player.DoesNotExist:
         return []
 
-    if player.type_json:
-        if not player.type_updated_at or datetime.now() - player.type_updated_at > timedelta(days=1):
-            update_type_data_task.delay(player_id)
+    if player.type_json is not None:
+        battles_stale = player_battle_data_needs_refresh(player)
+        type_stale = player_derived_chart_data_needs_refresh(
+            player.type_updated_at)
+        if battles_stale:
+            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+        elif type_stale:
+            _dispatch_async_refresh(update_type_data_task, player_id)
         return player.type_json
-    else:
-        update_type_data(player_id)
-        player = Player.objects.get(player_id=player_id)
-        return player.type_json
+
+    _dispatch_async_refresh(update_type_data_task, player_id)
+    return []
 
 
 def update_type_data(player_id: str) -> list:
@@ -3836,51 +3970,69 @@ def fetch_randoms_data(player_id: str) -> list:
     try:
         player = Player.objects.get(player_id=player_id)
         if not player.battles_json:
-            update_battle_data(player_id)
+            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+            return _extract_randoms_rows(player.randoms_json, limit=20)
     except Player.DoesNotExist:
         return []
 
-    if player.randoms_json:
+    if player.randoms_json is not None:
         has_required_fields = isinstance(player.randoms_json, list) and all(
             isinstance(row, dict) and 'ship_type' in row and 'ship_tier' in row
             for row in player.randoms_json
         )
 
         if not has_required_fields:
-            update_randoms_data(player_id)
-            player = Player.objects.get(player_id=player_id)
-            return _extract_randoms_rows(player.randoms_json, limit=20)
+            _dispatch_async_refresh(update_randoms_data_task, player_id)
+            return []
 
-        randoms_stale = not player.randoms_updated_at or datetime.now(
-        ) - player.randoms_updated_at > timedelta(days=1)
-        battles_stale = not player.battles_updated_at or datetime.now(
-        ) - player.battles_updated_at > timedelta(minutes=15)
-        if randoms_stale or battles_stale:
-            update_battle_data(player_id)
-            update_randoms_data(player_id)
-            player = Player.objects.get(player_id=player_id)
+        randoms_stale = player_derived_chart_data_needs_refresh(
+            player.randoms_updated_at)
+        battles_stale = player_battle_data_needs_refresh(player)
+        if battles_stale:
+            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+        elif randoms_stale:
+            _dispatch_async_refresh(update_randoms_data_task, player_id)
         return _extract_randoms_rows(player.randoms_json, limit=20)
-    else:
-        update_randoms_data(player_id)
-        player = Player.objects.get(player_id=player_id)
-        return _extract_randoms_rows(player.randoms_json, limit=20)
+
+    _dispatch_async_refresh(update_randoms_data_task, player_id)
+    return []
 
 
 def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
+    cache_key = f'clan:plot:v1:{clan_id}:{filter_type}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        try:
+            clan = Clan.objects.get(clan_id=clan_id)
+        except Clan.DoesNotExist:
+            return cached
+
+        member_count = clan.player_set.exclude(name='').count()
+        if clan_detail_needs_refresh(clan):
+            _dispatch_async_refresh(update_clan_data_task, clan_id=clan_id)
+        if clan_members_missing_or_incomplete(clan, member_count=member_count):
+            _dispatch_async_refresh(update_clan_members_task, clan_id=clan_id)
+        return cached
+
     try:
         clan = Clan.objects.get(clan_id=clan_id)
     except Clan.DoesNotExist:
         return []
 
-    if not clan.members_count:
-        update_clan_data(clan_id)
-        clan.refresh_from_db()
-
     members = clan.player_set.exclude(name='').all()
+    member_count = members.count()
+    needs_clan_refresh = not clan.members_count or clan_detail_needs_refresh(clan)
+    needs_member_refresh = member_count == 0 or (
+        clan.members_count and member_count < clan.members_count
+    )
 
-    if not members.exists() or (clan.members_count and members.count() < clan.members_count):
-        update_clan_members(clan_id)
-        members = clan.player_set.exclude(name='').all()
+    if needs_clan_refresh:
+        _dispatch_async_refresh(update_clan_data_task, clan_id=clan_id)
+    if needs_member_refresh:
+        _dispatch_async_refresh(update_clan_members_task, clan_id=clan_id)
+
+    if needs_clan_refresh or needs_member_refresh:
+        return []
 
     data = []
     for member in members:
@@ -3894,7 +4046,10 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
             'pvp_ratio': member.pvp_ratio or 0
         })
 
-    return sorted(data, key=lambda row: row.get('pvp_battles', 0), reverse=True)
+    payload = sorted(data, key=lambda row: row.get(
+        'pvp_battles', 0), reverse=True)
+    cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
+    return payload
 
 
 def update_randoms_data(player_id: str) -> None:
@@ -3941,6 +4096,8 @@ def update_clan_data(clan_id: str) -> None:
     clan.save()
     invalidate_landing_clan_caches()
     _invalidate_clan_battle_summary_cache(clan_id)
+    cache.delete(f'clan:plot:v1:{clan_id}:active')
+    cache.delete(f'clan:plot:v1:{clan_id}:all')
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
 
@@ -3986,6 +4143,8 @@ def update_clan_members(clan_id: str) -> None:
 
     invalidate_landing_clan_caches()
     _invalidate_clan_battle_summary_cache(clan_id)
+    cache.delete(f'clan:plot:v1:{clan_id}:active')
+    cache.delete(f'clan:plot:v1:{clan_id}:all')
 
 
 def update_player_data(player: Player, force_refresh: bool = False) -> None:
@@ -4099,6 +4258,186 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
     refresh_player_explorer_summary(player)
     invalidate_landing_player_caches(include_recent=True)
     logging.info(f"Updated player personal data: {player.name}")
+
+
+def _top_visited_entity_ids(entity_type: str, limit: int) -> list[int]:
+    from warships.visit_analytics import get_top_entities
+
+    try:
+        rows = get_top_entities(entity_type, '7d', 'views_deduped', limit)
+    except Exception as error:
+        logging.warning(
+            'Skipping top-visited %s lookup due to analytics error: %s',
+            entity_type,
+            error,
+        )
+        return []
+
+    entity_ids: list[int] = []
+    for row in rows:
+        try:
+            entity_id = int(row.get('entity_id') or 0)
+        except (TypeError, ValueError):
+            continue
+        if entity_id > 0:
+            entity_ids.append(entity_id)
+    return entity_ids
+
+
+def _get_hot_player_ids(limit: int = HOT_ENTITY_PLAYER_LIMIT) -> list[int]:
+    candidate_ids: list[int] = []
+    candidate_ids.extend(_top_visited_entity_ids('player', limit))
+    candidate_ids.extend(
+        Player.objects.exclude(name='').exclude(last_lookup__isnull=True).order_by(
+            F('last_lookup').desc(nulls_last=True),
+            'name',
+        ).values_list('player_id', flat=True)[:limit]
+    )
+    candidate_ids.extend(
+        Player.objects.exclude(name='').filter(is_hidden=False).select_related('explorer_summary').order_by(
+            F('explorer_summary__player_score').desc(nulls_last=True),
+            F('pvp_ratio').desc(nulls_last=True),
+            'name',
+        ).values_list('player_id', flat=True)[:limit]
+    )
+
+    ordered_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for raw_id in candidate_ids:
+        try:
+            player_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if player_id <= 0 or player_id in seen_ids:
+            continue
+        seen_ids.add(player_id)
+        ordered_ids.append(player_id)
+        if len(ordered_ids) >= limit:
+            break
+    return ordered_ids
+
+
+def _get_hot_clan_ids(limit: int = HOT_ENTITY_CLAN_LIMIT) -> list[int]:
+    candidate_ids: list[int] = []
+    candidate_ids.extend(_top_visited_entity_ids('clan', limit))
+    candidate_ids.extend(
+        Clan.objects.exclude(name__isnull=True).exclude(name='').exclude(last_lookup__isnull=True).order_by(
+            F('last_lookup').desc(nulls_last=True),
+            'name',
+        ).values_list('clan_id', flat=True)[:limit]
+    )
+    candidate_ids.extend(
+        Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
+            total_wins=Sum('player__pvp_wins'),
+            total_battles=Sum('player__pvp_battles'),
+            clan_wr=Case(
+                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
+                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
+                default=None,
+                output_field=FloatField(),
+            ),
+        ).filter(
+            total_battles__gte=100000,
+            clan_wr__isnull=False,
+        ).order_by(
+            F('clan_wr').desc(nulls_last=True),
+            F('total_battles').desc(nulls_last=True),
+            'name',
+        ).values_list('clan_id', flat=True)[:limit]
+    )
+
+    ordered_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for raw_id in candidate_ids:
+        try:
+            clan_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if clan_id <= 0 or clan_id in seen_ids:
+            continue
+        seen_ids.add(clan_id)
+        ordered_ids.append(clan_id)
+        if len(ordered_ids) >= limit:
+            break
+    return ordered_ids
+
+
+def warm_hot_entity_caches(
+    player_limit: int = HOT_ENTITY_PLAYER_LIMIT,
+    clan_limit: int = HOT_ENTITY_CLAN_LIMIT,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    player_ids = _get_hot_player_ids(player_limit)
+    clan_ids = _get_hot_clan_ids(clan_limit)
+    warmed_players = 0
+    warmed_clans = 0
+
+    for player_id in player_ids:
+        player = Player.objects.select_related(
+            'explorer_summary', 'clan').filter(player_id=player_id).first()
+        if player is None:
+            continue
+
+        if force_refresh or player_detail_needs_refresh(player):
+            update_player_data(player, force_refresh=force_refresh)
+            player.refresh_from_db()
+
+        if player.is_hidden:
+            warmed_players += 1
+            continue
+
+        if force_refresh or player_battle_data_needs_refresh(player):
+            update_battle_data(player.player_id)
+            player.refresh_from_db()
+
+        if force_refresh or player.activity_json is None or player_activity_data_needs_refresh(player):
+            update_snapshot_data(player.player_id)
+            update_activity_data(player.player_id)
+            player.refresh_from_db()
+
+        if force_refresh or player.tiers_json is None or player_derived_chart_data_needs_refresh(player.tiers_updated_at):
+            update_tiers_data(player.player_id)
+        if force_refresh or player.type_json is None or player_derived_chart_data_needs_refresh(player.type_updated_at):
+            update_type_data(player.player_id)
+        if force_refresh or player.randoms_json is None or player_derived_chart_data_needs_refresh(player.randoms_updated_at):
+            update_randoms_data(player.player_id)
+        if force_refresh or player_ranked_data_needs_refresh(player):
+            update_ranked_data(player.player_id)
+
+        player.refresh_from_db()
+        refresh_player_explorer_summary(player)
+        fetch_player_clan_battle_seasons(player.player_id)
+        warmed_players += 1
+
+    for clan_id in clan_ids:
+        clan = Clan.objects.filter(clan_id=clan_id).first()
+        if clan is None:
+            continue
+
+        if force_refresh or clan_detail_needs_refresh(clan):
+            update_clan_data(str(clan_id))
+            clan.refresh_from_db()
+
+        member_count = clan.player_set.exclude(name='').count()
+        if force_refresh or clan_members_missing_or_incomplete(clan, member_count=member_count):
+            update_clan_members(str(clan_id))
+
+        refresh_clan_battle_seasons_cache(str(clan_id))
+        fetch_clan_plot_data(str(clan_id), 'active')
+        fetch_clan_plot_data(str(clan_id), 'all')
+        warmed_clans += 1
+
+    return {
+        'status': 'completed',
+        'warmed': {
+            'players': warmed_players,
+            'clans': warmed_clans,
+        },
+        'candidate_counts': {
+            'players': len(player_ids),
+            'clans': len(clan_ids),
+        },
+    }
 
 
 def preload_battles_json() -> None:

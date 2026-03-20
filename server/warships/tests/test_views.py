@@ -945,6 +945,42 @@ class ClanMembersEndpointTests(TestCase):
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
 
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.data.update_clan_members")
+    @patch("warships.data.update_clan_data")
+    def test_clan_members_returns_partial_rows_and_queues_refresh_for_incomplete_clan(
+        self,
+        mock_update_clan_data,
+        mock_update_clan_members,
+        mock_update_clan_data_task,
+        mock_update_clan_members_task,
+    ):
+        clan = Clan.objects.create(
+            clan_id=420,
+            name="Incomplete Clan",
+            members_count=2,
+            leader_id=None,
+            leader_name="",
+        )
+        Player.objects.create(
+            name="ExistingMember",
+            player_id=4201,
+            clan=clan,
+            days_since_last_battle=4,
+            last_battle_date=timezone.now().date() - timedelta(days=4),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/420/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["name"], "ExistingMember")
+        mock_update_clan_data.assert_not_called()
+        mock_update_clan_members.assert_not_called()
+        mock_update_clan_data_task.assert_called_once_with(clan_id="420")
+        mock_update_clan_members_task.assert_called_once_with(clan_id="420")
+
     def test_clan_members_exposes_ranked_hydration_metadata(self):
         self.mock_queue_clan_ranked_hydration.return_value = {
             "pending_player_ids": {7901},

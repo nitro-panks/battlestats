@@ -21,9 +21,9 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
     WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer, PlayerExtendedCorrelationDistributionSerializer, \
     PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer, TopEntitiesQuerySerializer, TopEntityVisitSerializer
-from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
+from warships.data import clan_detail_needs_refresh, clan_members_missing_or_incomplete, fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
-    fetch_player_explorer_page, fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
+    fetch_player_explorer_page, fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, player_battle_data_needs_refresh, player_detail_needs_refresh, \
     fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, _get_published_efficiency_rank_payload, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
     is_sleepy_player, get_highest_ranked_league_name
 from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode
@@ -132,26 +132,12 @@ class PlayerViewSet(viewsets.ModelViewSet):
             update_player_data(player=obj, force_refresh=True)
             obj.refresh_from_db()
 
-        if obj.clan and (not obj.clan.name or not obj.clan.last_fetch):
-            from warships.data import update_clan_data
-            update_clan_data(obj.clan.clan_id)
-            obj.refresh_from_db()
-
-        if not obj.is_hidden and not obj.battles_json and (obj.pvp_battles or 0) > 0:
-            update_battle_data(obj.player_id)
-            obj.refresh_from_db()
-
         needs_efficiency_refresh = (
             not obj.is_hidden and
             obj.efficiency_json is None and
             obj.actual_kdr is not None and
             (obj.pvp_battles or 0) > 0
         )
-
-        if not obj.is_hidden and obj.actual_kdr is None and (obj.pvp_battles or 0) > 0:
-            from warships.data import update_player_data
-            update_player_data(player=obj, force_refresh=True)
-            obj.refresh_from_db()
 
         self.check_object_permissions(self.request, obj)
 
@@ -177,8 +163,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
         if not obj.is_hidden and _explorer_summary_needs_refresh(obj):
             refresh_player_explorer_summary(obj)
 
-        player_refresh_stale = not obj.last_fetch or (
-            now - obj.last_fetch) > timedelta(minutes=15)
+        player_refresh_stale = player_detail_needs_refresh(obj)
 
         # When clan is still missing, force a refresh task so we do not get
         # stuck on fresh-but-incomplete player records.
@@ -200,9 +185,8 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
         if obj.clan:
             clan = obj.clan
-            clan_refresh_stale = not clan.last_fetch or (
-                now - clan.last_fetch) > timedelta(hours=12)
-            clan_members_incomplete = not clan.members_count or clan.player_set.count() < clan.members_count
+            clan_refresh_stale = clan_detail_needs_refresh(clan)
+            clan_members_incomplete = clan_members_missing_or_incomplete(clan)
 
             if clan_refresh_stale:
                 logging.info(
@@ -212,6 +196,12 @@ class PlayerViewSet(viewsets.ModelViewSet):
             if clan_refresh_stale or clan_members_incomplete:
                 _delay_task_safely(update_clan_members_task,
                                    clan_id=clan.clan_id)
+
+        if not obj.is_hidden and obj.battles_json is not None and player_battle_data_needs_refresh(obj):
+            from warships.tasks import update_battle_data_task
+
+            _delay_task_safely(update_battle_data_task,
+                               player_id=obj.player_id)
 
         from warships.data import maybe_refresh_clan_battle_data
         maybe_refresh_clan_battle_data(obj)
@@ -235,6 +225,10 @@ class ClanViewSet(viewsets.ModelViewSet):
     def get_object(self):
         obj = super().get_object()
         _record_clan_lookup(obj)
+        if clan_detail_needs_refresh(obj):
+            _delay_task_safely(update_clan_data_task, clan_id=obj.clan_id)
+        if clan_members_missing_or_incomplete(obj):
+            _delay_task_safely(update_clan_members_task, clan_id=obj.clan_id)
         return obj
 
 
@@ -508,17 +502,24 @@ def clan_members(request, clan_id: str) -> Response:
 
     _record_clan_lookup(clan)
 
-    from warships.data import update_clan_data, update_clan_members, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, clan_battle_summary_is_stale, maybe_refresh_clan_battle_data, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT
-    if not clan.members_count or (clan.leader_id is None and not clan.leader_name):
-        update_clan_data(clan_id=clan_id)
-        clan.refresh_from_db()
+    from warships.data import queue_clan_efficiency_hydration, queue_clan_ranked_hydration, clan_battle_summary_is_stale, maybe_refresh_clan_battle_data, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT
+    local_member_count = clan.player_set.exclude(name='').count()
+    needs_clan_refresh = (
+        not clan.members_count
+        or (clan.leader_id is None and not clan.leader_name)
+        or clan_detail_needs_refresh(clan)
+    )
+    needs_member_refresh = local_member_count == 0 or (
+        clan.members_count and local_member_count < clan.members_count
+    )
+
+    if needs_clan_refresh:
+        _delay_task_safely(update_clan_data_task, clan_id=clan_id)
+    if needs_member_refresh:
+        _delay_task_safely(update_clan_members_task, clan_id=clan_id)
 
     members = clan.player_set.select_related('explorer_summary').exclude(name='').order_by(
         *_player_score_ordering('last_battle_date'))
-    if not members.exists() or (clan.members_count and members.count() < clan.members_count):
-        update_clan_members(clan_id=clan_id)
-        members = clan.player_set.select_related('explorer_summary').exclude(name='').order_by(
-            *_player_score_ordering('last_battle_date'))
 
     members = list(members)
     hydration_state = queue_clan_ranked_hydration(members)

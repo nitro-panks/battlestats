@@ -179,3 +179,22 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
             "description": "Refreshes landing page caches shortly before the one-hour TTL expires so the first landing request stays hot.",
         },
     )
+
+    hot_entity_warm_minutes = int(
+        os.getenv("HOT_ENTITY_CACHE_WARM_MINUTES", "30"))
+    hot_entity_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=hot_entity_warm_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+
+    PeriodicTask.objects.update_or_create(
+        name="hot-entity-cache-warmer",
+        defaults={
+            "task": "warships.tasks.warm_hot_entity_caches_task",
+            "interval": hot_entity_warm_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Keeps the hottest player and clan detail caches warm so detail routes can serve cached payloads and refresh in the background.",
+        },
+    )
