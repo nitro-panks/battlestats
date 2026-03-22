@@ -496,7 +496,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
     });
 
-    it('renders header markers for leader, ranked, sleepy, and known playstyle states', () => {
+    it('renders header markers for leader, ranked, and sleepy states without the playstyle panel', () => {
         render(
             <PlayerDetail
                 player={{
@@ -516,8 +516,8 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.getByLabelText('Clan leader')).toBeInTheDocument();
         expect(screen.getByLabelText('inactive for over a year')).toBeInTheDocument();
         expect(screen.getByLabelText(/ranked enjoyer/i)).toBeInTheDocument();
-        expect(screen.getByText('Playstyle:')).toBeInTheDocument();
-        expect(screen.getByText('Warrior')).toBeInTheDocument();
+        expect(screen.queryByText('Playstyle:')).not.toBeInTheDocument();
+        expect(screen.queryByText('Warrior')).not.toBeInTheDocument();
     });
 
     it('copies the player URL and clears the copied state after the timeout', async () => {

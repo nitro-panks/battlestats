@@ -190,6 +190,8 @@ const PLAYSTYLE_HELPER_TEXT: Record<string, string> = {
     Recruit: 'Has too few battles to read; the story is just beginning.',
 };
 
+const SHOW_PLAYSTYLE_PANEL = false;
+
 const HeaderLeaderCrown = () => (
     <span
         title="Clan leader"
@@ -674,7 +676,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <p>PvE Battles: <span className="font-medium text-[#2171b5]">{pveBattles.toLocaleString()}</span></p>
                             </div>
 
-                            {player.verdict && (
+                            {SHOW_PLAYSTYLE_PANEL && player.verdict && (
                                 <div className="mt-4 rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
                                     <p className="text-sm font-medium text-[#334155]">Playstyle: <span className="font-semibold text-[#084594]">{player.verdict}</span></p>
                                     {PLAYSTYLE_HELPER_TEXT[player.verdict] ? (
