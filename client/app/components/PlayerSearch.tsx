@@ -320,6 +320,32 @@ const PlayerSearch: React.FC = () => {
     }, [fetchLandingData]);
 
     useEffect(() => {
+        const refreshLandingData = () => {
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+                return;
+            }
+
+            void fetchLandingData();
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                refreshLandingData();
+            }
+        };
+
+        window.addEventListener('focus', refreshLandingData);
+        window.addEventListener('pageshow', refreshLandingData);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            window.removeEventListener('focus', refreshLandingData);
+            window.removeEventListener('pageshow', refreshLandingData);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [fetchLandingData]);
+
+    useEffect(() => {
         void fetchLandingClans(clanMode).catch((err) => {
             console.error('Error fetching landing clans:', err);
             setClans([]);

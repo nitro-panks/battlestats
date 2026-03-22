@@ -160,18 +160,21 @@ const installFetchMock = ({
     clans = defaultClans,
     recentClans = [],
     recentPlayers = [],
+    recentPlayersResponses,
     playersByMode = defaultPlayersByMode,
     playerResponses = {},
 }: {
     clans?: unknown[];
     recentClans?: unknown[];
     recentPlayers?: unknown[];
+    recentPlayersResponses?: unknown[][];
     playersByMode?: Record<string, unknown[]>;
     playerResponses?: Record<string, Array<ReturnType<typeof buildJsonResponse> | ReturnType<typeof buildErrorResponse>>>;
 } = {}) => {
     const responseQueues = new Map(
         Object.entries(playerResponses).map(([playerName, queue]) => [playerName, [...queue]]),
     );
+    const recentPlayersQueue = recentPlayersResponses ? [...recentPlayersResponses] : null;
 
     global.fetch = jest.fn((input: RequestInfo | URL) => {
         const url = input.toString();
@@ -185,6 +188,9 @@ const installFetchMock = ({
         }
 
         if (url === '/api/landing/recent/' || url === '/api/landing/recent') {
+            if (recentPlayersQueue && recentPlayersQueue.length > 0) {
+                return Promise.resolve(buildJsonResponse(recentPlayersQueue.shift() ?? []));
+            }
             return Promise.resolve(buildJsonResponse(recentPlayers));
         }
 
@@ -419,6 +425,33 @@ describe('PlayerSearch landing efficiency icon', () => {
             expect(screen.queryByTestId('player-detail')).not.toBeInTheDocument();
         });
         expect(screen.getByRole('heading', { name: 'Active Players' })).toBeInTheDocument();
+    });
+
+    it('refreshes recently viewed players when the page becomes visible again', async () => {
+        installFetchMock({
+            recentPlayersResponses: [
+                [{ name: 'for_the_kingdom_2022', pvp_ratio: 54.2, is_hidden: false }],
+                [
+                    { name: 'AnotherCaptain', pvp_ratio: 58.1, is_hidden: false },
+                    { name: 'for_the_kingdom_2022', pvp_ratio: 54.2, is_hidden: false },
+                ],
+            ],
+        });
+
+        render(<PlayerSearch />);
+
+        expect(await screen.findByRole('button', { name: /Show recent player for_the_kingdom_2022/i })).toBeInTheDocument();
+
+        Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            value: 'visible',
+        });
+
+        act(() => {
+            document.dispatchEvent(new Event('visibilitychange'));
+        });
+
+        expect(await screen.findByRole('button', { name: /Show recent player AnotherCaptain/i })).toBeInTheDocument();
     });
 
     it('executes nav search events and shows an error when player lookup fails', async () => {
