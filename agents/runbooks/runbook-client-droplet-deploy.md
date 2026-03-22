@@ -23,7 +23,9 @@ From the repo root:
 
 ```bash
 chmod +x client/deploy/bootstrap_droplet.sh client/deploy/deploy_to_droplet.sh
-API_ORIGIN=http://127.0.0.1:8888 ./client/deploy/bootstrap_droplet.sh 45.55.66.19
+NGINX_SERVER_NAME="tamezz.com www.tamezz.com" \
+API_ORIGIN=http://127.0.0.1:8888 \
+./client/deploy/bootstrap_droplet.sh YOUR_DROPLET_IP
 ```
 
 What the bootstrap does:
@@ -36,12 +38,14 @@ What the bootstrap does:
 
 If your Django backend is not on the same droplet, set `API_ORIGIN` to the actual backend origin before bootstrapping.
 
+If you want both the apex domain and `www` host to resolve on the droplet, point both DNS records at the droplet IP and include both names in `NGINX_SERVER_NAME`.
+
 ## First deploy and later updates
 
 When local client changes are ready to publish:
 
 ```bash
-./client/deploy/deploy_to_droplet.sh 45.55.66.19
+./client/deploy/deploy_to_droplet.sh YOUR_DROPLET_IP
 ```
 
 That command:
@@ -74,13 +78,13 @@ systemctl restart battlestats-client
 Useful remote commands:
 
 ```bash
-ssh root@45.55.66.19 'systemctl status battlestats-client --no-pager'
-ssh root@45.55.66.19 'journalctl -u battlestats-client -n 100 --no-pager'
-ssh root@45.55.66.19 'nginx -t && systemctl status nginx --no-pager'
+ssh root@YOUR_DROPLET_IP 'systemctl status battlestats-client --no-pager'
+ssh root@YOUR_DROPLET_IP 'journalctl -u battlestats-client -n 100 --no-pager'
+ssh root@YOUR_DROPLET_IP 'nginx -t && systemctl status nginx --no-pager'
 ```
 
 ## SSL later
 
-This bootstrap uses plain HTTP on port 80 so the client is reachable immediately by IP.
+This bootstrap uses plain HTTP on port 80 so the client is reachable immediately after DNS is pointed at the droplet IP.
 
 When you are ready to attach a domain, add TLS with Certbot or another reverse-proxy/TLS layer. That is the point where automation via GitHub Actions becomes more reasonable, but it is not required for the first deployment.

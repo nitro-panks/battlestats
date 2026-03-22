@@ -16,7 +16,8 @@ From the repo root:
 
 ```bash
 chmod +x server/deploy/bootstrap_droplet.sh server/deploy/deploy_to_droplet.sh
-./server/deploy/bootstrap_droplet.sh 45.55.66.19
+EXTRA_ALLOWED_HOSTS=tamezz.com,www.tamezz.com \
+./server/deploy/bootstrap_droplet.sh YOUR_DROPLET_IP
 ```
 
 The bootstrap installs:
@@ -35,7 +36,8 @@ The bootstrap installs:
 When backend changes are ready:
 
 ```bash
-./server/deploy/deploy_to_droplet.sh 45.55.66.19
+EXTRA_ALLOWED_HOSTS=tamezz.com,www.tamezz.com \
+./server/deploy/deploy_to_droplet.sh YOUR_DROPLET_IP
 ```
 
 That deploy does all of the following:
@@ -45,7 +47,7 @@ That deploy does all of the following:
 - uploads `server/ca-certificate.crt`
 - syncs the `server/` directory to a timestamped release
 - syncs the top-level `agents/` directory because the backend agentic runtime reads it at runtime
-- updates the remote env files to use the absolute CA cert path and droplet-local Redis/RabbitMQ values
+- updates the remote env files to use the absolute CA cert path, droplet-local Redis/RabbitMQ values, and the explicit domain/IP allow-list you passed in
 - installs Python dependencies into `/opt/battlestats-server/venv`
 - runs `manage.py migrate`
 - runs `manage.py collectstatic --noinput`
@@ -63,14 +65,16 @@ The deploy uses these droplet files:
 
 The deploy script populates them from the existing repo cloud target files, so the backend continues using the established managed Postgres connection details instead of a second config source.
 
+When you are serving the app from a custom domain, pass the root domain and any aliases as a comma-separated `EXTRA_ALLOWED_HOSTS` value so Django accepts the incoming `Host` header.
+
 ## Service checks
 
 Useful remote checks:
 
 ```bash
-ssh root@45.55.66.19 'systemctl status battlestats-gunicorn --no-pager'
-ssh root@45.55.66.19 'systemctl status battlestats-celery --no-pager'
-ssh root@45.55.66.19 'systemctl status battlestats-beat --no-pager'
-ssh root@45.55.66.19 'journalctl -u battlestats-gunicorn -n 100 --no-pager'
-ssh root@45.55.66.19 'curl -s http://127.0.0.1:8888/api/player/Mebuki/ | head'
+ssh root@YOUR_DROPLET_IP 'systemctl status battlestats-gunicorn --no-pager'
+ssh root@YOUR_DROPLET_IP 'systemctl status battlestats-celery --no-pager'
+ssh root@YOUR_DROPLET_IP 'systemctl status battlestats-beat --no-pager'
+ssh root@YOUR_DROPLET_IP 'journalctl -u battlestats-gunicorn -n 100 --no-pager'
+ssh root@YOUR_DROPLET_IP 'curl -s http://127.0.0.1:8888/api/player/Mebuki/ | head'
 ```

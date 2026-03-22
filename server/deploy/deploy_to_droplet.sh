@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${SERVER_DIR}/.." && pwd)"
 
-HOST="${1:-45.55.66.19}"
+HOST="${1:-}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"
 APP_USER="${APP_USER:-battlestats}"
@@ -16,6 +16,17 @@ REMOTE_RELEASE="${APP_ROOT}/releases/${RELEASE_ID}"
 REMOTE_TMP_ENV="/tmp/battlestats-server.env.${RELEASE_ID}"
 REMOTE_TMP_SECRETS="/tmp/battlestats-server.secrets.env.${RELEASE_ID}"
 REMOTE_TMP_CERT="/tmp/battlestats-do-ca.${RELEASE_ID}.crt"
+EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:-}"
+DJANGO_ALLOWED_HOSTS="localhost,127.0.0.1,${HOST}"
+
+if [[ -n "${EXTRA_ALLOWED_HOSTS}" ]]; then
+  DJANGO_ALLOWED_HOSTS="${DJANGO_ALLOWED_HOSTS},${EXTRA_ALLOWED_HOSTS}"
+fi
+
+if [[ -z "${HOST}" ]]; then
+  echo "Usage: $0 <droplet-ip-or-hostname>" >&2
+  exit 1
+fi
 
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \
@@ -62,6 +73,7 @@ ssh "${DEPLOY_USER}@${HOST}" \
   REMOTE_TMP_ENV="${REMOTE_TMP_ENV}" \
   REMOTE_TMP_SECRETS="${REMOTE_TMP_SECRETS}" \
   REMOTE_TMP_CERT="${REMOTE_TMP_CERT}" \
+  DJANGO_ALLOWED_HOSTS="${DJANGO_ALLOWED_HOSTS}" \
   KEEP_RELEASES="${KEEP_RELEASES}" \
   'bash -s' <<'REMOTE'
 set -euo pipefail
@@ -77,9 +89,9 @@ rm -f "${REMOTE_TMP_ENV}" "${REMOTE_TMP_SECRETS}" "${REMOTE_TMP_CERT}"
 sed -i 's|^DB_SSLROOTCERT=.*|DB_SSLROOTCERT=/etc/ssl/certs/battlestats-do-ca-certificate.crt|' /etc/battlestats-server.env
 
 if grep -q '^DJANGO_ALLOWED_HOSTS=' /etc/battlestats-server.env; then
-  sed -i 's|^DJANGO_ALLOWED_HOSTS=.*|DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,45.55.66.19,battlestats.io|' /etc/battlestats-server.env
+  sed -i "s|^DJANGO_ALLOWED_HOSTS=.*|DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}|" /etc/battlestats-server.env
 else
-  echo 'DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,45.55.66.19,battlestats.io' >> /etc/battlestats-server.env
+  echo "DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}" >> /etc/battlestats-server.env
 fi
 
 if grep -q '^DJANGO_DEBUG=' /etc/battlestats-server.env; then

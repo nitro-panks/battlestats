@@ -2,7 +2,7 @@
 
 _Captured: 2026-03-19_
 
-_Status: implementation tranche_
+_Status: historical tranche spec; superseded by Cache-First Lazy Refresh Policy_
 
 ## Goal
 
@@ -36,12 +36,14 @@ For already-known players and clans:
 - serve whatever cached model-backed or response-cached data already exists
 - if the cached data is stale or incomplete, enqueue background refresh work
 - avoid blocking the response on WG upstream calls or expensive cache rebuilds
+- do not recompute any derived payload that already exists until newer source data has been written locally
 
 More concretely:
 
 - repeat reads should prefer stale data over a slow fresh recompute
 - missing derived chart JSON should return `[]` or current partial data and trigger async refresh
 - hot landing entities should be proactively warmed so their detail pages are already primed
+- TTL expiry alone is not a valid recompute trigger for already-cached derived data
 
 ## Non-Goals
 
@@ -82,7 +84,7 @@ Required change:
 
 - if battle data is missing, queue battle refresh and return current derived JSON or `[]`
 - if battle data is present but derived JSON is missing, queue the derived refresh and return `[]`
-- if battle data is stale, queue battle refresh and let that battle refresh repopulate the dependent chart caches
+- if battle data is stale, queue battle refresh and let that battle refresh repopulate the dependent chart caches only if newer battle data is actually written
 
 ### Activity chart
 
@@ -95,6 +97,7 @@ Required change:
 - return cached activity rows when present
 - if the activity cache is missing or stale, queue snapshot refresh and let snapshot refresh rebuild activity downstream
 - return `[]` on cold activity cache instead of blocking
+- if no new snapshot rows are written, keep the existing activity payload and do not regenerate it
 
 ### Clan members endpoint
 
@@ -120,6 +123,7 @@ Required change:
 - if a cached plot exists, return it and queue stale/incomplete refreshes in the background
 - if no cached plot exists and clan data is incomplete, queue refresh tasks and return `[]`
 - only build and cache a plot synchronously when the local clan and roster data are already complete enough to do so without upstream work
+- do not rebuild an existing plot cache unless clan metadata or roster data actually changed
 
 ## Refresh Cascade Rules
 
@@ -129,6 +133,10 @@ To avoid racing derived refreshes against missing base data:
 - snapshot refresh should republish `activity_json`
 
 This lets read paths enqueue the base refresh task and rely on that task to repopulate dependent caches.
+
+Additional rule:
+
+- if the base refresh writes no new source data, dependent derived caches remain untouched
 
 ## Hot Entity Warming
 
@@ -174,4 +182,5 @@ This tranche is complete when all of the following are true:
 - missing derived player chart caches return quickly and refill asynchronously
 - clan roster and clan plot requests return quickly even when the local clan cache is incomplete
 - the hot entity warmer keeps the hottest detail surfaces primed in advance
+- already-cached derived payloads are not recomputed solely because of age, TTL expiry, or repeated reads
 - targeted tests cover the stale-while-revalidate behavior and pass

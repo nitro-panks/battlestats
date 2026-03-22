@@ -5,13 +5,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-HOST="${1:-45.55.66.19}"
+HOST="${1:-}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_ROOT="${APP_ROOT:-/opt/battlestats-client}"
 APP_USER="${APP_USER:-battlestats}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 RELEASE_ID="$(date +%Y%m%d%H%M%S)"
 REMOTE_RELEASE="${APP_ROOT}/releases/${RELEASE_ID}"
+
+if [[ -z "${HOST}" ]]; then
+  echo "Usage: $0 <droplet-ip-or-hostname>" >&2
+  exit 1
+fi
 
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \

@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface RankedSeasonsProps {
@@ -92,6 +91,8 @@ const formatSeasonStartDate = (startDate: string | null): string => {
 };
 
 const RANKED_FETCH_RETRY_DELAY_MS = 350;
+const RANKED_PENDING_RETRY_DELAY_MS = 1500;
+const RANKED_PENDING_RETRY_LIMIT = 5;
 
 const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
     window.setTimeout(resolve, timeoutMs);
@@ -101,34 +102,50 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
     const [seasons, setSeasons] = useState<RankedSeason[]>([]);
     const [isChartLoading, setIsChartLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [isPendingRefresh, setIsPendingRefresh] = useState(false);
     const [sortKey, setSortKey] = useState<SortKey>('season');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
     useEffect(() => {
         let isMounted = true;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let pendingAttempts = 0;
 
-        const fetchData = async () => {
-            setIsChartLoading(true);
-            setError(null);
+        const requestRankedData = async (): Promise<{ data: RankedSeason[]; pending: boolean } | null> => {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                try {
+                    const payload = await fetchSharedJson<RankedSeason[]>(`/api/fetch/ranked_data/${playerId}/`, {
+                        label: `Ranked data ${playerId}`,
+                        ttlMs: 0,
+                        cacheKey: `ranked-data:${playerId}:${pendingAttempts}:${attempt}`,
+                        responseHeaders: ['X-Ranked-Pending'],
+                    });
 
-            try {
-                let result: RankedSeason[] | null = null;
-
-                for (let attempt = 0; attempt < 2; attempt += 1) {
-                    try {
-                        const payload = await fetchSharedJson<RankedSeason[]>(`/api/fetch/ranked_data/${playerId}/`, {
-                            label: `Ranked data ${playerId}`,
-                            ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
-                        });
-                        result = payload.data;
-                        break;
-                    } catch {
-                        if (attempt === 0) {
-                            await delay(RANKED_FETCH_RETRY_DELAY_MS);
-                            continue;
-                        }
+                    return {
+                        data: payload.data,
+                        pending: payload.headers['X-Ranked-Pending'] === 'true',
+                    };
+                } catch {
+                    if (attempt === 0) {
+                        await delay(RANKED_FETCH_RETRY_DELAY_MS);
+                        continue;
                     }
                 }
+            }
+
+            return null;
+        };
+
+        const fetchData = async () => {
+            timeoutId = null;
+            setIsChartLoading(true);
+            if (pendingAttempts === 0) {
+                setError(null);
+                setIsPendingRefresh(false);
+            }
+
+            try {
+                const result = await requestRankedData();
 
                 if (!isMounted) {
                     return;
@@ -137,10 +154,20 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 if (result === null) {
                     setError('Unable to load ranked data right now.');
                     setSeasons([]);
+                    setIsPendingRefresh(false);
                     return;
                 }
 
-                setSeasons(result.slice().sort((left, right) => right.season_id - left.season_id));
+                setSeasons(result.data.slice().sort((left, right) => right.season_id - left.season_id));
+                setIsPendingRefresh(result.pending);
+
+                if (result.pending && pendingAttempts < RANKED_PENDING_RETRY_LIMIT) {
+                    pendingAttempts += 1;
+                    timeoutId = setTimeout(() => {
+                        void fetchData();
+                    }, RANKED_PENDING_RETRY_DELAY_MS);
+                    return;
+                }
             } catch {
                 if (!isMounted) {
                     return;
@@ -148,17 +175,21 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
 
                 setError('Unable to load ranked data right now.');
                 setSeasons([]);
+                setIsPendingRefresh(false);
             } finally {
-                if (isMounted) {
+                if (isMounted && !timeoutId) {
                     setIsChartLoading(false);
                 }
             }
         };
 
-        fetchData();
+        void fetchData();
 
         return () => {
             isMounted = false;
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
         };
     }, [playerId]);
 
@@ -208,7 +239,13 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 </p>
             ) : null}
 
-            {seasons.length === 0 && !shouldGrayOut && !error ? (
+            {isPendingRefresh && seasons.length === 0 && !error ? (
+                <p className="mb-3 rounded-md border border-[#c6dbef] bg-[#f0f7ff] px-3 py-2 text-sm text-[#2171b5]">
+                    Refreshing ranked seasons...
+                </p>
+            ) : null}
+
+            {seasons.length === 0 && !shouldGrayOut && !error && !isPendingRefresh ? (
                 <p className="text-sm text-gray-500">No ranked seasons found for this player.</p>
             ) : null}
 

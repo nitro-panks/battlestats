@@ -176,20 +176,20 @@ const installFetchMock = ({
     global.fetch = jest.fn((input: RequestInfo | URL) => {
         const url = input.toString();
 
-        if (url.startsWith('/api/landing/clans/')) {
+        if (url.startsWith('/api/landing/clans/') || url.startsWith('/api/landing/clans?')) {
             return Promise.resolve(buildJsonResponse(clans));
         }
 
-        if (url === '/api/landing/recent-clans/') {
+        if (url === '/api/landing/recent-clans/' || url === '/api/landing/recent-clans') {
             return Promise.resolve(buildJsonResponse(recentClans));
         }
 
-        if (url === '/api/landing/recent/') {
+        if (url === '/api/landing/recent/' || url === '/api/landing/recent') {
             return Promise.resolve(buildJsonResponse(recentPlayers));
         }
 
-        if (url.startsWith('/api/landing/players/')) {
-            const mode = new URL(url).searchParams.get('mode') || 'random';
+        if (url.startsWith('/api/landing/players/') || url.startsWith('/api/landing/players?')) {
+            const mode = new URL(url, 'http://localhost').searchParams.get('mode') || 'random';
             return Promise.resolve(buildJsonResponse(playersByMode[mode] ?? []));
         }
 
@@ -283,7 +283,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/players/?mode=sigma&limit=40',
+                ([url]) => url === '/api/landing/players/?mode=sigma&limit=40' || url === '/api/landing/players?mode=sigma&limit=40',
             )).toBe(true);
         });
 

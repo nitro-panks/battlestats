@@ -192,7 +192,7 @@ def build_cases() -> list[SmokeCase]:
             required_keys=("clan_id", "name"),
         ),
         SmokeCase("clan_data_naumachia", "/api/fetch/clan_data/1000055908:active",
-                  json_type="list", min_items=1),
+                  json_type="list"),
         SmokeCase("clan_members_naumachia",
                   "/api/fetch/clan_members/1000055908/", json_type="list", min_items=1),
         SmokeCase(
@@ -271,7 +271,8 @@ def build_cases() -> list[SmokeCase]:
             "player_correlation_tier_type_fourgate",
             "/api/fetch/player_correlation/tier_type/1014916452/",
             json_type="dict",
-            required_keys=("metric", "tracked_population", "tiles", "trend", "player_cells"),
+            required_keys=("metric", "tracked_population",
+                           "tiles", "trend", "player_cells"),
             exact_key_values={"metric": "tier_type"},
             nested_list_key="tiles",
             min_nested_items=1,

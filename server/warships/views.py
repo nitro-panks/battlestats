@@ -26,11 +26,10 @@ from warships.data import clan_detail_needs_refresh, clan_members_missing_or_inc
     fetch_player_explorer_page, fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, player_battle_data_needs_refresh, player_detail_needs_refresh, \
     fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, _get_published_efficiency_rank_payload, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
     is_sleepy_player, get_highest_ranked_league_name
-from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
 from warships.agentic.dashboard import get_agentic_trace_dashboard
-from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
-from .tasks import update_clan_battle_summary_task
+from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
 
@@ -298,13 +297,17 @@ def randoms_data(request, player_id: str) -> Response:
     fetch_all = request.query_params.get('all', '').lower() in ('true', '1')
 
     if fetch_all:
-        # Return all ships from battles_json (sorted by pvp_battles desc)
-        # while still triggering any staleness refresh via fetch_randoms_data
-        fetch_randoms_data(player_id)
+        # Prefer the full source cache, but fall back to derived randoms rows so
+        # the player page does not blank out while source data is repopulating.
+        cached_randoms_rows = fetch_randoms_data(player_id)
         player = Player.objects.filter(player_id=player_id).first()
-        if not player or not player.battles_json:
-            return Response([])
-        data = _extract_randoms_rows(player.battles_json, limit=None)
+        if not player:
+            data = []
+        elif player.battles_json:
+            data = _extract_randoms_rows(player.battles_json, limit=None)
+        else:
+            data = _extract_randoms_rows(
+                player.randoms_json, limit=None) or cached_randoms_rows
     else:
         data = fetch_randoms_data(player_id)
 
@@ -326,6 +329,8 @@ def ranked_data(request, player_id: str) -> Response:
     response = _validated_list_response(data, RankedDataSerializer)
 
     player = Player.objects.filter(player_id=player_id).first()
+    if not data and is_ranked_data_refresh_pending(player_id):
+        response["X-Ranked-Pending"] = "true"
     if player and player.ranked_updated_at:
         response["X-Ranked-Updated-At"] = player.ranked_updated_at.isoformat()
 
@@ -614,7 +619,10 @@ def clan_battle_seasons(request, clan_id: str) -> Response:
     data = fetch_clan_battle_seasons(clan_id)
     response = _validated_list_response(
         data, ClanBattleSeasonSummarySerializer)
-    if not had_cached_summary and not data:
+    if not data and (
+        not had_cached_summary or is_clan_battle_summary_refresh_pending(
+            clan_id)
+    ):
         response["X-Clan-Battles-Pending"] = "true"
 
     return response
@@ -644,11 +652,7 @@ def landing_clans(request) -> Response:
 
     limit = normalize_landing_player_limit(request.query_params.get('limit'))
     if mode == 'random':
-        payload, cache_metadata = get_random_landing_clan_queue_payload(
-            limit=limit,
-            pop=True,
-            schedule_refill=True,
-        )
+        payload, cache_metadata = get_landing_clans_payload_with_cache_metadata()
     else:
         payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata()
 
@@ -660,14 +664,6 @@ def landing_clans(request) -> Response:
         cache_metadata['cached_at'])
     response['X-Landing-Clans-Cache-Expires-At'] = str(
         cache_metadata['expires_at'])
-    if mode == 'random':
-        response['X-Landing-Queue-Type'] = 'clans-random'
-        response['X-Landing-Queue-Served-Count'] = str(
-            cache_metadata.get('served_count', 0))
-        response['X-Landing-Queue-Remaining'] = str(
-            cache_metadata.get('queue_remaining', 0))
-        response['X-Landing-Queue-Refill-Scheduled'] = 'true' if cache_metadata.get(
-            'refill_scheduled') else 'false'
     return response
 
 
@@ -685,17 +681,10 @@ def landing_players(request) -> Response:
     except ValueError:
         return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
     limit = normalize_landing_player_limit(request.query_params.get('limit'))
-    if mode == 'random':
-        payload, cache_metadata = get_random_landing_player_queue_payload(
-            limit=limit,
-            pop=True,
-            schedule_refill=True,
-        )
-    else:
-        payload, cache_metadata = get_landing_players_payload_with_cache_metadata(
-            mode=mode,
-            limit=limit,
-        )
+    payload, cache_metadata = get_landing_players_payload_with_cache_metadata(
+        mode=mode,
+        limit=limit,
+    )
     response = Response(payload)
     response['X-Landing-Players-Cache-Mode'] = mode
     response['X-Landing-Players-Cache-TTL-Seconds'] = str(
@@ -704,14 +693,6 @@ def landing_players(request) -> Response:
         cache_metadata['cached_at'])
     response['X-Landing-Players-Cache-Expires-At'] = str(
         cache_metadata['expires_at'])
-    if mode == 'random':
-        response['X-Landing-Queue-Type'] = 'players-random'
-        response['X-Landing-Queue-Served-Count'] = str(
-            cache_metadata.get('served_count', 0))
-        response['X-Landing-Queue-Remaining'] = str(
-            cache_metadata.get('queue_remaining', 0))
-        response['X-Landing-Queue-Refill-Scheduled'] = 'true' if cache_metadata.get(
-            'refill_scheduled') else 'false'
     return response
 
 

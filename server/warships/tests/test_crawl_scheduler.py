@@ -204,16 +204,15 @@ class ClanCrawlSchedulerTests(TestCase):
         mock_refresh.assert_any_call("555")
 
     def test_warm_landing_page_content_task_invalidates_then_warms(self):
-        with patch("warships.landing.invalidate_landing_recent_player_cache") as mock_invalidate_recent_players, patch("warships.tasks.cache.delete") as mock_cache_delete, patch("warships.landing.warm_landing_page_content") as mock_warm:
+        with patch("warships.tasks.cache.delete") as mock_cache_delete, patch("warships.landing.warm_landing_page_content") as mock_warm:
             mock_warm.return_value = {
                 "status": "completed", "warmed": {"players_sigma": 40}}
 
             result = warm_landing_page_content_task.run(include_recent=True)
 
         self.assertEqual(result["status"], "completed")
-        mock_invalidate_recent_players.assert_called_once_with()
-        mock_cache_delete.assert_any_call(LANDING_RECENT_CLANS_CACHE_KEY)
-        mock_warm.assert_called_once_with(force_refresh=True)
+        mock_warm.assert_called_once_with(
+            force_refresh=True, include_recent=True)
         self.assertIsNone(cache.get(LANDING_PAGE_WARM_LOCK_KEY))
 
     def test_warm_landing_page_content_task_skips_when_lock_exists(self):

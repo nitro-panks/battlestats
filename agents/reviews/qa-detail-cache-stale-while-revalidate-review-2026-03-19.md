@@ -4,7 +4,7 @@ _Reviewed: 2026-03-19_
 
 ## Scope Reviewed
 
-- [agents/runbooks/spec-detail-cache-stale-while-revalidate-2026-03-19.md](/home/august/code/archive/battlestats/agents/runbooks/spec-detail-cache-stale-while-revalidate-2026-03-19.md)
+- [agents/runbooks/archive/spec-detail-cache-stale-while-revalidate-2026-03-19.md](/home/august/code/archive/battlestats/agents/runbooks/archive/spec-detail-cache-stale-while-revalidate-2026-03-19.md)
 
 ## QA Verdict
 

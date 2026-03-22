@@ -2,12 +2,17 @@
 
 set -euo pipefail
 
-HOST="${1:-45.55.66.19}"
+HOST="${1:-}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_ROOT="${APP_ROOT:-/opt/battlestats-client}"
 APP_USER="${APP_USER:-battlestats}"
 NGINX_SERVER_NAME="${NGINX_SERVER_NAME:-_}"
 API_ORIGIN="${API_ORIGIN:-http://127.0.0.1:8888}"
+
+if [[ -z "${HOST}" ]]; then
+  echo "Usage: $0 <droplet-ip-or-hostname>" >&2
+  exit 1
+fi
 
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \

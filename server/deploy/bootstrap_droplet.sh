@@ -2,14 +2,26 @@
 
 set -euo pipefail
 
-HOST="${1:-45.55.66.19}"
+HOST="${1:-}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"
 APP_USER="${APP_USER:-battlestats}"
+EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:-}"
+DJANGO_ALLOWED_HOSTS="localhost,127.0.0.1,${HOST}"
+
+if [[ -n "${EXTRA_ALLOWED_HOSTS}" ]]; then
+  DJANGO_ALLOWED_HOSTS="${DJANGO_ALLOWED_HOSTS},${EXTRA_ALLOWED_HOSTS}"
+fi
+
+if [[ -z "${HOST}" ]]; then
+  echo "Usage: $0 <droplet-ip-or-hostname>" >&2
+  exit 1
+fi
 
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \
   APP_USER="${APP_USER}" \
+  DJANGO_ALLOWED_HOSTS="${DJANGO_ALLOWED_HOSTS}" \
   'bash -s' <<'REMOTE'
 set -euo pipefail
 
@@ -39,7 +51,7 @@ DB_HOST=db-postgresql-nyc3-11231-do-user-8591796-0.m.db.ondigitalocean.com
 DB_PORT=25060
 DB_SSLMODE=require
 DB_SSLROOTCERT=/etc/ssl/certs/battlestats-do-ca-certificate.crt
-DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,45.55.66.19,battlestats.io
+DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
 DJANGO_DEBUG=False
 DJANGO_LOGLEVEL=INFO
 REDIS_URL=redis://127.0.0.1:6379/0

@@ -89,11 +89,11 @@ npm test -- --runInBand app/components/__tests__/PlayerDetail.test.tsx
 For a simple DigitalOcean droplet deployment without changing local development, use the versioned scripts in `client/deploy/`:
 
 ```bash
-./client/deploy/bootstrap_droplet.sh 45.55.66.19
-./client/deploy/deploy_to_droplet.sh 45.55.66.19
+NGINX_SERVER_NAME="tamezz.com www.tamezz.com" ./client/deploy/bootstrap_droplet.sh YOUR_DROPLET_IP
+./client/deploy/deploy_to_droplet.sh YOUR_DROPLET_IP
 ```
 
-The bootstrap sets up Node.js 20, Nginx, a systemd service, and `/etc/battlestats-client.env` on the droplet. The deploy script rsyncs the client source, builds on the droplet, and restarts the service.
+The bootstrap sets up Node.js 20, Nginx, a systemd service, and `/etc/battlestats-client.env` on the droplet. The deploy script rsyncs the client source, builds on the droplet, and restarts the service. For a custom domain, point the apex and `www` DNS records at the droplet IP and include both hostnames in `NGINX_SERVER_NAME`.
 
 See `agents/runbooks/runbook-client-droplet-deploy.md` for the operator runbook.
 

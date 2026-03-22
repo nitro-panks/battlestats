@@ -12,6 +12,8 @@ import type { LandingClan, PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import HiddenAccountIcon from './HiddenAccountIcon';
+import useIntervalRefresh from './useIntervalRefresh';
+import useClanHydrationPoll from './useClanHydrationPoll';
 
 interface LandingPlayer {
     name: string;
@@ -265,7 +267,6 @@ const PlayerSearch: React.FC = () => {
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
     const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('random');
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
-    const clanHydrationAttemptsRef = useRef<Record<string, number>>({});
     const lastSubmittedSearchRef = useRef<string>('');
 
     const fetchLandingClans = useCallback(async (mode: LandingClanMode) => {
@@ -314,20 +315,6 @@ const PlayerSearch: React.FC = () => {
         }
     }, []);
 
-    const handleBack = useCallback(() => {
-        setPlayerData(null);
-        setError('');
-        setIsLoadingPlayer(false);
-        clanHydrationAttemptsRef.current = {};
-        fetchLandingData();
-    }, [fetchLandingData]);
-
-    useEffect(() => {
-        const onReset = () => handleBack();
-        window.addEventListener('resetApp', onReset);
-        return () => window.removeEventListener('resetApp', onReset);
-    }, [handleBack]);
-
     useEffect(() => {
         fetchLandingData();
     }, [fetchLandingData]);
@@ -343,21 +330,13 @@ const PlayerSearch: React.FC = () => {
         void fetchLandingPlayers(playerMode);
     }, [fetchLandingPlayers, playerMode]);
 
-    useEffect(() => {
-        const interval = window.setInterval(() => {
-            void fetchLandingClans(clanMode);
-        }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
+    useIntervalRefresh(() => {
+        void fetchLandingClans(clanMode);
+    }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
-        return () => window.clearInterval(interval);
-    }, [clanMode, fetchLandingClans]);
-
-    useEffect(() => {
-        const interval = window.setInterval(() => {
-            void fetchLandingPlayers(playerMode);
-        }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
-
-        return () => window.clearInterval(interval);
-    }, [fetchLandingPlayers, playerMode]);
+    useIntervalRefresh(() => {
+        void fetchLandingPlayers(playerMode);
+    }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
         const { data } = await fetchSharedJson<PlayerData>(
@@ -458,53 +437,27 @@ const PlayerSearch: React.FC = () => {
         return () => window.removeEventListener('navSearch', onNavSearch as EventListener);
     }, [executePlayerSearch]);
 
+    const { resetAttempts: resetClanHydrationAttempts } = useClanHydrationPoll({
+        playerData,
+        fetchPlayerByName,
+        setPlayerData,
+        pollLimit: CLAN_HYDRATION_POLL_LIMIT,
+        intervalMs: CLAN_HYDRATION_POLL_INTERVAL_MS,
+    });
+
+    const handleBack = useCallback(() => {
+        setPlayerData(null);
+        setError('');
+        setIsLoadingPlayer(false);
+        resetClanHydrationAttempts();
+        fetchLandingData();
+    }, [fetchLandingData, resetClanHydrationAttempts]);
+
     useEffect(() => {
-        if (!playerData?.name) {
-            return;
-        }
-
-        // Poll only when clan_id is present but clan_name is still missing
-        // (clan record being hydrated in background). Skip for clanless players.
-        const needsHydration = playerData.clan_id && !playerData.clan_name;
-        if (!needsHydration) {
-            return;
-        }
-
-        const playerName = playerData.name;
-        const attemptsUsed = clanHydrationAttemptsRef.current[playerName] || 0;
-        if (attemptsUsed >= CLAN_HYDRATION_POLL_LIMIT) {
-            return;
-        }
-
-        const interval = setInterval(async () => {
-            const currentAttempts = clanHydrationAttemptsRef.current[playerName] || 0;
-            if (currentAttempts >= CLAN_HYDRATION_POLL_LIMIT) {
-                clearInterval(interval);
-                return;
-            }
-
-            clanHydrationAttemptsRef.current[playerName] = currentAttempts + 1;
-
-            try {
-                const refreshed = await fetchPlayerByName(playerName);
-                if (!refreshed) {
-                    return;
-                }
-
-                setPlayerData(refreshed);
-
-                if (refreshed.clan_id && refreshed.clan_name) {
-                    clearInterval(interval);
-                }
-            } catch (err) {
-                if ((clanHydrationAttemptsRef.current[playerName] || 0) >= CLAN_HYDRATION_POLL_LIMIT) {
-                    clearInterval(interval);
-                }
-            }
-        }, CLAN_HYDRATION_POLL_INTERVAL_MS);
-
-        return () => clearInterval(interval);
-    }, [playerData?.name, playerData?.clan_id, playerData?.clan_name]);
+        const onReset = () => handleBack();
+        window.addEventListener('resetApp', onReset);
+        return () => window.removeEventListener('resetApp', onReset);
+    }, [handleBack]);
 
     return (
         <div className="p-4">

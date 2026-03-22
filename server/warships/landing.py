@@ -16,9 +16,9 @@ from warships.models import Clan, Player
 logger = logging.getLogger(__name__)
 
 
-LANDING_CACHE_TTL = 60
-LANDING_CLAN_CACHE_TTL = 60 * 60
-LANDING_PLAYER_CACHE_TTL = 60 * 60
+LANDING_CACHE_TTL = 60 * 60 * 12
+LANDING_CLAN_CACHE_TTL = 60 * 60 * 12
+LANDING_PLAYER_CACHE_TTL = 60 * 60 * 12
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v4'
 LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v4:meta'
 LANDING_CLANS_BEST_CACHE_KEY = 'landing:clans:best:v1'
@@ -26,6 +26,10 @@ LANDING_CLANS_BEST_CACHE_METADATA_KEY = 'landing:clans:best:v1:meta'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
 LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v6'
 LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v12:namespace'
+LANDING_CLANS_DIRTY_KEY = 'landing:clans:dirty:v1'
+LANDING_PLAYERS_DIRTY_KEY = 'landing:players:dirty:v1'
+LANDING_RECENT_CLANS_DIRTY_KEY = 'landing:recent_clans:dirty:v1'
+LANDING_RECENT_PLAYERS_DIRTY_KEY = 'landing:recent_players:dirty:v1'
 LANDING_CLAN_FEATURED_COUNT = 40
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_CLAN_BEST_MIN_ACTIVE_SHARE = 0.30
@@ -185,7 +189,7 @@ def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COU
         if (row.get('total_battles') or 0) >= min_total_battles and row.get('clan_wr') is not None
     ]
     if not eligible:
-        return rows
+        return rows[:sample_size]
 
     featured = random.sample(eligible, k=min(sample_size, len(eligible)))
     featured.sort(key=lambda row: (
@@ -194,9 +198,7 @@ def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COU
         row.get('clan_id') or 0,
     ))
 
-    featured_ids = {row.get('clan_id') for row in featured}
-    remainder = [row for row in rows if row.get('clan_id') not in featured_ids]
-    return featured + remainder
+    return featured
 
 
 def _get_landing_players_cache_namespace() -> int:
@@ -266,6 +268,23 @@ def _normalize_landing_player_cache_metadata(metadata: dict | None, ttl_seconds:
     return _build_landing_player_cache_metadata(ttl_seconds)
 
 
+def _mark_cache_family_dirty(*dirty_keys: str) -> None:
+    dirty_at = timezone.now().isoformat()
+    for dirty_key in dirty_keys:
+        cache.set(dirty_key, dirty_at, timeout=None)
+
+
+def _clear_cache_family_dirty(*dirty_keys: str) -> None:
+    if dirty_keys:
+        cache.delete_many(list(dirty_keys))
+
+
+def _queue_landing_republish() -> None:
+    from warships.tasks import queue_landing_page_warm
+
+    queue_landing_page_warm()
+
+
 def landing_clan_cache_metadata_key() -> str:
     return LANDING_CLANS_CACHE_METADATA_KEY
 
@@ -314,25 +333,24 @@ def normalize_landing_player_limit(requested_limit: int | None) -> int:
 
 
 def invalidate_landing_clan_caches() -> None:
-    cache.delete_many(
-        [
-            LANDING_CLANS_CACHE_KEY,
-            LANDING_CLANS_CACHE_METADATA_KEY,
-            LANDING_CLANS_BEST_CACHE_KEY,
-            LANDING_CLANS_BEST_CACHE_METADATA_KEY,
-            LANDING_RECENT_CLANS_CACHE_KEY,
-            LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY,
-        ])
+    _mark_cache_family_dirty(
+        LANDING_CLANS_DIRTY_KEY,
+        LANDING_RECENT_CLANS_DIRTY_KEY,
+    )
+    _queue_landing_republish()
 
 
 def invalidate_landing_recent_player_cache() -> None:
-    cache.delete(LANDING_RECENT_PLAYERS_CACHE_KEY)
+    _mark_cache_family_dirty(LANDING_RECENT_PLAYERS_DIRTY_KEY)
+    _queue_landing_republish()
 
 
 def invalidate_landing_player_caches(include_recent: bool = False) -> None:
-    _bump_landing_players_cache_namespace()
+    dirty_keys = [LANDING_PLAYERS_DIRTY_KEY]
     if include_recent:
-        invalidate_landing_recent_player_cache()
+        dirty_keys.append(LANDING_RECENT_PLAYERS_DIRTY_KEY)
+    _mark_cache_family_dirty(*dirty_keys)
+    _queue_landing_republish()
 
 
 def _normalize_cached_id_list(raw_value) -> list[int]:
@@ -1057,8 +1075,13 @@ def _build_recent_clans() -> list[dict]:
     )
 
 
-def get_landing_recent_clans_payload() -> list[dict]:
-    return cache.get_or_set(LANDING_RECENT_CLANS_CACHE_KEY, _build_recent_clans, LANDING_CACHE_TTL)
+def get_landing_recent_clans_payload(force_refresh: bool = False) -> list[dict]:
+    payload = None if force_refresh else cache.get(
+        LANDING_RECENT_CLANS_CACHE_KEY)
+    if payload is None:
+        payload = _build_recent_clans()
+        cache.set(LANDING_RECENT_CLANS_CACHE_KEY, payload, LANDING_CACHE_TTL)
+    return payload
 
 
 def _build_random_landing_players(limit: int) -> list[dict]:
@@ -1207,6 +1230,10 @@ def _build_sigma_landing_players(limit: int) -> list[dict]:
     rows = []
     for player in players:
         explorer_summary = getattr(player, 'explorer_summary', None)
+        published_efficiency = _get_published_efficiency_rank_payload(player)
+        if published_efficiency.get('efficiency_rank_percentile') is None:
+            continue
+
         rows.append({
             'name': player.name,
             'pvp_ratio': player.pvp_ratio,
@@ -1224,7 +1251,7 @@ def _build_sigma_landing_players(limit: int) -> list[dict]:
                         'clan_battle_seasons_participated', None),
             ),
             'clan_battle_win_rate': getattr(explorer_summary, 'clan_battle_overall_win_rate', None),
-            **_get_published_efficiency_rank_payload(player),
+            **published_efficiency,
         })
 
     return rows
@@ -1312,29 +1339,37 @@ def _build_recent_players() -> list[dict]:
     return rows
 
 
-def get_landing_recent_players_payload() -> list[dict]:
-    return cache.get_or_set(LANDING_RECENT_PLAYERS_CACHE_KEY, _build_recent_players, LANDING_CACHE_TTL)
+def get_landing_recent_players_payload(force_refresh: bool = False) -> list[dict]:
+    payload = None if force_refresh else cache.get(
+        LANDING_RECENT_PLAYERS_CACHE_KEY)
+    if payload is None:
+        payload = _build_recent_players()
+        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY, payload, LANDING_CACHE_TTL)
+    return payload
 
 
-def warm_landing_page_content(force_refresh: bool = False) -> dict:
-    random_players_payload, _ = get_random_landing_player_queue_payload(
+def warm_landing_page_content(force_refresh: bool = False, include_recent: bool = True) -> dict:
+    random_players_payload = get_landing_players_payload(
+        'random',
         LANDING_PLAYER_LIMIT,
-        pop=False,
-        schedule_refill=True,
+        force_refresh=force_refresh,
     )
-    random_clans_payload, _ = get_random_landing_clan_queue_payload(
-        LANDING_CLAN_FEATURED_COUNT,
-        pop=False,
-        schedule_refill=True,
-        warm_preview=True,
+    random_clans_payload = get_landing_clans_payload(
+        force_refresh=force_refresh,
     )
     warmed = {
         'clans': len(random_clans_payload),
         'clans_best': len(get_landing_best_clans_payload(force_refresh=force_refresh)),
-        'recent_clans': len(get_landing_recent_clans_payload()),
+        'recent_clans': len(get_landing_recent_clans_payload(force_refresh=force_refresh if include_recent else False)),
         'players_random': len(random_players_payload),
         'players_best': len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
         'players_sigma': len(get_landing_players_payload('sigma', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
-        'recent_players': len(get_landing_recent_players_payload()),
+        'recent_players': len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False)),
     }
+    _clear_cache_family_dirty(
+        LANDING_CLANS_DIRTY_KEY,
+        LANDING_PLAYERS_DIRTY_KEY,
+        LANDING_RECENT_CLANS_DIRTY_KEY,
+        LANDING_RECENT_PLAYERS_DIRTY_KEY,
+    )
     return {'status': 'completed', 'warmed': warmed}

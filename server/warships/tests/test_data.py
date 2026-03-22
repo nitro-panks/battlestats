@@ -7,8 +7,8 @@ from django.utils import timezone
 
 from warships.clan_crawl import run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, fetch_player_summary, fetch_tier_data, fetch_type_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
-from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_clan_plot_data, fetch_randoms_data, fetch_player_summary, fetch_tier_data, fetch_type_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
+from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
 from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship
 
 
@@ -209,7 +209,8 @@ class RandomsDataRefreshTests(TestCase):
         rows = fetch_randoms_data(player.player_id)
 
         self.assertEqual(rows, [])
-        mock_update_battle_task.assert_called_once_with(player_id=player.player_id)
+        mock_update_battle_task.assert_called_once_with(
+            player_id=player.player_id)
 
     @patch("warships.tasks.queue_ranked_data_refresh")
     def test_fetch_ranked_data_returns_stale_cache_and_queues_refresh(self, mock_queue_ranked_data_refresh):
@@ -243,7 +244,40 @@ class DerivedChartCacheRefreshTests(TestCase):
         rows = fetch_tier_data(player.player_id)
 
         self.assertEqual(rows, [])
-        mock_update_battle_task.assert_called_once_with(player_id=player.player_id)
+        mock_update_battle_task.assert_called_once_with(
+            player_id=player.player_id)
+
+    @patch("warships.data.update_tiers_data_task.delay")
+    @patch("warships.data.update_battle_data_task.delay")
+    def test_fetch_tier_data_keeps_cached_rows_and_only_queues_battle_refresh(
+        self,
+        mock_update_battle_task,
+        mock_update_tiers_task,
+    ):
+        player = Player.objects.create(
+            name="WarmTierUser",
+            player_id=4491,
+            battles_json=[
+                {
+                    "ship_name": "Ship",
+                    "ship_type": "Cruiser",
+                    "ship_tier": 8,
+                    "pvp_battles": 20,
+                    "wins": 10,
+                }
+            ],
+            battles_updated_at=timezone.now() - timedelta(hours=1),
+            tiers_json=[{"ship_tier": 8, "pvp_battles": 20,
+                         "wins": 10, "win_ratio": 0.5}],
+            tiers_updated_at=timezone.now() - timedelta(days=2),
+        )
+
+        rows = fetch_tier_data(player.player_id)
+
+        self.assertEqual(rows, player.tiers_json)
+        mock_update_battle_task.assert_called_once_with(
+            player_id=player.player_id)
+        mock_update_tiers_task.assert_not_called()
 
     @patch("warships.data.update_type_data_task.delay")
     def test_fetch_type_data_returns_empty_and_queues_derived_refresh_when_battles_exist(
@@ -272,6 +306,75 @@ class DerivedChartCacheRefreshTests(TestCase):
         self.assertEqual(rows, [])
         mock_update_type_task.assert_called_once_with(player.player_id)
 
+    @patch("warships.data.update_type_data_task.delay")
+    @patch("warships.data.update_battle_data_task.delay")
+    def test_fetch_type_data_keeps_cached_rows_and_only_queues_battle_refresh(
+        self,
+        mock_update_battle_task,
+        mock_update_type_task,
+    ):
+        player = Player.objects.create(
+            name="WarmTypeUser",
+            player_id=4501,
+            battles_json=[
+                {
+                    "ship_name": "Test Ship",
+                    "ship_type": "Cruiser",
+                    "ship_tier": 8,
+                    "pvp_battles": 20,
+                    "win_ratio": 0.5,
+                    "wins": 10,
+                }
+            ],
+            battles_updated_at=timezone.now() - timedelta(hours=1),
+            type_json=[{"ship_type": "Cruiser",
+                        "pvp_battles": 20, "wins": 10, "win_ratio": 0.5}],
+            type_updated_at=timezone.now() - timedelta(days=2),
+        )
+
+        rows = fetch_type_data(player.player_id)
+
+        self.assertEqual(rows, player.type_json)
+        mock_update_battle_task.assert_called_once_with(
+            player_id=player.player_id)
+        mock_update_type_task.assert_not_called()
+
+    @patch("warships.data.update_clan_members_task.delay")
+    @patch("warships.data.update_clan_data_task.delay")
+    def test_fetch_clan_plot_data_keeps_cached_rows_and_queues_stale_refreshes(
+        self,
+        mock_update_clan_data_task,
+        mock_update_clan_members_task,
+    ):
+        clan = Clan.objects.create(
+            clan_id=4601,
+            name="PlotClan",
+            tag="PC",
+            members_count=2,
+            last_fetch=timezone.now() - timedelta(days=2),
+        )
+        Player.objects.create(
+            name="PlotMember",
+            player_id=46011,
+            clan=clan,
+            pvp_battles=250,
+            pvp_ratio=55.0,
+        )
+        cached_plot = [{
+            "player_name": "PlotMember",
+            "pvp_battles": 250,
+            "pvp_ratio": 55.0,
+            "pvp_avg_damage_dealt": 70000,
+            "actual_kdr": 1.3,
+        }]
+        cache.set("clan:plot:v1:4601:active", cached_plot, 900)
+
+        rows = fetch_clan_plot_data("4601", filter_type="active")
+
+        self.assertEqual(rows, cached_plot)
+        mock_update_clan_data_task.assert_called_once_with(clan_id="4601")
+        mock_update_clan_members_task.assert_called_once_with(clan_id="4601")
+
 
 class PlayerSummaryRefreshTests(TestCase):
     @patch("warships.tasks.queue_ranked_data_refresh")
@@ -299,9 +402,114 @@ class PlayerSummaryRefreshTests(TestCase):
         self.assertEqual(summary["player_id"], player.player_id)
         self.assertEqual(summary["name"], "SummaryBootstrapUser")
         self.assertIsNone(summary["kill_ratio"])
-        mock_update_battle_task.assert_called_once_with(player_id=player.player_id)
+        mock_update_battle_task.assert_called_once_with(
+            player_id=player.player_id)
         mock_update_snapshot_task.assert_called_once_with(player.player_id)
-        mock_queue_ranked_data_refresh.assert_called_once_with(player.player_id)
+        mock_queue_ranked_data_refresh.assert_called_once_with(
+            player.player_id)
+
+    @patch("warships.data.refresh_player_explorer_summary")
+    @patch("warships.tasks.queue_ranked_data_refresh")
+    @patch("warships.data.update_snapshot_data_task.delay")
+    @patch("warships.data.update_battle_data_task.delay")
+    def test_fetch_player_summary_keeps_cached_explorer_summary_without_recompute(
+        self,
+        mock_update_battle_task,
+        mock_update_snapshot_task,
+        mock_queue_ranked_data_refresh,
+        mock_refresh_player_explorer_summary,
+    ):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="CachedSummaryUser",
+            player_id=4511,
+            is_hidden=False,
+            pvp_battles=120,
+            pvp_ratio=52.0,
+            battles_json=[
+                {
+                    "ship_name": "Ship",
+                    "ship_type": "Cruiser",
+                    "ship_tier": 8,
+                    "pvp_battles": 30,
+                    "wins": 15,
+                }
+            ],
+            battles_updated_at=now - timedelta(hours=1),
+            activity_json=[{"date": "2026-03-01", "battles": 2, "wins": 1}],
+            activity_updated_at=now - timedelta(hours=1),
+            ranked_json=[
+                {"season_id": 1, "highest_league_name": "Silver", "total_battles": 8}],
+            ranked_updated_at=now - timedelta(hours=1),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=player,
+            battles_last_29_days=2,
+            wins_last_29_days=1,
+            active_days_last_29_days=1,
+            recent_win_rate=0.5,
+            kill_ratio=0.3,
+            player_score=1.5,
+            ships_played_total=1,
+            ship_type_spread=1,
+            tier_spread=1,
+            ranked_seasons_participated=1,
+            latest_ranked_battles=8,
+            highest_ranked_league_recent="Silver",
+        )
+
+        summary = fetch_player_summary(player.player_id)
+
+        self.assertEqual(summary["player_score"], 1.5)
+        mock_update_battle_task.assert_called_once_with(
+            player_id=player.player_id)
+        mock_update_snapshot_task.assert_called_once_with(player.player_id)
+        mock_queue_ranked_data_refresh.assert_called_once_with(
+            player.player_id)
+        mock_refresh_player_explorer_summary.assert_not_called()
+
+
+class RandomsCachePolicyTests(TestCase):
+    @patch("warships.data.update_randoms_data_task.delay")
+    @patch("warships.data.update_battle_data_task.delay")
+    def test_fetch_randoms_data_keeps_cached_rows_and_only_queues_battle_refresh(
+        self,
+        mock_update_battle_task,
+        mock_update_randoms_task,
+    ):
+        player = Player.objects.create(
+            name="WarmRandomsUser",
+            player_id=4471,
+            battles_json=[
+                {
+                    "ship_name": "Old Ship",
+                    "ship_type": "Destroyer",
+                    "ship_tier": 8,
+                    "pvp_battles": 10,
+                    "win_ratio": 0.5,
+                    "wins": 5,
+                }
+            ],
+            randoms_json=[
+                {
+                    "ship_name": "Old Ship",
+                    "ship_type": "Destroyer",
+                    "ship_tier": 8,
+                    "pvp_battles": 10,
+                    "win_ratio": 0.5,
+                    "wins": 5,
+                }
+            ],
+            battles_updated_at=timezone.now() - timedelta(hours=1),
+            randoms_updated_at=timezone.now() - timedelta(days=2),
+        )
+
+        rows = fetch_randoms_data(player.player_id)
+
+        self.assertEqual(rows[0]["ship_name"], "Old Ship")
+        mock_update_battle_task.assert_called_once_with(
+            player_id=player.player_id)
+        mock_update_randoms_task.assert_not_called()
 
     def test_update_randoms_data_uses_plain_python_sorting(self):
         player = Player.objects.create(
@@ -1234,8 +1442,12 @@ class PlayerDataHardeningTests(TestCase):
 
         update_player_data(player, force_refresh=True)
 
-        self.assertIsNone(cache.get(landing_player_cache_key("random", 40)))
-        self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
+        self.assertEqual(cache.get(landing_player_cache_key(
+            "random", 40)), [{"name": "stale"}])
+        self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
+                         {"name": "recent-stale"}])
+        self.assertIsNotNone(cache.get(LANDING_PLAYERS_DIRTY_KEY))
+        self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
 
     @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
     @patch("warships.data._fetch_clan_membership_for_player")
@@ -2223,5 +2435,9 @@ class PlayerExplorerSummaryTests(TestCase):
 
         update_clan_data(clan.clan_id)
 
-        self.assertIsNone(cache.get(LANDING_CLANS_CACHE_KEY))
-        self.assertIsNone(cache.get(LANDING_RECENT_CLANS_CACHE_KEY))
+        self.assertEqual(cache.get(LANDING_CLANS_CACHE_KEY),
+                         [{"name": "stale"}])
+        self.assertEqual(cache.get(LANDING_RECENT_CLANS_CACHE_KEY), [
+                         {"name": "recent-stale"}])
+        self.assertIsNotNone(cache.get(LANDING_CLANS_DIRTY_KEY))
+        self.assertIsNotNone(cache.get(LANDING_RECENT_CLANS_DIRTY_KEY))

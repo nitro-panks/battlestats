@@ -393,7 +393,7 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
     @patch("warships.data._get_clan_battle_seasons_metadata")
     def test_fetch_player_clan_battle_seasons_persists_durable_summary_and_invalidates_landing_caches(self, mock_meta, mock_player_stats):
         from warships.data import fetch_player_clan_battle_seasons
-        from warships.landing import LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key
+        from warships.landing import LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
 
         player = Player.objects.create(
             name="DurableClanBattlePlayer",
@@ -437,9 +437,13 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
             player.explorer_summary.clan_battle_overall_win_rate, 53.3)
         self.assertIsNotNone(
             player.explorer_summary.clan_battle_summary_updated_at)
-        self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
-        self.assertNotEqual(original_random_key,
-                            landing_player_cache_key('random', 40))
+        self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
+                         {'name': 'recent-stale'}])
+        self.assertEqual(cache.get(original_random_key), [{'name': 'stale'}])
+        self.assertEqual(original_random_key,
+                         landing_player_cache_key('random', 40))
+        self.assertIsNotNone(cache.get(LANDING_PLAYERS_DIRTY_KEY))
+        self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
 
 
 @override_settings(CACHES=LOCMEM_CACHES)
@@ -555,8 +559,8 @@ class ClanBattleSummaryCacheTests(TestCase):
         self.assertEqual(result, [])
         mock_delay.assert_called_once_with(clan_id="91")
 
-    @patch("warships.data.refresh_clan_battle_seasons_cache")
-    def test_fetch_clan_battle_seasons_refreshes_stale_empty_cache_for_populated_clan(self, mock_refresh):
+    @patch("warships.tasks.queue_clan_battle_summary_refresh")
+    def test_fetch_clan_battle_seasons_keeps_empty_cache_and_queues_refresh_for_populated_clan(self, mock_queue_refresh):
         from warships.data import fetch_clan_battle_seasons, _get_clan_battle_summary_cache_key
 
         clan = Clan.objects.create(
@@ -565,22 +569,7 @@ class ClanBattleSummaryCacheTests(TestCase):
         Player.objects.create(name="Two", player_id=9202, clan=clan)
         cache.set(_get_clan_battle_summary_cache_key("92"), [], 3600)
 
-        mock_refresh.return_value = [{
-            "season_id": 50,
-            "season_name": "Valhalla",
-            "season_label": "S50",
-            "start_date": "2026-01-01",
-            "end_date": "2026-02-01",
-            "ship_tier_min": 10,
-            "ship_tier_max": 10,
-            "participants": 2,
-            "roster_battles": 30,
-            "roster_wins": 15,
-            "roster_losses": 15,
-            "roster_win_rate": 50.0,
-        }]
-
         result = fetch_clan_battle_seasons("92")
 
-        self.assertEqual(result[0]["season_id"], 50)
-        mock_refresh.assert_called_once_with("92")
+        self.assertEqual(result, [])
+        mock_queue_refresh.assert_called_once_with("92")

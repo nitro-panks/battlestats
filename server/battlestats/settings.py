@@ -16,7 +16,7 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('true', '1', 't')
 
 ALLOWED_HOSTS = [
     host.strip() for host in os.getenv(
-        'DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost,battlestats.io,159.89.242.69,138.197.75.47'
+        'DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost'
     ).split(',') if host.strip()
 ]
 
