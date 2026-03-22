@@ -86,6 +86,10 @@ chmod 640 /etc/battlestats-server.secrets.env
 chmod 644 /etc/ssl/certs/battlestats-do-ca-certificate.crt
 rm -f "${REMOTE_TMP_ENV}" "${REMOTE_TMP_SECRETS}" "${REMOTE_TMP_CERT}"
 
+if [[ -s /etc/battlestats-server.env ]] && [[ -n "$(tail -c1 /etc/battlestats-server.env 2>/dev/null || true)" ]]; then
+  printf '\n' >> /etc/battlestats-server.env
+fi
+
 sed -i 's|^DB_SSLROOTCERT=.*|DB_SSLROOTCERT=/etc/ssl/certs/battlestats-do-ca-certificate.crt|' /etc/battlestats-server.env
 
 if grep -q '^DJANGO_ALLOWED_HOSTS=' /etc/battlestats-server.env; then
