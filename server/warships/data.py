@@ -2333,6 +2333,10 @@ def _extract_randoms_rows(battles_json: Any, limit: Optional[int] = 20) -> list[
     return rows if limit is None else rows[:limit]
 
 
+def _randoms_rows_need_battle_refresh(player: Player, rows: list[dict]) -> bool:
+    return not rows and int(player.pvp_battles or 0) > 0
+
+
 def _aggregate_battles_by_key(battles_json: Any, group_key: str) -> list[dict]:
     if not isinstance(battles_json, list):
         return []
@@ -2799,7 +2803,7 @@ def fetch_landing_activity_attrition() -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)                          :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -4034,10 +4038,15 @@ def update_type_data(player_id: str) -> list:
 def fetch_randoms_data(player_id: str) -> list:
     try:
         player = Player.objects.get(player_id=player_id)
+        cached_randoms_rows = _extract_randoms_rows(
+            player.randoms_json, limit=20)
+        extracted_battle_rows = _extract_randoms_rows(
+            player.battles_json, limit=20)
+
         if not player.battles_json:
             _dispatch_async_refresh(
                 update_battle_data_task, player_id=player_id)
-            return _extract_randoms_rows(player.randoms_json, limit=20)
+            return cached_randoms_rows
     except Player.DoesNotExist:
         return []
 
@@ -4048,16 +4057,39 @@ def fetch_randoms_data(player_id: str) -> list:
         )
 
         if not has_required_fields:
+            if extracted_battle_rows:
+                _dispatch_async_refresh(update_randoms_data_task, player_id)
+                return extracted_battle_rows
+
+            if _randoms_rows_need_battle_refresh(player, extracted_battle_rows):
+                _dispatch_async_refresh(
+                    update_battle_data_task, player_id=player_id)
             _dispatch_async_refresh(update_randoms_data_task, player_id)
-            return []
+            return cached_randoms_rows
 
         if player_battle_data_needs_refresh(player):
             _dispatch_async_refresh(
                 update_battle_data_task, player_id=player_id)
-        return _extract_randoms_rows(player.randoms_json, limit=20)
+        if cached_randoms_rows:
+            return cached_randoms_rows
 
+        if extracted_battle_rows:
+            _dispatch_async_refresh(update_randoms_data_task, player_id)
+            return extracted_battle_rows
+
+        if _randoms_rows_need_battle_refresh(player, extracted_battle_rows):
+            _dispatch_async_refresh(
+                update_battle_data_task, player_id=player_id)
+        return []
+
+    if extracted_battle_rows:
+        _dispatch_async_refresh(update_randoms_data_task, player_id)
+        return extracted_battle_rows
+
+    if _randoms_rows_need_battle_refresh(player, extracted_battle_rows):
+        _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
     _dispatch_async_refresh(update_randoms_data_task, player_id)
-    return []
+    return cached_randoms_rows
 
 
 def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:

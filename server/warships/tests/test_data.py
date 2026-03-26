@@ -214,6 +214,35 @@ class RandomsDataRefreshTests(TestCase):
         mock_update_battle_task.assert_called_once_with(
             player_id=player.player_id)
 
+    @patch("warships.data.update_randoms_data_task.delay")
+    def test_fetch_randoms_data_uses_extractable_battle_rows_when_randoms_cache_missing(
+        self,
+        mock_update_randoms_task,
+    ):
+        player = Player.objects.create(
+            name="BattleOnlyRandomsUser",
+            player_id=4472,
+            pvp_battles=31,
+            battles_json=[
+                {
+                    "ship_name": "Fallback Ship",
+                    "ship_chart_name": "Fallback Ship",
+                    "ship_type": "Cruiser",
+                    "ship_tier": 8,
+                    "pvp_battles": 31,
+                    "win_ratio": 0.58,
+                    "wins": 18,
+                }
+            ],
+            randoms_json=None,
+        )
+
+        rows = fetch_randoms_data(player.player_id)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["ship_name"], "Fallback Ship")
+        mock_update_randoms_task.assert_called_once_with(player.player_id)
+
     @patch("warships.tasks.queue_ranked_data_refresh")
     def test_fetch_ranked_data_returns_stale_cache_and_queues_refresh(self, mock_queue_ranked_data_refresh):
         player = Player.objects.create(

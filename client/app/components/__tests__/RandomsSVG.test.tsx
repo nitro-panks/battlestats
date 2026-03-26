@@ -72,7 +72,7 @@ describe('RandomsSVG tier filters', () => {
     });
 
     it('suppresses the empty-state text while the chart is still loading', async () => {
-        mockFetch.mockImplementation(() => new Promise(() => {}));
+        mockFetch.mockImplementation(() => new Promise(() => { }));
 
         render(<RandomsSVG playerId={102} isLoading />);
 

@@ -323,6 +323,9 @@ def randoms_data(request, player_id: str) -> Response:
             data = []
         elif player.battles_json:
             data = _extract_randoms_rows(player.battles_json, limit=None)
+            if not data:
+                data = _extract_randoms_rows(
+                    player.randoms_json, limit=None) or cached_randoms_rows
         else:
             data = _extract_randoms_rows(
                 player.randoms_json, limit=None) or cached_randoms_rows

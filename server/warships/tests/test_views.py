@@ -4072,6 +4072,51 @@ class ApiThrottleTests(TestCase):
         self.assertIn("X-Randoms-Updated-At", response)
         mock_fetch_randoms_data.assert_called_once_with("654")
 
+    @patch("warships.views.fetch_randoms_data")
+    def test_randoms_data_all_falls_back_when_battles_json_is_unextractable(self, mock_fetch_randoms_data):
+        now = timezone.now()
+        Player.objects.create(
+            name="BrokenBattleCache",
+            player_id=655,
+            pvp_battles=31,
+            battles_json=[
+                {
+                    "ship_id": 900001,
+                    "pvp": {"battles": 31, "wins": 18},
+                }
+            ],
+            randoms_json=[
+                {
+                    "ship_name": "Fallback Ship",
+                    "ship_chart_name": "Fallback Ship",
+                    "ship_type": "Cruiser",
+                    "ship_tier": 8,
+                    "pvp_battles": 31,
+                    "win_ratio": 0.58,
+                    "wins": 18,
+                }
+            ],
+            randoms_updated_at=now,
+        )
+        mock_fetch_randoms_data.return_value = [
+            {
+                "ship_name": "Fallback Ship",
+                "ship_chart_name": "Fallback Ship",
+                "ship_type": "Cruiser",
+                "ship_tier": 8,
+                "pvp_battles": 31,
+                "win_ratio": 0.58,
+                "wins": 18,
+            }
+        ]
+
+        response = self.client.get("/api/fetch/randoms_data/655/?all=true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["ship_name"], "Fallback Ship")
+        mock_fetch_randoms_data.assert_called_once_with("655")
+
     @patch("warships.views.is_clan_battle_summary_refresh_pending", return_value=True)
     @patch("warships.tasks.queue_clan_battle_summary_refresh")
     def test_clan_battle_seasons_flags_pending_refresh_on_empty_cache(self, mock_queue_refresh, _mock_pending):
