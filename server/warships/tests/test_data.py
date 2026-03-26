@@ -418,6 +418,48 @@ class DerivedChartCacheRefreshTests(TestCase):
         mock_update_clan_data_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
+    @patch("warships.data.update_clan_members_task.delay")
+    @patch("warships.data.update_clan_data_task.delay")
+    def test_fetch_clan_plot_data_serves_rows_while_stale_clan_refreshes_in_background(
+        self,
+        mock_update_clan_data_task,
+        mock_update_clan_members_task,
+    ):
+        clan = Clan.objects.create(
+            clan_id=4603,
+            name="StalePlotClan",
+            tag="SPC",
+            members_count=2,
+            last_fetch=timezone.now() - timedelta(hours=13),
+        )
+        Player.objects.create(
+            name="PlotMemberA",
+            player_id=46031,
+            clan=clan,
+            pvp_battles=250,
+            pvp_ratio=55.0,
+        )
+        Player.objects.create(
+            name="PlotMemberB",
+            player_id=46032,
+            clan=clan,
+            pvp_battles=180,
+            pvp_ratio=52.5,
+        )
+
+        rows = fetch_clan_plot_data("4603", filter_type="active")
+
+        self.assertEqual(
+            rows,
+            [
+                {"player_name": "PlotMemberA", "pvp_battles": 250, "pvp_ratio": 55.0},
+                {"player_name": "PlotMemberB", "pvp_battles": 180, "pvp_ratio": 52.5},
+            ],
+        )
+        self.assertEqual(cache.get("clan:plot:v1:4603:active"), rows)
+        mock_update_clan_data_task.assert_called_once_with(clan_id="4603")
+        mock_update_clan_members_task.assert_not_called()
+
 
 class PlayerSummaryRefreshTests(TestCase):
     @patch("warships.tasks.queue_ranked_data_refresh")

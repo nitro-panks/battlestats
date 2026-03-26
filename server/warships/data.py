@@ -4091,14 +4091,14 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
         if cached:
             return cached
 
-        if needs_clan_refresh or needs_member_refresh:
+        if needs_member_refresh:
             return []
 
         payload = build_plot_payload(members)
         cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
         return payload
 
-    if needs_clan_refresh or needs_member_refresh:
+    if needs_member_refresh:
         return []
 
     payload = build_plot_payload(members)

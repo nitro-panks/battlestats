@@ -296,6 +296,8 @@ the current browser smoke coverage includes:
 - the routed player detail page, proving that background insights warmup waits until the player payload resolves before issuing inactive-tab data requests
 - the routed clan detail page, proving that an empty clan-plot response with `X-Clan-Plot-Pending: true` stays in a loading state and retries instead of flashing an empty-chart state
 
+on the backend side, clan-plot reads are now effectively stale-while-revalidate once clan members are already present. if clan shell metadata is stale but the clan roster is complete enough to build a plot, `/api/fetch/clan_data/<clan_id>:active` should still return plot rows while queueing the background clan refresh, instead of returning `[]` with `X-Clan-Plot-Pending: true` forever.
+
 for the client-specific command matrix, smoke targets, and coverage notes, use `client/README.md` and `agents/runbooks/runbook-client-test-hardening.md` as the durable sources.
 
 the player-tab clan battle seasons and efficiency badge tables are tuned to show up to ten visible rows before scrolling, and the efficiency badge section uses a denser compact layout with inline badge totals in the header.
