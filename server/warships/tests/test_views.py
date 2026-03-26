@@ -2368,7 +2368,8 @@ class ApiContractTests(TestCase):
             source_first_party_views=7,
         )
 
-        response = self.client.get("/api/landing/players/?mode=popular&limit=40")
+        response = self.client.get(
+            "/api/landing/players/?mode=popular&limit=40")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -2442,7 +2443,8 @@ class ApiContractTests(TestCase):
                 source_first_party_views=views,
             )
 
-        response = self.client.get("/api/landing/players/?mode=popular&limit=40")
+        response = self.client.get(
+            "/api/landing/players/?mode=popular&limit=40")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -4105,6 +4107,41 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
         self.assertEqual(response["X-Clan-Plot-Pending"], "true")
+
+    def test_clan_data_serves_plot_rows_while_member_refresh_catches_up(self):
+        clan = Clan.objects.create(
+            clan_id=44,
+            name="RenderablePlotClan",
+            tag="RPC",
+            members_count=4,
+            last_fetch=timezone.now(),
+        )
+        Player.objects.create(
+            name="PlotMemberA",
+            player_id=4401,
+            clan=clan,
+            pvp_battles=250,
+            pvp_ratio=55.0,
+        )
+        Player.objects.create(
+            name="PlotMemberB",
+            player_id=4402,
+            clan=clan,
+            pvp_battles=180,
+            pvp_ratio=52.5,
+        )
+
+        response = self.client.get("/api/fetch/clan_data/44:active")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            [
+                {"player_name": "PlotMemberA", "pvp_battles": 250, "pvp_ratio": 55.0},
+                {"player_name": "PlotMemberB", "pvp_battles": 180, "pvp_ratio": 52.5},
+            ],
+        )
+        self.assertNotIn("X-Clan-Plot-Pending", response)
 
     @patch("warships.views.fetch_player_clan_battle_seasons")
     def test_player_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):

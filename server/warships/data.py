@@ -4096,21 +4096,29 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
     if needs_member_refresh:
         _dispatch_async_refresh(update_clan_members_task, clan_id=clan_id)
 
+    payload = build_plot_payload(members)
+
     if cached is not None:
         if cached:
             return cached
 
+        if payload:
+            cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
+            return payload
+
         if needs_member_refresh:
             return []
 
-        payload = build_plot_payload(members)
+        cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
+        return payload
+
+    if payload:
         cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
         return payload
 
     if needs_member_refresh:
         return []
 
-    payload = build_plot_payload(members)
     cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
     return payload
 

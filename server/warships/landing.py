@@ -1357,9 +1357,11 @@ def _build_popular_landing_players(limit: int) -> list[dict]:
     candidate_limit = max(limit * 4, limit)
 
     try:
-        rows = get_top_entities('player', '7d', 'views_deduped', candidate_limit)
+        rows = get_top_entities(
+            'player', '7d', 'views_deduped', candidate_limit)
     except Exception as error:
-        logger.warning('Falling back to empty popular landing players due to analytics error: %s', error)
+        logger.warning(
+            'Falling back to empty popular landing players due to analytics error: %s', error)
         return []
 
     ordered_player_ids: list[int] = []
