@@ -159,6 +159,32 @@ def player_battle_data_needs_refresh(
     return _is_stale_timestamp(player.battles_updated_at, stale_after)
 
 
+def repair_inconsistent_player_cache_timestamps(player: Player) -> bool:
+    update_fields: list[str] = []
+
+    if player.battles_json is None and player.battles_updated_at is not None:
+        player.battles_updated_at = None
+        update_fields.append('battles_updated_at')
+
+    if player.randoms_json is None and player.randoms_updated_at is not None:
+        player.randoms_updated_at = None
+        update_fields.append('randoms_updated_at')
+
+    if player.tiers_json is None and player.tiers_updated_at is not None:
+        player.tiers_updated_at = None
+        update_fields.append('tiers_updated_at')
+
+    if player.type_json is None and player.type_updated_at is not None:
+        player.type_updated_at = None
+        update_fields.append('type_updated_at')
+
+    if not update_fields:
+        return False
+
+    player.save(update_fields=update_fields)
+    return True
+
+
 def player_activity_data_needs_refresh(
     player: Player,
     stale_after: timedelta = PLAYER_ACTIVITY_DATA_STALE_AFTER,
@@ -3182,6 +3208,7 @@ def _fetch_player_tier_type_population_correlation() -> dict:
 
 def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None) -> dict:
     player = player or Player.objects.get(player_id=player_id)
+    repair_inconsistent_player_cache_timestamps(player)
     population_payload = _fetch_player_tier_type_population_correlation()
     if not player.battles_json:
         _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
@@ -4038,6 +4065,7 @@ def update_type_data(player_id: str) -> list:
 def fetch_randoms_data(player_id: str) -> list:
     try:
         player = Player.objects.get(player_id=player_id)
+        repair_inconsistent_player_cache_timestamps(player)
         cached_randoms_rows = _extract_randoms_rows(
             player.randoms_json, limit=20)
         extracted_battle_rows = _extract_randoms_rows(
@@ -4292,9 +4320,6 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
 
     # If the player is not hidden, map additional statistics
     if not player.is_hidden:
-        stats_updated_at = player_data.get("stats_updated_at")
-        player.battles_updated_at = datetime.fromtimestamp(
-            stats_updated_at, tz=timezone.utc) if stats_updated_at else None
         stats = player_data.get("statistics", {})
         player.total_battles = stats.get("battles", 0)
         pvp_stats = stats.get("pvp", {})
@@ -4322,6 +4347,12 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
             pvp_ratio=player.pvp_ratio,
             pvp_survival_rate=player.pvp_survival_rate,
         )
+
+        # battles_updated_at tracks the per-ship battle cache, not the account
+        # summary payload timestamp. Clear impossible legacy state when the cache
+        # is absent instead of stamping a misleading fresh marker here.
+        if player.battles_json is None:
+            player.battles_updated_at = None
     else:
         player.total_battles = 0
         player.pvp_battles = 0

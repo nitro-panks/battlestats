@@ -3335,6 +3335,32 @@ class ApiContractTests(TestCase):
             for point in payload["trend"]
         ))
 
+    def test_player_correlation_distribution_resolves_player_name(self):
+        cache.clear()
+
+        Player.objects.create(
+            name="TierTypeByName",
+            player_id=8841,
+            is_hidden=False,
+            pvp_battles=1400,
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 40, "wins": 24},
+            ],
+        )
+
+        response = self.client.get(
+            "/api/fetch/player_correlation/tier_type/TierTypeByName/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["player_cells"][0]["ship_type"], "Destroyer")
+
+    def test_player_correlation_distribution_unknown_player_name_returns_404(self):
+        response = self.client.get(
+            "/api/fetch/player_correlation/tier_type/NoSuchCaptain/")
+
+        self.assertEqual(response.status_code, 404)
+
     @patch("warships.data.update_battle_data_task.delay")
     def test_player_correlation_distribution_flags_pending_tier_type_refresh_when_player_battles_are_missing(self, mock_update_battle_data_task):
         cache.clear()
@@ -3908,6 +3934,49 @@ class ApiThrottleTests(TestCase):
 
     def test_randoms_data_for_missing_player_returns_empty_list(self):
         response = self.client.get("/api/fetch/randoms_data/999999999/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+
+    def test_randoms_data_resolves_player_name_without_server_error(self):
+        now = timezone.now()
+        Player.objects.create(
+            name="LookupByNameCaptain",
+            player_id=999111,
+            battles_json=[
+                {
+                    "ship_name": "Lookup Ship",
+                    "ship_chart_name": "Lookup Ship",
+                    "ship_type": "Destroyer",
+                    "ship_tier": 8,
+                    "pvp_battles": 25,
+                    "win_ratio": 0.52,
+                    "wins": 13,
+                }
+            ],
+            randoms_json=[
+                {
+                    "ship_name": "Lookup Ship",
+                    "ship_chart_name": "Lookup Ship",
+                    "ship_type": "Destroyer",
+                    "ship_tier": 8,
+                    "pvp_battles": 25,
+                    "win_ratio": 0.52,
+                    "wins": 13,
+                }
+            ],
+            battles_updated_at=now,
+            randoms_updated_at=now,
+        )
+
+        response = self.client.get(
+            "/api/fetch/randoms_data/LookupByNameCaptain/?all=true")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["ship_name"], "Lookup Ship")
+
+    def test_randoms_data_unknown_player_name_returns_empty_list(self):
+        response = self.client.get("/api/fetch/randoms_data/NoSuchCaptain/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])

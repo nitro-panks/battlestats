@@ -69,6 +69,24 @@ def _missing_player_lookup_cache_key(player_name: str) -> str:
     return f'player:lookup:missing:v1:{normalized_name}'
 
 
+def _resolve_existing_player(player_ref: str, *only_fields: str) -> Player | None:
+    normalized_ref = (player_ref or '').strip()
+    if not normalized_ref:
+        return None
+
+    queryset = Player.objects
+    requested_fields = tuple(dict.fromkeys(('player_id', *only_fields)))
+    if requested_fields:
+        queryset = queryset.only(*requested_fields)
+
+    if normalized_ref.isdigit():
+        return queryset.filter(player_id=int(normalized_ref)).first()
+
+    return queryset.alias(name_lower=Lower('name')).filter(
+        name_lower=normalized_ref.casefold(),
+    ).first()
+
+
 def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COUNT, min_total_battles: int = LANDING_CLAN_MIN_TOTAL_BATTLES):
     eligible = [
         row for row in rows
@@ -291,21 +309,24 @@ def _player_explorer_response_cache_key(params: dict[str, object]) -> str:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def tier_data(request, player_id: str) -> Response:
-    data = fetch_tier_data(player_id)
+    player = _resolve_existing_player(player_id)
+    data = fetch_tier_data(str(player.player_id)) if player else []
     return _validated_list_response(data, TierDataSerializer)
 
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def activity_data(request, player_id: str) -> Response:
-    data = fetch_activity_data(player_id)
+    player = _resolve_existing_player(player_id)
+    data = fetch_activity_data(str(player.player_id)) if player else []
     return _validated_list_response(data, ActivityDataSerializer)
 
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def type_data(request, player_id: str) -> Response:
-    data = fetch_type_data(player_id)
+    player = _resolve_existing_player(player_id)
+    data = fetch_type_data(str(player.player_id)) if player else []
     return _validated_list_response(data, TypeDataSerializer)
 
 
@@ -313,12 +334,20 @@ def type_data(request, player_id: str) -> Response:
 @throttle_classes(PUBLIC_API_THROTTLES)
 def randoms_data(request, player_id: str) -> Response:
     fetch_all = request.query_params.get('all', '').lower() in ('true', '1')
+    player = _resolve_existing_player(
+        player_id,
+        'battles_json',
+        'battles_updated_at',
+        'randoms_json',
+        'randoms_updated_at',
+    )
+    normalized_player_id = str(player.player_id) if player else None
 
     if fetch_all:
         # Prefer the full source cache, but fall back to derived randoms rows so
         # the player page does not blank out while source data is repopulating.
-        cached_randoms_rows = fetch_randoms_data(player_id)
-        player = Player.objects.filter(player_id=player_id).first()
+        cached_randoms_rows = fetch_randoms_data(
+            normalized_player_id) if normalized_player_id else []
         if not player:
             data = []
         elif player.battles_json:
@@ -330,11 +359,12 @@ def randoms_data(request, player_id: str) -> Response:
             data = _extract_randoms_rows(
                 player.randoms_json, limit=None) or cached_randoms_rows
     else:
-        data = fetch_randoms_data(player_id)
+        data = fetch_randoms_data(normalized_player_id) if normalized_player_id else []
 
     response = _validated_list_response(data, RandomsDataSerializer)
 
-    player = Player.objects.filter(player_id=player_id).first()
+    if normalized_player_id:
+        player = Player.objects.filter(player_id=int(normalized_player_id)).first()
     if player and player.randoms_updated_at:
         response["X-Randoms-Updated-At"] = player.randoms_updated_at.isoformat()
     if player and player.battles_updated_at:
@@ -346,11 +376,12 @@ def randoms_data(request, player_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def ranked_data(request, player_id: str) -> Response:
-    data = fetch_ranked_data(player_id)
+    player = _resolve_existing_player(player_id, 'ranked_updated_at')
+    normalized_player_id = str(player.player_id) if player else None
+    data = fetch_ranked_data(normalized_player_id) if normalized_player_id else []
     response = _validated_list_response(data, RankedDataSerializer)
 
-    player = Player.objects.filter(player_id=player_id).first()
-    if not data and is_ranked_data_refresh_pending(player_id):
+    if normalized_player_id and not data and is_ranked_data_refresh_pending(normalized_player_id):
         response["X-Ranked-Pending"] = "true"
     if player and player.ranked_updated_at:
         response["X-Ranked-Updated-At"] = player.ranked_updated_at.isoformat()
@@ -361,8 +392,12 @@ def ranked_data(request, player_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_summary(request, player_id: str) -> Response:
+    player = _resolve_existing_player(player_id)
+    if player is None:
+        return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
+
     try:
-        data = fetch_player_summary(player_id)
+        data = fetch_player_summary(str(player.player_id))
     except Player.DoesNotExist:
         return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -395,20 +430,24 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
         return _validated_single_response(data, CompactPlayerCorrelationDistributionSerializer)
 
     if metric == 'ranked_wr_battles' and player_id is not None:
+        player = _resolve_existing_player(player_id)
+        if player is None:
+            return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
+
         try:
-            data = fetch_player_ranked_wr_battles_correlation(player_id)
+            data = fetch_player_ranked_wr_battles_correlation(str(player.player_id))
         except Player.DoesNotExist:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         return _validated_single_response(data, RankedPlayerCorrelationDistributionSerializer)
 
     if metric == 'tier_type' and player_id is not None:
-        try:
-            player = Player.objects.only(
-                'player_id', 'battles_json').get(player_id=player_id)
-            data = fetch_player_tier_type_correlation(player_id, player=player)
-        except Player.DoesNotExist:
+        player = _resolve_existing_player(player_id, 'battles_json')
+        if player is None:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        data = fetch_player_tier_type_correlation(
+            str(player.player_id), player=player)
 
         response = _validated_single_response(
             data, PlayerTierTypeCorrelationSerializer)
@@ -669,15 +708,18 @@ def clan_battle_seasons(request, clan_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_clan_battle_seasons(request, player_id: str) -> Response:
-    player = Player.objects.select_related(
-        'clan').filter(player_id=player_id).first()
+    player = _resolve_existing_player(player_id, 'clan_id')
+    normalized_player_id = str(player.player_id) if player else player_id
+    if player is not None:
+        player = Player.objects.select_related('clan').filter(
+            player_id=player.player_id).first()
 
     try:
-        data = fetch_player_clan_battle_seasons(player_id)
+        data = fetch_player_clan_battle_seasons(normalized_player_id)
     except Exception:
         logger.exception(
             'Player clan battle seasons endpoint failed for player_id=%s player_name=%s clan_id=%s clan_name=%s',
-            player_id,
+            normalized_player_id,
             getattr(player, 'name', None),
             getattr(getattr(player, 'clan', None), 'clan_id', None),
             getattr(getattr(player, 'clan', None), 'name', None),
