@@ -111,6 +111,7 @@ const TAB_DATA_WARMUP_IDLE_TIMEOUT_MS = 1500;
 const PROFILE_FETCH_RETRY_DELAY_MS = 350;
 const PROFILE_PENDING_RETRY_DELAY_MS = 1500;
 const PROFILE_PENDING_RETRY_LIMIT = 5;
+const PROFILE_WARMING_RETRY_DELAY_MS = 5000;
 
 const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
     window.setTimeout(resolve, timeoutMs);
@@ -207,7 +208,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     }, [hasClan, isLoading, playerId]);
 
     useEffect(() => {
-        if (isLoading || activeTab !== 'profile' || profileChartPayload || profileChartState === 'error' || profileChartState === 'warming') {
+        if (isLoading || activeTab !== 'profile' || profileChartPayload) {
             return;
         }
 
@@ -243,9 +244,15 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
             return null;
         };
 
-        const loadProfileCharts = async () => {
+        const scheduleProfileReload = (delayMs: number, showLoadingState: boolean) => {
+            timeoutId = setTimeout(() => {
+                void loadProfileCharts(showLoadingState);
+            }, delayMs);
+        };
+
+        const loadProfileCharts = async (showLoadingState: boolean) => {
             timeoutId = null;
-            setProfileChartState('loading');
+            setProfileChartState(showLoadingState ? 'loading' : 'warming');
 
             const result = await requestProfileData();
             if (cancelled) {
@@ -260,14 +267,13 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
             if (result.pending && result.data.player_cells.length === 0) {
                 if (pendingAttempts < PROFILE_PENDING_RETRY_LIMIT) {
                     pendingAttempts += 1;
-                    timeoutId = setTimeout(() => {
-                        void loadProfileCharts();
-                    }, PROFILE_PENDING_RETRY_DELAY_MS);
+                    scheduleProfileReload(PROFILE_PENDING_RETRY_DELAY_MS, true);
                     return;
                 }
 
                 setProfileChartPayload(null);
                 setProfileChartState('warming');
+                scheduleProfileReload(PROFILE_WARMING_RETRY_DELAY_MS, false);
                 return;
             }
 
@@ -275,7 +281,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
             setProfileChartState('ready');
         };
 
-        void loadProfileCharts();
+        void loadProfileCharts(true);
 
         return () => {
             cancelled = true;
@@ -283,7 +289,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 clearTimeout(timeoutId);
             }
         };
-    }, [activeTab, isLoading, playerId, profileChartPayload, profileChartState]);
+    }, [activeTab, isLoading, playerId, profileChartPayload]);
 
     const derivedTypeRows = profileChartPayload ? deriveTypeRowsFromTierTypePayload(profileChartPayload) : [];
     const derivedTierRows = profileChartPayload ? deriveTierRowsFromTierTypePayload(profileChartPayload) : [];
