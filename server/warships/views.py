@@ -729,8 +729,8 @@ def landing_recent_clans(request) -> Response:
 def landing_players(request) -> Response:
     try:
         mode = normalize_landing_player_mode(request.query_params.get('mode'))
-    except ValueError:
-        return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
+    except ValueError as error:
+        return Response({'detail': str(error)}, status=status.HTTP_400_BAD_REQUEST)
     limit = normalize_landing_player_limit(request.query_params.get('limit'))
     payload, cache_metadata = get_landing_players_payload_with_cache_metadata(
         mode=mode,

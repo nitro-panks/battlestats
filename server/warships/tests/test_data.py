@@ -769,8 +769,10 @@ class AggregateChartDataTests(TestCase):
             payload = fetch_player_population_distribution('battles_played')
 
         self.assertEqual(payload['tracked_population'], 2)
-        self.assertTrue(any(row['bin_min'] == 100 and row['count'] == 1 for row in payload['bins']))
-        self.assertTrue(any(row['bin_min'] == 6400 and row['count'] == 1 for row in payload['bins']))
+        self.assertTrue(
+            any(row['bin_min'] == 100 and row['count'] == 1 for row in payload['bins']))
+        self.assertTrue(
+            any(row['bin_min'] == 6400 and row['count'] == 1 for row in payload['bins']))
         self.assertEqual(len(queries), 1)
 
 

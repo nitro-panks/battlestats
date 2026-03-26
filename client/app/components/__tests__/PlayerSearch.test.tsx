@@ -251,8 +251,8 @@ jest.mock('../ClanDetail', () => {
 });
 
 jest.mock('../LandingClanSVG', () => {
-    return function MockLandingClanSVG() {
-        return <div data-testid="landing-clan-svg" />;
+    return function MockLandingClanSVG(props: { clans?: Array<{ name?: string }> }) {
+        return <div data-testid="landing-clan-svg" data-clan-count={props.clans?.length ?? 0} />;
     };
 });
 
@@ -268,6 +268,9 @@ describe('PlayerSearch landing efficiency icon', () => {
     afterEach(() => {
         jest.useRealTimers();
     });
+
+    const getClanRecentButton = async () => (await screen.findAllByRole('button', { name: 'Recent' }))[0];
+    const getPlayerRecentButton = async () => (await screen.findAllByRole('button', { name: 'Recent' }))[1];
 
     it('renders the sigma only for Expert landing rows while preserving existing landing icons', async () => {
         render(<PlayerSearch />);
@@ -308,6 +311,26 @@ describe('PlayerSearch landing efficiency icon', () => {
         expect(within(sigmaLeaderRow).getByText('Σ')).toBeInTheDocument();
         expect(within(sigmaRunnerUpRow).queryByText('Σ')).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Sigma' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('folds recent players into the player mode switch after Sigma', async () => {
+        installFetchMock({
+            recentPlayers: [
+                { name: 'RecentCaptain', pvp_ratio: 58.1, is_hidden: false },
+            ],
+        });
+
+        render(<PlayerSearch />);
+
+        const sigmaButton = await screen.findByRole('button', { name: 'Sigma' });
+        const recentButton = await getPlayerRecentButton();
+        expect(sigmaButton.compareDocumentPosition(recentButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+        fireEvent.click(recentButton);
+
+        expect(await screen.findByRole('button', { name: /Show recent player RecentCaptain/i })).toBeInTheDocument();
+        expect(screen.queryByText('Recently Viewed')).not.toBeInTheDocument();
+        expect(await getPlayerRecentButton()).toHaveAttribute('aria-pressed', 'true');
     });
 
     it('requests 30 clans while keeping player landing requests at 25', async () => {
@@ -465,6 +488,44 @@ describe('PlayerSearch landing efficiency icon', () => {
         expect(screen.queryByRole('button', { name: /Show clan Inactive Clan/i })).not.toBeInTheDocument();
     });
 
+    it('folds recent clans into the clan mode switch with a Recent button', async () => {
+        installFetchMock({
+            clans: defaultClans,
+            recentClans: [
+                {
+                    clan_id: 777,
+                    name: 'RecentClan',
+                    tag: 'REC',
+                    members_count: 35,
+                    clan_wr: 54.3,
+                    total_battles: 92000,
+                    active_members: 14,
+                },
+            ],
+        });
+
+        render(<PlayerSearch />);
+
+        fireEvent.click(await getClanRecentButton());
+
+        expect(await screen.findByRole('button', { name: /Show recent clan RecentClan/i })).toBeInTheDocument();
+        expect(screen.queryByText('Recently Viewed Clans')).not.toBeInTheDocument();
+        expect(await getClanRecentButton()).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('shows the recent clan empty state inside the shared clan surface', async () => {
+        installFetchMock({
+            recentClans: [],
+        });
+
+        render(<PlayerSearch />);
+
+        fireEvent.click(await getClanRecentButton());
+
+        expect(await screen.findByText('No recently viewed clans yet.')).toBeInTheDocument();
+        expect(screen.queryByText('Recently Viewed Clans')).not.toBeInTheDocument();
+    });
+
     it('loads player detail from the q parameter and returns to landing on back', async () => {
         mockQueryParam = 'Player One';
         installFetchMock({
@@ -502,6 +563,8 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         render(<PlayerSearch />);
 
+        fireEvent.click(await getPlayerRecentButton());
+
         expect(await screen.findByRole('button', { name: /Show recent player for_the_kingdom_2022/i })).toBeInTheDocument();
 
         Object.defineProperty(document, 'visibilityState', {
@@ -514,6 +577,19 @@ describe('PlayerSearch landing efficiency icon', () => {
         });
 
         expect(await screen.findByRole('button', { name: /Show recent player AnotherCaptain/i })).toBeInTheDocument();
+    });
+
+    it('shows the recent player empty state inside the shared player surface', async () => {
+        installFetchMock({
+            recentPlayers: [],
+        });
+
+        render(<PlayerSearch />);
+
+        fireEvent.click(await getPlayerRecentButton());
+
+        expect(await screen.findByText('No recently viewed players yet.')).toBeInTheDocument();
+        expect(screen.queryByText('Recently Viewed')).not.toBeInTheDocument();
     });
 
     it('executes nav search events and shows an error when player lookup fails', async () => {

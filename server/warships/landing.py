@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player
 from warships.models import Clan, Player
+from warships.visit_analytics import get_top_entities
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ LANDING_PLAYER_BEST_MIN_HIGH_TIER_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_TARGET_HIGH_TIER_PVP_BATTLES = 5000
 LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 1200
 LANDING_PLAYER_SIGMA_MIN_PVP_BATTLES = 500
-LANDING_PLAYER_MODES = ('random', 'best', 'sigma')
+LANDING_PLAYER_MODES = ('random', 'best', 'sigma', 'popular')
 LANDING_PLAYER_BEST_WR_WEIGHT = 0.40
 LANDING_PLAYER_BEST_PLAYER_SCORE_WEIGHT = 0.22
 LANDING_PLAYER_BEST_EFFICIENCY_WEIGHT = 0.18
@@ -382,7 +383,7 @@ def get_landing_clans_payload_with_cache_metadata(force_refresh: bool = False) -
 def normalize_landing_player_mode(mode: str | None) -> str:
     normalized_mode = (mode or 'random').strip().lower()
     if normalized_mode not in LANDING_PLAYER_MODES:
-        raise ValueError('mode must be one of: random, best, sigma')
+        raise ValueError('mode must be one of: random, best, sigma, popular')
     return normalized_mode
 
 
@@ -1352,6 +1353,30 @@ def _build_sigma_landing_players(limit: int) -> list[dict]:
     return rows
 
 
+def _build_popular_landing_players(limit: int) -> list[dict]:
+    candidate_limit = max(limit * 4, limit)
+
+    try:
+        rows = get_top_entities('player', '7d', 'views_deduped', candidate_limit)
+    except Exception as error:
+        logger.warning('Falling back to empty popular landing players due to analytics error: %s', error)
+        return []
+
+    ordered_player_ids: list[int] = []
+    seen_player_ids: set[int] = set()
+    for row in rows:
+        try:
+            player_id = int(row.get('entity_id') or 0)
+        except (TypeError, ValueError):
+            continue
+        if player_id <= 0 or player_id in seen_player_ids:
+            continue
+        seen_player_ids.add(player_id)
+        ordered_player_ids.append(player_id)
+
+    return resolve_landing_players_by_id_order(ordered_player_ids)[:limit]
+
+
 def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False) -> tuple[list[dict], dict[str, str | int]]:
     normalized_mode = normalize_landing_player_mode(mode)
     normalized_limit = normalize_landing_player_limit(limit)
@@ -1368,6 +1393,8 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
         builder = _build_best_landing_players
     elif normalized_mode == 'sigma':
         builder = _build_sigma_landing_players
+    elif normalized_mode == 'popular':
+        builder = _build_popular_landing_players
     else:
         builder = _build_random_landing_players
 
@@ -1477,6 +1504,7 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
         'players_random': len(random_players_payload),
         'players_best': len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
         'players_sigma': len(get_landing_players_payload('sigma', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
+        'players_popular': len(get_landing_players_payload('popular', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
         'recent_players': len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False)),
     }
     _clear_cache_family_dirty(

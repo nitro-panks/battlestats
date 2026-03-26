@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
-from warships.models import Player, Clan, PlayerExplorerSummary
+from warships.models import Player, Clan, EntityVisitDaily, PlayerExplorerSummary
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
@@ -2295,6 +2295,161 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()), LANDING_PLAYER_LIMIT)
 
+    def test_landing_players_popular_mode_orders_by_deduped_views(self):
+        cache.clear()
+        now = timezone.now()
+        today = now.date()
+
+        Player.objects.create(
+            name="PopularThird",
+            player_id=5371,
+            is_hidden=False,
+            pvp_ratio=56.2,
+            pvp_battles=2400,
+            total_battles=3000,
+            days_since_last_battle=6,
+            last_battle_date=today - timedelta(days=6),
+        )
+        Player.objects.create(
+            name="PopularLeader",
+            player_id=5372,
+            is_hidden=False,
+            pvp_ratio=60.4,
+            pvp_battles=4200,
+            total_battles=5000,
+            days_since_last_battle=2,
+            last_battle_date=today - timedelta(days=2),
+        )
+        Player.objects.create(
+            name="PopularRunnerUp",
+            player_id=5373,
+            is_hidden=False,
+            pvp_ratio=58.1,
+            pvp_battles=3900,
+            total_battles=4700,
+            days_since_last_battle=3,
+            last_battle_date=today - timedelta(days=3),
+        )
+
+        EntityVisitDaily.objects.create(
+            date=today,
+            entity_type='player',
+            entity_id=5371,
+            entity_name_snapshot='PopularThird',
+            views_raw=5,
+            views_deduped=5,
+            unique_visitors=5,
+            unique_sessions=5,
+            last_view_at=now - timedelta(minutes=15),
+            source_first_party_views=5,
+        )
+        EntityVisitDaily.objects.create(
+            date=today,
+            entity_type='player',
+            entity_id=5372,
+            entity_name_snapshot='PopularLeader',
+            views_raw=9,
+            views_deduped=9,
+            unique_visitors=9,
+            unique_sessions=9,
+            last_view_at=now - timedelta(minutes=5),
+            source_first_party_views=9,
+        )
+        EntityVisitDaily.objects.create(
+            date=today,
+            entity_type='player',
+            entity_id=5373,
+            entity_name_snapshot='PopularRunnerUp',
+            views_raw=7,
+            views_deduped=7,
+            unique_visitors=7,
+            unique_sessions=7,
+            last_view_at=now - timedelta(minutes=10),
+            source_first_party_views=7,
+        )
+
+        response = self.client.get("/api/landing/players/?mode=popular&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:3]],
+            ["PopularLeader", "PopularRunnerUp", "PopularThird"],
+        )
+        self.assertEqual(response["X-Landing-Players-Cache-Mode"], "popular")
+
+    def test_landing_players_popular_mode_excludes_hidden_and_inactive_players(self):
+        cache.clear()
+        now = timezone.now()
+        today = now.date()
+
+        Player.objects.create(
+            name="PopularHidden",
+            player_id=5381,
+            is_hidden=True,
+            pvp_ratio=61.1,
+            pvp_battles=5200,
+            total_battles=6000,
+            days_since_last_battle=2,
+            last_battle_date=today - timedelta(days=2),
+        )
+        Player.objects.create(
+            name="PopularInactive",
+            player_id=5382,
+            is_hidden=False,
+            pvp_ratio=59.4,
+            pvp_battles=5100,
+            total_battles=6200,
+            days_since_last_battle=240,
+            last_battle_date=today - timedelta(days=240),
+        )
+        Player.objects.create(
+            name="PopularEligibleA",
+            player_id=5383,
+            is_hidden=False,
+            pvp_ratio=57.2,
+            pvp_battles=3100,
+            total_battles=3800,
+            days_since_last_battle=8,
+            last_battle_date=today - timedelta(days=8),
+        )
+        Player.objects.create(
+            name="PopularEligibleB",
+            player_id=5384,
+            is_hidden=False,
+            pvp_ratio=55.9,
+            pvp_battles=2900,
+            total_battles=3600,
+            days_since_last_battle=5,
+            last_battle_date=today - timedelta(days=5),
+        )
+
+        for entity_id, name, views, minutes_ago in [
+            (5381, 'PopularHidden', 12, 1),
+            (5382, 'PopularInactive', 11, 2),
+            (5383, 'PopularEligibleA', 9, 3),
+            (5384, 'PopularEligibleB', 8, 4),
+        ]:
+            EntityVisitDaily.objects.create(
+                date=today,
+                entity_type='player',
+                entity_id=entity_id,
+                entity_name_snapshot=name,
+                views_raw=views,
+                views_deduped=views,
+                unique_visitors=views,
+                unique_sessions=views,
+                last_view_at=now - timedelta(minutes=minutes_ago),
+                source_first_party_views=views,
+            )
+
+        response = self.client.get("/api/landing/players/?mode=popular&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()],
+            ["PopularEligibleA", "PopularEligibleB"],
+        )
+
     def test_landing_players_only_include_recently_active_players(self):
         cache.clear()
         today = timezone.now().date()
@@ -2620,7 +2775,10 @@ class ApiContractTests(TestCase):
         response = self.client.get("/api/landing/players/?mode=invalid")
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("detail", response.json())
+        self.assertEqual(
+            response.json()["detail"],
+            "mode must be one of: random, best, sigma, popular",
+        )
 
     def test_landing_recent_players_expose_sleepy_player_flag(self):
         cache.clear()
@@ -2663,6 +2821,10 @@ class ApiContractTests(TestCase):
             cache.get(landing_player_cache_key('sigma', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
             cache.get(landing_player_published_cache_key('sigma', LANDING_PLAYER_LIMIT)))
+        self.assertIsNotNone(
+            cache.get(landing_player_cache_key('popular', LANDING_PLAYER_LIMIT)))
+        self.assertIsNotNone(
+            cache.get(landing_player_published_cache_key('popular', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
 
     def test_landing_recent_clans_orders_by_last_lookup_desc(self):
