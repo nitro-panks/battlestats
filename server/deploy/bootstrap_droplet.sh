@@ -7,11 +7,12 @@ DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"
 APP_USER="${APP_USER:-battlestats}"
 EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:-}"
-DJANGO_ALLOWED_HOSTS="localhost,127.0.0.1,${HOST}"
+DEFAULT_PUBLIC_ALLOWED_HOSTS="${DEFAULT_PUBLIC_ALLOWED_HOSTS:-battlestats.online,www.battlestats.online}"
 
-if [[ -n "${EXTRA_ALLOWED_HOSTS}" ]]; then
-  DJANGO_ALLOWED_HOSTS="${DJANGO_ALLOWED_HOSTS},${EXTRA_ALLOWED_HOSTS}"
-fi
+DJANGO_ALLOWED_HOSTS="$({
+  printf '%s\n' localhost 127.0.0.1 "${HOST}"
+  printf '%s' "${DEFAULT_PUBLIC_ALLOWED_HOSTS},${EXTRA_ALLOWED_HOSTS}" | tr ',' '\n'
+} | awk 'NF && !seen[$0]++' | paste -sd, -)"
 
 if [[ -z "${HOST}" ]]; then
   echo "Usage: $0 <droplet-ip-or-hostname>" >&2

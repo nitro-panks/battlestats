@@ -20,7 +20,7 @@ In the full Docker stack used by this repo, the client is exposed at [http://loc
 
 The client now calls relative `/api/...` paths and relies on a Next.js rewrite to reach Django. By default the rewrite target is `http://localhost:8888`, and you can override it with `BATTLESTATS_API_ORIGIN` when running the client outside the local stack.
 
-Crawler metadata routes use `BATTLESTATS_APP_ORIGIN` as the canonical public origin for generated `robots.txt`, `sitemap.xml`, and `metadataBase`. If that variable is unset, the app falls back to `NEXT_PUBLIC_SITE_URL`, then `https://tamezz.com`.
+Crawler metadata routes use `BATTLESTATS_APP_ORIGIN` as the canonical public origin for generated `robots.txt`, `sitemap.xml`, and `metadataBase`. If that variable is unset, the app falls back to `NEXT_PUBLIC_SITE_URL`, then `https://battlestats.online`.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
@@ -167,7 +167,7 @@ npm test -- --runInBand app/components/__tests__/PlayerDetail.test.tsx
 For a simple DigitalOcean droplet deployment without changing local development, use the versioned scripts in `client/deploy/`:
 
 ```bash
-NGINX_SERVER_NAME="tamezz.com www.tamezz.com" ./client/deploy/bootstrap_droplet.sh YOUR_DROPLET_IP
+NGINX_SERVER_NAME="battlestats.online www.battlestats.online" ./client/deploy/bootstrap_droplet.sh YOUR_DROPLET_IP
 ./client/deploy/deploy_to_droplet.sh YOUR_DROPLET_IP
 ```
 

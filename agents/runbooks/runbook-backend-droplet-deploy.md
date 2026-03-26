@@ -16,7 +16,7 @@ From the repo root:
 
 ```bash
 chmod +x server/deploy/bootstrap_droplet.sh server/deploy/deploy_to_droplet.sh
-EXTRA_ALLOWED_HOSTS=tamezz.com,www.tamezz.com \
+EXTRA_ALLOWED_HOSTS=battlestats.online,www.battlestats.online \
 ./server/deploy/bootstrap_droplet.sh YOUR_DROPLET_IP
 ```
 
@@ -36,7 +36,7 @@ The bootstrap installs:
 When backend changes are ready:
 
 ```bash
-EXTRA_ALLOWED_HOSTS=tamezz.com,www.tamezz.com \
+EXTRA_ALLOWED_HOSTS=battlestats.online,www.battlestats.online \
 ./server/deploy/deploy_to_droplet.sh YOUR_DROPLET_IP
 ```
 

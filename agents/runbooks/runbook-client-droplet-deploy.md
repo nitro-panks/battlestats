@@ -23,7 +23,7 @@ From the repo root:
 
 ```bash
 chmod +x client/deploy/bootstrap_droplet.sh client/deploy/deploy_to_droplet.sh
-NGINX_SERVER_NAME="tamezz.com www.tamezz.com" \
+NGINX_SERVER_NAME="battlestats.online www.battlestats.online" \
 API_ORIGIN=http://127.0.0.1:8888 \
 ./client/deploy/bootstrap_droplet.sh YOUR_DROPLET_IP
 ```
@@ -64,8 +64,11 @@ Current supported values:
 
 ```env
 BATTLESTATS_API_ORIGIN=http://127.0.0.1:8888
+BATTLESTATS_APP_ORIGIN=https://battlestats.online
 NEXT_PUBLIC_GA_MEASUREMENT_ID=
 ```
+
+Set `BATTLESTATS_APP_ORIGIN` to the public canonical site origin so generated `robots.txt`, `sitemap.xml`, and `metadataBase` all agree with the domain users and crawlers actually hit.
 
 After editing that file on the droplet:
 

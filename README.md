@@ -1,8 +1,6 @@
 # battlestats
 
-visit live site: [battlestats.online](https://www.battlestats.online)
-
-the current production deploy also answers on [tamezz.com](https://www.tamezz.com).
+visit live site: [battlestats.online](https://battlestats.online)
 
 this repo contains a D3/React/Django service designed to deliver interactive data charts (SVG) for a given player or naval clan.
 

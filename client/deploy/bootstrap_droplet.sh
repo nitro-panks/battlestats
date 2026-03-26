@@ -13,7 +13,7 @@ if [[ -z "${APP_ORIGIN:-}" ]]; then
   if [[ "${NGINX_SERVER_NAME}" != "_" ]]; then
     APP_ORIGIN="https://${NGINX_SERVER_NAME%% *}"
   else
-    APP_ORIGIN="https://tamezz.com"
+    APP_ORIGIN="https://battlestats.online"
   fi
 fi
 

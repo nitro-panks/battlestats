@@ -30,31 +30,31 @@ describe("site origin helpers", () => {
 
   it("falls back to the public site url when the deploy origin is unset", () => {
     delete process.env.BATTLESTATS_APP_ORIGIN;
-    process.env.NEXT_PUBLIC_SITE_URL = "https://www.tamezz.com/";
+    process.env.NEXT_PUBLIC_SITE_URL = "https://www.battlestats.online/";
 
-    expect(getSiteOrigin()).toBe("https://www.tamezz.com");
+    expect(getSiteOrigin()).toBe("https://www.battlestats.online");
   });
 
   it("builds a robots response with a sitemap reference", () => {
-    process.env.BATTLESTATS_APP_ORIGIN = "https://tamezz.com";
+    process.env.BATTLESTATS_APP_ORIGIN = "https://battlestats.online";
 
     expect(robots()).toEqual({
       rules: {
         userAgent: "*",
         allow: "/",
       },
-      sitemap: "https://tamezz.com/sitemap.xml",
+      sitemap: "https://battlestats.online/sitemap.xml",
     });
   });
 
   it("builds a sitemap rooted at the canonical site origin", () => {
-    process.env.BATTLESTATS_APP_ORIGIN = "https://tamezz.com";
+    process.env.BATTLESTATS_APP_ORIGIN = "https://battlestats.online";
 
     const entries = sitemap();
 
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({
-      url: "https://tamezz.com/",
+      url: "https://battlestats.online/",
       changeFrequency: "daily",
       priority: 1,
     });

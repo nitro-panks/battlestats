@@ -1,4 +1,4 @@
-const DEFAULT_APP_ORIGIN = "https://tamezz.com";
+const DEFAULT_APP_ORIGIN = "https://battlestats.online";
 
 const normalizeOrigin = (value: string): string => value.replace(/\/+$/, "");
 
