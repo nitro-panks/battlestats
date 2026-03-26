@@ -6,6 +6,8 @@ See `agents/langgraph-usage-note.md` for when it makes sense to use the repo's L
 
 CrewAI integration guidance now lives in `agents/runbooks/runbook-crewai-integration.md`. LangGraph remains the guarded implementation workflow; CrewAI is the persona-first orchestration option.
 
+Agentic memory guidance now lives in `agents/runbooks/spec-langmem-agentic-memory-pilot-2026-03-26.md` and the operator review loop is documented in `agents/runbooks/runbook-agentic-memory-review.md`.
+
 ## Recommended Structure
 
 - One role spec per file (already set up).
@@ -93,3 +95,4 @@ No commit is considered ready until that documentation, verification, and runboo
 - Store reusable execution guides under `agents/runbooks/`.
 - Keep runbooks task-oriented: include context, exact commands, validation steps, and rollback notes when applicable.
 - Before committing, archive runbooks whose planning state or feature status no longer matches the live code.
+- For agentic memory work, start with `agents/runbooks/spec-langmem-agentic-memory-pilot-2026-03-26.md` for scope and `agents/runbooks/runbook-agentic-memory-review.md` for day-to-day review operations.

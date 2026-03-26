@@ -1,17 +1,26 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import PlayerDetail from '../PlayerDetail';
+import { fetchSharedJson } from '../../lib/sharedJsonFetch';
+
+jest.mock('../../lib/sharedJsonFetch', () => ({
+    fetchSharedJson: jest.fn(),
+}));
 
 const mockUseClanMembers = jest.fn();
 const mockClipboardWriteText = jest.fn();
+const mockClanSvg = jest.fn();
 let mockClanBattleSummary:
     | { seasonsPlayed: number; totalBattles: number; overallWinRate: number; }
     | null
     | undefined;
 let mockRankedHeatmapVisibility: boolean | undefined;
+const mockFetchSharedJson = fetchSharedJson as jest.MockedFunction<typeof fetchSharedJson>;
 
 jest.mock('next/dynamic', () => {
     return () => function MockDynamicComponent(props: {
+        clanId?: number;
+        highlightedPlayerName?: string;
         playerId?: number;
         onSummaryChange?: (summary: { seasonsPlayed: number; totalBattles: number; overallWinRate: number; } | null) => void;
         onVisibilityChange?: (isVisible: boolean) => void;
@@ -26,11 +35,19 @@ jest.mock('next/dynamic', () => {
             if (typeof props?.onVisibilityChange === 'function' && mockRankedHeatmapVisibility !== undefined) {
                 props.onVisibilityChange(mockRankedHeatmapVisibility);
             }
-        }, [props?.onSummaryChange, props?.playerId]);
+        }, [props?.onSummaryChange, props?.onVisibilityChange, props?.playerId]);
 
         return <div data-testid="dynamic-component" />;
     };
 });
+
+jest.mock('../ClanSVG', () => ({
+    __esModule: true,
+    default: (props: unknown) => {
+        mockClanSvg(props);
+        return <div data-testid="player-clan-chart" />;
+    },
+}));
 
 jest.mock('../DeferredSection', () => {
     return function MockDeferredSection({ children }: { children: React.ReactNode }) {
@@ -98,8 +115,11 @@ describe('PlayerDetail efficiency-rank icon', () => {
 
     beforeEach(() => {
         mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: null });
+        mockClanSvg.mockReset();
         mockClanBattleSummary = undefined;
         mockRankedHeatmapVisibility = undefined;
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({ data: [], headers: {} });
         mockClipboardWriteText.mockReset();
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
@@ -132,6 +152,30 @@ describe('PlayerDetail efficiency-rank icon', () => {
         );
 
         expect(mockUseClanMembers).toHaveBeenCalledWith(4444, false);
+    });
+
+    it('renders the clan chart on the player page when clan data exists', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    clan_id: 4444,
+                    clan_name: 'Fixture Clan',
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByTestId('player-clan-chart')).toBeInTheDocument();
+        expect(screen.queryByText('Loading clan chart...')).not.toBeInTheDocument();
+        expect(mockClanSvg).toHaveBeenCalledWith(expect.objectContaining({
+            clanId: 4444,
+            highlightedPlayerName: 'Rank Captain',
+            svgHeight: 280,
+            membersData: [],
+        }));
     });
 
     it('renders actual KDR in the summary cards instead of weighted KDR', () => {
@@ -385,6 +429,8 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
+        fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
+
         expect(screen.getByLabelText(/clan battle enjoyer 60\.2 percent WR/i)).toBeInTheDocument();
     });
 
@@ -411,6 +457,8 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 onSelectClan={() => undefined}
             />,
         );
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
 
         expect(screen.queryByLabelText(/clan battle enjoyer/i)).not.toBeInTheDocument();
     });
@@ -496,6 +544,37 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
     });
 
+    it('moves clan battle seasons, efficiency badges, and performance by tier behind focused tabs', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    clan_id: 4444,
+                    clan_name: 'Fixture Clan',
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+        expect(screen.getByText('Performance by Tier')).toBeInTheDocument();
+        expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Badges' }));
+
+        expect(screen.getByText('Efficiency badges')).toBeInTheDocument();
+        expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+        expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
+
+        expect(screen.getByText('Clan Battle Seasons')).toBeInTheDocument();
+        expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
+        expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
+    });
+
     it('renders header markers for leader, ranked, and sleepy states without the playstyle panel', () => {
         render(
             <PlayerDetail
@@ -567,7 +646,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(consoleErrorSpy).toHaveBeenCalled();
     });
 
-    it('omits the ranked heatmap when the player has no known ranked games', () => {
+    it('renders the default profile insight tab on the player page', () => {
         render(
             <PlayerDetail
                 player={{
@@ -580,8 +659,9 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
+        expect(screen.getByRole('tab', { name: 'Profile' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByText('Tier vs Type Profile')).toBeInTheDocument();
         expect(screen.queryByText('Ranked Games vs Win Rate')).not.toBeInTheDocument();
-        expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
     });
 
     it('shows the loading overlay when the player detail is refreshing', () => {

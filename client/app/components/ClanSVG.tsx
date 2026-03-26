@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
 import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
-import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface ClanProps {
@@ -43,6 +42,15 @@ const ACTIVITY_BUCKETS: Array<{ key: ActivityBucketKey; label: string; shortLabe
     { key: 'unknown', label: 'No recency', shortLabel: 'Unknown', color: '#e5e7eb' },
 ];
 
+const CLAN_PLOT_FETCH_RETRY_DELAY_MS = 350;
+const CLAN_PLOT_FETCH_ATTEMPTS = 2;
+const CLAN_PLOT_PENDING_RETRY_DELAY_MS = 3000;
+const CLAN_PLOT_PENDING_RETRY_LIMIT = 20;
+
+const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
+    window.setTimeout(resolve, timeoutMs);
+});
+
 const selectClanColorByWR = (winRatio: number) => {
     if (winRatio > 65) {
         return '#810c9e';
@@ -82,6 +90,27 @@ const buildActivitySegments = (points: ClanPlotPoint[]): ActivitySegment[] => {
             share: total > 0 ? (count / total) * 100 : 0,
         };
     });
+};
+
+const drawClanChartStatus = (
+    containerElement: HTMLDivElement,
+    message: string,
+    svgWidth: number,
+    svgHeight: number,
+) => {
+    const container = d3.select(containerElement);
+    container.selectAll('*').remove();
+
+    const svg = container.append('svg')
+        .attr('width', svgWidth)
+        .attr('height', svgHeight);
+
+    svg.append('text')
+        .attr('x', 16)
+        .attr('y', 24)
+        .attr('class', 'text-sm')
+        .style('fill', '#6b7280')
+        .text(message);
 };
 
 const drawClanPlot = (
@@ -412,30 +441,78 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
     const chartMemberActivity = useMemo(() => buildClanChartMemberActivity(membersData), [chartMemberActivitySignature]);
     const [plotData, setPlotData] = useState<ClanData[] | null>(null);
     const [plotError, setPlotError] = useState(false);
+    const [isPlotPendingRefresh, setIsPlotPendingRefresh] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let pendingAttempts = 0;
 
         setPlotData(null);
         setPlotError(false);
+        setIsPlotPendingRefresh(false);
 
-        fetchSharedJson<ClanData[]>(`/api/fetch/clan_data/${clanId}:active`, {
-            label: 'Clan plot data',
-            ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
-        })
-            .then(({ data }) => {
-                if (!cancelled) {
-                    setPlotData(data);
+        const requestPlotData = async (): Promise<{ data: ClanData[]; pending: boolean } | null> => {
+            for (let attempt = 0; attempt < CLAN_PLOT_FETCH_ATTEMPTS; attempt += 1) {
+                try {
+                    const payload = await fetchSharedJson<ClanData[]>(`/api/fetch/clan_data/${clanId}:active`, {
+                        label: 'Clan plot data',
+                        ttlMs: 0,
+                        cacheKey: `clan-plot:${clanId}:${pendingAttempts}:${attempt}`,
+                        responseHeaders: ['X-Clan-Plot-Pending'],
+                    });
+
+                    return {
+                        data: payload.data,
+                        pending: payload.headers['X-Clan-Plot-Pending'] === 'true',
+                    };
+                } catch {
+                    if (attempt + 1 < CLAN_PLOT_FETCH_ATTEMPTS) {
+                        await delay(CLAN_PLOT_FETCH_RETRY_DELAY_MS);
+                        if (cancelled) {
+                            return null;
+                        }
+                        continue;
+                    }
                 }
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setPlotError(true);
-                }
-            });
+            }
+
+            return null;
+        };
+
+        const loadPlotData = async () => {
+            timeoutId = null;
+
+            const result = await requestPlotData();
+            if (cancelled) {
+                return;
+            }
+
+            if (result === null) {
+                setPlotError(true);
+                setIsPlotPendingRefresh(false);
+                return;
+            }
+
+            setPlotData(result.data);
+            setPlotError(false);
+            setIsPlotPendingRefresh(result.pending);
+
+            if (result.pending && pendingAttempts < CLAN_PLOT_PENDING_RETRY_LIMIT) {
+                pendingAttempts += 1;
+                timeoutId = setTimeout(() => {
+                    void loadPlotData();
+                }, CLAN_PLOT_PENDING_RETRY_DELAY_MS);
+            }
+        };
+
+        void loadPlotData();
 
         return () => {
             cancelled = true;
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
         };
     }, [clanId]);
 
@@ -449,23 +526,17 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
         }
 
         if (plotData === null && !plotError) {
-            d3.select(containerRef.current).selectAll('*').remove();
+            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', svgWidth, svgHeight);
             return;
         }
 
         if (plotError) {
-            const container = d3.select(containerRef.current);
-            container.selectAll('*').remove();
-            const svg = container.append('svg')
-                .attr('width', svgWidth)
-                .attr('height', svgHeight);
+            drawClanChartStatus(containerRef.current, 'Unable to load clan chart.', svgWidth, svgHeight);
+            return;
+        }
 
-            svg.append('text')
-                .attr('x', 16)
-                .attr('y', 24)
-                .attr('class', 'text-sm')
-                .style('fill', '#6b7280')
-                .text('Unable to load clan chart.');
+        if (plotData !== null && isPlotPendingRefresh && plotData.length === 0) {
+            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', svgWidth, svgHeight);
             return;
         }
 
@@ -480,7 +551,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                 plotData,
             );
         }
-    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, plotData, plotError, svgHeight, svgWidth]);
+    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth]);
 
     return <div ref={containerRef}></div>;
 };

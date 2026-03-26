@@ -21,7 +21,7 @@ interface PlayerClanBattleSeasonsProps {
     onSummaryChange?: (summary: PlayerClanBattleSummary | null) => void;
 }
 
-const CLAN_BATTLE_TABLE_VISIBLE_ROWS = 5;
+const CLAN_BATTLE_TABLE_VISIBLE_ROWS = 10;
 const CLAN_BATTLE_TABLE_HEADER_HEIGHT_REM = 2.25;
 const CLAN_BATTLE_TABLE_ROW_HEIGHT_REM = 3.25;
 
@@ -111,18 +111,15 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
 
     return (
         <div>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Clan Battle Seasons</h3>
-            <p className="mt-1 text-xs text-gray-500">Player-specific clan battle participation by season.</p>
-
-            {loading && <p className="mt-3 text-sm text-gray-500">Loading clan battle seasons...</p>}
-            {!loading && error && <p className="mt-3 text-sm text-gray-500">{error}</p>}
+            {loading && <p className="text-sm text-gray-500">Loading clan battle seasons...</p>}
+            {!loading && error && <p className="text-sm text-gray-500">{error}</p>}
             {!loading && !error && seasons.length === 0 && (
-                <p className="mt-3 text-sm text-gray-500">No clan battle season data available for this player.</p>
+                <p className="text-sm text-gray-500">No clan battle season data available for this player.</p>
             )}
 
             {!loading && !error && seasons.length > 0 && (
                 <>
-                    <div className="mt-3 grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                         <div className="rounded-md bg-[#eff3ff] px-3 py-2">
                             <p className="text-[10px] uppercase tracking-wide text-[#4292c6]">Seasons</p>
                             <p className="mt-1 text-lg font-semibold text-[#084594]">{summary.seasonsPlayed}</p>

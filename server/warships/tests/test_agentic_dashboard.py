@@ -23,6 +23,23 @@ class AgenticDashboardTests(TestCase):
                 "logged_at": "2026-03-15T12:00:00Z",
                 "langgraph_result": {
                     "task": "Evaluate trace dashboard spec",
+                    "workflow_kind": "agentic_workflow",
+                    "memory_enabled": True,
+                    "retrieved_memories": [{
+                        "summary": "Reuse the trace validation commands for dashboard work.",
+                        "review_status": "reviewed",
+                    }],
+                    "memory_candidates": [{
+                        "summary": "Reuse the validated command set for agentic_workflow workflows.",
+                        "review_status": "candidate",
+                    }],
+                    "memory_store_activity": {
+                        "backend": "file",
+                        "candidate_queue_path": "logs/agentic/memory/pending/run-1.json",
+                        "queued_candidate_count": 1,
+                        "promoted_count": 1,
+                        "reviewed_store_paths": ["logs/agentic/memory/reviewed/battlestats__local__procedural.json"],
+                    },
                     "checks_passed": True,
                     "boundary_ok": True,
                     "design_review_passed": True,
@@ -48,6 +65,16 @@ class AgenticDashboardTests(TestCase):
                 "summary": ["Verification failed."],
                 "logged_at": "2026-03-14T12:00:00Z",
                 "task": "Fix trace dashboard endpoint",
+                "workflow_kind": "agentic_workflow",
+                "memory_enabled": False,
+                "retrieved_memories": [],
+                "memory_candidates": [],
+                "memory_store_activity": {
+                    "backend": "disabled",
+                    "queued_candidate_count": 0,
+                    "promoted_count": 0,
+                    "reviewed_store_paths": [],
+                },
                 "checks_passed": False,
                 "boundary_ok": False,
                 "design_review_passed": False,
@@ -61,7 +88,47 @@ class AgenticDashboardTests(TestCase):
                 "touched_files": ["server/warships/agentic/dashboard.py"],
             }), encoding="utf-8")
 
-            with patch("warships.agentic.dashboard._log_root", return_value=log_root), patch.dict(
+            memory_root = Path(temp_dir) / "memory"
+            (memory_root / "reviewed").mkdir(parents=True)
+            (memory_root / "pending").mkdir(parents=True)
+            (memory_root / "reviewed" / "battlestats__local__procedural.json").write_text(json.dumps({
+                "version": 1,
+                "namespace": ["battlestats", "local", "procedural"],
+                "records": [{
+                    "memory_id": "mem-1",
+                    "summary": "Reuse the trace validation commands for dashboard work.",
+                    "workflow_kind": "agentic_workflow",
+                    "review_status": "reviewed",
+                    "reviewed_at": "2026-03-15T12:10:00Z",
+                    "provenance": {"source_run_id": "run-1", "engine": "langgraph"},
+                    "supersedes": [],
+                }, {
+                    "memory_id": "mem-old",
+                    "summary": "Old trace guidance.",
+                    "workflow_kind": "agentic_workflow",
+                    "review_status": "superseded",
+                    "reviewed_at": "2026-03-14T11:00:00Z",
+                    "superseded_by": "mem-1",
+                    "provenance": {"source_run_id": "run-0", "engine": "langgraph"},
+                    "supersedes": [],
+                }],
+            }), encoding="utf-8")
+            (memory_root / "pending" / "run-1.json").write_text(json.dumps({
+                "version": 1,
+                "workflow_id": "run-1",
+                "namespace": ["battlestats", "local", "procedural"],
+                "candidates": [{
+                    "candidate_id": "run-1:candidate:1",
+                    "summary": "Reuse the validated command set for agentic_workflow workflows.",
+                    "workflow_kind": "agentic_workflow",
+                    "review_status": "reviewed",
+                    "memory_id": "mem-1",
+                    "provenance": {"source_run_id": "run-1", "engine": "langgraph"},
+                    "supersedes": ["mem-old"],
+                }],
+            }), encoding="utf-8")
+
+            with patch("warships.agentic.dashboard._log_root", return_value=log_root), patch("warships.agentic.memory._memory_root", return_value=memory_root), patch.dict(
                 "os.environ",
                 {
                     "LANGSMITH_TRACING_V2": "true",
@@ -89,10 +156,40 @@ class AgenticDashboardTests(TestCase):
         self.assertEqual(payload["recent_runs"][0]["doctrine_note_count"], 1)
         self.assertTrue(payload["recent_runs"][0]["design_review_passed"])
         self.assertTrue(payload["recent_runs"][0]["api_review_passed"])
+        self.assertTrue(payload["recent_runs"][0]["memory_enabled"])
+        self.assertEqual(payload["recent_runs"][0]
+                         ["memory_retrieval_count"], 1)
+        self.assertEqual(payload["recent_runs"][0]
+                         ["memory_candidate_count"], 1)
+        self.assertEqual(payload["diagnostics"]["runs_with_memory_enabled"], 1)
+        self.assertEqual(payload["diagnostics"]
+                         ["runs_with_memory_retrievals"], 1)
+        self.assertEqual(payload["diagnostics"]["memory_candidate_total"], 1)
+        self.assertEqual(payload["diagnostics"]["reviewed_memory_total"], 1)
+        self.assertEqual(payload["diagnostics"]["pending_review_total"], 0)
+        self.assertEqual(payload["diagnostics"]["superseded_memory_total"], 1)
         self.assertEqual(
             payload["learning"]["common_guidance_paths"][0]["label"],
             "agents/runbooks/runbook-langgraph-opinionated-workflow.md",
         )
+        self.assertEqual(
+            payload["learning"]["common_workflow_kinds"][0]["label"],
+            "agentic_workflow",
+        )
+        self.assertEqual(
+            payload["learning"]["memory_candidate_summaries"][0]["label"],
+            "Reuse the validated command set for agentic_workflow workflows.",
+        )
+        self.assertEqual(
+            payload["learning"]["reviewed_store_paths"][0]["label"],
+            "logs/agentic/memory/reviewed/battlestats__local__procedural.json",
+        )
+        self.assertEqual(payload["memory_store"]
+                         ["recent_reviewed"][0]["memory_id"], "mem-1")
+        self.assertEqual(payload["memory_store"]["recent_reviewed"]
+                         [0]["provenance"]["source_run_id"], "run-1")
+        self.assertEqual(
+            payload["memory_store"]["recent_candidates"][0]["supersedes"], ["mem-old"])
         self.assertEqual(
             payload["learning"]["chart_tuning_notes"][0]["runbook_path"],
             "agents/runbooks/archive/runbook-ranked-wr-battles-heatmap-granularity.md",
@@ -119,6 +216,8 @@ class AgenticDashboardTests(TestCase):
         self.assertEqual(payload["diagnostics"]["total_runs"], 0)
         self.assertEqual(payload["learning"]["recurring_issues"], [])
         self.assertEqual(payload["learning"]["common_guidance_paths"], [])
+        self.assertEqual(payload["learning"]["memory_candidate_summaries"], [])
+        self.assertEqual(payload["memory_store"]["recent_reviewed"], [])
         self.assertEqual(payload["learning"]["chart_tuning_notes"]
                          [0]["slug"], "ranked_wr_battles_heatmap")
 

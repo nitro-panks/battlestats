@@ -22,4 +22,7 @@ server/ca-certificate.crt
 logs/
 *.log
 
+client/playwright-report/
+client/test-results/
+
 server/static/rest_framework/**/*.png

@@ -1,45 +1,16 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import type { TierTypePayload, TierTypePlayerCell, TierTypeTile, TierTypeTrendPoint } from './playerProfileChartData';
 
 type SvgGroupSelection = ReturnType<typeof d3.select>;
 
 interface TierTypeHeatmapSVGProps {
     playerId: number;
+    data?: TierTypePayload;
     svgWidth?: number;
     svgHeight?: number;
-}
-
-interface TierTypeTile {
-    ship_type: string;
-    ship_tier: number;
-    count: number;
-}
-
-interface TierTypeTrendPoint {
-    ship_type: string;
-    avg_tier: number;
-    count: number;
-}
-
-interface TierTypePlayerCell {
-    ship_type: string;
-    ship_tier: number;
-    pvp_battles: number;
-    wins: number;
-    win_ratio: number;
-}
-
-interface TierTypePayload {
-    metric: 'tier_type';
-    label: string;
-    x_label: string;
-    y_label: string;
-    tracked_population: number;
-    tiles: TierTypeTile[];
-    trend: TierTypeTrendPoint[];
-    player_cells: TierTypePlayerCell[];
 }
 
 const SHIP_TYPE_ORDER = ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'];
@@ -361,6 +332,7 @@ const drawChart = (
 
 const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
     playerId,
+    data,
     svgWidth = 680,
     svgHeight = 332,
 }) => {
@@ -376,16 +348,16 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
 
         const load = async () => {
             try {
-                const { data } = await fetchSharedJson<TierTypePayload>(`/api/fetch/player_correlation/tier_type/${playerId}/`, {
+                const payload = data ?? (await fetchSharedJson<TierTypePayload>(`/api/fetch/player_correlation/tier_type/${playerId}/`, {
                     label: `Tier type correlation ${playerId}`,
-                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
-                });
+                    ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                })).data;
                 if (abortController.signal.aborted) {
                     return;
                 }
 
                 const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
-                drawChart(containerElement, data, resolvedSvgWidth, svgHeight);
+                drawChart(containerElement, payload, resolvedSvgWidth, svgHeight);
             } catch {
                 if (!abortController.signal.aborted) {
                     const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
@@ -396,7 +368,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
 
         load();
         return () => abortController.abort();
-    }, [playerId, svgHeight, svgWidth]);
+    }, [data, playerId, svgHeight, svgWidth]);
 
     return <div ref={containerRef} className="w-full" />;
 };

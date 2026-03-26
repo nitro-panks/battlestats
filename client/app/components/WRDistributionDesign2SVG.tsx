@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { getCorrelationTileBounds, getCorrelationTrendX } from './wrDistributionPayload';
 
 type D3Selection = ReturnType<typeof d3.select>;
 
@@ -19,15 +20,13 @@ interface CorrelationDomain {
 }
 
 interface CorrelationTile {
-    x_min: number;
-    x_max: number;
-    y_min: number;
-    y_max: number;
+    x_index: number;
+    y_index: number;
     count: number;
 }
 
 interface CorrelationTrendPoint {
-    x: number;
+    x_index: number;
     y: number;
     count: number;
 }
@@ -62,32 +61,36 @@ const clampToDomain = (value: number, domain: CorrelationDomain): number => {
     return Math.min(Math.max(value, domain.min), domain.max);
 };
 
-const interpolateTrendValue = (trend: CorrelationTrendPoint[], targetX: number): number | null => {
+const interpolateTrendValue = (trend: CorrelationTrendPoint[], xDomain: CorrelationDomain, targetX: number): number | null => {
     if (!trend.length) {
         return null;
     }
 
-    if (targetX <= trend[0].x) {
+    const firstX = getCorrelationTrendX(trend[0], xDomain);
+    if (targetX <= firstX) {
         return trend[0].y;
     }
 
-    if (targetX >= trend[trend.length - 1].x) {
+    const lastX = getCorrelationTrendX(trend[trend.length - 1], xDomain);
+    if (targetX >= lastX) {
         return trend[trend.length - 1].y;
     }
 
     for (let index = 1; index < trend.length; index += 1) {
         const left = trend[index - 1];
         const right = trend[index];
-        if (targetX > right.x) {
+        const leftX = getCorrelationTrendX(left, xDomain);
+        const rightX = getCorrelationTrendX(right, xDomain);
+        if (targetX > rightX) {
             continue;
         }
 
-        const span = right.x - left.x;
+        const span = rightX - leftX;
         if (span === 0) {
             return right.y;
         }
 
-        const t = (targetX - left.x) / span;
+        const t = (targetX - leftX) / span;
         return left.y + ((right.y - left.y) * t);
     }
 
@@ -258,15 +261,21 @@ const drawChart = (
         .data(payload.tiles)
         .enter()
         .append('rect')
-        .attr('x', (tile: CorrelationTile) => x(tile.x_min))
-        .attr('y', (tile: CorrelationTile) => y(tile.y_max))
-        .attr('width', (tile: CorrelationTile) => Math.max(1, x(tile.x_max) - x(tile.x_min)))
-        .attr('height', (tile: CorrelationTile) => Math.max(1, y(tile.y_min) - y(tile.y_max)))
+        .attr('x', (tile: CorrelationTile) => x(getCorrelationTileBounds(payload, tile).xMin))
+        .attr('y', (tile: CorrelationTile) => y(getCorrelationTileBounds(payload, tile).yMax))
+        .attr('width', (tile: CorrelationTile) => {
+            const bounds = getCorrelationTileBounds(payload, tile);
+            return Math.max(1, x(bounds.xMax) - x(bounds.xMin));
+        })
+        .attr('height', (tile: CorrelationTile) => {
+            const bounds = getCorrelationTileBounds(payload, tile);
+            return Math.max(1, y(bounds.yMin) - y(bounds.yMax));
+        })
         .attr('fill', '#2171b5')
         .attr('opacity', (tile: CorrelationTile) => tileOpacity(tile.count));
 
     const trendLine = d3.line()
-        .x((point: CorrelationTrendPoint) => x(point.x))
+        .x((point: CorrelationTrendPoint) => x(getCorrelationTrendX(point, payload.x_domain)))
         .y((point: CorrelationTrendPoint) => y(point.y))
         .curve(d3.curveMonotoneX);
 
@@ -277,7 +286,7 @@ const drawChart = (
         .attr('stroke-width', 1.75)
         .attr('d', trendLine);
 
-    const expectedSurvival = interpolateTrendValue(payload.trend, playerWR);
+    const expectedSurvival = interpolateTrendValue(payload.trend, payload.x_domain, playerWR);
     const survivalDelta = expectedSurvival == null ? null : playerSurvivalRate - expectedSurvival;
     const playerColor = selectColorByWR(playerWR);
     const plottedPlayerWR = clampToDomain(playerWR, payload.x_domain);
@@ -377,7 +386,7 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
             try {
                 const { data: payload } = await fetchSharedJson<CorrelationPayload>('/api/fetch/player_correlation/win_rate_survival/', {
                     label: 'Win rate survival correlation',
-                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                 });
                 if (abortController.signal.aborted) {
                     return;

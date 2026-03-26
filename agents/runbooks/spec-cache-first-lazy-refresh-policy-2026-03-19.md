@@ -2,7 +2,7 @@
 
 _Captured: 2026-03-19_
 
-_Status: active policy; implemented tranche through 2026-03-20_
+_Status: active policy; implemented tranche through 2026-03-25_
 
 ## Goal
 
@@ -29,9 +29,10 @@ The current repo implements the following parts of this policy:
 
 1. landing player and clan published surfaces now default to a 12-hour cache TTL
 2. public random landing players and clans read from the published cache path rather than consuming queue-pop reads on every request
-3. landing cache invalidation now marks cache families dirty and schedules republish work instead of deleting the currently served payloads immediately
-4. player derived chart payloads and explorer summaries now remain in place until newer source timestamps exist locally
-5. clan battle season reads now prefer cached results and queue background refreshes instead of synchronously rebuilding stale empty caches
+3. landing player and clan published surfaces retain a durable published fallback copy, so public reads stay hot after first publish even if the TTL-bound primary key is missing
+4. landing cache invalidation now marks cache families dirty and schedules republish work instead of deleting the currently served payloads immediately
+5. player derived chart payloads and explorer summaries now remain in place until newer source timestamps exist locally
+6. clan battle season reads now prefer cached results and queue background refreshes instead of synchronously rebuilding stale empty caches
 
 This leaves the document active as the durable policy source while the archived tranche specs capture the narrower planning history that led here.
 
@@ -97,6 +98,12 @@ For every API endpoint and page-data fetch:
 3. Do not synchronously fetch upstream data because the payload is stale.
 4. Do not synchronously rebuild derived data because the payload is stale.
 5. At most, enqueue background refresh work for the underlying source data.
+
+For published landing player and clan payloads specifically:
+
+1. keep a durable published fallback copy once a surface has been built at least once
+2. if the TTL-bound primary key is missing but the published fallback exists, serve the published fallback and queue republish work
+3. only perform synchronous build work when neither the primary cache entry nor the published fallback exists yet
 
 The user-visible experience should be:
 

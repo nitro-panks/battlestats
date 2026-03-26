@@ -26,11 +26,13 @@ jest.mock('d3', () => {
             range: jest.Mock;
             padding: jest.Mock;
             bandwidth: jest.Mock;
+            step: jest.Mock;
         };
         scale.domain = jest.fn(() => scale);
         scale.range = jest.fn(() => scale);
         scale.padding = jest.fn(() => scale);
         scale.bandwidth = jest.fn(() => 24);
+        scale.step = jest.fn(() => 25);
         return scale;
     };
 

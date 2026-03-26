@@ -44,14 +44,27 @@ Hidden accounts now use a shared mask icon treatment across suggestions, landing
 
 The clan roster mounted on both `ClanDetail` and `PlayerDetail` is also the shared owner of clan-member efficiency-rank icon hydration. It fetches the single `/api/fetch/clan_members/<clan_id>/` payload, shows a compact `Updating Battlestats rank icons...` status while any member row is still warming, and then renders inline sigma icons for Expert-ranked clan members once the published rank snapshot catches up.
 
+The clan plot now also tolerates backend warmup gaps more explicitly. When `/api/fetch/clan_data/<clan_id>:active` returns an empty payload with `X-Clan-Plot-Pending: true`, the client keeps the chart in a loading state, retries the fetch on a short cadence, and avoids briefly rendering `No clan chart data available.` while clan detail or member hydration is still catching up.
+
 ## Player Detail Notes
 
 The player detail surface is intentionally split across two columns.
 
-- The left column focuses on clan context and compact performance summaries: clan plot, clan members, clan battle seasons, efficiency badges, and the tier chart.
-- The right column focuses on broader comparison views: summary cards, top ships, ranked sections, tier-vs-type profile, and the ship-type chart.
+- The left column focuses on clan context only: clan plot and clan members.
+- The right column keeps the summary cards above an `Insights` tab surface for broader analysis.
 
-Recent UI tightening also reduced the badge-table body font size, simplified the efficiency summary cards, added inline badge totals in the section header, and limited the clan battle seasons table viewport to five visible rows before scroll.
+The current insights lanes are:
+
+- `Population`: win-rate and battle-distribution charts.
+- `Ships`: top ships.
+- `Ranked`: ranked heatmap and ranked seasons.
+- `Profile`: tier-vs-type, ship-type, and tier performance charts.
+- `Badges`: efficiency badges.
+- `Clan Battles`: player clan battle seasons.
+
+Recent UI tightening also reduced the badge-table body font size, simplified the efficiency summary cards, added inline badge totals in the section header, and tuned the player-tab efficiency badge and clan battle tables to show up to ten visible rows before scroll.
+
+After the main player payload resolves, the inactive insights tabs now warm their data in the background during idle time. This warmup is data-only: it does not mount hidden tab DOM, and clan-battle warmup is skipped for clanless players.
 
 When the player payload includes a fresh published Expert efficiency-rank snapshot, the header renders the Battlestats sigma icon. Non-Expert published tiers and stored badge-only fallback rows no longer render a visible header sigma, which keeps the player-detail header aligned with the current `E`-only rule used on the other player-list surfaces. This header marker remains distinct from the lower `Efficiency Badges` section, which still represents the raw ship-level WG badge rows.
 
@@ -61,22 +74,83 @@ The landing-page `Best` active-player mode is now resilient to sparse high-tier 
 
 ## Testing
 
-The client now has a small Jest + React Testing Library regression layer.
+The client now has two frontend test lanes:
+
+- Jest + React Testing Library for component and route-loader regressions.
+- Playwright for browser-level route smoke tests.
 
 Run it with:
 
 ```bash
 npm test -- --runInBand
 npm run test:ci
+npm run test:e2e:install
+npm run test:e2e:install:deps
+npm run test:e2e
 ```
 
-Current coverage is intentionally focused on route loaders, route helpers, header search behavior, compact efficiency badge rendering/sorting, and clan-chart redraw signatures.
+On Linux hosts, use `npm run test:e2e:install:deps` for the first Playwright setup if Chromium reports missing shared libraries such as `libgbm.so.1`.
+
+Current coverage is intentionally focused on route loaders, route helpers, header search behavior, compact efficiency badge rendering/sorting, player-detail tab orchestration, and clan-chart behavior.
 
 Focused route and analytics checks include:
 
 ```bash
 npm test -- --runInBand app/components/__tests__/PlayerRouteView.test.tsx app/components/__tests__/ClanRouteView.test.tsx app/lib/__tests__/visitAnalytics.test.ts
 ```
+
+The current Playwright smoke checks are:
+
+```bash
+npm run test:e2e -- e2e/player-route-warmup.spec.ts
+npm run test:e2e -- e2e/clan-route-clan-chart-pending.spec.ts
+npm run test:e2e -- e2e/player-detail-tabs.spec.ts
+npm run test:e2e -- e2e/ranked-heatmap-performance.spec.ts
+npm run test:e2e:benchmarks
+```
+
+They run a real browser against the routed player and clan detail pages, mock the `/api/...` surface in-browser, and verify both of these route-critical contracts:
+
+- player insights warmup does not start until the player route payload resolves
+- clan chart loading remains stable while the backend signals `X-Clan-Plot-Pending: true`
+- player detail tabs can be opened end to end without surfacing chart/table failure states across profile, population, ships, ranked, badges, and clan battles
+
+### Playwright metadata
+
+The current Playwright lane is a browser-smoke harness, not a full end-to-end suite against Django.
+
+- Config file: `client/playwright.config.ts`
+- Runner package: `@playwright/test`
+- Browser target: Chromium only
+- Base URL: `http://127.0.0.1:3100`
+- Dev server owner: Playwright starts `npm run dev -- --hostname 127.0.0.1 --port 3100`
+- Server reuse: local runs reuse an existing dev server when possible; CI does not
+- Default artifacts: traces and videos are retained on failure, screenshots are captured on failure, and outputs are written under `client/test-results/playwright/`
+
+Current spec roles:
+
+- `e2e/player-route-warmup.spec.ts`: proves inactive tab warmup waits for the routed player payload
+- `e2e/clan-route-clan-chart-pending.spec.ts`: proves pending clan-plot responses stay in loading state instead of flashing empty-chart UI
+- `e2e/player-detail-tabs.spec.ts`: opens the major player-detail insight tabs end to end and checks that each lane settles without user-facing failure text
+- `e2e/ranked-heatmap-performance.spec.ts`: exercises a dense mocked ranked payload in Chromium and logs bounded timing metrics for the ranked heatmap draw path
+- `e2e/player-route-cold-performance-live.spec.ts`: hits 10 real player routes, isolates the routed player shell, and stores timestamped cold-route timing JSON for trend comparison
+- `e2e/profile-chart-performance-live.spec.ts`: hits 10 real player profile tabs, verifies the single `tier_type` request contract, and stores timestamped chart timing JSON for trend comparison
+
+Benchmark artifact and trend storage:
+
+- latest benchmark JSON: `client/test-results/playwright/benchmarks/`
+- timestamped snapshots for trend analysis: `logs/benchmarks/client/<benchmark-name>/`
+- append-only trend lines: `logs/benchmarks/client/history/<benchmark-name>.jsonl`
+
+The nightly benchmark workflow uploads both locations as CI artifacts so runs can be compared over time.
+
+Important conventions used by the current specs:
+
+- specs mock the `/api/...` surface with `page.route(...)` instead of depending on a live Django backend for each browser run
+- specs intentionally use route-specific fixture payloads and custom response headers such as `X-Clan-Plot-Pending` to drive client-side retry and pending-state logic
+- these tests are best treated as deterministic browser-contract checks for route safety, not as backend integration coverage
+
+For the broader test posture, remaining gaps, and CI guidance, see [agents/runbooks/runbook-client-test-hardening.md](../agents/runbooks/runbook-client-test-hardening.md).
 
 The client also has a focused player-detail regression for the Battlestats efficiency-rank header icon:
 

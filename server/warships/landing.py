@@ -21,8 +21,12 @@ LANDING_CLAN_CACHE_TTL = 60 * 60 * 12
 LANDING_PLAYER_CACHE_TTL = 60 * 60 * 12
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v4'
 LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v4:meta'
+LANDING_CLANS_PUBLISHED_CACHE_KEY = 'landing:clans:v4:published'
+LANDING_CLANS_PUBLISHED_METADATA_KEY = 'landing:clans:v4:published:meta'
 LANDING_CLANS_BEST_CACHE_KEY = 'landing:clans:best:v1'
 LANDING_CLANS_BEST_CACHE_METADATA_KEY = 'landing:clans:best:v1:meta'
+LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY = 'landing:clans:best:v1:published'
+LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY = 'landing:clans:best:v1:published:meta'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
 LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v6'
 LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v12:namespace'
@@ -30,11 +34,11 @@ LANDING_CLANS_DIRTY_KEY = 'landing:clans:dirty:v1'
 LANDING_PLAYERS_DIRTY_KEY = 'landing:players:dirty:v1'
 LANDING_RECENT_CLANS_DIRTY_KEY = 'landing:recent_clans:dirty:v1'
 LANDING_RECENT_PLAYERS_DIRTY_KEY = 'landing:recent_players:dirty:v1'
-LANDING_CLAN_FEATURED_COUNT = 40
+LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_CLAN_BEST_MIN_ACTIVE_SHARE = 0.30
 LANDING_CLAN_MODES = ('random', 'best')
-LANDING_PLAYER_LIMIT = 40
+LANDING_PLAYER_LIMIT = 25
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 LANDING_PLAYER_BEST_MIN_HIGH_TIER_PVP_BATTLES = 500
@@ -54,7 +58,7 @@ LANDING_RANDOM_PLAYER_QUEUE_KEY = 'landing:queue:players:random:v1'
 LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_KEY = 'landing:queue:players:random:eligible:v1'
 LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY = 'landing:queue:players:random:lock:v1'
 LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE = 100
-LANDING_RANDOM_PLAYER_QUEUE_REFILL_SIZE = 40
+LANDING_RANDOM_PLAYER_QUEUE_REFILL_SIZE = 25
 LANDING_RANDOM_PLAYER_QUEUE_REFILL_THRESHOLD = 60
 LANDING_RANDOM_PLAYER_QUEUE_LOCK_TIMEOUT = 30
 LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_TTL = 10 * 60
@@ -63,7 +67,7 @@ LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_KEY = 'landing:queue:clans:random:eligible:v1
 LANDING_RANDOM_CLAN_QUEUE_LOCK_KEY = 'landing:queue:clans:random:lock:v1'
 LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY = 'landing:queue:clans:random:preview:v1'
 LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE = 100
-LANDING_RANDOM_CLAN_QUEUE_REFILL_SIZE = 40
+LANDING_RANDOM_CLAN_QUEUE_REFILL_SIZE = 30
 LANDING_RANDOM_CLAN_QUEUE_REFILL_THRESHOLD = 60
 LANDING_RANDOM_CLAN_QUEUE_LOCK_TIMEOUT = 30
 LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_TTL = 10 * 60
@@ -235,6 +239,14 @@ def landing_player_cache_metadata_key(mode: str, limit: int) -> str:
     return f'landing:players:v12:n{namespace}:{mode}:{limit}:meta'
 
 
+def landing_player_published_cache_key(mode: str, limit: int) -> str:
+    return f'landing:players:v12:published:{mode}:{limit}'
+
+
+def landing_player_published_metadata_key(mode: str, limit: int) -> str:
+    return f'landing:players:v12:published:{mode}:{limit}:meta'
+
+
 def landing_player_cache_ttl(mode: str) -> int:
     if mode in LANDING_PLAYER_MODES:
         return LANDING_PLAYER_CACHE_TTL
@@ -285,6 +297,52 @@ def _queue_landing_republish() -> None:
     queue_landing_page_warm()
 
 
+def _publish_landing_payload(
+    cache_key: str,
+    metadata_key: str,
+    published_cache_key: str,
+    published_metadata_key: str,
+    payload: list[dict],
+    metadata: dict[str, str | int],
+    ttl_seconds: int,
+) -> None:
+    cache.set(cache_key, payload, ttl_seconds)
+    cache.set(metadata_key, metadata, ttl_seconds)
+    cache.set(published_cache_key, payload, timeout=None)
+    cache.set(published_metadata_key, metadata, timeout=None)
+
+
+def _get_cached_landing_payload_with_fallback(
+    cache_key: str,
+    metadata_key: str,
+    published_cache_key: str,
+    published_metadata_key: str,
+    ttl_seconds: int,
+    force_refresh: bool,
+) -> tuple[list[dict] | None, dict[str, str | int]]:
+    payload = None if force_refresh else cache.get(cache_key)
+    metadata = _normalize_landing_player_cache_metadata(
+        None if force_refresh else cache.get(metadata_key), ttl_seconds)
+
+    if payload is not None:
+        if cache.get(metadata_key) is None:
+            cache.set(metadata_key, metadata, ttl_seconds)
+        cache.set(published_cache_key, payload, timeout=None)
+        cache.set(published_metadata_key, metadata, timeout=None)
+        return payload, metadata
+
+    published_payload = None if force_refresh else cache.get(
+        published_cache_key)
+    if published_payload is not None:
+        published_metadata = _normalize_landing_player_cache_metadata(
+            cache.get(published_metadata_key), ttl_seconds)
+        cache.set(published_metadata_key, published_metadata, timeout=None)
+        _queue_landing_republish()
+        return published_payload, published_metadata
+
+    return None, metadata
+
+
 def landing_clan_cache_metadata_key() -> str:
     return LANDING_CLANS_CACHE_METADATA_KEY
 
@@ -293,18 +351,30 @@ def get_landing_clans_payload_with_cache_metadata(force_refresh: bool = False) -
     ttl_seconds = LANDING_CLAN_CACHE_TTL
     cache_key = LANDING_CLANS_CACHE_KEY
     metadata_key = landing_clan_cache_metadata_key()
+    published_cache_key = LANDING_CLANS_PUBLISHED_CACHE_KEY
+    published_metadata_key = LANDING_CLANS_PUBLISHED_METADATA_KEY
 
-    payload = None if force_refresh else cache.get(cache_key)
-    metadata = _normalize_landing_player_cache_metadata(
-        None if force_refresh else cache.get(metadata_key), ttl_seconds)
+    payload, metadata = _get_cached_landing_payload_with_fallback(
+        cache_key,
+        metadata_key,
+        published_cache_key,
+        published_metadata_key,
+        ttl_seconds,
+        force_refresh,
+    )
 
     if payload is None:
         payload = _build_landing_clans()
         metadata = _build_landing_player_cache_metadata(ttl_seconds)
-        cache.set(cache_key, payload, ttl_seconds)
-        cache.set(metadata_key, metadata, ttl_seconds)
-    elif cache.get(metadata_key) is None:
-        cache.set(metadata_key, metadata, ttl_seconds)
+        _publish_landing_payload(
+            cache_key,
+            metadata_key,
+            published_cache_key,
+            published_metadata_key,
+            payload,
+            metadata,
+            ttl_seconds,
+        )
 
     return payload, metadata
 
@@ -330,6 +400,15 @@ def normalize_landing_player_limit(requested_limit: int | None) -> int:
         parsed_limit = LANDING_PLAYER_LIMIT
 
     return max(1, min(parsed_limit, LANDING_PLAYER_LIMIT))
+
+
+def normalize_landing_clan_limit(requested_limit: int | None) -> int:
+    try:
+        parsed_limit = int(requested_limit or LANDING_CLAN_FEATURED_COUNT)
+    except (TypeError, ValueError):
+        parsed_limit = LANDING_CLAN_FEATURED_COUNT
+
+    return max(1, min(parsed_limit, LANDING_CLAN_FEATURED_COUNT))
 
 
 def invalidate_landing_clan_caches() -> None:
@@ -550,14 +629,14 @@ def ensure_random_landing_clan_queue_ready(
 
 
 def peek_random_landing_clan_ids(limit: int = LANDING_CLAN_FEATURED_COUNT) -> tuple[list[int], int]:
-    normalized_limit = normalize_landing_player_limit(limit)
+    normalized_limit = normalize_landing_clan_limit(limit)
     ensure_random_landing_clan_queue_ready(minimum_size=normalized_limit)
     queue_ids = _get_random_landing_clan_queue()
     return queue_ids[:normalized_limit], len(queue_ids)
 
 
 def pop_random_landing_clan_ids(limit: int = LANDING_CLAN_FEATURED_COUNT) -> tuple[list[int], int]:
-    normalized_limit = normalize_landing_player_limit(limit)
+    normalized_limit = normalize_landing_clan_limit(limit)
     ensure_random_landing_clan_queue_ready(minimum_size=normalized_limit)
 
     if not _acquire_random_landing_clan_queue_lock():
@@ -687,18 +766,30 @@ def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = Fal
     ttl_seconds = LANDING_CLAN_CACHE_TTL
     cache_key = LANDING_CLANS_BEST_CACHE_KEY
     metadata_key = LANDING_CLANS_BEST_CACHE_METADATA_KEY
+    published_cache_key = LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY
+    published_metadata_key = LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY
 
-    payload = None if force_refresh else cache.get(cache_key)
-    metadata = _normalize_landing_player_cache_metadata(
-        None if force_refresh else cache.get(metadata_key), ttl_seconds)
+    payload, metadata = _get_cached_landing_payload_with_fallback(
+        cache_key,
+        metadata_key,
+        published_cache_key,
+        published_metadata_key,
+        ttl_seconds,
+        force_refresh,
+    )
 
     if payload is None:
         payload = _build_best_landing_clans(LANDING_CLAN_FEATURED_COUNT)
         metadata = _build_landing_player_cache_metadata(ttl_seconds)
-        cache.set(cache_key, payload, ttl_seconds)
-        cache.set(metadata_key, metadata, ttl_seconds)
-    elif cache.get(metadata_key) is None:
-        cache.set(metadata_key, metadata, ttl_seconds)
+        _publish_landing_payload(
+            cache_key,
+            metadata_key,
+            published_cache_key,
+            published_metadata_key,
+            payload,
+            metadata,
+            ttl_seconds,
+        )
 
     return payload, metadata
 
@@ -738,7 +829,7 @@ def get_random_landing_clan_queue_payload(
     schedule_refill: bool = True,
     warm_preview: bool = False,
 ) -> tuple[list[dict], dict[str, str | int | bool]]:
-    normalized_limit = normalize_landing_player_limit(limit)
+    normalized_limit = normalize_landing_clan_limit(limit)
     if pop:
         clan_ids, queue_remaining = pop_random_landing_clan_ids(
             normalized_limit)
@@ -1267,6 +1358,10 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
     cache_key = landing_player_cache_key(normalized_mode, normalized_limit)
     metadata_key = landing_player_cache_metadata_key(
         normalized_mode, normalized_limit)
+    published_cache_key = landing_player_published_cache_key(
+        normalized_mode, normalized_limit)
+    published_metadata_key = landing_player_published_metadata_key(
+        normalized_mode, normalized_limit)
     ttl_seconds = landing_player_cache_ttl(normalized_mode)
 
     if normalized_mode == 'best':
@@ -1276,17 +1371,27 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
     else:
         builder = _build_random_landing_players
 
-    payload = None if force_refresh else cache.get(cache_key)
-    metadata = _normalize_landing_player_cache_metadata(
-        None if force_refresh else cache.get(metadata_key), ttl_seconds)
+    payload, metadata = _get_cached_landing_payload_with_fallback(
+        cache_key,
+        metadata_key,
+        published_cache_key,
+        published_metadata_key,
+        ttl_seconds,
+        force_refresh,
+    )
 
     if payload is None:
         payload = builder(normalized_limit)
         metadata = _build_landing_player_cache_metadata(ttl_seconds)
-        cache.set(cache_key, payload, ttl_seconds)
-        cache.set(metadata_key, metadata, ttl_seconds)
-    elif cache.get(metadata_key) is None:
-        cache.set(metadata_key, metadata, ttl_seconds)
+        _publish_landing_payload(
+            cache_key,
+            metadata_key,
+            published_cache_key,
+            published_metadata_key,
+            payload,
+            metadata,
+            ttl_seconds,
+        )
 
     return payload, metadata
 

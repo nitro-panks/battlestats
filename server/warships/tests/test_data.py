@@ -8,7 +8,7 @@ from django.utils import timezone
 from warships.clan_crawl import run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
 from warships.data import update_snapshot_data, fetch_activity_data, fetch_clan_plot_data, fetch_randoms_data, fetch_player_summary, fetch_tier_data, fetch_type_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
-from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
+from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
 from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship
 
 
@@ -374,6 +374,49 @@ class DerivedChartCacheRefreshTests(TestCase):
         self.assertEqual(rows, cached_plot)
         mock_update_clan_data_task.assert_called_once_with(clan_id="4601")
         mock_update_clan_members_task.assert_called_once_with(clan_id="4601")
+
+    @patch("warships.data.update_clan_members_task.delay")
+    @patch("warships.data.update_clan_data_task.delay")
+    def test_fetch_clan_plot_data_rebuilds_cached_empty_rows_for_populated_clan(
+        self,
+        mock_update_clan_data_task,
+        mock_update_clan_members_task,
+    ):
+        clan = Clan.objects.create(
+            clan_id=4602,
+            name="WarmPlotClan",
+            tag="WPC",
+            members_count=2,
+            last_fetch=timezone.now(),
+        )
+        Player.objects.create(
+            name="PlotMemberA",
+            player_id=46021,
+            clan=clan,
+            pvp_battles=250,
+            pvp_ratio=55.0,
+        )
+        Player.objects.create(
+            name="PlotMemberB",
+            player_id=46022,
+            clan=clan,
+            pvp_battles=180,
+            pvp_ratio=52.5,
+        )
+        cache.set("clan:plot:v1:4602:active", [], 900)
+
+        rows = fetch_clan_plot_data("4602", filter_type="active")
+
+        self.assertEqual(
+            rows,
+            [
+                {"player_name": "PlotMemberA", "pvp_battles": 250, "pvp_ratio": 55.0},
+                {"player_name": "PlotMemberB", "pvp_battles": 180, "pvp_ratio": 52.5},
+            ],
+        )
+        self.assertEqual(cache.get("clan:plot:v1:4602:active"), rows)
+        mock_update_clan_data_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
 
 
 class PlayerSummaryRefreshTests(TestCase):
@@ -1428,7 +1471,8 @@ class PlayerDataHardeningTests(TestCase):
             player_id=9191,
             last_fetch=timezone.now() - timedelta(days=2),
         )
-        stale_player_key = landing_player_cache_key("random", 40)
+        stale_player_key = landing_player_cache_key(
+            "random", LANDING_PLAYER_LIMIT)
         cache.set(stale_player_key, [{"name": "stale"}], 60)
         cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY,
                   [{"name": "recent-stale"}], 60)
@@ -1443,7 +1487,7 @@ class PlayerDataHardeningTests(TestCase):
         update_player_data(player, force_refresh=True)
 
         self.assertEqual(cache.get(landing_player_cache_key(
-            "random", 40)), [{"name": "stale"}])
+            "random", LANDING_PLAYER_LIMIT)), [{"name": "stale"}])
         self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
                          {"name": "recent-stale"}])
         self.assertIsNotNone(cache.get(LANDING_PLAYERS_DIRTY_KEY))
@@ -1660,7 +1704,7 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(summary.wins_last_29_days, 4)
         self.assertEqual(summary.active_days_last_29_days, 2)
         self.assertEqual(summary.kill_ratio, 0.0)
-        self.assertAlmostEqual(summary.player_score, 3.13, places=2)
+        self.assertAlmostEqual(summary.player_score, 3.12, places=2)
         self.assertEqual(summary.ships_played_total, 2)
         self.assertEqual(summary.ship_type_spread, 2)
         self.assertEqual(summary.tier_spread, 2)

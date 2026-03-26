@@ -393,7 +393,7 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
     @patch("warships.data._get_clan_battle_seasons_metadata")
     def test_fetch_player_clan_battle_seasons_persists_durable_summary_and_invalidates_landing_caches(self, mock_meta, mock_player_stats):
         from warships.data import fetch_player_clan_battle_seasons
-        from warships.landing import LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
+        from warships.landing import LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
 
         player = Player.objects.create(
             name="DurableClanBattlePlayer",
@@ -421,7 +421,8 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
             {"season_id": 31, "battles": 42, "wins": 23, "losses": 19},
             {"season_id": 32, "battles": 18, "wins": 9, "losses": 9},
         ]
-        original_random_key = landing_player_cache_key('random', 40)
+        original_random_key = landing_player_cache_key(
+            'random', LANDING_PLAYER_LIMIT)
         cache.set(original_random_key, [{'name': 'stale'}], 60)
         cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY,
                   [{'name': 'recent-stale'}], 60)
@@ -441,7 +442,7 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
                          {'name': 'recent-stale'}])
         self.assertEqual(cache.get(original_random_key), [{'name': 'stale'}])
         self.assertEqual(original_random_key,
-                         landing_player_cache_key('random', 40))
+                         landing_player_cache_key('random', LANDING_PLAYER_LIMIT))
         self.assertIsNotNone(cache.get(LANDING_PLAYERS_DIRTY_KEY))
         self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
 

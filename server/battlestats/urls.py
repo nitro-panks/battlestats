@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, player_clan_battle_seasons, landing_activity_attrition, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats, agentic_trace_dashboard, analytics_entity_view, analytics_top_entities
+from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, player_clan_battle_seasons, landing_activity_attrition, landing_best_warmup, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats, agentic_trace_dashboard, analytics_entity_view, analytics_top_entities
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -86,6 +86,10 @@ urlpatterns = [
          landing_players, name='landing_players'),
     path('api/landing/players',
          landing_players, name='landing_players_no_slash'),
+    path('api/landing/warm-best/',
+         landing_best_warmup, name='landing_best_warmup'),
+    path('api/landing/warm-best',
+         landing_best_warmup, name='landing_best_warmup_no_slash'),
     path('api/landing/player-suggestions/',
          player_name_suggestions, name='player_name_suggestions'),
     path('api/landing/player-suggestions',

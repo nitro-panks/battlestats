@@ -2,17 +2,12 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import type { TierRow } from './playerProfileChartData';
 
 interface TierSVGProps {
     playerId: number;
+    data?: TierRow[];
     svgHeight?: number;
-}
-
-interface TierRow {
-    ship_tier: number;
-    pvp_battles: number;
-    wins: number;
-    win_ratio: number;
 }
 
 const normalizeTierRows = (data: unknown): TierRow[] => {
@@ -36,7 +31,7 @@ const selectTierColorByWr = (winRatio: number): string => {
     return '#a50f15';
 };
 
-const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: number) => {
+const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: number, data?: TierRow[]) => {
     const containerWidth = Math.max(container.clientWidth || 0, 280);
     const compact = containerWidth < 420;
 
@@ -65,12 +60,7 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
         .append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
-    fetchSharedJson<unknown>(`/api/fetch/tier_data/${playerId}/`, {
-        label: `Tier data ${playerId}`,
-        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
-    })
-        .then(({ data }) => {
-            const rows = normalizeTierRows(data).sort((left, right) => right.ship_tier - left.ship_tier);
+    const renderRows = (rows: TierRow[]) => {
             if (rows.length === 0) {
                 return;
             }
@@ -226,13 +216,26 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
                 .text((datum: TierRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
 
             renderDetails(rows[0]);
+        };
+
+    if (data) {
+        renderRows(data);
+        return;
+    }
+
+    fetchSharedJson<unknown>(`/api/fetch/tier_data/${playerId}/`, {
+        label: `Tier data ${playerId}`,
+        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+    })
+        .then(({ data: payload }) => {
+            renderRows(normalizeTierRows(payload).sort((left, right) => right.ship_tier - left.ship_tier));
         })
         .catch((error) => {
             console.error('Error fetching tier data:', error);
         });
 };
 
-const TierSVG: React.FC<TierSVGProps> = ({ playerId, svgHeight = 334 }) => {
+const TierSVG: React.FC<TierSVGProps> = ({ playerId, data, svgHeight = 334 }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
@@ -242,7 +245,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId, svgHeight = 334 }) => {
         }
 
         const render = () => {
-            drawTierPlot(container, playerId, svgHeight);
+            drawTierPlot(container, playerId, svgHeight, data);
         };
 
         render();
@@ -251,7 +254,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId, svgHeight = 334 }) => {
         return () => {
             window.removeEventListener('resize', render);
         };
-    }, [playerId, svgHeight]);
+    }, [data, playerId, svgHeight]);
 
     return <div ref={containerRef} className="w-full"></div>;
 };

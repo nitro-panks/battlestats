@@ -5,6 +5,7 @@ from typing import Any
 
 from .crewai_runner import run_crewai_workflow
 from .graph import run_graph
+from .memory import get_memory_backend, get_memory_environment, is_phase0_memory_enabled, persist_phase0_memory_artifacts
 from .runlog import write_agent_run_log
 from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
 
@@ -24,6 +25,11 @@ def _prepare_langgraph_context(context: dict[str, Any]) -> dict[str, Any]:
 
     if db_engine.startswith("postgresql") and not db_password:
         prepared["checkpoint_backend"] = "memory"
+
+    if is_phase0_memory_enabled("langgraph", prepared):
+        prepared["memory_enabled"] = True
+        prepared.setdefault("memory_backend", get_memory_backend(prepared))
+        prepared.setdefault("memory_environment", get_memory_environment())
 
     return prepared
 
@@ -112,6 +118,12 @@ def run_routed_workflow(
                 task, context=_prepare_langgraph_context(resolved_context))
             result["selected_engine"] = "langgraph"
             result["route_rationale"] = route["rationale"]
+            result["memory_store_activity"] = persist_phase0_memory_artifacts(
+                result,
+                review_context=resolved_context.get("memory_review") if isinstance(
+                    resolved_context.get("memory_review"), dict) else None,
+                context=resolved_context,
+            )
             result["run_log_path"] = write_agent_run_log("langgraph", result)
         elif route["engine"] == "crewai":
             result = run_crewai_workflow(
@@ -136,6 +148,15 @@ def run_routed_workflow(
                 ],
                 "crew_result": crew_result,
                 "langgraph_result": graph_result,
+                "memory_store_activity": {
+                    "backend": get_memory_backend(resolved_context),
+                    "queued_candidate_count": 0,
+                    "promoted_count": 0,
+                    "rejected_count": 0,
+                    "reviewed_store_paths": [],
+                    "candidate_queue_path": None,
+                    "note": "Durable memory writes remain LangGraph-owned in this tranche.",
+                },
             }
             result["run_log_path"] = write_agent_run_log("hybrid", result)
 

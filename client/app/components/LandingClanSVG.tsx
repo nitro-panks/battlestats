@@ -153,16 +153,6 @@ const drawLandingClanChart = (
         .attr('y', -34)
         .text('Clan WR');
 
-    svgRoot
-        .append('g')
-        .attr('transform', `translate(${margin.left + width - 166}, 16)`)
-        .append('text')
-        .attr('x', 0)
-        .attr('y', 0)
-        .style('font-size', '10px')
-        .style('fill', '#64748b')
-        .text('dot color = win rate');
-
     const showDetails = (datum: PlotDatum) => {
         const detailGroup = svgRoot
             .append('g')

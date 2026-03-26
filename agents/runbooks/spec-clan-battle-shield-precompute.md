@@ -1,8 +1,14 @@
 # Clan Battle Shield Precompute — Spec
 
 **Date:** 2026-03-18  
-**Status:** Draft  
+**Status:** Superseded  
 **Scope:** Eliminate the on-demand hydration pattern for clan battle shields. Precompute and persist shield-ready data so it is immediately available to the client. Refresh lazily on player invocation.
+
+## Superseded Note
+
+This document reflects the original shield-precompute rollout. The current durability policy is defined in `agents/work-items/clan-list-shield-badge-durability-spec.md`.
+
+The important behavioral difference is that `clan_members()` no longer refreshes stale shield summaries during response generation. Shield freshness now belongs to slower producer lanes with a dedicated badge cadence (`CLAN_BATTLE_BADGE_REFRESH_DAYS`, default `14`).
 
 ---
 

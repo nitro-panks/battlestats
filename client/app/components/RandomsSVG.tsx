@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
-import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface RandomsSVGProps {
@@ -33,6 +33,10 @@ type RandomsChartDesign = 'design1' | 'design2';
 const TOP_N = 20;
 const DEFAULT_RANDOMS_DESIGN: RandomsChartDesign = 'design1';
 const WR_BREAKPOINTS = [45, 50, 52, 54, 56, 60, 65];
+const RANDOMS_CHART_SHIFT_RIGHT_PX = 15;
+const RANDOMS_CHART_RIGHT_EXTENSION_PX = 10;
+const RANDOMS_BAR_HEIGHT_INCREASE_PX = 2;
+const RANDOMS_CHART_HEIGHT_INCREASE_PX = 100;
 
 const selectRandomsColorByWr = (winRatio: number): string => {
     if (winRatio > 0.65) return '#810c9e';
@@ -70,9 +74,9 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
     const rows: RandomsChartRow[] = data.map((datum, index) => ({ ...datum, rowKey: `row-${index}` }));
     const labelByRowKey = new Map(rows.map((row) => [row.rowKey, row.ship_chart_name]));
     const containerWidth = containerElement.clientWidth;
-    const totalSvgWidth = Math.max(containerWidth || 0, 680);
-    const totalSvgHeight = 420;
-    const margin = { top: 28, right: 96, bottom: 48, left: 68 };
+    const totalSvgWidth = Math.max(containerWidth || 0, 680) + RANDOMS_CHART_RIGHT_EXTENSION_PX;
+    const totalSvgHeight = 420 + RANDOMS_CHART_HEIGHT_INCREASE_PX;
+    const margin = { top: 28, right: 96, bottom: 48, left: 68 + RANDOMS_CHART_SHIFT_RIGHT_PX };
     const width = totalSvgWidth - margin.left - margin.right;
     const height = totalSvgHeight - margin.top - margin.bottom;
 
@@ -94,6 +98,12 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         .range([0, height])
         .domain(rows.map((datum) => datum.rowKey))
         .padding(0.08);
+
+    const maxBarHeight = Math.max(1, y.step() - 1);
+    const backgroundBarHeight = Math.min((y.bandwidth() * 0.88) + RANDOMS_BAR_HEIGHT_INCREASE_PX, maxBarHeight);
+    const foregroundBarHeight = Math.min(y.bandwidth() + RANDOMS_BAR_HEIGHT_INCREASE_PX, maxBarHeight);
+    const backgroundBarOffset = (y.bandwidth() - backgroundBarHeight) / 2;
+    const foregroundBarOffset = (y.bandwidth() - foregroundBarHeight) / 2;
 
     const xGrid = d3.axisBottom(x).ticks(5).tickSize(-height).tickFormat(() => '');
     svg.append('g')
@@ -195,17 +205,17 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
 
     nodes.append('rect')
         .attr('x', 0)
-        .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + (y.bandwidth() * 0.1))
+        .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + backgroundBarOffset)
         .attr('width', (datum: RandomsChartRow) => x(datum.pvp_battles))
-        .attr('height', y.bandwidth() * 0.88)
+        .attr('height', backgroundBarHeight)
         .attr('rx', 3)
         .attr('fill', '#dbe4f0');
 
     nodes.append('rect')
         .attr('x', 0)
-        .attr('y', (datum: RandomsChartRow) => y(datum.rowKey) ?? 0)
+        .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + foregroundBarOffset)
         .attr('width', (datum: RandomsChartRow) => x(datum.wins))
-        .attr('height', y.bandwidth())
+        .attr('height', foregroundBarHeight)
         .attr('rx', 3)
         .style('stroke', '#334155')
         .style('stroke-width', 0.7)
@@ -227,7 +237,7 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
             const labelX = x(datum.pvp_battles) + 6;
             return labelX > width - 4 ? width - 4 : labelX;
         })
-        .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + (y.bandwidth() / 2) + 3)
+        .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + foregroundBarOffset + (foregroundBarHeight / 2) + 3)
         .style('font-size', '10px')
         .style('fill', '#64748b')
         .attr('text-anchor', (datum: RandomsChartRow) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
@@ -239,9 +249,9 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
 };
 
 const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRow[]) => {
-    const margin = { top: 30, right: 22, bottom: 36, left: 52 };
+    const margin = { top: 30, right: 22, bottom: 36, left: 57 };
     const width = 620 - margin.left - margin.right;
-    const height = 360 - margin.top - margin.bottom;
+    const height = (360 + RANDOMS_CHART_HEIGHT_INCREASE_PX) - margin.top - margin.bottom;
 
     const svg = d3.select(containerElement)
         .append('svg')
@@ -510,7 +520,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 const { data, headers } = await fetchSharedJson<unknown>(`/api/fetch/randoms_data/${playerId}/?all=true`, {
                     label: `Randoms data ${playerId}`,
                     responseHeaders: ['X-Randoms-Updated-At'],
-                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                 });
                 const result = normalizeRandomsRows(data);
                 setAllShips(result);
@@ -643,56 +653,55 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 </span>
             </div>
             <div className="mb-3 text-sm">
-                <div className="mb-1 flex items-center justify-between gap-4">
-                    <div className="font-semibold text-[#334155]">Ship Type</div>
-                    <div className="text-xs text-[#94a3b8]">Top {TOP_N} ships by battles after filters.</div>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                    <button
-                        key="all-types"
-                        type="button"
-                        aria-pressed={allTypesSelected}
-                        className={filterButtonClass(allTypesSelected)}
-                        onClick={selectAllTypes}
-                    >
-                        All
-                    </button>
-                    {availableTypes.map((shipType) => (
+                <div className="mb-3 flex flex-wrap items-start gap-3">
+                    <div className="w-20 shrink-0 font-semibold text-[#334155]">Ship Type</div>
+                    <div className="flex flex-1 flex-wrap justify-start gap-1">
                         <button
-                            key={shipType}
+                            key="all-types"
                             type="button"
-                            aria-pressed={selectedTypes.includes(shipType)}
-                            className={filterButtonClass(selectedTypes.includes(shipType))}
-                            onClick={() => toggleType(shipType)}
+                            aria-pressed={allTypesSelected}
+                            className={filterButtonClass(allTypesSelected)}
+                            onClick={selectAllTypes}
                         >
-                            {shipType}
+                            All
                         </button>
-                    ))}
+                        {availableTypes.map((shipType) => (
+                            <button
+                                key={shipType}
+                                type="button"
+                                aria-pressed={selectedTypes.includes(shipType)}
+                                className={filterButtonClass(selectedTypes.includes(shipType))}
+                                onClick={() => toggleType(shipType)}
+                            >
+                                {shipType}
+                            </button>
+                        ))}
+                    </div>
                 </div>
-                <div className="mt-3 mb-1 flex items-center justify-between gap-4">
-                    <div className="font-semibold text-[#334155]">Tier</div>
-                </div>
-                <div className="flex flex-wrap gap-1">
-                    <button
-                        key="all-tiers"
-                        type="button"
-                        aria-pressed={allTiersSelected}
-                        className={filterButtonClass(allTiersSelected)}
-                        onClick={selectAllTiers}
-                    >
-                        All
-                    </button>
-                    {availableTiers.map((tier) => (
+                <div className="mb-1 flex flex-wrap items-start gap-3">
+                    <div className="w-20 shrink-0 font-semibold text-[#334155]">Tier</div>
+                    <div className="flex flex-1 flex-wrap justify-start gap-1">
                         <button
-                            key={tier}
+                            key="all-tiers"
                             type="button"
-                            aria-pressed={selectedTiers.includes(tier)}
-                            className={filterButtonClass(selectedTiers.includes(tier))}
-                            onClick={() => toggleTier(tier)}
+                            aria-pressed={allTiersSelected}
+                            className={filterButtonClass(allTiersSelected)}
+                            onClick={selectAllTiers}
                         >
-                            T{tier}
+                            All
                         </button>
-                    ))}
+                        {availableTiers.map((tier) => (
+                            <button
+                                key={tier}
+                                type="button"
+                                aria-pressed={selectedTiers.includes(tier)}
+                                className={filterButtonClass(selectedTiers.includes(tier))}
+                                onClick={() => toggleTier(tier)}
+                            >
+                                T{tier}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
 

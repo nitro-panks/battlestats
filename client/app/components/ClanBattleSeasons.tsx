@@ -155,17 +155,14 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
 
     return (
         <div>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Clan Battles Seasons</h3>
-            <p className="mt-1 text-xs text-gray-500">Current roster aggregate by season. Active shows the share of the current clan roster that played that season.</p>
-
-            {loading && <p className="mt-3 text-sm text-gray-500">Loading clan battles seasons...</p>}
-            {!loading && error && <p className="mt-3 text-sm text-gray-500">{error}</p>}
+            {loading && <p className="text-sm text-gray-500">Loading clan battles seasons...</p>}
+            {!loading && error && <p className="text-sm text-gray-500">{error}</p>}
             {!loading && !error && seasons.length === 0 && (
-                <p className="mt-3 text-sm text-gray-500">No clan battles season data available.</p>
+                <p className="text-sm text-gray-500">No clan battles season data available.</p>
             )}
 
             {!loading && !error && seasons.length > 0 && (
-                <div className="mt-3 max-h-[28rem] overflow-y-auto overflow-x-auto rounded-sm">
+                <div className="max-h-[28rem] overflow-y-auto overflow-x-auto rounded-sm">
                     <table className="min-w-full border-collapse text-sm tabular-nums text-gray-700">
                         <thead>
                             <tr className="border-b border-gray-200 bg-white text-[11px] uppercase tracking-[0.14em] text-gray-500">

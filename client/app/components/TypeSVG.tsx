@@ -2,17 +2,12 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import type { TypeRow } from './playerProfileChartData';
 
 interface TypeSVGProps {
     playerId: number;
+    data?: TypeRow[];
     svgHeight?: number;
-}
-
-interface TypeRow {
-    ship_type: string;
-    pvp_battles: number;
-    wins: number;
-    win_ratio: number;
 }
 
 const normalizeTypeRows = (data: unknown): TypeRow[] => {
@@ -36,7 +31,7 @@ const selectTypeColorByWr = (winRatio: number): string => {
     return '#a50f15';
 };
 
-const drawTypePlot = (container: HTMLDivElement, playerId: number, svgHeight: number) => {
+const drawTypePlot = (container: HTMLDivElement, playerId: number, svgHeight: number, data?: TypeRow[]) => {
     const containerWidth = Math.max(container.clientWidth || 0, 280);
     const compact = containerWidth < 420;
 
@@ -65,12 +60,7 @@ const drawTypePlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
         .append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
-    fetchSharedJson<unknown>(`/api/fetch/type_data/${playerId}/`, {
-        label: `Type data ${playerId}`,
-        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
-    })
-        .then(({ data }) => {
-            const rows = normalizeTypeRows(data).sort((left, right) => right.pvp_battles - left.pvp_battles);
+    const renderRows = (rows: TypeRow[]) => {
             if (rows.length === 0) {
                 return;
             }
@@ -226,13 +216,26 @@ const drawTypePlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
                 .text((datum: TypeRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
 
             renderDetails(rows[0]);
+        };
+
+    if (data) {
+        renderRows(data);
+        return;
+    }
+
+    fetchSharedJson<unknown>(`/api/fetch/type_data/${playerId}/`, {
+        label: `Type data ${playerId}`,
+        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+    })
+        .then(({ data: payload }) => {
+            renderRows(normalizeTypeRows(payload).sort((left, right) => right.pvp_battles - left.pvp_battles));
         })
         .catch((error) => {
             console.error('Error fetching type data:', error);
         });
 };
 
-const TypeSVG: React.FC<TypeSVGProps> = ({ playerId, svgHeight = 210 }) => {
+const TypeSVG: React.FC<TypeSVGProps> = ({ playerId, data, svgHeight = 210 }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
@@ -242,7 +245,7 @@ const TypeSVG: React.FC<TypeSVGProps> = ({ playerId, svgHeight = 210 }) => {
         }
 
         const render = () => {
-            drawTypePlot(container, playerId, svgHeight);
+            drawTypePlot(container, playerId, svgHeight, data);
         };
 
         render();
@@ -251,7 +254,7 @@ const TypeSVG: React.FC<TypeSVGProps> = ({ playerId, svgHeight = 210 }) => {
         return () => {
             window.removeEventListener('resize', render);
         };
-    }, [playerId, svgHeight]);
+    }, [data, playerId, svgHeight]);
 
     return <div ref={containerRef} className="w-full"></div>;
 };

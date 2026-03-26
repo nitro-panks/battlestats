@@ -24,7 +24,7 @@ const buildExplorerResponse = (overrides: Partial<{
 const getLastRequestedUrl = (): URL => {
     const calls = (global.fetch as jest.Mock).mock.calls;
     const requestUrl = calls[calls.length - 1][0] as string;
-    return new URL(requestUrl);
+    return new URL(requestUrl, 'http://localhost');
 };
 
 describe('PlayerExplorer', () => {

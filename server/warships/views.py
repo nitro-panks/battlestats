@@ -19,19 +19,20 @@ from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
-    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer, PlayerExtendedCorrelationDistributionSerializer, \
+    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, CompactPlayerCorrelationDistributionSerializer, PlayerCorrelationDistributionSerializer, PlayerExtendedCorrelationDistributionSerializer, RankedPlayerCorrelationDistributionSerializer, \
     PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer, TopEntitiesQuerySerializer, TopEntityVisitSerializer
 from warships.data import clan_detail_needs_refresh, clan_members_missing_or_incomplete, fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
     fetch_player_explorer_page, fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, player_battle_data_needs_refresh, player_detail_needs_refresh, \
     fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, _get_published_efficiency_rank_payload, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
     is_sleepy_player, get_highest_ranked_league_name
-from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
 from warships.agentic.dashboard import get_agentic_trace_dashboard
-from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, update_clan_data_task, update_player_data_task, update_clan_members_task
+from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, queue_landing_best_entity_warm, update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def _delay_task_safely(task, **kwargs) -> None:
@@ -52,10 +53,10 @@ def _record_clan_lookup(clan: Clan) -> None:
 
 
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
-LANDING_CLAN_FEATURED_COUNT = 40
+LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_RECENT_PLAYER_SCORE_WINDOW = 120
-LANDING_PLAYER_LIMIT = 40
+LANDING_PLAYER_LIMIT = 25
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 400
@@ -127,6 +128,23 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 defaults={"name": normalized_lookup_value}
             )
 
+            from warships.data import update_player_data
+            update_player_data(player=obj, force_refresh=True)
+            obj.refresh_from_db()
+
+        # Some older player records have populated battle history but are still
+        # missing core derived detail fields. Repair those stale records before
+        # serializing the detail payload so first load does not show empty KDR
+        # or efficiency details that update_player_data can restore inline.
+        if (
+            not obj.is_hidden and
+            (obj.pvp_battles or 0) > 0 and
+            player_detail_needs_refresh(obj) and
+            (
+                obj.actual_kdr is None or
+                obj.efficiency_json is None
+            )
+        ):
             from warships.data import update_player_data
             update_player_data(player=obj, force_refresh=True)
             obj.refresh_from_db()
@@ -371,7 +389,7 @@ def player_distribution(request, metric: str) -> Response:
 def player_correlation_distribution(request, metric: str, player_id: str | None = None) -> Response:
     if metric == 'win_rate_survival' and player_id is None:
         data = fetch_player_wr_survival_correlation()
-        return _validated_single_response(data, PlayerCorrelationDistributionSerializer)
+        return _validated_single_response(data, CompactPlayerCorrelationDistributionSerializer)
 
     if metric == 'ranked_wr_battles' and player_id is not None:
         try:
@@ -379,15 +397,21 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
         except Player.DoesNotExist:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        return _validated_single_response(data, PlayerExtendedCorrelationDistributionSerializer)
+        return _validated_single_response(data, RankedPlayerCorrelationDistributionSerializer)
 
     if metric == 'tier_type' and player_id is not None:
         try:
-            data = fetch_player_tier_type_correlation(player_id)
+            player = Player.objects.only(
+                'player_id', 'battles_json').get(player_id=player_id)
+            data = fetch_player_tier_type_correlation(player_id, player=player)
         except Player.DoesNotExist:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        return _validated_single_response(data, PlayerTierTypeCorrelationSerializer)
+        response = _validated_single_response(
+            data, PlayerTierTypeCorrelationSerializer)
+        if not player.battles_json and not data.get('player_cells'):
+            response['X-Tier-Type-Pending'] = 'true'
+        return response
 
     return Response({'detail': 'Unsupported player correlation metric.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -507,7 +531,7 @@ def clan_members(request, clan_id: str) -> Response:
 
     _record_clan_lookup(clan)
 
-    from warships.data import queue_clan_efficiency_hydration, queue_clan_ranked_hydration, clan_battle_summary_is_stale, maybe_refresh_clan_battle_data, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT
+    from warships.data import queue_clan_efficiency_hydration, queue_clan_ranked_hydration
     local_member_count = clan.player_set.exclude(name='').count()
     needs_clan_refresh = (
         not clan.members_count
@@ -580,9 +604,6 @@ def clan_members(request, clan_id: str) -> Response:
         len(efficiency_hydration_state['pending_player_ids']))
     response['X-Efficiency-Hydration-Max-In-Flight'] = str(
         efficiency_hydration_state['max_in_flight'])
-    stale_members = [m for m in members if clan_battle_summary_is_stale(m)]
-    for member in stale_members[:CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT]:
-        maybe_refresh_clan_battle_data(member)
     return response
 
 
@@ -605,7 +626,21 @@ def clan_data(request, clan_filter: str) -> Response:
         _record_clan_lookup(clan)
 
     data = fetch_clan_plot_data(clan_id=clan_id, filter_type=filter_type)
-    return _validated_list_response(data, ClanDataSerializer)
+    response = _validated_list_response(data, ClanDataSerializer)
+
+    if clan is not None and not data:
+        cache_key = f'clan:plot:v1:{clan_id}:{filter_type}'
+        member_count = clan.player_set.exclude(name='').count()
+        has_cached_plot = cache.get(cache_key) is not None
+
+        if (
+            not has_cached_plot
+            or clan_detail_needs_refresh(clan)
+            or clan_members_missing_or_incomplete(clan, member_count=member_count)
+        ):
+            response['X-Clan-Plot-Pending'] = 'true'
+
+    return response
 
 
 @api_view(["GET"])
@@ -631,7 +666,21 @@ def clan_battle_seasons(request, clan_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_clan_battle_seasons(request, player_id: str) -> Response:
-    data = fetch_player_clan_battle_seasons(player_id)
+    player = Player.objects.select_related(
+        'clan').filter(player_id=player_id).first()
+
+    try:
+        data = fetch_player_clan_battle_seasons(player_id)
+    except Exception:
+        logger.exception(
+            'Player clan battle seasons endpoint failed for player_id=%s player_name=%s clan_id=%s clan_name=%s',
+            player_id,
+            getattr(player, 'name', None),
+            getattr(getattr(player, 'clan', None), 'clan_id', None),
+            getattr(getattr(player, 'clan', None), 'name', None),
+        )
+        raise
+
     return _validated_list_response(data, PlayerClanBattleSeasonSerializer)
 
 
@@ -650,11 +699,13 @@ def landing_clans(request) -> Response:
     except ValueError:
         return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
 
-    limit = normalize_landing_player_limit(request.query_params.get('limit'))
+    limit = normalize_landing_clan_limit(request.query_params.get('limit'))
     if mode == 'random':
         payload, cache_metadata = get_landing_clans_payload_with_cache_metadata()
     else:
         payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata()
+
+    payload = payload[:limit]
 
     response = Response(payload)
     response['X-Landing-Clans-Cache-Mode'] = mode
@@ -700,6 +751,18 @@ def landing_players(request) -> Response:
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_recent_players(request) -> Response:
     return Response(get_landing_recent_players_payload())
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def landing_best_warmup(request) -> Response:
+    result = queue_landing_best_entity_warm(
+        player_limit=LANDING_PLAYER_LIMIT,
+        clan_limit=LANDING_PLAYER_LIMIT,
+    )
+    status_code = status.HTTP_202_ACCEPTED if result.get(
+        'status') == 'queued' else status.HTTP_200_OK
+    return Response(result, status=status_code)
 
 
 @api_view(["GET"])

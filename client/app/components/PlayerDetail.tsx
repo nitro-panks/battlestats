@@ -2,11 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBed, faCrown, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
 import dynamic from 'next/dynamic';
+import ClanSVG from './ClanSVG';
 import DeferredSection from './DeferredSection';
-import PlayerEfficiencyBadges from './PlayerEfficiencyBadges';
-import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getHighestRankedLeagueName, getRankedLeagueTooltip, getRankedLeagueColor, type RankedLeagueName } from './rankedLeague';
+import PlayerDetailInsightsTabs from './PlayerDetailInsightsTabs';
 import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
@@ -97,11 +97,6 @@ const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, 
     </div>
 );
 
-const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 'PlayerDetail-ClanSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading clan chart..." minHeight={280} />,
-});
-
 const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMembers'), 'PlayerDetail-ClanMembers'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan members..." minHeight={96} />,
@@ -110,46 +105,6 @@ const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMem
 const PlayerClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./PlayerClanBattleSeasons'), 'PlayerDetail-PlayerClanBattleSeasons'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={180} />,
-});
-
-const RandomsSVG = dynamic(() => resilientDynamicImport(() => import('./RandomsSVG'), 'PlayerDetail-RandomsSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading top ships..." minHeight={500} />,
-});
-
-const RankedSeasons = dynamic(() => resilientDynamicImport(() => import('./RankedSeasons'), 'PlayerDetail-RankedSeasons'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading ranked seasons..." minHeight={220} />,
-});
-
-const RankedWRBattlesHeatmapSVG = dynamic(() => resilientDynamicImport(() => import('./RankedWRBattlesHeatmapSVG'), 'PlayerDetail-RankedWRBattlesHeatmapSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading ranked heatmap..." minHeight={280} />,
-});
-
-const TierSVG = dynamic(() => resilientDynamicImport(() => import('./TierSVG'), 'PlayerDetail-TierSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading tier chart..." minHeight={300} />,
-});
-
-const TypeSVG = dynamic(() => resilientDynamicImport(() => import('./TypeSVG'), 'PlayerDetail-TypeSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading ship type chart..." minHeight={192} />,
-});
-
-const TierTypeHeatmapSVG = dynamic(() => resilientDynamicImport(() => import('./TierTypeHeatmapSVG'), 'PlayerDetail-TierTypeHeatmapSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading tier vs type heatmap..." minHeight={332} />,
-});
-
-const WRDistributionSVG = dynamic(() => resilientDynamicImport(() => import('./WRDistributionSVG'), 'PlayerDetail-WRDistributionSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading win rate distribution..." minHeight={240} />,
-});
-
-const BattlesDistributionSVG = dynamic(() => resilientDynamicImport(() => import('./BattlesDistributionSVG'), 'PlayerDetail-BattlesDistributionSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading battles distribution..." minHeight={240} />,
 });
 
 const selectColorByWR = (winRatio: number): string => {
@@ -345,7 +300,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     const hasKnownRankedGames = Array.isArray(player.ranked_json)
         ? player.ranked_json.some((row) => (row?.total_battles || 0) > 0)
         : true;
-    const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
     const [clanBattleSummary, setClanBattleSummary] = useState<PlayerClanBattleSummary | null>(() => getInitialClanBattleHeaderState(player));
     const [shouldLoadClanMembers, setShouldLoadClanMembers] = useState(false);
     const isClanBattleEnjoyer = clanBattleSummary !== null;
@@ -353,9 +307,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 
     usePlayerRouteDiagnostics(player.player_id, player.name);
 
-    useEffect(() => {
-        setShowRankedHeatmap(hasKnownRankedGames);
-    }, [hasKnownRankedGames, player.player_id]);
 
     useEffect(() => {
         setClanBattleSummary(getInitialClanBattleHeaderState(player));
@@ -492,100 +443,10 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     <ClanMembers members={clanMembers} loading={clanMembersLoading} error={clanMembersError} onSelectMember={onSelectMember} layout="stacked" />
                                 </div>
                             </DeferredSection>
-                            {!player.is_hidden ? (
-                                <DeferredSection
-                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
-                                    minHeight={180}
-                                    placeholder={<LoadingPanel label="Preparing clan battle seasons..." minHeight={180} />}
-                                    playerId={player.player_id}
-                                    rootMargin="80px 0px"
-                                    sectionId="clan-battle-seasons"
-                                >
-                                    <div id="player_clan_battle_seasons_container">
-                                        <PlayerClanBattleSeasons playerId={player.player_id} onSummaryChange={handleClanBattleSummaryChange} />
-                                    </div>
-                                </DeferredSection>
-                            ) : null}
-                            {!player.is_hidden ? (
-                                <DeferredSection
-                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
-                                    minHeight={240}
-                                    placeholder={<LoadingPanel label="Preparing efficiency badges..." minHeight={240} />}
-                                    playerId={player.player_id}
-                                    rootMargin="80px 0px"
-                                    sectionId="efficiency-badges"
-                                >
-                                    <div id="player_efficiency_badges_container">
-                                        <PlayerEfficiencyBadges
-                                            efficiencyRows={player.efficiency_json}
-                                        />
-                                    </div>
-                                </DeferredSection>
-                            ) : null}
-                            {!player.is_hidden ? (
-                                <DeferredSection
-                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
-                                    minHeight={300}
-                                    placeholder={<LoadingPanel label="Preparing tier chart..." minHeight={300} />}
-                                    playerId={player.player_id}
-                                    rootMargin="80px 0px"
-                                    sectionId="tier-chart"
-                                >
-                                    <div>
-                                        <SectionHeadingWithTooltip
-                                            title="Performance by Tier"
-                                            description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
-                                            className="mb-2"
-                                        />
-                                        <TierSVG playerId={player.player_id} svgHeight={300} />
-                                    </div>
-                                </DeferredSection>
-                            ) : null}
-                            {!player.is_hidden ? (
-                                null
-                            ) : null}
                         </>
                     ) : (
                         <>
                             <p className="text-sm text-gray-500">No clan data available</p>
-                            {!player.is_hidden ? (
-                                <DeferredSection
-                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
-                                    minHeight={240}
-                                    placeholder={<LoadingPanel label="Preparing efficiency badges..." minHeight={240} />}
-                                    playerId={player.player_id}
-                                    rootMargin="80px 0px"
-                                    sectionId="efficiency-badges"
-                                >
-                                    <div id="player_efficiency_badges_container">
-                                        <PlayerEfficiencyBadges
-                                            efficiencyRows={player.efficiency_json}
-                                        />
-                                    </div>
-                                </DeferredSection>
-                            ) : null}
-                            {!player.is_hidden ? (
-                                <DeferredSection
-                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
-                                    minHeight={300}
-                                    placeholder={<LoadingPanel label="Preparing tier chart..." minHeight={300} />}
-                                    playerId={player.player_id}
-                                    rootMargin="80px 0px"
-                                    sectionId="tier-chart"
-                                >
-                                    <div>
-                                        <SectionHeadingWithTooltip
-                                            title="Performance by Tier"
-                                            description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
-                                            className="mb-2"
-                                        />
-                                        <TierSVG playerId={player.player_id} svgHeight={300} />
-                                    </div>
-                                </DeferredSection>
-                            ) : null}
-                            {!player.is_hidden ? (
-                                null
-                            ) : null}
                         </>
                     )}
                 </div>
@@ -684,136 +545,17 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     ) : null}
                                 </div>
                             )}
-
-                            <DeferredSection
-                                className="mt-4"
-                                minHeight={268}
-                                placeholder={<LoadingPanel label="Preparing win rate and survival chart..." minHeight={268} />}
+                            <PlayerDetailInsightsTabs
                                 playerId={player.player_id}
-                                rootMargin="80px 0px"
-                                sectionId="wr-distribution"
-                            >
-                                <div>
-                                    <SectionHeadingWithTooltip
-                                        title="Win Rate vs Survival"
-                                        description="This scatter plot shows how this player's win rate and survival rate compare to the broader tracked player base. Each dot represents a player, positioned by PvP win rate on the x-axis and PvP survival rate on the y-axis. Darker areas indicate denser player clusters, and the outlined marker shows where this player sits in that field."
-                                        className="mb-2"
-                                    />
-                                    <WRDistributionSVG playerWR={player.pvp_ratio} playerSurvivalRate={player.pvp_survival_rate} />
-                                </div>
-                            </DeferredSection>
-
-                            {player.pvp_battles >= 150 ? (
-                                <DeferredSection
-                                    className="mt-6"
-                                    minHeight={204}
-                                    placeholder={<LoadingPanel label="Preparing battles distribution..." minHeight={204} />}
-                                    playerId={player.player_id}
-                                    rootMargin="80px 0px"
-                                    sectionId="battles-distribution"
-                                >
-                                    <div>
-                                        <SectionHeadingWithTooltip
-                                            title="Battles Played Distribution"
-                                            description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
-                                            className="mb-2"
-                                        />
-                                        <BattlesDistributionSVG playerBattles={player.pvp_battles} />
-                                    </div>
-                                </DeferredSection>
-                            ) : null}
-
-                            <DeferredSection
-                                className="mt-4"
-                                minHeight={532}
-                                placeholder={<LoadingPanel label="Preparing top ships..." minHeight={532} />}
-                                playerId={player.player_id}
-                                rootMargin="32px 0px"
-                                sectionId="randoms-top-ships"
-                            >
-                                <div>
-                                    <SectionHeadingWithTooltip
-                                        title="Top Ships (Random Battles)"
-                                        description="This chart highlights the player's most-played random-battle ships, pairing battle volume with wins so you can see which ships dominate their recent visible mix."
-                                        className="mb-2"
-                                    />
-                                    <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
-                                </div>
-                            </DeferredSection>
-                            {showRankedHeatmap ? (
-                                <DeferredSection
-                                    className="mt-4"
-                                    minHeight={312}
-                                    placeholder={<LoadingPanel label="Preparing ranked heatmap..." minHeight={312} />}
-                                    playerId={player.player_id}
-                                    rootMargin="32px 0px"
-                                    sectionId="ranked-heatmap"
-                                >
-                                    <div>
-                                        <SectionHeadingWithTooltip
-                                            title="Ranked Games vs Win Rate"
-                                            description="Each tile represents a pocket of ranked players grouped by total ranked games and overall ranked win rate. The outlined marker shows where this player lands inside that broader field."
-                                            className="mb-3"
-                                        />
-                                        <RankedWRBattlesHeatmapSVG
-                                            playerId={player.player_id}
-                                            isLoading={isLoading}
-                                            onVisibilityChange={setShowRankedHeatmap}
-                                        />
-                                    </div>
-                                </DeferredSection>
-                            ) : null}
-                            <DeferredSection
-                                className="mt-4"
-                                minHeight={252}
-                                placeholder={<LoadingPanel label="Preparing ranked seasons..." minHeight={252} />}
-                                playerId={player.player_id}
-                                rootMargin="32px 0px"
-                                sectionId="ranked-seasons"
-                            >
-                                <div>
-                                    <SectionHeadingWithTooltip
-                                        title="Ranked Seasons"
-                                        description="This table summarizes the player's historical ranked-season results, including total battles, win rate, and the best league finish reached in each season."
-                                        className="mb-3"
-                                    />
-                                    <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
-                                </div>
-                            </DeferredSection>
-                            <DeferredSection
-                                className="mt-4"
-                                minHeight={332}
-                                placeholder={<LoadingPanel label="Preparing tier vs type heatmap..." minHeight={332} />}
-                                playerId={player.player_id}
-                                rootMargin="48px 0px"
-                                sectionId="tier-type-heatmap"
-                            >
-                                <div>
-                                    <SectionHeadingWithTooltip
-                                        title="Tier vs Type Profile"
-                                        description="This heatmap shows where the tracked player base clusters by ship tier and type. The player markers show where this captain spends most of their battles, so you can compare their ship mix with the broader population trend."
-                                        className="mb-2"
-                                    />
-                                    <TierTypeHeatmapSVG playerId={player.player_id} />
-                                </div>
-                            </DeferredSection>
-                            <DeferredSection
-                                className="mt-4"
-                                minHeight={192}
-                                placeholder={<LoadingPanel label="Preparing ship type chart..." minHeight={192} />}
-                                playerId={player.player_id}
-                                rootMargin="48px 0px"
-                                sectionId="type-chart"
-                            >
-                                <div>
-                                    <SectionHeadingWithTooltip
-                                        title="Performance by Ship Type"
-                                        description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
-                                        className="mb-2"
-                                    />
-                                    <TypeSVG playerId={player.player_id} svgHeight={192} />
-                                </div>
-                            </DeferredSection>
+                                pvpRatio={player.pvp_ratio}
+                                pvpSurvivalRate={player.pvp_survival_rate}
+                                pvpBattles={player.pvp_battles}
+                                hasKnownRankedGames={hasKnownRankedGames}
+                                hasClan={Boolean(player.clan_id)}
+                                efficiencyRows={player.efficiency_json}
+                                onClanBattleSummaryChange={handleClanBattleSummaryChange}
+                                isLoading={isLoading}
+                            />
                         </>
                     )}
                 </div>

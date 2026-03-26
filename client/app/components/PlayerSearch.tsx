@@ -8,32 +8,12 @@ import EfficiencyRankIcon, { resolveEfficiencyRankTier, type EfficiencyRankTier 
 import PlayerDetail from './PlayerDetail';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
-import type { LandingClan, PlayerData } from './entityTypes';
+import type { LandingClan, LandingPlayer, PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import useIntervalRefresh from './useIntervalRefresh';
 import useClanHydrationPoll from './useClanHydrationPoll';
-
-interface LandingPlayer {
-    name: string;
-    pvp_ratio: number | null;
-    is_hidden?: boolean;
-    pvp_battles?: number | null;
-    high_tier_pvp_ratio?: number | null;
-    high_tier_pvp_battles?: number | null;
-    is_pve_player?: boolean;
-    is_sleepy_player?: boolean;
-    is_ranked_player?: boolean;
-    is_clan_battle_player?: boolean;
-    clan_battle_win_rate?: number | null;
-    highest_ranked_league?: RankedLeagueName | null;
-    efficiency_rank_percentile?: number | null;
-    efficiency_rank_tier?: EfficiencyRankTier | null;
-    has_efficiency_rank_icon?: boolean;
-    efficiency_rank_population_size?: number | null;
-    efficiency_rank_updated_at?: string | null;
-}
 
 const wrColor = (r: number | null): string => {
     if (r == null) return '#c6dbef';
@@ -232,12 +212,21 @@ const LandingClanSVG = dynamic(
     },
 );
 
+const LandingPlayerSVG = dynamic(
+    () => resilientDynamicImport(() => import('./LandingPlayerSVG'), 'LandingPlayerSVG'),
+    {
+        ssr: false,
+        loading: () => <LoadingPanel label="Loading player landscape..." minHeight={360} />,
+    },
+);
+
 const PlayerExplorer = dynamic(() => resilientDynamicImport(() => import('./PlayerExplorer'), 'PlayerExplorer'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading player explorer..." minHeight={360} />,
 });
 
-const LANDING_LIMIT = 40;
+const LANDING_CLAN_LIMIT = 30;
+const LANDING_PLAYER_LIMIT = 25;
 const BEST_CLAN_MIN_TOTAL_BATTLES = 100000;
 const BEST_CLAN_MIN_ACTIVE_SHARE = 0.3;
 const RANDOM_PLAYER_MIN_PVP_BATTLES = 500;
@@ -268,10 +257,11 @@ const PlayerSearch: React.FC = () => {
     const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('random');
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
     const lastSubmittedSearchRef = useRef<string>('');
+    const bestLandingWarmupRequestedRef = useRef(false);
 
     const fetchLandingClans = useCallback(async (mode: LandingClanMode) => {
         const { data: payload } = await fetchSharedJson<LandingClan[]>(
-            `/api/landing/clans/?mode=${mode}&limit=${LANDING_LIMIT}`,
+            `/api/landing/clans/?mode=${mode}&limit=${LANDING_CLAN_LIMIT}`,
             {
                 label: `Landing clans (${mode})`,
                 ttlMs: LANDING_FETCH_TTL_MS,
@@ -280,7 +270,23 @@ const PlayerSearch: React.FC = () => {
         setClans(Array.isArray(payload) ? payload : []);
     }, []);
 
+    const triggerBestLandingWarmup = useCallback(() => {
+        if (bestLandingWarmupRequestedRef.current) {
+            return;
+        }
+
+        bestLandingWarmupRequestedRef.current = true;
+        void fetchSharedJson('/api/landing/warm-best/', {
+            label: 'Landing best warmup',
+            ttlMs: 0,
+        }).catch((err) => {
+            console.warn('Error warming landing best entities:', err);
+        });
+    }, []);
+
     const fetchLandingData = useCallback(async () => {
+        triggerBestLandingWarmup();
+
         try {
             const [{ data: recentClansPayload }, { data: recentPlayersPayload }] = await Promise.all([
                 fetchSharedJson<LandingClan[]>('/api/landing/recent-clans/', {
@@ -297,12 +303,12 @@ const PlayerSearch: React.FC = () => {
         } catch (err) {
             console.error('Error fetching landing data:', err);
         }
-    }, []);
+    }, [triggerBestLandingWarmup]);
 
     const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode) => {
         try {
             const { data: payload } = await fetchSharedJson<LandingPlayer[]>(
-                `/api/landing/players/?mode=${mode}&limit=${LANDING_LIMIT}`,
+                `/api/landing/players/?mode=${mode}&limit=${LANDING_PLAYER_LIMIT}`,
                 {
                     label: `Landing players (${mode})`,
                     ttlMs: LANDING_FETCH_TTL_MS,
@@ -429,10 +435,10 @@ const PlayerSearch: React.FC = () => {
 
                     return left.name.localeCompare(right.name);
                 })
-                .slice(0, LANDING_LIMIT);
+                .slice(0, LANDING_CLAN_LIMIT);
         }
 
-        return clans.slice(0, LANDING_LIMIT);
+        return clans.slice(0, LANDING_CLAN_LIMIT);
     }, [clanMode, clans]);
 
     const handleSelectMember = useCallback(async (memberName: string) => {
@@ -500,8 +506,16 @@ const PlayerSearch: React.FC = () => {
                     {error && <p className="text-red-600">{error}</p>}
 
                     {clans.length > 0 && (
-                        <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
-                            <div className="flex flex-wrap items-center gap-2">
+                        <div className={`${error ? 'mt-6' : 'mt-2'} pt-3`}>
+                            <div className="mt-1">
+                                <LandingClanSVG
+                                    clans={visibleLandingClans}
+                                    heatmapClans={clans}
+                                    onSelectClan={handleSelectClan}
+                                />
+                            </div>
+                            <div className="mt-4 flex flex-wrap items-center gap-2">
+                                <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Active Clans</h3>
                                 <button
                                     type="button"
                                     onClick={() => setClanMode('random')}
@@ -535,13 +549,6 @@ const PlayerSearch: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                            <div className="mt-3">
-                                <LandingClanSVG
-                                    clans={visibleLandingClans}
-                                    heatmapClans={clans}
-                                    onSelectClan={handleSelectClan}
-                                />
-                            </div>
                             <ClanTagGrid
                                 clans={visibleLandingClans}
                                 onSelectClan={handleSelectClan}
@@ -551,7 +558,7 @@ const PlayerSearch: React.FC = () => {
                             <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Recently Viewed Clans</h3>
                             {recentClans.length > 0 ? (
                                 <ClanTagGrid
-                                    clans={recentClans.slice(0, LANDING_LIMIT)}
+                                    clans={recentClans.slice(0, LANDING_CLAN_LIMIT)}
                                     onSelectClan={handleSelectClan}
                                     ariaLabelPrefix="Show recent"
                                 />
@@ -563,6 +570,12 @@ const PlayerSearch: React.FC = () => {
 
                     {players.length > 0 && (
                         <div className="mt-6 border-t border-[#c6dbef] pt-6">
+                            <div className="mt-1">
+                                <LandingPlayerSVG
+                                    players={players}
+                                    onSelectPlayer={(player) => handleSelectMember(player.name)}
+                                />
+                            </div>
                             <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Active Players</h3>
                                 <button
@@ -615,7 +628,7 @@ const PlayerSearch: React.FC = () => {
                             <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Recently Viewed</h3>
                             {recentPlayers.length > 0 ? (
                                 <PlayerNameGrid
-                                    players={recentPlayers.slice(0, LANDING_LIMIT)}
+                                    players={recentPlayers.slice(0, LANDING_PLAYER_LIMIT)}
                                     onSelectMember={handleSelectMember}
                                     ariaLabelPrefix="Show recent"
                                 />

@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import RankedSeasons from '../RankedSeasons';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../../lib/playerRouteFetch';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
@@ -54,6 +55,11 @@ describe('RankedSeasons', () => {
         await waitFor(() => {
             expect(screen.getByText('S1')).toBeInTheDocument();
         });
+
+        expect(mockFetchSharedJson).toHaveBeenNthCalledWith(1, '/api/fetch/ranked_data/123/', expect.objectContaining({
+            ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+            cacheKey: 'ranked-data:123:0:0',
+        }));
     });
 
     it('shows the final empty state when ranked data is empty and not pending', async () => {

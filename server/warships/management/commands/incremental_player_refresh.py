@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from warships.clan_crawl import fetch_players_bulk, save_player
 from warships.data import (
+    clan_battle_summary_is_stale,
     fetch_player_clan_battle_seasons,
     player_achievements_need_refresh,
     player_efficiency_needs_refresh,
@@ -194,12 +195,8 @@ def _refresh_player(player_id: int) -> None:
             update_player_efficiency_data(player)
         if player_achievements_need_refresh(player):
             update_achievements_data(player.player_id)
-        try:
-            es = player.explorer_summary
-            if es.clan_battle_summary_updated_at is None:
-                fetch_player_clan_battle_seasons(player.player_id)
-        except PlayerExplorerSummary.DoesNotExist:
-            pass
+        if clan_battle_summary_is_stale(player):
+            fetch_player_clan_battle_seasons(player.player_id)
 
 
 class Command(BaseCommand):

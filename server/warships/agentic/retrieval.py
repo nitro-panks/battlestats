@@ -59,21 +59,38 @@ def _extract_excerpt(content: str) -> str:
 @lru_cache(maxsize=1)
 def _guidance_documents() -> list[dict[str, Any]]:
     root = _repo_root()
+    candidate_roots: list[Path] = []
+    for candidate in (root, root.parent):
+        if candidate in candidate_roots:
+            continue
+        if (candidate / "agents").exists():
+            candidate_roots.append(candidate)
+
+    if not candidate_roots:
+        candidate_roots.append(root)
+
     docs: list[dict[str, Any]] = []
-    for pattern in GUIDANCE_GLOBS:
-        for path in sorted(root.glob(pattern)):
-            content = path.read_text(encoding="utf-8")
-            title = _extract_title(content, path)
-            excerpt = _extract_excerpt(content)
-            docs.append({
-                "path": str(path.relative_to(root)),
-                "title": title,
-                "excerpt": excerpt,
-                "tokens": _tokenize(
-                    str(path.relative_to(root)) + "\n" + title +
-                    "\n" + excerpt + "\n" + content[:6000]
-                ),
-            })
+    seen_paths: set[str] = set()
+    for candidate_root in candidate_roots:
+        for pattern in GUIDANCE_GLOBS:
+            for path in sorted(candidate_root.glob(pattern)):
+                relative_path = str(path.relative_to(candidate_root))
+                if relative_path in seen_paths:
+                    continue
+                seen_paths.add(relative_path)
+
+                content = path.read_text(encoding="utf-8")
+                title = _extract_title(content, path)
+                excerpt = _extract_excerpt(content)
+                docs.append({
+                    "path": relative_path,
+                    "title": title,
+                    "excerpt": excerpt,
+                    "tokens": _tokenize(
+                        relative_path + "\n" + title +
+                        "\n" + excerpt + "\n" + content[:6000]
+                    ),
+                })
     return docs
 
 

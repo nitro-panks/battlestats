@@ -132,6 +132,13 @@ docker compose --profile local-db up -d db
 
 the server now warms the landing-page caches automatically a few seconds after startup, so the first browser hit after a `bounce` or fresh `docker compose up` does not have to build the landing payloads cold.
 
+landing behavior to be aware of:
+
+- public landing players use a `25`-row published cache surface
+- public landing clans use a `30`-row published cache surface
+- landing player and clan reads keep a durable published fallback copy, so if the TTL-bound cache key is missing after the first publish, the public route still serves the last published payload while a background republish is queued
+- landing page load also queues an asynchronous best-detail warmup for the current top `25` Best players and top `25` Best clans; this is best-effort and depends on worker dispatch, but it does not block the page render
+
 to trigger the same warm-up manually:
 
 ```bash
@@ -192,6 +199,16 @@ LANDING_WARMUP_START_DELAY_SECONDS=5
 - set `WARM_LANDING_PAGE_ON_STARTUP=0` if you want to disable the automatic landing-cache warm-up.
 - `LANDING_WARMUP_START_DELAY_SECONDS` controls how long the server waits after migrations before launching the background warm command.
 
+optional clan battle badge freshness knob:
+
+```env
+CLAN_BATTLE_BADGE_REFRESH_DAYS=14
+```
+
+- controls how old a durable clan-battle shield snapshot can be before slow producer lanes refresh it.
+- `clan_members()` no longer queues shield refresh work on read; stale-or-null badge summaries are refreshed by slower background lanes such as incremental player refresh and hot-entity warming.
+- legacy `CLAN_BATTLE_SUMMARY_STALE_DAYS` is still honored as a fallback if `CLAN_BATTLE_BADGE_REFRESH_DAYS` is unset.
+
 optional client analytics knob:
 
 ```env
@@ -243,22 +260,43 @@ the landing-page `Best` active-player mode now falls back to overall PvP win rat
 
 ### player detail layout
 
-the player detail page is now split so the left column carries the clan-specific and badge summary context first:
+the player detail page now keeps the left column focused on clan context:
 
 - clan plot and clan members
-- clan battle seasons
-- efficiency badges
-- performance by tier
 
-the right column carries the broader profile and comparison views:
+the broader player analysis lives in the `Insights` tab surface on the right:
 
-- summary stats and playstyle
-- win-rate and battle-distribution charts
-- top ships and ranked sections
-- tier-vs-type profile
-- performance by ship type
+- `Population`: win-rate and battle-distribution charts
+- `Ships`: top ships
+- `Ranked`: ranked heatmap and ranked seasons
+- `Profile`: tier-vs-type, ship-type, and tier performance charts
+- `Badges`: efficiency badges
+- `Clan Battles`: player clan battle seasons
 
-the clan battle seasons table viewport is tuned to show five visible season rows before scrolling, and the efficiency badge section uses a denser compact layout with inline badge totals in the header.
+once the main player detail payload finishes loading, inactive insights tabs warm their data in the background during idle time so the first explicit tab switch is faster without mounting hidden chart DOM.
+
+### browser smoke tests
+
+the client now includes Playwright browser smoke lanes for real-browser route safety checks.
+
+from `client/`:
+
+```bash
+npm run test:e2e:install
+npm run test:e2e:install:deps
+npm run test:e2e
+```
+
+on Linux hosts that do not already have the required browser runtime libraries, prefer `npm run test:e2e:install:deps` for the first setup pass.
+
+the current browser smoke coverage includes:
+
+- the routed player detail page, proving that background insights warmup waits until the player payload resolves before issuing inactive-tab data requests
+- the routed clan detail page, proving that an empty clan-plot response with `X-Clan-Plot-Pending: true` stays in a loading state and retries instead of flashing an empty-chart state
+
+for the client-specific command matrix, smoke targets, and coverage notes, use `client/README.md` and `agents/runbooks/runbook-client-test-hardening.md` as the durable sources.
+
+the player-tab clan battle seasons and efficiency badge tables are tuned to show up to ten visible rows before scrolling, and the efficiency badge section uses a denser compact layout with inline badge totals in the header.
 
 when a fresh published Battlestats efficiency-rank snapshot exists for an Expert-ranked player, the player header shows a compact sigma marker. non-Expert published tiers and stored badge-only fallback rows do not render a visible header sigma, which keeps the player-detail header aligned with the current `E`-only behavior used on the other player lists. this header marker remains distinct from the lower `Efficiency Badges` section, which still shows the underlying raw ship-level WG badge rows.
 

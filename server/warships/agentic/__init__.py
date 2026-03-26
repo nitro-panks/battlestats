@@ -4,6 +4,7 @@ from .graph import AgentState, build_graph, run_graph
 from .checkpoints import get_checkpoint_backend_name, get_langgraph_checkpoint_postgres_url
 from .crewai_runner import build_crewai_crew, build_crewai_plan, run_crewai_workflow
 from .doctrine import DEFAULT_TEAM_DOCTRINE, load_repo_team_doctrine, merge_team_doctrine, summarize_team_doctrine
+from .memory import get_memory_backend, get_memory_environment, get_memory_namespace, get_memory_store_snapshot, get_pending_memory_candidates, infer_workflow_kind, is_phase0_memory_enabled, persist_phase0_memory_artifacts, review_memory_candidates
 from .retrieval import retrieve_doctrine_guidance
 from .router import route_agent_workflow, run_routed_workflow
 from .policy import resolve_crewai_policy
@@ -18,6 +19,15 @@ __all__ = [
     "DEFAULT_TEAM_DOCTRINE",
     "load_repo_team_doctrine",
     "merge_team_doctrine",
+    "get_memory_backend",
+    "get_memory_environment",
+    "get_memory_namespace",
+    "get_memory_store_snapshot",
+    "get_pending_memory_candidates",
+    "infer_workflow_kind",
+    "is_phase0_memory_enabled",
+    "persist_phase0_memory_artifacts",
+    "review_memory_candidates",
     "retrieve_doctrine_guidance",
     "summarize_team_doctrine",
     "run_graph",

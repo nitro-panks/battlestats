@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useRef } from 'react';
 import * as d3 from 'd3';
-import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 type DistributionMetric = 'win_rate' | 'survival_rate' | 'battles_played';
@@ -590,7 +590,7 @@ const drawErrorState = (containerElement: HTMLDivElement, message: string) => {
 const fetchDistribution = async (metric: DistributionMetric, signal: AbortSignal): Promise<DistributionPayload> => {
     const { data } = await fetchSharedJson<DistributionPayload>(`/api/fetch/player_distribution/${metric}/`, {
         label: `Player distribution ${metric}`,
-        ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
     });
 
     if (signal.aborted) {

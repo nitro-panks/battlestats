@@ -41,6 +41,10 @@ LANDING_PAGE_WARM_DISPATCH_KEY = "warships:tasks:warm_landing_page_content:dispa
 LANDING_PAGE_WARM_DISPATCH_TIMEOUT = 5 * 60
 HOT_ENTITY_CACHE_WARM_LOCK_KEY = "warships:tasks:warm_hot_entity_caches:lock"
 HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
+LANDING_BEST_ENTITY_WARM_LOCK_KEY = "warships:tasks:warm_landing_best_entity_caches:lock"
+LANDING_BEST_ENTITY_WARM_LOCK_TIMEOUT = 30 * 60
+LANDING_BEST_ENTITY_WARM_DISPATCH_KEY = "warships:tasks:warm_landing_best_entity_caches:dispatch"
+LANDING_BEST_ENTITY_WARM_DISPATCH_TIMEOUT = 5 * 60
 CLAN_BATTLE_SUMMARY_REFRESH_DISPATCH_TIMEOUT = 10 * 60
 LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_KEY = "warships:tasks:landing_random_player_queue_refill:dispatch"
 LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
@@ -182,6 +186,30 @@ def queue_landing_page_warm():
         cache.delete(LANDING_PAGE_WARM_DISPATCH_KEY)
         logger.warning(
             "Skipping landing page warm enqueue because broker dispatch failed: %s",
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def queue_landing_best_entity_warm(player_limit=25, clan_limit=25, force_refresh=False):
+    if not cache.add(
+        LANDING_BEST_ENTITY_WARM_DISPATCH_KEY,
+        "queued",
+        timeout=LANDING_BEST_ENTITY_WARM_DISPATCH_TIMEOUT,
+    ):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        warm_landing_best_entity_caches_task.delay(
+            player_limit=int(player_limit),
+            clan_limit=int(clan_limit),
+            force_refresh=bool(force_refresh),
+        )
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(LANDING_BEST_ENTITY_WARM_DISPATCH_KEY)
+        logger.warning(
+            "Skipping landing best entity warm enqueue because broker dispatch failed: %s",
             error,
         )
         return {"status": "skipped", "reason": "enqueue-failed"}
@@ -643,6 +671,36 @@ def warm_hot_entity_caches_task(self, player_limit=None, clan_limit=None, force_
         return result
     finally:
         cache.delete(HOT_ENTITY_CACHE_WARM_LOCK_KEY)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_landing_best_entity_caches_task(self, player_limit=25, clan_limit=25, force_refresh=False):
+    from warships.data import warm_landing_best_entity_caches
+
+    logger.info(
+        "Starting warm_landing_best_entity_caches_task player_limit=%s clan_limit=%s force_refresh=%s",
+        player_limit,
+        clan_limit,
+        force_refresh,
+    )
+
+    if not cache.add(LANDING_BEST_ENTITY_WARM_LOCK_KEY, self.request.id, timeout=LANDING_BEST_ENTITY_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_landing_best_entity_caches_task because another landing best warm is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        result = warm_landing_best_entity_caches(
+            player_limit=int(player_limit or 25),
+            clan_limit=int(clan_limit or 25),
+            force_refresh=bool(force_refresh),
+        )
+        logger.info("Finished warm_landing_best_entity_caches_task: %s", result)
+        return result
+    finally:
+        cache.delete(LANDING_BEST_ENTITY_WARM_LOCK_KEY)
+        cache.delete(LANDING_BEST_ENTITY_WARM_DISPATCH_KEY)
 
 
 @app.task(bind=True, **TASK_OPTS)

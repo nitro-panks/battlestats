@@ -43,6 +43,10 @@ const BADGE_CHIP_CLASSNAMES: Record<number, string> = {
     4: 'border-[#cbd5e1] bg-[#f8fafc] text-[#64748b]',
 };
 
+const BADGE_TABLE_VISIBLE_ROWS = 10;
+const BADGE_TABLE_HEADER_HEIGHT_REM = 2.5;
+const BADGE_TABLE_ROW_HEIGHT_REM = 2.9;
+
 const SHIP_TYPE_LABELS: Record<string, string> = {
     battleship: 'BB',
     cruiser: 'CA',
@@ -283,7 +287,13 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                             <p className="mt-2 text-lg font-semibold text-[#084594]">{bestTierBandByScore}</p>
                         </div>
                     </div>
-                    <div className="mt-4 max-h-[332px] overflow-auto rounded-md border border-[#dbe9f6] bg-white">
+                    <div className="mt-4 overflow-x-auto rounded-md border border-[#dbe9f6] bg-white">
+                        <div
+                            className="overflow-y-auto"
+                            style={{
+                                maxHeight: `calc(${BADGE_TABLE_HEADER_HEIGHT_REM}rem + (${BADGE_TABLE_VISIBLE_ROWS} * ${BADGE_TABLE_ROW_HEIGHT_REM}rem))`,
+                            }}
+                        >
                         <table className="min-w-full divide-y divide-[#dbe9f6]">
                             <thead className="sticky top-0 bg-[#f7fbff] text-[#2171b5]">
                                 <tr>
@@ -320,6 +330,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                                 ))}
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </>
             )}

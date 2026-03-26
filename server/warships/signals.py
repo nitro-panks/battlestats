@@ -176,7 +176,7 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
             "enabled": True,
             "args": json.dumps([]),
             "kwargs": json.dumps({"include_recent": True}),
-            "description": "Refreshes landing page caches shortly before the one-hour TTL expires so the first landing request stays hot.",
+            "description": "Refreshes landing page caches on a short cadence so published landing payloads stay hot while the 12-hour freshness window remains cache-first.",
         },
     )
 

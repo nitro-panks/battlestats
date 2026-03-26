@@ -12,6 +12,27 @@ export interface LandingClan {
 }
 
 
+export interface LandingPlayer {
+    name: string;
+    pvp_ratio: number | null;
+    is_hidden?: boolean;
+    pvp_battles?: number | null;
+    high_tier_pvp_ratio?: number | null;
+    high_tier_pvp_battles?: number | null;
+    is_pve_player?: boolean;
+    is_sleepy_player?: boolean;
+    is_ranked_player?: boolean;
+    is_clan_battle_player?: boolean;
+    clan_battle_win_rate?: number | null;
+    highest_ranked_league?: RankedLeagueName | null;
+    efficiency_rank_percentile?: number | null;
+    efficiency_rank_tier?: 'E' | 'I' | 'II' | 'III' | null;
+    has_efficiency_rank_icon?: boolean;
+    efficiency_rank_population_size?: number | null;
+    efficiency_rank_updated_at?: string | null;
+}
+
+
 export interface PlayerData {
     id: number;
     name: string;

@@ -12,6 +12,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .checkpoints import get_graph_checkpointer
 from .doctrine import merge_team_doctrine, summarize_team_doctrine
+from .memory import PHASE0_MEMORY_LIMIT, build_phase0_memory_candidates, prepare_phase0_memory_context
 from .retrieval import retrieve_doctrine_guidance
 from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
 
@@ -35,6 +36,14 @@ class AgentState(TypedDict, total=False):
     doctrine_notes: list[str]
     retrieved_guidance: list[dict[str, Any]]
     guidance_notes: list[str]
+    workflow_kind: str
+    memory_enabled: bool
+    memory_backend: str
+    memory_environment: str
+    memory_namespace: tuple[str, str, str]
+    retrieved_memories: list[dict[str, Any]]
+    memory_notes: list[str]
+    memory_candidates: list[dict[str, Any]]
     design_review_notes: list[str]
     design_review_passed: bool
     design_review_retry_count: int
@@ -214,6 +223,8 @@ def _plan_task(state: AgentState) -> dict:
     task = state["task"].strip() or "No task provided"
     doctrine = state.get("team_doctrine", {})
     doctrine_summary = summarize_team_doctrine(doctrine)
+    retrieved_memories = list(state.get("retrieved_memories", []))
+    memory_notes = list(state.get("memory_notes", []))
 
     if _is_clan_hydration_use_case(task):
         plan = [
@@ -256,6 +267,18 @@ def _plan_task(state: AgentState) -> dict:
         guidance_notes.append(
             f"Planning referenced {len(guidance)} retrieved guidance artifact(s)."
         )
+    if retrieved_memories:
+        plan.append(
+            "Apply bounded reviewed procedural memory before implementation: "
+            + "; ".join(
+                str(item.get("summary") or "")
+                for item in retrieved_memories[:2]
+                if item.get("summary")
+            )
+        )
+        memory_notes.append(
+            f"Planning consumed {len(retrieved_memories)} reviewed procedural memory entr{'y' if len(retrieved_memories) == 1 else 'ies'}."
+        )
 
     return {
         "plan": plan,
@@ -263,8 +286,36 @@ def _plan_task(state: AgentState) -> dict:
         "role_context": _read_role_files(),
         "doctrine_notes": doctrine_notes,
         "guidance_notes": guidance_notes,
+        "memory_notes": memory_notes,
         "status": "planned",
         "transition_log": _append_transition(state, "plan_task"),
+    }
+
+
+def _load_memory_context(state: AgentState) -> dict:
+    memory_context = prepare_phase0_memory_context(
+        state.get("task", ""),
+        {
+            "memory_enabled": state.get("memory_enabled"),
+            "memory_backend": state.get("memory_backend"),
+            "memory_records": state.get("retrieved_memories", []),
+            "verification_commands": state.get("verification_commands", []),
+            "touched_files": state.get("touched_files", []),
+            "memory_limit": PHASE0_MEMORY_LIMIT,
+        },
+    )
+    notes = list(state.get("memory_notes", []))
+    notes.extend(memory_context.get("memory_notes", []))
+    return {
+        "memory_enabled": memory_context["memory_enabled"],
+        "memory_backend": memory_context["memory_backend"],
+        "memory_environment": memory_context["memory_environment"],
+        "memory_namespace": memory_context["memory_namespace"],
+        "workflow_kind": memory_context["workflow_kind"],
+        "retrieved_memories": memory_context["retrieved_memories"],
+        "memory_notes": notes,
+        "status": "memory_loaded",
+        "transition_log": _append_transition(state, "load_memory_context"),
     }
 
 
@@ -275,10 +326,23 @@ def _plan_has_validation_step(plan: list[str]) -> bool:
     )
 
 
+def _is_generic_doctrine_step(step: str) -> bool:
+    normalized = step.lower()
+    return any(
+        normalized.startswith(prefix)
+        for prefix in (
+            "clarify acceptance criteria for:",
+            "avoid battlestats doctrine anti-patterns:",
+            "review the approach against battlestats doctrine:",
+            "confirm the change can clear pre-commit doctrine requirements:",
+            "review relevant battlestats guidance artifacts before implementation:",
+        )
+    )
+
+
 def _plan_has_risk_control_step(plan: list[str]) -> bool:
     return any(
-        not step.lower().startswith("clarify acceptance criteria for:")
-        and not step.lower().startswith("review the approach against battlestats doctrine:")
+        not _is_generic_doctrine_step(step)
         and any(token in step.lower() for token in ("rollback", "guardrail", "monitor", "bound", "load"))
         for step in plan
     )
@@ -302,9 +366,7 @@ def _task_needs_api_contract_review(task: str) -> bool:
 
 def _plan_has_api_contract_step(plan: list[str]) -> bool:
     return any(
-        not step.lower().startswith("clarify acceptance criteria for:")
-        and not step.lower().startswith("review the approach against battlestats doctrine:")
-        and not step.lower().startswith("review relevant battlestats guidance artifacts before implementation:")
+        not _is_generic_doctrine_step(step)
         and
         any(token in step.lower() for token in ("contract", "payload",
             "serializer", "schema", "response", "endpoint", "backward", "compat"))
@@ -314,12 +376,13 @@ def _plan_has_api_contract_step(plan: list[str]) -> bool:
 
 def _plan_has_docs_and_api_test_step(plan: list[str]) -> bool:
     has_docs = any(
-        not step.lower().startswith(
-            "review relevant battlestats guidance artifacts before implementation:")
+        not _is_generic_doctrine_step(step)
         and any(token in step.lower() for token in ("documentation", "docs", "runbook", "readme"))
         for step in plan
     )
     has_tests = any(
+        not _is_generic_doctrine_step(step)
+        and
         not step.lower().startswith("implement the smallest safe change and validate")
         and not step.lower().startswith("identify files and tests affected by the task")
         and any(token in step.lower() for token in ("test", "validat", "regression"))
@@ -645,13 +708,25 @@ def _summarize(state: AgentState) -> dict:
     guidance_notes = list(state.get("guidance_notes", []))
     if guidance_notes:
         summary.append("Guidance: " + " | ".join(guidance_notes[:1]))
+    memory_notes = list(state.get("memory_notes", []))
+    if memory_notes:
+        summary.append("Memory: " + " | ".join(memory_notes[:2]))
     if state.get("issues"):
         summary.append("Issues: " + " | ".join(state.get("issues", [])))
 
-    final_status = "completed" if state.get("boundary_ok") and state.get(
-        "checks_passed") else "needs_attention"
+    final_status = "completed" if (
+        state.get("design_review_passed", False)
+        and (not api_review_required or state.get("api_review_passed", False))
+        and state.get("boundary_ok")
+        and state.get("checks_passed")
+    ) else "needs_attention"
+    memory_candidates = build_phase0_memory_candidates({
+        **state,
+        "status": final_status,
+    })
     return {
         "summary": summary,
+        "memory_candidates": memory_candidates,
         "status": final_status,
         "transition_log": _append_transition(state, "summarize"),
     }
@@ -710,6 +785,7 @@ def _graph_trace_inputs(task: str, context: dict[str, Any]) -> dict[str, Any]:
         "touched_file_count": len(context.get("touched_files", [])),
         "verification_command_count": len(context.get("verification_commands", [])),
         "checkpoint_backend": context.get("checkpoint_backend"),
+        "memory_enabled": context.get("memory_enabled"),
     }
 
 
@@ -720,6 +796,7 @@ def _graph_trace_outputs(result: AgentState) -> dict[str, Any]:
         "boundary_ok": result.get("boundary_ok"),
         "checks_passed": result.get("checks_passed"),
         "issue_count": len(result.get("issues", [])),
+        "memory_candidate_count": len(result.get("memory_candidates", [])),
         "summary": result.get("summary", []),
     }
 
@@ -731,6 +808,7 @@ def build_graph(checkpointer: Any | None = None):
 
     graph_builder.add_node("load_team_doctrine", _load_team_doctrine)
     graph_builder.add_node("retrieve_guidance", _retrieve_guidance)
+    graph_builder.add_node("load_memory_context", _load_memory_context)
     graph_builder.add_node("plan_task", _plan_task)
     graph_builder.add_node("design_pattern_review", _design_pattern_review)
     graph_builder.add_node("revise_plan", _revise_plan)
@@ -747,7 +825,8 @@ def build_graph(checkpointer: Any | None = None):
 
     graph_builder.add_edge(START, "load_team_doctrine")
     graph_builder.add_edge("load_team_doctrine", "retrieve_guidance")
-    graph_builder.add_edge("retrieve_guidance", "plan_task")
+    graph_builder.add_edge("retrieve_guidance", "load_memory_context")
+    graph_builder.add_edge("load_memory_context", "plan_task")
     graph_builder.add_edge("plan_task", "design_pattern_review")
     graph_builder.add_conditional_edges(
         "design_pattern_review",
@@ -805,6 +884,14 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
             "doctrine_notes": [],
             "retrieved_guidance": [],
             "guidance_notes": [],
+            "workflow_kind": str(context.get("workflow_kind", "")),
+            "memory_enabled": bool(context.get("memory_enabled", False)),
+            "memory_backend": str(context.get("memory_backend", "")),
+            "memory_environment": str(context.get("memory_environment", "")),
+            "memory_namespace": tuple(context.get("memory_namespace", ()) or ()),
+            "retrieved_memories": list(context.get("memory_records", [])),
+            "memory_notes": [],
+            "memory_candidates": [],
             "design_review_notes": [],
             "design_review_passed": False,
             "design_review_retry_count": int(context.get("design_review_retry_count", 0)),

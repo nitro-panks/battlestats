@@ -290,6 +290,66 @@ class AgenticGraphTests(TestCase):
             for note in result["guidance_notes"]
         ))
 
+    def test_run_graph_uses_reviewed_memory_when_phase0_enabled(self):
+        result = run_graph(
+            "Improve the LangGraph trace dashboard validation flow",
+            context={
+                "memory_enabled": True,
+                "touched_files": ["server/warships/agentic/dashboard.py"],
+                "memory_records": [{
+                    "memory_type": "procedural",
+                    "namespace": ("battlestats", "local", "procedural"),
+                    "workflow_kind": "agentic_workflow",
+                    "summary": "Use focused dashboard tests before broad suites.",
+                    "review_status": "reviewed",
+                    "confidence": 0.9,
+                    "created_at": "2026-03-26T12:00:00Z",
+                    "evidence": {
+                        "validation_commands": ["python -m pytest warships/tests/test_agentic_dashboard.py -q"],
+                        "file_paths": ["server/warships/agentic/dashboard.py"],
+                    },
+                }],
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+            },
+        )
+
+        self.assertTrue(result["memory_enabled"])
+        self.assertEqual(result["workflow_kind"], "agentic_workflow")
+        self.assertEqual(len(result["retrieved_memories"]), 1)
+        self.assertTrue(any(
+            "bounded reviewed procedural memory" in step.lower()
+            for step in result["plan"]
+        ))
+        self.assertTrue(result["memory_candidates"])
+
+    def test_run_graph_skips_memory_retrieval_when_phase0_disabled(self):
+        result = run_graph(
+            "Improve the LangGraph trace dashboard validation flow",
+            context={
+                "memory_enabled": False,
+                "memory_records": [{
+                    "memory_type": "procedural",
+                    "namespace": ("battlestats", "local", "procedural"),
+                    "workflow_kind": "agentic_workflow",
+                    "summary": "Use focused dashboard tests before broad suites.",
+                    "review_status": "reviewed",
+                    "confidence": 0.9,
+                    "created_at": "2026-03-26T12:00:00Z",
+                }],
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+            },
+        )
+
+        self.assertFalse(result["memory_enabled"])
+        self.assertEqual(result["retrieved_memories"], [])
+        self.assertEqual(result["memory_candidates"], [])
+
     def test_run_graph_api_review_revises_plan_before_implementation(self):
         result = run_graph(
             "Change player summary API response payload",

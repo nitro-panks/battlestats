@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 interface RankedSeasonsProps {
@@ -6,7 +7,7 @@ interface RankedSeasonsProps {
     isLoading?: boolean;
 }
 
-const RANKED_TABLE_VISIBLE_ROWS = 5;
+const RANKED_TABLE_VISIBLE_ROWS = 8;
 const RANKED_TABLE_HEADER_HEIGHT_REM = 2.5;
 const RANKED_TABLE_ROW_HEIGHT_REM = 3.5;
 
@@ -116,7 +117,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 try {
                     const payload = await fetchSharedJson<RankedSeason[]>(`/api/fetch/ranked_data/${playerId}/`, {
                         label: `Ranked data ${playerId}`,
-                        ttlMs: 0,
+                        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                         cacheKey: `ranked-data:${playerId}:${pendingAttempts}:${attempt}`,
                         responseHeaders: ['X-Ranked-Pending'],
                     });

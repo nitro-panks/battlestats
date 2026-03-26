@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { getRankedHeatmapTileBounds, getRankedHeatmapTrendX, getRankedHeatmapXDomain, type RankedHeatmapPayloadShape, type RankedHeatmapTile, type RankedHeatmapTrendPoint } from './rankedHeatmapPayload';
 
 interface RankedWRBattlesHeatmapSVGProps {
     playerId: number;
@@ -11,19 +12,9 @@ interface RankedWRBattlesHeatmapSVGProps {
     onVisibilityChange?: (isVisible: boolean) => void;
 }
 
-interface CorrelationTile {
-    x_min: number;
-    x_max: number;
-    y_min: number;
-    y_max: number;
-    count: number;
-}
+type CorrelationTile = RankedHeatmapTile;
 
-interface CorrelationTrendPoint {
-    x: number;
-    y: number;
-    count: number;
-}
+type CorrelationTrendPoint = RankedHeatmapTrendPoint;
 
 interface CorrelationPoint {
     x: number;
@@ -41,11 +32,7 @@ interface RankedWRBattlesPayload {
     x_scale: 'linear' | 'log';
     y_scale: 'linear' | 'log';
     x_ticks?: number[];
-    x_domain: {
-        min: number;
-        max: number;
-        bin_width?: number | null;
-    };
+    x_edges: number[];
     y_domain: {
         min: number;
         max: number;
@@ -102,12 +89,14 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
     const svg = svgRoot.append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
+    const [xMin, xMax] = getRankedHeatmapXDomain(payload as RankedHeatmapPayloadShape);
+
     const x = (payload.x_scale === 'log'
         ? d3.scaleLog()
-            .domain([Math.max(1, payload.x_domain.min), Math.max(payload.x_domain.max, payload.x_domain.min + 1)])
+            .domain([xMin, xMax])
             .range([0, width])
         : d3.scaleLinear()
-            .domain([payload.x_domain.min, payload.x_domain.max])
+            .domain([xMin, xMax])
             .range([0, width]));
 
     const y = (payload.y_scale === 'log'
@@ -126,16 +115,28 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
         .enter()
         .append('rect')
         .attr('class', 'ranked-heat-tile')
-        .attr('x', (row: CorrelationTile) => x(Math.max(row.x_min, payload.x_domain.min)))
-        .attr('y', (row: CorrelationTile) => y(row.y_max))
-        .attr('width', (row: CorrelationTile) => Math.max(1, x(Math.max(row.x_max, row.x_min + 0.001)) - x(Math.max(row.x_min, payload.x_domain.min))))
-        .attr('height', (row: CorrelationTile) => Math.max(1, y(row.y_min) - y(row.y_max)))
+        .attr('x', (row: CorrelationTile) => {
+            const bounds = getRankedHeatmapTileBounds(payload as RankedHeatmapPayloadShape, row);
+            return x(Math.max(bounds.xMin, xMin));
+        })
+        .attr('y', (row: CorrelationTile) => {
+            const bounds = getRankedHeatmapTileBounds(payload as RankedHeatmapPayloadShape, row);
+            return y(bounds.yMax);
+        })
+        .attr('width', (row: CorrelationTile) => {
+            const bounds = getRankedHeatmapTileBounds(payload as RankedHeatmapPayloadShape, row);
+            return Math.max(1, x(Math.max(bounds.xMax, bounds.xMin + 0.001)) - x(Math.max(bounds.xMin, xMin)));
+        })
+        .attr('height', (row: CorrelationTile) => {
+            const bounds = getRankedHeatmapTileBounds(payload as RankedHeatmapPayloadShape, row);
+            return Math.max(1, y(bounds.yMin) - y(bounds.yMax));
+        })
         .attr('rx', 0)
         .attr('fill', (row: CorrelationTile) => tileColor(row.count))
         .attr('stroke', 'none');
 
     const trendLine = d3.line()
-        .x((row: unknown) => x(Math.max((row as CorrelationTrendPoint).x, payload.x_domain.min)))
+        .x((row: unknown) => x(Math.max(getRankedHeatmapTrendX(payload as RankedHeatmapPayloadShape, row as CorrelationTrendPoint), xMin)))
         .y((row: unknown) => y((row as CorrelationTrendPoint).y))
         .curve(d3.curveMonotoneX);
 
@@ -149,7 +150,7 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
 
     if (payload.player_point) {
         const point = payload.player_point;
-        const clampedX = Math.min(Math.max(point.x, payload.x_domain.min), payload.x_domain.max);
+        const clampedX = Math.min(Math.max(point.x, xMin), xMax);
         const clampedY = Math.min(Math.max(point.y, payload.y_domain.min), payload.y_domain.max);
 
         svg.append('circle')
@@ -254,7 +255,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
             try {
                 const { data: payload } = await fetchSharedJson<RankedWRBattlesPayload>(`/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`, {
                     label: `Ranked correlation ${playerId}`,
-                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                 });
                 if (!isMounted || !containerRef.current) {
                     return;

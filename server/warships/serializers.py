@@ -405,6 +405,31 @@ class PlayerCorrelationTrendPointSerializer(serializers.Serializer):
     count = serializers.IntegerField()
 
 
+class CompactPlayerCorrelationTileSerializer(serializers.Serializer):
+    x_index = serializers.IntegerField(min_value=0)
+    y_index = serializers.IntegerField(min_value=0)
+    count = serializers.IntegerField(min_value=0)
+
+
+class CompactPlayerCorrelationTrendPointSerializer(serializers.Serializer):
+    x_index = serializers.IntegerField(min_value=0)
+    y = serializers.FloatField()
+    count = serializers.IntegerField(min_value=0)
+
+
+class CompactPlayerCorrelationDistributionSerializer(serializers.Serializer):
+    metric = serializers.CharField()
+    label = serializers.CharField()
+    x_label = serializers.CharField()
+    y_label = serializers.CharField()
+    tracked_population = serializers.IntegerField()
+    correlation = serializers.FloatField(allow_null=True)
+    x_domain = PlayerCorrelationDomainSerializer()
+    y_domain = PlayerCorrelationDomainSerializer()
+    tiles = CompactPlayerCorrelationTileSerializer(many=True)
+    trend = CompactPlayerCorrelationTrendPointSerializer(many=True)
+
+
 class PlayerCorrelationDistributionSerializer(serializers.Serializer):
     metric = serializers.CharField()
     label = serializers.CharField()
@@ -429,6 +454,37 @@ class PlayerExtendedCorrelationDistributionSerializer(PlayerCorrelationDistribut
     y_scale = serializers.ChoiceField(choices=['linear', 'log'])
     x_ticks = serializers.ListField(
         child=serializers.FloatField(), required=False)
+    player_point = PlayerCorrelationPointSerializer(
+        allow_null=True, required=False)
+
+
+class RankedPlayerCorrelationTileSerializer(serializers.Serializer):
+    x_index = serializers.IntegerField(min_value=0)
+    y_index = serializers.IntegerField(min_value=0)
+    count = serializers.IntegerField(min_value=0)
+
+
+class RankedPlayerCorrelationTrendPointSerializer(serializers.Serializer):
+    x_index = serializers.IntegerField(min_value=0)
+    y = serializers.FloatField()
+    count = serializers.IntegerField(min_value=0)
+
+
+class RankedPlayerCorrelationDistributionSerializer(serializers.Serializer):
+    metric = serializers.CharField()
+    label = serializers.CharField()
+    x_label = serializers.CharField()
+    y_label = serializers.CharField()
+    tracked_population = serializers.IntegerField()
+    correlation = serializers.FloatField(allow_null=True)
+    x_scale = serializers.ChoiceField(choices=['linear', 'log'])
+    y_scale = serializers.ChoiceField(choices=['linear', 'log'])
+    x_ticks = serializers.ListField(
+        child=serializers.FloatField(), required=False)
+    x_edges = serializers.ListField(child=serializers.FloatField())
+    y_domain = PlayerCorrelationDomainSerializer()
+    tiles = RankedPlayerCorrelationTileSerializer(many=True)
+    trend = RankedPlayerCorrelationTrendPointSerializer(many=True)
     player_point = PlayerCorrelationPointSerializer(
         allow_null=True, required=False)
 

@@ -5,6 +5,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import (
+    CLAN_BATTLE_BADGE_REFRESH_DAYS,
     CLAN_BATTLE_SUMMARY_STALE_DAYS,
     clan_battle_summary_is_stale,
     get_published_clan_battle_summary_payload,
@@ -31,7 +32,7 @@ class ClanBattleSummaryIsStaleTests(TestCase):
         PlayerExplorerSummary.objects.create(
             player=self.player,
             clan_battle_summary_updated_at=timezone.now() - timedelta(
-                days=CLAN_BATTLE_SUMMARY_STALE_DAYS + 1),
+                days=CLAN_BATTLE_BADGE_REFRESH_DAYS + 1),
         )
         self.player.refresh_from_db()
         self.assertTrue(clan_battle_summary_is_stale(self.player))
@@ -144,20 +145,20 @@ class ClanMembersShieldTests(TestCase):
            return_value={'pending_player_ids': set(), 'queued_player_ids': set(),
                          'deferred_player_ids': set(), 'max_in_flight': 5})
     @patch('warships.tasks.queue_clan_battle_data_refresh')
-    def test_dispatches_refresh_for_stale(self, mock_cb_dispatch,
-                                          mock_eff_hydration, mock_ranked):
+    def test_does_not_dispatch_refresh_for_stale(self, mock_cb_dispatch,
+                                                 mock_eff_hydration, mock_ranked):
         stale = Player.objects.create(
             name='StaleMember', player_id=88103, clan=self.clan,
             last_battle_date=self.now.date(), total_battles=50,
             pvp_battles=40, is_hidden=False)
         PlayerExplorerSummary.objects.create(
             player=stale,
-            clan_battle_summary_updated_at=self.now - timedelta(days=10),
+            clan_battle_summary_updated_at=self.now - timedelta(days=CLAN_BATTLE_BADGE_REFRESH_DAYS + 1),
         )
         response = self.client.get(
             f'/api/fetch/clan_members/{self.clan.clan_id}/')
         self.assertEqual(response.status_code, 200)
-        mock_cb_dispatch.assert_called()
+        mock_cb_dispatch.assert_not_called()
 
     @patch('warships.data.queue_clan_ranked_hydration',
            return_value={'pending_player_ids': set(), 'queued_player_ids': set(),
@@ -297,6 +298,28 @@ class IncrementalRefreshCBBackfillTests(TestCase):
         _refresh_player(player.id)
 
         mock_fetch_cb.assert_not_called()
+
+    @patch('warships.management.commands.incremental_player_refresh.update_achievements_data')
+    @patch('warships.management.commands.incremental_player_refresh.update_player_efficiency_data')
+    @patch('warships.management.commands.incremental_player_refresh.save_player')
+    @patch('warships.management.commands.incremental_player_refresh.fetch_players_bulk')
+    @patch('warships.management.commands.incremental_player_refresh.fetch_player_clan_battle_seasons')
+    def test_backfills_when_cb_summary_is_stale(self, mock_fetch_cb, mock_bulk,
+                                                mock_save, mock_eff, mock_ach):
+        now = timezone.now()
+        player = Player.objects.create(
+            name='StaleBadgePlayer', player_id=88403, is_hidden=False,
+            last_fetch=now)
+        PlayerExplorerSummary.objects.create(
+            player=player,
+            clan_battle_summary_updated_at=now - timedelta(days=CLAN_BATTLE_BADGE_REFRESH_DAYS + 1),
+        )
+        mock_bulk.return_value = {str(player.player_id): {'mock': 'data'}}
+
+        from warships.management.commands.incremental_player_refresh import _refresh_player
+        _refresh_player(player.id)
+
+        mock_fetch_cb.assert_called_once_with(player.player_id)
 
 
 class GetPublishedClanBattleSummaryPayloadTests(TestCase):

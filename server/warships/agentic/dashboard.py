@@ -12,6 +12,7 @@ from warships.data import (
     PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG,
 )
 
+from .memory import get_memory_store_snapshot
 from .tracing import get_langsmith_project_name, is_langsmith_tracing_enabled
 
 
@@ -185,6 +186,15 @@ def _extract_run_summary(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         for item in retrieved_guidance
         if isinstance(item, dict) and item.get("path")
     ]
+    retrieved_memories = verification_source.get("retrieved_memories") if isinstance(
+        verification_source.get("retrieved_memories"), list) else []
+    memory_candidates = verification_source.get("memory_candidates") if isinstance(
+        verification_source.get("memory_candidates"), list) else []
+    memory_enabled = verification_source.get("memory_enabled") if isinstance(
+        verification_source.get("memory_enabled"), bool) else False
+    workflow_kind = verification_source.get("workflow_kind")
+    memory_store_activity = verification_source.get("memory_store_activity") if isinstance(
+        verification_source.get("memory_store_activity"), dict) else payload.get("memory_store_activity") if isinstance(payload.get("memory_store_activity"), dict) else {}
 
     return {
         "workflow_id": str(payload.get("workflow_id") or verification_source.get("workflow_id") or path.stem),
@@ -207,6 +217,11 @@ def _extract_run_summary(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "doctrine_note_count": len(doctrine_notes),
         "guidance_match_count": len(guidance_paths),
         "guidance_paths": guidance_paths,
+        "memory_enabled": memory_enabled,
+        "memory_retrieval_count": len(retrieved_memories),
+        "memory_candidate_count": len(memory_candidates),
+        "memory_store_activity": memory_store_activity,
+        "workflow_kind": workflow_kind,
         "langsmith_trace_url": trace_url,
         "run_log_path": _relative_path(path),
     }
@@ -242,6 +257,9 @@ def get_agentic_trace_dashboard(limit: int = 12) -> dict[str, Any]:
     verification_commands: list[str] = []
     touched_files: list[str] = []
     route_rationales: list[str] = []
+    workflow_kinds: list[str] = []
+    memory_candidate_summaries: list[str] = []
+    reviewed_store_paths: list[str] = []
     for payload in raw_payloads:
         verification_source = payload.get("langgraph_result") if isinstance(
             payload.get("langgraph_result"), dict) else payload
@@ -256,10 +274,27 @@ def get_agentic_trace_dashboard(limit: int = 12) -> dict[str, Any]:
         touched_files.extend(str(file_path) for file_path in files)
         if payload.get("route_rationale"):
             route_rationales.append(str(payload["route_rationale"]))
+        if verification_source.get("workflow_kind"):
+            workflow_kinds.append(str(verification_source["workflow_kind"]))
+        candidate_memories = verification_source.get("memory_candidates") if isinstance(
+            verification_source.get("memory_candidates"), list) else []
+        memory_candidate_summaries.extend(
+            str(item.get("summary"))
+            for item in candidate_memories
+            if isinstance(item, dict) and item.get("summary")
+        )
+        store_activity = verification_source.get("memory_store_activity") if isinstance(
+            verification_source.get("memory_store_activity"), dict) else payload.get("memory_store_activity") if isinstance(payload.get("memory_store_activity"), dict) else {}
+        reviewed_store_paths.extend(
+            str(item)
+            for item in store_activity.get("reviewed_store_paths", [])
+            if item
+        )
 
     api_host = _env_value("LANGSMITH_ENDPOINT", "LANGCHAIN_ENDPOINT")
     api_key_configured = _env_value(
         "LANGSMITH_API_KEY", "LANGCHAIN_API_KEY") is not None
+    memory_store = get_memory_store_snapshot(limit=limit)
 
     return {
         "project_name": get_langsmith_project_name(),
@@ -275,6 +310,12 @@ def get_agentic_trace_dashboard(limit: int = 12) -> dict[str, Any]:
             "runs_with_guidance": sum(1 for run in runs if int(run.get("guidance_match_count") or 0) > 0),
             "design_review_fail_count": sum(1 for run in runs if run.get("design_review_passed") is False),
             "api_review_fail_count": sum(1 for run in runs if run.get("api_review_required") and run.get("api_review_passed") is False),
+            "runs_with_memory_enabled": sum(1 for run in runs if run.get("memory_enabled")),
+            "runs_with_memory_retrievals": sum(1 for run in runs if int(run.get("memory_retrieval_count") or 0) > 0),
+            "memory_candidate_total": sum(int(run.get("memory_candidate_count") or 0) for run in runs),
+            "reviewed_memory_total": int(memory_store.get("reviewed_total") or 0),
+            "pending_review_total": int(memory_store.get("pending_review_total") or 0),
+            "superseded_memory_total": int(memory_store.get("superseded_total") or 0),
             "verification_pass_rate": verification_pass_rate,
             "engine_mix": dict(Counter(run["selected_engine"] for run in runs)),
             "status_mix": dict(Counter(run["status"] for run in runs)),
@@ -285,11 +326,15 @@ def get_agentic_trace_dashboard(limit: int = 12) -> dict[str, Any]:
             "common_verification_commands": _common_entries(verification_commands),
             "common_touched_files": _common_entries(touched_files),
             "common_route_rationales": _common_entries(route_rationales),
+            "common_workflow_kinds": _common_entries(workflow_kinds),
             "common_guidance_paths": _common_entries([
                 path
                 for run in runs
                 for path in run.get("guidance_paths", [])
             ]),
+            "memory_candidate_summaries": _common_entries(memory_candidate_summaries),
+            "reviewed_store_paths": _common_entries(reviewed_store_paths),
             "chart_tuning_notes": [_build_ranked_heatmap_learning_note()],
         },
+        "memory_store": memory_store,
     }

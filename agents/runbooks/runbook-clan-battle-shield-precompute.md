@@ -5,6 +5,15 @@
 **QA Review:** `agents/reviews/qa-clan-battle-shield-precompute-review.md`  
 **Scope:** Eliminate on-demand hydration pattern for clan battle shields. Serve shield data from DB, refresh lazily on invocation.
 
+## Superseded Note
+
+This runbook documents the original shield-precompute rollout. The current implementation policy is in `agents/work-items/clan-list-shield-badge-durability-spec.md`.
+
+Current behavior differs in two ways:
+
+1. `clan_members()` is now a pure read path for shield badges and does not enqueue stale shield refresh work.
+2. Shield freshness is governed by the slower `CLAN_BATTLE_BADGE_REFRESH_DAYS` cadence and refreshed by slow producer lanes, not hot clan-list reads.
+
 ---
 
 ## Prerequisites

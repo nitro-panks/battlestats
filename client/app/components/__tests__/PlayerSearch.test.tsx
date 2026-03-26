@@ -161,6 +161,7 @@ const installFetchMock = ({
     recentClans = [],
     recentPlayers = [],
     recentPlayersResponses,
+    recentClansResponse,
     playersByMode = defaultPlayersByMode,
     playerResponses = {},
 }: {
@@ -168,6 +169,7 @@ const installFetchMock = ({
     recentClans?: unknown[];
     recentPlayers?: unknown[];
     recentPlayersResponses?: unknown[][];
+    recentClansResponse?: ReturnType<typeof buildJsonResponse> | ReturnType<typeof buildErrorResponse>;
     playersByMode?: Record<string, unknown[]>;
     playerResponses?: Record<string, Array<ReturnType<typeof buildJsonResponse> | ReturnType<typeof buildErrorResponse>>>;
 } = {}) => {
@@ -184,6 +186,9 @@ const installFetchMock = ({
         }
 
         if (url === '/api/landing/recent-clans/' || url === '/api/landing/recent-clans') {
+            if (recentClansResponse) {
+                return Promise.resolve(recentClansResponse);
+            }
             return Promise.resolve(buildJsonResponse(recentClans));
         }
 
@@ -192,6 +197,10 @@ const installFetchMock = ({
                 return Promise.resolve(buildJsonResponse(recentPlayersQueue.shift() ?? []));
             }
             return Promise.resolve(buildJsonResponse(recentPlayers));
+        }
+
+        if (url === '/api/landing/warm-best/' || url === '/api/landing/warm-best') {
+            return Promise.resolve(buildJsonResponse({ status: 'queued' }));
         }
 
         if (url.startsWith('/api/landing/players/') || url.startsWith('/api/landing/players?')) {
@@ -289,7 +298,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/players/?mode=sigma&limit=40' || url === '/api/landing/players?mode=sigma&limit=40',
+                ([url]) => url === '/api/landing/players/?mode=sigma&limit=25' || url === '/api/landing/players?mode=sigma&limit=25',
             )).toBe(true);
         });
 
@@ -299,6 +308,59 @@ describe('PlayerSearch landing efficiency icon', () => {
         expect(within(sigmaLeaderRow).getByText('Σ')).toBeInTheDocument();
         expect(within(sigmaRunnerUpRow).queryByText('Σ')).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Sigma' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('requests 30 clans while keeping player landing requests at 25', async () => {
+        render(<PlayerSearch />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('heading', { name: 'Active Clans' })).toBeInTheDocument();
+        });
+
+        await waitFor(() => {
+            expect((global.fetch as jest.Mock).mock.calls.some(
+                ([url]) => url === '/api/landing/clans/?mode=random&limit=30' || url === '/api/landing/clans?mode=random&limit=30',
+            )).toBe(true);
+        });
+
+        expect((global.fetch as jest.Mock).mock.calls.some(
+            ([url]) => url === '/api/landing/players/?mode=random&limit=25' || url === '/api/landing/players?mode=random&limit=25',
+        )).toBe(true);
+    });
+
+    it('queues a best landing warmup once on page load', async () => {
+        render(<PlayerSearch />);
+
+        await waitFor(() => {
+            expect((global.fetch as jest.Mock).mock.calls.some(
+                ([url]) => url === '/api/landing/warm-best/' || url === '/api/landing/warm-best',
+            )).toBe(true);
+        });
+
+        const warmupCalls = (global.fetch as jest.Mock).mock.calls.filter(
+            ([url]) => url === '/api/landing/warm-best/' || url === '/api/landing/warm-best',
+        );
+        expect(warmupCalls).toHaveLength(1);
+    });
+
+    it('still queues the best landing warmup when recent landing data fails', async () => {
+        installFetchMock({
+            recentClansResponse: buildErrorResponse(500, 'boom'),
+        });
+
+        render(<PlayerSearch />);
+
+        await waitFor(() => {
+            expect((global.fetch as jest.Mock).mock.calls.some(
+                ([url]) => url === '/api/landing/warm-best/' || url === '/api/landing/warm-best',
+            )).toBe(true);
+        });
+
+        await waitFor(() => {
+            expect((global.fetch as jest.Mock).mock.calls.some(
+                ([url]) => url === '/api/landing/recent-clans/' || url === '/api/landing/recent-clans',
+            )).toBe(true);
+        });
     });
 
     it('routes visible landing rows to canonical routes while keeping hidden rows non-interactive', async () => {

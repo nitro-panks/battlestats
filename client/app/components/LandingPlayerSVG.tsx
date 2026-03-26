@@ -1,0 +1,276 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as d3 from 'd3';
+import type { LandingPlayer } from './entityTypes';
+
+interface LandingPlayerSVGProps {
+    players: LandingPlayer[];
+    onSelectPlayer?: (player: LandingPlayer) => void;
+    svgHeight?: number;
+}
+
+interface PlotDatum extends LandingPlayer {
+    pvp_ratio: number;
+    pvp_battles: number;
+    total_wins: number;
+}
+
+const expandDomain = (minValue: number, maxValue: number, paddingRatio: number, floor?: number, ceiling?: number): [number, number] => {
+    const span = Math.max(maxValue - minValue, 1);
+    const padding = span * paddingRatio;
+    const paddedMin = floor == null ? minValue - padding : Math.max(floor, minValue - padding);
+    const paddedMax = ceiling == null ? maxValue + padding : Math.min(ceiling, maxValue + padding);
+
+    if (paddedMin === paddedMax) {
+        return [paddedMin - 1, paddedMax + 1];
+    }
+
+    return [paddedMin, paddedMax];
+};
+
+const selectLandingPlayerColorByWR = (winRatio: number): string => {
+    if (winRatio > 65) return '#810c9e';
+    if (winRatio >= 60) return '#D042F3';
+    if (winRatio >= 56) return '#3182bd';
+    if (winRatio >= 54) return '#74c476';
+    if (winRatio >= 52) return '#a1d99b';
+    if (winRatio >= 50) return '#fed976';
+    if (winRatio >= 45) return '#fd8d3c';
+    if (winRatio >= 40) return '#e6550d';
+    return '#a50f15';
+};
+
+const formatCompactCount = (value: number): string => d3.format('~s')(value).replace('G', 'B');
+
+const drawLandingPlayerChart = (
+    containerElement: HTMLDivElement,
+    players: LandingPlayer[],
+    onSelectPlayer: LandingPlayerSVGProps['onSelectPlayer'],
+    containerWidth: number,
+    svgHeight: number,
+) => {
+    const margin = { top: 56, right: 16, bottom: 32, left: 48 };
+    const width = containerWidth - margin.left - margin.right;
+    const height = svgHeight - margin.top - margin.bottom;
+
+    const container = d3.select(containerElement);
+    container.selectAll('*').remove();
+
+    const plotData: PlotDatum[] = players
+        .filter((player) => player.pvp_ratio != null && player.pvp_battles != null && player.pvp_battles > 0)
+        .map((player) => ({
+            ...player,
+            pvp_ratio: player.pvp_ratio as number,
+            pvp_battles: player.pvp_battles as number,
+            total_wins: Math.round((player.pvp_battles as number) * ((player.pvp_ratio as number) / 100)),
+        }));
+
+    const svgRoot = container
+        .append('svg')
+        .attr('width', width + margin.left + margin.right)
+        .attr('height', height + margin.top + margin.bottom);
+
+    const svg = svgRoot
+        .append('g')
+        .attr('transform', `translate(${margin.left}, ${margin.top})`);
+
+    if (plotData.length === 0) {
+        svg.append('text')
+            .attr('x', 0)
+            .attr('y', 16)
+            .style('font-size', '12px')
+            .style('fill', '#6b7280')
+            .text('No player chart data available.');
+        return;
+    }
+
+    const battlesExtent = d3.extent(plotData, (datum: PlotDatum) => datum.pvp_battles) as [number, number];
+    const wrExtent = d3.extent(plotData, (datum: PlotDatum) => datum.pvp_ratio) as [number, number];
+    const [xMin, xMax] = expandDomain(battlesExtent[0], battlesExtent[1], 0.1, 0);
+    const [yMin, yMax] = expandDomain(wrExtent[0], wrExtent[1], 0.08, 0, 100);
+
+    const x = d3.scaleLinear().domain([xMin, xMax]).range([0, width]);
+    const y = d3.scaleLinear().domain([yMin, yMax]).range([height, 0]);
+
+    svg.append('g')
+        .attr('class', 'landing-player-x-grid')
+        .attr('transform', `translate(0, ${height})`)
+        .call(d3.axisBottom(x).ticks(6).tickSize(-height).tickFormat(() => ''));
+    svg.select('.landing-player-x-grid')?.select('.domain')?.remove();
+    svg.selectAll('.landing-player-x-grid line')
+        .style('stroke', '#dbeafe')
+        .style('stroke-width', 1);
+
+    svg.append('g')
+        .attr('class', 'landing-player-y-grid')
+        .call(d3.axisLeft(y).ticks(5).tickSize(-width).tickFormat(() => ''));
+    svg.select('.landing-player-y-grid')?.select('.domain')?.remove();
+    svg.selectAll('.landing-player-y-grid line')
+        .style('stroke', '#eff6ff')
+        .style('stroke-width', 1);
+
+    svg.append('g')
+        .attr('transform', `translate(0, ${height})`)
+        .style('color', '#64748b')
+        .call(d3.axisBottom(x).ticks(6).tickFormat((value: number) => formatCompactCount(value)).tickSizeOuter(0))
+        .selectAll('text')
+        .style('font-size', '10px');
+
+    svg.append('g')
+        .style('color', '#64748b')
+        .call(d3.axisLeft(y).ticks(5).tickFormat((value: number) => `${value.toFixed(0)}%`).tickSizeOuter(0))
+        .selectAll('text')
+        .style('font-size', '10px');
+
+    svg.append('text')
+        .attr('class', 'axisLabel')
+        .style('font-size', '10px')
+        .style('fill', '#6b7280')
+        .attr('text-anchor', 'middle')
+        .attr('x', width / 2)
+        .attr('y', height + 30)
+        .text('PvP Battles');
+
+    svg.append('text')
+        .attr('class', 'axisLabel')
+        .style('font-size', '10px')
+        .style('fill', '#6b7280')
+        .attr('text-anchor', 'middle')
+        .attr('transform', 'rotate(-90)')
+        .attr('x', -height / 2)
+        .attr('y', -34)
+        .text('Player WR');
+
+    const showDetails = (datum: PlotDatum) => {
+        const detailGroup = svgRoot
+            .append('g')
+            .classed('details', true)
+            .attr('transform', `translate(${margin.left}, 14)`);
+
+        const titleText = detailGroup.append('text')
+            .attr('x', 0)
+            .attr('y', 0)
+            .style('font-size', '11px')
+            .attr('font-weight', '700')
+            .style('fill', '#084594')
+            .text(datum.name);
+
+        const metaText = detailGroup.append('text')
+            .attr('x', 0)
+            .attr('y', 18)
+            .style('font-size', '10px')
+            .attr('font-weight', '400')
+            .style('fill', '#6b7280');
+
+        metaText.append('tspan')
+            .text(`${datum.total_wins.toLocaleString()} Wins`);
+
+        metaText.append('tspan')
+            .attr('dx', 12)
+            .text(`${datum.pvp_battles.toLocaleString()} Battles`);
+
+        metaText.append('tspan')
+            .attr('dx', 12)
+            .text(`${datum.pvp_ratio.toFixed(1)}% WR`);
+
+        if (datum.highest_ranked_league) {
+            metaText.append('tspan')
+                .attr('dx', 12)
+                .text(`${datum.highest_ranked_league} Ranked`);
+        }
+
+        const titleNode = titleText.node();
+        const metaNode = metaText.node();
+        if (!titleNode || !metaNode) {
+            return;
+        }
+
+        const titleBox = titleNode.getBBox();
+        const metaBox = metaNode.getBBox();
+        const minX = Math.min(titleBox.x, metaBox.x);
+        const minY = Math.min(titleBox.y, metaBox.y);
+        const maxX = Math.max(titleBox.x + titleBox.width, metaBox.x + metaBox.width);
+        const maxY = Math.max(titleBox.y + titleBox.height, metaBox.y + metaBox.height);
+
+        detailGroup.insert('rect', 'text')
+            .attr('x', minX - 10)
+            .attr('y', minY - 6)
+            .attr('width', maxX - minX + 20)
+            .attr('height', maxY - minY + 12)
+            .attr('rx', 6)
+            .attr('fill', 'rgba(255, 255, 255, 0.94)');
+    };
+
+    const hideDetails = () => {
+        svgRoot.select('.details').remove();
+    };
+
+    svg.append('g')
+        .selectAll('dot')
+        .data(plotData)
+        .enter()
+        .append('circle')
+        .attr('cx', (datum: PlotDatum) => x(datum.pvp_battles))
+        .attr('cy', (datum: PlotDatum) => y(datum.pvp_ratio))
+        .attr('r', 5)
+        .style('cursor', onSelectPlayer ? 'pointer' : 'default')
+        .attr('fill', (datum: PlotDatum) => selectLandingPlayerColorByWR(datum.pvp_ratio))
+        .attr('stroke', '#444')
+        .attr('stroke-width', 1.25);
+
+    const circles = svg.selectAll('circle');
+
+    circles
+        .on('click', function (_event: MouseEvent, datum: PlotDatum) {
+            if (onSelectPlayer) {
+                onSelectPlayer(datum);
+            }
+        })
+        .on('mouseover', function (this: SVGCircleElement, _event: MouseEvent, datum: PlotDatum) {
+            showDetails(datum);
+            d3.select(this).transition().duration(50).attr('fill', '#bcbddc');
+        })
+        .on('mouseout', function (this: SVGCircleElement, _event: MouseEvent, datum: PlotDatum) {
+            hideDetails();
+            d3.select(this).transition().duration(50).attr('fill', selectLandingPlayerColorByWR(datum.pvp_ratio));
+        });
+};
+
+const LandingPlayerSVG: React.FC<LandingPlayerSVGProps> = ({
+    players,
+    onSelectPlayer,
+    svgHeight = 300,
+}) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [containerWidth, setContainerWidth] = useState(320);
+    const [isChartReady, setIsChartReady] = useState(false);
+    const chartSignature = useMemo(() => JSON.stringify({
+        players: players.map((player) => [player.name, player.pvp_ratio, player.pvp_battles, player.highest_ranked_league]),
+        svgHeight,
+    }), [players, svgHeight]);
+
+    useEffect(() => {
+        if (!containerRef.current) return;
+        const observer = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                setContainerWidth(entry.contentRect.width);
+            }
+        });
+        observer.observe(containerRef.current);
+        setContainerWidth(containerRef.current.clientWidth);
+        return () => observer.disconnect();
+    }, []);
+
+    useEffect(() => {
+        if (!containerRef.current || containerWidth < 100) return;
+        setIsChartReady(false);
+        drawLandingPlayerChart(containerRef.current, players, onSelectPlayer, containerWidth, svgHeight);
+        const frameId = window.requestAnimationFrame(() => {
+            setIsChartReady(true);
+        });
+        return () => window.cancelAnimationFrame(frameId);
+    }, [chartSignature, containerWidth, onSelectPlayer, players, svgHeight]);
+
+    return <div ref={containerRef} className={`pr-8 transition-opacity duration-150 md:pr-16 ${isChartReady ? 'opacity-100' : 'opacity-0'}`}></div>;
+};
+
+export default LandingPlayerSVG;

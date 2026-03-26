@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key, warm_landing_page_content
+from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
 from warships.models import Player, Clan, PlayerExplorerSummary
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
@@ -418,6 +418,32 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
+
+class LandingWarmupViewTests(TestCase):
+    @patch("warships.views.queue_landing_best_entity_warm")
+    def test_landing_best_warmup_queues_background_warm(self, mock_queue):
+        mock_queue.return_value = {"status": "queued"}
+
+        response = self.client.get("/api/landing/warm-best/")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), {"status": "queued"})
+        mock_queue.assert_called_once_with(
+            player_limit=LANDING_PLAYER_LIMIT,
+            clan_limit=LANDING_PLAYER_LIMIT,
+        )
+
+    @patch("warships.views.queue_landing_best_entity_warm")
+    def test_landing_best_warmup_returns_skip_status_without_error(self, mock_queue):
+        mock_queue.return_value = {
+            "status": "skipped", "reason": "already-queued"}
+
+        response = self.client.get("/api/landing/warm-best/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+                         "status": "skipped", "reason": "already-queued"})
+
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
@@ -729,6 +755,7 @@ class PlayerViewSetTests(TestCase):
             pvp_battles=25,
             pvp_ratio=52.0,
             pvp_survival_rate=38.0,
+            actual_kdr=1.1,
             battles_json=[{"ship_name": "Stub Ship", "pvp_battles": 25}],
             efficiency_json=None,
         )
@@ -1969,7 +1996,7 @@ class ApiContractTests(TestCase):
         response = self.client.get("/api/landing/players/?mode=best&limit=40")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 40)
+        self.assertEqual(len(response.json()), LANDING_PLAYER_LIMIT)
 
     def test_landing_players_expose_cache_expiry_headers(self):
         cache.clear()
@@ -2266,7 +2293,7 @@ class ApiContractTests(TestCase):
         response = self.client.get("/api/landing/players/?mode=sigma&limit=40")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 40)
+        self.assertEqual(len(response.json()), LANDING_PLAYER_LIMIT)
 
     def test_landing_players_only_include_recently_active_players(self):
         cache.clear()
@@ -2620,11 +2647,22 @@ class ApiContractTests(TestCase):
 
         self.assertEqual(result['status'], 'completed')
         self.assertIsNotNone(cache.get(LANDING_CLANS_CACHE_KEY))
+        self.assertIsNotNone(cache.get(LANDING_CLANS_PUBLISHED_CACHE_KEY))
         self.assertIsNotNone(cache.get(LANDING_CLANS_BEST_CACHE_KEY))
+        self.assertIsNotNone(cache.get(LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY))
         self.assertIsNotNone(cache.get(LANDING_RECENT_CLANS_CACHE_KEY))
-        self.assertIsNotNone(cache.get(landing_player_cache_key('random', 40)))
-        self.assertIsNotNone(cache.get(landing_player_cache_key('best', 40)))
-        self.assertIsNotNone(cache.get(landing_player_cache_key('sigma', 40)))
+        self.assertIsNotNone(
+            cache.get(landing_player_cache_key('random', LANDING_PLAYER_LIMIT)))
+        self.assertIsNotNone(
+            cache.get(landing_player_published_cache_key('random', LANDING_PLAYER_LIMIT)))
+        self.assertIsNotNone(
+            cache.get(landing_player_cache_key('best', LANDING_PLAYER_LIMIT)))
+        self.assertIsNotNone(
+            cache.get(landing_player_published_cache_key('best', LANDING_PLAYER_LIMIT)))
+        self.assertIsNotNone(
+            cache.get(landing_player_cache_key('sigma', LANDING_PLAYER_LIMIT)))
+        self.assertIsNotNone(
+            cache.get(landing_player_published_cache_key('sigma', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
 
     def test_landing_recent_clans_orders_by_last_lookup_desc(self):
@@ -2833,6 +2871,91 @@ class ApiContractTests(TestCase):
             force_refresh=True,
         )
 
+    @patch("warships.data.update_player_data")
+    def test_player_detail_repairs_stale_missing_actual_kdr_before_serializing(self, mock_update_player_data):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="DetailActualKdrImmediateRepair",
+            player_id=8186,
+            is_hidden=False,
+            pvp_ratio=52.5,
+            pvp_battles=17089,
+            pvp_frags=0,
+            pvp_survived_battles=0,
+            pvp_deaths=0,
+            actual_kdr=None,
+            creation_date=now - timedelta(days=180),
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 8, "pvp_battles": 50, "kdr": 1.3},
+            ],
+            last_fetch=now - timedelta(days=2),
+        )
+
+        def fake_update_player_data(player, force_refresh=False):
+            player.pvp_frags = 120
+            player.pvp_survived_battles = 20
+            player.pvp_deaths = 80
+            player.actual_kdr = 1.5
+            player.last_fetch = timezone.now()
+            player.save(update_fields=[
+                        "pvp_frags", "pvp_survived_battles", "pvp_deaths", "actual_kdr", "last_fetch"])
+
+        mock_update_player_data.side_effect = fake_update_player_data
+
+        response = self.client.get(
+            "/api/player/DetailActualKdrImmediateRepair/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["actual_kdr"], 1.5)
+        mock_update_player_data.assert_called_once_with(
+            player=player, force_refresh=True)
+
+    @patch("warships.data.update_player_data")
+    def test_player_detail_repairs_stale_missing_efficiency_data_before_serializing(self, mock_update_player_data):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="DetailEfficiencyImmediateRepair",
+            player_id=8187,
+            is_hidden=False,
+            pvp_ratio=52.5,
+            pvp_battles=17089,
+            actual_kdr=1.4,
+            efficiency_json=None,
+            creation_date=now - timedelta(days=180),
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 8, "pvp_battles": 50, "kdr": 1.3},
+            ],
+            last_fetch=now - timedelta(days=2),
+        )
+
+        def fake_update_player_data(player, force_refresh=False):
+            player.efficiency_json = [{
+                "ship_id": 111,
+                "top_grade_class": 1,
+                "top_grade_label": "Expert",
+                "badge_label": "Expert",
+                "ship_name": "Ship A",
+                "ship_chart_name": "Ship A",
+                "ship_type": "Destroyer",
+                "ship_tier": 8,
+                "nation": "usa",
+            }]
+            player.last_fetch = timezone.now()
+            player.save(update_fields=["efficiency_json", "last_fetch"])
+
+        mock_update_player_data.side_effect = fake_update_player_data
+
+        response = self.client.get(
+            "/api/player/DetailEfficiencyImmediateRepair/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["efficiency_json"][0]["ship_name"], "Ship A")
+        mock_update_player_data.assert_called_once_with(
+            player=player, force_refresh=True)
+
     def test_player_distribution_returns_survival_payload(self):
         Player.objects.create(
             name="DistributionOne",
@@ -2954,8 +3077,30 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["tracked_population"], 2)
         self.assertTrue(payload["correlation"]
                         is None or payload["correlation"] > 0)
-        self.assertTrue(any(tile["count"] > 0 for tile in payload["tiles"]))
-        self.assertTrue(any(point["count"] > 0 for point in payload["trend"]))
+        self.assertEqual(payload["x_domain"], {
+            "min": 35.0,
+            "max": 75.0,
+            "bin_width": 1.0,
+        })
+        self.assertEqual(payload["y_domain"], {
+            "min": 15.0,
+            "max": 75.0,
+            "bin_width": 1.5,
+        })
+        self.assertTrue(any(
+            tile["x_index"] == 17 and tile["y_index"] == 12 and tile["count"] == 1
+            for tile in payload["tiles"]
+        ))
+        self.assertTrue(any(
+            tile["x_index"] == 23 and tile["y_index"] == 18 and tile["count"] == 1
+            for tile in payload["tiles"]
+        ))
+        self.assertTrue(all("x_min" not in tile for tile in payload["tiles"]))
+        self.assertTrue(
+            any(point["x_index"] == 17 and point["count"] == 1 for point in payload["trend"]))
+        self.assertTrue(
+            any(point["x_index"] == 23 and point["count"] == 1 for point in payload["trend"]))
+        self.assertTrue(all("x" not in point for point in payload["trend"]))
 
     def test_player_correlation_distribution_returns_tier_type_payload(self):
         cache.clear()
@@ -3026,6 +3171,41 @@ class ApiContractTests(TestCase):
             for point in payload["trend"]
         ))
 
+    @patch("warships.data.update_battle_data_task.delay")
+    def test_player_correlation_distribution_flags_pending_tier_type_refresh_when_player_battles_are_missing(self, mock_update_battle_data_task):
+        cache.clear()
+
+        Player.objects.create(
+            name="TierTypePending",
+            player_id=8834,
+            is_hidden=False,
+            pvp_battles=1400,
+            battles_json=None,
+        )
+        Player.objects.create(
+            name="TierTypePopulation",
+            player_id=8835,
+            is_hidden=False,
+            pvp_battles=2100,
+            battles_json=[
+                {"ship_name": "Ship D", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 15, "wins": 8},
+                {"ship_name": "Ship E", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 30, "wins": 18},
+            ],
+        )
+
+        response = self.client.get(
+            "/api/fetch/player_correlation/tier_type/8834/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Tier-Type-Pending"], "true")
+        payload = response.json()
+        self.assertEqual(payload["metric"], "tier_type")
+        self.assertEqual(payload["player_cells"], [])
+        self.assertTrue(payload["tiles"])
+        mock_update_battle_data_task.assert_called_once_with(player_id="8834")
+
     def test_player_correlation_distribution_returns_ranked_wr_battles_payload(self):
         cache.clear()
         from warships.data import warm_player_ranked_wr_battles_population_correlation
@@ -3085,7 +3265,8 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["x_label"], "Total Ranked Games")
         self.assertEqual(payload["y_label"], "Ranked Win Rate")
         self.assertEqual(payload["x_scale"], "log")
-        self.assertEqual(payload["x_domain"]["min"], 50.0)
+        self.assertEqual(payload["x_edges"][0], 50.0)
+        self.assertEqual(payload["x_edges"][1], 59.0)
         self.assertEqual(payload["x_ticks"][0], 50.0)
         self.assertEqual(payload["x_ticks"][1], 100.0)
         self.assertEqual(payload["tracked_population"], 2)
@@ -3093,14 +3274,15 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["player_point"]["y"], 56.67)
         self.assertTrue(any(tile["count"] > 0 for tile in payload["tiles"]))
         self.assertTrue(any(
-            tile["x_min"] == 59.0 and tile["x_max"] == 71.0 and tile["y_min"] == 56.0 and tile["y_max"] == 56.75 and tile["count"] == 1
+            tile["x_index"] == 1 and tile["y_index"] == 28 and tile["count"] == 1
             for tile in payload["tiles"]
         ))
         self.assertTrue(any(
-            tile["x_min"] == 119.0 and tile["x_max"] == 141.0 and tile["y_min"] == 59.75 and tile["y_max"] == 60.5 and tile["count"] == 1
+            tile["x_index"] == 5 and tile["y_index"] == 33 and tile["count"] == 1
             for tile in payload["tiles"]
         ))
         self.assertTrue(any(point["count"] > 0 for point in payload["trend"]))
+        self.assertTrue(all("x_index" in point for point in payload["trend"]))
 
     def test_player_correlation_distribution_returns_404_for_missing_ranked_wr_battles_player(self):
         response = self.client.get(
@@ -3109,7 +3291,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     @patch("warships.tasks.queue_player_ranked_wr_battles_correlation_refresh")
-    def test_player_correlation_distribution_returns_fallback_when_ranked_population_cache_is_cold(self, mock_queue_refresh):
+    def test_player_correlation_distribution_builds_ranked_population_when_cache_is_cold(self, mock_queue_refresh):
         cache.clear()
 
         Player.objects.create(
@@ -3129,11 +3311,45 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["metric"], "ranked_wr_battles")
-        self.assertEqual(payload["tracked_population"], 0)
-        self.assertEqual(payload["tiles"], [])
-        self.assertEqual(payload["trend"], [])
+        self.assertEqual(payload["tracked_population"], 1)
+        self.assertTrue(payload["tiles"])
+        self.assertTrue(payload["trend"])
         self.assertEqual(payload["player_point"]["x"], 90.0)
         self.assertEqual(payload["player_point"]["y"], 60.0)
+        mock_queue_refresh.assert_not_called()
+
+    @patch("warships.tasks.queue_player_ranked_wr_battles_correlation_refresh")
+    def test_player_correlation_distribution_uses_published_ranked_population_fallback(self, mock_queue_refresh):
+        from warships.data import _player_correlation_cache_key, _player_correlation_published_cache_key, warm_player_ranked_wr_battles_population_correlation
+
+        cache.clear()
+
+        Player.objects.create(
+            name="PublishedFallbackRankedHeatmap",
+            player_id=8846,
+            is_hidden=False,
+            ranked_updated_at=timezone.now(),
+            ranked_json=[
+                {"season_id": 10, "total_battles": 120,
+                    "total_wins": 72, "win_rate": 0.6, "top_ship_name": None},
+            ],
+        )
+
+        warm_player_ranked_wr_battles_population_correlation()
+        cache.delete(_player_correlation_cache_key("ranked_wr_battles:v6"))
+
+        response = self.client.get(
+            "/api/fetch/player_correlation/ranked_wr_battles/8846/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["metric"], "ranked_wr_battles")
+        self.assertEqual(payload["tracked_population"], 1)
+        self.assertTrue(payload["tiles"])
+        self.assertEqual(payload["player_point"]["x"], 120.0)
+        self.assertEqual(payload["player_point"]["y"], 60.0)
+        self.assertIsNotNone(
+            cache.get(_player_correlation_published_cache_key("ranked_wr_battles:v6")))
         mock_queue_refresh.assert_called_once_with()
 
     def test_player_correlation_distribution_returns_404_for_missing_tier_type_player(self):
@@ -3556,11 +3772,21 @@ class ApiThrottleTests(TestCase):
                 "runs_with_guidance": 1,
                 "design_review_fail_count": 0,
                 "api_review_fail_count": 0,
+                "reviewed_memory_total": 1,
             },
             "learning": {
                 "recurring_issues": [],
                 "common_guidance_paths": [{"label": "agents/runbooks/runbook-langgraph-opinionated-workflow.md", "count": 1}],
+                "reviewed_store_paths": [{"label": "logs/agentic/memory/reviewed/battlestats__local__procedural.json", "count": 1}],
                 "chart_tuning_notes": [{"slug": "ranked_wr_battles_heatmap"}],
+            },
+            "memory_store": {
+                "backend": "file",
+                "reviewed_total": 1,
+                "pending_review_total": 0,
+                "superseded_total": 0,
+                "recent_reviewed": [{"memory_id": "mem-1", "summary": "Reuse trace validation commands."}],
+                "recent_candidates": [],
             },
         }
 
@@ -3571,8 +3797,12 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.json()["diagnostics"]["total_runs"], 1)
         self.assertEqual(
             response.json()["diagnostics"]["runs_with_guidance"], 1)
+        self.assertEqual(
+            response.json()["diagnostics"]["reviewed_memory_total"], 1)
         self.assertTrue(
             response.json()["recent_runs"][0]["design_review_passed"])
+        self.assertEqual(
+            response.json()["memory_store"]["recent_reviewed"][0]["memory_id"], "mem-1")
         self.assertEqual(response.json()[
                          "learning"]["chart_tuning_notes"][0]["slug"], "ranked_wr_battles_heatmap")
         mock_get_agentic_trace_dashboard.assert_called_once_with(limit=12)
@@ -3691,6 +3921,29 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response["X-Clan-Battles-Pending"], "true")
         mock_queue_refresh.assert_called_once_with("42")
 
+    @patch("warships.views.fetch_clan_plot_data", return_value=[])
+    def test_clan_data_flags_pending_refresh_on_empty_plot_warmup(self, _mock_fetch_plot):
+        clan = Clan.objects.create(
+            clan_id=43,
+            name="PendingPlotClan",
+            tag="PPC",
+            members_count=2,
+            last_fetch=None,
+        )
+        Player.objects.create(
+            name="PlotMember",
+            player_id=4301,
+            clan=clan,
+            pvp_battles=120,
+            pvp_ratio=54.0,
+        )
+
+        response = self.client.get("/api/fetch/clan_data/43:active")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+        self.assertEqual(response["X-Clan-Plot-Pending"], "true")
+
     @patch("warships.views.fetch_player_clan_battle_seasons")
     def test_player_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):
         mock_fetch.return_value = [
@@ -3745,6 +3998,24 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["season_label"], "S33")
         mock_fetch.assert_called_once_with("777")
+
+    @patch("warships.views.logger.exception")
+    @patch("warships.views.fetch_player_clan_battle_seasons", side_effect=RuntimeError("boom"))
+    def test_player_clan_battle_seasons_logs_player_context_on_failure(self, _mock_fetch, mock_logger_exception):
+        clan = Clan.objects.create(
+            clan_id=778, name="LogClan", tag="LOG", members_count=1)
+        Player.objects.create(name="LogPlayer", player_id=7781, clan=clan)
+
+        with self.assertRaises(RuntimeError):
+            self.client.get("/api/fetch/player_clan_battle_seasons/7781/")
+
+        mock_logger_exception.assert_called_once_with(
+            'Player clan battle seasons endpoint failed for player_id=%s player_name=%s clan_id=%s clan_name=%s',
+            '7781',
+            'LogPlayer',
+            clan.clan_id,
+            'LogClan',
+        )
 
     @patch("warships.views.fetch_ranked_data")
     def test_ranked_data_returns_serialized_rows_and_refresh_header(self, mock_fetch_ranked_data):

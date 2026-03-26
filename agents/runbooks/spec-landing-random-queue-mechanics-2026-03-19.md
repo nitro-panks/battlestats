@@ -2,19 +2,26 @@
 
 _Captured: 2026-03-19_
 
-_Status: proposed implementation spec_
+_Status: partially historical; public landing reads now use published cache surfaces with durable fallback, while queue refill/preview remains background infrastructure_
 
 ## Goal
 
 Change the landing-page random surfaces so they stop choosing random players and clans during the user request.
 
+Current runtime note:
+
+- public landing player and clan requests now read the published landing cache surfaces, not queue-pop responses
+- the queue lane remains relevant for background refill and preview plumbing, not as the public request contract
+
 Required behavior:
 
 - maintain a queue of `100` eligible random player ids
 - maintain a queue of `100` eligible random clan ids
-- when the landing page requests random players or random clans, pop `40` ids from the head of the relevant queue and return those rows
+- when the landing page requests random players, pop `25` ids from the head of the player queue and return those rows
+- when the landing page requests random clans, pop `30` ids from the head of the clan queue and return those rows
 - do not refill the queue while the user is waiting on that request
-- after serving the request, trigger background refill of `40` more ids
+- after serving a random-player request, trigger background refill of `25` more eligible player ids
+- after serving a random-clan request, trigger background refill of `30` more eligible clan ids
 - when the clan queue refill happens, warm the landing clan chart payload so the next clan render is ready
 
 This spec applies only to the random landing lanes.
@@ -64,19 +71,19 @@ Implication:
 
 For `GET /api/landing/players/?mode=random`:
 
-- response returns the next `40` ids from a Redis-backed random-player queue
+- response returns the next `25` ids from a Redis-backed random-player queue
 - those ids are resolved to player rows after the pop
 - the request does not build or refill the next batch synchronously
-- after the response payload is determined, the server schedules a background refill of `40` more eligible ids
+- after the response payload is determined, the server schedules a background refill of `25` more eligible ids
 
 ### Random landing clans
 
 For `GET /api/landing/clans/` in the landing random lane:
 
-- response returns the next `40` ids from a Redis-backed random-clan queue
+- response returns the next `30` ids from a Redis-backed random-clan queue
 - those ids are resolved to clan rows after the pop
 - the request does not synchronously refill the queue
-- after the response payload is determined, the server schedules a background refill of `40` more eligible ids
+- after the response payload is determined, the server schedules a background refill of `30` more eligible ids
 - the refill task also warms the landing clan chart payload so the next clan landscape render is ready
 
 ### Queue intent
@@ -280,7 +287,7 @@ Reason:
 
 ### Keep payload caching, but change what it caches
 
-Current landing caches store request-built payloads for one hour.
+Current published landing caches use a 12-hour freshness window and retain the last published payload as a durable fallback so public reads stay hot after first publish.
 
 Under the queue model:
 

@@ -60,8 +60,16 @@ SLEEPY_PLAYER_DAYS_THRESHOLD = 365
 CLAN_RANKED_HYDRATION_STALE_AFTER = timedelta(hours=24)
 CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT', '8')))
-CLAN_BATTLE_SUMMARY_STALE_DAYS = max(
-    1, int(os.getenv('CLAN_BATTLE_SUMMARY_STALE_DAYS', '7')))
+CLAN_BATTLE_BADGE_REFRESH_DAYS = max(
+    1,
+    int(
+        os.getenv(
+            'CLAN_BATTLE_BADGE_REFRESH_DAYS',
+            os.getenv('CLAN_BATTLE_SUMMARY_STALE_DAYS', '14'),
+        )
+    ),
+)
+CLAN_BATTLE_SUMMARY_STALE_DAYS = CLAN_BATTLE_BADGE_REFRESH_DAYS
 CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT', '8')))
 PLAYER_EFFICIENCY_STALE_AFTER = timedelta(hours=24)
@@ -629,7 +637,7 @@ def clan_battle_summary_is_stale(player: Player) -> bool:
     updated_at = summary.clan_battle_summary_updated_at
     if updated_at is None:
         return True
-    return (django_timezone.now() - updated_at).days >= CLAN_BATTLE_SUMMARY_STALE_DAYS
+    return (django_timezone.now() - updated_at).days >= CLAN_BATTLE_BADGE_REFRESH_DAYS
 
 
 def maybe_refresh_clan_battle_data(player: Player) -> None:
@@ -2835,6 +2843,10 @@ def _player_correlation_cache_key(metric: str) -> str:
     return f'players:correlation:v2:{metric}'
 
 
+def _player_correlation_published_cache_key(metric: str) -> str:
+    return f'{_player_correlation_cache_key(metric)}:published'
+
+
 def _build_doubling_bin_edges(max_value: int, seed_edges: list[int]) -> list[int]:
     if not seed_edges:
         return [1, max(2, max_value)]
@@ -3155,13 +3167,16 @@ def _fetch_player_tier_type_population_correlation() -> dict:
     return payload
 
 
-def fetch_player_tier_type_correlation(player_id: str) -> dict:
-    player = Player.objects.get(player_id=player_id)
-    if not player.battles_json:
-        update_battle_data(player_id)
-        player.refresh_from_db(fields=['battles_json'])
-
+def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None) -> dict:
+    player = player or Player.objects.get(player_id=player_id)
     population_payload = _fetch_player_tier_type_population_correlation()
+    if not player.battles_json:
+        _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+        return {
+            **population_payload,
+            'player_cells': [],
+        }
+
     return {
         **population_payload,
         'player_cells': _build_tier_type_player_cells(player.battles_json),
@@ -3230,10 +3245,8 @@ def fetch_player_wr_survival_correlation() -> dict:
     tiles = []
     for (x_index, y_index), count in sorted(tile_counts.items()):
         tiles.append({
-            'x_min': round(x_min + (x_index * x_bin_width), 4),
-            'x_max': round(x_min + ((x_index + 1) * x_bin_width), 4),
-            'y_min': round(y_min + (y_index * y_bin_width), 4),
-            'y_max': round(y_min + ((y_index + 1) * y_bin_width), 4),
+            'x_index': x_index,
+            'y_index': y_index,
             'count': count,
         })
 
@@ -3243,7 +3256,7 @@ def fetch_player_wr_survival_correlation() -> dict:
             continue
 
         trend.append({
-            'x': round(x_min + (index * x_bin_width) + (x_bin_width / 2), 4),
+            'x_index': index,
             'y': round(trend_sum_y[index] / count, 4),
             'count': count,
         })
@@ -3276,12 +3289,16 @@ def fetch_player_wr_survival_correlation() -> dict:
 def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
     cache_key = _player_correlation_cache_key(
         PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+    published_cache_key = _player_correlation_published_cache_key(
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
     cached = cache.get(cache_key)
     if cached is not None:
+        cache.set(published_cache_key, cached, timeout=None)
         return cached
 
     payload = _build_player_ranked_wr_battles_population_correlation_payload()
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
+    cache.set(published_cache_key, payload, timeout=None)
     return payload
 
 
@@ -3299,13 +3316,9 @@ def _build_empty_player_ranked_wr_battles_population_correlation_payload() -> di
         'x_scale': config['x_scale'],
         'y_scale': config['y_scale'],
         'x_ticks': [base_edge, x_max],
+        'x_edges': [base_edge, x_max],
         'tracked_population': 0,
         'correlation': None,
-        'x_domain': {
-            'min': base_edge,
-            'max': x_max,
-            'bin_width': None,
-        },
         'y_domain': {
             'min': config['y_min'],
             'max': config['y_max'],
@@ -3378,10 +3391,8 @@ def _build_player_ranked_wr_battles_population_correlation_payload() -> dict:
     tiles = []
     for (x_index, y_index), count in sorted(tile_counts.items()):
         tiles.append({
-            'x_min': float(x_edges[x_index]),
-            'x_max': float(x_edges[x_index + 1]),
-            'y_min': round(y_min + (y_index * y_bin_width), 4),
-            'y_max': round(y_min + ((y_index + 1) * y_bin_width), 4),
+            'x_index': x_index,
+            'y_index': y_index,
             'count': count,
         })
 
@@ -3391,7 +3402,7 @@ def _build_player_ranked_wr_battles_population_correlation_payload() -> dict:
             continue
 
         trend.append({
-            'x': round(math.sqrt(x_edges[index] * x_edges[index + 1]), 4),
+            'x_index': index,
             'y': round(trend_sum_y[index] / count, 4),
             'count': count,
         })
@@ -3403,14 +3414,10 @@ def _build_player_ranked_wr_battles_population_correlation_payload() -> dict:
         'y_label': config['y_label'],
         'x_scale': config['x_scale'],
         'y_scale': config['y_scale'],
-        'x_ticks': major_x_ticks,
+        'x_ticks': [float(tick) for tick in major_x_ticks],
+        'x_edges': [float(edge) for edge in x_edges],
         'tracked_population': tracked_population,
         'correlation': round(_pearson_correlation(tracked_population, sum_x, sum_y, sum_xy, sum_x2, sum_y2), 4) if tracked_population > 1 else None,
-        'x_domain': {
-            'min': float(x_edges[0]),
-            'max': float(x_edges[-1]),
-            'bin_width': None,
-        },
         'y_domain': {
             'min': y_min,
             'max': y_max,
@@ -3425,7 +3432,10 @@ def warm_player_ranked_wr_battles_population_correlation() -> dict:
     payload = _build_player_ranked_wr_battles_population_correlation_payload()
     cache_key = _player_correlation_cache_key(
         PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+    published_cache_key = _player_correlation_published_cache_key(
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
+    cache.set(published_cache_key, payload, timeout=None)
     return payload
 
 
@@ -3437,7 +3447,19 @@ def fetch_player_ranked_wr_battles_correlation(player_id: str) -> dict:
     total_battles, win_rate = _calculate_ranked_record(ranked_rows)
     cache_key = _player_correlation_cache_key(
         PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+    published_cache_key = _player_correlation_published_cache_key(
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
     population_payload = cache.get(cache_key)
+    if population_payload is not None:
+        cache.set(published_cache_key, population_payload, timeout=None)
+    else:
+        published_payload = cache.get(published_cache_key)
+        if published_payload is not None:
+            population_payload = published_payload
+            queue_player_ranked_wr_battles_correlation_refresh()
+        else:
+            population_payload = warm_player_ranked_wr_battles_population_correlation()
+
     if population_payload is None:
         queue_player_ranked_wr_battles_correlation_refresh()
         population_payload = _build_empty_player_ranked_wr_battles_population_correlation_payload()
@@ -4030,25 +4052,27 @@ def fetch_randoms_data(player_id: str) -> list:
 
 
 def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
+    def build_plot_payload(members_queryset) -> list:
+        data = []
+        for member in members_queryset:
+            battles = member.pvp_battles or 0
+            if filter_type != 'all' and battles < 100:
+                continue
+
+            data.append({
+                'player_name': member.name,
+                'pvp_battles': battles,
+                'pvp_ratio': member.pvp_ratio or 0
+            })
+
+        return sorted(data, key=lambda row: row.get('pvp_battles', 0), reverse=True)
+
     cache_key = f'clan:plot:v1:{clan_id}:{filter_type}'
     cached = cache.get(cache_key)
-    if cached is not None:
-        try:
-            clan = Clan.objects.get(clan_id=clan_id)
-        except Clan.DoesNotExist:
-            return cached
-
-        member_count = clan.player_set.exclude(name='').count()
-        if clan_detail_needs_refresh(clan):
-            _dispatch_async_refresh(update_clan_data_task, clan_id=clan_id)
-        if clan_members_missing_or_incomplete(clan, member_count=member_count):
-            _dispatch_async_refresh(update_clan_members_task, clan_id=clan_id)
-        return cached
-
     try:
         clan = Clan.objects.get(clan_id=clan_id)
     except Clan.DoesNotExist:
-        return []
+        return cached if cached is not None else []
 
     members = clan.player_set.exclude(name='').all()
     member_count = members.count()
@@ -4063,23 +4087,21 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
     if needs_member_refresh:
         _dispatch_async_refresh(update_clan_members_task, clan_id=clan_id)
 
+    if cached is not None:
+        if cached:
+            return cached
+
+        if needs_clan_refresh or needs_member_refresh:
+            return []
+
+        payload = build_plot_payload(members)
+        cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
+        return payload
+
     if needs_clan_refresh or needs_member_refresh:
         return []
 
-    data = []
-    for member in members:
-        battles = member.pvp_battles or 0
-        if filter_type != 'all' and battles < 100:
-            continue
-
-        data.append({
-            'player_name': member.name,
-            'pvp_battles': battles,
-            'pvp_ratio': member.pvp_ratio or 0
-        })
-
-    payload = sorted(data, key=lambda row: row.get(
-        'pvp_battles', 0), reverse=True)
+    payload = build_plot_payload(members)
     cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
     return payload
 
@@ -4397,8 +4419,30 @@ def warm_hot_entity_caches(
 ) -> dict[str, Any]:
     player_ids = _get_hot_player_ids(player_limit)
     clan_ids = _get_hot_clan_ids(clan_limit)
+    warmed_players = warm_player_entity_caches(
+        player_ids,
+        force_refresh=force_refresh,
+    )
+    warmed_clans = warm_clan_entity_caches(
+        clan_ids,
+        force_refresh=force_refresh,
+    )
+
+    return {
+        'status': 'completed',
+        'warmed': {
+            'players': warmed_players,
+            'clans': warmed_clans,
+        },
+        'candidate_counts': {
+            'players': len(player_ids),
+            'clans': len(clan_ids),
+        },
+    }
+
+
+def warm_player_entity_caches(player_ids: Iterable[int], force_refresh: bool = False) -> int:
     warmed_players = 0
-    warmed_clans = 0
 
     for player_id in player_ids:
         player = Player.objects.select_related(
@@ -4438,6 +4482,12 @@ def warm_hot_entity_caches(
         fetch_player_clan_battle_seasons(player.player_id)
         warmed_players += 1
 
+    return warmed_players
+
+
+def warm_clan_entity_caches(clan_ids: Iterable[int], force_refresh: bool = False) -> int:
+    warmed_clans = 0
+
     for clan_id in clan_ids:
         clan = Clan.objects.filter(clan_id=clan_id).first()
         if clan is None:
@@ -4455,6 +4505,44 @@ def warm_hot_entity_caches(
         fetch_clan_plot_data(str(clan_id), 'active')
         fetch_clan_plot_data(str(clan_id), 'all')
         warmed_clans += 1
+
+    return warmed_clans
+
+
+def warm_landing_best_entity_caches(
+    player_limit: int = 25,
+    clan_limit: int = 25,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    from warships.landing import get_landing_best_clans_payload, get_landing_players_payload, normalize_landing_clan_limit, normalize_landing_player_limit
+
+    normalized_player_limit = normalize_landing_player_limit(player_limit)
+    normalized_clan_limit = min(normalize_landing_clan_limit(clan_limit), 25)
+    best_player_rows = get_landing_players_payload(
+        'best',
+        normalized_player_limit,
+    )
+    best_clan_rows = get_landing_best_clans_payload()[:normalized_clan_limit]
+
+    player_ids = [
+        int(row.get('player_id') or 0)
+        for row in best_player_rows
+        if row.get('player_id') is not None
+    ]
+    clan_ids = [
+        int(row.get('clan_id') or 0)
+        for row in best_clan_rows
+        if row.get('clan_id') is not None
+    ]
+
+    warmed_players = warm_player_entity_caches(
+        player_ids,
+        force_refresh=force_refresh,
+    )
+    warmed_clans = warm_clan_entity_caches(
+        clan_ids,
+        force_refresh=force_refresh,
+    )
 
     return {
         'status': 'completed',
