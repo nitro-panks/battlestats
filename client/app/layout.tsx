@@ -7,6 +7,7 @@ import { Inter } from "next/font/google";
 import HeaderSearch from "./components/HeaderSearch";
 import Logo from "./components/Logo";
 import Footer from "./components/Footer";
+import { getSiteOrigin } from "./lib/siteOrigin";
 import "./globals.css";
 
 config.autoAddCss = false;
@@ -17,6 +18,7 @@ const gaMeasurementId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 export const metadata: Metadata = {
   title: "WoWs Battlestats",
   description: "World of Warships player and clan statistics",
+  metadataBase: new URL(getSiteOrigin()),
 };
 
 export default function RootLayout({

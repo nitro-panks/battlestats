@@ -20,6 +20,8 @@ In the full Docker stack used by this repo, the client is exposed at [http://loc
 
 The client now calls relative `/api/...` paths and relies on a Next.js rewrite to reach Django. By default the rewrite target is `http://localhost:8888`, and you can override it with `BATTLESTATS_API_ORIGIN` when running the client outside the local stack.
 
+Crawler metadata routes use `BATTLESTATS_APP_ORIGIN` as the canonical public origin for generated `robots.txt`, `sitemap.xml`, and `metadataBase`. If that variable is unset, the app falls back to `NEXT_PUBLIC_SITE_URL`, then `https://tamezz.com`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
@@ -107,6 +109,7 @@ npm run test:e2e -- e2e/clan-route-clan-chart-pending.spec.ts
 npm run test:e2e -- e2e/player-detail-tabs.spec.ts
 npm run test:e2e -- e2e/ranked-heatmap-performance.spec.ts
 npm run test:e2e:benchmarks
+npm run test:e2e:live-site-player-sweep
 ```
 
 They run a real browser against the routed player and clan detail pages, mock the `/api/...` surface in-browser, and verify both of these route-critical contracts:
@@ -135,6 +138,7 @@ Current spec roles:
 - `e2e/ranked-heatmap-performance.spec.ts`: exercises a dense mocked ranked payload in Chromium and logs bounded timing metrics for the ranked heatmap draw path
 - `e2e/player-route-cold-performance-live.spec.ts`: hits 10 real player routes, isolates the routed player shell, and stores timestamped cold-route timing JSON for trend comparison
 - `e2e/profile-chart-performance-live.spec.ts`: hits 10 real player profile tabs, verifies the single `tier_type` request contract, and stores timestamped chart timing JSON for trend comparison
+- `e2e/player-route-live-site-components-performance.spec.ts`: sweeps 12 live player routes against a real external deployment, verifies the major player-detail panels render without failure text, and stores timestamped component timing JSON for trend comparison
 
 Benchmark artifact and trend storage:
 
@@ -168,6 +172,8 @@ NGINX_SERVER_NAME="tamezz.com www.tamezz.com" ./client/deploy/bootstrap_droplet.
 ```
 
 The bootstrap sets up Node.js 20, Nginx, a systemd service, and `/etc/battlestats-client.env` on the droplet. The deploy script rsyncs the client source, builds on the droplet, and restarts the service. For a custom domain, point the apex and `www` DNS records at the droplet IP and include both hostnames in `NGINX_SERVER_NAME`.
+
+If the public site origin differs from the first hostname in `NGINX_SERVER_NAME`, set `APP_ORIGIN` during bootstrap or add `BATTLESTATS_APP_ORIGIN=https://your-public-origin` to `/etc/battlestats-client.env` so generated crawler metadata stays canonical.
 
 See `agents/runbooks/runbook-client-droplet-deploy.md` for the operator runbook.
 

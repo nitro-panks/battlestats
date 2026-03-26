@@ -11,6 +11,7 @@
     "test:ci": "jest --runInBand --coverage",
     "test:e2e": "playwright test",
     "test:e2e:benchmarks": "playwright test e2e/player-route-cold-performance-live.spec.ts e2e/profile-chart-performance-live.spec.ts",
+    "test:e2e:live-site-player-sweep": "PLAYWRIGHT_EXTERNAL_BASE_URL=https://www.tamezz.com BATTLESTATS_APP_ORIGIN=https://www.tamezz.com BATTLESTATS_API_ORIGIN=https://www.tamezz.com PLAYWRIGHT_DISABLE_WEBSERVER=1 playwright test e2e/player-route-live-site-components-performance.spec.ts",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:install": "playwright install chromium",
     "test:e2e:install:deps": "playwright install --with-deps chromium"

@@ -9,6 +9,14 @@ APP_USER="${APP_USER:-battlestats}"
 NGINX_SERVER_NAME="${NGINX_SERVER_NAME:-_}"
 API_ORIGIN="${API_ORIGIN:-http://127.0.0.1:8888}"
 
+if [[ -z "${APP_ORIGIN:-}" ]]; then
+  if [[ "${NGINX_SERVER_NAME}" != "_" ]]; then
+    APP_ORIGIN="https://${NGINX_SERVER_NAME%% *}"
+  else
+    APP_ORIGIN="https://tamezz.com"
+  fi
+fi
+
 if [[ -z "${HOST}" ]]; then
   echo "Usage: $0 <droplet-ip-or-hostname>" >&2
   exit 1
@@ -19,6 +27,7 @@ ssh "${DEPLOY_USER}@${HOST}" \
   APP_USER="${APP_USER}" \
   NGINX_SERVER_NAME="${NGINX_SERVER_NAME}" \
   API_ORIGIN="${API_ORIGIN}" \
+  APP_ORIGIN="${APP_ORIGIN}" \
   'bash -s' <<'REMOTE'
 set -euo pipefail
 
@@ -45,6 +54,7 @@ install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/releases"
 if [ ! -f /etc/battlestats-client.env ]; then
   cat > /etc/battlestats-client.env <<EOF
 BATTLESTATS_API_ORIGIN=${API_ORIGIN}
+BATTLESTATS_APP_ORIGIN=${APP_ORIGIN}
 # NEXT_PUBLIC_GA_MEASUREMENT_ID=
 EOF
 fi
