@@ -2899,25 +2899,32 @@ def _build_linear_distribution_bins(qs, field_name: str, value_min: float, value
 
 
 def _build_explicit_distribution_bins(qs, field_name: str, bin_edges: list[int]) -> list[dict]:
-    bins: list[dict] = []
+    aggregate_counts: dict[str, int] = {}
+    aggregate_filters = {
+        '__total': Count('id'),
+    }
 
     for index, lower in enumerate(bin_edges[:-1]):
         upper = bin_edges[index + 1]
-        filters = {
-            f'{field_name}__gte': lower,
-            f'{field_name}__lt': upper,
-        }
+        upper_lookup = 'lte' if index == len(bin_edges) - 2 else 'lt'
+        aggregate_filters[f'bin_{index}'] = Count(
+            'id',
+            filter=Q(
+                **{
+                    f'{field_name}__gte': lower,
+                    f'{field_name}__{upper_lookup}': upper,
+                }
+            ),
+        )
 
-        if index == len(bin_edges) - 2:
-            filters = {
-                f'{field_name}__gte': lower,
-                f'{field_name}__lte': upper,
-            }
-
+    aggregate_counts = qs.aggregate(**aggregate_filters)
+    bins: list[dict] = []
+    for index, lower in enumerate(bin_edges[:-1]):
+        upper = bin_edges[index + 1]
         bins.append({
             'bin_min': lower,
             'bin_max': upper,
-            'count': qs.filter(**filters).count(),
+            'count': int(aggregate_counts.get(f'bin_{index}', 0) or 0),
         })
 
     return bins
@@ -2943,6 +2950,7 @@ def fetch_player_population_distribution(metric: str) -> dict:
     if config['scale'] == 'log':
         bins = _build_explicit_distribution_bins(
             qs, field_name, config['bin_edges'])
+        tracked_population = sum(bin_row['count'] for bin_row in bins)
     else:
         bins = _build_linear_distribution_bins(
             qs,
@@ -2951,6 +2959,7 @@ def fetch_player_population_distribution(metric: str) -> dict:
             config['range_max'],
             config['bin_width'],
         )
+        tracked_population = qs.count()
 
     payload = {
         'metric': metric,
@@ -2958,7 +2967,7 @@ def fetch_player_population_distribution(metric: str) -> dict:
         'x_label': config['x_label'],
         'scale': config['scale'],
         'value_format': config['value_format'],
-        'tracked_population': qs.count(),
+        'tracked_population': tracked_population,
         'bins': bins,
     }
 

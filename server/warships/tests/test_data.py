@@ -1,13 +1,15 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_clan_plot_data, fetch_randoms_data, fetch_player_summary, fetch_tier_data, fetch_type_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_clan_plot_data, fetch_randoms_data, fetch_player_summary, fetch_tier_data, fetch_type_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile, fetch_player_population_distribution
 from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
 from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship
 
@@ -743,6 +745,33 @@ class AggregateChartDataTests(TestCase):
 
         self.assertEqual(result[1100], "Yamato")
         self.assertEqual(result[1101], "Des Moines")
+
+    def test_fetch_player_population_distribution_uses_single_query_for_battles_bins(self):
+        Player.objects.create(
+            name="BattlesAggA",
+            player_id=4481,
+            is_hidden=False,
+            pvp_battles=150,
+            pvp_ratio=48.0,
+            pvp_survival_rate=30.0,
+        )
+        Player.objects.create(
+            name="BattlesAggB",
+            player_id=4482,
+            is_hidden=False,
+            pvp_battles=9800,
+            pvp_ratio=62.0,
+            pvp_survival_rate=46.0,
+        )
+        cache.delete('player_distribution:v1:battles_played')
+
+        with CaptureQueriesContext(connection) as queries:
+            payload = fetch_player_population_distribution('battles_played')
+
+        self.assertEqual(payload['tracked_population'], 2)
+        self.assertTrue(any(row['bin_min'] == 100 and row['count'] == 1 for row in payload['bins']))
+        self.assertTrue(any(row['bin_min'] == 6400 and row['count'] == 1 for row in payload['bins']))
+        self.assertEqual(len(queries), 1)
 
 
 class PlayerAchievementsDataTests(TestCase):
