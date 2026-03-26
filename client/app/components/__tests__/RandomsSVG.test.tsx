@@ -71,6 +71,18 @@ describe('RandomsSVG tier filters', () => {
         global.fetch = mockFetch as unknown as typeof fetch;
     });
 
+    it('suppresses the empty-state text while the chart is still loading', async () => {
+        mockFetch.mockImplementation(() => new Promise(() => {}));
+
+        render(<RandomsSVG playerId={102} isLoading />);
+
+        await waitFor(() => {
+            expect(screen.getByText('Loading random battles...')).toBeInTheDocument();
+        });
+
+        expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
+    });
+
     it('keeps the Tier All button selected by default when low-tier rows exist in the payload', async () => {
         mockFetch.mockResolvedValue({
             ok: true,

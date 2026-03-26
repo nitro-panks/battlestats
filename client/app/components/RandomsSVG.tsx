@@ -639,6 +639,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const randomsFreshness = getFreshnessStatus(randomsUpdatedAt);
 
     const shouldGrayOut = isLoading || isChartLoading;
+    const shouldShowEmptyState = !shouldGrayOut && chartData.length === 0;
     const filterButtonClass = (selected: boolean) => selected
         ? 'border border-[#2171b5] bg-[#eff3ff] px-2 py-1 text-xs font-medium text-[#084594]'
         : 'border border-[#cbd5e1] bg-white px-2 py-1 text-xs font-medium text-[#64748b]';
@@ -705,7 +706,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 </div>
             </div>
 
-            {chartData.length === 0 ? (
+            {shouldShowEmptyState ? (
                 <p className="text-sm text-gray-500">No ships match the selected filters.</p>
             ) : null}
 
