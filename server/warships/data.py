@@ -2051,32 +2051,28 @@ def refresh_player_explorer_summary(
 def fetch_player_summary(player_id: str) -> dict:
     player = Player.objects.get(player_id=player_id)
 
-    needs_bootstrap = (
-        not player.is_hidden
-        and player.battles_json is None
-        and player.activity_json is None
-        and player.ranked_json is None
-        and getattr(player, 'explorer_summary', None) is None
-    )
-    if needs_bootstrap:
-        _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
-        _dispatch_async_refresh(update_snapshot_data_task, player_id)
-        from warships.tasks import queue_ranked_data_refresh
+    if not player.is_hidden:
+        # Per-field lazy hydration: dispatch refresh for any missing or stale
+        # JSON field independently, so partial data (e.g. ranked_json set but
+        # battles_json missing) no longer blocks hydration.
+        if player.battles_json is None:
+            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+        elif player_battle_data_needs_refresh(player):
+            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
 
-        queue_ranked_data_refresh(player_id)
-        return build_player_summary(player)
+        if player.activity_json is None:
+            _dispatch_async_refresh(update_snapshot_data_task, player_id)
+            _dispatch_async_refresh(update_activity_data_task, player_id)
+        elif player_activity_data_needs_refresh(player):
+            _dispatch_async_refresh(update_snapshot_data_task, player_id)
+            _dispatch_async_refresh(update_activity_data_task, player_id)
 
-    if not player.is_hidden and player.battles_json is not None and player_battle_data_needs_refresh(player):
-        _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
-
-    if not player.is_hidden and player.activity_json is not None and player_activity_data_needs_refresh(player):
-        _dispatch_async_refresh(update_snapshot_data_task, player_id)
-        _dispatch_async_refresh(update_activity_data_task, player_id)
-
-    if not player.is_hidden and player.ranked_json is not None and player_ranked_data_needs_refresh(player):
-        from warships.tasks import queue_ranked_data_refresh
-
-        queue_ranked_data_refresh(player_id)
+        if player.ranked_json is None:
+            from warships.tasks import queue_ranked_data_refresh
+            queue_ranked_data_refresh(player_id)
+        elif player_ranked_data_needs_refresh(player):
+            from warships.tasks import queue_ranked_data_refresh
+            queue_ranked_data_refresh(player_id)
 
     if getattr(player, 'explorer_summary', None) is None and (
         player.battles_json is not None or player.activity_json is not None or player.ranked_json is not None

@@ -647,6 +647,40 @@ class PlayerSummaryRefreshTests(TestCase):
         mock_refresh_player_explorer_summary.assert_not_called()
 
 
+    @patch("warships.tasks.queue_ranked_data_refresh")
+    @patch("warships.data.update_snapshot_data_task.delay")
+    @patch("warships.data.update_battle_data_task.delay")
+    def test_fetch_player_summary_dispatches_battle_refresh_when_only_battles_json_missing(
+        self,
+        mock_update_battle_task,
+        mock_update_snapshot_task,
+        mock_queue_ranked_data_refresh,
+    ):
+        """Regression: players with ranked_json set but battles_json=None were
+        permanently stuck because the old bootstrap guard required ALL fields
+        to be None before dispatching any refresh."""
+        player = Player.objects.create(
+            name="PartialDataPlayer",
+            player_id=4520,
+            is_hidden=False,
+            pvp_battles=5000,
+            pvp_ratio=51.0,
+            battles_json=None,
+            activity_json=None,
+            ranked_json=[{"season_id": 1, "highest_league_name": "Gold", "total_battles": 42}],
+        )
+
+        summary = fetch_player_summary(player.player_id)
+
+        self.assertEqual(summary["player_id"], player.player_id)
+        mock_update_battle_task.assert_called_once_with(
+            player_id=player.player_id)
+        mock_update_snapshot_task.assert_called_once_with(player.player_id)
+        # ranked_json is set but ranked_updated_at is None (stale), so refresh fires
+        mock_queue_ranked_data_refresh.assert_called_once_with(
+            player.player_id)
+
+
 class RandomsCachePolicyTests(TestCase):
     @patch("warships.data.update_randoms_data_task.delay")
     @patch("warships.data.update_battle_data_task.delay")
