@@ -102,13 +102,12 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
     const y = d3.scaleBand()
         .range([0, height])
         .domain(rows.map((datum) => datum.rowKey))
-        .padding(0.08);
+        .padding(0.18);
 
-    const maxBarHeight = Math.max(1, y.step() - 1);
-    const backgroundBarHeight = Math.min((y.bandwidth() * 0.88) + RANDOMS_BAR_HEIGHT_INCREASE_PX, maxBarHeight);
-    const foregroundBarHeight = Math.min(y.bandwidth() + RANDOMS_BAR_HEIGHT_INCREASE_PX, maxBarHeight);
-    const backgroundBarOffset = (y.bandwidth() - backgroundBarHeight) / 2;
-    const foregroundBarOffset = (y.bandwidth() - foregroundBarHeight) / 2;
+    const foregroundBarHeight = y.bandwidth();
+    const backgroundBarHeight = Math.max(3, Math.round(foregroundBarHeight * 0.5));
+    const backgroundBarOffset = (foregroundBarHeight - backgroundBarHeight) / 2;
+    const foregroundBarOffset = 0;
 
     const xGrid = d3.axisBottom(x).ticks(5).tickSize(-height).tickFormat(() => '');
     svg.append('g')
@@ -222,8 +221,8 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         .attr('width', (datum: RandomsChartRow) => x(datum.wins))
         .attr('height', foregroundBarHeight)
         .attr('rx', 3)
-        .style('stroke', colors.labelMid)
-        .style('stroke-width', 0.7)
+        .style('stroke', colors.axisLine)
+        .style('stroke-width', 0.5)
         .attr('fill', (datum: RandomsChartRow) => selectRandomsColorByWr(datum.win_ratio, theme))
         .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, datum: RandomsChartRow) {
             renderDetails(datum);
@@ -649,20 +648,20 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const shouldShowEmptyState = !shouldGrayOut && chartData.length === 0;
     const filterButtonClass = (selected: boolean) => selected
         ? 'border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-2 py-1 text-xs font-medium text-[var(--accent-dark)]'
-        : 'border border-[var(--border)] bg-white px-2 py-1 text-xs font-medium text-[var(--text-secondary)] dark:bg-transparent';
+        : 'border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]';
 
     return (
         <div>
-            <div className="mb-2 text-xs text-gray-600">
+            <div className="mb-2 text-xs text-[var(--text-secondary)]">
                 Randoms data last refreshed: {formatTimestamp(randomsUpdatedAt)}
                 {' · '}
-                <span className={randomsFreshness === 'fresh' ? 'text-green-700' : randomsFreshness === 'stale' ? 'text-red-700' : 'text-gray-500'}>
+                <span className={randomsFreshness === 'fresh' ? 'text-green-700' : randomsFreshness === 'stale' ? 'text-red-700' : 'text-[var(--text-secondary)]'}>
                     {randomsFreshness === 'fresh' ? 'fresh' : randomsFreshness === 'stale' ? 'stale' : 'unknown'}
                 </span>
             </div>
             <div className="mb-3 text-sm">
                 <div className="mb-3 flex flex-wrap items-start gap-3">
-                    <div className="w-20 shrink-0 font-semibold text-[#334155]">Ship Type</div>
+                    <div className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">Ship Type</div>
                     <div className="flex flex-1 flex-wrap justify-start gap-1">
                         <button
                             key="all-types"
@@ -687,7 +686,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     </div>
                 </div>
                 <div className="mb-1 flex flex-wrap items-start gap-3">
-                    <div className="w-20 shrink-0 font-semibold text-[#334155]">Tier</div>
+                    <div className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">Tier</div>
                     <div className="flex flex-1 flex-wrap justify-start gap-1">
                         <button
                             key="all-tiers"
@@ -714,7 +713,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             </div>
 
             {shouldShowEmptyState ? (
-                <p className="text-sm text-gray-500">No ships match the selected filters.</p>
+                <p className="text-sm text-[var(--text-secondary)]">No ships match the selected filters.</p>
             ) : null}
 
             <div className="relative">
@@ -725,8 +724,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     <div ref={containerRef}></div>
                 </div>
                 {shouldGrayOut ? (
-                    <div className="absolute inset-0 flex items-center justify-center rounded bg-gray-100/65">
-                        <span className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600">
+                    <div className="absolute inset-0 flex items-center justify-center rounded bg-[var(--bg-page)]/65">
+                        <span className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
                             Loading random battles...
                         </span>
                     </div>

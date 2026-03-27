@@ -64,7 +64,7 @@ const DeferredSection: React.FC<DeferredSectionProps> = ({
 
     return (
         <div ref={containerRef} className={className} data-perf-section={sectionId} style={{ minHeight }}>
-            {shouldRender ? children : placeholder ?? <div className="animate-pulse rounded-md border border-[#dbe9f6] bg-[#f7fbff]" style={{ minHeight }} />}
+            {shouldRender ? children : placeholder ?? <div className="animate-pulse rounded-md border border-[var(--border)] bg-[var(--bg-surface)]" style={{ minHeight }} />}
         </div>
     );
 };

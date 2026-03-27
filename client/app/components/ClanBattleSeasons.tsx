@@ -155,44 +155,44 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
 
     return (
         <div>
-            {loading && <p className="text-sm text-gray-500">Loading clan battles seasons...</p>}
-            {!loading && error && <p className="text-sm text-gray-500">{error}</p>}
+            {loading && <p className="text-sm text-[var(--text-secondary)]">Loading clan battles seasons...</p>}
+            {!loading && error && <p className="text-sm text-[var(--text-secondary)]">{error}</p>}
             {!loading && !error && seasons.length === 0 && (
-                <p className="text-sm text-gray-500">No clan battles season data available.</p>
+                <p className="text-sm text-[var(--text-secondary)]">No clan battles season data available.</p>
             )}
 
             {!loading && !error && seasons.length > 0 && (
                 <div className="max-h-[28rem] overflow-y-auto overflow-x-auto rounded-sm">
-                    <table className="min-w-full border-collapse text-sm tabular-nums text-gray-700">
+                    <table className="min-w-full border-collapse text-sm tabular-nums text-[var(--text-primary)]">
                         <thead>
-                            <tr className="border-b border-gray-200 bg-white text-[11px] uppercase tracking-[0.14em] text-gray-500">
-                                <th className="sticky top-0 bg-white py-2 pr-4 text-left font-semibold" aria-sort={ariaSortFor('season')}>
-                                    <button type="button" onClick={() => handleSort('season')} className="text-left font-semibold text-inherit hover:text-gray-700">
+                            <tr className="border-b border-[var(--border)] bg-[var(--bg-surface)] text-[11px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+                                <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-4 text-left font-semibold" aria-sort={ariaSortFor('season')}>
+                                    <button type="button" onClick={() => handleSort('season')} className="text-left font-semibold text-inherit hover:text-[var(--text-primary)]">
                                         Season{sortIndicator('season')}
                                     </button>
                                 </th>
-                                <th className="sticky top-0 bg-white py-2 pr-4 text-left font-semibold" aria-sort={ariaSortFor('start_date')}>
-                                    <button type="button" onClick={() => handleSort('start_date')} className="text-left font-semibold text-inherit hover:text-gray-700">
+                                <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-4 text-left font-semibold" aria-sort={ariaSortFor('start_date')}>
+                                    <button type="button" onClick={() => handleSort('start_date')} className="text-left font-semibold text-inherit hover:text-[var(--text-primary)]">
                                         Date Start{sortIndicator('start_date')}
                                     </button>
                                 </th>
-                                <th className="sticky top-0 bg-white py-2 pr-4 text-left font-semibold" aria-sort={ariaSortFor('ships')}>
-                                    <button type="button" onClick={() => handleSort('ships')} className="text-left font-semibold text-inherit hover:text-gray-700">
+                                <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-4 text-left font-semibold" aria-sort={ariaSortFor('ships')}>
+                                    <button type="button" onClick={() => handleSort('ships')} className="text-left font-semibold text-inherit hover:text-[var(--text-primary)]">
                                         Ships{sortIndicator('ships')}
                                     </button>
                                 </th>
-                                <th className="sticky top-0 bg-white py-2 pr-4 text-right font-semibold" aria-sort={ariaSortFor('participants')}>
-                                    <button type="button" onClick={() => handleSort('participants')} className="text-right font-semibold text-inherit hover:text-gray-700">
+                                <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-4 text-right font-semibold" aria-sort={ariaSortFor('participants')}>
+                                    <button type="button" onClick={() => handleSort('participants')} className="text-right font-semibold text-inherit hover:text-[var(--text-primary)]">
                                         Players{sortIndicator('participants')}
                                     </button>
                                 </th>
-                                <th className="sticky top-0 bg-white py-2 pr-4 text-right font-semibold" aria-sort={ariaSortFor('active_rate')}>
-                                    <button type="button" onClick={() => handleSort('active_rate')} className="text-right font-semibold text-inherit hover:text-gray-700">
+                                <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-4 text-right font-semibold" aria-sort={ariaSortFor('active_rate')}>
+                                    <button type="button" onClick={() => handleSort('active_rate')} className="text-right font-semibold text-inherit hover:text-[var(--text-primary)]">
                                         Clan Activity % {sortIndicator('active_rate')}
                                     </button>
                                 </th>
-                                <th className="sticky top-0 bg-white py-2 pr-3 text-right font-semibold" aria-sort={ariaSortFor('roster_win_rate')}>
-                                    <button type="button" onClick={() => handleSort('roster_win_rate')} className="text-right font-semibold text-inherit hover:text-gray-700">
+                                <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-right font-semibold" aria-sort={ariaSortFor('roster_win_rate')}>
+                                    <button type="button" onClick={() => handleSort('roster_win_rate')} className="text-right font-semibold text-inherit hover:text-[var(--text-primary)]">
                                         WR{sortIndicator('roster_win_rate')}
                                     </button>
                                 </th>
@@ -200,13 +200,13 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
                         </thead>
                         <tbody>
                             {sortedSeasons.map((season) => (
-                                <tr key={season.season_id} className="border-b border-gray-100 align-top last:border-b-0">
-                                    <td className="py-2 pr-4 text-left text-[#084594]">
+                                <tr key={season.season_id} className="border-b border-[var(--border)] align-top last:border-b-0">
+                                    <td className="py-2 pr-4 text-left text-[var(--accent-dark)]">
                                         <div className="font-medium">{season.season_name}</div>
-                                        <div className="text-xs text-gray-500">{season.season_label}</div>
+                                        <div className="text-xs text-[var(--text-secondary)]">{season.season_label}</div>
                                     </td>
-                                    <td className="py-2 pr-4 text-left text-gray-600">{season.start_date || '—'}</td>
-                                    <td className="py-2 pr-4 text-left text-gray-600">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
+                                    <td className="py-2 pr-4 text-left text-[var(--text-secondary)]">{season.start_date || '—'}</td>
+                                    <td className="py-2 pr-4 text-left text-[var(--text-secondary)]">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
                                     <td className="py-2 pr-4 text-right">{season.participants.toLocaleString()}</td>
                                     <td className="py-2 pr-4 text-right">{memberCount > 0 ? `${((season.participants / memberCount) * 100).toFixed(0)}%` : '—'}</td>
                                     <td className="py-2 pr-3 text-right font-medium" style={{ color: selectColorByWR(season.roster_win_rate) }}>{season.roster_win_rate.toFixed(1)}%</td>

@@ -119,13 +119,13 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
     const totalPages = data ? Math.max(1, Math.ceil(data.count / data.page_size)) : 1;
 
     return (
-        <div className="mt-8 border-t border-[#c6dbef] pt-6">
+        <div className="mt-8 border-t border-[var(--border)] pt-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Player Explorer</h3>
-                    <p className="mt-1 text-xs text-[#6baed6]">Compare known players by recent activity, performance, longevity, and breadth.</p>
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Player Explorer</h3>
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">Compare known players by recent activity, performance, longevity, and breadth.</p>
                 </div>
-                <p className="text-xs text-[#6baed6]">Visible dataset slice, not a universal leaderboard. Weighted KDR is tier-weighted and player score blends performance with recency.</p>
+                <p className="text-xs text-[var(--text-secondary)]">Visible dataset slice, not a universal leaderboard. Weighted KDR is tier-weighted and player score blends performance with recency.</p>
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-5">
@@ -137,7 +137,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                         setPage(1);
                     }}
                     placeholder="Filter players"
-                    className="rounded-md border border-[#c6dbef] px-3 py-2 text-sm focus:border-[#4292c6] focus:outline-none focus:ring-1 focus:ring-[#4292c6]"
+                    className="rounded-md border border-[var(--border)] px-3 py-2 text-sm focus:border-[var(--accent-light)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-light)]"
                 />
                 <select
                     value={hiddenFilter}
@@ -145,7 +145,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                         setHiddenFilter(event.target.value as HiddenFilter);
                         setPage(1);
                     }}
-                    className="rounded-md border border-[#c6dbef] px-3 py-2 text-sm"
+                    className="rounded-md border border-[var(--border)] px-3 py-2 text-sm"
                 >
                     <option value="visible">Visible only</option>
                     <option value="all">Visible + hidden</option>
@@ -157,7 +157,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                         setActivityBucket(event.target.value as ActivityBucket);
                         setPage(1);
                     }}
-                    className="rounded-md border border-[#c6dbef] px-3 py-2 text-sm"
+                    className="rounded-md border border-[var(--border)] px-3 py-2 text-sm"
                 >
                     <option value="30d">Active in last 30 days</option>
                     <option value="7d">Active in last 7 days</option>
@@ -171,7 +171,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                         setRankedFilter(event.target.value as RankedFilter);
                         setPage(1);
                     }}
-                    className="rounded-md border border-[#c6dbef] px-3 py-2 text-sm"
+                    className="rounded-md border border-[var(--border)] px-3 py-2 text-sm"
                 >
                     <option value="all">All ranked states</option>
                     <option value="yes">Ranked only</option>
@@ -184,7 +184,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                             setSort(event.target.value as SortKey);
                             setPage(1);
                         }}
-                        className="w-full rounded-md border border-[#c6dbef] px-3 py-2 text-sm"
+                        className="w-full rounded-md border border-[var(--border)] px-3 py-2 text-sm"
                     >
                         <option value="pvp_ratio">PvP WR</option>
                         <option value="pvp_battles">Total battles</option>
@@ -201,7 +201,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                             setDirection(event.target.value as SortDirection);
                             setPage(1);
                         }}
-                        className="rounded-md border border-[#c6dbef] px-3 py-2 text-sm"
+                        className="rounded-md border border-[var(--border)] px-3 py-2 text-sm"
                     >
                         <option value="desc">Desc</option>
                         <option value="asc">Asc</option>
@@ -213,24 +213,24 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                 <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
             ) : null}
 
-            <div className="mt-4 overflow-x-auto rounded-lg border border-[#c6dbef] bg-white">
-                <table className="min-w-full divide-y divide-[#dbe9f6] text-sm">
-                    <thead className="bg-[#f0f7ff]">
+            <div className="mt-4 overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--bg-surface)]">
+                <table className="min-w-full divide-y divide-[var(--border)] text-sm">
+                    <thead className="bg-[var(--bg-surface)]">
                         <tr>
-                            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Player</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Score</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Total Battles</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Survive %</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Weighted KDR</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">PvP WR</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Ships</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Ranked</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Player</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Score</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Total Battles</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Survive %</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Weighted KDR</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">PvP WR</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Ships</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Ranked</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-[#edf4fb]">
+                    <tbody className="divide-y divide-[var(--border)]">
                         {data?.results.map((row) => (
                             <tr key={row.player_id} className="align-top">
-                                <td className="px-3 py-3 text-[#084594]">
+                                <td className="px-3 py-3 text-[var(--accent-dark)]">
                                     <button
                                         type="button"
                                         onClick={() => onSelectMember(row.name)}
@@ -240,35 +240,35 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                                         {row.is_hidden ? <HiddenAccountIcon /> : null}
                                     </button>
                                 </td>
-                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.player_score)}</td>
-                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.pvp_battles)}</td>
-                                <td className="px-3 py-3 text-right text-[#084594]">{formatPercent(row.pvp_survival_rate)}</td>
-                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.kill_ratio)}</td>
-                                <td className="px-3 py-3 text-right font-medium text-[#084594]">{formatWinRate(row.pvp_ratio)}</td>
-                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.ships_played_total)}</td>
-                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.ranked_seasons_participated)}</td>
+                                <td className="px-3 py-3 text-right text-[var(--accent-dark)]">{formatMetric(row.player_score)}</td>
+                                <td className="px-3 py-3 text-right text-[var(--accent-dark)]">{formatMetric(row.pvp_battles)}</td>
+                                <td className="px-3 py-3 text-right text-[var(--accent-dark)]">{formatPercent(row.pvp_survival_rate)}</td>
+                                <td className="px-3 py-3 text-right text-[var(--accent-dark)]">{formatMetric(row.kill_ratio)}</td>
+                                <td className="px-3 py-3 text-right font-medium text-[var(--accent-dark)]">{formatWinRate(row.pvp_ratio)}</td>
+                                <td className="px-3 py-3 text-right text-[var(--accent-dark)]">{formatMetric(row.ships_played_total)}</td>
+                                <td className="px-3 py-3 text-right text-[var(--accent-dark)]">{formatMetric(row.ranked_seasons_participated)}</td>
                             </tr>
                         ))}
                         {!isLoading && (data?.results.length || 0) === 0 ? (
                             <tr>
-                                <td colSpan={8} className="px-3 py-6 text-center text-sm text-gray-500">No players matched the current explorer filters.</td>
+                                <td colSpan={8} className="px-3 py-6 text-center text-sm text-[var(--text-secondary)]">No players matched the current explorer filters.</td>
                             </tr>
                         ) : null}
                     </tbody>
                 </table>
                 {isLoading ? (
-                    <div className="border-t border-[#dbe9f6] bg-[#f7fbff] px-3 py-2 text-xs text-[#6baed6]">Loading explorer data...</div>
+                    <div className="border-t border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-xs text-[var(--text-secondary)]">Loading explorer data...</div>
                 ) : null}
             </div>
 
-            <div className="mt-3 flex items-center justify-between text-sm text-[#4292c6]">
+            <div className="mt-3 flex items-center justify-between text-sm text-[var(--accent-light)]">
                 <p>{data ? `${data.count.toLocaleString()} matching players` : 'No explorer data yet'}</p>
                 <div className="flex items-center gap-2">
                     <button
                         type="button"
                         onClick={() => setPage((current) => Math.max(1, current - 1))}
                         disabled={page <= 1 || isLoading}
-                        className="rounded-md border border-[#c6dbef] px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-md border border-[var(--border)] px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         Prev
                     </button>
@@ -277,7 +277,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                         type="button"
                         onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
                         disabled={page >= totalPages || isLoading}
-                        className="rounded-md border border-[#c6dbef] px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-md border border-[var(--border)] px-3 py-1.5 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         Next
                     </button>

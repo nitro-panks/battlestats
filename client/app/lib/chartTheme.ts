@@ -68,7 +68,7 @@ export const chartColors: Record<ChartTheme, {
         labelMuted: '#64748b',
         separator: '#94a3b8',
         barStroke: '#ffffff',
-        barBg: '#f8fafc',
+        barBg: '#dde5ed',
         // Win-rate palette
         wrNull: '#c6dbef',
         wrElite: '#810c9e',
@@ -122,7 +122,7 @@ export const chartColors: Record<ChartTheme, {
         labelMuted: '#6b7280',
         separator: '#30363d',
         barStroke: '#0d1117',
-        barBg: '#161b22',
+        barBg: '#2d333b',
         // Win-rate palette
         wrNull: '#4b6a8a',
         wrElite: '#810c9e',

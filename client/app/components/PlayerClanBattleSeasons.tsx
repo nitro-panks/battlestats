@@ -111,25 +111,25 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
 
     return (
         <div>
-            {loading && <p className="text-sm text-gray-500">Loading clan battle seasons...</p>}
-            {!loading && error && <p className="text-sm text-gray-500">{error}</p>}
+            {loading && <p className="text-sm text-[var(--text-secondary)]">Loading clan battle seasons...</p>}
+            {!loading && error && <p className="text-sm text-[var(--text-secondary)]">{error}</p>}
             {!loading && !error && seasons.length === 0 && (
-                <p className="text-sm text-gray-500">No clan battle season data available for this player.</p>
+                <p className="text-sm text-[var(--text-secondary)]">No clan battle season data available for this player.</p>
             )}
 
             {!loading && !error && seasons.length > 0 && (
                 <>
                     <div className="grid grid-cols-3 gap-2">
-                        <div className="rounded-md bg-[#eff3ff] px-3 py-2">
-                            <p className="text-[10px] uppercase tracking-wide text-[#4292c6]">Seasons</p>
-                            <p className="mt-1 text-lg font-semibold text-[#084594]">{summary.seasonsPlayed}</p>
+                        <div className="rounded-md bg-[var(--accent-faint)] px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-wide text-[var(--accent-light)]">Seasons</p>
+                            <p className="mt-1 text-lg font-semibold text-[var(--accent-dark)]">{summary.seasonsPlayed}</p>
                         </div>
-                        <div className="rounded-md bg-[#eff3ff] px-3 py-2">
-                            <p className="text-[10px] uppercase tracking-wide text-[#4292c6]">Battles</p>
-                            <p className="mt-1 text-lg font-semibold text-[#084594]">{summary.totalBattles.toLocaleString()}</p>
+                        <div className="rounded-md bg-[var(--accent-faint)] px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-wide text-[var(--accent-light)]">Battles</p>
+                            <p className="mt-1 text-lg font-semibold text-[var(--accent-dark)]">{summary.totalBattles.toLocaleString()}</p>
                         </div>
-                        <div className="rounded-md bg-[#eff3ff] px-3 py-2">
-                            <p className="text-[10px] uppercase tracking-wide text-[#4292c6]">WR</p>
+                        <div className="rounded-md bg-[var(--accent-faint)] px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-wide text-[var(--accent-light)]">WR</p>
                             <p className="mt-1 text-lg font-semibold" style={{ color: selectColorByWR(summary.overallWinRate) }}>
                                 {summary.overallWinRate.toFixed(1)}%
                             </p>
@@ -143,23 +143,23 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                 maxHeight: `calc(${CLAN_BATTLE_TABLE_HEADER_HEIGHT_REM}rem + (${CLAN_BATTLE_TABLE_VISIBLE_ROWS} * ${CLAN_BATTLE_TABLE_ROW_HEIGHT_REM}rem))`,
                             }}
                         >
-                            <table className="min-w-full border-collapse text-xs tabular-nums text-gray-700">
+                            <table className="min-w-full border-collapse text-xs tabular-nums text-[var(--text-primary)]">
                                 <thead>
-                                    <tr className="border-b border-gray-200 bg-white uppercase tracking-[0.12em] text-gray-500">
-                                        <th className="sticky top-0 bg-white py-2 pr-3 text-left font-semibold">Season</th>
-                                        <th className="sticky top-0 bg-white py-2 pr-3 text-left font-semibold">Ships</th>
-                                        <th className="sticky top-0 bg-white py-2 pr-3 text-right font-semibold">Battles</th>
-                                        <th className="sticky top-0 bg-white py-2 text-right font-semibold">WR</th>
+                                    <tr className="border-b border-[var(--border)] bg-[var(--bg-surface)] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                                        <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Season</th>
+                                        <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Ships</th>
+                                        <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-right font-semibold">Battles</th>
+                                        <th className="sticky top-0 bg-[var(--bg-surface)] py-2 text-right font-semibold">WR</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {seasons.map((season) => (
-                                        <tr key={season.season_id} className="border-b border-gray-100 align-top last:border-b-0">
-                                            <td className="py-2 pr-3 text-left text-[#084594]">
+                                        <tr key={season.season_id} className="border-b border-[var(--border)] align-top last:border-b-0">
+                                            <td className="py-2 pr-3 text-left text-[var(--accent-dark)]">
                                                 <div className="font-medium">{season.season_label}</div>
-                                                <div className="text-[11px] text-gray-500">{season.start_date || season.season_name}</div>
+                                                <div className="text-[11px] text-[var(--text-secondary)]">{season.start_date || season.season_name}</div>
                                             </td>
-                                            <td className="py-2 pr-3 text-left text-gray-600">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
+                                            <td className="py-2 pr-3 text-left text-[var(--text-secondary)]">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
                                             <td className="py-2 pr-3 text-right">{season.battles.toLocaleString()}</td>
                                             <td className="py-2 text-right font-medium" style={{ color: selectColorByWR(season.win_rate) }}>
                                                 {season.win_rate.toFixed(1)}%

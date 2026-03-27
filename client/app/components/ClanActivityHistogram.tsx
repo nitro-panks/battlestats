@@ -328,7 +328,7 @@ const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, m
                 {activeShare}% active within 30 days
             </p>
             {loading ? (
-                <div className="mt-4 flex min-h-[180px] items-center justify-center rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-500 dark:border-[#30363d] dark:bg-[#161b22] dark:text-[#8b949e]">
+                <div className="mt-4 flex min-h-[180px] items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--text-secondary)]">
                     Loading clan activity...
                 </div>
             ) : (

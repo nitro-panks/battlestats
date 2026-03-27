@@ -23,7 +23,7 @@ const SectionHeadingWithTooltip: React.FC<SectionHeadingWithTooltipProps> = ({
             >
                 <FontAwesomeIcon icon={faCircleInfo} className="text-sm" aria-hidden="true" />
             </button>
-            <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-80 max-w-[calc(100vw-2rem)] rounded-md border border-[#c6dbef] bg-white px-3 py-2 text-left text-xs normal-case tracking-normal text-[#334155] shadow-lg group-hover:block group-focus-within:block">
+            <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-80 max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
                 {description}
             </div>
         </div>

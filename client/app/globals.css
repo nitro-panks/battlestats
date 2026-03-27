@@ -28,6 +28,10 @@
   --accent-faint: #0c2a4a;
 }
 
+html {
+  background-color: var(--bg-page);
+}
+
 body {
   background-color: var(--bg-page);
   color: var(--text-primary);

@@ -241,78 +241,78 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
             ) : null}
 
             {isPendingRefresh && seasons.length === 0 && !error ? (
-                <p className="mb-3 rounded-md border border-[#c6dbef] bg-[#f0f7ff] px-3 py-2 text-sm text-[#2171b5]">
+                <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--accent-faint)] px-3 py-2 text-sm text-[var(--accent-mid)]">
                     Refreshing ranked seasons...
                 </p>
             ) : null}
 
             {seasons.length === 0 && !shouldGrayOut && !error && !isPendingRefresh ? (
-                <p className="text-sm text-gray-500">No ranked seasons found for this player.</p>
+                <p className="text-sm text-[var(--text-secondary)]">No ranked seasons found for this player.</p>
             ) : null}
 
             {shouldShowTable ? (
                 <div className="relative">
                     <div className={shouldGrayOut ? 'pointer-events-none opacity-60 grayscale transition' : 'transition'} aria-busy={shouldGrayOut}>
-                        <div className="overflow-x-auto rounded-lg border border-[#c6dbef] bg-white">
+                        <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--bg-surface)]">
                             <div
                                 className="overflow-y-auto"
                                 style={{
                                     maxHeight: `calc(${RANKED_TABLE_HEADER_HEIGHT_REM}rem + (${RANKED_TABLE_VISIBLE_ROWS} * ${RANKED_TABLE_ROW_HEIGHT_REM}rem))`,
                                 }}
                             >
-                                <table className="min-w-full divide-y divide-[#dbe9f6] text-sm">
-                                    <thead className="sticky top-0 bg-[#f0f7ff]">
+                                <table className="min-w-full divide-y divide-[var(--border)] text-sm">
+                                    <thead className="sticky top-0 bg-[var(--bg-surface)]">
                                         <tr>
-                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[var(--accent-mid)]">
                                                 <button type="button" className="inline-flex items-center gap-1" onClick={() => handleSort('season')}>
                                                     Season <span aria-hidden="true">{getSortMarker('season')}</span>
                                                 </button>
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[var(--accent-mid)]">
                                                 <button type="button" className="inline-flex items-center gap-1" onClick={() => handleSort('highestRank')}>
                                                     Highest Rank <span aria-hidden="true">{getSortMarker('highestRank')}</span>
                                                 </button>
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[var(--accent-mid)]">
                                                 Top Ship
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold tracking-wide text-[var(--accent-mid)]">
                                                 <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('battles')}>
                                                     Battles <span aria-hidden="true">{getSortMarker('battles')}</span>
                                                 </button>
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold tracking-wide text-[var(--accent-mid)]">
                                                 <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('wins')}>
                                                     Wins <span aria-hidden="true">{getSortMarker('wins')}</span>
                                                 </button>
                                             </th>
-                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold tracking-wide text-[#2171b5]">
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold tracking-wide text-[var(--accent-mid)]">
                                                 <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('winRate')}>
                                                     WR <span aria-hidden="true">{getSortMarker('winRate')}</span>
                                                 </button>
                                             </th>
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-[#edf4fb]">
+                                    <tbody className="divide-y divide-[var(--border)]">
                                         {sortedSeasons.map((season) => {
                                             const badgeClassName = leagueColors[season.highest_league_name] || leagueColors.Bronze;
 
                                             return (
                                                 <tr key={season.season_id} className="align-top">
-                                                    <td className="px-3 py-3 text-[#084594]">
+                                                    <td className="px-3 py-3 text-[var(--accent-dark)]">
                                                         <p className="font-semibold">{season.season_label}</p>
-                                                        <p className="mt-1 text-xs text-[#6baed6]">{formatSeasonStartDate(season.start_date)}</p>
+                                                        <p className="mt-1 text-xs text-[var(--text-secondary)]">{formatSeasonStartDate(season.start_date)}</p>
                                                     </td>
                                                     <td className="px-3 py-3">
                                                         <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badgeClassName}`}>
                                                             {season.highest_league_name}
                                                         </span>
                                                     </td>
-                                                    <td className="px-3 py-3 text-[#084594]">
+                                                    <td className="px-3 py-3 text-[var(--accent-dark)]">
                                                         <span className="font-medium">{season.top_ship_name || '—'}</span>
                                                     </td>
-                                                    <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.total_battles.toLocaleString()}</td>
-                                                    <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.total_wins.toLocaleString()}</td>
+                                                    <td className="px-3 py-3 text-right font-medium text-[var(--accent-dark)]">{season.total_battles.toLocaleString()}</td>
+                                                    <td className="px-3 py-3 text-right font-medium text-[var(--accent-dark)]">{season.total_wins.toLocaleString()}</td>
                                                     <td className={`px-3 py-3 text-right font-semibold ${getWinRateColorClass(season.win_rate)}`}>{formatWinRate(season.win_rate)}</td>
                                                 </tr>
                                             );
@@ -323,8 +323,8 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                         </div>
                     </div>
                     {shouldGrayOut ? (
-                        <div className="absolute inset-0 flex items-center justify-center rounded bg-gray-100/65">
-                            <span className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600">
+                        <div className="absolute inset-0 flex items-center justify-center rounded bg-[var(--bg-surface)]/65">
+                            <span className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
                                 Loading ranked data...
                             </span>
                         </div>

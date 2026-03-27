@@ -30,6 +30,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('bs-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;})();` }} />
+      </head>
       {gaMeasurementId ? (
         <>
           <Script
@@ -47,7 +50,6 @@ export default function RootLayout({
           </Script>
         </>
       ) : null}
-      <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('bs-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;})();` }} />
       <body className={inter.className}>
         <ThemeProvider>
           <div className="mx-auto max-w-6xl px-4 md:px-6">

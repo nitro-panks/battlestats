@@ -154,7 +154,7 @@ const SortButton: React.FC<{
         className="inline-flex items-center gap-1"
     >
         <span>{label}</span>
-        <span aria-hidden="true" className={active ? 'text-[#084594]' : 'text-[#6baed6]'}>{direction === 'asc' ? '↑' : '↓'}</span>
+        <span aria-hidden="true" className={active ? 'text-[var(--accent-dark)]' : 'text-[var(--text-secondary)]'}>{direction === 'asc' ? '↑' : '↓'}</span>
     </button>
 );
 
@@ -268,34 +268,34 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                 ) : null}
             </div>
             {rows.length === 0 ? (
-                <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3 text-sm text-[#4292c6]">
+                <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--accent-light)]">
                     No Efficiency Badge data is stored for this player yet, or no qualifying ships have earned a badge.
                 </div>
             ) : (
                 <>
                     <div className="grid gap-3 md:grid-cols-3">
-                        <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
-                            <p className="text-xs uppercase tracking-wide text-[#4292c6]">Highest Badge</p>
-                            <p className="mt-2 text-lg font-semibold text-[#084594]">{highestBadgeLabel}</p>
+                        <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3">
+                            <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Highest Badge</p>
+                            <p className="mt-2 text-lg font-semibold text-[var(--accent-dark)]">{highestBadgeLabel}</p>
                         </div>
-                        <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
-                            <p className="text-xs uppercase tracking-wide text-[#4292c6]">Strongest Class</p>
-                            <p className="mt-2 text-lg font-semibold text-[#084594]">{bestClassByScore}</p>
+                        <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3">
+                            <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Strongest Class</p>
+                            <p className="mt-2 text-lg font-semibold text-[var(--accent-dark)]">{bestClassByScore}</p>
                         </div>
-                        <div className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
-                            <p className="text-xs uppercase tracking-wide text-[#4292c6]">Strongest Tier Band</p>
-                            <p className="mt-2 text-lg font-semibold text-[#084594]">{bestTierBandByScore}</p>
+                        <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3">
+                            <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Strongest Tier Band</p>
+                            <p className="mt-2 text-lg font-semibold text-[var(--accent-dark)]">{bestTierBandByScore}</p>
                         </div>
                     </div>
-                    <div className="mt-4 overflow-x-auto rounded-md border border-[#dbe9f6] bg-white">
+                    <div className="mt-4 overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--bg-surface)]">
                         <div
                             className="overflow-y-auto"
                             style={{
                                 maxHeight: `calc(${BADGE_TABLE_HEADER_HEIGHT_REM}rem + (${BADGE_TABLE_VISIBLE_ROWS} * ${BADGE_TABLE_ROW_HEIGHT_REM}rem))`,
                             }}
                         >
-                        <table className="min-w-full divide-y divide-[#dbe9f6]">
-                            <thead className="sticky top-0 bg-[#f7fbff] text-[#2171b5]">
+                        <table className="min-w-full divide-y divide-[var(--border)]">
+                            <thead className="sticky top-0 bg-[var(--bg-surface)] text-[var(--accent-mid)]">
                                 <tr>
                                     <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide">
                                         <SortButton label="Ship" active={sortKey === 'ship'} direction={sortDirection} onClick={() => updateSort('ship')} />
@@ -311,10 +311,10 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-[#eff3ff] text-xs">
+                            <tbody className="divide-y divide-[var(--border)] text-xs">
                                 {sortedRows.map((row) => (
                                     <tr key={`${row.shipId}-${row.badgeClass}`} className="align-top">
-                                        <td className="px-3 py-3 text-[#084594]">
+                                        <td className="px-3 py-3 text-[var(--accent-dark)]">
                                             <div className="font-medium">{row.shipName}</div>
                                         </td>
                                         <td className="px-3 py-3">
@@ -324,8 +324,8 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                                                 </span>
                                             </span>
                                         </td>
-                                        <td className="px-3 py-3 text-[#084594]">{row.shipType || 'Unknown'}</td>
-                                        <td className="px-3 py-3 text-[#084594]">{row.shipTier != null ? row.shipTier : '—'}</td>
+                                        <td className="px-3 py-3 text-[var(--accent-dark)]">{row.shipType || 'Unknown'}</td>
+                                        <td className="px-3 py-3 text-[var(--accent-dark)]">{row.shipTier != null ? row.shipTier : '—'}</td>
                                     </tr>
                                 ))}
                             </tbody>

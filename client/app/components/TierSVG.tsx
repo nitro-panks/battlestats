@@ -77,7 +77,7 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
             const y = d3.scaleBand()
                 .range([0, height])
                 .domain(rows.map((datum: TierRow) => String(datum.ship_tier)))
-                .padding(0.08);
+                .padding(0.18);
 
             svg.append('g')
                 .attr('class', 'tier-grid')
@@ -177,22 +177,26 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
                 .append('g')
                 .classed('tier-row', true);
 
+            const fgBarHeight = y.bandwidth();
+            const bgBarHeight = Math.max(3, Math.round(fgBarHeight * 0.5));
+            const bgBarOffset = (fgBarHeight - bgBarHeight) / 2;
+
             rowNodes.append('rect')
                 .attr('x', 0)
-                .attr('y', (datum: TierRow) => (y(String(datum.ship_tier)) ?? 0) + (y.bandwidth() * 0.1))
+                .attr('y', (datum: TierRow) => (y(String(datum.ship_tier)) ?? 0) + bgBarOffset)
                 .attr('width', (datum: TierRow) => x(datum.pvp_battles))
-                .attr('height', y.bandwidth() * 0.88)
+                .attr('height', bgBarHeight)
                 .attr('rx', 3)
-                .attr('fill', colors.gridLineBlue);
+                .attr('fill', colors.barBg);
 
             rowNodes.append('rect')
                 .attr('x', 0)
                 .attr('y', (datum: TierRow) => y(String(datum.ship_tier)) ?? 0)
                 .attr('width', (datum: TierRow) => x(datum.wins))
-                .attr('height', y.bandwidth())
+                .attr('height', fgBarHeight)
                 .attr('rx', 3)
-                .style('stroke', colors.axisText)
-                .style('stroke-width', 0.7)
+                .style('stroke', colors.axisLine)
+                .style('stroke-width', 0.5)
                 .attr('fill', (datum: TierRow) => selectTierColorByWr(datum.win_ratio))
                 .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, datum: TierRow) {
                     renderDetails(datum);

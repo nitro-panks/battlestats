@@ -239,7 +239,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId, theme = 'light' }) => 
     return (
         <div>
             {isAllZeroWindow ? (
-                <p className="mb-2 text-xs text-gray-500">
+                <p className="mb-2 text-xs text-[var(--text-secondary)]">
                     No daily Random Battles activity recorded in the last 28 days.
                 </p>
             ) : null}
