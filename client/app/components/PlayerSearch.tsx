@@ -237,8 +237,8 @@ const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SHOW_PLAYER_EXPLORER = false;
 const LANDING_FETCH_TTL_MS = 1500;
 
-type LandingClanMode = 'random' | 'best';
-type LandingPlayerMode = 'random' | 'best' | 'sigma';
+type LandingClanMode = 'random' | 'best' | 'recent';
+type LandingPlayerMode = 'random' | 'best' | 'sigma' | 'recent';
 
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 
@@ -354,6 +354,7 @@ const PlayerSearch: React.FC = () => {
     }, [fetchLandingData]);
 
     useEffect(() => {
+        if (clanMode === 'recent') return;
         void fetchLandingClans(clanMode).catch((err) => {
             console.error('Error fetching landing clans:', err);
             setClans([]);
@@ -361,15 +362,16 @@ const PlayerSearch: React.FC = () => {
     }, [clanMode, fetchLandingClans]);
 
     useEffect(() => {
+        if (playerMode === 'recent') return;
         void fetchLandingPlayers(playerMode);
     }, [fetchLandingPlayers, playerMode]);
 
     useIntervalRefresh(() => {
-        void fetchLandingClans(clanMode);
+        if (clanMode !== 'recent') void fetchLandingClans(clanMode);
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
     useIntervalRefresh(() => {
-        void fetchLandingPlayers(playerMode);
+        if (playerMode !== 'recent') void fetchLandingPlayers(playerMode);
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
@@ -412,6 +414,10 @@ const PlayerSearch: React.FC = () => {
     };
 
     const visibleLandingClans = useMemo(() => {
+        if (clanMode === 'recent') {
+            return recentClans.slice(0, LANDING_CLAN_LIMIT);
+        }
+
         if (clanMode === 'best') {
             return [...clans]
                 .filter((clan) => {
@@ -441,7 +447,15 @@ const PlayerSearch: React.FC = () => {
         }
 
         return clans.slice(0, LANDING_CLAN_LIMIT);
-    }, [clanMode, clans]);
+    }, [clanMode, clans, recentClans]);
+
+    const visibleLandingPlayers = useMemo(() => {
+        if (playerMode === 'recent') {
+            return recentPlayers.slice(0, LANDING_PLAYER_LIMIT);
+        }
+
+        return players;
+    }, [playerMode, players, recentPlayers]);
 
     const handleSelectMember = useCallback(async (memberName: string) => {
         router.push(buildPlayerPath(memberName));
@@ -507,7 +521,7 @@ const PlayerSearch: React.FC = () => {
                 <div>
                     {error && <p className="text-red-600 dark:text-red-400">{error}</p>}
 
-                    {clans.length > 0 && (
+                    {(clans.length > 0 || recentClans.length > 0) && (
                         <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
                             <div className="mt-3">
                                 <LandingClanSVG
@@ -535,6 +549,14 @@ const PlayerSearch: React.FC = () => {
                                 >
                                     Best
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setClanMode('recent')}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
+                                    aria-pressed={clanMode === 'recent'}
+                                >
+                                    Recent
+                                </button>
                                 <div className="group relative inline-flex items-center">
                                     <button
                                         type="button"
@@ -557,25 +579,14 @@ const PlayerSearch: React.FC = () => {
                                 onSelectClan={handleSelectClan}
                                 ariaLabelPrefix="Show"
                             />
-
-                            <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Recently Viewed Clans</h3>
-                            {recentClans.length > 0 ? (
-                                <ClanTagGrid
-                                    clans={recentClans.slice(0, LANDING_CLAN_LIMIT)}
-                                    onSelectClan={handleSelectClan}
-                                    ariaLabelPrefix="Show recent"
-                                />
-                            ) : (
-                                <p className="mt-2 text-sm text-[var(--accent-light)]">No recently viewed clans yet.</p>
-                            )}
                         </div>
                     )}
 
-                    {players.length > 0 && (
+                    {(players.length > 0 || recentPlayers.length > 0) && (
                         <div className="mt-6 border-t border-[var(--border)] pt-6">
                             <div className="mt-1">
                                 <LandingPlayerSVG
-                                    players={players}
+                                    players={visibleLandingPlayers}
                                     onSelectPlayer={(player) => handleSelectMember(player.name)}
                                     theme={theme}
                                 />
@@ -606,6 +617,14 @@ const PlayerSearch: React.FC = () => {
                                 >
                                     Sigma
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPlayerMode('recent')}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
+                                    aria-pressed={playerMode === 'recent'}
+                                >
+                                    Recent
+                                </button>
                                 <div className="group relative inline-flex items-center">
                                     <button
                                         type="button"
@@ -624,21 +643,10 @@ const PlayerSearch: React.FC = () => {
                                 </div>
                             </div>
                             <PlayerNameGrid
-                                players={players}
+                                players={visibleLandingPlayers}
                                 onSelectMember={handleSelectMember}
                                 ariaLabelPrefix="Show"
                             />
-
-                            <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Recently Viewed</h3>
-                            {recentPlayers.length > 0 ? (
-                                <PlayerNameGrid
-                                    players={recentPlayers.slice(0, LANDING_PLAYER_LIMIT)}
-                                    onSelectMember={handleSelectMember}
-                                    ariaLabelPrefix="Show recent"
-                                />
-                            ) : (
-                                <p className="mt-2 text-sm text-[var(--accent-light)]">No recently viewed players yet.</p>
-                            )}
                         </div>
                     )}
 
