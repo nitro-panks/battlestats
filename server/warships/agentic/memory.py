@@ -203,147 +203,9 @@ def _normalize_datetime(value: Any) -> datetime:
 def _normalize_created_at(record: dict[str, Any]) -> datetime:
     return _normalize_datetime(
         record.get("reviewed_at")
-    or record.get("updated_at")
-from __future__ import annotations
-
-from datetime import datetime
-import hashlib
-import json
-import os
-from pathlib import Path
-from typing import Any, Literal
-
-
-MemoryType=Literal["procedural", "episodic", "operational"]
-
-MEMORY_STORE_VERSION=1
-PHASE0_MEMORY_LIMIT=3
-_REVIEWED_STATUSES={"reviewed", "approved"}
-_PENDING_REVIEW_STATUS="pending_review"
-_SUPERSEDED_STATUS="superseded"
-_REJECTED_STATUS="rejected"
-
-
-def _project_root() -> Path:
-    current=Path(__file__).resolve()
-    for candidate in current.parents:
-        if (candidate / "docker-compose.yml").exists():
-            return candidate
-    for candidate in current.parents:
-        if (candidate / "manage.py").exists():
-            return candidate
-    return current.parents[3]
-
-
-def _memory_root() -> Path:
-    project_root=_project_root()
-    if (project_root / "manage.py").exists():
-        return project_root / "logs" / "agentic" / "memory"
-    return project_root / "server" / "logs" / "agentic" / "memory"
-
-
-def _reviewed_root() -> Path:
-    return _memory_root() / "reviewed"
-
-
-def _pending_root() -> Path:
-    return _memory_root() / "pending"
-
-
-def _env_flag(name: str, default: bool=False) -> bool:
-    value=os.getenv(name, "").strip().lower()
-    if not value:
-        return default
-    return value in {"1", "true", "yes", "on"}
-
-
-def _normalize_environment(value: str | None) -> str:
-    normalized=(value or "").strip().lower()
-    if normalized in {"", "dev", "development", "local"}:
-        return "local"
-    if normalized in {"stage", "staging", "test", "qa"}:
-        return "staging"
-    if normalized in {"prod", "production", "prod-agentic"}:
-        return "prod-agentic"
-    return normalized or "local"
-
-
-def get_memory_environment() -> str:
-    return _normalize_environment(
-        os.getenv("BATTLESTATS_AGENTIC_ENV")
-        or os.getenv("BATTLESTATS_ENV")
-        or os.getenv("DJANGO_ENV")
+        or record.get("updated_at")
+        or record.get("created_at")
     )
-
-
-def get_memory_namespace(memory_type: MemoryType, environment: str | None=None) -> tuple[str, str, str]:
-    return ("battlestats", _normalize_environment(environment) if environment else get_memory_environment(), memory_type)
-
-
-def get_memory_backend(context: dict[str, Any] | None=None) -> str:
-    resolved_context=context or {}
-    explicit=str(
-        resolved_context.get("memory_backend")
-        or os.getenv("BATTLESTATS_AGENTIC_MEMORY_BACKEND")
-        or os.getenv("BATTLESTATS_LANGMEM_BACKEND")
-        or "file"
-    ).strip().lower()
-    if explicit in {"", "file", "filesystem", "json"}:
-        return "file"
-    return "file"
-
-
-def is_phase0_memory_enabled(engine: str, context: dict[str, Any] | None=None) -> bool:
-    if engine.strip().lower() != "langgraph":
-        return False
-
-    if context and "memory_enabled" in context:
-        return bool(context.get("memory_enabled"))
-
-    return _env_flag("BATTLESTATS_LANGMEM_ENABLED", default=False)
-
-
-def infer_workflow_kind(
-    task: str,
-    touched_files: list[str] | None=None,
-    verification_commands: list[str] | None=None,
-) -> str:
-    normalized_task=task.lower()
-    file_hints=" ".join((touched_files or [])).lower()
-    command_hints=" ".join((verification_commands or [])).lower()
-    corpus=" ".join([normalized_task, file_hints, command_hints])
-
-    if any(token in corpus for token in ("playwright", "e2e", "route smoke", "browser")):
-        return "client_route_smoke"
-    if any(token in corpus for token in ("cache", "ttl", "hydrate", "warming", "poll", "stale")):
-        return "cache_behavior"
-    if any(token in corpus for token in ("api", "serializer", "endpoint", "payload", "contract")):
-        return "api_contract_change"
-    if any(token in corpus for token in ("trace", "langgraph", "crewai", "agentic", "checkpoint")):
-        return "agentic_workflow"
-    if any(token in corpus for token in ("upstream", "encyclopedia", "wargaming", "contract review")):
-        return "upstream_contract_review"
-    if any(token in corpus for token in ("performance", "slow", "latency", "regression")):
-        return "performance_regression"
-    return "agentic_workflow"
-
-
-def _normalize_review_status(record: dict[str, Any]) -> str:
-    return str(record.get("review_status") or "").strip().lower()
-
-
-def _normalize_confidence(record: dict[str, Any]) -> float:
-    confidence=record.get("confidence", 0)
-    try:
-        return float(confidence)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _normalize_created_at(record: dict[str, Any]) -> datetime:
-    raw=str(record.get("created_at") or "").strip()
-    if not raw:
-        return datetime.min
 
 
 def _relative_memory_path(path: Path) -> str:
@@ -688,7 +550,18 @@ def persist_phase0_memory_artifacts(result: dict[str, Any], review_context: dict
     }
 
 
-def get_memory_store_snapshot(limit: int=12) -> dict[str, Any]:
+def get_pending_memory_candidates(workflow_id: str, context: dict[str, Any] | None=None) -> list[dict[str, Any]]:
+    path=_pending_workflow_path(str(workflow_id))
+    payload=_read_json_file(path, {"candidates": []})
+    return [candidate for candidate in payload.get("candidates", []) if isinstance(candidate, dict)]
+
+
+def review_memory_candidates(workflow_id: str, review_context: dict[str, Any] | None, context: dict[str, Any] | None=None) -> dict[str, Any]:
+    result: dict[str, Any]={"workflow_id": str(workflow_id)}
+    return promote_reviewed_candidates(result, review_context)
+
+
+def get_memory_store_snapshot(limit: int=12, context: dict[str, Any] | None=None) -> dict[str, Any]:
     reviewed_records: list[dict[str, Any]]=[]
     pending_candidates: list[dict[str, Any]]=[]
     reviewed_root=_reviewed_root()
@@ -738,11 +611,6 @@ def get_memory_store_snapshot(limit: int=12) -> dict[str, Any]:
         "recent_reviewed": reviewed_records[:limit],
         "recent_candidates": pending_candidates[:limit],
     }
-
-    try:
-        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except ValueError:
-        return datetime.min
 
 
 def retrieve_reviewed_memories(

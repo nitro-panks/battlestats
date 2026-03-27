@@ -197,7 +197,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 _delay_task_safely(update_clan_members_task,
                                    clan_id=clan.clan_id)
 
-        if not obj.is_hidden and obj.battles_json is not None and player_battle_data_needs_refresh(obj):
+        if not obj.is_hidden and (obj.battles_json is None or player_battle_data_needs_refresh(obj)):
             from warships.tasks import update_battle_data_task
 
             _delay_task_safely(update_battle_data_task,

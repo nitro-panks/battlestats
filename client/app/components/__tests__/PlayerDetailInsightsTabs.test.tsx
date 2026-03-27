@@ -269,7 +269,9 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            expect(mockFetchSharedJson).toHaveBeenCalledTimes(5);
+            // 4 background warmup calls + 1 initial tier_type from profile tab + 1 re-run
+            // when profileChartState transitions idle→loading (profileChartState is in effect deps)
+            expect(mockFetchSharedJson).toHaveBeenCalledTimes(6);
         });
 
         expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/101/', expect.objectContaining({ ttlMs: 30000 }));
@@ -300,7 +302,8 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            expect(mockFetchSharedJson).toHaveBeenCalledTimes(4);
+            // 3 background warmup calls (no clan battle) + 2 tier_type calls (initial + idle→loading re-run)
+            expect(mockFetchSharedJson).toHaveBeenCalledTimes(5);
         });
 
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith(
@@ -367,5 +370,68 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.getByText('Performance by Tier')).toBeInTheDocument();
         expect(screen.queryByText('Profile charts are still warming. Try again in a moment.')).not.toBeInTheDocument();
         expect(tierTypeRequestCount).toBeGreaterThanOrEqual(3);
+    });
+
+    it('resets warming state to idle after 30s so profile charts can self-heal', async () => {
+        // Serve pending responses until the warming message appears, then serve ready.
+        let serveReady = false;
+
+        mockFetchSharedJson.mockImplementation((url) => {
+            if (url.includes('/api/fetch/player_correlation/tier_type/')) {
+                if (serveReady) {
+                    return Promise.resolve({
+                        data: readyTierTypePayload,
+                        headers: { 'X-Tier-Type-Pending': 'false' },
+                    });
+                }
+
+                return Promise.resolve({
+                    data: pendingTierTypePayload,
+                    headers: { 'X-Tier-Type-Pending': 'true' },
+                });
+            }
+
+            return Promise.resolve({ data: [], headers: {} });
+        });
+
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={102}
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan={false}
+                efficiencyRows={[]}
+                isLoading={false}
+            />,
+        );
+
+        // Exhaust pending retries to reach warming state. PROFILE_PENDING_RETRY_LIMIT=5,
+        // each retry fires after PROFILE_PENDING_RETRY_DELAY_MS=1500ms. Advance enough to
+        // drain the full retry loop (extra advances are safe — no timers remain after warming).
+        for (let i = 0; i < 8; i += 1) {
+            await act(async () => {
+                jest.advanceTimersByTime(1500);
+                await Promise.resolve();
+            });
+        }
+
+        await waitFor(() => {
+            expect(screen.getByText('Profile charts are still warming. Try again in a moment.')).toBeInTheDocument();
+        });
+
+        // Switch the mock to return ready before the 30s recovery fires.
+        serveReady = true;
+
+        // Advance 30s — warming recovery timer resets state to idle and re-triggers the fetch.
+        await act(async () => {
+            jest.advanceTimersByTime(30_000);
+            await Promise.resolve();
+        });
+
+        await waitFor(() => {
+            expect(screen.getByText('Tier vs Type Profile')).toBeInTheDocument();
+        });
     });
 });

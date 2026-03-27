@@ -573,10 +573,12 @@ class LandingWarmupViewTests(TestCase):
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.tasks.update_battle_data_task.delay")
     @patch("warships.data.update_battle_data")
     def test_player_lookup_keeps_missing_kill_ratio_without_sync_battle_hydration(
         self,
         mock_update_battle_data,
+        mock_update_battle_data_task,
         _mock_update_player_task,
         _mock_update_clan_task,
         _mock_update_clan_members_task,
@@ -617,6 +619,7 @@ class LandingWarmupViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["kill_ratio"])
         mock_update_battle_data.assert_not_called()
+        mock_update_battle_data_task.assert_called_once_with(player_id=player.player_id)
         player.refresh_from_db()
         self.assertIsNotNone(player.last_lookup)
         self.assertGreaterEqual(player.last_lookup, request_started_at)
@@ -3119,7 +3122,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["metric"], "tier_type")
         self.assertEqual(payload["player_cells"], [])
         self.assertTrue(payload["tiles"])
-        mock_update_battle_data_task.assert_called_once_with(player_id=8834)
+        mock_update_battle_data_task.assert_called_once_with(player_id='8834')
 
     def test_player_correlation_distribution_returns_ranked_wr_battles_payload(self):
         cache.clear()

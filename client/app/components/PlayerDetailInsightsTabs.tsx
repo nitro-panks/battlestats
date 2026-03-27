@@ -111,6 +111,7 @@ const TAB_DATA_WARMUP_IDLE_TIMEOUT_MS = 1500;
 const PROFILE_FETCH_RETRY_DELAY_MS = 350;
 const PROFILE_PENDING_RETRY_DELAY_MS = 1500;
 const PROFILE_PENDING_RETRY_LIMIT = 5;
+const PROFILE_WARMING_RETRY_DELAY_MS = 30_000;
 
 const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
     window.setTimeout(resolve, timeoutMs);
@@ -284,6 +285,18 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
             }
         };
     }, [activeTab, isLoading, playerId, profileChartPayload, profileChartState]);
+
+    useEffect(() => {
+        if (profileChartState !== 'warming') {
+            return;
+        }
+
+        const timeoutId = setTimeout(() => {
+            setProfileChartState('idle');
+        }, PROFILE_WARMING_RETRY_DELAY_MS);
+
+        return () => clearTimeout(timeoutId);
+    }, [profileChartState]);
 
     const derivedTypeRows = profileChartPayload ? deriveTypeRowsFromTierTypePayload(profileChartPayload) : [];
     const derivedTierRows = profileChartPayload ? deriveTierRowsFromTierTypePayload(profileChartPayload) : [];

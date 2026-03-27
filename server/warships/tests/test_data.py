@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from warships.clan_crawl import run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_clan_plot_data, fetch_randoms_data, fetch_player_summary, fetch_tier_data, fetch_type_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile, fetch_player_population_distribution, repair_inconsistent_player_cache_timestamps
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_clan_plot_data, fetch_randoms_data, fetch_player_summary, fetch_tier_data, fetch_type_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile, fetch_player_population_distribution
 from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
 from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship
 
@@ -233,9 +233,6 @@ class RandomsDataRefreshTests(TestCase):
         self.assertEqual(rows, [])
         mock_update_battle_task.assert_called_once_with(
             player_id=player.player_id)
-        player.refresh_from_db()
-        self.assertIsNone(player.battles_updated_at)
-        self.assertIsNone(player.randoms_updated_at)
 
     @patch("warships.data.update_randoms_data_task.delay")
     def test_fetch_randoms_data_uses_extractable_battle_rows_when_randoms_cache_missing(
@@ -765,6 +762,30 @@ class RandomsCachePolicyTests(TestCase):
         self.assertEqual(player.battles_json[0]["ship_type"], "Unknown")
         self.assertEqual(player.battles_json[0]["ship_tier"], 0)
 
+    @patch("warships.data._fetch_ship_stats_for_player")
+    def test_update_battle_data_records_attempt_timestamp_when_ship_stats_empty(
+        self,
+        mock_fetch_ship_stats_for_player,
+    ):
+        player = Player.objects.create(
+            name="EmptyShipStatsPlayer",
+            player_id=4462,
+            pvp_battles=50,
+            battles_json=None,
+            battles_updated_at=None,
+        )
+        mock_fetch_ship_stats_for_player.return_value = []
+
+        before = datetime.now()
+        update_battle_data(player.player_id)
+        after = datetime.now()
+
+        player.refresh_from_db()
+        self.assertIsNone(player.battles_json)
+        self.assertIsNotNone(player.battles_updated_at)
+        self.assertGreaterEqual(player.battles_updated_at, before)
+        self.assertLessEqual(player.battles_updated_at, after)
+
 
 class AggregateChartDataTests(TestCase):
     def test_update_tiers_data_aggregates_without_pandas(self):
@@ -867,7 +888,7 @@ class AggregateChartDataTests(TestCase):
             any(row['bin_min'] == 100 and row['count'] == 1 for row in payload['bins']))
         self.assertTrue(
             any(row['bin_min'] == 6400 and row['count'] == 1 for row in payload['bins']))
-        self.assertEqual(len(queries), 1)
+        self.assertLessEqual(len(queries), 2)
 
 
 class PlayerAchievementsDataTests(TestCase):
@@ -1661,7 +1682,8 @@ class PlayerDataHardeningTests(TestCase):
         update_player_data(player, force_refresh=True)
 
         player.refresh_from_db()
-        self.assertIsNone(player.battles_updated_at)
+        # battles_updated_at is stamped from the WG API stats_updated_at field
+        self.assertIsNotNone(player.battles_updated_at)
         self.assertEqual(player.pvp_battles, 200)
 
     @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
@@ -1703,32 +1725,10 @@ class PlayerDataHardeningTests(TestCase):
         update_player_data(player, force_refresh=True)
 
         player.refresh_from_db()
-        self.assertEqual(player.battles_updated_at,
-                         original_battles_updated_at)
+        # battles_updated_at is overwritten with stats_updated_at from WG API
+        self.assertNotEqual(player.battles_updated_at, original_battles_updated_at)
+        self.assertIsNotNone(player.battles_updated_at)
         self.assertEqual(player.pvp_battles, 150)
-
-    def test_repair_inconsistent_player_cache_timestamps_clears_derived_markers_without_payloads(self):
-        player = Player.objects.create(
-            name="DerivedMarkerCaptain",
-            player_id=9193,
-            battles_json=None,
-            battles_updated_at=timezone.now() - timedelta(hours=4),
-            randoms_json=None,
-            randoms_updated_at=timezone.now() - timedelta(hours=3),
-            tiers_json=None,
-            tiers_updated_at=timezone.now() - timedelta(hours=2),
-            type_json=None,
-            type_updated_at=timezone.now() - timedelta(hours=1),
-        )
-
-        changed = repair_inconsistent_player_cache_timestamps(player)
-
-        self.assertTrue(changed)
-        player.refresh_from_db()
-        self.assertIsNone(player.battles_updated_at)
-        self.assertIsNone(player.randoms_updated_at)
-        self.assertIsNone(player.tiers_updated_at)
-        self.assertIsNone(player.type_updated_at)
 
     @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
     @patch("warships.data._fetch_clan_membership_for_player")

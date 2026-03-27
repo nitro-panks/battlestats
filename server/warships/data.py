@@ -7,7 +7,7 @@ import math
 import os
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
+from django.db.models import Case, Count, F, FloatField, IntegerField, Q, Sum, Value, When
 from django.db.models.functions import Cast, Lower, TruncMonth
 from django.utils import timezone as django_timezone
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
@@ -2385,9 +2385,11 @@ def update_battle_data(player_id: str) -> None:
     ship_data = _fetch_ship_stats_for_player(player_id)
     if not ship_data:
         logging.warning(
-            f'No ship stats returned for player_id={player_id}; leaving battles_json unchanged.'
+            f'No ship stats returned for player_id={player_id}; recording attempt timestamp to avoid tight retry loop.'
         )
-        return player.battles_json
+        player.battles_updated_at = datetime.now()
+        player.save(update_fields=['battles_updated_at'])
+        return
 
     prepared_data = []
 
@@ -2891,28 +2893,30 @@ def _build_linear_distribution_bins(qs, field_name: str, value_min: float, value
 
 
 def _build_explicit_distribution_bins(qs, field_name: str, bin_edges: list[int]) -> list[dict]:
-    bins: list[dict] = []
-
+    last = len(bin_edges) - 2
+    whens = []
     for index, lower in enumerate(bin_edges[:-1]):
         upper = bin_edges[index + 1]
-        filters = {
-            f'{field_name}__gte': lower,
-            f'{field_name}__lt': upper,
-        }
+        if index == last:
+            whens.append(When(**{f'{field_name}__gte': lower, f'{field_name}__lte': upper}, then=Value(index)))
+        else:
+            whens.append(When(**{f'{field_name}__gte': lower, f'{field_name}__lt': upper}, then=Value(index)))
 
-        if index == len(bin_edges) - 2:
-            filters = {
-                f'{field_name}__gte': lower,
-                f'{field_name}__lte': upper,
-            }
+    counts_by_index = {
+        row['bin_index']: row['count']
+        for row in (
+            qs.annotate(bin_index=Case(*whens, output_field=IntegerField(), default=Value(-1)))
+            .filter(bin_index__gte=0)
+            .values('bin_index')
+            .annotate(count=Count('id'))
+            .order_by()
+        )
+    }
 
-        bins.append({
-            'bin_min': lower,
-            'bin_max': upper,
-            'count': qs.filter(**filters).count(),
-        })
-
-    return bins
+    return [
+        {'bin_min': bin_edges[i], 'bin_max': bin_edges[i + 1], 'count': counts_by_index.get(i, 0)}
+        for i in range(len(bin_edges) - 1)
+    ]
 
 
 def fetch_player_population_distribution(metric: str) -> dict:
@@ -4039,6 +4043,11 @@ def fetch_randoms_data(player_id: str) -> list:
                 update_battle_data_task, player_id=player_id)
         return _extract_randoms_rows(player.randoms_json, limit=20)
 
+    extracted_battle_rows = _extract_randoms_rows(player.battles_json, limit=20)
+    if extracted_battle_rows:
+        _dispatch_async_refresh(update_randoms_data_task, player_id)
+        return extracted_battle_rows
+
     _dispatch_async_refresh(update_randoms_data_task, player_id)
     return []
 
@@ -4083,14 +4092,14 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
         if cached:
             return cached
 
-        if needs_clan_refresh or needs_member_refresh:
+        if member_count == 0:
             return []
 
         payload = build_plot_payload(members)
         cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
         return payload
 
-    if needs_clan_refresh or needs_member_refresh:
+    if member_count == 0:
         return []
 
     payload = build_plot_payload(members)
