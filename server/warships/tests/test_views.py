@@ -3209,7 +3209,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     @patch("warships.tasks.queue_player_ranked_wr_battles_correlation_refresh")
-    def test_player_correlation_distribution_builds_ranked_population_when_cache_is_cold(self, mock_queue_refresh):
+    def test_player_correlation_distribution_queues_refresh_when_cache_is_cold(self, mock_queue_refresh):
         cache.clear()
 
         Player.objects.create(
@@ -3227,14 +3227,14 @@ class ApiContractTests(TestCase):
             "/api/fetch/player_correlation/ranked_wr_battles/8845/")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Ranked-WR-Battles-Pending"], "true")
         payload = response.json()
         self.assertEqual(payload["metric"], "ranked_wr_battles")
-        self.assertEqual(payload["tracked_population"], 1)
-        self.assertTrue(payload["tiles"])
-        self.assertTrue(payload["trend"])
+        self.assertEqual(payload["tracked_population"], 0)
+        self.assertEqual(payload["tiles"], [])
         self.assertEqual(payload["player_point"]["x"], 90.0)
         self.assertEqual(payload["player_point"]["y"], 60.0)
-        mock_queue_refresh.assert_not_called()
+        mock_queue_refresh.assert_called()
 
     @patch("warships.tasks.queue_player_ranked_wr_battles_correlation_refresh")
     def test_player_correlation_distribution_uses_published_ranked_population_fallback(self, mock_queue_refresh):
@@ -3269,6 +3269,49 @@ class ApiContractTests(TestCase):
         self.assertIsNotNone(
             cache.get(_player_correlation_published_cache_key("ranked_wr_battles:v6")))
         mock_queue_refresh.assert_called_once_with()
+
+    @patch("warships.tasks.queue_player_ranked_wr_battles_correlation_refresh")
+    def test_ranked_wr_battles_cold_cache_returns_200_with_pending_header(self, mock_queue_refresh):
+        cache.clear()
+
+        Player.objects.create(
+            name="ColdCachePendingPlayer",
+            player_id=8850,
+            is_hidden=False,
+            ranked_updated_at=timezone.now(),
+            ranked_json=[],
+        )
+
+        response = self.client.get(
+            "/api/fetch/player_correlation/ranked_wr_battles/8850/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Ranked-WR-Battles-Pending"], "true")
+        payload = response.json()
+        self.assertEqual(payload["metric"], "ranked_wr_battles")
+        self.assertEqual(payload["tracked_population"], 0)
+        self.assertEqual(payload["tiles"], [])
+        self.assertIsNone(payload["player_point"])
+        mock_queue_refresh.assert_called()
+
+    @patch("warships.data.fetch_player_ranked_wr_battles_correlation", side_effect=RuntimeError("db timeout"))
+    def test_ranked_wr_battles_exception_returns_200_with_pending_header(self, mock_fetch):
+        Player.objects.create(
+            name="ErrorPlayer",
+            player_id=8851,
+            is_hidden=False,
+            ranked_updated_at=timezone.now(),
+            ranked_json=[],
+        )
+
+        response = self.client.get(
+            "/api/fetch/player_correlation/ranked_wr_battles/8851/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Ranked-WR-Battles-Pending"], "true")
+        payload = response.json()
+        self.assertEqual(payload["tracked_population"], 0)
+        self.assertEqual(payload["tiles"], [])
 
     def test_player_correlation_distribution_returns_404_for_missing_tier_type_player(self):
         response = self.client.get(

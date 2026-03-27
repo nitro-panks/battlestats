@@ -3446,6 +3446,7 @@ def fetch_player_ranked_wr_battles_correlation(player_id: str) -> dict:
     published_cache_key = _player_correlation_published_cache_key(
         PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
     population_payload = cache.get(cache_key)
+    pending = False
     if population_payload is not None:
         cache.set(published_cache_key, population_payload, timeout=None)
     else:
@@ -3454,13 +3455,16 @@ def fetch_player_ranked_wr_battles_correlation(player_id: str) -> dict:
             population_payload = published_payload
             queue_player_ranked_wr_battles_correlation_refresh()
         else:
-            population_payload = warm_player_ranked_wr_battles_population_correlation()
+            queue_player_ranked_wr_battles_correlation_refresh()
+            population_payload = _build_empty_player_ranked_wr_battles_population_correlation_payload()
+            pending = True
 
     if population_payload is None:
         queue_player_ranked_wr_battles_correlation_refresh()
         population_payload = _build_empty_player_ranked_wr_battles_population_correlation_payload()
+        pending = True
 
-    return {
+    result = {
         **population_payload,
         'player_point': {
             'x': float(total_battles),
@@ -3468,6 +3472,8 @@ def fetch_player_ranked_wr_battles_correlation(player_id: str) -> dict:
             'label': player.name,
         } if total_battles > 0 and win_rate is not None else None,
     }
+    result['_pending'] = pending
+    return result
 
 
 def fetch_wr_distribution() -> list[dict]:

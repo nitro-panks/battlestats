@@ -333,9 +333,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         const activateClanMembers = () => setShouldLoadClanMembers(true);
 
         if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-            idleCallbackId = window.requestIdleCallback(activateClanMembers, { timeout: 1200 });
+            idleCallbackId = window.requestIdleCallback(activateClanMembers, { timeout: 2500 });
         } else if (typeof window !== 'undefined') {
-            timeoutId = window.setTimeout(activateClanMembers, 250);
+            timeoutId = window.setTimeout(activateClanMembers, 2500);
         }
 
         return () => {
@@ -436,7 +436,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             </div>
                             <DeferredSection
                                 className="pt-5"
-                                minHeight={96}
+                                minHeight={clanMembers.length > 0 ? Math.max(96, clanMembers.length * 26 + 48) : 96}
                                 placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
                                 playerId={player.player_id}
                                 rootMargin="80px 0px"

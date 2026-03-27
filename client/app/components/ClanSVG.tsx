@@ -564,7 +564,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
         }
     }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme]);
 
-    return <div ref={containerRef}></div>;
+    return <div ref={containerRef} style={{ minHeight: svgHeight, minWidth: svgWidth }}></div>;
 };
 
 const areClanSvgPropsEqual = (previousProps: ClanProps, nextProps: ClanProps): boolean => {

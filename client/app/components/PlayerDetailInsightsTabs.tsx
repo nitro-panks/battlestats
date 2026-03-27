@@ -341,7 +341,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 aria-labelledby={`player-insights-tab-${activeConfig.id}`}
                 className="min-w-0"
                 data-perf-section={panelSectionIdByTab[activeTab]}
-                style={{ minHeight: activeConfig.minHeight }}
+                style={{ minHeight: activeConfig.minHeight, contain: 'layout style' }}
             >
                 {activeTab === 'population' ? (
                     <div>

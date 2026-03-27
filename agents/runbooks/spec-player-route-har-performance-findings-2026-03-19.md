@@ -201,24 +201,20 @@ Interpretation:
 
 ## Recommended Next Steps
 
-### Priority 0: stop the failing long-tail request
+### Priority 0: stop the failing long-tail request — COMPLETED 2026-03-27
 
 Target:
 
 - `GET /api/fetch/player_correlation/ranked_wr_battles/<player_id>/`
 
-Actions:
+Root cause: when both working and published caches were empty, the endpoint called `warm_player_ranked_wr_battles_population_correlation()` synchronously on the request path, iterating all players with ranked data. This took 33+ seconds and timed out the Gunicorn worker.
 
-- reproduce the `500` from the backend directly
-- capture the exception, query path, and data shape for player `1018847016`
-- add a fast failure mode or empty-state fallback if the data is incomplete or too expensive to derive synchronously
-- ensure the player page does not block or thrash when this panel fails
+Fix shipped:
 
-Success criteria:
-
-- endpoint returns either a valid payload or a cheap explicit empty-state response
-- request latency is reduced from `33.3 s` to an acceptable steady-state budget
-- the player route no longer emits a failed request for this panel in the HAR
+1. Removed synchronous population build from the request path. Cold cache now queues a Celery task and returns the empty fallback payload immediately.
+2. Added `X-Ranked-WR-Battles-Pending: true` response header when serving a fallback so the client can show a warming state.
+3. Added broad exception handling so unexpected errors (DB timeout, cache failure) return a degraded 200 with empty payload + pending header instead of a 500.
+4. Updated and added tests covering cold-cache pending behavior and exception degradation.
 
 ### Priority 1: eliminate duplicate player and panel fetches
 

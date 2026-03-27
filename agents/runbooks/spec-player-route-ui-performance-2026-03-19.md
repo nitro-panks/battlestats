@@ -407,10 +407,14 @@ After each phase:
 1. Completed: defer `RandomsSVG`, `RankedWRBattlesHeatmapSVG`, and `RankedSeasons` behind `DeferredSection` placeholders.
 2. Completed: reserve stable height for the above-the-fold clan chart container.
 3. Completed: delay `useClanMembers` until browser idle so the route does not compete with immediate clan-member fetch and polling during first paint.
-4. Next: instrument section-level render timing and visibility so the remaining CLS spikes can be tied to specific mounts rather than inferred from page-level metrics.
-5. Next: audit the worst remaining pages for oversized SVG and DOM output, starting with `Rei`, `BBD_Dutch`, `Klee_FleeingSunlight`, `PeytonTheRockHider`, and `Noob_CoralSea`.
-6. Next: reduce DOM node count and default content depth in the remaining heavy charts before attempting broader architectural changes.
-7. Later: move the critical player fetch out of the client-effect gate in `PlayerRouteView` once the current layout-instability tail is under control.
+4. Completed: add `minHeight`/`minWidth` to ClanSVG container so D3 `selectAll('*').remove()` redraws never collapse the element to zero height.
+5. Completed: apply `minHeight` to DeferredSection outer wrapper div so content mount doesn't snap from placeholder to actual height.
+6. Completed: scale clan members DeferredSection `minHeight` dynamically by `clanMembers.length * 26 + 48` to prevent the 96px-to-1200px shift on large clans.
+7. Completed: increase `requestIdleCallback` timeout from 1200ms to 2500ms so clan member data arrives outside the browser CLS measurement window.
+8. Completed: add `contain: layout style` to insights tab panel so inner height changes don't propagate CLS to outer elements.
+9. Next: audit the worst remaining pages for oversized SVG and DOM output, starting with `Rei`, `BBD_Dutch`, `Klee_FleeingSunlight`, `PeytonTheRockHider`, and `Noob_CoralSea`.
+10. Next: reduce DOM node count and default content depth in the remaining heavy charts before attempting broader architectural changes.
+11. Later: move the critical player fetch out of the client-effect gate in `PlayerRouteView` once the current layout-instability tail is under control.
 
 ## Recommendation
 
