@@ -3,6 +3,7 @@ import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { getCorrelationTileBounds, getCorrelationTrendX } from './wrDistributionPayload';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 
 type D3Selection = ReturnType<typeof d3.select>;
 
@@ -11,6 +12,7 @@ interface WRDistributionDesign2Props {
     playerSurvivalRate?: number | null;
     svgWidth?: number;
     svgHeight?: number;
+    theme?: ChartTheme;
 }
 
 interface CorrelationDomain {
@@ -106,7 +108,7 @@ const formatDelta = (value: number | null): string => {
     return `${sign}${value.toFixed(1)} pts vs trend`;
 };
 
-const drawErrorState = (containerElement: HTMLDivElement, message: string) => {
+const drawErrorState = (containerElement: HTMLDivElement, message: string, colors: typeof chartColors['light']) => {
     const container = d3.select(containerElement);
     container.selectAll('*').remove();
 
@@ -120,7 +122,7 @@ const drawErrorState = (containerElement: HTMLDivElement, message: string) => {
     svg.append('text')
         .attr('x', 0)
         .attr('y', 16)
-        .style('fill', '#6b7280')
+        .style('fill', colors.labelText)
         .style('font-size', '12px')
         .text(message);
 };
@@ -132,6 +134,7 @@ const appendSummaryBlock = (
     payload: CorrelationPayload,
     expectedSurvival: number | null,
     survivalDelta: number | null,
+    colors: typeof chartColors['light'],
 ) => {
     const header = svgRoot.append('g').attr('transform', `translate(${marginLeft + width - 6}, 10)`);
     const headerText = header.append('text')
@@ -143,31 +146,31 @@ const appendSummaryBlock = (
     headerText.append('tspan')
         .style('font-size', '11px')
         .style('font-weight', '700')
-        .style('fill', '#334155')
+        .style('fill', colors.axisText)
         .text(payload.correlation == null ? 'r unavailable' : `r = ${payload.correlation.toFixed(2)}`);
 
     headerText.append('tspan')
         .style('font-size', '10px')
         .style('font-weight', '400')
-        .style('fill', '#94a3b8')
+        .style('fill', colors.separator)
         .text('  •  ');
 
     headerText.append('tspan')
         .style('font-size', '10px')
         .style('font-weight', '400')
-        .style('fill', '#475569')
+        .style('fill', colors.axisText)
         .text(expectedSurvival == null ? 'Expected survival unavailable' : `Expected survival ${formatPercent(expectedSurvival)}`);
 
     headerText.append('tspan')
         .style('font-size', '10px')
         .style('font-weight', '400')
-        .style('fill', '#94a3b8')
+        .style('fill', colors.separator)
         .text('  •  ');
 
     headerText.append('tspan')
         .style('font-size', '10px')
         .style('font-weight', '700')
-        .style('fill', survivalDelta != null ? (survivalDelta >= 0 ? '#166534' : '#991b1b') : '#64748b')
+        .style('fill', survivalDelta != null ? (survivalDelta >= 0 ? colors.heatmapAboveTrend : colors.heatmapBelowTrend) : colors.labelMuted)
         .text(formatDelta(survivalDelta));
 };
 
@@ -178,6 +181,7 @@ const drawChart = (
     playerSurvivalRate: number,
     svgWidth: number,
     svgHeight: number,
+    colors: typeof chartColors['light'],
 ) => {
     const margin = { top: 38, right: 18, bottom: 34, left: 44 };
     const width = svgWidth - margin.left - margin.right;
@@ -199,7 +203,7 @@ const drawChart = (
         svg.append('text')
             .attr('x', 0)
             .attr('y', 16)
-            .style('fill', '#6b7280')
+            .style('fill', colors.labelText)
             .style('font-size', '12px')
             .text('No correlation data available.');
         return;
@@ -220,13 +224,13 @@ const drawChart = (
 
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisBottom(x).ticks(8).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
 
     svg.append('g')
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisLeft(y).ticks(7).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
@@ -235,7 +239,7 @@ const drawChart = (
         .attr('class', 'grid-lines')
         .call(d3.axisLeft(y).ticks(7).tickSize(-width).tickFormat(() => ''))
         .selectAll('line')
-        .style('stroke', '#e2e8f0')
+        .style('stroke', colors.gridLine)
         .style('stroke-width', 1);
     svg.select('.grid-lines')?.select('.domain')?.remove();
 
@@ -243,7 +247,7 @@ const drawChart = (
         .attr('x', width / 2)
         .attr('y', height + 32)
         .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '10px')
         .text(payload.x_label);
 
@@ -252,7 +256,7 @@ const drawChart = (
         .attr('x', -height / 2)
         .attr('y', -34)
         .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '10px')
         .text(payload.y_label);
 
@@ -271,7 +275,7 @@ const drawChart = (
             const bounds = getCorrelationTileBounds(payload, tile);
             return Math.max(1, y(bounds.yMin) - y(bounds.yMax));
         })
-        .attr('fill', '#2171b5')
+        .attr('fill', colors.accentMid)
         .attr('opacity', (tile: CorrelationTile) => tileOpacity(tile.count));
 
     const trendLine = d3.line()
@@ -282,7 +286,7 @@ const drawChart = (
     svg.append('path')
         .datum(payload.trend)
         .attr('fill', 'none')
-        .attr('stroke', '#1e293b')
+        .attr('stroke', colors.axisText)
         .attr('stroke-width', 1.75)
         .attr('d', trendLine);
 
@@ -302,7 +306,7 @@ const drawChart = (
         .attr('x2', playerX)
         .attr('y1', height)
         .attr('y2', playerY)
-        .attr('stroke', '#94a3b8')
+        .attr('stroke', colors.separator)
         .attr('stroke-width', 1)
         .attr('stroke-dasharray', '3,3');
 
@@ -311,7 +315,7 @@ const drawChart = (
         .attr('x2', playerX)
         .attr('y1', playerY)
         .attr('y2', playerY)
-        .attr('stroke', '#94a3b8')
+        .attr('stroke', colors.separator)
         .attr('stroke-width', 1)
         .attr('stroke-dasharray', '3,3');
 
@@ -320,7 +324,7 @@ const drawChart = (
         .attr('cy', playerY)
         .attr('r', 5.5)
         .attr('fill', playerColor)
-        .attr('stroke', '#ffffff')
+        .attr('stroke', colors.barStroke)
         .attr('stroke-width', 1.75);
 
     const label = svg.append('g').attr('transform', `translate(${labelX}, ${labelY})`);
@@ -339,7 +343,7 @@ const drawChart = (
         .attr('dy', 14)
         .style('font-size', '10px')
         .style('font-weight', '400')
-        .style('fill', survivalDelta == null ? '#64748b' : (survivalDelta >= 0 ? '#166534' : '#991b1b'))
+        .style('fill', survivalDelta == null ? colors.labelMuted : (survivalDelta >= 0 ? colors.heatmapAboveTrend : colors.heatmapBelowTrend))
         .text(formatDelta(survivalDelta));
 
     const labelNode = labelText.node();
@@ -351,17 +355,18 @@ const drawChart = (
             .attr('width', bbox.width + 12)
             .attr('height', bbox.height + 6)
             .attr('rx', 4)
-            .attr('fill', 'rgba(255, 255, 255, 0.94)')
-            .attr('stroke', '#cbd5e1');
+            .attr('fill', colors.surface)
+            .attr('fill-opacity', 0.96)
+            .attr('stroke', colors.axisLine);
     }
 
-    appendSummaryBlock(svgRoot, margin.left, width, payload, expectedSurvival, survivalDelta);
+    appendSummaryBlock(svgRoot, margin.left, width, payload, expectedSurvival, survivalDelta, colors);
 
     svg.append('text')
         .attr('x', width)
         .attr('y', height + 32)
         .attr('text-anchor', 'end')
-        .style('fill', '#94a3b8')
+        .style('fill', colors.separator)
         .style('font-size', '10px')
         .text(`tiles: ${payload.x_domain.bin_width.toFixed(1)} x ${payload.y_domain.bin_width.toFixed(1)} pts`);
 };
@@ -371,6 +376,7 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
     playerSurvivalRate = null,
     svgWidth = 600,
     svgHeight = 248,
+    theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -380,6 +386,7 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
             return;
         }
 
+        const colors = chartColors[theme];
         const abortController = new AbortController();
 
         const load = async () => {
@@ -392,17 +399,17 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
                     return;
                 }
 
-                drawChart(containerElement, payload, playerWR, playerSurvivalRate, svgWidth, svgHeight);
+                drawChart(containerElement, payload, playerWR, playerSurvivalRate, svgWidth, svgHeight, colors);
             } catch {
                 if (!abortController.signal.aborted) {
-                    drawErrorState(containerElement, 'Unable to load win rate and survival chart.');
+                    drawErrorState(containerElement, 'Unable to load win rate and survival chart.', colors);
                 }
             }
         };
 
         load();
         return () => abortController.abort();
-    }, [playerSurvivalRate, playerWR, svgHeight, svgWidth]);
+    }, [playerSurvivalRate, playerWR, svgHeight, svgWidth, theme]);
 
     return <div ref={containerRef}></div>;
 };

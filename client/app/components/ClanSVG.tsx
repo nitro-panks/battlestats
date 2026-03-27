@@ -3,6 +3,7 @@ import * as d3 from 'd3';
 import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
 import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 
 interface ClanProps {
     clanId: number;
@@ -11,6 +12,7 @@ interface ClanProps {
     svgWidth?: number;
     svgHeight?: number;
     membersData?: ClanMemberData[];
+    theme?: ChartTheme;
 }
 
 interface ClanData {
@@ -33,14 +35,17 @@ interface ActivitySegment {
     share: number;
 }
 
-const ACTIVITY_BUCKETS: Array<{ key: ActivityBucketKey; label: string; shortLabel: string; color: string }> = [
-    { key: 'active_7d', label: 'Active now', shortLabel: '0-7d', color: '#08519c' },
-    { key: 'active_30d', label: 'Still warm', shortLabel: '8-30d', color: '#3182bd' },
-    { key: 'cooling_90d', label: 'Cooling', shortLabel: '31-90d', color: '#6baed6' },
-    { key: 'dormant_180d', label: 'Dormant', shortLabel: '91-180d', color: '#9ecae1' },
-    { key: 'inactive_180d_plus', label: 'Gone dark', shortLabel: '181d+', color: '#d9e2ec' },
-    { key: 'unknown', label: 'No recency', shortLabel: 'Unknown', color: '#e5e7eb' },
-];
+const getActivityBuckets = (theme: ChartTheme): Array<{ key: ActivityBucketKey; label: string; shortLabel: string; color: string }> => {
+    const colors = chartColors[theme];
+    return [
+        { key: 'active_7d', label: 'Active now', shortLabel: '0-7d', color: colors.activityActive },
+        { key: 'active_30d', label: 'Still warm', shortLabel: '8-30d', color: colors.activityRecent },
+        { key: 'cooling_90d', label: 'Cooling', shortLabel: '31-90d', color: colors.activityCooling },
+        { key: 'dormant_180d', label: 'Dormant', shortLabel: '91-180d', color: colors.activityDormant },
+        { key: 'inactive_180d_plus', label: 'Gone dark', shortLabel: '181d+', color: colors.activityInactive },
+        { key: 'unknown', label: 'No recency', shortLabel: 'Unknown', color: colors.activityUnknown },
+    ];
+};
 
 const CLAN_PLOT_FETCH_RETRY_DELAY_MS = 350;
 const CLAN_PLOT_FETCH_ATTEMPTS = 2;
@@ -51,38 +56,39 @@ const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
     window.setTimeout(resolve, timeoutMs);
 });
 
-const selectClanColorByWR = (winRatio: number) => {
+const selectClanColorByWR = (winRatio: number, theme: ChartTheme) => {
+    const colors = chartColors[theme];
     if (winRatio > 65) {
-        return '#810c9e';
+        return colors.wrElite;
     }
     if (winRatio >= 60) {
-        return '#D042F3';
+        return colors.wrSuperUnicum;
     }
     if (winRatio >= 56) {
-        return '#3182bd';
+        return colors.wrUnicum;
     }
     if (winRatio >= 54) {
-        return '#74c476';
+        return colors.wrVeryGood;
     }
     if (winRatio >= 52) {
-        return '#a1d99b';
+        return colors.wrGood;
     }
     if (winRatio >= 50) {
-        return '#fed976';
+        return colors.wrAboveAvg;
     }
     if (winRatio >= 45) {
-        return '#fd8d3c';
+        return colors.wrAverage;
     }
     if (winRatio >= 40) {
-        return '#e6550d';
+        return colors.wrBelowAvg;
     }
-    return '#a50f15';
+    return colors.wrBad;
 };
 
-const buildActivitySegments = (points: ClanPlotPoint[]): ActivitySegment[] => {
+const buildActivitySegments = (points: ClanPlotPoint[], theme: ChartTheme): ActivitySegment[] => {
     const total = points.length;
 
-    return ACTIVITY_BUCKETS.map((bucket) => {
+    return getActivityBuckets(theme).map((bucket) => {
         const count = points.filter((point) => point.activity_bucket === bucket.key).length;
         return {
             ...bucket,
@@ -97,7 +103,9 @@ const drawClanChartStatus = (
     message: string,
     svgWidth: number,
     svgHeight: number,
+    theme: ChartTheme,
 ) => {
+    const colors = chartColors[theme];
     const container = d3.select(containerElement);
     container.selectAll('*').remove();
 
@@ -109,7 +117,7 @@ const drawClanChartStatus = (
         .attr('x', 16)
         .attr('y', 24)
         .attr('class', 'text-sm')
-        .style('fill', '#6b7280')
+        .style('fill', colors.labelText)
         .text(message);
 };
 
@@ -121,7 +129,9 @@ const drawClanPlot = (
     svgHeight: number,
     chartMembers: ClanChartMemberActivity[],
     plotData: ClanData[],
+    theme: ChartTheme,
 ) => {
+    const colors = chartColors[theme];
     const margin = { top: 64, right: 16, bottom: 32, left: 38 };
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -160,14 +170,14 @@ const drawClanPlot = (
             .attr('dominant-baseline', 'hanging')
             .style('font-size', '11px')
             .style('font-weight', '700')
-            .style('fill', '#0f172a')
+            .style('fill', colors.labelStrong)
             .text(`${segment.label} • ${segment.shortLabel}`);
 
         title.append('tspan')
             .attr('dx', 10)
             .style('font-size', '10px')
             .style('font-weight', '400')
-            .style('fill', '#475569')
+            .style('fill', colors.labelMid)
             .text(`(${segment.share.toFixed(0)}%)`);
 
         const nodes = [title.node()].filter(Boolean) as SVGGraphicsElement[];
@@ -183,14 +193,14 @@ const drawClanPlot = (
             .attr('width', maxX - minX + 20)
             .attr('height', maxY - minY + 12)
             .attr('rx', 6)
-            .attr('fill', 'rgba(255, 255, 255, 0.94)');
+            .attr('fill', theme === 'dark' ? 'rgba(13, 17, 23, 0.94)' : 'rgba(255, 255, 255, 0.94)');
     };
     if (!plotData.length) {
         svg.append('text')
             .attr('x', 0)
             .attr('y', 16)
             .attr('class', 'text-sm')
-            .style('fill', '#6b7280')
+            .style('fill', colors.labelText)
             .text('No clan chart data available.');
         return;
     }
@@ -209,7 +219,7 @@ const drawClanPlot = (
         };
     });
 
-    const activitySegments = buildActivitySegments(data);
+    const activitySegments = buildActivitySegments(data, theme);
 
     const max = (d3.max(data, (datum: ClanData) => datum.pvp_battles) || 0) + 50;
     const ymax = (d3.max(data, (datum: ClanData) => datum.pvp_ratio) || 0) + 2;
@@ -244,8 +254,8 @@ const drawClanPlot = (
         .attr('width', width)
         .attr('height', activityBarHeight)
         .attr('rx', 5)
-        .attr('fill', '#f8fafc')
-        .attr('stroke', '#e2e8f0')
+        .attr('fill', colors.barBg)
+        .attr('stroke', colors.gridLine)
         .attr('stroke-width', 1);
 
     activityGroup.append('g')
@@ -258,7 +268,7 @@ const drawClanPlot = (
         .attr('width', (segment: ActivitySegment & { shareStart: number; shareEnd: number }) => Math.max(0, activityScale(segment.shareEnd) - activityScale(segment.shareStart)))
         .attr('height', activityBarHeight)
         .attr('fill', (segment: ActivitySegment) => segment.color)
-        .attr('stroke', '#ffffff')
+        .attr('stroke', colors.barStroke)
         .attr('stroke-width', 1)
         .style('cursor', 'default')
         .on('mouseover', function (_event: MouseEvent, segment: ActivitySegment) {
@@ -276,7 +286,7 @@ const drawClanPlot = (
         .domain([0, max])
         .range([0, width]);
     svg.append('g')
-        .style('color', '#6b7280')
+        .style('color', colors.labelText)
         .attr('transform', `translate(0, ${height})`)
         .call(d3.axisBottom(x).ticks(5).tickSizeOuter(0))
         .selectAll('text')
@@ -287,7 +297,7 @@ const drawClanPlot = (
         .domain([ymin, ymax])
         .range([height, 0]);
     svg.append('g')
-        .style('color', '#6b7280')
+        .style('color', colors.labelText)
         .call(d3.axisLeft(y).ticks(5).tickSizeOuter(0));
 
     const showPointDetails = (datum: ClanPlotPoint) => {
@@ -306,21 +316,21 @@ const drawClanPlot = (
         detailText.append('tspan')
             .style('font-size', '11px')
             .attr('font-weight', '700')
-            .style('fill', '#084594')
+            .style('fill', colors.accentLink)
             .text(datum.player_name);
 
         detailText.append('tspan')
             .attr('dx', 10)
             .style('font-size', '10px')
             .attr('font-weight', '400')
-            .style('fill', '#6b7280')
+            .style('fill', colors.labelText)
             .text(`${datum.pvp_battles} Battles`);
 
         detailText.append('tspan')
             .attr('dx', 10)
             .style('font-size', '10px')
             .attr('font-weight', '400')
-            .style('fill', '#6b7280')
+            .style('fill', colors.labelText)
             .text(`${datum.pvp_ratio}% WR`);
 
         if (datum.days_since_last_battle != null) {
@@ -328,7 +338,7 @@ const drawClanPlot = (
                 .attr('dx', 10)
                 .style('font-size', '10px')
                 .attr('font-weight', '400')
-                .style('fill', '#6b7280')
+                .style('fill', colors.labelText)
                 .text(`${datum.days_since_last_battle}d idle`);
         }
 
@@ -344,7 +354,7 @@ const drawClanPlot = (
             .attr('width', bbox.width + 16)
             .attr('height', bbox.height + 8)
             .attr('rx', 6)
-            .attr('fill', 'rgba(255, 255, 255, 0.92)');
+            .attr('fill', theme === 'dark' ? 'rgba(13, 17, 23, 0.92)' : 'rgba(255, 255, 255, 0.92)');
     };
 
     const points = svg.append('g')
@@ -360,10 +370,10 @@ const drawClanPlot = (
         .attr('cy', 0)
         .attr('class', (datum: ClanPlotPoint) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase() ? 'clan-player-dot' : null)
         .attr('r', 4)
-        .style('stroke', '#444')
+        .style('stroke', colors.axisLine)
         .style('stroke-width', 1.25)
         .style('cursor', onSelectMember ? 'pointer' : 'default')
-        .attr('fill', (datum: ClanPlotPoint) => selectClanColorByWR(datum.pvp_ratio))
+        .attr('fill', (datum: ClanPlotPoint) => selectClanColorByWR(datum.pvp_ratio, theme))
         .on('click', function (_event: MouseEvent, datum: ClanPlotPoint) {
             if (onSelectMember) {
                 onSelectMember(datum.player_name);
@@ -390,9 +400,9 @@ const drawClanPlot = (
             })
             .attr('fill', (datum: ClanPlotPoint) => {
                 if (!hoveredBucket) {
-                    return selectClanColorByWR(datum.pvp_ratio);
+                    return selectClanColorByWR(datum.pvp_ratio, theme);
                 }
-                return datum.activity_bucket === hoveredBucket ? selectClanColorByWR(datum.pvp_ratio) : '#d1d5db';
+                return datum.activity_bucket === hoveredBucket ? selectClanColorByWR(datum.pvp_ratio, theme) : '#d1d5db';
             })
             .attr('opacity', (datum: ClanPlotPoint) => {
                 if (!hoveredBucket) {
@@ -434,7 +444,7 @@ const drawClanPlot = (
     applyBucketFilter();
 };
 
-const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [] }) => {
+const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [], theme = 'light' }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const onSelectMemberRef = useRef(onSelectMember);
     const chartMemberActivitySignature = useMemo(() => buildClanChartMemberActivitySignature(membersData), [membersData]);
@@ -526,17 +536,17 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
         }
 
         if (plotData === null && !plotError) {
-            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', svgWidth, svgHeight);
+            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', svgWidth, svgHeight, theme);
             return;
         }
 
         if (plotError) {
-            drawClanChartStatus(containerRef.current, 'Unable to load clan chart.', svgWidth, svgHeight);
+            drawClanChartStatus(containerRef.current, 'Unable to load clan chart.', svgWidth, svgHeight, theme);
             return;
         }
 
         if (plotData !== null && isPlotPendingRefresh && plotData.length === 0) {
-            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', svgWidth, svgHeight);
+            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', svgWidth, svgHeight, theme);
             return;
         }
 
@@ -549,9 +559,10 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                 svgHeight,
                 chartMemberActivity,
                 plotData,
+                theme,
             );
         }
-    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth]);
+    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme]);
 
     return <div ref={containerRef}></div>;
 };
@@ -561,6 +572,7 @@ const areClanSvgPropsEqual = (previousProps: ClanProps, nextProps: ClanProps): b
         && previousProps.highlightedPlayerName === nextProps.highlightedPlayerName
         && (previousProps.svgWidth ?? 320) === (nextProps.svgWidth ?? 320)
         && (previousProps.svgHeight ?? 280) === (nextProps.svgHeight ?? 280)
+        && (previousProps.theme ?? 'light') === (nextProps.theme ?? 'light')
         && buildClanChartMemberActivitySignature(previousProps.membersData ?? []) === buildClanChartMemberActivitySignature(nextProps.membersData ?? []);
 };
 

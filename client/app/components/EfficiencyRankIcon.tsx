@@ -40,19 +40,19 @@ const formatEfficiencyPopulation = (populationSize: number | null | undefined): 
 const EFFICIENCY_TIER_META: Record<EfficiencyRankTier, { label: string; sigmaClassName: string; }> = {
     III: {
         label: 'Grade III',
-        sigmaClassName: 'border-[#b87333] bg-[#fff1e6] text-[#8c4f1f]',
+        sigmaClassName: 'border-[#b87333] bg-[#fff1e6] text-[#8c4f1f] dark:border-[#a0522d] dark:bg-[#2a1a0e] dark:text-[#d4956a]',
     },
     II: {
         label: 'Grade II',
-        sigmaClassName: 'border-[#94a3b8] bg-[#f8fafc] text-[#475569]',
+        sigmaClassName: 'border-[#94a3b8] bg-[#f8fafc] text-[#475569] dark:border-[#6e7f96] dark:bg-[#1c2433] dark:text-[#94a3b8]',
     },
     I: {
         label: 'Grade I',
-        sigmaClassName: 'border-[#d4a72c] bg-[#fff7db] text-[#946200]',
+        sigmaClassName: 'border-[#d4a72c] bg-[#fff7db] text-[#946200] dark:border-[#b8860b] dark:bg-[#2a2000] dark:text-[#d4a72c]',
     },
     E: {
         label: 'Expert',
-        sigmaClassName: 'border-[#b91c1c] bg-[#fff1f2] text-[#991b1b]',
+        sigmaClassName: 'border-[#b91c1c] bg-[#fff1f2] text-[#991b1b] dark:border-[#dc2626] dark:bg-[#2a0a0a] dark:text-[#f87171]',
     },
 };
 

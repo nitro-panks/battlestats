@@ -6,7 +6,7 @@ interface HiddenAccountIconProps {
     className?: string;
 }
 
-const HiddenAccountIcon: React.FC<HiddenAccountIconProps> = ({ className = 'text-xs text-[#6baed6]' }) => (
+const HiddenAccountIcon: React.FC<HiddenAccountIconProps> = ({ className = 'text-xs text-[var(--accent-light)]' }) => (
     <span
         title="Hidden account"
         aria-label="Hidden account"

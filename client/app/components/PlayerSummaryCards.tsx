@@ -101,9 +101,9 @@ const PlayerSummaryCards: React.FC<PlayerSummaryCardsProps> = ({ playerId, isLoa
             <div className={shouldGrayOut ? 'pointer-events-none opacity-60 grayscale transition' : 'transition'} aria-busy={shouldGrayOut}>
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
                     {cards.map((card) => (
-                        <div key={card.label} className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] p-3">
-                            <p className="text-[11px] uppercase tracking-wide text-[#4292c6]">{card.label}</p>
-                            <p className="mt-1 text-xl font-semibold text-[#084594]">{card.value}</p>
+                        <div key={card.label} className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3">
+                            <p className="text-[11px] uppercase tracking-wide text-[var(--accent-light)]">{card.label}</p>
+                            <p className="mt-1 text-xl font-semibold text-[var(--accent-dark)]">{card.value}</p>
                         </div>
                     ))}
                 </div>

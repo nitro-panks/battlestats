@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { ChartTheme, chartColors } from '../lib/chartTheme';
 
 type DistributionMetric = 'win_rate' | 'survival_rate' | 'battles_played';
 
@@ -12,6 +13,7 @@ interface PopulationDistributionSVGProps {
     overlayValue?: number | null;
     svgWidth?: number;
     svgHeight?: number;
+    theme?: ChartTheme;
 }
 
 interface DistributionBin {
@@ -41,29 +43,31 @@ type GroupSelection = ReturnType<typeof d3.select>;
 
 const WOWS_WR_BREAKPOINTS = [45, 50, 52, 54, 56, 60, 65];
 
-const selectColorByWR = (winRatio: number): string => {
-    if (winRatio > 65) return '#810c9e';
-    if (winRatio >= 60) return '#D042F3';
-    if (winRatio >= 56) return '#3182bd';
-    if (winRatio >= 54) return '#74c476';
-    if (winRatio >= 52) return '#a1d99b';
-    if (winRatio >= 50) return '#fed976';
-    if (winRatio >= 45) return '#fd8d3c';
-    return '#a50f15';
+const selectColorByWR = (winRatio: number, theme: ChartTheme = 'light'): string => {
+    const c = chartColors[theme];
+    if (winRatio > 65) return c.wrElite;
+    if (winRatio >= 60) return c.wrSuperUnicum;
+    if (winRatio >= 56) return c.wrUnicum;
+    if (winRatio >= 54) return c.wrVeryGood;
+    if (winRatio >= 52) return c.wrGood;
+    if (winRatio >= 50) return c.wrAboveAvg;
+    if (winRatio >= 45) return c.wrAverage;
+    return c.wrBad;
 };
 
-const metricLineColor = (metric: DistributionMetric): string => {
-    if (metric === 'survival_rate') return '#0f766e';
-    if (metric === 'battles_played') return '#2171b5';
-    return '#4292c6';
+const metricLineColor = (metric: DistributionMetric, theme: ChartTheme = 'light'): string => {
+    const c = chartColors[theme];
+    if (metric === 'survival_rate') return c.metricSurvival;
+    if (metric === 'battles_played') return c.metricBattles;
+    return c.metricWR;
 };
 
-const metricValueColor = (metric: DistributionMetric, value: number): string => {
+const metricValueColor = (metric: DistributionMetric, value: number, theme: ChartTheme = 'light'): string => {
     if (metric === 'win_rate') {
-        return selectColorByWR(value);
+        return selectColorByWR(value, theme);
     }
 
-    return metricLineColor(metric);
+    return metricLineColor(metric, theme);
 };
 
 const midpointForBin = (bin: DistributionBin, scale: DistributionPayload['scale']): number => {
@@ -247,6 +251,7 @@ const appendLabelPill = (
     x: number,
     y: number,
     segments: Array<{ text: string; fill: string; weight: string; fontSize: string }>,
+    theme: ChartTheme = 'light',
 ) => {
     const labelGroup = svg.append('g').attr('transform', `translate(${x}, ${y})`);
     const labelText = labelGroup.append('text')
@@ -268,14 +273,15 @@ const appendLabelPill = (
     }
 
     const bbox = textNode.getBBox();
+    const c = chartColors[theme];
     labelGroup.insert('rect', 'text')
         .attr('x', bbox.x - 6)
         .attr('y', bbox.y - 2)
         .attr('width', bbox.width + 12)
         .attr('height', bbox.height + 4)
         .attr('rx', 4)
-        .attr('fill', 'rgba(255, 255, 255, 0.92)')
-        .attr('stroke', '#9ca3af')
+        .attr('fill', theme === 'dark' ? 'rgba(22, 27, 34, 0.92)' : 'rgba(255, 255, 255, 0.92)')
+        .attr('stroke', c.separator)
         .attr('stroke-width', 1);
 };
 
@@ -283,6 +289,7 @@ const appendLegend = (
     svg: GroupSelection,
     width: number,
     items: Array<{ label: string; color: string; dashed?: boolean }>,
+    theme: ChartTheme = 'light',
 ) => {
     const legend = svg.append('g').attr('transform', `translate(${Math.max(0, width - 190)}, 6)`);
 
@@ -302,7 +309,7 @@ const appendLegend = (
             .attr('x', 22)
             .attr('y', 3)
             .style('font-size', '10px')
-            .style('fill', '#6b7280')
+            .style('fill', chartColors[theme].labelText)
             .text(item.label);
     });
 };
@@ -316,7 +323,9 @@ const drawDistribution = (
     svgWidth: number,
     svgHeight: number,
     gradientId: string,
+    theme: ChartTheme = 'light',
 ) => {
+    const c = chartColors[theme];
     const margin = { top: 22, right: 14, bottom: 28, left: 42 };
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -335,7 +344,7 @@ const drawDistribution = (
         svg.append('text')
             .attr('x', 0)
             .attr('y', 16)
-            .style('fill', '#6b7280')
+            .style('fill', c.labelText)
             .style('font-size', '12px')
             .text('No distribution data available.');
         return;
@@ -375,13 +384,13 @@ const drawDistribution = (
 
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
-        .style('color', '#6b7280')
+        .style('color', c.axisText)
         .call(xAxis)
         .selectAll('text')
         .style('font-size', '10px');
 
     svg.append('g')
-        .style('color', '#6b7280')
+        .style('color', c.axisText)
         .call(d3.axisLeft(y).ticks(3).tickFormat((value: number) => d3.format(',')(Number(value))).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
@@ -390,7 +399,7 @@ const drawDistribution = (
         .attr('x', width / 2)
         .attr('y', height + 32)
         .attr('text-anchor', 'middle')
-        .style('fill', '#6b7280')
+        .style('fill', c.labelText)
         .style('font-size', '10px')
         .text(primaryPayload.x_label);
 
@@ -411,19 +420,19 @@ const drawDistribution = (
         gradientStops.forEach((stopValue) => {
             gradient.append('stop')
                 .attr('offset', `${((stopValue - domainMin) / (domainMax - domainMin)) * 100}%`)
-                .attr('stop-color', selectColorByWR(stopValue))
-                .attr('stop-opacity', 0.24);
+                .attr('stop-color', selectColorByWR(stopValue, theme))
+                .attr('stop-opacity', theme === 'dark' ? 0.32 : 0.24);
         });
     } else {
         gradient.append('stop')
             .attr('offset', '0%')
-            .attr('stop-color', metricLineColor(primaryPayload.metric))
-            .attr('stop-opacity', 0.26);
+            .attr('stop-color', metricLineColor(primaryPayload.metric, theme))
+            .attr('stop-opacity', theme === 'dark' ? 0.34 : 0.26);
 
         gradient.append('stop')
             .attr('offset', '100%')
-            .attr('stop-color', metricLineColor(primaryPayload.metric))
-            .attr('stop-opacity', 0.08);
+            .attr('stop-color', metricLineColor(primaryPayload.metric, theme))
+            .attr('stop-opacity', theme === 'dark' ? 0.12 : 0.08);
     }
 
     const area = d3.area()
@@ -445,7 +454,7 @@ const drawDistribution = (
     svg.append('path')
         .datum(primaryPoints)
         .attr('fill', 'none')
-        .attr('stroke', metricLineColor(primaryPayload.metric))
+        .attr('stroke', metricLineColor(primaryPayload.metric, theme))
         .attr('stroke-width', 2)
         .attr('d', line);
 
@@ -459,7 +468,7 @@ const drawDistribution = (
                     .attr('x2', x(breakpoint))
                     .attr('y1', y(breakpointCount))
                     .attr('y2', height)
-                    .attr('stroke', selectColorByWR(breakpoint))
+                    .attr('stroke', selectColorByWR(breakpoint, theme))
                     .attr('stroke-width', 1)
                     .attr('opacity', 0.9);
             });
@@ -468,7 +477,7 @@ const drawDistribution = (
     const clampedPrimaryValue = Math.max(primaryPayload.bins[0].bin_min, Math.min(primaryPayload.bins[primaryPayload.bins.length - 1].bin_max, primaryValue));
     const primaryCount = interpolateCountAtValue(primaryPoints, clampedPrimaryValue, primaryPayload.scale);
     const primaryX = x(clampedPrimaryValue);
-    const primaryColor = metricValueColor(primaryPayload.metric, primaryValue);
+    const primaryColor = metricValueColor(primaryPayload.metric, primaryValue, theme);
     const primaryPercentile = percentileLabelForValue(
         primaryPayload.bins,
         clampedPrimaryValue,
@@ -490,7 +499,7 @@ const drawDistribution = (
         .attr('cy', y(primaryCount))
         .attr('r', 5)
         .attr('fill', primaryColor)
-        .attr('stroke', '#fff')
+        .attr('stroke', c.chartBg)
         .attr('stroke-width', 1.5);
 
     appendLabelPill(svg, primaryX, y(primaryCount) - 12, [
@@ -502,14 +511,14 @@ const drawDistribution = (
         },
         {
             text: primaryPercentile,
-            fill: '#6b7280',
+            fill: c.labelText,
             weight: '400',
             fontSize: '10px',
         },
-    ]);
+    ], theme);
 
     if (overlayPayload && overlayPayload.scale === primaryPayload.scale && overlayValue != null && overlayPayload.bins.length) {
-        const overlayColor = metricValueColor(overlayPayload.metric, overlayValue);
+        const overlayColor = metricValueColor(overlayPayload.metric, overlayValue, theme);
         const clampedOverlayValue = Math.max(overlayPayload.bins[0].bin_min, Math.min(overlayPayload.bins[overlayPayload.bins.length - 1].bin_max, overlayValue));
         const overlayCount = interpolateCountAtValue(overlayPoints, clampedOverlayValue, overlayPayload.scale);
         const overlayX = x(clampedOverlayValue);
@@ -523,7 +532,7 @@ const drawDistribution = (
         svg.append('path')
             .datum(overlayPoints)
             .attr('fill', 'none')
-            .attr('stroke', metricLineColor(overlayPayload.metric))
+            .attr('stroke', metricLineColor(overlayPayload.metric, theme))
             .attr('stroke-width', 2)
             .attr('stroke-dasharray', '5,4')
             .attr('opacity', 0.95)
@@ -542,7 +551,7 @@ const drawDistribution = (
             .attr('cx', overlayX)
             .attr('cy', y(overlayCount))
             .attr('r', 4.5)
-            .attr('fill', '#ffffff')
+            .attr('fill', c.chartBg)
             .attr('stroke', overlayColor)
             .attr('stroke-width', 2);
 
@@ -555,20 +564,20 @@ const drawDistribution = (
             },
             {
                 text: overlayPercentile,
-                fill: '#6b7280',
+                fill: c.labelText,
                 weight: '400',
                 fontSize: '10px',
             },
-        ]);
+        ], theme);
 
         appendLegend(svg, width, [
-            { label: primaryPayload.label, color: metricLineColor(primaryPayload.metric) },
-            { label: overlayPayload.label, color: metricLineColor(overlayPayload.metric), dashed: true },
-        ]);
+            { label: primaryPayload.label, color: metricLineColor(primaryPayload.metric, theme) },
+            { label: overlayPayload.label, color: metricLineColor(overlayPayload.metric, theme), dashed: true },
+        ], theme);
     }
 };
 
-const drawErrorState = (containerElement: HTMLDivElement, message: string) => {
+const drawErrorState = (containerElement: HTMLDivElement, message: string, theme: ChartTheme = 'light') => {
     const container = d3.select(containerElement);
     container.selectAll('*').remove();
 
@@ -582,7 +591,7 @@ const drawErrorState = (containerElement: HTMLDivElement, message: string) => {
     svg.append('text')
         .attr('x', 0)
         .attr('y', 16)
-        .style('fill', '#6b7280')
+        .style('fill', chartColors[theme].labelText)
         .style('font-size', '12px')
         .text(message);
 };
@@ -607,6 +616,7 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
     overlayValue,
     svgWidth = 600,
     svgHeight = 184,
+    theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const chartId = useId().replace(/:/g, '-');
@@ -639,17 +649,18 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
                     svgWidth,
                     svgHeight,
                     `${chartId}-${primaryMetric}-gradient`,
+                    theme,
                 );
             } catch {
                 if (!abortController.signal.aborted) {
-                    drawErrorState(containerElement, 'Unable to load distribution chart.');
+                    drawErrorState(containerElement, 'Unable to load distribution chart.', theme);
                 }
             }
         };
 
         load();
         return () => abortController.abort();
-    }, [chartId, overlayMetric, overlayValue, primaryMetric, primaryValue, svgHeight, svgWidth]);
+    }, [chartId, overlayMetric, overlayValue, primaryMetric, primaryValue, svgHeight, svgWidth, theme]);
 
     return <div ref={containerRef}></div>;
 };

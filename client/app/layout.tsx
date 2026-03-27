@@ -7,6 +7,8 @@ import { Inter } from "next/font/google";
 import HeaderSearch from "./components/HeaderSearch";
 import Logo from "./components/Logo";
 import Footer from "./components/Footer";
+import ThemeToggle from "./components/ThemeToggle";
+import { ThemeProvider } from "./context/ThemeContext";
 import { getSiteOrigin } from "./lib/siteOrigin";
 import "./globals.css";
 
@@ -45,19 +47,23 @@ export default function RootLayout({
           </Script>
         </>
       ) : null}
+      <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('bs-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;})();` }} />
       <body className={inter.className}>
-        <div className="mx-auto max-w-6xl px-4 md:px-6">
-          <header className="flex flex-col gap-4 bg-white py-5 pl-5 md:flex-row md:items-center md:justify-between md:py-6">
-            <Logo />
-            <div className="flex w-full justify-end pr-2 md:w-auto">
-              <Suspense fallback={null}>
-                <HeaderSearch />
-              </Suspense>
-            </div>
-          </header>
-          <main className="pt-6 pb-8">{children}</main>
-          <Footer />
-        </div>
+        <ThemeProvider>
+          <div className="mx-auto max-w-6xl px-4 md:px-6">
+            <header className="flex flex-col gap-4 bg-[var(--bg-page)] py-5 pl-5 md:flex-row md:items-center md:justify-between md:py-6">
+              <Logo />
+              <div className="flex w-full items-center justify-end gap-3 pr-2 md:w-auto">
+                <ThemeToggle />
+                <Suspense fallback={null}>
+                  <HeaderSearch />
+                </Suspense>
+              </div>
+            </header>
+            <main className="pt-6 pb-8">{children}</main>
+            <Footer />
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -9,6 +9,7 @@ import { deriveTierRowsFromTierTypePayload, deriveTypeRowsFromTierTypePayload } 
 import { dispatchPlayerRouteSectionRendered } from './usePlayerRouteDiagnostics';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { useTheme } from '../context/ThemeContext';
 
 type InsightsTabId = 'population' | 'ships' | 'ranked' | 'profile' | 'badges' | 'career';
 
@@ -36,7 +37,7 @@ interface PlayerDetailInsightsTabsProps {
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
     <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[#dbe9f6] bg-[#f7fbff] text-sm text-[#6baed6]"
+        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
         style={{ minHeight }}
     >
         {label}
@@ -128,6 +129,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     onClanBattleSummaryChange,
     isLoading = false,
 }) => {
+    const { theme } = useTheme();
     const [activeTab, setActiveTab] = useState<InsightsTabId>('profile');
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
     const [profileChartPayload, setProfileChartPayload] = useState<TierTypePayload | null>(null);
@@ -304,10 +306,10 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     const activeConfig = TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
 
     return (
-        <section className="mt-5 rounded-lg border border-[#dbe9f6] bg-[#fcfdff] p-4" data-perf-section="insights-tabs-shell">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[#dbe9f6] pb-3">
+        <section className="mt-5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4" data-perf-section="insights-tabs-shell">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
                 <div>
-                    <h2 className="text-lg font-semibold text-[#084594]">Insights</h2>
+                    <h2 className="text-lg font-semibold text-[var(--accent-dark)]">Insights</h2>
                 </div>
                 <div role="tablist" aria-label="Player insight tabs" className="flex flex-wrap gap-2">
                     {TAB_CONFIG.map((tab) => {
@@ -323,8 +325,8 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 tabIndex={isActive ? 0 : -1}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={isActive
-                                    ? 'rounded-full border border-[#2171b5] bg-[#eff3ff] px-3 py-1.5 text-sm font-medium text-[#2171b5]'
-                                    : 'rounded-full border border-[#dbe9f6] bg-white px-3 py-1.5 text-sm font-medium text-[#6b7280] transition-colors hover:border-[#c6dbef] hover:text-[#2171b5]'}
+                                    ? 'rounded-full border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-3 py-1.5 text-sm font-medium text-[var(--accent-mid)]'
+                                    : 'rounded-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-light)] hover:text-[var(--accent-mid)]'}
                             >
                                 {tab.label}
                             </button>
@@ -348,7 +350,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             description="This scatter plot shows how this player's win rate and survival rate compare to the broader tracked player base. Each dot represents a player, positioned by PvP win rate on the x-axis and PvP survival rate on the y-axis. Darker areas indicate denser player clusters, and the outlined marker shows where this player sits in that field."
                             className="mb-2"
                         />
-                        <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={348} />
+                        <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={348} theme={theme} />
 
                         {pvpBattles >= 150 ? (
                             <div className="mt-6">
@@ -357,7 +359,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
                                     className="mb-2"
                                 />
-                                <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={284} />
+                                <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={284} theme={theme} />
                             </div>
                         ) : null}
                     </div>
@@ -370,14 +372,14 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             description="This chart highlights the player's most-played random-battle ships, pairing battle volume with wins so you can see which ships dominate their recent visible mix."
                             className="mb-2"
                         />
-                        <RandomsSVG playerId={playerId} isLoading={isLoading} />
+                        <RandomsSVG playerId={playerId} isLoading={isLoading} theme={theme} />
                     </div>
                 ) : null}
 
                 {activeTab === 'ranked' ? (
                     <div>
                         {!showRankedHeatmap ? (
-                            <p className="mb-3 rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-3 py-2 text-sm text-[#2171b5]">
+                            <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--accent-mid)]">
                                 No ranked history is visible for this player yet.
                             </p>
                         ) : (
@@ -391,6 +393,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     playerId={playerId}
                                     isLoading={isLoading}
                                     onVisibilityChange={setShowRankedHeatmap}
+                                    theme={theme}
                                 />
                             </>
                         )}
@@ -409,11 +412,11 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 {activeTab === 'profile' ? (
                     <div>
                         {profileChartState === 'error' ? (
-                            <p className="rounded-md border border-[#f1d2d2] bg-[#fff7f7] px-3 py-2 text-sm text-[#b91c1c]">
+                            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
                                 Unable to load profile charts right now.
                             </p>
                         ) : profileChartState === 'warming' ? (
-                            <p className="rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-3 py-2 text-sm text-[#2171b5]">
+                            <p className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--accent-mid)]">
                                 Profile charts are still warming. Try again in a moment.
                             </p>
                         ) : profileChartPayload ? (
@@ -423,7 +426,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     description="This heatmap shows where the tracked player base clusters by ship tier and type. The player markers show where this captain spends most of their battles, so you can compare their ship mix with the broader population trend."
                                     className="mb-2"
                                 />
-                                <TierTypeHeatmapSVG playerId={playerId} data={profileChartPayload} />
+                                <TierTypeHeatmapSVG playerId={playerId} data={profileChartPayload} theme={theme} />
 
                                 <div className="mt-4">
                                     <SectionHeadingWithTooltip
@@ -431,7 +434,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                         description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
                                         className="mb-2"
                                     />
-                                    <TypeSVG playerId={playerId} data={derivedTypeRows} svgHeight={192} />
+                                    <TypeSVG playerId={playerId} data={derivedTypeRows} svgHeight={192} theme={theme} />
                                 </div>
 
                                 <div className="mt-5">
@@ -440,7 +443,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                         description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
                                         className="mb-2"
                                     />
-                                    <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={300} />
+                                    <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={300} theme={theme} />
                                 </div>
                             </>
                         ) : (

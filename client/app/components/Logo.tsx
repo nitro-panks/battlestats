@@ -17,7 +17,7 @@ const Logo: React.FC = () => {
         <Link
             href="/"
             onClick={handleClick}
-            className="text-xl font-bold tracking-tight text-[#084594] transition-colors hover:text-[#2171b5]"
+            className="text-xl font-bold tracking-tight text-[var(--accent-dark)] transition-colors hover:text-[var(--accent-mid)]"
         >
             WoWs Battlestats
         </Link>

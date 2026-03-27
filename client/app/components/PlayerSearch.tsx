@@ -14,6 +14,7 @@ import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import useIntervalRefresh from './useIntervalRefresh';
 import useClanHydrationPoll from './useClanHydrationPoll';
+import { useTheme } from '../context/ThemeContext';
 
 const wrColor = (r: number | null): string => {
     if (r == null) return '#c6dbef';
@@ -29,7 +30,7 @@ const wrColor = (r: number | null): string => {
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
     <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[#dbe9f6] bg-[#f7fbff] text-sm text-[#6baed6]"
+        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
         style={{ minHeight }}
     >
         {label}
@@ -108,7 +109,7 @@ const ClanTagGrid: React.FC<{
                 key={`${ariaLabelPrefix}-${clan.clan_id}`}
                 type="button"
                 onClick={() => onSelectClan(clan)}
-                className="inline-flex min-w-0 items-center gap-1 rounded-sm py-1 text-left font-medium text-[#334155]"
+                className="inline-flex min-w-0 items-center gap-1 rounded-sm py-1 text-left font-medium text-[var(--text-primary)]"
                 style={{ paddingInline: '0.3rem' }}
                 aria-label={`${ariaLabelPrefix} clan ${clan.name}`}
                 title={clan.tag || clan.name}
@@ -162,7 +163,7 @@ const PlayerNameGrid: React.FC<{
                 return (
                     <span
                         key={`${ariaLabelPrefix}-${label}`}
-                        className="inline-flex min-w-0 items-center gap-1 rounded-sm py-1 font-medium text-[#334155]"
+                        className="inline-flex min-w-0 items-center gap-1 rounded-sm py-1 font-medium text-[var(--text-primary)]"
                         style={{ paddingInline: '0.3rem' }}
                         aria-label={`${label} has hidden stats`}
                         title={label}
@@ -185,7 +186,7 @@ const PlayerNameGrid: React.FC<{
                     key={`${ariaLabelPrefix}-${label}`}
                     type="button"
                     onClick={() => onSelectMember(label)}
-                    className="inline-flex min-w-0 items-center gap-1 rounded-sm py-1 font-medium text-[#334155]"
+                    className="inline-flex min-w-0 items-center gap-1 rounded-sm py-1 font-medium text-[var(--text-primary)]"
                     style={{ paddingInline: '0.3rem' }}
                     aria-label={`${ariaLabelPrefix} player ${label}`}
                     title={label}
@@ -245,6 +246,7 @@ const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18
 const CLAN_BEST_FORMULA_APPROXIMATION = 'Best_clan ≈ WR × I(Battles ≥ 100k) × I(ActiveShare ≥ 0.30), tie → Battles';
 
 const PlayerSearch: React.FC = () => {
+    const { theme } = useTheme();
     const router = useRouter();
     const searchParams = useSearchParams();
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
@@ -503,7 +505,7 @@ const PlayerSearch: React.FC = () => {
                 />
             ) : (
                 <div>
-                    {error && <p className="text-red-600">{error}</p>}
+                    {error && <p className="text-red-600 dark:text-red-400">{error}</p>}
 
                     {clans.length > 0 && (
                         <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
@@ -512,14 +514,15 @@ const PlayerSearch: React.FC = () => {
                                     clans={visibleLandingClans}
                                     heatmapClans={clans}
                                     onSelectClan={handleSelectClan}
+                                    theme={theme}
                                 />
                             </div>
                             <div className="mt-4 flex flex-wrap items-center gap-2">
-                                <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Active Clans</h3>
+                                <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Clans</h3>
                                 <button
                                     type="button"
                                     onClick={() => setClanMode('random')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'random' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={clanMode === 'random'}
                                 >
                                     Random
@@ -527,7 +530,7 @@ const PlayerSearch: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={() => setClanMode('best')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'best' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={clanMode === 'best'}
                                 >
                                     Best
@@ -535,15 +538,15 @@ const PlayerSearch: React.FC = () => {
                                 <div className="group relative inline-flex items-center">
                                     <button
                                         type="button"
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#c6dbef] bg-white text-[#6baed6] transition-colors hover:bg-[#eff3ff] hover:text-[#2171b5] focus:outline-none focus-visible:text-[#2171b5]"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-light)] transition-colors hover:bg-[var(--accent-faint)] hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
                                         aria-label="Clan ranking formula details"
                                     >
                                         <FontAwesomeIcon icon={faCircleInfo} className="text-sm" aria-hidden="true" />
                                     </button>
-                                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-md border border-[#c6dbef] bg-white px-3 py-3 text-left text-xs normal-case tracking-normal text-[#334155] shadow-lg group-hover:block group-focus-within:block">
-                                        <p className="font-semibold uppercase tracking-wide text-[#2171b5]">Best approximation</p>
-                                        <p className="mt-2 font-mono text-[11px] leading-5 text-[#1e3a5f]">{CLAN_BEST_FORMULA_APPROXIMATION}</p>
-                                        <p className="mt-2 leading-5 text-[#475569]">
+                                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
+                                        <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Best approximation</p>
+                                        <p className="mt-2 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_FORMULA_APPROXIMATION}</p>
+                                        <p className="mt-2 leading-5 text-[var(--text-secondary)]">
                                             Current clan Best is a thresholded competitive surface: require at least 100k total battles and at least 30% active members, then rank by clan WR with total battles as the first tie-break.
                                         </p>
                                     </div>
@@ -555,7 +558,7 @@ const PlayerSearch: React.FC = () => {
                                 ariaLabelPrefix="Show"
                             />
 
-                            <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Recently Viewed Clans</h3>
+                            <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Recently Viewed Clans</h3>
                             {recentClans.length > 0 ? (
                                 <ClanTagGrid
                                     clans={recentClans.slice(0, LANDING_CLAN_LIMIT)}
@@ -563,25 +566,26 @@ const PlayerSearch: React.FC = () => {
                                     ariaLabelPrefix="Show recent"
                                 />
                             ) : (
-                                <p className="mt-2 text-sm text-[#6baed6]">No recently viewed clans yet.</p>
+                                <p className="mt-2 text-sm text-[var(--accent-light)]">No recently viewed clans yet.</p>
                             )}
                         </div>
                     )}
 
                     {players.length > 0 && (
-                        <div className="mt-6 border-t border-[#c6dbef] pt-6">
+                        <div className="mt-6 border-t border-[var(--border)] pt-6">
                             <div className="mt-1">
                                 <LandingPlayerSVG
                                     players={players}
                                     onSelectPlayer={(player) => handleSelectMember(player.name)}
+                                    theme={theme}
                                 />
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
-                                <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Active Players</h3>
+                                <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Players</h3>
                                 <button
                                     type="button"
                                     onClick={() => setPlayerMode('random')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'random' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={playerMode === 'random'}
                                 >
                                     Random
@@ -589,7 +593,7 @@ const PlayerSearch: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={() => setPlayerMode('best')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'best' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={playerMode === 'best'}
                                 >
                                     Best
@@ -597,7 +601,7 @@ const PlayerSearch: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={() => setPlayerMode('sigma')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'sigma' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'sigma' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={playerMode === 'sigma'}
                                 >
                                     Sigma
@@ -605,15 +609,15 @@ const PlayerSearch: React.FC = () => {
                                 <div className="group relative inline-flex items-center">
                                     <button
                                         type="button"
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#c6dbef] bg-white text-[#6baed6] transition-colors hover:bg-[#eff3ff] hover:text-[#2171b5] focus:outline-none focus-visible:text-[#2171b5]"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-light)] transition-colors hover:bg-[var(--accent-faint)] hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
                                         aria-label="Best ranking formula details"
                                     >
                                         <FontAwesomeIcon icon={faCircleInfo} className="text-sm" aria-hidden="true" />
                                     </button>
-                                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-md border border-[#c6dbef] bg-white px-3 py-3 text-left text-xs normal-case tracking-normal text-[#334155] shadow-lg group-hover:block group-focus-within:block">
-                                        <p className="font-semibold uppercase tracking-wide text-[#2171b5]">Best approximation</p>
-                                        <p className="mt-2 font-mono text-[11px] leading-5 text-[#1e3a5f]">{BEST_FORMULA_APPROXIMATION}</p>
-                                        <p className="mt-2 leading-5 text-[#475569]">
+                                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
+                                        <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Best approximation</p>
+                                        <p className="mt-2 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{BEST_FORMULA_APPROXIMATION}</p>
+                                        <p className="mt-2 leading-5 text-[var(--text-secondary)]">
                                             Uses tier 5-10 win rate as the anchor, then blends Battlestats score, published efficiency, competitive volume, ranked, and clan battles. Player detail now shows literal KDR separately, but Best still uses the composite score rather than overall KDR directly. Low-tier-heavy profiles are discounted by a competitive-share multiplier.
                                         </p>
                                     </div>
@@ -625,7 +629,7 @@ const PlayerSearch: React.FC = () => {
                                 ariaLabelPrefix="Show"
                             />
 
-                            <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Recently Viewed</h3>
+                            <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Recently Viewed</h3>
                             {recentPlayers.length > 0 ? (
                                 <PlayerNameGrid
                                     players={recentPlayers.slice(0, LANDING_PLAYER_LIMIT)}
@@ -633,7 +637,7 @@ const PlayerSearch: React.FC = () => {
                                     ariaLabelPrefix="Show recent"
                                 />
                             ) : (
-                                <p className="mt-2 text-sm text-[#6baed6]">No recently viewed players yet.</p>
+                                <p className="mt-2 text-sm text-[var(--accent-light)]">No recently viewed players yet.</p>
                             )}
                         </div>
                     )}

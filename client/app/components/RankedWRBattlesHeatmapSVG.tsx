@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { getRankedHeatmapTileBounds, getRankedHeatmapTrendX, getRankedHeatmapXDomain, type RankedHeatmapPayloadShape, type RankedHeatmapTile, type RankedHeatmapTrendPoint } from './rankedHeatmapPayload';
 
 interface RankedWRBattlesHeatmapSVGProps {
@@ -10,6 +11,7 @@ interface RankedWRBattlesHeatmapSVGProps {
     svgWidth?: number;
     svgHeight?: number;
     onVisibilityChange?: (isVisible: boolean) => void;
+    theme?: ChartTheme;
 }
 
 type CorrelationTile = RankedHeatmapTile;
@@ -54,7 +56,9 @@ const selectColorByWR = (winRate: number): string => {
     return '#a50f15';
 };
 
-const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth: number, svgHeight: number) => {
+type Colors = typeof chartColors['light'];
+
+const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth: number, svgHeight: number, colors: Colors) => {
     const container = d3.select(containerElement);
     container.selectAll('*').remove();
 
@@ -65,14 +69,14 @@ const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth
     svg.append('text')
         .attr('x', 16)
         .attr('y', 24)
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '12px')
         .text(message);
 };
 
-const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPayload, svgWidth: number, svgHeight: number) => {
+const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPayload, svgWidth: number, svgHeight: number, colors: Colors, theme: ChartTheme) => {
     if (!payload.tiles.length) {
-        drawMessage(containerElement, 'No ranked population data available.', svgWidth, 120);
+        drawMessage(containerElement, 'No ranked population data available.', svgWidth, 120, colors);
         return;
     }
 
@@ -108,7 +112,9 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
             .range([height, 0]));
 
     const maxTileCount = d3.max(payload.tiles, (row: CorrelationTile) => row.count) || 1;
-    const tileColor = d3.scaleSequential(d3.interpolateBlues).domain([0, maxTileCount]);
+    const tileColor = theme === 'dark'
+        ? d3.scaleSequential(d3.interpolateRgb('#1c2d3f', '#79c0ff')).domain([0, maxTileCount])
+        : d3.scaleSequential(d3.interpolateBlues).domain([0, maxTileCount]);
 
     svg.selectAll('.ranked-heat-tile')
         .data(payload.tiles)
@@ -159,7 +165,7 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
             .attr('r', 8)
             .attr('fill', selectColorByWR(point.y))
             .attr('fill-opacity', 0.95)
-            .attr('stroke', '#ffffff')
+            .attr('stroke', colors.barStroke)
             .attr('stroke-width', 2);
 
         svg.append('circle')
@@ -182,25 +188,25 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
 
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(xAxis)
         .selectAll('text')
         .style('font-size', '10px');
 
     svg.append('g')
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(yAxis)
         .selectAll('text')
         .style('font-size', '10px');
 
-    svg.selectAll('.domain').style('stroke', '#cbd5e1');
-    svg.selectAll('.tick line').style('stroke', '#e2e8f0');
+    svg.selectAll('.domain').style('stroke', colors.axisLine);
+    svg.selectAll('.tick line').style('stroke', colors.gridLine);
 
     svg.append('text')
         .attr('x', width / 2)
         .attr('y', height + 34)
         .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '10px')
         .text(payload.x_label);
 
@@ -209,7 +215,7 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
         .attr('x', -height / 2)
         .attr('y', -38)
         .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '10px')
         .text(payload.y_label);
 
@@ -217,7 +223,7 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
     summary.append('text')
         .style('font-size', '10px')
         .style('font-weight', '600')
-        .style('fill', '#475569');
+        .style('fill', colors.axisText);
 
     if (payload.player_point) {
         summary.append('text')
@@ -230,7 +236,7 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
         summary.append('text')
             .attr('x', 210)
             .style('font-size', '10px')
-            .style('fill', '#64748b')
+            .style('fill', colors.labelMuted)
             .text('No ranked history for this player');
     }
 };
@@ -241,6 +247,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
     svgWidth = 600,
     svgHeight = 276,
     onVisibilityChange,
+    theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -249,6 +256,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
             return;
         }
 
+        const colors = chartColors[theme];
         let isMounted = true;
 
         const fetchAndDraw = async () => {
@@ -268,7 +276,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
                     return;
                 }
 
-                drawChart(containerRef.current, payload, svgWidth, svgHeight);
+                drawChart(containerRef.current, payload, svgWidth, svgHeight, colors, theme);
             } catch {
                 if (!isMounted || !containerRef.current) {
                     return;
@@ -276,7 +284,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
 
                 onVisibilityChange?.(true);
 
-                drawMessage(containerRef.current, 'Unable to load ranked heatmap.', svgWidth, 120);
+                drawMessage(containerRef.current, 'Unable to load ranked heatmap.', svgWidth, 120, colors);
             }
         };
 
@@ -285,9 +293,9 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
         return () => {
             isMounted = false;
         };
-    }, [isLoading, onVisibilityChange, playerId, svgHeight, svgWidth]);
+    }, [isLoading, onVisibilityChange, playerId, svgHeight, svgWidth, theme]);
 
-    return <div ref={containerRef} className="w-full overflow-hidden rounded-md border border-[#dbe9f6] bg-white" />;
+    return <div ref={containerRef} className="w-full overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg-surface)]" />;
 };
 
 export default RankedWRBattlesHeatmapSVG;

@@ -6,11 +6,11 @@ import { buildPlayerPath } from '../lib/entityRoutes';
 
 const Footer: React.FC = () => {
     return (
-        <footer className="border-t border-[#c6dbef] py-4 text-center text-xs text-[#6b7280]">
+        <footer className="border-t border-[var(--border)] py-4 text-center text-xs text-[var(--text-secondary)]">
             <div className="space-y-2 px-4 leading-5">
                 <p>
                     Battlestats copyright 2026 by{' '}
-                    <Link href={buildPlayerPath('lil_boots')} className="text-[#2171b5] underline-offset-2 hover:text-[#084594] hover:underline">
+                    <Link href={buildPlayerPath('lil_boots')} className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline">
                         lil_boots
                     </Link>
                 </p>
@@ -21,7 +21,7 @@ const Footer: React.FC = () => {
                 <p>
                     <a
                         href="https://worldofwarships.com/"
-                        className="text-[#2171b5] underline-offset-2 hover:text-[#084594] hover:underline"
+                        className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                         target="_blank"
                         rel="noreferrer"
                     >
@@ -30,7 +30,7 @@ const Footer: React.FC = () => {
                     {' · '}
                     <a
                         href="https://www.support.wargaming.net/"
-                        className="text-[#2171b5] underline-offset-2 hover:text-[#084594] hover:underline"
+                        className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                         target="_blank"
                         rel="noreferrer"
                     >

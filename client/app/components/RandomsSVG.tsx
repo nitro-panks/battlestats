@@ -2,11 +2,13 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 
 interface RandomsSVGProps {
     playerId: number;
     isLoading?: boolean;
     design?: RandomsChartDesign;
+    theme?: ChartTheme;
 }
 
 interface RandomsRow {
@@ -38,37 +40,40 @@ const RANDOMS_CHART_RIGHT_EXTENSION_PX = 10;
 const RANDOMS_BAR_HEIGHT_INCREASE_PX = 2;
 const RANDOMS_CHART_HEIGHT_INCREASE_PX = 100;
 
-const selectRandomsColorByWr = (winRatio: number): string => {
-    if (winRatio > 0.65) return '#810c9e';
-    if (winRatio >= 0.60) return '#D042F3';
-    if (winRatio >= 0.56) return '#3182bd';
-    if (winRatio >= 0.54) return '#74c476';
-    if (winRatio >= 0.52) return '#a1d99b';
-    if (winRatio >= 0.50) return '#fed976';
-    if (winRatio >= 0.45) return '#fd8d3c';
-    if (winRatio >= 0.40) return '#e6550d';
-    return '#a50f15';
+const selectRandomsColorByWr = (winRatio: number, theme: ChartTheme): string => {
+    const colors = chartColors[theme];
+    if (winRatio > 0.65) return colors.wrElite;
+    if (winRatio >= 0.60) return colors.wrSuperUnicum;
+    if (winRatio >= 0.56) return colors.wrUnicum;
+    if (winRatio >= 0.54) return colors.wrVeryGood;
+    if (winRatio >= 0.52) return colors.wrGood;
+    if (winRatio >= 0.50) return colors.wrAboveAvg;
+    if (winRatio >= 0.45) return colors.wrAverage;
+    if (winRatio >= 0.40) return colors.wrBelowAvg;
+    return colors.wrBad;
 };
 
-const selectShipTypeColor = (shipType: string): string => {
+const selectShipTypeColor = (shipType: string, theme: ChartTheme): string => {
+    const colors = chartColors[theme];
     switch (shipType) {
         case 'Destroyer':
-            return '#0f766e';
+            return colors.shipDD;
         case 'Cruiser':
-            return '#2563eb';
+            return colors.shipCA;
         case 'Battleship':
-            return '#a16207';
+            return colors.shipBB;
         case 'AirCarrier':
         case 'Carrier':
-            return '#b91c1c';
+            return colors.shipCV;
         case 'Submarine':
-            return '#7c3aed';
+            return colors.shipSS;
         default:
-            return '#475569';
+            return colors.shipDefault;
     }
 };
 
-const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRow[]) => {
+const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRow[], theme: ChartTheme) => {
+    const colors = chartColors[theme];
     type RandomsChartRow = RandomsRow & { rowKey: string };
 
     const rows: RandomsChartRow[] = data.map((datum, index) => ({ ...datum, rowKey: `row-${index}` }));
@@ -113,31 +118,31 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
 
     svg.select('.randoms-grid')?.select('.domain')?.remove();
     svg.selectAll('.randoms-grid line')
-        .style('stroke', '#e2e8f0')
+        .style('stroke', colors.gridLine)
         .style('stroke-width', 1);
 
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisBottom(x).ticks(5).tickFormat((value: number) => d3.format(',')(value)).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
 
     svg.append('g')
-        .style('color', '#475569')
+        .style('color', colors.labelMid)
         .call(d3.axisLeft(y).tickSize(0).tickPadding(6).tickFormat((value: number) => labelByRowKey.get(String(value)) ?? ''))
         .selectAll('text')
         .style('font-size', '10px')
         .style('font-weight', '500');
 
-    svg.selectAll('.domain').style('stroke', '#cbd5e1');
+    svg.selectAll('.domain').style('stroke', colors.axisLine);
 
     svg.append('text')
         .attr('x', width)
         .attr('y', height + 38)
         .attr('text-anchor', 'end')
         .style('font-size', '10px')
-        .style('fill', '#6b7280')
+        .style('fill', colors.labelText)
         .text('Random battles');
 
     const detailGroup = svgRoot.append('g').attr('transform', `translate(${margin.left + width - 6}, 16)`);
@@ -157,43 +162,43 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         detailText.append('tspan')
             .style('font-size', '11px')
             .style('font-weight', '700')
-            .style('fill', '#084594')
+            .style('fill', colors.accentLink)
             .text(datum.ship_name);
 
         detailText.append('tspan')
             .style('font-size', '10px')
             .style('font-weight', '400')
-            .style('fill', '#94a3b8')
+            .style('fill', colors.separator)
             .text('  •  ');
 
         detailText.append('tspan')
             .style('font-size', '10px')
             .style('font-weight', '400')
-            .style('fill', '#475569')
+            .style('fill', colors.labelMid)
             .text(`T${datum.ship_tier} ${datum.ship_type}`);
 
         detailText.append('tspan')
             .style('font-size', '10px')
             .style('font-weight', '400')
-            .style('fill', '#94a3b8')
+            .style('fill', colors.separator)
             .text('  •  ');
 
         detailText.append('tspan')
             .style('font-size', '10px')
             .style('font-weight', '400')
-            .style('fill', '#475569')
+            .style('fill', colors.labelMid)
             .text(`${datum.pvp_battles.toLocaleString()} battles • ${datum.wins.toLocaleString()} wins`);
 
         detailText.append('tspan')
             .style('font-size', '10px')
             .style('font-weight', '400')
-            .style('fill', '#94a3b8')
+            .style('fill', colors.separator)
             .text('  •  ');
 
         detailText.append('tspan')
             .style('font-size', '10px')
             .style('font-weight', '700')
-            .style('fill', '#475569')
+            .style('fill', colors.labelMid)
             .text(`${(datum.win_ratio * 100).toFixed(1)}% win rate`);
     };
 
@@ -209,7 +214,7 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         .attr('width', (datum: RandomsChartRow) => x(datum.pvp_battles))
         .attr('height', backgroundBarHeight)
         .attr('rx', 3)
-        .attr('fill', '#dbe4f0');
+        .attr('fill', colors.barBg);
 
     nodes.append('rect')
         .attr('x', 0)
@@ -217,9 +222,9 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         .attr('width', (datum: RandomsChartRow) => x(datum.wins))
         .attr('height', foregroundBarHeight)
         .attr('rx', 3)
-        .style('stroke', '#334155')
+        .style('stroke', colors.labelMid)
         .style('stroke-width', 0.7)
-        .attr('fill', (datum: RandomsChartRow) => selectRandomsColorByWr(datum.win_ratio))
+        .attr('fill', (datum: RandomsChartRow) => selectRandomsColorByWr(datum.win_ratio, theme))
         .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, datum: RandomsChartRow) {
             renderDetails(datum);
             d3.select(this).transition()
@@ -239,7 +244,7 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         })
         .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + foregroundBarOffset + (foregroundBarHeight / 2) + 3)
         .style('font-size', '10px')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .attr('text-anchor', (datum: RandomsChartRow) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
         .text((datum: RandomsChartRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
 
@@ -248,7 +253,8 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
     }
 };
 
-const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRow[]) => {
+const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRow[], theme: ChartTheme) => {
+    const colors = chartColors[theme];
     const margin = { top: 30, right: 22, bottom: 36, left: 57 };
     const width = 620 - margin.left - margin.right;
     const height = (360 + RANDOMS_CHART_HEIGHT_INCREASE_PX) - margin.top - margin.bottom;
@@ -286,7 +292,7 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
 
     svg.select('.randoms-x-grid')?.select('.domain')?.remove();
     svg.selectAll('.randoms-x-grid line')
-        .style('stroke', '#e2e8f0')
+        .style('stroke', colors.gridLine)
         .style('stroke-width', 1);
 
     svg.append('g')
@@ -295,7 +301,7 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
 
     svg.select('.randoms-y-grid')?.select('.domain')?.remove();
     svg.selectAll('.randoms-y-grid line')
-        .style('stroke', '#f1f5f9')
+        .style('stroke', colors.gridLine)
         .style('stroke-width', 1);
 
     WR_BREAKPOINTS
@@ -306,20 +312,20 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
                 .attr('x2', x(breakpoint))
                 .attr('y1', 0)
                 .attr('y2', height)
-                .attr('stroke', selectRandomsColorByWr(breakpoint / 100))
+                .attr('stroke', selectRandomsColorByWr(breakpoint / 100, theme))
                 .attr('stroke-width', 1)
                 .attr('opacity', 0.18);
         });
 
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisBottom(x).ticks(8).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
 
     svg.append('g')
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisLeft(y).tickValues([1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter((value) => value <= yMax * 1.15)).tickFormat((value: number) => d3.format(',')(value)).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
@@ -328,7 +334,7 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
         .attr('x', width / 2)
         .attr('y', height + 32)
         .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '10px')
         .text('Ship win rate');
 
@@ -337,7 +343,7 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
         .attr('x', -height / 2)
         .attr('y', -38)
         .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '10px')
         .text('Random battles played');
 
@@ -347,31 +353,31 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
         .attr('y', 0)
         .style('font-size', '11px')
         .style('font-weight', '700')
-        .style('fill', '#334155')
+        .style('fill', colors.labelMid)
         .text('Design 2');
     summaryGroup.append('text')
         .attr('x', 0)
         .attr('y', 14)
         .style('font-size', '10px')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .text('x = win rate');
     summaryGroup.append('text')
         .attr('x', 0)
         .attr('y', 28)
         .style('font-size', '10px')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .text('y = battle volume');
     summaryGroup.append('text')
         .attr('x', 0)
         .attr('y', 42)
         .style('font-size', '10px')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .text('area = wins');
     summaryGroup.append('text')
         .attr('x', 0)
         .attr('y', 56)
         .style('font-size', '10px')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .text('fill = ship class');
 
     const detailGroup = svg.append('g').attr('class', 'randoms-detail').attr('transform', 'translate(0, 0)');
@@ -396,7 +402,7 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
                 .attr('y', index * 14)
                 .style('font-size', index === 0 ? '11px' : '10px')
                 .style('font-weight', index === 0 ? '700' : '400')
-                .style('fill', index === 0 ? '#0f172a' : '#475569')
+                .style('fill', index === 0 ? colors.labelStrong : colors.labelMid)
                 .text(line);
         });
 
@@ -409,8 +415,8 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
                 .attr('width', bbox.width + 16)
                 .attr('height', bbox.height + 12)
                 .attr('rx', 6)
-                .attr('fill', 'rgba(255,255,255,0.94)')
-                .attr('stroke', '#cbd5e1');
+                .attr('fill', theme === 'dark' ? `${colors.surface}ee` : `${colors.surface}f0`)
+                .attr('stroke', colors.axisLine);
         }
     };
 
@@ -422,9 +428,9 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
         .attr('cx', (datum: RandomsRow) => x(datum.win_ratio * 100))
         .attr('cy', (datum: RandomsRow) => y(Math.max(1, datum.pvp_battles)))
         .attr('r', (datum: RandomsRow) => radius(datum.wins))
-        .attr('fill', (datum: RandomsRow) => selectShipTypeColor(datum.ship_type))
+        .attr('fill', (datum: RandomsRow) => selectShipTypeColor(datum.ship_type, theme))
         .attr('fill-opacity', 0.82)
-        .attr('stroke', (datum: RandomsRow) => selectRandomsColorByWr(datum.win_ratio))
+        .attr('stroke', (datum: RandomsRow) => selectRandomsColorByWr(datum.win_ratio, theme))
         .attr('stroke-width', 1.5)
         .style('cursor', 'default')
         .on('mouseover', function (this: SVGCircleElement, _event: MouseEvent, datum: RandomsRow) {
@@ -461,7 +467,7 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
             .attr('x2', pointX + dx)
             .attr('y1', pointY)
             .attr('y2', pointY + dy)
-            .attr('stroke', '#94a3b8')
+            .attr('stroke', colors.separator)
             .attr('stroke-width', 1);
 
         svg.append('text')
@@ -471,7 +477,7 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
             .attr('dominant-baseline', 'middle')
             .style('font-size', '10px')
             .style('font-weight', '500')
-            .style('fill', '#334155')
+            .style('fill', colors.labelMid)
             .text(datum.ship_chart_name);
     });
 
@@ -483,12 +489,12 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
             .attr('cx', 0)
             .attr('cy', 0)
             .attr('r', 4)
-            .attr('fill', selectShipTypeColor(shipType));
+            .attr('fill', selectShipTypeColor(shipType, theme));
         row.append('text')
             .attr('x', 8)
             .attr('y', 3)
             .style('font-size', '10px')
-            .style('fill', '#64748b')
+            .style('fill', colors.labelMuted)
             .text(shipType);
     });
 
@@ -504,6 +510,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     playerId,
     isLoading = false,
     design = DEFAULT_RANDOMS_DESIGN,
+    theme = 'light',
 }) => {
     const [allShips, setAllShips] = useState<RandomsRow[]>([]);
     const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
@@ -557,12 +564,12 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         d3.select(containerRef.current).selectAll("*").remove();
         if (chartData.length > 0) {
             if (design === 'design1') {
-                drawBattlePlotDesign1(containerRef.current, chartData);
+                drawBattlePlotDesign1(containerRef.current, chartData, theme);
             } else {
-                drawBattlePlotDesign2(containerRef.current, chartData);
+                drawBattlePlotDesign2(containerRef.current, chartData, theme);
             }
         }
-    }, [chartData, design]);
+    }, [chartData, design, theme]);
 
     const availableTypes = Array.from(new Set(allShips.map((row) => row.ship_type)));
     const availableTiers = Array.from(new Set(allShips.map((row) => row.ship_tier)))
@@ -641,8 +648,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const shouldGrayOut = isLoading || isChartLoading;
     const shouldShowEmptyState = !shouldGrayOut && chartData.length === 0;
     const filterButtonClass = (selected: boolean) => selected
-        ? 'border border-[#2171b5] bg-[#eff3ff] px-2 py-1 text-xs font-medium text-[#084594]'
-        : 'border border-[#cbd5e1] bg-white px-2 py-1 text-xs font-medium text-[#64748b]';
+        ? 'border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-2 py-1 text-xs font-medium text-[var(--accent-dark)]'
+        : 'border border-[var(--border)] bg-white px-2 py-1 text-xs font-medium text-[var(--text-secondary)] dark:bg-transparent';
 
     return (
         <div>

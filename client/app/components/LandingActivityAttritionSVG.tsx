@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 
 interface LandingActivityAttritionMonth {
     month: string;
@@ -34,6 +35,7 @@ interface LandingActivityAttritionData {
 interface LandingActivityAttritionSVGProps {
     data: LandingActivityAttritionData;
     svgHeight?: number;
+    theme?: ChartTheme;
 }
 
 interface ActiveTrendPoint {
@@ -43,19 +45,14 @@ interface ActiveTrendPoint {
 
 type SvgRootSelection = ReturnType<typeof d3.select>;
 
-const ACTIVE_FILL = '#2171b5';
-const COOLING_FILL = '#6baed6';
-const DORMANT_FILL = '#dbe4f0';
-const TREND_STROKE = '#1e293b';
-
 const formatCompactCount = (value: number): string => d3.format('~s')(value).replace('G', 'B');
 
 const formatMonthLabel = (value: string): string => d3.timeFormat('%b %y')(new Date(`${value}T00:00:00`));
 
-const signalColor = (signal: LandingActivityAttritionSummary['population_signal']): string => {
-    if (signal === 'growing') return '#166534';
-    if (signal === 'shrinking') return '#991b1b';
-    return '#475569';
+const signalColor = (signal: LandingActivityAttritionSummary['population_signal'], colors: typeof chartColors['light']): string => {
+    if (signal === 'growing') return colors.heatmapAboveTrend;
+    if (signal === 'shrinking') return colors.heatmapBelowTrend;
+    return colors.axisText;
 };
 
 const signalLabel = (summary: LandingActivityAttritionSummary): string => {
@@ -80,6 +77,7 @@ const showDetails = (
     svgRoot: SvgRootSelection,
     row: LandingActivityAttritionMonth,
     trackedPopulation: number,
+    colors: typeof chartColors['light'],
 ) => {
     svgRoot.select('.landing-activity-details').remove();
 
@@ -93,25 +91,25 @@ const showDetails = (
         .attr('y', 0)
         .style('font-size', '11px')
         .style('font-weight', '700')
-        .style('fill', '#084594')
+        .style('fill', colors.accentLink)
         .text(formatMonthLabel(row.month));
 
     const meta = detailGroup.append('text')
         .attr('x', 0)
         .attr('y', 18)
         .style('font-size', '10px')
-        .style('fill', '#475569');
+        .style('fill', colors.axisText);
 
     meta.append('tspan').text(`${row.total_players.toLocaleString()} observed`);
-    meta.append('tspan').attr('dx', 12).style('fill', ACTIVE_FILL).text(`${row.active_players.toLocaleString()} active`);
-    meta.append('tspan').attr('dx', 12).style('fill', COOLING_FILL).text(`${row.cooling_players.toLocaleString()} cooling`);
-    meta.append('tspan').attr('dx', 12).style('fill', '#64748b').text(`${row.dormant_players.toLocaleString()} dormant`);
+    meta.append('tspan').attr('dx', 12).style('fill', colors.activityActive).text(`${row.active_players.toLocaleString()} active`);
+    meta.append('tspan').attr('dx', 12).style('fill', colors.activityCooling).text(`${row.cooling_players.toLocaleString()} cooling`);
+    meta.append('tspan').attr('dx', 12).style('fill', colors.labelMuted).text(`${row.dormant_players.toLocaleString()} dormant`);
 
     const sub = detailGroup.append('text')
         .attr('x', 0)
         .attr('y', 34)
         .style('font-size', '10px')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .text(`${row.active_share.toFixed(1)}% still active today • ${((row.total_players / Math.max(trackedPopulation, 1)) * 100).toFixed(1)}% of observed population`);
 
     const nodes = [title.node(), meta.node(), sub.node()].filter(Boolean) as SVGGraphicsElement[];
@@ -127,7 +125,8 @@ const showDetails = (
         .attr('width', maxX - minX + 20)
         .attr('height', maxY - minY + 12)
         .attr('rx', 6)
-        .attr('fill', 'rgba(255, 255, 255, 0.94)');
+        .attr('fill', colors.surface)
+        .attr('fill-opacity', 0.96);
 };
 
 const drawChart = (
@@ -135,7 +134,13 @@ const drawChart = (
     data: LandingActivityAttritionData,
     containerWidth: number,
     svgHeight: number,
+    colors: typeof chartColors['light'],
 ) => {
+    const ACTIVE_FILL = colors.activityActive;
+    const COOLING_FILL = colors.activityCooling;
+    const DORMANT_FILL = colors.activityDormant;
+    const TREND_STROKE = colors.axisText;
+
     const margin = { top: 56, right: 18, bottom: 40, left: 50 };
     const width = containerWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -156,7 +161,7 @@ const drawChart = (
             .attr('x', 0)
             .attr('y', 16)
             .style('font-size', '12px')
-            .style('fill', '#6b7280')
+            .style('fill', colors.labelText)
             .text('No activity and attrition data available.');
         return;
     }
@@ -176,7 +181,7 @@ const drawChart = (
         .call(d3.axisLeft(y).ticks(5).tickSize(-width).tickFormat(() => ''));
     svg.select('.landing-activity-grid')?.select('.domain')?.remove();
     svg.selectAll('.landing-activity-grid line')
-        .style('stroke', '#e2e8f0')
+        .style('stroke', colors.gridLine)
         .style('stroke-width', 1);
 
     const tickStep = Math.max(1, Math.floor(data.months.length / 6));
@@ -186,13 +191,13 @@ const drawChart = (
 
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisBottom(x).tickValues(tickValues).tickFormat((value: unknown) => formatMonthLabel(String(value))).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
 
     svg.append('g')
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisLeft(y).ticks(5).tickFormat((value: unknown) => formatCompactCount(Number(value))).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
@@ -201,7 +206,7 @@ const drawChart = (
         .attr('x', width / 2)
         .attr('y', height + 34)
         .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '10px')
         .text(data.x_label);
 
@@ -210,7 +215,7 @@ const drawChart = (
         .attr('x', -height / 2)
         .attr('y', -36)
         .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '10px')
         .text(data.y_label);
 
@@ -281,14 +286,14 @@ const drawChart = (
         .attr('y', 0)
         .style('font-size', '10px')
         .style('font-weight', '700')
-        .style('fill', signalColor(data.summary.population_signal))
+        .style('fill', signalColor(data.summary.population_signal, colors))
         .text(signalLabel(data.summary));
 
     summaryGroup.append('text')
         .attr('x', 0)
         .attr('y', 14)
         .style('font-size', '10px')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .text(`bars = cohort fate today • line = ${data.summary.months_compared}-month active pulse`);
 
     const legendItems = [
@@ -311,7 +316,7 @@ const drawChart = (
             .attr('x', 13)
             .attr('y', 0)
             .style('font-size', '10px')
-            .style('fill', '#64748b')
+            .style('fill', colors.labelMuted)
             .text(item.label);
     });
 
@@ -326,13 +331,14 @@ const drawChart = (
         .attr('height', height)
         .attr('fill', 'transparent')
         .style('cursor', 'default')
-        .on('mouseover', (_event: MouseEvent, row: LandingActivityAttritionMonth) => showDetails(svgRoot, row, data.tracked_population))
+        .on('mouseover', (_event: MouseEvent, row: LandingActivityAttritionMonth) => showDetails(svgRoot, row, data.tracked_population, colors))
         .on('mouseout', () => svgRoot.select('.landing-activity-details').remove());
 };
 
 const LandingActivityAttritionSVG: React.FC<LandingActivityAttritionSVGProps> = ({
     data,
     svgHeight = 300,
+    theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerWidth, setContainerWidth] = useState(320);
@@ -364,11 +370,12 @@ const LandingActivityAttritionSVG: React.FC<LandingActivityAttritionSVGProps> = 
             return;
         }
 
+        const colors = chartColors[theme];
         setIsChartReady(false);
-        drawChart(containerRef.current, data, containerWidth, svgHeight);
+        drawChart(containerRef.current, data, containerWidth, svgHeight, colors);
         const frameId = window.requestAnimationFrame(() => setIsChartReady(true));
         return () => window.cancelAnimationFrame(frameId);
-    }, [chartSignature, containerWidth, data, svgHeight]);
+    }, [chartSignature, containerWidth, data, svgHeight, theme]);
 
     return <div ref={containerRef} className={`pr-8 transition-opacity duration-150 md:pr-16 ${isChartReady ? 'opacity-100' : 'opacity-0'}`}></div>;
 };

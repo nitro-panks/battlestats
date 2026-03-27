@@ -12,6 +12,7 @@ import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
+import { useTheme } from '../context/ThemeContext';
 
 interface PlayerDetailProps {
     player: {
@@ -90,7 +91,7 @@ interface PlayerDetailProps {
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
     <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[#dbe9f6] bg-[#f7fbff] text-sm text-[#6baed6]"
+        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
         style={{ minHeight }}
     >
         {label}
@@ -284,6 +285,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     onSelectClan,
     isLoading = false,
 }) => {
+    const { theme } = useTheme();
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
     const isPveEnjoyer = Boolean(player.is_pve_player);
@@ -394,10 +396,10 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     };
 
     return (
-        <div className="relative overflow-hidden bg-white p-6">
+        <div className="relative overflow-hidden bg-[var(--bg-page)] p-6">
             {isLoading ? (
-                <div className="absolute inset-0 z-20 flex items-start justify-center bg-white/70 pt-6">
-                    <div className="rounded-md border border-gray-200 bg-white px-3 py-1 text-sm font-medium text-gray-700 shadow-sm">
+                <div className="absolute inset-0 z-20 flex items-start justify-center bg-[var(--bg-page)]/70 pt-6">
+                    <div className="rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-1 text-sm font-medium text-[var(--text-secondary)] shadow-sm">
                         Loading player...
                     </div>
                 </div>
@@ -410,13 +412,13 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             <button
                                 type="button"
                                 onClick={() => onSelectClan(player.clan_id, player.clan_name || "Clan")}
-                                className="mt-1 text-xl font-semibold text-[#2171b5] underline-offset-4 hover:underline"
+                                className="mt-1 text-xl font-semibold text-[var(--accent-mid)] underline-offset-4 hover:underline"
                                 aria-label={`Open clan page for ${player.clan_name || "clan"}`}
                             >
                                 {player.clan_tag ? `[${player.clan_tag}] ` : ''}{player.clan_name || 'Clan'}
                             </button>
                         ) : (
-                            <h2 className="mt-1 text-xl font-semibold text-[#2171b5]">No Clan</h2>
+                            <h2 className="mt-1 text-xl font-semibold text-[var(--accent-mid)]">No Clan</h2>
                         )}
                     </div>
                     {player.clan_id ? (
@@ -428,6 +430,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     highlightedPlayerName={player.name}
                                     svgHeight={280}
                                     membersData={clanMembers}
+                                    theme={theme}
                                 />
 
                             </div>
@@ -446,20 +449,20 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                         </>
                     ) : (
                         <>
-                            <p className="text-sm text-gray-500">No clan data available</p>
+                            <p className="text-sm text-[var(--accent-light)]">No clan data available</p>
                         </>
                     )}
                 </div>
 
                 {/* Second Column */}
-                <div className="min-w-0 text-left border-l border-[#c6dbef] pl-4">
-                    <div className="mb-3 border-b border-[#c6dbef] pb-3" data-perf-section="player-header">
+                <div className="min-w-0 text-left border-l border-[var(--border)] pl-4">
+                    <div className="mb-3 border-b border-[var(--border)] pb-3" data-perf-section="player-header">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                             <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
+                                <h1 className="text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
                                     {player.name}
                                 </h1>
-                                {player.is_hidden ? <HiddenAccountIcon className="text-sm text-[#6baed6]" /> : null}
+                                {player.is_hidden ? <HiddenAccountIcon className="text-sm text-[var(--accent-light)]" /> : null}
                                 {player.is_clan_leader ? <HeaderLeaderCrown /> : null}
                                 {isPveEnjoyer ? <HeaderPveRobot /> : null}
                                 {isSleepyPlayer ? <HeaderSleepyBed /> : null}
@@ -471,30 +474,30 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <button
                                     type="button"
                                     onClick={handleShare}
-                                    className="rounded-md border border-[#c6dbef] px-3 py-1.5 text-sm font-medium text-[#2171b5] transition-colors hover:bg-[#eff3ff]"
+                                    className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--accent-mid)] transition-colors hover:bg-[var(--accent-faint)]"
                                     aria-label="Copy shareable player URL"
                                 >
                                     Share
                                 </button>
                                 {shareState === 'copied' ? (
-                                    <span className="text-xs font-medium text-[#2171b5]">Copied</span>
+                                    <span className="text-xs font-medium text-[var(--accent-mid)]">Copied</span>
                                 ) : null}
                                 {shareState === 'failed' ? (
-                                    <span className="text-xs font-medium text-[#b91c1c]">Copy failed</span>
+                                    <span className="text-xs font-medium text-red-500">Copy failed</span>
                                 ) : null}
                             </div>
                         </div>
-                        <p className="mt-1 text-sm text-[#4292c6]">
+                        <p className="mt-1 text-sm text-[var(--accent-light)]">
                             Last played {player.days_since_last_battle} days ago
                         </p>
                     </div>
 
                     {player.is_hidden ? (
-                        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
-                            <p className="text-sm font-medium text-amber-800">
+                        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/40">
+                            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
                                 This player&apos;s stats are hidden.
                             </p>
-                            <p className="mt-1 text-xs text-amber-700">
+                            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
                                 The player has set their profile to private. Detailed statistics and charts are not available.
                             </p>
                         </div>
@@ -502,46 +505,46 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                         <>
                             <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4" data-perf-section="summary-cards">
                                 <div
-                                    className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3"
+                                    className="flex min-h-[108px] flex-col rounded-md bg-[var(--accent-faint)] p-3"
                                     style={{ border: `1px solid ${selectColorByWR(player.pvp_ratio)}` }}
                                 >
-                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">Win Rate</p>
+                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Win Rate</p>
                                     <div className="flex flex-1 items-center justify-center">
-                                        <p className="text-center text-2xl font-semibold text-[#084594]">{player.pvp_ratio}%</p>
+                                        <p className="text-center text-2xl font-semibold text-[var(--accent-dark)]">{player.pvp_ratio}%</p>
                                     </div>
                                 </div>
-                                <div className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3">
-                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">PvP Battles</p>
+                                <div className="flex min-h-[108px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
+                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">PvP Battles</p>
                                     <div className="flex flex-1 items-center justify-center">
-                                        <p className="text-center text-2xl font-semibold text-[#084594]">{player.pvp_battles.toLocaleString()}</p>
+                                        <p className="text-center text-2xl font-semibold text-[var(--accent-dark)]">{player.pvp_battles.toLocaleString()}</p>
                                     </div>
                                 </div>
-                                <div className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3">
-                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">Survival</p>
+                                <div className="flex min-h-[108px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
+                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Survival</p>
                                     <div className="flex flex-1 items-center justify-center">
-                                        <p className="text-center text-2xl font-semibold text-[#084594]">{player.pvp_survival_rate}%</p>
+                                        <p className="text-center text-2xl font-semibold text-[var(--accent-dark)]">{player.pvp_survival_rate}%</p>
                                     </div>
                                 </div>
-                                <div className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3">
-                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">KDR</p>
+                                <div className="flex min-h-[108px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
+                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">KDR</p>
                                     <div className="flex flex-1 items-center justify-center">
-                                        <p className="text-center text-2xl font-semibold text-[#084594]">{formatKillRatio(player.actual_kdr ?? null)}</p>
+                                        <p className="text-center text-2xl font-semibold text-[var(--accent-dark)]">{formatKillRatio(player.actual_kdr ?? null)}</p>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-[#4292c6]">
-                                <p>Total Battles: <span className="font-medium text-[#2171b5]">{player.total_battles.toLocaleString()}</span></p>
-                                <p>PvP Wins: <span className="font-medium text-[#2171b5]">{player.pvp_wins.toLocaleString()}</span></p>
-                                <p>Last Battle Date: <span className="font-medium text-[#2171b5]">{player.last_battle_date}</span></p>
-                                <p>PvE Battles: <span className="font-medium text-[#2171b5]">{pveBattles.toLocaleString()}</span></p>
+                            <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-[var(--accent-light)]">
+                                <p>Total Battles: <span className="font-medium text-[var(--accent-mid)]">{player.total_battles.toLocaleString()}</span></p>
+                                <p>PvP Wins: <span className="font-medium text-[var(--accent-mid)]">{player.pvp_wins.toLocaleString()}</span></p>
+                                <p>Last Battle Date: <span className="font-medium text-[var(--accent-mid)]">{player.last_battle_date}</span></p>
+                                <p>PvE Battles: <span className="font-medium text-[var(--accent-mid)]">{pveBattles.toLocaleString()}</span></p>
                             </div>
 
                             {SHOW_PLAYSTYLE_PANEL && player.verdict && (
-                                <div className="mt-4 rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
-                                    <p className="text-sm font-medium text-[#334155]">Playstyle: <span className="font-semibold text-[#084594]">{player.verdict}</span></p>
+                                <div className="mt-4 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3">
+                                    <p className="text-sm font-medium text-[var(--text-primary)]">Playstyle: <span className="font-semibold text-[var(--accent-dark)]">{player.verdict}</span></p>
                                     {PLAYSTYLE_HELPER_TEXT[player.verdict] ? (
-                                        <p className="mt-1 text-xs text-[#6baed6]">{PLAYSTYLE_HELPER_TEXT[player.verdict]}</p>
+                                        <p className="mt-1 text-xs text-[var(--accent-light)]">{PLAYSTYLE_HELPER_TEXT[player.verdict]}</p>
                                     ) : null}
                                 </div>
                             )}
@@ -564,7 +567,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                 <button
                     type="button"
                     onClick={onBack}
-                    className="inline-flex items-center rounded-md border border-[#2171b5] px-4 py-2 text-sm font-medium text-[#2171b5] transition-colors hover:bg-[#eff3ff]"
+                    className="inline-flex items-center rounded-md border border-[var(--accent-mid)] px-4 py-2 text-sm font-medium text-[var(--accent-mid)] transition-colors hover:bg-[var(--accent-faint)]"
                     aria-label="Return to landing page"
                 >
                     Back

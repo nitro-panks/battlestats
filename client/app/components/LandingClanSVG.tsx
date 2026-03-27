@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 
 interface ClanDatum {
     clan_id: number;
@@ -15,6 +16,7 @@ interface LandingClanSVGProps {
     heatmapClans?: ClanDatum[];
     onSelectClan?: (clan: ClanDatum) => void;
     svgHeight?: number;
+    theme?: ChartTheme;
 }
 
 interface PlotDatum {
@@ -40,16 +42,16 @@ const expandDomain = (minValue: number, maxValue: number, paddingRatio: number, 
     return [paddedMin, paddedMax];
 };
 
-const selectLandingClanColorByWR = (winRatio: number): string => {
-    if (winRatio > 65) return '#810c9e';
-    if (winRatio >= 60) return '#D042F3';
-    if (winRatio >= 56) return '#3182bd';
-    if (winRatio >= 54) return '#74c476';
-    if (winRatio >= 52) return '#a1d99b';
-    if (winRatio >= 50) return '#fed976';
-    if (winRatio >= 45) return '#fd8d3c';
-    if (winRatio >= 40) return '#e6550d';
-    return '#a50f15';
+const selectLandingClanColorByWR = (winRatio: number, colors: typeof chartColors.light): string => {
+    if (winRatio > 65) return colors.wrElite;
+    if (winRatio >= 60) return colors.wrSuperUnicum;
+    if (winRatio >= 56) return colors.wrUnicum;
+    if (winRatio >= 54) return colors.wrVeryGood;
+    if (winRatio >= 52) return colors.wrGood;
+    if (winRatio >= 50) return colors.wrAboveAvg;
+    if (winRatio >= 45) return colors.wrAverage;
+    if (winRatio >= 40) return colors.wrBelowAvg;
+    return colors.wrBad;
 };
 
 const formatCompactCount = (value: number): string => d3.format('~s')(value).replace('G', 'B');
@@ -60,6 +62,7 @@ const drawLandingClanChart = (
     onSelectClan: LandingClanSVGProps['onSelectClan'],
     containerWidth: number,
     svgHeight: number,
+    colors: typeof chartColors.light,
 ) => {
     const margin = { top: 56, right: 16, bottom: 32, left: 48 };
     const width = containerWidth - margin.left - margin.right;
@@ -91,7 +94,7 @@ const drawLandingClanChart = (
             .attr('x', 0)
             .attr('y', 16)
             .style('font-size', '12px')
-            .style('fill', '#6b7280')
+            .style('fill', colors.labelText)
             .text('No clan chart data available.');
         return;
     }
@@ -110,7 +113,7 @@ const drawLandingClanChart = (
         .call(d3.axisBottom(x).ticks(6).tickSize(-height).tickFormat(() => ''));
     svg.select('.landing-clan-x-grid')?.select('.domain')?.remove();
     svg.selectAll('.landing-clan-x-grid line')
-        .style('stroke', '#dbeafe')
+        .style('stroke', colors.gridLineBlue)
         .style('stroke-width', 1);
 
     svg.append('g')
@@ -118,18 +121,18 @@ const drawLandingClanChart = (
         .call(d3.axisLeft(y).ticks(5).tickSize(-width).tickFormat(() => ''));
     svg.select('.landing-clan-y-grid')?.select('.domain')?.remove();
     svg.selectAll('.landing-clan-y-grid line')
-        .style('stroke', '#eff6ff')
+        .style('stroke', colors.surface)
         .style('stroke-width', 1);
 
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisBottom(x).ticks(6).tickFormat((value: number) => formatCompactCount(value)).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
 
     svg.append('g')
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisLeft(y).ticks(5).tickFormat((value: number) => `${value.toFixed(0)}%`).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
@@ -137,7 +140,7 @@ const drawLandingClanChart = (
     svg.append('text')
         .attr('class', 'axisLabel')
         .style('font-size', '10px')
-        .style('fill', '#6b7280')
+        .style('fill', colors.labelText)
         .attr('text-anchor', 'middle')
         .attr('x', width / 2)
         .attr('y', height + 30)
@@ -146,7 +149,7 @@ const drawLandingClanChart = (
     svg.append('text')
         .attr('class', 'axisLabel')
         .style('font-size', '10px')
-        .style('fill', '#6b7280')
+        .style('fill', colors.labelText)
         .attr('text-anchor', 'middle')
         .attr('transform', 'rotate(-90)')
         .attr('x', -height / 2)
@@ -164,7 +167,7 @@ const drawLandingClanChart = (
             .attr('y', 0)
             .style('font-size', '11px')
             .attr('font-weight', '700')
-            .style('fill', '#084594')
+            .style('fill', colors.accentLink)
             .text(`[${datum.tag}] ${datum.name}`);
 
         const metaText = detailGroup.append('text')
@@ -172,7 +175,7 @@ const drawLandingClanChart = (
             .attr('y', 18)
             .style('font-size', '10px')
             .attr('font-weight', '400')
-            .style('fill', '#6b7280');
+            .style('fill', colors.labelText);
 
         metaText.append('tspan')
             .text(`${Math.round(datum.total_wins).toLocaleString()} Wins`);
@@ -224,8 +227,8 @@ const drawLandingClanChart = (
         .attr('cy', (datum: PlotDatum) => y(datum.clan_wr))
         .attr('r', 5)
         .style('cursor', onSelectClan ? 'pointer' : 'default')
-        .attr('fill', (datum: PlotDatum) => selectLandingClanColorByWR(datum.clan_wr))
-        .attr('stroke', '#444')
+        .attr('fill', (datum: PlotDatum) => selectLandingClanColorByWR(datum.clan_wr, colors))
+        .attr('stroke', colors.axisLine)
         .attr('stroke-width', 1.25);
 
     const circles = svg.selectAll('circle');
@@ -242,7 +245,7 @@ const drawLandingClanChart = (
         })
         .on('mouseout', function (this: SVGCircleElement, _event: MouseEvent, datum: PlotDatum) {
             hideDetails();
-            d3.select(this).transition().duration(50).attr('fill', selectLandingClanColorByWR(datum.clan_wr));
+            d3.select(this).transition().duration(50).attr('fill', selectLandingClanColorByWR(datum.clan_wr, colors));
         });
 };
 
@@ -251,6 +254,7 @@ const LandingClanSVG: React.FC<LandingClanSVGProps> = ({
     heatmapClans,
     onSelectClan,
     svgHeight = 300,
+    theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerWidth, setContainerWidth] = useState(320);
@@ -274,13 +278,14 @@ const LandingClanSVG: React.FC<LandingClanSVGProps> = ({
 
     useEffect(() => {
         if (!containerRef.current || containerWidth < 100) return;
+        const colors = chartColors[theme];
         setIsChartReady(false);
-        drawLandingClanChart(containerRef.current, clans, onSelectClan, containerWidth, svgHeight);
+        drawLandingClanChart(containerRef.current, clans, onSelectClan, containerWidth, svgHeight, colors);
         const frameId = window.requestAnimationFrame(() => {
             setIsChartReady(true);
         });
         return () => window.cancelAnimationFrame(frameId);
-    }, [chartSignature, clans, containerWidth, onSelectClan, svgHeight]);
+    }, [chartSignature, clans, containerWidth, onSelectClan, svgHeight, theme]);
 
     return <div ref={containerRef} className={`pr-8 transition-opacity duration-150 md:pr-16 ${isChartReady ? 'opacity-100' : 'opacity-0'}`}></div>;
 };

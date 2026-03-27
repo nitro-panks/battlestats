@@ -198,12 +198,12 @@ const HeaderSearch: React.FC = () => {
                     aria-autocomplete="list"
                     aria-controls={SEARCH_SUGGESTIONS_ID}
                     aria-activedescendant={highlightedSuggestionIndex >= 0 ? `header-player-search-suggestion-${highlightedSuggestionIndex}` : undefined}
-                    className="block w-full rounded-md border border-[#c6dbef] px-3 py-2 text-sm shadow-sm focus:border-[#4292c6] focus:outline-none focus:ring-[#4292c6]"
+                    className="block w-full rounded-md border border-[var(--border)] px-3 py-2 text-sm shadow-sm focus:border-[var(--accent-light)] focus:outline-none focus:ring-[var(--accent-light)]"
                 />
                 {isSuggestionListOpen && suggestions.length > 0 && (
                     <ul
                         id={SEARCH_SUGGESTIONS_ID}
-                        className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-[#c6dbef] bg-white py-1 shadow-lg"
+                        className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--bg-page)] py-1 shadow-lg"
                         role="listbox"
                     >
                         {suggestions.map((player, index) => {
@@ -219,7 +219,7 @@ const HeaderSearch: React.FC = () => {
                                         type="button"
                                         onMouseDown={() => handleSuggestionMouseDown(player.name)}
                                         onMouseEnter={() => setHighlightedSuggestionIndex(index)}
-                                        className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${isHighlighted ? "bg-[#deebf7] text-[#084594]" : "text-[#2171b5] hover:bg-[#eff3ff]"}`}
+                                        className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${isHighlighted ? "bg-[var(--bg-hover)] text-[var(--accent-dark)]" : "text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]"}`}
                                     >
                                         <span className="inline-flex items-center gap-2">
                                             <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u{1F79C}"}</span>
@@ -235,7 +235,7 @@ const HeaderSearch: React.FC = () => {
             </div>
             <button
                 type="submit"
-                className="rounded-md bg-[#2171b5] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#084594]"
+                className="rounded-md bg-[var(--accent-mid)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-dark)]"
             >
                 Go
             </button>

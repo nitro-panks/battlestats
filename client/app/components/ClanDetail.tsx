@@ -3,6 +3,7 @@ import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { useClanMembers } from './useClanMembers';
+import { useTheme } from '../context/ThemeContext';
 
 interface ClanDetailProps {
     clan: {
@@ -17,7 +18,7 @@ interface ClanDetailProps {
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
     <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-500"
+        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--text-secondary)]"
         style={{ minHeight }}
     >
         {label}
@@ -40,6 +41,7 @@ const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMem
 });
 
 const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember }) => {
+    const { theme } = useTheme();
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const { members, loading: membersLoading, error: membersError } = useClanMembers(clan.clan_id);
 
@@ -66,40 +68,40 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
     };
 
     return (
-        <div className="bg-white p-6">
+        <div className="bg-[var(--bg-page)] p-6">
             <div className="mb-3 pb-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                    <h1 className="text-3xl font-semibold tracking-tight text-gray-900">
+                    <h1 className="text-3xl font-semibold tracking-tight text-[var(--text-primary)]">
                         [{clan.tag}] {clan.name}
                     </h1>
                     <div className="flex items-center gap-2 self-start">
                         <button
                             type="button"
                             onClick={handleShare}
-                            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
                             aria-label="Copy shareable clan URL"
                         >
                             Share
                         </button>
                         {shareState === 'copied' ? (
-                            <span className="text-xs font-medium text-[#2171b5]">Copied</span>
+                            <span className="text-xs font-medium text-[var(--accent-mid)]">Copied</span>
                         ) : null}
                         {shareState === 'failed' ? (
-                            <span className="text-xs font-medium text-[#b91c1c]">Copy failed</span>
+                            <span className="text-xs font-medium text-red-600 dark:text-red-400">Copy failed</span>
                         ) : null}
                     </div>
                 </div>
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">
                     {clan.members_count} members
                 </p>
             </div>
 
             <div className="mt-4">
-                <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={440} membersData={members} />
+                <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={440} membersData={members} theme={theme} />
             </div>
 
             <DeferredSection
-                className="mt-6 border-t border-gray-100 pt-4"
+                className="mt-6 border-t border-[var(--border)] pt-4"
                 minHeight={96}
                 placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
             >
@@ -120,7 +122,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
 
             <button
                 onClick={onBack}
-                className="mt-5 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="mt-5 rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
             >
                 Back
             </button>

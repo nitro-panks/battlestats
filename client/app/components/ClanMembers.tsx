@@ -87,17 +87,17 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
 
     return (
         <div>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Clan Members</h3>
-            {loading && <p className="text-sm text-gray-500">Syncing clan members...</p>}
-            {!loading && error ? <p className="text-sm text-gray-500">{error}</p> : null}
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Clan Members</h3>
+            {loading && <p className="text-sm text-[var(--text-secondary)]">Syncing clan members...</p>}
+            {!loading && error ? <p className="text-sm text-[var(--text-secondary)]">{error}</p> : null}
             {!loading && !error && isWarmingEfficiencyRanks ? (
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-[var(--text-secondary)]">
                     {`Updating Battlestats rank icons for ${pendingEfficiencyCount} clan member${pendingEfficiencyCount === 1 ? '' : 's'}...`}
                 </p>
             ) : null}
-            {!loading && members.length === 0 && <p className="text-sm text-gray-500">No clan members found.</p>}
+            {!loading && members.length === 0 && <p className="text-sm text-[var(--text-secondary)]">No clan members found.</p>}
             {!loading && members.length > 0 && (
-                <div className={layout === 'stacked' ? 'mt-2 space-y-1 text-sm text-[#4292c6]' : 'mt-2 text-sm leading-7 text-[#4292c6]'}>
+                <div className={layout === 'stacked' ? 'mt-2 space-y-1 text-sm text-[var(--accent-light)]' : 'mt-2 text-sm leading-7 text-[var(--accent-light)]'}>
                     {members.map((member) => (
                         <React.Fragment key={member.name}>
                             {(() => {
@@ -109,20 +109,20 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                                     return (
                                         <span
                                             className={layout === 'stacked'
-                                                ? 'flex items-center gap-1 font-medium text-gray-500'
-                                                : 'mr-3 inline-flex items-center gap-1 font-medium text-gray-500'}
+                                                ? 'flex items-center gap-1 font-medium text-[var(--text-secondary)]'
+                                                : 'mr-3 inline-flex items-center gap-1 font-medium text-[var(--text-secondary)]'}
                                             title={formatRecency(member.days_since_last_battle)}
                                         >
                                             <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
                                             {member.name}
-                                            <HiddenAccountIcon className="text-[11px] text-[#6baed6]" />
+                                            <HiddenAccountIcon className="text-[11px] text-[var(--accent-light)]" />
                                             {member.is_leader && <LeaderCrown />}
                                             {member.is_pve_player && <PveRobot />}
                                             {member.is_sleepy_player && <SleepyBed />}
                                             {member.is_ranked_player && <RankedStar league={member.highest_ranked_league} />}
                                             {member.is_clan_battle_player && <ClanBattleShield winRate={member.clan_battle_win_rate} />}
                                             {efficiencyRankTier === 'E' ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={member.efficiency_rank_percentile} populationSize={member.efficiency_rank_population_size} size="inline" /> : null}
-                                            <span className="text-xs font-normal text-gray-400">{formatRecency(member.days_since_last_battle)}</span>
+                                            <span className="text-xs font-normal text-[var(--text-secondary)]">{formatRecency(member.days_since_last_battle)}</span>
                                         </span>
                                     );
                                 }
@@ -131,8 +131,8 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                                     <button
                                         onClick={() => onSelectMember(member.name)}
                                         className={layout === 'stacked'
-                                            ? 'flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]'
-                                            : 'mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]'}
+                                            ? 'flex items-center gap-1 font-medium text-[var(--accent-dark)] underline-offset-2 hover:underline hover:text-[var(--accent-mid)]'
+                                            : 'mr-3 inline-flex items-center gap-1 font-medium text-[var(--accent-dark)] underline-offset-2 hover:underline hover:text-[var(--accent-mid)]'}
                                         aria-label={`Show player ${member.name}`}
                                         title={formatRecency(member.days_since_last_battle)}
                                     >
@@ -144,7 +144,7 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                                         {member.is_ranked_player && <RankedStar league={member.highest_ranked_league} />}
                                         {member.is_clan_battle_player && <ClanBattleShield winRate={member.clan_battle_win_rate} />}
                                         {efficiencyRankTier === 'E' ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={member.efficiency_rank_percentile} populationSize={member.efficiency_rank_population_size} size="inline" /> : null}
-                                        <span className="text-xs font-normal text-gray-400">{formatRecency(member.days_since_last_battle)}</span>
+                                        <span className="text-xs font-normal text-[var(--text-secondary)]">{formatRecency(member.days_since_last_battle)}</span>
                                     </button>
                                 );
                             })()}

@@ -2,12 +2,14 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import type { TierRow } from './playerProfileChartData';
 
 interface TierSVGProps {
     playerId: number;
     data?: TierRow[];
     svgHeight?: number;
+    theme?: ChartTheme;
 }
 
 const normalizeTierRows = (data: unknown): TierRow[] => {
@@ -31,7 +33,9 @@ const selectTierColorByWr = (winRatio: number): string => {
     return '#a50f15';
 };
 
-const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: number, data?: TierRow[]) => {
+type Colors = typeof chartColors['light'];
+
+const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: number, colors: Colors, data?: TierRow[]) => {
     const containerWidth = Math.max(container.clientWidth || 0, 280);
     const compact = containerWidth < 420;
 
@@ -82,31 +86,31 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
 
             svg.select('.tier-grid')?.select('.domain')?.remove();
             svg.selectAll('.tier-grid line')
-                .style('stroke', '#e2e8f0')
+                .style('stroke', colors.gridLine)
                 .style('stroke-width', 1);
 
             svg.append('g')
                 .attr('transform', `translate(0, ${height})`)
-                .style('color', '#64748b')
+                .style('color', colors.labelMuted)
                 .call(d3.axisBottom(x).ticks(6).tickFormat((value: number) => d3.format(',')(Number(value))).tickSizeOuter(0))
                 .selectAll('text')
                 .style('font-size', axisFontSize);
 
             svg.append('g')
-                .style('color', '#475569')
+                .style('color', colors.axisText)
                 .call(d3.axisLeft(y).tickSize(0).tickPadding(6))
                 .selectAll('text')
                 .style('font-size', axisFontSize)
                 .style('font-weight', '500');
 
-            svg.selectAll('.domain').style('stroke', '#cbd5e1');
+            svg.selectAll('.domain').style('stroke', colors.axisLine);
 
             svg.append('text')
                 .attr('x', width)
                 .attr('y', height + (compact ? 32 : 38))
                 .attr('text-anchor', 'end')
                 .style('font-size', axisFontSize)
-                .style('fill', '#64748b')
+                .style('fill', colors.labelMuted)
                 .text('Random battles');
 
             const detailGroup = svgRoot.append('g').attr('transform', `translate(${margin.left + width - 4}, 12)`);
@@ -127,43 +131,43 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
                 detailText.append('tspan')
                     .style('font-size', detailTitleSize)
                     .style('font-weight', '700')
-                    .style('fill', '#084594')
+                    .style('fill', colors.accentLink)
                     .text(`Tier ${datum.ship_tier}`);
 
                 detailText.append('tspan')
                     .style('font-size', detailFontSize)
                     .style('font-weight', '400')
-                    .style('fill', '#94a3b8')
+                    .style('fill', colors.separator)
                     .text('  •  ');
 
                 detailText.append('tspan')
                     .style('font-size', detailFontSize)
                     .style('font-weight', '400')
-                    .style('fill', '#475569')
+                    .style('fill', colors.axisText)
                     .text(`${datum.pvp_battles.toLocaleString()} battles`);
 
                 detailText.append('tspan')
                     .style('font-size', detailFontSize)
                     .style('font-weight', '400')
-                    .style('fill', '#94a3b8')
+                    .style('fill', colors.separator)
                     .text('  •  ');
 
                 detailText.append('tspan')
                     .style('font-size', detailFontSize)
                     .style('font-weight', '400')
-                    .style('fill', '#475569')
+                    .style('fill', colors.axisText)
                     .text(`${datum.wins.toLocaleString()} wins`);
 
                 detailText.append('tspan')
                     .style('font-size', detailFontSize)
                     .style('font-weight', '400')
-                    .style('fill', '#94a3b8')
+                    .style('fill', colors.separator)
                     .text('  •  ');
 
                 detailText.append('tspan')
                     .style('font-size', detailFontSize)
                     .style('font-weight', '700')
-                    .style('fill', '#475569')
+                    .style('fill', colors.axisText)
                     .text(`${(datum.win_ratio * 100).toFixed(1)}% win rate`);
             };
 
@@ -179,7 +183,7 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
                 .attr('width', (datum: TierRow) => x(datum.pvp_battles))
                 .attr('height', y.bandwidth() * 0.88)
                 .attr('rx', 3)
-                .attr('fill', '#dbe4f0');
+                .attr('fill', colors.gridLineBlue);
 
             rowNodes.append('rect')
                 .attr('x', 0)
@@ -187,7 +191,7 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
                 .attr('width', (datum: TierRow) => x(datum.wins))
                 .attr('height', y.bandwidth())
                 .attr('rx', 3)
-                .style('stroke', '#334155')
+                .style('stroke', colors.axisText)
                 .style('stroke-width', 0.7)
                 .attr('fill', (datum: TierRow) => selectTierColorByWr(datum.win_ratio))
                 .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, datum: TierRow) {
@@ -211,7 +215,7 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
                 })
                 .attr('y', (datum: TierRow) => (y(String(datum.ship_tier)) ?? 0) + (y.bandwidth() / 2) + 3)
                 .style('font-size', axisFontSize)
-                .style('fill', '#64748b')
+                .style('fill', colors.labelMuted)
                 .attr('text-anchor', (datum: TierRow) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
                 .text((datum: TierRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
 
@@ -235,7 +239,7 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
         });
 };
 
-const TierSVG: React.FC<TierSVGProps> = ({ playerId, data, svgHeight = 334 }) => {
+const TierSVG: React.FC<TierSVGProps> = ({ playerId, data, svgHeight = 334, theme = 'light' }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
@@ -244,8 +248,9 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId, data, svgHeight = 334 }) =>
             return;
         }
 
+        const colors = chartColors[theme];
         const render = () => {
-            drawTierPlot(container, playerId, svgHeight, data);
+            drawTierPlot(container, playerId, svgHeight, colors, data);
         };
 
         render();
@@ -254,7 +259,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId, data, svgHeight = 334 }) =>
         return () => {
             window.removeEventListener('resize', render);
         };
-    }, [data, playerId, svgHeight]);
+    }, [data, playerId, svgHeight, theme]);
 
     return <div ref={containerRef} className="w-full"></div>;
 };

@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 
-export const APP_ORIGIN = 'http://127.0.0.1:3100';
+export const APP_ORIGIN = (process.env.BATTLESTATS_APP_ORIGIN ?? process.env.PLAYWRIGHT_EXTERNAL_BASE_URL ?? 'http://127.0.0.1:3100').replace(/\/$/, '');
 export const API_ORIGIN = (process.env.BATTLESTATS_API_ORIGIN ?? 'http://localhost:8888').replace(/\/$/, '');
 export const PLAYER_SAMPLE_SIZE = 10;
 export const PLAYER_POOL_SIZE = 20;
@@ -105,6 +105,41 @@ export const fetchJson = async <T>(url: string): Promise<T> => {
     }
 
     return response.json() as Promise<T>;
+};
+
+export const shuffleArray = <T>(values: T[]): T[] => {
+    const copy = [...values];
+    for (let index = copy.length - 1; index > 0; index -= 1) {
+        const swapIndex = Math.floor(Math.random() * (index + 1));
+        [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+    }
+
+    return copy;
+};
+
+export const collectLandingPlayerNames = async (): Promise<string[]> => {
+    const urls = [
+        `${API_ORIGIN}/api/landing/players/`,
+        `${API_ORIGIN}/api/landing/players/?mode=best`,
+        `${API_ORIGIN}/api/landing/players/?mode=sigma`,
+    ];
+    const names = new Set<string>();
+
+    for (const url of urls) {
+        try {
+            const payload = await fetchJson<Array<LandingPlayer>>(url);
+            payload.forEach((player) => {
+                const name = (player?.name || '').trim();
+                if (name) {
+                    names.add(name);
+                }
+            });
+        } catch {
+            continue;
+        }
+    }
+
+    return [...names];
 };
 
 export const collectProfileBenchmarkCandidates = async (): Promise<BenchmarkCandidate[]> => {

@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import * as d3 from 'd3';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 
 interface ActivityProps {
     playerId: number;
+    theme?: ChartTheme;
 }
 
 interface ActivityRow {
@@ -11,7 +13,7 @@ interface ActivityRow {
     wins: number;
 }
 
-const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
+const ActivitySVG: React.FC<ActivityProps> = ({ playerId, theme = 'light' }) => {
     const [isAllZeroWindow, setIsAllZeroWindow] = useState(false);
     const [chartData, setChartData] = useState<{ rows: ActivityRow[], error: boolean } | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -48,6 +50,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
     useEffect(() => {
         if (!containerRef.current || !chartData) return;
 
+        const colors = chartColors[theme];
         const container = containerRef.current;
         d3.select(container).selectAll("*").remove(); // Clean up safely
 
@@ -70,7 +73,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
                     .attr("x", 0)
                     .attr("y", 16)
                     .style("font-size", "12px")
-                    .style("fill", "#6b7280")
+                    .style("fill", colors.labelText)
                     .text("Unable to load activity data.");
                 return;
             }
@@ -80,7 +83,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
                     .attr("x", 0)
                     .attr("y", 16)
                     .style("font-size", "12px")
-                    .style("fill", "#6b7280")
+                    .style("fill", colors.labelText)
                     .text("No recent activity data available.");
                 return;
             }
@@ -116,7 +119,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
                 .attr("y", height + 44)
                 .attr("text-anchor", "end")
                 .style("font-size", "10px")
-                .style("fill", "#6b7280")
+                .style("fill", colors.labelText)
                 .text("Date");
 
             svg.append("text")
@@ -125,7 +128,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
                 .attr("y", -52)
                 .attr("text-anchor", "end")
                 .style("font-size", "10px")
-                .style("fill", "#6b7280")
+                .style("fill", colors.labelText)
                 .text("Battles");
 
             svg.append("text")
@@ -133,7 +136,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
                 .attr("y", 12)
                 .attr("text-anchor", "end")
                 .style("font-size", "10px")
-                .style("fill", "#6b7280")
+                .style("fill", colors.labelText)
                 .text("Gray = total games, Green = wins");
 
             const nodes = svg.selectAll(".rect")
@@ -157,7 +160,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
                     return height - yVal;
                 })
                 .attr("width", "12")
-                .attr("fill", "#ccc")
+                .attr("fill", colors.axisLine)
                 .on('mouseover', function (event: any, d: ActivityRow) {
                     showRecentDetails(d);
                 })
@@ -180,20 +183,20 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
                     return height - yVal;
                 })
                 .attr("width", "10")
-                .style("stroke", "#444")
+                .style("stroke", colors.axisLine)
                 .style("stroke-width", 0.5)
-                .attr("fill", "#74c476")
+                .attr("fill", colors.wrVeryGood)
                 .on('mouseover', function (this: any, event: any, d: ActivityRow) {
                     showRecentDetails(d);
                     d3.select(this).transition()
                         .duration(50)
-                        .attr('fill', '#bcbddc');
+                        .attr('fill', colors.surface);
                 })
                 .on('mouseout', function (this: any, event: any, d: ActivityRow) {
                     hideRecentDetails();
                     d3.select(this).transition()
                         .duration(50)
-                        .attr("fill", "#74c476");
+                        .attr("fill", colors.wrVeryGood);
                 });
 
             const showRecentDetails = (d: ActivityRow) => {
@@ -231,7 +234,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
                 .style("fill", "red")
                 .text("Error rendering chart: " + e.message);
         }
-    }, [chartData]); // Watch chartData
+    }, [chartData, theme]); // Watch chartData and theme
 
     return (
         <div>

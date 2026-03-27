@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import type { TierTypePayload, TierTypePlayerCell, TierTypeTile, TierTypeTrendPoint } from './playerProfileChartData';
 
 type SvgGroupSelection = ReturnType<typeof d3.select>;
@@ -11,6 +12,7 @@ interface TierTypeHeatmapSVGProps {
     data?: TierTypePayload;
     svgWidth?: number;
     svgHeight?: number;
+    theme?: ChartTheme;
 }
 
 const SHIP_TYPE_ORDER = ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'];
@@ -31,7 +33,9 @@ const buildShipTypeOrderMap = (): Map<string, number> => {
     return new Map(SHIP_TYPE_ORDER.map((label, index) => [label, index]));
 };
 
-const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth: number, svgHeight: number) => {
+type Colors = typeof chartColors['light'];
+
+const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth: number, svgHeight: number, colors: Colors) => {
     const container = d3.select(containerElement);
     container.selectAll('*').remove();
 
@@ -42,7 +46,7 @@ const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth
     svg.append('text')
         .attr('x', 16)
         .attr('y', 24)
-        .style('fill', '#6b7280')
+        .style('fill', colors.labelText)
         .style('font-size', '12px')
         .text(message);
 };
@@ -80,25 +84,26 @@ const renderSummaryCard = (
     tile: TierTypeTile,
     playerCell: TierTypePlayerCell | undefined,
     trendDelta: number | null,
+    colors: Colors,
 ) => {
     const columns = [0, 106, 208, 330];
     const headers = ['Type', 'Population', 'Player', 'Trend'];
     const values = [
         {
             text: `${tile.ship_type} T${tile.ship_tier}`,
-            fill: '#084594',
+            fill: colors.accentLink,
             weight: '700',
         },
         {
             text: tile.count.toLocaleString(),
-            fill: '#475569',
+            fill: colors.axisText,
             weight: '600',
         },
         {
             text: playerCell
                 ? `${playerCell.pvp_battles.toLocaleString()} @ ${(playerCell.win_ratio * 100).toFixed(1)}%`
                 : 'No battles in cell',
-            fill: playerCell ? selectColorByWR(playerCell.win_ratio) : '#64748b',
+            fill: playerCell ? selectColorByWR(playerCell.win_ratio) : colors.heatmapUnavailable,
             weight: playerCell ? '700' : '400',
         },
         {
@@ -107,7 +112,7 @@ const renderSummaryCard = (
                 : Math.abs(trendDelta) < 0.15
                     ? 'Aligned'
                     : `${Math.abs(trendDelta).toFixed(1)} ${trendDelta > 0 ? 'above' : 'below'}`,
-            fill: trendDelta == null ? '#64748b' : (trendDelta >= 0 ? '#166534' : '#991b1b'),
+            fill: trendDelta == null ? colors.heatmapUnavailable : (trendDelta >= 0 ? colors.heatmapAboveTrend : colors.heatmapBelowTrend),
             weight: '600',
         },
     ];
@@ -120,7 +125,7 @@ const renderSummaryCard = (
             .attr('dominant-baseline', 'hanging')
             .style('font-size', '9px')
             .style('font-weight', '600')
-            .style('fill', '#64748b')
+            .style('fill', colors.labelMuted)
             .text(header);
     });
 
@@ -142,21 +147,23 @@ const drawChart = (
     payload: TierTypePayload,
     svgWidth: number,
     svgHeight: number,
+    colors: Colors,
+    theme: ChartTheme,
 ) => {
     if (!payload.tiles.length) {
-        drawMessage(containerElement, 'No tier and ship-type population data available.', svgWidth, 112);
+        drawMessage(containerElement, 'No tier and ship-type population data available.', svgWidth, 112, colors);
         return;
     }
 
     if (payload.player_cells.length < 2) {
-        drawMessage(containerElement, 'This captain does not have enough tier and ship-type variety yet to draw a useful heatmap.', svgWidth, 112);
+        drawMessage(containerElement, 'This captain does not have enough tier and ship-type variety yet to draw a useful heatmap.', svgWidth, 112, colors);
         return;
     }
 
     const shipTypes = normalizeShipTypes(payload);
     const tiers = normalizeTiers(payload);
     if (!shipTypes.length || !tiers.length) {
-        drawMessage(containerElement, 'Unable to build tier and ship-type chart axes.', svgWidth, 112);
+        drawMessage(containerElement, 'Unable to build tier and ship-type chart axes.', svgWidth, 112, colors);
         return;
     }
 
@@ -195,8 +202,9 @@ const drawChart = (
     const trendByType = new Map(payload.trend.map((row: TierTypeTrendPoint) => [row.ship_type, row]));
     const maxTileCount = d3.max(payload.tiles, (row: TierTypeTile) => row.count) || 1;
     const maxPlayerBattles = d3.max(payload.player_cells, (row: TierTypePlayerCell) => row.pvp_battles) || 1;
-    const tileColor = d3.scaleSequential(d3.interpolateBlues)
-        .domain([0, maxTileCount]);
+    const tileColor = theme === 'dark'
+        ? d3.scaleSequential(d3.interpolateRgb('#1c2d3f', '#79c0ff')).domain([0, maxTileCount])
+        : d3.scaleSequential(d3.interpolateBlues).domain([0, maxTileCount]);
     const playerRadius = d3.scaleSqrt()
         .domain([0, maxPlayerBattles])
         .range([0, 14]);
@@ -213,31 +221,31 @@ const drawChart = (
         .attr('height', y.bandwidth())
         .attr('rx', 4)
         .attr('fill', (row: TierTypeTile) => tileColor(row.count))
-        .attr('stroke', '#dbe9f6')
+        .attr('stroke', colors.gridLineBlue)
         .attr('stroke-width', 0.8);
 
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisBottom(x).tickSize(0))
         .selectAll('text')
         .style('font-size', '10px')
         .style('font-weight', '500');
 
     svg.append('g')
-        .style('color', '#475569')
+        .style('color', colors.axisText)
         .call(d3.axisLeft(y).tickSize(0).tickPadding(6))
         .selectAll('text')
         .style('font-size', '10px')
         .style('font-weight', '500');
 
-    svg.selectAll('.domain').style('stroke', '#cbd5e1');
+    svg.selectAll('.domain').style('stroke', colors.axisLine);
 
     svg.append('text')
         .attr('x', width / 2)
         .attr('y', height + 34)
         .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
+        .style('fill', colors.labelMuted)
         .style('font-size', '10px')
         .text(payload.x_label);
 
@@ -251,7 +259,7 @@ const drawChart = (
         const trendPoint = trendByType.get(tile.ship_type);
         const trendDelta = trendPoint ? tile.ship_tier - trendPoint.avg_tier : null;
 
-        renderSummaryCard(summaryGroup, tile, playerCell, trendDelta);
+        renderSummaryCard(summaryGroup, tile, playerCell, trendDelta, colors);
     };
 
     const tileNodes = svg.selectAll('.tier-type-tile')
@@ -269,7 +277,7 @@ const drawChart = (
         .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, row: TierTypeTile) {
             renderSummary(row);
             d3.select(this)
-                .attr('stroke', '#1e293b')
+                .attr('stroke', colors.labelStrong)
                 .attr('stroke-width', 1.2);
         })
         .on('mouseout', function (this: SVGRectElement) {
@@ -292,7 +300,7 @@ const drawChart = (
     svg.append('path')
         .datum(payload.trend)
         .attr('fill', 'none')
-        .attr('stroke', '#1e293b')
+        .attr('stroke', colors.labelStrong)
         .attr('stroke-width', 1.6)
         .attr('d', trendLine);
 
@@ -304,7 +312,7 @@ const drawChart = (
         .attr('cx', (row: TierTypeTrendPoint) => (x(row.ship_type) ?? 0) + (x.bandwidth() / 2))
         .attr('cy', (row: TierTypeTrendPoint) => yTrend(row.avg_tier))
         .attr('r', 2.8)
-        .attr('fill', '#1e293b');
+        .attr('fill', colors.labelStrong);
 
     svg.selectAll('.player-cell')
         .data(payload.player_cells)
@@ -316,7 +324,7 @@ const drawChart = (
         .attr('r', (row: TierTypePlayerCell) => Math.max(4, playerRadius(row.pvp_battles)))
         .attr('fill', (row: TierTypePlayerCell) => selectColorByWR(row.win_ratio))
         .attr('fill-opacity', 0.92)
-        .attr('stroke', '#ffffff')
+        .attr('stroke', colors.barStroke)
         .attr('stroke-width', 1.6);
 
     const defaultTile = payload.player_cells.length
@@ -335,6 +343,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
     data,
     svgWidth = 680,
     svgHeight = 332,
+    theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -344,6 +353,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
             return;
         }
 
+        const colors = chartColors[theme];
         const abortController = new AbortController();
 
         const load = async () => {
@@ -357,18 +367,18 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
                 }
 
                 const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
-                drawChart(containerElement, payload, resolvedSvgWidth, svgHeight);
+                drawChart(containerElement, payload, resolvedSvgWidth, svgHeight, colors, theme);
             } catch {
                 if (!abortController.signal.aborted) {
                     const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
-                    drawMessage(containerElement, 'Unable to load tier and ship-type heatmap.', resolvedSvgWidth, 112);
+                    drawMessage(containerElement, 'Unable to load tier and ship-type heatmap.', resolvedSvgWidth, 112, colors);
                 }
             }
         };
 
         load();
         return () => abortController.abort();
-    }, [data, playerId, svgHeight, svgWidth]);
+    }, [data, playerId, svgHeight, svgWidth, theme]);
 
     return <div ref={containerRef} className="w-full" />;
 };

@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import type { LandingPlayer } from './entityTypes';
 
 interface LandingPlayerSVGProps {
     players: LandingPlayer[];
     onSelectPlayer?: (player: LandingPlayer) => void;
     svgHeight?: number;
+    theme?: ChartTheme;
 }
 
 interface PlotDatum extends LandingPlayer {
@@ -41,12 +43,15 @@ const selectLandingPlayerColorByWR = (winRatio: number): string => {
 
 const formatCompactCount = (value: number): string => d3.format('~s')(value).replace('G', 'B');
 
+type Colors = typeof chartColors['light'];
+
 const drawLandingPlayerChart = (
     containerElement: HTMLDivElement,
     players: LandingPlayer[],
     onSelectPlayer: LandingPlayerSVGProps['onSelectPlayer'],
     containerWidth: number,
     svgHeight: number,
+    colors: Colors,
 ) => {
     const margin = { top: 56, right: 16, bottom: 32, left: 48 };
     const width = containerWidth - margin.left - margin.right;
@@ -78,7 +83,7 @@ const drawLandingPlayerChart = (
             .attr('x', 0)
             .attr('y', 16)
             .style('font-size', '12px')
-            .style('fill', '#6b7280')
+            .style('fill', colors.labelText)
             .text('No player chart data available.');
         return;
     }
@@ -97,7 +102,7 @@ const drawLandingPlayerChart = (
         .call(d3.axisBottom(x).ticks(6).tickSize(-height).tickFormat(() => ''));
     svg.select('.landing-player-x-grid')?.select('.domain')?.remove();
     svg.selectAll('.landing-player-x-grid line')
-        .style('stroke', '#dbeafe')
+        .style('stroke', colors.gridLineBlue)
         .style('stroke-width', 1);
 
     svg.append('g')
@@ -105,18 +110,18 @@ const drawLandingPlayerChart = (
         .call(d3.axisLeft(y).ticks(5).tickSize(-width).tickFormat(() => ''));
     svg.select('.landing-player-y-grid')?.select('.domain')?.remove();
     svg.selectAll('.landing-player-y-grid line')
-        .style('stroke', '#eff6ff')
+        .style('stroke', colors.gridLine)
         .style('stroke-width', 1);
 
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisBottom(x).ticks(6).tickFormat((value: number) => formatCompactCount(value)).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
 
     svg.append('g')
-        .style('color', '#64748b')
+        .style('color', colors.labelMuted)
         .call(d3.axisLeft(y).ticks(5).tickFormat((value: number) => `${value.toFixed(0)}%`).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
@@ -124,7 +129,7 @@ const drawLandingPlayerChart = (
     svg.append('text')
         .attr('class', 'axisLabel')
         .style('font-size', '10px')
-        .style('fill', '#6b7280')
+        .style('fill', colors.labelText)
         .attr('text-anchor', 'middle')
         .attr('x', width / 2)
         .attr('y', height + 30)
@@ -133,7 +138,7 @@ const drawLandingPlayerChart = (
     svg.append('text')
         .attr('class', 'axisLabel')
         .style('font-size', '10px')
-        .style('fill', '#6b7280')
+        .style('fill', colors.labelText)
         .attr('text-anchor', 'middle')
         .attr('transform', 'rotate(-90)')
         .attr('x', -height / 2)
@@ -151,7 +156,7 @@ const drawLandingPlayerChart = (
             .attr('y', 0)
             .style('font-size', '11px')
             .attr('font-weight', '700')
-            .style('fill', '#084594')
+            .style('fill', colors.accentLink)
             .text(datum.name);
 
         const metaText = detailGroup.append('text')
@@ -159,7 +164,7 @@ const drawLandingPlayerChart = (
             .attr('y', 18)
             .style('font-size', '10px')
             .attr('font-weight', '400')
-            .style('fill', '#6b7280');
+            .style('fill', colors.labelText);
 
         metaText.append('tspan')
             .text(`${datum.total_wins.toLocaleString()} Wins`);
@@ -197,7 +202,8 @@ const drawLandingPlayerChart = (
             .attr('width', maxX - minX + 20)
             .attr('height', maxY - minY + 12)
             .attr('rx', 6)
-            .attr('fill', 'rgba(255, 255, 255, 0.94)');
+            .attr('fill', colors.surface)
+            .attr('fill-opacity', 0.96);
     };
 
     const hideDetails = () => {
@@ -214,7 +220,7 @@ const drawLandingPlayerChart = (
         .attr('r', 5)
         .style('cursor', onSelectPlayer ? 'pointer' : 'default')
         .attr('fill', (datum: PlotDatum) => selectLandingPlayerColorByWR(datum.pvp_ratio))
-        .attr('stroke', '#444')
+        .attr('stroke', colors.axisText)
         .attr('stroke-width', 1.25);
 
     const circles = svg.selectAll('circle');
@@ -227,7 +233,7 @@ const drawLandingPlayerChart = (
         })
         .on('mouseover', function (this: SVGCircleElement, _event: MouseEvent, datum: PlotDatum) {
             showDetails(datum);
-            d3.select(this).transition().duration(50).attr('fill', '#bcbddc');
+            d3.select(this).transition().duration(50).attr('fill', colors.surface);
         })
         .on('mouseout', function (this: SVGCircleElement, _event: MouseEvent, datum: PlotDatum) {
             hideDetails();
@@ -239,6 +245,7 @@ const LandingPlayerSVG: React.FC<LandingPlayerSVGProps> = ({
     players,
     onSelectPlayer,
     svgHeight = 300,
+    theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerWidth, setContainerWidth] = useState(320);
@@ -262,13 +269,14 @@ const LandingPlayerSVG: React.FC<LandingPlayerSVGProps> = ({
 
     useEffect(() => {
         if (!containerRef.current || containerWidth < 100) return;
+        const colors = chartColors[theme];
         setIsChartReady(false);
-        drawLandingPlayerChart(containerRef.current, players, onSelectPlayer, containerWidth, svgHeight);
+        drawLandingPlayerChart(containerRef.current, players, onSelectPlayer, containerWidth, svgHeight, colors);
         const frameId = window.requestAnimationFrame(() => {
             setIsChartReady(true);
         });
         return () => window.cancelAnimationFrame(frameId);
-    }, [chartSignature, containerWidth, onSelectPlayer, players, svgHeight]);
+    }, [chartSignature, containerWidth, onSelectPlayer, players, svgHeight, theme]);
 
     return <div ref={containerRef} className={`pr-8 transition-opacity duration-150 md:pr-16 ${isChartReady ? 'opacity-100' : 'opacity-0'}`}></div>;
 };
