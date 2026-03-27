@@ -1,7 +1,7 @@
 # Runbook: Profile Charts Permanently Stuck in Warming State (Batch)
 
 **Created**: 2026-03-27
-**Status**: Fix applied — bootstrap guard relaxed; pending deployment and verification
+**Status**: Resolved — deployed 2026-03-27, verified against 3 test players
 **Priority**: High — affects 264,890 of 265,846 visible players
 
 ## Problem
@@ -140,10 +140,16 @@ print(f'battles_json: {len(p.battles_json) if p.battles_json else None} rows')
 
 ## Test Players
 
-| Player | ID | Status | Detail |
-|--------|----|--------|--------|
-| Magnetohydrodynamics | 1039062423 | Stuck | battles_json=None, ranked_json=set, explorer_summary=set, 5592 battles |
-| B277 | 1025693496 | Stuck | battles_json=None, ranked_json=set, explorer_summary=set, 11943 battles |
-| cicero_jones | 1001006706 | Stuck | battles_json=None, ranked_json=set, explorer_summary=set, 3097 battles |
-| John_The_Ruthless | 1020639850 | Working | All fields populated, 26741 pvp_battles |
-| Noob_CoralSea | 1033630907 | Working | All fields populated, 14009 pvp_battles |
+| Player | ID | Pre-fix Status | Post-fix Status |
+|--------|----|----------------|-----------------|
+| Magnetohydrodynamics | 1039062423 | Stuck (battles_json=None) | Fixed — 26 tier_type cells |
+| B277 | 1025693496 | Stuck (battles_json=None) | Fixed — 20 tier_type cells |
+| cicero_jones | 1001006706 | Stuck (battles_json=None) | Fixed — 30 tier_type cells |
+| John_The_Ruthless | 1020639850 | Working | Working |
+| Noob_CoralSea | 1033630907 | Working | Working |
+
+## Deployment Notes
+
+- The clan crawl watchdog (`ensure_crawl_all_clans_running_task`, every 5 min) can trigger a full crawl on restart if a stale lock remains in Redis. Before restarting Celery services, clear the crawl lock: `redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat`
+- Also purge the Celery queue to discard stale tasks: `rabbitmqctl purge_queue celery`
+- Players self-heal on next profile visit. No backfill needed for organic traffic; consider backfill only for analytics completeness.
