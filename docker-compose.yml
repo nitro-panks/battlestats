@@ -82,7 +82,7 @@ services:
     volumes:
       - ./server:/usr/src/app
       - ./agents:/usr/src/agents:ro
-    command: celery -A battlestats worker -l INFO --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle
+    command: celery -A battlestats worker -l INFO -Q default -c 2 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n hydration@%h
     env_file:
       - server/.env
       - server/.env.secrets
@@ -92,6 +92,24 @@ services:
       - RANKED_INCREMENTAL_SKIP_FRESH_HOURS=24
       - RANKED_INCREMENTAL_KNOWN_LIMIT=300
       - RANKED_INCREMENTAL_DISCOVERY_LIMIT=75
+    depends_on:
+      - rabbitmq
+      - redis
+
+  task-runner-background:
+    container_name: battlestats-celery-background
+    build:
+      context: server/
+      dockerfile: Dockerfile
+    volumes:
+      - ./server:/usr/src/app
+      - ./agents:/usr/src/agents:ro
+    command: celery -A battlestats worker -l INFO -Q background -c 1 --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child=50 --without-gossip --without-mingle -n background@%h
+    env_file:
+      - server/.env
+      - server/.env.secrets
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       - rabbitmq
       - redis

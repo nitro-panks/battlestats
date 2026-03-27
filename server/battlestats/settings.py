@@ -88,6 +88,7 @@ DATABASES = {
         'HOST': resolve_db_host(),
         'PORT': os.getenv('DB_PORT', '5432'),
         'OPTIONS': db_options,
+        'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '300')),
     }
 }
 
@@ -259,6 +260,21 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_WORKER_MAX_TASKS_PER_CHILD = int(
     os.getenv('CELERY_WORKER_MAX_TASKS_PER_CHILD', '200'))
+
+CELERY_TASK_DEFAULT_QUEUE = 'default'
+CELERY_TASK_ROUTES = {
+    'warships.tasks.crawl_all_clans_task': {'queue': 'background'},
+    'warships.tasks.incremental_player_refresh_task': {'queue': 'background'},
+    'warships.tasks.incremental_ranked_data_task': {'queue': 'background'},
+    'warships.tasks.refresh_efficiency_rank_snapshot_task': {'queue': 'background'},
+    'warships.tasks.warm_hot_entity_caches_task': {'queue': 'background'},
+    'warships.tasks.warm_landing_best_entity_caches_task': {'queue': 'background'},
+    'warships.tasks.warm_landing_page_content_task': {'queue': 'background'},
+    'warships.tasks.warm_clan_battle_summaries_task': {'queue': 'background'},
+    'warships.tasks.warm_player_ranked_wr_battles_correlation_task': {'queue': 'background'},
+    'warships.tasks.refill_landing_random_players_queue_task': {'queue': 'background'},
+    'warships.tasks.refill_landing_random_clans_queue_task': {'queue': 'background'},
+}
 
 REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'warships.exceptions.custom_exception_handler',

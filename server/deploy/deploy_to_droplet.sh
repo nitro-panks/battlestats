@@ -150,7 +150,8 @@ chown -R "${APP_USER}:${APP_USER}" "${REMOTE_RELEASE}"
 ln -sfn "${REMOTE_RELEASE}" "${APP_ROOT}/current"
 
 systemctl daemon-reload
-systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-beat
+redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
+systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-background battlestats-beat
 systemctl --no-pager --full status battlestats-gunicorn | sed -n '1,25p'
 
 find "${APP_ROOT}/releases" -mindepth 1 -maxdepth 1 -type d | sort | head -n -"${KEEP_RELEASES}" | xargs -r rm -rf
