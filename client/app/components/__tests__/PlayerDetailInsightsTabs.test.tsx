@@ -63,7 +63,7 @@ describe('PlayerDetailInsightsTabs', () => {
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockImplementation((url) => {
             if (url.includes('/api/fetch/player_correlation/tier_type/')) {
-                return new Promise(() => {});
+                return new Promise(() => { });
             }
 
             return Promise.resolve({ data: [], headers: {} });
@@ -71,11 +71,8 @@ describe('PlayerDetailInsightsTabs', () => {
         jest.useFakeTimers();
     });
 
-    afterEach(async () => {
-        await act(async () => {
-            jest.runOnlyPendingTimers();
-            await Promise.resolve();
-        });
+    afterEach(() => {
+        jest.runOnlyPendingTimers();
         jest.useRealTimers();
     });
 
@@ -370,86 +367,5 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.getByText('Performance by Tier')).toBeInTheDocument();
         expect(screen.queryByText('Profile charts are still warming. Try again in a moment.')).not.toBeInTheDocument();
         expect(tierTypeRequestCount).toBeGreaterThanOrEqual(3);
-    });
-
-    it('schedules a background retry while the profile tab is warming', async () => {
-        let tierTypeRequestCount = 0;
-        const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
-        const originalRequestIdleCallback = window.requestIdleCallback;
-        const originalCancelIdleCallback = window.cancelIdleCallback;
-
-        Object.defineProperty(window, 'requestIdleCallback', {
-            configurable: true,
-            writable: true,
-            value: jest.fn(() => 1),
-        });
-        Object.defineProperty(window, 'cancelIdleCallback', {
-            configurable: true,
-            writable: true,
-            value: jest.fn(),
-        });
-
-        mockFetchSharedJson.mockImplementation((url) => {
-            if (url.includes('/api/fetch/player_correlation/tier_type/')) {
-                tierTypeRequestCount += 1;
-
-                if (tierTypeRequestCount < 8) {
-                    return Promise.resolve({
-                        data: pendingTierTypePayload,
-                        headers: { 'X-Tier-Type-Pending': 'true' },
-                    });
-                }
-
-                return Promise.resolve({
-                    data: readyTierTypePayload,
-                    headers: { 'X-Tier-Type-Pending': 'false' },
-                });
-            }
-
-            return Promise.resolve({ data: [], headers: {} });
-        });
-
-        try {
-            render(
-                <PlayerDetailInsightsTabs
-                    playerId={101}
-                    pvpRatio={55}
-                    pvpSurvivalRate={40}
-                    pvpBattles={800}
-                    hasKnownRankedGames
-                    hasClan
-                    efficiencyRows={[]}
-                    isLoading={false}
-                />,
-            );
-
-            expect(screen.getByText('Loading profile charts...')).toBeInTheDocument();
-
-            for (let attempt = 0; attempt < 6; attempt += 1) {
-                await act(async () => {
-                    jest.advanceTimersByTime(1500);
-                    await Promise.resolve();
-                });
-            }
-
-            await waitFor(() => {
-                expect(screen.getByText('Profile charts are still warming. Try again in a moment.')).toBeInTheDocument();
-            });
-
-            expect(tierTypeRequestCount).toBeGreaterThanOrEqual(6);
-            expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 5000);
-        } finally {
-            setTimeoutSpy.mockRestore();
-            Object.defineProperty(window, 'requestIdleCallback', {
-                configurable: true,
-                writable: true,
-                value: originalRequestIdleCallback,
-            });
-            Object.defineProperty(window, 'cancelIdleCallback', {
-                configurable: true,
-                writable: true,
-                value: originalCancelIdleCallback,
-            });
-        }
     });
 });

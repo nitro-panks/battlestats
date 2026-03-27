@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
-from warships.models import Player, Clan, EntityVisitDaily, PlayerExplorerSummary
+from warships.models import Player, Clan, PlayerExplorerSummary
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
@@ -2295,163 +2295,6 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()), LANDING_PLAYER_LIMIT)
 
-    def test_landing_players_popular_mode_orders_by_deduped_views(self):
-        cache.clear()
-        now = timezone.now()
-        today = now.date()
-
-        Player.objects.create(
-            name="PopularThird",
-            player_id=5371,
-            is_hidden=False,
-            pvp_ratio=56.2,
-            pvp_battles=2400,
-            total_battles=3000,
-            days_since_last_battle=6,
-            last_battle_date=today - timedelta(days=6),
-        )
-        Player.objects.create(
-            name="PopularLeader",
-            player_id=5372,
-            is_hidden=False,
-            pvp_ratio=60.4,
-            pvp_battles=4200,
-            total_battles=5000,
-            days_since_last_battle=2,
-            last_battle_date=today - timedelta(days=2),
-        )
-        Player.objects.create(
-            name="PopularRunnerUp",
-            player_id=5373,
-            is_hidden=False,
-            pvp_ratio=58.1,
-            pvp_battles=3900,
-            total_battles=4700,
-            days_since_last_battle=3,
-            last_battle_date=today - timedelta(days=3),
-        )
-
-        EntityVisitDaily.objects.create(
-            date=today,
-            entity_type='player',
-            entity_id=5371,
-            entity_name_snapshot='PopularThird',
-            views_raw=5,
-            views_deduped=5,
-            unique_visitors=5,
-            unique_sessions=5,
-            last_view_at=now - timedelta(minutes=15),
-            source_first_party_views=5,
-        )
-        EntityVisitDaily.objects.create(
-            date=today,
-            entity_type='player',
-            entity_id=5372,
-            entity_name_snapshot='PopularLeader',
-            views_raw=9,
-            views_deduped=9,
-            unique_visitors=9,
-            unique_sessions=9,
-            last_view_at=now - timedelta(minutes=5),
-            source_first_party_views=9,
-        )
-        EntityVisitDaily.objects.create(
-            date=today,
-            entity_type='player',
-            entity_id=5373,
-            entity_name_snapshot='PopularRunnerUp',
-            views_raw=7,
-            views_deduped=7,
-            unique_visitors=7,
-            unique_sessions=7,
-            last_view_at=now - timedelta(minutes=10),
-            source_first_party_views=7,
-        )
-
-        response = self.client.get(
-            "/api/landing/players/?mode=popular&limit=40")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [row["name"] for row in response.json()[:3]],
-            ["PopularLeader", "PopularRunnerUp", "PopularThird"],
-        )
-        self.assertEqual(response["X-Landing-Players-Cache-Mode"], "popular")
-
-    def test_landing_players_popular_mode_excludes_hidden_and_inactive_players(self):
-        cache.clear()
-        now = timezone.now()
-        today = now.date()
-
-        Player.objects.create(
-            name="PopularHidden",
-            player_id=5381,
-            is_hidden=True,
-            pvp_ratio=61.1,
-            pvp_battles=5200,
-            total_battles=6000,
-            days_since_last_battle=2,
-            last_battle_date=today - timedelta(days=2),
-        )
-        Player.objects.create(
-            name="PopularInactive",
-            player_id=5382,
-            is_hidden=False,
-            pvp_ratio=59.4,
-            pvp_battles=5100,
-            total_battles=6200,
-            days_since_last_battle=240,
-            last_battle_date=today - timedelta(days=240),
-        )
-        Player.objects.create(
-            name="PopularEligibleA",
-            player_id=5383,
-            is_hidden=False,
-            pvp_ratio=57.2,
-            pvp_battles=3100,
-            total_battles=3800,
-            days_since_last_battle=8,
-            last_battle_date=today - timedelta(days=8),
-        )
-        Player.objects.create(
-            name="PopularEligibleB",
-            player_id=5384,
-            is_hidden=False,
-            pvp_ratio=55.9,
-            pvp_battles=2900,
-            total_battles=3600,
-            days_since_last_battle=5,
-            last_battle_date=today - timedelta(days=5),
-        )
-
-        for entity_id, name, views, minutes_ago in [
-            (5381, 'PopularHidden', 12, 1),
-            (5382, 'PopularInactive', 11, 2),
-            (5383, 'PopularEligibleA', 9, 3),
-            (5384, 'PopularEligibleB', 8, 4),
-        ]:
-            EntityVisitDaily.objects.create(
-                date=today,
-                entity_type='player',
-                entity_id=entity_id,
-                entity_name_snapshot=name,
-                views_raw=views,
-                views_deduped=views,
-                unique_visitors=views,
-                unique_sessions=views,
-                last_view_at=now - timedelta(minutes=minutes_ago),
-                source_first_party_views=views,
-            )
-
-        response = self.client.get(
-            "/api/landing/players/?mode=popular&limit=40")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [row["name"] for row in response.json()],
-            ["PopularEligibleA", "PopularEligibleB"],
-        )
-
     def test_landing_players_only_include_recently_active_players(self):
         cache.clear()
         today = timezone.now().date()
@@ -2777,10 +2620,7 @@ class ApiContractTests(TestCase):
         response = self.client.get("/api/landing/players/?mode=invalid")
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.json()["detail"],
-            "mode must be one of: random, best, sigma, popular",
-        )
+        self.assertIn("detail", response.json())
 
     def test_landing_recent_players_expose_sleepy_player_flag(self):
         cache.clear()
@@ -2823,10 +2663,6 @@ class ApiContractTests(TestCase):
             cache.get(landing_player_cache_key('sigma', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
             cache.get(landing_player_published_cache_key('sigma', LANDING_PLAYER_LIMIT)))
-        self.assertIsNotNone(
-            cache.get(landing_player_cache_key('popular', LANDING_PLAYER_LIMIT)))
-        self.assertIsNotNone(
-            cache.get(landing_player_published_cache_key('popular', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
 
     def test_landing_recent_clans_orders_by_last_lookup_desc(self):
@@ -3034,91 +2870,6 @@ class ApiContractTests(TestCase):
             player_id=player.player_id,
             force_refresh=True,
         )
-
-    @patch("warships.data.update_player_data")
-    def test_player_detail_repairs_stale_missing_actual_kdr_before_serializing(self, mock_update_player_data):
-        now = timezone.now()
-        player = Player.objects.create(
-            name="DetailActualKdrImmediateRepair",
-            player_id=8186,
-            is_hidden=False,
-            pvp_ratio=52.5,
-            pvp_battles=17089,
-            pvp_frags=0,
-            pvp_survived_battles=0,
-            pvp_deaths=0,
-            actual_kdr=None,
-            creation_date=now - timedelta(days=180),
-            battles_json=[
-                {"ship_name": "Ship A", "ship_type": "Destroyer",
-                    "ship_tier": 8, "pvp_battles": 50, "kdr": 1.3},
-            ],
-            last_fetch=now - timedelta(days=2),
-        )
-
-        def fake_update_player_data(player, force_refresh=False):
-            player.pvp_frags = 120
-            player.pvp_survived_battles = 20
-            player.pvp_deaths = 80
-            player.actual_kdr = 1.5
-            player.last_fetch = timezone.now()
-            player.save(update_fields=[
-                        "pvp_frags", "pvp_survived_battles", "pvp_deaths", "actual_kdr", "last_fetch"])
-
-        mock_update_player_data.side_effect = fake_update_player_data
-
-        response = self.client.get(
-            "/api/player/DetailActualKdrImmediateRepair/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["actual_kdr"], 1.5)
-        mock_update_player_data.assert_called_once_with(
-            player=player, force_refresh=True)
-
-    @patch("warships.data.update_player_data")
-    def test_player_detail_repairs_stale_missing_efficiency_data_before_serializing(self, mock_update_player_data):
-        now = timezone.now()
-        player = Player.objects.create(
-            name="DetailEfficiencyImmediateRepair",
-            player_id=8187,
-            is_hidden=False,
-            pvp_ratio=52.5,
-            pvp_battles=17089,
-            actual_kdr=1.4,
-            efficiency_json=None,
-            creation_date=now - timedelta(days=180),
-            battles_json=[
-                {"ship_name": "Ship A", "ship_type": "Destroyer",
-                    "ship_tier": 8, "pvp_battles": 50, "kdr": 1.3},
-            ],
-            last_fetch=now - timedelta(days=2),
-        )
-
-        def fake_update_player_data(player, force_refresh=False):
-            player.efficiency_json = [{
-                "ship_id": 111,
-                "top_grade_class": 1,
-                "top_grade_label": "Expert",
-                "badge_label": "Expert",
-                "ship_name": "Ship A",
-                "ship_chart_name": "Ship A",
-                "ship_type": "Destroyer",
-                "ship_tier": 8,
-                "nation": "usa",
-            }]
-            player.last_fetch = timezone.now()
-            player.save(update_fields=["efficiency_json", "last_fetch"])
-
-        mock_update_player_data.side_effect = fake_update_player_data
-
-        response = self.client.get(
-            "/api/player/DetailEfficiencyImmediateRepair/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json()["efficiency_json"][0]["ship_name"], "Ship A")
-        mock_update_player_data.assert_called_once_with(
-            player=player, force_refresh=True)
 
     def test_player_distribution_returns_survival_payload(self):
         Player.objects.create(
@@ -3335,32 +3086,6 @@ class ApiContractTests(TestCase):
             for point in payload["trend"]
         ))
 
-    def test_player_correlation_distribution_resolves_player_name(self):
-        cache.clear()
-
-        Player.objects.create(
-            name="TierTypeByName",
-            player_id=8841,
-            is_hidden=False,
-            pvp_battles=1400,
-            battles_json=[
-                {"ship_name": "Ship A", "ship_type": "Destroyer",
-                    "ship_tier": 10, "pvp_battles": 40, "wins": 24},
-            ],
-        )
-
-        response = self.client.get(
-            "/api/fetch/player_correlation/tier_type/TierTypeByName/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["player_cells"][0]["ship_type"], "Destroyer")
-
-    def test_player_correlation_distribution_unknown_player_name_returns_404(self):
-        response = self.client.get(
-            "/api/fetch/player_correlation/tier_type/NoSuchCaptain/")
-
-        self.assertEqual(response.status_code, 404)
-
     @patch("warships.data.update_battle_data_task.delay")
     def test_player_correlation_distribution_flags_pending_tier_type_refresh_when_player_battles_are_missing(self, mock_update_battle_data_task):
         cache.clear()
@@ -3394,7 +3119,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["metric"], "tier_type")
         self.assertEqual(payload["player_cells"], [])
         self.assertTrue(payload["tiles"])
-        mock_update_battle_data_task.assert_called_once_with(player_id="8834")
+        mock_update_battle_data_task.assert_called_once_with(player_id=8834)
 
     def test_player_correlation_distribution_returns_ranked_wr_battles_payload(self):
         cache.clear()
@@ -3938,49 +3663,6 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
 
-    def test_randoms_data_resolves_player_name_without_server_error(self):
-        now = timezone.now()
-        Player.objects.create(
-            name="LookupByNameCaptain",
-            player_id=999111,
-            battles_json=[
-                {
-                    "ship_name": "Lookup Ship",
-                    "ship_chart_name": "Lookup Ship",
-                    "ship_type": "Destroyer",
-                    "ship_tier": 8,
-                    "pvp_battles": 25,
-                    "win_ratio": 0.52,
-                    "wins": 13,
-                }
-            ],
-            randoms_json=[
-                {
-                    "ship_name": "Lookup Ship",
-                    "ship_chart_name": "Lookup Ship",
-                    "ship_type": "Destroyer",
-                    "ship_tier": 8,
-                    "pvp_battles": 25,
-                    "win_ratio": 0.52,
-                    "wins": 13,
-                }
-            ],
-            battles_updated_at=now,
-            randoms_updated_at=now,
-        )
-
-        response = self.client.get(
-            "/api/fetch/randoms_data/LookupByNameCaptain/?all=true")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()[0]["ship_name"], "Lookup Ship")
-
-    def test_randoms_data_unknown_player_name_returns_empty_list(self):
-        response = self.client.get("/api/fetch/randoms_data/NoSuchCaptain/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), [])
-
     @override_settings(SECRET_KEY="test-secret")
     @patch("warships.views.get_agentic_trace_dashboard")
     def test_agentic_trace_dashboard_endpoint_returns_summary(self, mock_get_agentic_trace_dashboard):
@@ -4141,51 +3823,6 @@ class ApiThrottleTests(TestCase):
         self.assertIn("X-Randoms-Updated-At", response)
         mock_fetch_randoms_data.assert_called_once_with("654")
 
-    @patch("warships.views.fetch_randoms_data")
-    def test_randoms_data_all_falls_back_when_battles_json_is_unextractable(self, mock_fetch_randoms_data):
-        now = timezone.now()
-        Player.objects.create(
-            name="BrokenBattleCache",
-            player_id=655,
-            pvp_battles=31,
-            battles_json=[
-                {
-                    "ship_id": 900001,
-                    "pvp": {"battles": 31, "wins": 18},
-                }
-            ],
-            randoms_json=[
-                {
-                    "ship_name": "Fallback Ship",
-                    "ship_chart_name": "Fallback Ship",
-                    "ship_type": "Cruiser",
-                    "ship_tier": 8,
-                    "pvp_battles": 31,
-                    "win_ratio": 0.58,
-                    "wins": 18,
-                }
-            ],
-            randoms_updated_at=now,
-        )
-        mock_fetch_randoms_data.return_value = [
-            {
-                "ship_name": "Fallback Ship",
-                "ship_chart_name": "Fallback Ship",
-                "ship_type": "Cruiser",
-                "ship_tier": 8,
-                "pvp_battles": 31,
-                "win_ratio": 0.58,
-                "wins": 18,
-            }
-        ]
-
-        response = self.client.get("/api/fetch/randoms_data/655/?all=true")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 1)
-        self.assertEqual(response.json()[0]["ship_name"], "Fallback Ship")
-        mock_fetch_randoms_data.assert_called_once_with("655")
-
     @patch("warships.views.is_clan_battle_summary_refresh_pending", return_value=True)
     @patch("warships.tasks.queue_clan_battle_summary_refresh")
     def test_clan_battle_seasons_flags_pending_refresh_on_empty_cache(self, mock_queue_refresh, _mock_pending):
@@ -4221,41 +3858,6 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
         self.assertEqual(response["X-Clan-Plot-Pending"], "true")
-
-    def test_clan_data_serves_plot_rows_while_member_refresh_catches_up(self):
-        clan = Clan.objects.create(
-            clan_id=44,
-            name="RenderablePlotClan",
-            tag="RPC",
-            members_count=4,
-            last_fetch=timezone.now(),
-        )
-        Player.objects.create(
-            name="PlotMemberA",
-            player_id=4401,
-            clan=clan,
-            pvp_battles=250,
-            pvp_ratio=55.0,
-        )
-        Player.objects.create(
-            name="PlotMemberB",
-            player_id=4402,
-            clan=clan,
-            pvp_battles=180,
-            pvp_ratio=52.5,
-        )
-
-        response = self.client.get("/api/fetch/clan_data/44:active")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json(),
-            [
-                {"player_name": "PlotMemberA", "pvp_battles": 250, "pvp_ratio": 55.0},
-                {"player_name": "PlotMemberB", "pvp_battles": 180, "pvp_ratio": 52.5},
-            ],
-        )
-        self.assertNotIn("X-Clan-Plot-Pending", response)
 
     @patch("warships.views.fetch_player_clan_battle_seasons")
     def test_player_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):

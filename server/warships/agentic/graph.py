@@ -38,7 +38,6 @@ class AgentState(TypedDict, total=False):
     guidance_notes: list[str]
     workflow_kind: str
     memory_enabled: bool
-    memory_backend: str
     memory_environment: str
     memory_namespace: tuple[str, str, str]
     retrieved_memories: list[dict[str, Any]]
@@ -297,7 +296,6 @@ def _load_memory_context(state: AgentState) -> dict:
         state.get("task", ""),
         {
             "memory_enabled": state.get("memory_enabled"),
-            "memory_backend": state.get("memory_backend"),
             "memory_records": state.get("retrieved_memories", []),
             "verification_commands": state.get("verification_commands", []),
             "touched_files": state.get("touched_files", []),
@@ -308,7 +306,6 @@ def _load_memory_context(state: AgentState) -> dict:
     notes.extend(memory_context.get("memory_notes", []))
     return {
         "memory_enabled": memory_context["memory_enabled"],
-        "memory_backend": memory_context["memory_backend"],
         "memory_environment": memory_context["memory_environment"],
         "memory_namespace": memory_context["memory_namespace"],
         "workflow_kind": memory_context["workflow_kind"],
@@ -886,7 +883,6 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
             "guidance_notes": [],
             "workflow_kind": str(context.get("workflow_kind", "")),
             "memory_enabled": bool(context.get("memory_enabled", False)),
-            "memory_backend": str(context.get("memory_backend", "")),
             "memory_environment": str(context.get("memory_environment", "")),
             "memory_namespace": tuple(context.get("memory_namespace", ()) or ()),
             "retrieved_memories": list(context.get("memory_records", [])),

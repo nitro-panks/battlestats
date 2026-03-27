@@ -60,16 +60,8 @@ SLEEPY_PLAYER_DAYS_THRESHOLD = 365
 CLAN_RANKED_HYDRATION_STALE_AFTER = timedelta(hours=24)
 CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT', '8')))
-CLAN_BATTLE_BADGE_REFRESH_DAYS = max(
-    1,
-    int(
-        os.getenv(
-            'CLAN_BATTLE_BADGE_REFRESH_DAYS',
-            os.getenv('CLAN_BATTLE_SUMMARY_STALE_DAYS', '14'),
-        )
-    ),
-)
-CLAN_BATTLE_SUMMARY_STALE_DAYS = CLAN_BATTLE_BADGE_REFRESH_DAYS
+CLAN_BATTLE_SUMMARY_STALE_DAYS = max(
+    1, int(os.getenv('CLAN_BATTLE_SUMMARY_STALE_DAYS', '7')))
 CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT', '8')))
 PLAYER_EFFICIENCY_STALE_AFTER = timedelta(hours=24)
@@ -157,32 +149,6 @@ def player_battle_data_needs_refresh(
     if player.battles_json is None:
         return True
     return _is_stale_timestamp(player.battles_updated_at, stale_after)
-
-
-def repair_inconsistent_player_cache_timestamps(player: Player) -> bool:
-    update_fields: list[str] = []
-
-    if player.battles_json is None and player.battles_updated_at is not None:
-        player.battles_updated_at = None
-        update_fields.append('battles_updated_at')
-
-    if player.randoms_json is None and player.randoms_updated_at is not None:
-        player.randoms_updated_at = None
-        update_fields.append('randoms_updated_at')
-
-    if player.tiers_json is None and player.tiers_updated_at is not None:
-        player.tiers_updated_at = None
-        update_fields.append('tiers_updated_at')
-
-    if player.type_json is None and player.type_updated_at is not None:
-        player.type_updated_at = None
-        update_fields.append('type_updated_at')
-
-    if not update_fields:
-        return False
-
-    player.save(update_fields=update_fields)
-    return True
 
 
 def player_activity_data_needs_refresh(
@@ -663,7 +629,7 @@ def clan_battle_summary_is_stale(player: Player) -> bool:
     updated_at = summary.clan_battle_summary_updated_at
     if updated_at is None:
         return True
-    return (django_timezone.now() - updated_at).days >= CLAN_BATTLE_BADGE_REFRESH_DAYS
+    return (django_timezone.now() - updated_at).days >= CLAN_BATTLE_SUMMARY_STALE_DAYS
 
 
 def maybe_refresh_clan_battle_data(player: Player) -> None:
@@ -2359,10 +2325,6 @@ def _extract_randoms_rows(battles_json: Any, limit: Optional[int] = 20) -> list[
     return rows if limit is None else rows[:limit]
 
 
-def _randoms_rows_need_battle_refresh(player: Player, rows: list[dict]) -> bool:
-    return not rows and int(player.pvp_battles or 0) > 0
-
-
 def _aggregate_battles_by_key(battles_json: Any, group_key: str) -> list[dict]:
     if not isinstance(battles_json, list):
         return []
@@ -2829,7 +2791,7 @@ def fetch_landing_activity_attrition() -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)                          :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -2929,32 +2891,25 @@ def _build_linear_distribution_bins(qs, field_name: str, value_min: float, value
 
 
 def _build_explicit_distribution_bins(qs, field_name: str, bin_edges: list[int]) -> list[dict]:
-    aggregate_counts: dict[str, int] = {}
-    aggregate_filters = {
-        '__total': Count('id'),
-    }
-
-    for index, lower in enumerate(bin_edges[:-1]):
-        upper = bin_edges[index + 1]
-        upper_lookup = 'lte' if index == len(bin_edges) - 2 else 'lt'
-        aggregate_filters[f'bin_{index}'] = Count(
-            'id',
-            filter=Q(
-                **{
-                    f'{field_name}__gte': lower,
-                    f'{field_name}__{upper_lookup}': upper,
-                }
-            ),
-        )
-
-    aggregate_counts = qs.aggregate(**aggregate_filters)
     bins: list[dict] = []
+
     for index, lower in enumerate(bin_edges[:-1]):
         upper = bin_edges[index + 1]
+        filters = {
+            f'{field_name}__gte': lower,
+            f'{field_name}__lt': upper,
+        }
+
+        if index == len(bin_edges) - 2:
+            filters = {
+                f'{field_name}__gte': lower,
+                f'{field_name}__lte': upper,
+            }
+
         bins.append({
             'bin_min': lower,
             'bin_max': upper,
-            'count': int(aggregate_counts.get(f'bin_{index}', 0) or 0),
+            'count': qs.filter(**filters).count(),
         })
 
     return bins
@@ -2980,7 +2935,6 @@ def fetch_player_population_distribution(metric: str) -> dict:
     if config['scale'] == 'log':
         bins = _build_explicit_distribution_bins(
             qs, field_name, config['bin_edges'])
-        tracked_population = sum(bin_row['count'] for bin_row in bins)
     else:
         bins = _build_linear_distribution_bins(
             qs,
@@ -2989,7 +2943,6 @@ def fetch_player_population_distribution(metric: str) -> dict:
             config['range_max'],
             config['bin_width'],
         )
-        tracked_population = qs.count()
 
     payload = {
         'metric': metric,
@@ -2997,7 +2950,7 @@ def fetch_player_population_distribution(metric: str) -> dict:
         'x_label': config['x_label'],
         'scale': config['scale'],
         'value_format': config['value_format'],
-        'tracked_population': tracked_population,
+        'tracked_population': qs.count(),
         'bins': bins,
     }
 
@@ -3208,7 +3161,6 @@ def _fetch_player_tier_type_population_correlation() -> dict:
 
 def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None) -> dict:
     player = player or Player.objects.get(player_id=player_id)
-    repair_inconsistent_player_cache_timestamps(player)
     population_payload = _fetch_player_tier_type_population_correlation()
     if not player.battles_json:
         _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
@@ -4065,16 +4017,10 @@ def update_type_data(player_id: str) -> list:
 def fetch_randoms_data(player_id: str) -> list:
     try:
         player = Player.objects.get(player_id=player_id)
-        repair_inconsistent_player_cache_timestamps(player)
-        cached_randoms_rows = _extract_randoms_rows(
-            player.randoms_json, limit=20)
-        extracted_battle_rows = _extract_randoms_rows(
-            player.battles_json, limit=20)
-
         if not player.battles_json:
             _dispatch_async_refresh(
                 update_battle_data_task, player_id=player_id)
-            return cached_randoms_rows
+            return _extract_randoms_rows(player.randoms_json, limit=20)
     except Player.DoesNotExist:
         return []
 
@@ -4085,39 +4031,16 @@ def fetch_randoms_data(player_id: str) -> list:
         )
 
         if not has_required_fields:
-            if extracted_battle_rows:
-                _dispatch_async_refresh(update_randoms_data_task, player_id)
-                return extracted_battle_rows
-
-            if _randoms_rows_need_battle_refresh(player, extracted_battle_rows):
-                _dispatch_async_refresh(
-                    update_battle_data_task, player_id=player_id)
             _dispatch_async_refresh(update_randoms_data_task, player_id)
-            return cached_randoms_rows
+            return []
 
         if player_battle_data_needs_refresh(player):
             _dispatch_async_refresh(
                 update_battle_data_task, player_id=player_id)
-        if cached_randoms_rows:
-            return cached_randoms_rows
+        return _extract_randoms_rows(player.randoms_json, limit=20)
 
-        if extracted_battle_rows:
-            _dispatch_async_refresh(update_randoms_data_task, player_id)
-            return extracted_battle_rows
-
-        if _randoms_rows_need_battle_refresh(player, extracted_battle_rows):
-            _dispatch_async_refresh(
-                update_battle_data_task, player_id=player_id)
-        return []
-
-    if extracted_battle_rows:
-        _dispatch_async_refresh(update_randoms_data_task, player_id)
-        return extracted_battle_rows
-
-    if _randoms_rows_need_battle_refresh(player, extracted_battle_rows):
-        _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
     _dispatch_async_refresh(update_randoms_data_task, player_id)
-    return cached_randoms_rows
+    return []
 
 
 def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
@@ -4156,29 +4079,21 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
     if needs_member_refresh:
         _dispatch_async_refresh(update_clan_members_task, clan_id=clan_id)
 
-    payload = build_plot_payload(members)
-
     if cached is not None:
         if cached:
             return cached
 
-        if payload:
-            cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
-            return payload
-
-        if needs_member_refresh:
+        if needs_clan_refresh or needs_member_refresh:
             return []
 
+        payload = build_plot_payload(members)
         cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
         return payload
 
-    if payload:
-        cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
-        return payload
-
-    if needs_member_refresh:
+    if needs_clan_refresh or needs_member_refresh:
         return []
 
+    payload = build_plot_payload(members)
     cache.set(cache_key, payload, CLAN_PLOT_DATA_CACHE_TTL)
     return payload
 
@@ -4320,6 +4235,9 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
 
     # If the player is not hidden, map additional statistics
     if not player.is_hidden:
+        stats_updated_at = player_data.get("stats_updated_at")
+        player.battles_updated_at = datetime.fromtimestamp(
+            stats_updated_at, tz=timezone.utc) if stats_updated_at else None
         stats = player_data.get("statistics", {})
         player.total_battles = stats.get("battles", 0)
         pvp_stats = stats.get("pvp", {})
@@ -4347,12 +4265,6 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
             pvp_ratio=player.pvp_ratio,
             pvp_survival_rate=player.pvp_survival_rate,
         )
-
-        # battles_updated_at tracks the per-ship battle cache, not the account
-        # summary payload timestamp. Clear impossible legacy state when the cache
-        # is absent instead of stamping a misleading fresh marker here.
-        if player.battles_json is None:
-            player.battles_updated_at = None
     else:
         player.total_battles = 0
         player.pvp_battles = 0

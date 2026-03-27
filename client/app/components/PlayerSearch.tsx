@@ -236,8 +236,8 @@ const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SHOW_PLAYER_EXPLORER = false;
 const LANDING_FETCH_TTL_MS = 1500;
 
-type LandingClanMode = 'random' | 'best' | 'recent';
-type LandingPlayerMode = 'random' | 'best' | 'sigma' | 'recent';
+type LandingClanMode = 'random' | 'best';
+type LandingPlayerMode = 'random' | 'best' | 'sigma';
 
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 
@@ -259,7 +259,7 @@ const PlayerSearch: React.FC = () => {
     const lastSubmittedSearchRef = useRef<string>('');
     const bestLandingWarmupRequestedRef = useRef(false);
 
-    const fetchLandingClans = useCallback(async (mode: Exclude<LandingClanMode, 'recent'>) => {
+    const fetchLandingClans = useCallback(async (mode: LandingClanMode) => {
         const { data: payload } = await fetchSharedJson<LandingClan[]>(
             `/api/landing/clans/?mode=${mode}&limit=${LANDING_CLAN_LIMIT}`,
             {
@@ -305,7 +305,7 @@ const PlayerSearch: React.FC = () => {
         }
     }, [triggerBestLandingWarmup]);
 
-    const fetchLandingPlayers = useCallback(async (mode: Exclude<LandingPlayerMode, 'recent'>) => {
+    const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode) => {
         try {
             const { data: payload } = await fetchSharedJson<LandingPlayer[]>(
                 `/api/landing/players/?mode=${mode}&limit=${LANDING_PLAYER_LIMIT}`,
@@ -352,10 +352,6 @@ const PlayerSearch: React.FC = () => {
     }, [fetchLandingData]);
 
     useEffect(() => {
-        if (clanMode === 'recent') {
-            return;
-        }
-
         void fetchLandingClans(clanMode).catch((err) => {
             console.error('Error fetching landing clans:', err);
             setClans([]);
@@ -363,38 +359,16 @@ const PlayerSearch: React.FC = () => {
     }, [clanMode, fetchLandingClans]);
 
     useEffect(() => {
-        if (playerMode === 'recent') {
-            return;
-        }
-
         void fetchLandingPlayers(playerMode);
     }, [fetchLandingPlayers, playerMode]);
 
     useIntervalRefresh(() => {
-        if (clanMode === 'recent') {
-            return;
-        }
-
         void fetchLandingClans(clanMode);
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
     useIntervalRefresh(() => {
-        if (playerMode === 'recent') {
-            return;
-        }
-
         void fetchLandingPlayers(playerMode);
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
-
-    const visibleLandingPlayers = useMemo(() => {
-        if (playerMode === 'recent') {
-            return recentPlayers.slice(0, LANDING_PLAYER_LIMIT);
-        }
-
-        return players;
-    }, [playerMode, players, recentPlayers]);
-
-    const shouldShowPlayerSurface = players.length > 0 || recentPlayers.length > 0;
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
         const { data } = await fetchSharedJson<PlayerData>(
@@ -436,10 +410,6 @@ const PlayerSearch: React.FC = () => {
     };
 
     const visibleLandingClans = useMemo(() => {
-        if (clanMode === 'recent') {
-            return recentClans.slice(0, LANDING_CLAN_LIMIT);
-        }
-
         if (clanMode === 'best') {
             return [...clans]
                 .filter((clan) => {
@@ -469,17 +439,7 @@ const PlayerSearch: React.FC = () => {
         }
 
         return clans.slice(0, LANDING_CLAN_LIMIT);
-    }, [clanMode, clans, recentClans]);
-
-    const landingClanChartData = useMemo(() => {
-        if (clanMode === 'recent') {
-            return visibleLandingClans;
-        }
-
-        return clans;
-    }, [clanMode, clans, visibleLandingClans]);
-
-    const shouldShowClanSurface = clans.length > 0 || recentClans.length > 0;
+    }, [clanMode, clans]);
 
     const handleSelectMember = useCallback(async (memberName: string) => {
         router.push(buildPlayerPath(memberName));
@@ -545,12 +505,12 @@ const PlayerSearch: React.FC = () => {
                 <div>
                     {error && <p className="text-red-600">{error}</p>}
 
-                    {shouldShowClanSurface && (
-                        <div className={`${error ? 'mt-6' : 'mt-2'} pt-3`}>
-                            <div className="mt-1">
+                    {clans.length > 0 && (
+                        <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
+                            <div className="mt-3">
                                 <LandingClanSVG
                                     clans={visibleLandingClans}
-                                    heatmapClans={landingClanChartData}
+                                    heatmapClans={clans}
                                     onSelectClan={handleSelectClan}
                                 />
                             </div>
@@ -572,14 +532,6 @@ const PlayerSearch: React.FC = () => {
                                 >
                                     Best
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setClanMode('recent')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'recent' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
-                                    aria-pressed={clanMode === 'recent'}
-                                >
-                                    Recent
-                                </button>
                                 <div className="group relative inline-flex items-center">
                                     <button
                                         type="button"
@@ -600,24 +552,31 @@ const PlayerSearch: React.FC = () => {
                             <ClanTagGrid
                                 clans={visibleLandingClans}
                                 onSelectClan={handleSelectClan}
-                                ariaLabelPrefix={clanMode === 'recent' ? 'Show recent' : 'Show'}
+                                ariaLabelPrefix="Show"
                             />
 
-                            {clanMode === 'recent' && recentClans.length === 0 ? (
+                            <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Recently Viewed Clans</h3>
+                            {recentClans.length > 0 ? (
+                                <ClanTagGrid
+                                    clans={recentClans.slice(0, LANDING_CLAN_LIMIT)}
+                                    onSelectClan={handleSelectClan}
+                                    ariaLabelPrefix="Show recent"
+                                />
+                            ) : (
                                 <p className="mt-2 text-sm text-[#6baed6]">No recently viewed clans yet.</p>
-                            ) : null}
+                            )}
                         </div>
                     )}
 
-                    {shouldShowPlayerSurface && (
+                    {players.length > 0 && (
                         <div className="mt-6 border-t border-[#c6dbef] pt-6">
                             <div className="mt-1">
                                 <LandingPlayerSVG
-                                    players={visibleLandingPlayers}
+                                    players={players}
                                     onSelectPlayer={(player) => handleSelectMember(player.name)}
                                 />
                             </div>
-                            <div className="mt-4 flex flex-wrap items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Active Players</h3>
                                 <button
                                     type="button"
@@ -643,14 +602,6 @@ const PlayerSearch: React.FC = () => {
                                 >
                                     Sigma
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setPlayerMode('recent')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'recent' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
-                                    aria-pressed={playerMode === 'recent'}
-                                >
-                                    Recent
-                                </button>
                                 <div className="group relative inline-flex items-center">
                                     <button
                                         type="button"
@@ -669,14 +620,21 @@ const PlayerSearch: React.FC = () => {
                                 </div>
                             </div>
                             <PlayerNameGrid
-                                players={visibleLandingPlayers}
+                                players={players}
                                 onSelectMember={handleSelectMember}
-                                ariaLabelPrefix={playerMode === 'recent' ? 'Show recent' : 'Show'}
+                                ariaLabelPrefix="Show"
                             />
 
-                            {playerMode === 'recent' && recentPlayers.length === 0 ? (
+                            <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Recently Viewed</h3>
+                            {recentPlayers.length > 0 ? (
+                                <PlayerNameGrid
+                                    players={recentPlayers.slice(0, LANDING_PLAYER_LIMIT)}
+                                    onSelectMember={handleSelectMember}
+                                    ariaLabelPrefix="Show recent"
+                                />
+                            ) : (
                                 <p className="mt-2 text-sm text-[#6baed6]">No recently viewed players yet.</p>
-                            ) : null}
+                            )}
                         </div>
                     )}
 
