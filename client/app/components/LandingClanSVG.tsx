@@ -211,7 +211,8 @@ const drawLandingClanChart = (
             .attr('width', maxX - minX + 20)
             .attr('height', maxY - minY + 12)
             .attr('rx', 6)
-            .attr('fill', 'rgba(255, 255, 255, 0.94)');
+            .attr('fill', colors.surface)
+            .attr('fill-opacity', 0.96);
     };
 
     const hideDetails = () => {
