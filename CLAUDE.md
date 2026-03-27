@@ -82,7 +82,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 
 ### Key backend modules
 - `server/warships/data.py` (4.5K lines) — Core hydration, chart payload assembly, cache warming
-- `server/warships/landing.py` — Landing page modes (Best, Trending, Recent, Random) with published-cache + durable fallback
+- `server/warships/landing.py` — Landing page modes (Best, Random, Sigma, Recent) with published-cache + durable fallback
 - `server/warships/tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing warmup
 - `server/warships/views.py` — DRF views and `@api_view` endpoints
 
@@ -104,7 +104,9 @@ Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, En
 
 ## Team Doctrine (Pre-commit Requirements)
 
-These rules from `agents/knowledge/agentic-team-doctrine.json` apply to every commit:
+**Agents must read `agents/knowledge/agentic-team-doctrine.json` before planning or executing multi-step work.** It contains the authoritative decision rules, pre-commit checklist, and quality gates that govern all changes in this repository.
+
+These rules from that file apply to every commit:
 
 1. **Documentation review** — Update or synthesize durable docs that describe new behavior, contracts, or operational state.
 2. **Doc-vs-code reconciliation** — When documentation is uncertain, verify against live code and tests before committing.
