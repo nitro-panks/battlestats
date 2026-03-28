@@ -78,6 +78,31 @@ test.describe('Mobile chart overflow', () => {
         }
     });
 
+    test('player detail: ranked tab has no horizontal overflow', async ({ page }) => {
+        await page.goto('/player/lil_boots', { waitUntil: 'networkidle' });
+
+        const rankedTab = page.locator('button[role="tab"]:text("Ranked")');
+        const hasRanked = await rankedTab.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+        if (!hasRanked) {
+            console.log('Ranked tab not visible — player may not have ranked data, skipping');
+            return;
+        }
+        await rankedTab.click();
+        await page.waitForTimeout(3000);
+
+        const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
+        console.log(`Ranked tab body scroll width: ${bodyWidth}px`);
+        expect(bodyWidth).toBeLessThanOrEqual(VIEWPORT_WIDTH + OVERFLOW_TOLERANCE);
+
+        const svgWidths = await page.evaluate(() =>
+            Array.from(document.querySelectorAll('svg')).map((svg) => svg.getBoundingClientRect().width)
+        );
+        console.log(`Ranked tab SVG widths: ${JSON.stringify(svgWidths)}`);
+        for (const w of svgWidths) {
+            expect(w).toBeLessThanOrEqual(VIEWPORT_WIDTH + OVERFLOW_TOLERANCE);
+        }
+    });
+
     test('clan detail: chart has no horizontal overflow', async ({ page }) => {
         // Use a known clan page
         await page.goto('/clan/1000060069-friday-night-fights', { waitUntil: 'networkidle' });

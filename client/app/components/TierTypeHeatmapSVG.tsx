@@ -85,8 +85,11 @@ const renderSummaryCard = (
     playerCell: TierTypePlayerCell | undefined,
     trendDelta: number | null,
     colors: Colors,
+    chartWidth?: number,
 ) => {
-    const columns = [0, 106, 208, 330];
+    const compact = chartWidth != null && chartWidth < 480;
+    const availableWidth = compact ? Math.max(chartWidth - 40, 240) : 400;
+    const columns = [0, availableWidth * 0.27, availableWidth * 0.52, availableWidth * 0.82];
     const headers = ['Type', 'Population', 'Player', 'Trend'];
     const values = [
         {
@@ -263,7 +266,7 @@ const drawChart = (
         const trendPoint = trendByType.get(tile.ship_type);
         const trendDelta = trendPoint ? tile.ship_tier - trendPoint.avg_tier : null;
 
-        renderSummaryCard(summaryGroup, tile, playerCell, trendDelta, colors);
+        renderSummaryCard(summaryGroup, tile, playerCell, trendDelta, colors, svgWidth);
     };
 
     const tileNodes = svg.selectAll('.tier-type-tile')
@@ -360,6 +363,22 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
         const colors = chartColors[theme];
         const abortController = new AbortController();
 
+        let cachedPayload: TierTypePayload | null = null;
+        let resizeFrame: number | null = null;
+
+        const resolveWidth = () => Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
+
+        const redraw = () => {
+            if (cachedPayload && containerElement) {
+                drawChart(containerElement, cachedPayload, resolveWidth(), svgHeight, colors, theme);
+            }
+        };
+
+        const onResize = () => {
+            if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
+            resizeFrame = requestAnimationFrame(redraw);
+        };
+
         const load = async () => {
             try {
                 const payload = data ?? (await fetchSharedJson<TierTypePayload>(`/api/fetch/player_correlation/tier_type/${playerId}/`, {
@@ -370,18 +389,22 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
                     return;
                 }
 
-                const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
-                drawChart(containerElement, payload, resolvedSvgWidth, svgHeight, colors, theme);
+                cachedPayload = payload;
+                drawChart(containerElement, payload, resolveWidth(), svgHeight, colors, theme);
             } catch {
                 if (!abortController.signal.aborted) {
-                    const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
-                    drawMessage(containerElement, 'Unable to load tier and ship-type heatmap.', resolvedSvgWidth, 112, colors);
+                    drawMessage(containerElement, 'Unable to load tier and ship-type heatmap.', resolveWidth(), 112, colors);
                 }
             }
         };
 
         load();
-        return () => abortController.abort();
+        window.addEventListener('resize', onResize);
+        return () => {
+            abortController.abort();
+            window.removeEventListener('resize', onResize);
+            if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
+        };
     }, [data, playerId, svgHeight, svgWidth, theme]);
 
     return <div ref={containerRef} className="w-full" />;

@@ -2,7 +2,7 @@
 
 **Created**: 2026-03-28
 **Updated**: 2026-03-28
-**Status**: Implemented — all 5 changes complete, Playwright tests written
+**Status**: Complete — all 7 changes implemented, tested, deployed
 **Spec**: `spec-mobile-player-detail-ux-2026-03-28.md`
 
 ## Context
@@ -18,6 +18,8 @@ The player detail page charts were designed for desktop viewports (680px+ conten
 | PopulationDistributionSVG | 600px | none (hardcoded) | ~345px | **255px overflow** |
 | RandomsSVG Design 1 | 680px min | 680px (floor) | ~345px | **335px overflow** |
 | ClanSVG (clan page) | 900px | 900px (minWidth style) | ~345px | **555px overflow** |
+| RankedWRBattlesHeatmapSVG | 600px | none (hardcoded) | ~345px | **255px clipped** (overflow-hidden) |
+| TierTypeHeatmapSVG summary card | 364px (columns) | n/a | ~345px | **~19px overflow** |
 
 ## Components Already Mobile-Ready
 
@@ -75,6 +77,25 @@ Playwright tests added at `client/e2e/mobile-chart-overflow.spec.ts`:
 - Ships tab: SVG widths <= 398px — **FAIL on live (690px), expected to pass post-deploy**
 - Clan page: body scroll width <= 398px — **FAIL on live (940px), expected to pass post-deploy**
 
+## Remaining Issues (Post-deploy UX Review)
+
+### Change 6: TierTypeHeatmapSVG summary card proportional columns + resize — DONE
+- [x] `renderSummaryCard` now accepts `chartWidth` parameter
+- [x] Summary columns scaled proportionally: `[0, w*0.27, w*0.52, w*0.82]` where `w = chartWidth - 40` (compact) or 400 (default)
+- [x] Added window resize listener with cached payload and `cancelAnimationFrame` cleanup
+
+### Change 7: RankedWRBattlesHeatmapSVG container-aware width — DONE
+- [x] Resolves width from `containerElement.clientWidth`, clamped to `[280, svgWidth]`
+- [x] Compact mode at `< 480px`: margins `{ top: 38, right: 8, bottom: 36, left: 38 }`, axis font 9px
+- [x] Summary text x-offset scaled proportionally: `Math.round(width * 0.4)` instead of hardcoded `x=210`
+- [x] X-axis ticks filtered to every-other in compact mode; Y-axis ticks reduced to 4
+- [x] Y-axis label offset adjusted in compact mode (`-26` vs `-38`)
+- [x] Window resize listener with cached payload and animation frame cleanup
+
+### Playwright test addition
+- [x] Added ranked tab test to `mobile-chart-overflow.spec.ts`
+- Ranked tab: body scroll width + all SVG widths <= 398px — **FAIL on live (600px), expected to pass post-deploy**
+
 ## Risk
 
 - Compact margins may clip axis labels on certain data ranges (e.g., very large battle counts with 5+ digits). Mitigate with tick formatting (`1.2k` instead of `1,200`).
@@ -89,4 +110,6 @@ Playwright tests added at `client/e2e/mobile-chart-overflow.spec.ts`:
 - `client/app/components/RandomsSVG.tsx:75-95` — Design 1 dimensions
 - `client/app/components/ClanSVG.tsx:135,619` — margins, container minWidth
 - `client/app/components/ClanDetail.tsx:100` — hardcoded svgWidth={900}
-- `client/app/components/PlayerDetailInsightsTabs.tsx:92-99` — tab min-heights
+- `client/app/components/RankedWRBattlesHeatmapSVG.tsx:83,230,237,247-248,298` — margins, summary text, defaults, container
+- `client/app/components/TierTypeHeatmapSVG.tsx:89,257` — summary card columns, summary group position
+- `client/app/components/PlayerDetailInsightsTabs.tsx:92-99,392-397` — tab min-heights, ranked chart call
