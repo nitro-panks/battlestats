@@ -1242,18 +1242,15 @@ def _recompute_efficiency_rank_snapshot_sql(
     publish_applied = player_limit <= 0 or publish_partial
 
     if publish_applied:
-        # Single-pass UPDATE using LEFT JOIN: eligible rows get computed
-        # values, non-eligible rows get NULLed out. This avoids the
-        # expensive NOT IN subquery that was taking 80s+ on its own.
+        # Two-step approach:
+        # Step 2a: UPDATE eligible rows with computed rank values (~55K rows)
+        # Step 2b: Clear stale ranks — only rows that previously had a rank
+        #          but weren't touched in Step 2a (uses timestamp, not NOT IN)
         #
         # PERCENT_RANK() gives (rank-1)/(count-1) with 0 at top,
         # but our percentile is (pop-rank)/(pop-1) with 1 at top.
         # So: our_percentile = 1.0 - PERCENT_RANK().
-        scope_where = (
-            'AND es.player_id IN (SELECT id FROM player_scope)'
-            if player_limit > 0 else ''
-        )
-        unified_sql = f"""
+        update_sql = f"""
             WITH {player_scope_cte if player_scope_cte else ''}
             eligible AS (
                 SELECT
@@ -1287,7 +1284,7 @@ def _recompute_efficiency_rank_snapshot_sql(
                     ))::numeric, 6) AS percentile
                 FROM eligible
             )
-            UPDATE warships_playerexplorersummary es SET
+            UPDATE warships_playerexplorersummary SET
                 shrunken_efficiency_strength = ranked.shrunken_strength,
                 efficiency_rank_percentile = ranked.percentile,
                 efficiency_rank_tier = CASE
@@ -1297,29 +1294,45 @@ def _recompute_efficiency_rank_snapshot_sql(
                     WHEN ranked.percentile >= %s THEN 'III'
                     ELSE NULL
                 END,
-                has_efficiency_rank_icon = COALESCE(ranked.percentile >= %s, false),
-                efficiency_rank_population_size = CASE
-                    WHEN ranked.summary_id IS NOT NULL THEN %s ELSE NULL
-                END,
+                has_efficiency_rank_icon = (ranked.percentile >= %s),
+                efficiency_rank_population_size = %s,
                 efficiency_rank_updated_at = %s
-            FROM (
-                SELECT es_all.id AS all_id, ranked.summary_id,
-                       ranked.shrunken_strength, ranked.percentile
-                FROM warships_playerexplorersummary es_all
-                LEFT JOIN ranked ON ranked.summary_id = es_all.id
-            ) ranked
-            WHERE es.id = ranked.all_id
+            FROM ranked
+            WHERE warships_playerexplorersummary.id = ranked.summary_id
+        """
+
+        # Clear stale ranks: rows that previously had a rank but were not
+        # updated in the step above. Uses the timestamp to identify stale
+        # rows — much faster than NOT IN over 275K rows.
+        scope_where = (
+            'AND player_id IN (SELECT id FROM player_scope)'
+            if player_limit > 0 else ''
+        )
+        clear_sql = f"""
+            UPDATE warships_playerexplorersummary SET
+                shrunken_efficiency_strength = NULL,
+                efficiency_rank_percentile = NULL,
+                efficiency_rank_tier = NULL,
+                has_efficiency_rank_icon = false,
+                efficiency_rank_population_size = NULL,
+                efficiency_rank_updated_at = %s
+            WHERE efficiency_rank_tier IS NOT NULL
+              AND efficiency_rank_updated_at != %s
             {scope_where}
         """
 
         with transaction.atomic():
             with connection.cursor() as cursor:
-                cursor.execute(unified_sql, [
+                cursor.execute(update_sql, [
                     shrinkage_k, shrinkage_k, field_mean_strength,
                     min_pvp, min_ships, unmapped_limit,
                     expert_pct, grade_i_pct, grade_ii_pct, grade_iii_pct,
                     grade_iii_pct,
                     population_size, snapshot_updated_at,
+                ])
+
+                cursor.execute(clear_sql, [
+                    snapshot_updated_at, snapshot_updated_at,
                 ])
 
     # Gather tier counts and distribution stats for the return value.
