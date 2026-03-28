@@ -1,7 +1,8 @@
 # Runbook: Remaining Performance Bottlenecks
 
 **Created**: 2026-03-28
-**Status**: Plan — ready for implementation
+**Implemented**: 2026-03-28
+**Status**: Complete — deployed to production, clan aggregation backfill done (35,252 clans)
 **Context**: Profiling run on 2026-03-28 after queue separation and efficiency snapshot SQL optimizations. Simulated 12 player + 4 clan concurrent visits (96 API requests at concurrency 8).
 
 ## Profiling Baseline (warm cache, 4GB droplet, 2 vCPU)
