@@ -4774,7 +4774,7 @@ def bulk_load_player_cache(limit: int = BULK_CACHE_PLAYER_LIMIT) -> dict[str, An
     """
     from warships.serializers import PlayerSerializer
 
-    players = (
+    top_players = list(
         Player.objects
         .exclude(name='')
         .filter(is_hidden=False)
@@ -4785,9 +4785,21 @@ def bulk_load_player_cache(limit: int = BULK_CACHE_PLAYER_LIMIT) -> dict[str, An
         )[:limit]
     )
 
+    # Always include pinned players even if they fall outside the top-N
+    top_ids = {p.player_id for p in top_players}
+    pinned_ids = _get_pinned_player_ids()
+    missing_pinned = [pid for pid in pinned_ids if pid not in top_ids]
+    if missing_pinned:
+        pinned_players = list(
+            Player.objects
+            .filter(player_id__in=missing_pinned)
+            .select_related('clan', 'explorer_summary')
+        )
+        top_players.extend(pinned_players)
+
     payloads: dict[str, dict] = {}
     serializer = PlayerSerializer()
-    for player in players:
+    for player in top_players:
         try:
             data = serializer.to_representation(player)
             key = _bulk_cache_key_player(player.player_id)
