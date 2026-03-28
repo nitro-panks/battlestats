@@ -13,6 +13,9 @@ from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_playe
 
 
 class PlayerViewSetTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")

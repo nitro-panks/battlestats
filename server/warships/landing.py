@@ -446,7 +446,13 @@ def invalidate_landing_clan_caches() -> None:
     _queue_landing_republish()
 
 
+RECENT_PLAYERS_INVALIDATE_COOLDOWN = 30  # seconds — coalesce rapid lookups
+
+
 def invalidate_landing_recent_player_cache() -> None:
+    cooldown_key = 'landing:recent_players:invalidate_cooldown'
+    if not cache.add(cooldown_key, 1, timeout=RECENT_PLAYERS_INVALIDATE_COOLDOWN):
+        return
     _mark_cache_family_dirty(LANDING_RECENT_PLAYERS_DIRTY_KEY)
     _queue_landing_republish()
 
@@ -1417,44 +1423,44 @@ def get_landing_players_payload(mode: str = 'random', limit: int = LANDING_PLAYE
 
 
 def _build_recent_players() -> list[dict]:
-    rows = list(
-        Player.objects.exclude(name='').exclude(
-            last_lookup__isnull=True
-        ).values('name', 'player_id', 'pvp_ratio', 'days_since_last_battle', 'total_battles', 'pvp_battles', 'ranked_json').order_by(
-            F('last_lookup').desc(nulls_last=True),
-            'name',
-        )[:40]
-    )
-    player_ids = [int(row.get('player_id') or 0)
-                  for row in rows if row.get('player_id') is not None]
-    players_by_id = {
-        player.player_id: player
-        for player in Player.objects.filter(player_id__in=player_ids).select_related('explorer_summary')
-    }
-
-    for row in rows:
-        player_id = int(row.get('player_id') or 0)
-        ranked_rows = row.pop('ranked_json', None)
-        player_obj = players_by_id.get(player_id)
-        es = getattr(player_obj, 'explorer_summary',
-                     None) if player_obj else None
-        row['is_pve_player'] = is_pve_player(
-            row.get('total_battles'), row.get('pvp_battles'))
-        row['is_sleepy_player'] = is_sleepy_player(
-            row.get('days_since_last_battle'))
-        row['is_ranked_player'] = is_ranked_player(ranked_rows)
-        row['is_clan_battle_player'] = is_clan_battle_enjoyer(
-            getattr(es, 'clan_battle_total_battles', None),
-            getattr(es, 'clan_battle_seasons_participated', None),
+    # Single query: fetch lightweight columns + ranked_json, joined with
+    # explorer_summary to avoid N+1.
+    players = list(
+        Player.objects.exclude(name='').exclude(last_lookup__isnull=True)
+        .select_related('explorer_summary')
+        .only(
+            'player_id', 'name', 'pvp_ratio', 'days_since_last_battle',
+            'total_battles', 'pvp_battles', 'ranked_json',
+            'explorer_summary__clan_battle_total_battles',
+            'explorer_summary__clan_battle_seasons_participated',
+            'explorer_summary__clan_battle_overall_win_rate',
         )
-        row['clan_battle_win_rate'] = getattr(
-            es, 'clan_battle_overall_win_rate', None)
-        row['highest_ranked_league'] = get_highest_ranked_league_name(
-            ranked_rows)
-        row.update(_get_published_efficiency_rank_payload(
-            players_by_id.get(player_id)))
-        row.pop('player_id', None)
-        row.pop('days_since_last_battle', None)
+        .order_by(F('last_lookup').desc(nulls_last=True), 'name')[:40]
+    )
+
+    rows = []
+    for player_obj in players:
+        ranked_rows = player_obj.ranked_json
+        es = getattr(player_obj, 'explorer_summary', None)
+        row = {
+            'name': player_obj.name,
+            'pvp_ratio': player_obj.pvp_ratio,
+            'is_pve_player': is_pve_player(
+                player_obj.total_battles, player_obj.pvp_battles),
+            'is_sleepy_player': is_sleepy_player(
+                player_obj.days_since_last_battle),
+            'is_ranked_player': is_ranked_player(ranked_rows),
+            'is_clan_battle_player': is_clan_battle_enjoyer(
+                getattr(es, 'clan_battle_total_battles', None),
+                getattr(es, 'clan_battle_seasons_participated', None),
+            ),
+            'clan_battle_win_rate': getattr(
+                es, 'clan_battle_overall_win_rate', None),
+            'highest_ranked_league': get_highest_ranked_league_name(
+                ranked_rows),
+        }
+        row.update(_get_published_efficiency_rank_payload(player_obj))
+        rows.append(row)
 
     return rows
 

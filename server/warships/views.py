@@ -35,13 +35,22 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+LAZY_REFRESH_DEDUP_TIMEOUT = 60  # seconds
+
+
 def _delay_task_safely(task, **kwargs) -> None:
+    task_name = getattr(task, 'name', repr(task))
+    kw_hash = sha256(str(sorted(kwargs.items())).encode()).hexdigest()[:12]
+    dedup_key = f'views_dedup:{task_name.rsplit(".", 1)[-1]}:{kw_hash}'
+    if not cache.add(dedup_key, 1, timeout=LAZY_REFRESH_DEDUP_TIMEOUT):
+        return
     try:
         task.delay(**kwargs)
     except KombuOperationalError as error:
+        cache.delete(dedup_key)
         logging.warning(
             'Skipping async task enqueue for %s due to broker error: %s',
-            getattr(task, 'name', repr(task)),
+            task_name,
             error,
         )
 
