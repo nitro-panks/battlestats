@@ -4795,13 +4795,13 @@ def bulk_load_player_cache(
     )
     seen_ids = {p.player_id for p in top_players}
 
-    # Cohort 2: members of the best clans
+    # Cohort 2: members of the most-populated tracked clans
     best_clan_ids = list(
-        Clan.objects
-        .exclude(name__isnull=True).exclude(name='')
-        .filter(cached_clan_wr__isnull=False, cached_total_battles__gte=10000)
-        .order_by(F('cached_clan_wr').desc(nulls_last=True), F('cached_total_battles').desc(nulls_last=True))
-        .values_list('clan_id', flat=True)[:clan_member_clans]
+        Player.objects
+        .exclude(name='').exclude(clan__isnull=True)
+        .values_list('clan_id', flat=True)
+        .annotate(mc=Count('player_id'))
+        .order_by('-mc')[:clan_member_clans]
     )
     clan_members = list(
         Player.objects
