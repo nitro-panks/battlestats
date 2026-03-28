@@ -110,7 +110,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q default -c 2 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n hydration@%%h
+ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q default -c 3 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n hydration@%%h
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
@@ -132,7 +132,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q background -c 1 --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child=50 --without-gossip --without-mingle -n background@%%h
+ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q background -c 2 --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child=50 --without-gossip --without-mingle -n background@%%h
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
