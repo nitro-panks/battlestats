@@ -110,7 +110,7 @@ Clan buttons and player buttons are separated by 453px vertically. No touch-targ
 
 ### P0: Fix player detail clan name tap (Bug 1) — DONE
 - Converted `<button onClick>` to Next.js `<Link href>` with `buildClanPath()` for native touch navigation
-- Kept `onClick` for the existing `onSelectClan` callback (pre-navigation state setup)
+- Removed redundant `onClick` handler — was calling `router.push` to the same URL as the `href`, causing a navigation race on mobile that prevented actual navigation
 - Removed `overflow-hidden` from the player detail wrapper (was interfering with touch event propagation)
 
 ### P1: Make player detail responsive (Bug 4) — DONE

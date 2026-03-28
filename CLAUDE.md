@@ -121,6 +121,7 @@ These rules from that file apply to every commit:
 3. **Test coverage** — Ensure touched behavior has automated coverage; add or update focused tests when the current suite no longer proves the changed behavior.
 4. **Runbook archiving** — Move superseded runbooks from `agents/runbooks/` to `agents/runbooks/archive/`.
 5. **Contract safety** — When an endpoint or payload changes, update contract docs and API-facing tests in the same commit.
+6. **Runbook reconciliation** — When implementing changes described in a runbook or spec, update it to reflect implementation status, fixes applied, and validation results.
 
 ### Decision rules
 - Smallest safe vertical slice. Reversible changes over clever shortcuts.

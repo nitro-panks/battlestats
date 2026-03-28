@@ -25,7 +25,8 @@
         "Before every commit, review changed project documentation and update or synthesize the durable docs that describe the new behavior, contract, workflow, or operational state.",
         "When documentation is uncertain or lags reality, check the docs against the live code and tests before committing.",
         "Before every commit, ensure the touched behavior has appropriate automated coverage; add or update focused tests when the current suite no longer proves the changed behavior.",
-        "Before every commit, move superseded or historical runbooks out of agents/runbooks/ into agents/runbooks/archive/ so active runbooks remain the current source of truth."
+        "Before every commit, move superseded or historical runbooks out of agents/runbooks/ into agents/runbooks/archive/ so active runbooks remain the current source of truth.",
+        "Before every commit that implements changes described in a runbook or spec, update the corresponding runbook to reflect the implementation status, fixes applied, and validation results."
     ],
     "decision_rules": [
         "Prefer the smallest safe vertical slice.",

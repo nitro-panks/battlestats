@@ -326,7 +326,11 @@ const drawDistribution = (
     theme: ChartTheme = 'light',
 ) => {
     const c = chartColors[theme];
-    const margin = { top: 22, right: 14, bottom: 28, left: 42 };
+    const compact = svgWidth < 480;
+    const margin = compact
+        ? { top: 22, right: 6, bottom: 28, left: 30 }
+        : { top: 22, right: 14, bottom: 28, left: 42 };
+    const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
 
@@ -387,20 +391,20 @@ const drawDistribution = (
         .style('color', c.axisText)
         .call(xAxis)
         .selectAll('text')
-        .style('font-size', '10px');
+        .style('font-size', axisFontSize);
 
     svg.append('g')
         .style('color', c.axisText)
         .call(d3.axisLeft(y).ticks(3).tickFormat((value: number) => d3.format(',')(Number(value))).tickSizeOuter(0))
         .selectAll('text')
-        .style('font-size', '10px');
+        .style('font-size', axisFontSize);
 
     svg.append('text')
         .attr('x', width / 2)
-        .attr('y', height + 32)
+        .attr('y', height + (compact ? 24 : 32))
         .attr('text-anchor', 'middle')
         .style('fill', c.labelText)
-        .style('font-size', '10px')
+        .style('font-size', axisFontSize)
         .text(primaryPayload.x_label);
 
     const defs = svg.append('defs');
@@ -628,6 +632,27 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
         }
 
         const abortController = new AbortController();
+        let cachedPrimary: DistributionPayload | null = null;
+        let cachedOverlay: DistributionPayload | null = null;
+
+        const draw = () => {
+            if (!cachedPrimary) return;
+            const resolvedWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 280));
+            drawDistribution(
+                containerElement,
+                cachedPrimary,
+                primaryValue,
+                cachedOverlay,
+                overlayValue ?? null,
+                resolvedWidth,
+                svgHeight,
+                `${chartId}-${primaryMetric}-gradient`,
+                theme,
+            );
+        };
+
+        const onResize = () => draw();
+        window.addEventListener('resize', onResize);
 
         const load = async () => {
             try {
@@ -640,17 +665,9 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
                     return;
                 }
 
-                drawDistribution(
-                    containerElement,
-                    primaryPayload,
-                    primaryValue,
-                    overlayPayload,
-                    overlayValue ?? null,
-                    svgWidth,
-                    svgHeight,
-                    `${chartId}-${primaryMetric}-gradient`,
-                    theme,
-                );
+                cachedPrimary = primaryPayload;
+                cachedOverlay = overlayPayload;
+                draw();
             } catch {
                 if (!abortController.signal.aborted) {
                     drawErrorState(containerElement, 'Unable to load distribution chart.', theme);
@@ -659,7 +676,10 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
         };
 
         load();
-        return () => abortController.abort();
+        return () => {
+            abortController.abort();
+            window.removeEventListener('resize', onResize);
+        };
     }, [chartId, overlayMetric, overlayValue, primaryMetric, primaryValue, svgHeight, svgWidth, theme]);
 
     return <div ref={containerRef}></div>;

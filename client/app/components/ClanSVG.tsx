@@ -132,7 +132,11 @@ const drawClanPlot = (
     theme: ChartTheme,
 ) => {
     const colors = chartColors[theme];
-    const margin = { top: 64, right: 16, bottom: 32, left: 38 };
+    const compact = svgWidth < 480;
+    const margin = compact
+        ? { top: 48, right: 10, bottom: 28, left: 30 }
+        : { top: 64, right: 16, bottom: 32, left: 38 };
+    const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
 
@@ -288,17 +292,20 @@ const drawClanPlot = (
     svg.append('g')
         .style('color', colors.labelText)
         .attr('transform', `translate(0, ${height})`)
-        .call(d3.axisBottom(x).ticks(5).tickSizeOuter(0))
+        .call(d3.axisBottom(x).ticks(compact ? 3 : 5).tickSizeOuter(0))
         .selectAll('text')
         .attr('transform', 'translate(-10,0)rotate(-45)')
-        .style('text-anchor', 'end');
+        .style('text-anchor', 'end')
+        .style('font-size', axisFontSize);
 
     const y = d3.scaleLinear()
         .domain([ymin, ymax])
         .range([height, 0]);
     svg.append('g')
         .style('color', colors.labelText)
-        .call(d3.axisLeft(y).ticks(5).tickSizeOuter(0));
+        .call(d3.axisLeft(y).ticks(compact ? 3 : 5).tickSizeOuter(0))
+        .selectAll('text')
+        .style('font-size', axisFontSize);
 
     const showPointDetails = (datum: ClanPlotPoint) => {
         activityGroup.select('.player-details').remove();
@@ -586,37 +593,55 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
             return;
         }
 
+        const resolvedWidth = Math.min(svgWidth, Math.max(containerRef.current.clientWidth || svgWidth, 280));
+
         if (plotData === null && !plotError) {
-            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', svgWidth, svgHeight, theme);
+            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', resolvedWidth, svgHeight, theme);
             return;
         }
 
         if (plotError) {
-            drawClanChartStatus(containerRef.current, 'Unable to load clan chart.', svgWidth, svgHeight, theme);
+            drawClanChartStatus(containerRef.current, 'Unable to load clan chart.', resolvedWidth, svgHeight, theme);
             return;
         }
 
         if (plotData !== null && isPlotPendingRefresh && plotData.length === 0) {
-            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', svgWidth, svgHeight, theme);
+            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', resolvedWidth, svgHeight, theme);
             return;
         }
 
         if (plotData !== null) {
-            const cleanup = drawClanPlot(
-                containerRef.current,
-                (memberName) => onSelectMemberRef.current?.(memberName),
-                highlightedPlayerName,
-                svgWidth,
-                svgHeight,
-                chartMemberActivity,
-                plotData,
-                theme,
-            );
-            return cleanup;
+            const containerElement = containerRef.current;
+            let cleanupPlot: (() => void) | undefined;
+
+            const drawAtCurrentWidth = () => {
+                cleanupPlot?.();
+                const w = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 280));
+                cleanupPlot = drawClanPlot(
+                    containerElement,
+                    (memberName) => onSelectMemberRef.current?.(memberName),
+                    highlightedPlayerName,
+                    w,
+                    svgHeight,
+                    chartMemberActivity,
+                    plotData,
+                    theme,
+                );
+            };
+
+            drawAtCurrentWidth();
+
+            const onResize = () => drawAtCurrentWidth();
+            window.addEventListener('resize', onResize);
+
+            return () => {
+                cleanupPlot?.();
+                window.removeEventListener('resize', onResize);
+            };
         }
     }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme]);
 
-    return <div ref={containerRef} style={{ minHeight: svgHeight, minWidth: svgWidth }}></div>;
+    return <div ref={containerRef} style={{ minHeight: svgHeight }}></div>;
 };
 
 const areClanSvgPropsEqual = (previousProps: ClanProps, nextProps: ClanProps): boolean => {

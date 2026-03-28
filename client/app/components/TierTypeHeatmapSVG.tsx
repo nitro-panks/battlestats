@@ -167,7 +167,11 @@ const drawChart = (
         return;
     }
 
-    const margin = { top: 62, right: 18, bottom: 42, left: 42 };
+    const compact = svgWidth < 480;
+    const margin = compact
+        ? { top: 48, right: 6, bottom: 42, left: 28 }
+        : { top: 62, right: 18, bottom: 42, left: 42 };
+    const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
     const container = d3.select(containerElement);
@@ -229,14 +233,14 @@ const drawChart = (
         .style('color', colors.labelMuted)
         .call(d3.axisBottom(x).tickSize(0))
         .selectAll('text')
-        .style('font-size', '10px')
+        .style('font-size', axisFontSize)
         .style('font-weight', '500');
 
     svg.append('g')
         .style('color', colors.axisText)
-        .call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+        .call(d3.axisLeft(y).tickSize(0).tickPadding(compact ? 4 : 6))
         .selectAll('text')
-        .style('font-size', '10px')
+        .style('font-size', axisFontSize)
         .style('font-weight', '500');
 
     svg.selectAll('.domain').style('stroke', colors.axisLine);
@@ -246,7 +250,7 @@ const drawChart = (
         .attr('y', height + 34)
         .attr('text-anchor', 'middle')
         .style('fill', colors.labelMuted)
-        .style('font-size', '10px')
+        .style('font-size', axisFontSize)
         .text(payload.x_label);
 
     const summaryGroup = svgRoot.append('g')

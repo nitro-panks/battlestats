@@ -330,13 +330,12 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                 </div>
             ) : null}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-[350px_1fr]">
-                {/* First Column */}
-                <div>
+                {/* Left rail: clan info (below player info on mobile) */}
+                <div className="order-2 lg:order-1">
                     <div className="mb-4 pb-1">
                         {player.clan_id ? (
                             <Link
                                 href={buildClanPath(player.clan_id, player.clan_name || "Clan")}
-                                onClick={() => onSelectClan(player.clan_id, player.clan_name || "Clan")}
                                 className="mt-1 text-xl font-semibold text-[var(--accent-mid)] underline-offset-4 hover:underline"
                                 aria-label={`Open clan page for ${player.clan_name || "clan"}`}
                             >
@@ -379,8 +378,8 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     )}
                 </div>
 
-                {/* Second Column */}
-                <div className="min-w-0 text-left pl-4">
+                {/* Right rail: player info (on top on mobile) */}
+                <div className="order-1 min-w-0 text-left lg:order-2 lg:pl-4">
                     <div className="mb-6 border-b border-[var(--border)] pb-3" data-perf-section="player-header">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                             <div className="flex min-w-0 flex-wrap items-center gap-2">

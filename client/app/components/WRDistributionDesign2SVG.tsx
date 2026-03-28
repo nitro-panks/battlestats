@@ -183,7 +183,11 @@ const drawChart = (
     svgHeight: number,
     colors: typeof chartColors['light'],
 ) => {
-    const margin = { top: 38, right: 18, bottom: 34, left: 44 };
+    const compact = svgWidth < 480;
+    const margin = compact
+        ? { top: 38, right: 8, bottom: 28, left: 32 }
+        : { top: 38, right: 18, bottom: 34, left: 44 };
+    const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
 
@@ -225,19 +229,19 @@ const drawChart = (
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
         .style('color', colors.labelMuted)
-        .call(d3.axisBottom(x).ticks(8).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
+        .call(d3.axisBottom(x).ticks(compact ? 5 : 8).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
         .selectAll('text')
-        .style('font-size', '10px');
+        .style('font-size', axisFontSize);
 
     svg.append('g')
         .style('color', colors.labelMuted)
-        .call(d3.axisLeft(y).ticks(7).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
+        .call(d3.axisLeft(y).ticks(compact ? 5 : 7).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
         .selectAll('text')
-        .style('font-size', '10px');
+        .style('font-size', axisFontSize);
 
     svg.append('g')
         .attr('class', 'grid-lines')
-        .call(d3.axisLeft(y).ticks(7).tickSize(-width).tickFormat(() => ''))
+        .call(d3.axisLeft(y).ticks(compact ? 5 : 7).tickSize(-width).tickFormat(() => ''))
         .selectAll('line')
         .style('stroke', colors.gridLine)
         .style('stroke-width', 1);
@@ -245,19 +249,19 @@ const drawChart = (
 
     svg.append('text')
         .attr('x', width / 2)
-        .attr('y', height + 32)
+        .attr('y', height + (compact ? 24 : 32))
         .attr('text-anchor', 'middle')
         .style('fill', colors.labelMuted)
-        .style('font-size', '10px')
+        .style('font-size', axisFontSize)
         .text(payload.x_label);
 
     svg.append('text')
         .attr('transform', 'rotate(-90)')
         .attr('x', -height / 2)
-        .attr('y', -34)
+        .attr('y', compact ? -24 : -34)
         .attr('text-anchor', 'middle')
         .style('fill', colors.labelMuted)
-        .style('font-size', '10px')
+        .style('font-size', axisFontSize)
         .text(payload.y_label);
 
     svg.append('g')
@@ -388,6 +392,13 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
 
         const colors = chartColors[theme];
         const abortController = new AbortController();
+        let cachedPayload: CorrelationPayload | null = null;
+
+        const draw = () => {
+            if (!cachedPayload) return;
+            const resolvedWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 280));
+            drawChart(containerElement, cachedPayload, playerWR, playerSurvivalRate, resolvedWidth, svgHeight, colors);
+        };
 
         const load = async () => {
             try {
@@ -399,7 +410,8 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
                     return;
                 }
 
-                drawChart(containerElement, payload, playerWR, playerSurvivalRate, svgWidth, svgHeight, colors);
+                cachedPayload = payload;
+                draw();
             } catch {
                 if (!abortController.signal.aborted) {
                     drawErrorState(containerElement, 'Unable to load win rate and survival chart.', colors);
@@ -407,8 +419,14 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
             }
         };
 
+        const onResize = () => draw();
+        window.addEventListener('resize', onResize);
+
         load();
-        return () => abortController.abort();
+        return () => {
+            abortController.abort();
+            window.removeEventListener('resize', onResize);
+        };
     }, [playerSurvivalRate, playerWR, svgHeight, svgWidth, theme]);
 
     return <div ref={containerRef}></div>;

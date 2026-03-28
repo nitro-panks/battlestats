@@ -79,9 +79,13 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
     const rows: RandomsChartRow[] = data.map((datum, index) => ({ ...datum, rowKey: `row-${index}` }));
     const labelByRowKey = new Map(rows.map((row) => [row.rowKey, row.ship_chart_name]));
     const containerWidth = containerElement.clientWidth;
-    const totalSvgWidth = Math.max(containerWidth || 0, 680) + RANDOMS_CHART_RIGHT_EXTENSION_PX;
+    const compact = containerWidth < 580;
+    const totalSvgWidth = Math.max(containerWidth || 0, 280) + RANDOMS_CHART_RIGHT_EXTENSION_PX;
     const totalSvgHeight = 420 + RANDOMS_CHART_HEIGHT_INCREASE_PX;
-    const margin = { top: 28, right: 96, bottom: 48, left: 68 + RANDOMS_CHART_SHIFT_RIGHT_PX };
+    const margin = compact
+        ? { top: 28, right: 14, bottom: 48, left: 52 }
+        : { top: 28, right: 96, bottom: 48, left: 68 + RANDOMS_CHART_SHIFT_RIGHT_PX };
+    const axisFontSize = compact ? '9px' : '10px';
     const width = totalSvgWidth - margin.left - margin.right;
     const height = totalSvgHeight - margin.top - margin.bottom;
 
@@ -109,7 +113,8 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
     const backgroundBarOffset = (foregroundBarHeight - backgroundBarHeight) / 2;
     const foregroundBarOffset = 0;
 
-    const xGrid = d3.axisBottom(x).ticks(5).tickSize(-height).tickFormat(() => '');
+    const tickCount = compact ? 3 : 5;
+    const xGrid = d3.axisBottom(x).ticks(tickCount).tickSize(-height).tickFormat(() => '');
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
         .attr('class', 'randoms-grid')
@@ -123,15 +128,19 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
         .style('color', colors.labelMuted)
-        .call(d3.axisBottom(x).ticks(5).tickFormat((value: number) => d3.format(',')(value)).tickSizeOuter(0))
+        .call(d3.axisBottom(x).ticks(tickCount).tickFormat((value: number) => d3.format(',')(value)).tickSizeOuter(0))
         .selectAll('text')
-        .style('font-size', '10px');
+        .style('font-size', axisFontSize);
 
+    const truncateLabel = (label: string, maxLen: number) => label.length > maxLen ? label.slice(0, maxLen) + '\u2026' : label;
     svg.append('g')
         .style('color', colors.labelMid)
-        .call(d3.axisLeft(y).tickSize(0).tickPadding(6).tickFormat((value: number) => labelByRowKey.get(String(value)) ?? ''))
+        .call(d3.axisLeft(y).tickSize(0).tickPadding(compact ? 4 : 6).tickFormat((value: number) => {
+            const label = labelByRowKey.get(String(value)) ?? '';
+            return compact ? truncateLabel(label, 8) : label;
+        }))
         .selectAll('text')
-        .style('font-size', '10px')
+        .style('font-size', axisFontSize)
         .style('font-weight', '500');
 
     svg.selectAll('.domain').style('stroke', colors.axisLine);
@@ -140,7 +149,7 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         .attr('x', width)
         .attr('y', height + 38)
         .attr('text-anchor', 'end')
-        .style('font-size', '10px')
+        .style('font-size', axisFontSize)
         .style('fill', colors.labelText)
         .text('Random battles');
 
@@ -242,7 +251,7 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
             return labelX > width - 4 ? width - 4 : labelX;
         })
         .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + foregroundBarOffset + (foregroundBarHeight / 2) + 3)
-        .style('font-size', '10px')
+        .style('font-size', axisFontSize)
         .style('fill', colors.labelMuted)
         .attr('text-anchor', (datum: RandomsChartRow) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
         .text((datum: RandomsChartRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
