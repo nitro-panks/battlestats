@@ -107,6 +107,9 @@ HOT_ENTITY_PLAYER_LIMIT = max(
     1, int(os.getenv('HOT_ENTITY_PLAYER_LIMIT', '20')))
 HOT_ENTITY_CLAN_LIMIT = max(
     1, int(os.getenv('HOT_ENTITY_CLAN_LIMIT', '10')))
+HOT_ENTITY_PINNED_PLAYER_NAMES = [
+    n.strip() for n in os.getenv('HOT_ENTITY_PINNED_PLAYER_NAMES', 'lil_boots').split(',') if n.strip()
+]
 CLAN_PLOT_DATA_CACHE_TTL = 15 * 60
 
 
@@ -4496,8 +4499,17 @@ def _top_visited_entity_ids(entity_type: str, limit: int) -> list[int]:
     return entity_ids
 
 
+def _get_pinned_player_ids() -> list[int]:
+    if not HOT_ENTITY_PINNED_PLAYER_NAMES:
+        return []
+    return list(
+        Player.objects.filter(name__in=HOT_ENTITY_PINNED_PLAYER_NAMES)
+        .values_list('player_id', flat=True)
+    )
+
+
 def _get_hot_player_ids(limit: int = HOT_ENTITY_PLAYER_LIMIT) -> list[int]:
-    candidate_ids: list[int] = []
+    candidate_ids: list[int] = list(_get_pinned_player_ids())
     candidate_ids.extend(_top_visited_entity_ids('player', limit))
     candidate_ids.extend(
         Player.objects.exclude(name='').exclude(last_lookup__isnull=True).order_by(
@@ -4579,8 +4591,11 @@ def warm_hot_entity_caches(
     clan_limit: int = HOT_ENTITY_CLAN_LIMIT,
     force_refresh: bool = False,
 ) -> dict[str, Any]:
+    pinned_ids = _get_pinned_player_ids()
     player_ids = _get_hot_player_ids(player_limit)
     clan_ids = _get_hot_clan_ids(clan_limit)
+    if pinned_ids:
+        logger.info("Hot entity warm includes %d pinned player(s): %s", len(pinned_ids), pinned_ids)
     warmed_players = warm_player_entity_caches(
         player_ids,
         force_refresh=force_refresh,
