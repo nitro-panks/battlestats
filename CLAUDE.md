@@ -81,22 +81,29 @@ npm run test:e2e:install                          # Install Playwright browsers
 Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`). The frontend never calls the Wargaming API directly — all data flows through Django.
 
 ### Key backend modules
-- `server/warships/data.py` (4.5K lines) — Core hydration, chart payload assembly, cache warming
-- `server/warships/landing.py` — Landing page modes (Best, Random, Sigma, Recent) with published-cache + durable fallback
+- `server/warships/data.py` (~4.8K lines) — Core hydration, chart payload assembly, cache warming, hot entity warming
+- `server/warships/landing.py` — Landing page modes (Best, Random, Sigma, Popular) with published-cache + durable fallback
 - `server/warships/tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing warmup
+- `server/warships/signals.py` — Registers all Celery Beat periodic tasks via `@receiver(post_migrate)` (landing warmer, hot entity warmer, clan crawl, player refresh, etc.)
 - `server/warships/views.py` — DRF views and `@api_view` endpoints
 
 ### Key frontend patterns
 - D3-based SVG chart components (TierSVG, TypeSVG, ActivitySVG, RankedWRBattlesHeatmapSVG, etc.)
 - `client/app/context/ThemeContext.tsx` — Dark/light theme with localStorage persistence
+- `client/app/components/ThemeToggle.tsx` — Theme selection dropdown (light/dark/system)
 - `client/app/lib/chartTheme.ts` — D3 color schemes keyed to active theme
+- `client/app/lib/wrColor.ts` — Shared win-rate → color mapping used across all surfaces
 - `client/app/lib/sharedJsonFetch.ts` — Fetch with retry and cache
 - `client/app/lib/entityRoutes.ts` — URL encoding/decoding for player/clan routes
+- `client/app/globals.css` — CSS custom properties for theming (`--bg-*`, `--text-*`, `--accent-*`), dark mode via `[data-theme="dark"]`
+- Shared icon components in `client/app/components/` — 7 player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon) with `size` prop for surface variants
 
 ### Caching strategy
 - **Cache-first with lazy-refresh**: Return cached payload immediately, queue background refresh
 - **Durable fallback**: Keep last-published copy after TTL expiry
 - **Stale-while-revalidate**: `X-Clan-Plot-Pending: true` header signals pending warm-up
+- **Hot entity warmer**: Periodic task (every 30 min) keeps top-visited + pinned players/clans warm. Pinned players configured via `HOT_ENTITY_PINNED_PLAYER_NAMES` env var
+- **Landing page warmer**: Periodic task (every 55 min) refreshes all landing payloads
 - Redis-backed in production, LocMemCache in tests
 
 ### Data models (server/warships/models.py)
@@ -127,6 +134,12 @@ These rules from that file apply to every commit:
 - `.env` — Non-secret connection values (DB_HOST, DB_ENGINE, DJANGO_ALLOWED_HOSTS)
 - `.env.secrets` — Secrets (WG_APP_ID, DB_PASSWORD, DJANGO_SECRET_KEY)
 - `.env.cloud` / `.env.secrets.cloud` — Cloud database overrides
+
+### Server runtime env (configurable, not secrets)
+- `HOT_ENTITY_PINNED_PLAYER_NAMES` — Comma-separated player names to always keep warm (default: `lil_boots`)
+- `CLAN_BATTLE_WARM_CLAN_IDS` — Comma-separated clan IDs for clan battle summary warming
+- `HOT_ENTITY_PLAYER_LIMIT` / `HOT_ENTITY_CLAN_LIMIT` — Hot entity cache size (defaults: 20/10)
+- `ENABLE_CRAWLER_SCHEDULES` — Enable daily clan crawl (set `1` in production)
 
 ### Client env
 - `BATTLESTATS_API_ORIGIN` — Backend URL (default `http://localhost:8888`)
