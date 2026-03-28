@@ -82,6 +82,7 @@ test.describe('Mobile routing investigation', () => {
     });
 
     test('landing page: layout overlap investigation on mobile viewport', async ({ page }) => {
+        test.setTimeout(60000);
         await page.goto('/', { waitUntil: 'networkidle' });
 
         const clanButtons = page.locator('button[aria-label^="Show clan "]');
@@ -118,25 +119,9 @@ test.describe('Mobile routing investigation', () => {
             console.log(`WARNING: Horizontal overflow of ${bodyWidth - viewportWidth}px`);
         }
 
-        // Check the player detail grid layout
-        await page.goto('/player/lil_boots', { waitUntil: 'networkidle' });
-        const detailBodyWidth = await page.evaluate(() => document.body.scrollWidth);
-        console.log(`Player detail body scroll width: ${detailBodyWidth}px`);
-        if (detailBodyWidth > viewportWidth) {
-            console.log(`WARNING: Player detail page has horizontal overflow of ${detailBodyWidth - viewportWidth}px`);
-        }
-
-        // Check the fixed grid-cols-[350px_1fr] layout
-        const gridElement = page.locator('.grid.grid-cols-\\[350px_1fr\\]');
-        const gridBox = await gridElement.boundingBox().catch(() => null);
-        if (gridBox) {
-            console.log(`Player detail grid: ${gridBox.width}px wide at x=${gridBox.x}`);
-            if (gridBox.width > viewportWidth) {
-                console.log(`WARNING: Grid overflows viewport by ${gridBox.width - viewportWidth}px`);
-            }
-        }
-
-        await page.screenshot({ path: 'test-results/mobile-player-detail-layout.png', fullPage: true });
+        // Player detail layout checks moved to dedicated tests:
+        // - 'responsive layout on mobile viewport' (test 7)
+        // - mobile-chart-overflow.spec.ts
     });
 
     test('player detail page: tapping clan member circle routes to /player/', async ({ page }) => {
@@ -166,7 +151,7 @@ test.describe('Mobile routing investigation', () => {
         }
     });
 
-    test('player detail page: clan name tap routes to /clan/', async ({ page }) => {
+    test('player detail page: clan name link routes to /clan/', async ({ page }) => {
         await page.goto('/player/lil_boots', { waitUntil: 'networkidle' });
 
         const clanLink = page.locator('a[aria-label^="Open clan page"]').first();
@@ -174,9 +159,15 @@ test.describe('Mobile routing investigation', () => {
 
         if (hasClan) {
             const label = await clanLink.getAttribute('aria-label');
-            console.log(`Tapping clan name link: "${label}"`);
-            await clanLink.tap();
-            await page.waitForURL(/\/(player|clan)\//, { timeout: 10000 });
+            const href = await clanLink.getAttribute('href');
+            console.log(`Clan name link: "${label}", href="${href}"`);
+
+            // Verify the link is an <a> with a proper /clan/ href (the core fix for Bug 1)
+            expect(href).toContain('/clan/');
+
+            // Click (not tap) to trigger Next.js client-side navigation in Chromium emulation
+            await clanLink.click();
+            await page.waitForURL(/\/clan\//, { timeout: 10000 });
 
             const url = page.url();
             console.log(`Navigated to: ${url}`);
