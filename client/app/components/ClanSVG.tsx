@@ -369,7 +369,7 @@ const drawClanPlot = (
         .attr('cx', 0)
         .attr('cy', 0)
         .attr('class', (datum: ClanPlotPoint) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase() ? 'clan-player-dot' : null)
-        .attr('r', 4.8)
+        .attr('r', 6.2)
         .style('stroke', colors.axisLine)
         .style('stroke-width', 1.25)
         .style('cursor', onSelectMember ? 'pointer' : 'default')
@@ -413,9 +413,9 @@ const drawClanPlot = (
             })
             .attr('r', (datum: ClanPlotPoint) => {
                 if (!hoveredBucket) {
-                    return 4.8;
+                    return 6.2;
                 }
-                return datum.activity_bucket === hoveredBucket ? 5.4 : 3.6;
+                return datum.activity_bucket === hoveredBucket ? 7.0 : 4.7;
             });
 
         points
@@ -429,20 +429,70 @@ const drawClanPlot = (
 
     points
         .filter((datum: ClanPlotPoint) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase())
-        .append('circle')
-        .attr('class', 'clan-player-pulse-ring')
-        .attr('r', 8.4)
-        .attr('fill', 'none')
-        .attr('stroke', '#f59e0b')
-        .attr('stroke-width', 1.75)
-        .attr('stroke-linecap', 'round')
-        .style('pointer-events', 'none');
-
-    points
-        .filter((datum: ClanPlotPoint) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase())
         .raise();
 
     applyBucketFilter();
+
+    // Lissajous orbit around highlighted player
+    let animationFrameId: number | null = null;
+    const highlightedGroup = points
+        .filter((datum: ClanPlotPoint) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase());
+
+    if (!highlightedGroup.empty()) {
+        const orbitDot = highlightedGroup.append('circle')
+            .attr('r', 2.2)
+            .attr('fill', '#f59e0b')
+            .attr('opacity', 0.85)
+            .style('pointer-events', 'none');
+
+        const orbitTrail = highlightedGroup.append('path')
+            .attr('fill', 'none')
+            .attr('stroke', '#f59e0b')
+            .attr('stroke-width', 1.0)
+            .attr('stroke-opacity', 0.35)
+            .attr('stroke-linecap', 'round')
+            .style('pointer-events', 'none');
+
+        const A = 14;
+        const B = 10;
+        const a = 3;
+        const b = 2;
+        const delta = Math.PI / 2;
+        const speed = 0.0012;
+        const trailPoints = 220;
+
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        if (!prefersReducedMotion) {
+            const trail: [number, number][] = [];
+            const startTime = performance.now();
+
+            const animate = (now: number) => {
+                const t = (now - startTime) * speed;
+                const cx = A * Math.sin(a * t + delta);
+                const cy = B * Math.sin(b * t);
+
+                orbitDot.attr('cx', cx).attr('cy', cy);
+
+                trail.push([cx, cy]);
+                if (trail.length > trailPoints) trail.shift();
+
+                if (trail.length > 1) {
+                    orbitTrail.attr('d', d3.line()(trail));
+                }
+
+                animationFrameId = requestAnimationFrame(animate);
+            };
+
+            animationFrameId = requestAnimationFrame(animate);
+        }
+    }
+
+    return () => {
+        if (animationFrameId !== null) {
+            cancelAnimationFrame(animationFrameId);
+        }
+    };
 };
 
 const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [], theme = 'light' }) => {
@@ -552,7 +602,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
         }
 
         if (plotData !== null) {
-            drawClanPlot(
+            const cleanup = drawClanPlot(
                 containerRef.current,
                 (memberName) => onSelectMemberRef.current?.(memberName),
                 highlightedPlayerName,
@@ -562,6 +612,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                 plotData,
                 theme,
             );
+            return cleanup;
         }
     }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme]);
 

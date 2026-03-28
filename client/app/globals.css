@@ -43,40 +43,18 @@ body {
   filter: drop-shadow(0 0 5px rgba(245, 158, 11, 0.45));
 }
 
-.clan-player-pulse-ring {
-  transform-origin: center;
-  animation: clan-player-pulse 3.6s ease-in-out infinite;
-}
-
-@keyframes clan-player-pulse {
-  0% {
-    opacity: 0.28;
-    transform: scale(0.96);
-  }
-
-  50% {
-    opacity: 0.92;
-    transform: scale(1.09);
-  }
-
-  100% {
-    opacity: 0.28;
-    transform: scale(0.96);
-  }
-}
 
 .clan-dot-pulse {
-  animation: clan-dot-hover-pulse 0.8s ease-in-out infinite;
+  animation: clan-dot-hover-pulse 1.28s ease-in-out infinite;
 }
 
 @keyframes clan-dot-hover-pulse {
-  0% { r: 4.8px; }
-  50% { r: 7.2px; }
-  100% { r: 4.8px; }
+  0% { r: 6.2px; }
+  50% { r: 9.3px; }
+  100% { r: 6.2px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .clan-player-pulse-ring,
   .clan-dot-pulse {
     animation: none;
     opacity: 0.85;
