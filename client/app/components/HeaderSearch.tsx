@@ -4,6 +4,7 @@ import React, { startTransition, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { buildPlayerPath } from "../lib/entityRoutes";
 import HiddenAccountIcon from "./HiddenAccountIcon";
+import wrColor from "../lib/wrColor";
 
 interface HeaderSearchSuggestion {
     name: string;
@@ -14,18 +15,6 @@ interface HeaderSearchSuggestion {
 const SEARCH_SUGGESTION_LIMIT = 8;
 const SEARCH_DEBOUNCE_MS = 180;
 const SEARCH_SUGGESTIONS_ID = "header-player-search-suggestions";
-
-const wrColor = (r: number | null): string => {
-    if (r == null) return "#c6dbef";
-    if (r > 65) return "#810c9e";
-    if (r >= 60) return "#D042F3";
-    if (r >= 56) return "#3182bd";
-    if (r >= 54) return "#74c476";
-    if (r >= 52) return "#a1d99b";
-    if (r >= 50) return "#fed976";
-    if (r >= 45) return "#fd8d3c";
-    return "#a50f15";
-};
 
 const isAbortError = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
 

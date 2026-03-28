@@ -1,18 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBed, faCrown, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
 import dynamic from 'next/dynamic';
 import ClanSVG from './ClanSVG';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
-import { getHighestRankedLeagueName, getRankedLeagueTooltip, getRankedLeagueColor, type RankedLeagueName } from './rankedLeague';
+import { getHighestRankedLeagueName, type RankedLeagueName } from './rankedLeague';
 import PlayerDetailInsightsTabs from './PlayerDetailInsightsTabs';
 import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
+import LeaderCrownIcon from './LeaderCrownIcon';
+import PveEnjoyerIcon from './PveEnjoyerIcon';
+import InactiveIcon from './InactiveIcon';
+import RankedPlayerIcon from './RankedPlayerIcon';
+import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
 import { useTheme } from '../context/ThemeContext';
+import wrColor from '../lib/wrColor';
 
 interface PlayerDetailProps {
     player: {
@@ -108,16 +112,6 @@ const PlayerClanBattleSeasons = dynamic(() => resilientDynamicImport(() => impor
     loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={180} />,
 });
 
-const selectColorByWR = (winRatio: number): string => {
-    if (winRatio > 65) return "#810c9e";  // super unicum
-    if (winRatio >= 60) return "#D042F3";  // unicum
-    if (winRatio >= 56) return "#3182bd";  // great
-    if (winRatio >= 54) return "#74c476";  // very good
-    if (winRatio >= 52) return "#a1d99b";  // good
-    if (winRatio >= 50) return "#fed976";  // average
-    if (winRatio >= 45) return "#fd8d3c";  // below average
-    return "#a50f15";                       // bad
-};
 
 const formatKillRatio = (killRatio: number | null): string => {
     if (killRatio == null) {
@@ -148,77 +142,6 @@ const PLAYSTYLE_HELPER_TEXT: Record<string, string> = {
 
 const SHOW_PLAYSTYLE_PANEL = false;
 
-const HeaderLeaderCrown = () => (
-    <span
-        title="Clan leader"
-        aria-label="Clan leader"
-        className="inline-flex items-center cursor-help"
-    >
-        <FontAwesomeIcon
-            icon={faCrown}
-            className="text-sm text-amber-500"
-            aria-hidden="true"
-        />
-    </span>
-);
-
-const HeaderPveRobot = () => (
-    <span
-        title="pve enjoyer"
-        aria-label="pve enjoyer"
-        className="inline-flex items-center cursor-help"
-    >
-        <FontAwesomeIcon
-            icon={faRobot}
-            className="text-sm text-slate-500"
-            aria-hidden="true"
-        />
-    </span>
-);
-
-const HeaderSleepyBed = () => (
-    <span
-        title="inactive for over a year"
-        aria-label="inactive for over a year"
-        className="inline-flex items-center cursor-help"
-    >
-        <FontAwesomeIcon
-            icon={faBed}
-            className="text-sm text-slate-400"
-            aria-hidden="true"
-        />
-    </span>
-);
-
-const HeaderRankedStar: React.FC<{ league: RankedLeagueName | null }> = ({ league }) => (
-    <span
-        title={getRankedLeagueTooltip(league)}
-        aria-label={getRankedLeagueTooltip(league)}
-        className="inline-flex items-center cursor-help"
-    >
-        <FontAwesomeIcon
-            icon={faStar}
-            className="text-sm"
-            style={{ color: getRankedLeagueColor(league) }}
-            aria-hidden="true"
-        />
-    </span>
-);
-
-const HeaderClanBattleShield: React.FC<{ winRate: number }> = ({ winRate }) => (
-    <span
-        title={`clan battle enjoyer · ${winRate.toFixed(1)}% WR`}
-        aria-label={`clan battle enjoyer ${winRate.toFixed(1)} percent WR`}
-        className="inline-flex items-center cursor-help"
-    >
-        <FontAwesomeIcon
-            icon={faShieldHalved}
-            className="text-sm"
-            style={{ color: selectColorByWR(winRate) }}
-            aria-hidden="true"
-        />
-    </span>
-);
 
 const buildClanBattleHeaderState = (
     summary: PlayerClanBattleSummary | null | undefined,
@@ -274,7 +197,7 @@ const areEquivalentClanBattleHeaderStates = (
 
     return (
         current.overallWinRate === incoming.overallWinRate
-        && selectColorByWR(current.overallWinRate) === selectColorByWR(incoming.overallWinRate)
+        && wrColor(current.overallWinRate) === wrColor(incoming.overallWinRate)
     );
 };
 
@@ -463,11 +386,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     {player.name}
                                 </h1>
                                 {player.is_hidden ? <HiddenAccountIcon className="text-sm text-[var(--accent-light)]" /> : null}
-                                {player.is_clan_leader ? <HeaderLeaderCrown /> : null}
-                                {isPveEnjoyer ? <HeaderPveRobot /> : null}
-                                {isSleepyPlayer ? <HeaderSleepyBed /> : null}
-                                {isRankedEnjoyer ? <HeaderRankedStar league={highestRankedLeague} /> : null}
-                                {isClanBattleEnjoyer && clanBattleSummary ? <HeaderClanBattleShield winRate={clanBattleSummary.overallWinRate} /> : null}
+                                {player.is_clan_leader ? <LeaderCrownIcon size="header" /> : null}
+                                {isPveEnjoyer ? <PveEnjoyerIcon size="header" /> : null}
+                                {isSleepyPlayer ? <InactiveIcon size="header" /> : null}
+                                {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}
+                                {isClanBattleEnjoyer && clanBattleSummary ? <ClanBattleShieldIcon winRate={clanBattleSummary.overallWinRate} size="header" /> : null}
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
                             </div>
                             <div className="flex items-center gap-2 self-start">
@@ -506,7 +429,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4" data-perf-section="summary-cards">
                                 <div
                                     className="flex min-h-[108px] flex-col rounded-md bg-[var(--accent-faint)] p-3"
-                                    style={{ border: `1px solid ${selectColorByWR(player.pvp_ratio)}` }}
+                                    style={{ border: `1px solid ${wrColor(player.pvp_ratio)}` }}
                                 >
                                     <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Win Rate</p>
                                     <div className="flex flex-1 items-center justify-center">

@@ -1,11 +1,13 @@
 import React from 'react';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBed, faCrown, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
-import { getRankedLeagueColor, getRankedLeagueTooltip } from './rankedLeague';
 import type { ClanMemberData } from './clanMembersShared';
-import type { RankedLeagueName } from './rankedLeague';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
+import LeaderCrownIcon from './LeaderCrownIcon';
+import PveEnjoyerIcon from './PveEnjoyerIcon';
+import InactiveIcon from './InactiveIcon';
+import RankedPlayerIcon from './RankedPlayerIcon';
+import ClanBattleShieldIcon from './ClanBattleShieldIcon';
+import wrColor from '../lib/wrColor';
 
 interface ClanMembersProps {
     members: ClanMemberData[];
@@ -15,71 +17,12 @@ interface ClanMembersProps {
     error?: string;
 }
 
-const wrColor = (r: number | null): string => {
-    if (r == null) return '#c6dbef';
-    if (r > 65) return '#810c9e';
-    if (r >= 60) return '#D042F3';
-    if (r >= 56) return '#3182bd';
-    if (r >= 54) return '#74c476';
-    if (r >= 52) return '#a1d99b';
-    if (r >= 50) return '#fed976';
-    if (r >= 45) return '#fd8d3c';
-    return '#a50f15';
-};
-
 const formatRecency = (daysSinceLastBattle: number | null): string => {
     if (daysSinceLastBattle == null) return 'activity unknown';
     if (daysSinceLastBattle === 0) return 'played today';
     if (daysSinceLastBattle === 1) return '1 day idle';
     return `${daysSinceLastBattle} days idle`;
 };
-
-const LeaderCrown = () => (
-    <FontAwesomeIcon
-        icon={faCrown}
-        className="text-[11px] text-amber-500"
-        title="Clan leader"
-        aria-label="Clan leader"
-    />
-);
-
-const PveRobot = () => (
-    <FontAwesomeIcon
-        icon={faRobot}
-        className="text-[11px] text-slate-500"
-        title="pve enjoyer"
-        aria-label="pve enjoyer"
-    />
-);
-
-const SleepyBed = () => (
-    <FontAwesomeIcon
-        icon={faBed}
-        className="text-[11px] text-slate-400"
-        title="inactive for over a year"
-        aria-label="inactive for over a year"
-    />
-);
-
-const RankedStar: React.FC<{ league: RankedLeagueName | null }> = ({ league }) => (
-    <FontAwesomeIcon
-        icon={faStar}
-        className="text-[11px]"
-        style={{ color: getRankedLeagueColor(league) }}
-        title={getRankedLeagueTooltip(league)}
-        aria-label={getRankedLeagueTooltip(league)}
-    />
-);
-
-const ClanBattleShield: React.FC<{ winRate: number | null }> = ({ winRate }) => (
-    <FontAwesomeIcon
-        icon={faShieldHalved}
-        className="text-[11px]"
-        style={{ color: wrColor(winRate) }}
-        title={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer · ${winRate.toFixed(1)}% WR`}
-        aria-label={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer ${winRate.toFixed(1)} percent WR`}
-    />
-);
 
 const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layout = 'inline', loading = false, error = '' }) => {
     const pendingEfficiencyCount = members.filter((member) => member.efficiency_hydration_pending).length;
@@ -116,11 +59,11 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                                             <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
                                             {member.name}
                                             <HiddenAccountIcon className="text-[11px] text-[var(--accent-light)]" />
-                                            {member.is_leader && <LeaderCrown />}
-                                            {member.is_pve_player && <PveRobot />}
-                                            {member.is_sleepy_player && <SleepyBed />}
-                                            {member.is_ranked_player && <RankedStar league={member.highest_ranked_league} />}
-                                            {member.is_clan_battle_player && <ClanBattleShield winRate={member.clan_battle_win_rate} />}
+                                            {member.is_leader && <LeaderCrownIcon size="inline" />}
+                                            {member.is_pve_player && <PveEnjoyerIcon size="inline" />}
+                                            {member.is_sleepy_player && <InactiveIcon size="inline" />}
+                                            {member.is_ranked_player && <RankedPlayerIcon league={member.highest_ranked_league} size="inline" />}
+                                            {member.is_clan_battle_player && <ClanBattleShieldIcon winRate={member.clan_battle_win_rate} size="inline" />}
                                             {efficiencyRankTier === 'E' ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={member.efficiency_rank_percentile} populationSize={member.efficiency_rank_population_size} size="inline" /> : null}
                                             <span className="text-xs font-normal text-[var(--text-secondary)]">{formatRecency(member.days_since_last_battle)}</span>
                                         </span>
@@ -138,11 +81,11 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                                     >
                                         <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
                                         {member.name}
-                                        {member.is_leader && <LeaderCrown />}
-                                        {member.is_pve_player && <PveRobot />}
-                                        {member.is_sleepy_player && <SleepyBed />}
-                                        {member.is_ranked_player && <RankedStar league={member.highest_ranked_league} />}
-                                        {member.is_clan_battle_player && <ClanBattleShield winRate={member.clan_battle_win_rate} />}
+                                        {member.is_leader && <LeaderCrownIcon size="inline" />}
+                                        {member.is_pve_player && <PveEnjoyerIcon size="inline" />}
+                                        {member.is_sleepy_player && <InactiveIcon size="inline" />}
+                                        {member.is_ranked_player && <RankedPlayerIcon league={member.highest_ranked_league} size="inline" />}
+                                        {member.is_clan_battle_player && <ClanBattleShieldIcon winRate={member.clan_battle_win_rate} size="inline" />}
                                         {efficiencyRankTier === 'E' ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={member.efficiency_rank_percentile} populationSize={member.efficiency_rank_population_size} size="inline" /> : null}
                                         <span className="text-xs font-normal text-[var(--text-secondary)]">{formatRecency(member.days_since_last_battle)}</span>
                                     </button>

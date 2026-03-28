@@ -1,32 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBed, faCircleInfo, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
+import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ClanDetail from './ClanDetail';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier, type EfficiencyRankTier } from './EfficiencyRankIcon';
 import PlayerDetail from './PlayerDetail';
 import { resilientDynamicImport } from './resilientDynamicImport';
-import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
 import type { LandingClan, LandingPlayer, PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import HiddenAccountIcon from './HiddenAccountIcon';
+import PveEnjoyerIcon from './PveEnjoyerIcon';
+import InactiveIcon from './InactiveIcon';
+import RankedPlayerIcon from './RankedPlayerIcon';
+import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import useIntervalRefresh from './useIntervalRefresh';
 import useClanHydrationPoll from './useClanHydrationPoll';
 import { useTheme } from '../context/ThemeContext';
-
-const wrColor = (r: number | null): string => {
-    if (r == null) return '#c6dbef';
-    if (r > 65) return '#810c9e';
-    if (r >= 60) return '#D042F3';
-    if (r >= 56) return '#3182bd';
-    if (r >= 54) return '#74c476';
-    if (r >= 52) return '#a1d99b';
-    if (r >= 50) return '#fed976';
-    if (r >= 45) return '#fd8d3c';
-    return '#a50f15';
-}
+import wrColor from '../lib/wrColor';
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
     <div
@@ -37,63 +29,6 @@ const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, 
     </div>
 );
 
-const LandingPveRobot = () => (
-    <span
-        title="pve enjoyer"
-        aria-label="pve enjoyer"
-        className="inline-flex items-center cursor-help"
-    >
-        <FontAwesomeIcon
-            icon={faRobot}
-            className="text-xs text-slate-500"
-            aria-hidden="true"
-        />
-    </span>
-);
-
-const LandingSleepyBed = () => (
-    <span
-        title="inactive for over a year"
-        aria-label="inactive for over a year"
-        className="inline-flex items-center cursor-help"
-    >
-        <FontAwesomeIcon
-            icon={faBed}
-            className="text-xs text-slate-400"
-            aria-hidden="true"
-        />
-    </span>
-);
-
-const LandingRankedStar: React.FC<{ league: RankedLeagueName | null | undefined }> = ({ league }) => (
-    <span
-        title={getRankedLeagueTooltip(league)}
-        aria-label={getRankedLeagueTooltip(league)}
-        className="inline-flex items-center cursor-help"
-    >
-        <FontAwesomeIcon
-            icon={faStar}
-            className="text-xs"
-            style={{ color: getRankedLeagueColor(league) }}
-            aria-hidden="true"
-        />
-    </span>
-);
-
-const LandingClanBattleShield: React.FC<{ winRate: number | null | undefined }> = ({ winRate }) => (
-    <span
-        title={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer · ${winRate.toFixed(1)}% WR`}
-        aria-label={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer ${winRate.toFixed(1)} percent WR`}
-        className="inline-flex items-center cursor-help"
-    >
-        <FontAwesomeIcon
-            icon={faShieldHalved}
-            className="text-xs"
-            style={{ color: wrColor(winRate ?? null) }}
-            aria-hidden="true"
-        />
-    </span>
-);
 
 const ClanTagGrid: React.FC<{
     clans: LandingClan[];
@@ -144,10 +79,10 @@ const PlayerNameGrid: React.FC<{
             );
             const iconRow = (
                 <>
-                    {player.is_ranked_player ? <LandingRankedStar league={player.highest_ranked_league} /> : null}
-                    {player.is_pve_player ? <LandingPveRobot /> : null}
-                    {player.is_sleepy_player ? <LandingSleepyBed /> : null}
-                    {player.is_clan_battle_player ? <LandingClanBattleShield winRate={player.clan_battle_win_rate} /> : null}
+                    {player.is_ranked_player ? <RankedPlayerIcon league={player.highest_ranked_league} size="search" /> : null}
+                    {player.is_pve_player ? <PveEnjoyerIcon size="search" /> : null}
+                    {player.is_sleepy_player ? <InactiveIcon size="search" /> : null}
+                    {player.is_clan_battle_player ? <ClanBattleShieldIcon winRate={player.clan_battle_win_rate ?? null} size="search" /> : null}
                     {efficiencyTier === 'E' ? (
                         <EfficiencyRankIcon
                             tier={efficiencyTier}
