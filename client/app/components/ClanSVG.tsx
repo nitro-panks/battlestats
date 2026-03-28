@@ -369,7 +369,7 @@ const drawClanPlot = (
         .attr('cx', 0)
         .attr('cy', 0)
         .attr('class', (datum: ClanPlotPoint) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase() ? 'clan-player-dot' : null)
-        .attr('r', 4)
+        .attr('r', 4.8)
         .style('stroke', colors.axisLine)
         .style('stroke-width', 1.25)
         .style('cursor', onSelectMember ? 'pointer' : 'default')
@@ -381,12 +381,13 @@ const drawClanPlot = (
         })
         .on('mouseover', function (this: SVGCircleElement, _event: MouseEvent, datum: ClanPlotPoint) {
             showPointDetails(datum);
-            d3.select(this).transition()
-                .duration(50)
-                .attr('fill', '#bcbddc');
+            d3.select(this)
+                .attr('fill', '#bcbddc')
+                .classed('clan-dot-pulse', true);
         })
-        .on('mouseout', function (_event: MouseEvent, _datum: ClanPlotPoint) {
+        .on('mouseout', function (this: SVGCircleElement, _event: MouseEvent, _datum: ClanPlotPoint) {
             hideDetails();
+            d3.select(this).classed('clan-dot-pulse', false);
             applyBucketFilter();
         });
 
@@ -412,9 +413,9 @@ const drawClanPlot = (
             })
             .attr('r', (datum: ClanPlotPoint) => {
                 if (!hoveredBucket) {
-                    return 4;
+                    return 4.8;
                 }
-                return datum.activity_bucket === hoveredBucket ? 4.5 : 3;
+                return datum.activity_bucket === hoveredBucket ? 5.4 : 3.6;
             });
 
         points
@@ -430,7 +431,7 @@ const drawClanPlot = (
         .filter((datum: ClanPlotPoint) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase())
         .append('circle')
         .attr('class', 'clan-player-pulse-ring')
-        .attr('r', 7)
+        .attr('r', 8.4)
         .attr('fill', 'none')
         .attr('stroke', '#f59e0b')
         .attr('stroke-width', 1.75)

@@ -65,8 +65,19 @@ body {
   }
 }
 
+.clan-dot-pulse {
+  animation: clan-dot-hover-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes clan-dot-hover-pulse {
+  0% { r: 4.8px; }
+  50% { r: 7.2px; }
+  100% { r: 4.8px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .clan-player-pulse-ring {
+  .clan-player-pulse-ring,
+  .clan-dot-pulse {
     animation: none;
     opacity: 0.85;
   }
