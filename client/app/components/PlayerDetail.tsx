@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
+import { buildClanPath } from '../lib/entityRoutes';
 import ClanSVG from './ClanSVG';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
@@ -319,7 +321,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     };
 
     return (
-        <div className="relative overflow-hidden bg-[var(--bg-page)] p-6">
+        <div className="relative bg-[var(--bg-page)] p-6">
             {isLoading ? (
                 <div className="absolute inset-0 z-20 flex items-start justify-center bg-[var(--bg-page)]/70 pt-6">
                     <div className="rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-1 text-sm font-medium text-[var(--text-secondary)] shadow-sm">
@@ -327,19 +329,19 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     </div>
                 </div>
             ) : null}
-            <div className="grid grid-cols-[350px_1fr] gap-4">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[350px_1fr]">
                 {/* First Column */}
                 <div>
                     <div className="mb-4 pb-1">
                         {player.clan_id ? (
-                            <button
-                                type="button"
+                            <Link
+                                href={buildClanPath(player.clan_id, player.clan_name || "Clan")}
                                 onClick={() => onSelectClan(player.clan_id, player.clan_name || "Clan")}
                                 className="mt-1 text-xl font-semibold text-[var(--accent-mid)] underline-offset-4 hover:underline"
                                 aria-label={`Open clan page for ${player.clan_name || "clan"}`}
                             >
                                 {player.clan_tag ? `[${player.clan_tag}] ` : ''}{player.clan_name || 'Clan'}
-                            </button>
+                            </Link>
                         ) : (
                             <h2 className="mt-1 text-xl font-semibold text-[var(--accent-mid)]">No Clan</h2>
                         )}

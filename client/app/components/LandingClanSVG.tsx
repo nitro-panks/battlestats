@@ -224,6 +224,7 @@ const drawLandingClanChart = (
         .data(plotData)
         .enter()
         .append('circle')
+        .attr('class', 'data-circle')
         .attr('cx', (datum: PlotDatum) => x(datum.total_battles))
         .attr('cy', (datum: PlotDatum) => y(datum.clan_wr))
         .attr('r', 5)
@@ -232,7 +233,7 @@ const drawLandingClanChart = (
         .attr('stroke', colors.axisLine)
         .attr('stroke-width', 1.25);
 
-    const circles = svg.selectAll('circle');
+    const circles = svg.selectAll('.data-circle');
 
     circles
         .on('click', function (_event: MouseEvent, datum: PlotDatum) {

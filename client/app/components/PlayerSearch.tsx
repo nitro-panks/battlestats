@@ -458,15 +458,7 @@ const PlayerSearch: React.FC = () => {
 
                     {(clans.length > 0 || recentClans.length > 0) && (
                         <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
-                            <div className="mt-3">
-                                <LandingClanSVG
-                                    clans={visibleLandingClans}
-                                    heatmapClans={clans}
-                                    onSelectClan={handleSelectClan}
-                                    theme={theme}
-                                />
-                            </div>
-                            <div className="mt-4 flex flex-wrap items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Clans</h3>
                                 <button
                                     type="button"
@@ -509,6 +501,14 @@ const PlayerSearch: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
+                            <div className="mt-3">
+                                <LandingClanSVG
+                                    clans={visibleLandingClans}
+                                    heatmapClans={clans}
+                                    onSelectClan={handleSelectClan}
+                                    theme={theme}
+                                />
+                            </div>
                             <ClanTagGrid
                                 clans={visibleLandingClans}
                                 onSelectClan={handleSelectClan}
@@ -519,13 +519,6 @@ const PlayerSearch: React.FC = () => {
 
                     {(players.length > 0 || recentPlayers.length > 0) && (
                         <div className="mt-6 border-t border-[var(--border)] pt-6">
-                            <div className="mt-1">
-                                <LandingPlayerSVG
-                                    players={visibleLandingPlayers}
-                                    onSelectPlayer={(player) => handleSelectMember(player.name)}
-                                    theme={theme}
-                                />
-                            </div>
                             <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Players</h3>
                                 <button
@@ -576,6 +569,13 @@ const PlayerSearch: React.FC = () => {
                                         </p>
                                     </div>
                                 </div>
+                            </div>
+                            <div className="mt-3">
+                                <LandingPlayerSVG
+                                    players={visibleLandingPlayers}
+                                    onSelectPlayer={(player) => handleSelectMember(player.name)}
+                                    theme={theme}
+                                />
                             </div>
                             <PlayerNameGrid
                                 players={visibleLandingPlayers}

@@ -169,20 +169,54 @@ test.describe('Mobile routing investigation', () => {
     test('player detail page: clan name tap routes to /clan/', async ({ page }) => {
         await page.goto('/player/lil_boots', { waitUntil: 'networkidle' });
 
-        const clanButton = page.locator('button[aria-label^="Open clan page"]').first();
-        const hasClan = await clanButton.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+        const clanLink = page.locator('a[aria-label^="Open clan page"]').first();
+        const hasClan = await clanLink.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
 
         if (hasClan) {
-            const label = await clanButton.getAttribute('aria-label');
-            console.log(`Tapping clan name button: "${label}"`);
-            await clanButton.tap();
+            const label = await clanLink.getAttribute('aria-label');
+            console.log(`Tapping clan name link: "${label}"`);
+            await clanLink.tap();
             await page.waitForURL(/\/(player|clan)\//, { timeout: 10000 });
 
             const url = page.url();
             console.log(`Navigated to: ${url}`);
             expect(url).toContain('/clan/');
         } else {
-            console.log('No clan button found on player detail page');
+            console.log('No clan link found on player detail page');
+        }
+    });
+
+    test('player detail page: responsive layout on mobile viewport', async ({ page }) => {
+        await page.goto('/player/lil_boots', { waitUntil: 'networkidle' });
+
+        // The grid should be single-column on mobile (no fixed 350px column)
+        const bodyWidth = await page.evaluate(() => document.body.scrollWidth);
+        const viewportWidth = 393;
+        console.log(`Player detail body scroll width: ${bodyWidth}px`);
+
+        // No horizontal overflow on mobile
+        expect(bodyWidth).toBeLessThanOrEqual(viewportWidth + 5);
+    });
+
+    test('landing page: chart labels appear above charts', async ({ page }) => {
+        await page.goto('/', { waitUntil: 'networkidle' });
+
+        const clanLabel = page.locator('h3:text("Active Clans")').first();
+        const playerLabel = page.locator('h3:text("Active Players")').first();
+
+        await clanLabel.waitFor({ state: 'visible', timeout: 15000 });
+        await playerLabel.waitFor({ state: 'visible', timeout: 15000 });
+
+        // Clan SVG circles should appear AFTER the clan label
+        const clanLabelBox = await clanLabel.boundingBox();
+        const clanCircle = page.locator('svg .data-circle').first();
+        const hasClanCircle = await clanCircle.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false);
+        if (hasClanCircle && clanLabelBox) {
+            const circleBox = await clanCircle.boundingBox();
+            if (circleBox) {
+                console.log(`Clan label Y: ${clanLabelBox.y}, first clan circle Y: ${circleBox.y}`);
+                expect(circleBox.y).toBeGreaterThan(clanLabelBox.y);
+            }
         }
     });
 });
