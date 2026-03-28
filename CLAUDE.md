@@ -81,7 +81,7 @@ npm run test:e2e:install                          # Install Playwright browsers
 Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`). The frontend never calls the Wargaming API directly — all data flows through Django.
 
 ### Key backend modules
-- `server/warships/data.py` (~4.8K lines) — Core hydration, chart payload assembly, cache warming, hot entity warming
+- `server/warships/data.py` (~5K lines) — Core hydration, chart payload assembly, cache warming, hot entity warming, `score_best_clans()` composite ranking
 - `server/warships/landing.py` — Landing page modes (Best, Random, Sigma, Popular) with published-cache + durable fallback
 - `server/warships/tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing warmup
 - `server/warships/signals.py` — Registers all Celery Beat periodic tasks via `@receiver(post_migrate)` (landing warmer, hot entity warmer, clan crawl, player refresh, etc.)
@@ -103,7 +103,8 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Durable fallback**: Keep last-published copy after TTL expiry
 - **Stale-while-revalidate**: `X-Clan-Plot-Pending: true` header signals pending warm-up
 - **Hot entity warmer**: Periodic task (every 30 min) keeps top-visited + pinned players/clans warm. Pinned players configured via `HOT_ENTITY_PINNED_PLAYER_NAMES` env var
-- **Landing page warmer**: Periodic task (every 55 min) refreshes all landing payloads
+- **Bulk entity cache loader**: Periodic task (every 12h) pre-loads top 50 players + members of 25 best-scored clans + top 25 clans into Redis. Uses `score_best_clans()` composite ranking (WR 30%, activity 25%, member score 20%, CB recency 15%, volume 10%). See `runbook-best-clan-eligibility.md`.
+- **Landing page warmer**: Periodic task (every 55 min) refreshes all landing payloads; Best clan mode also uses `score_best_clans()`
 - Redis-backed in production, LocMemCache in tests
 
 ### Data models (server/warships/models.py)

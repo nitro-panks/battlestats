@@ -434,7 +434,7 @@ describe('PlayerSearch landing efficiency icon', () => {
                     members_count: 40,
                     clan_wr: 58.1,
                     total_battles: 120000,
-                    active_members: 12,
+                    active_members: 20,
                 },
                 {
                     clan_id: 901,
@@ -460,7 +460,7 @@ describe('PlayerSearch landing efficiency icon', () => {
                     tag: 'LOW',
                     members_count: 40,
                     clan_wr: 61.0,
-                    total_battles: 90000,
+                    total_battles: 40000,
                     active_members: 20,
                 },
                 {
@@ -678,7 +678,7 @@ describe('PlayerSearch landing efficiency icon', () => {
             name: 'Clan ranking formula details',
         });
 
-        expect(screen.getByText(/Best_clan ≈ WR × I\(Battles ≥ 100k\) × I\(ActiveShare ≥ 0\.30\), tie → Battles/i)).toBeInTheDocument();
+        expect(screen.getByText(/Best_clan ≈ 0\.30·WR \+ 0\.25·Activity \+ 0\.20·MemberScore \+ 0\.15·CB_recency \+ 0\.10·log\(Battles\)/i)).toBeInTheDocument();
         expect(screen.queryByText(/Current clan cache refreshes in about/i)).not.toBeInTheDocument();
         expect(infoButton).toBeInTheDocument();
     });

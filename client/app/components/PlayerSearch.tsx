@@ -163,8 +163,8 @@ const PlayerExplorer = dynamic(() => resilientDynamicImport(() => import('./Play
 
 const LANDING_CLAN_LIMIT = 30;
 const LANDING_PLAYER_LIMIT = 25;
-const BEST_CLAN_MIN_TOTAL_BATTLES = 100000;
-const BEST_CLAN_MIN_ACTIVE_SHARE = 0.3;
+const BEST_CLAN_MIN_TOTAL_BATTLES = 50000;
+const BEST_CLAN_MIN_ACTIVE_SHARE = 0.4;
 const RANDOM_PLAYER_MIN_PVP_BATTLES = 500;
 const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
@@ -178,7 +178,7 @@ type LandingPlayerMode = 'random' | 'best' | 'sigma' | 'recent';
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 
 const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18·Eff + 0.10·Vol_5-10 + 0.06·Ranked + 0.04·Clan) × M_share';
-const CLAN_BEST_FORMULA_APPROXIMATION = 'Best_clan ≈ WR × I(Battles ≥ 100k) × I(ActiveShare ≥ 0.30), tie → Battles';
+const CLAN_BEST_FORMULA_APPROXIMATION = 'Best_clan ≈ 0.30·WR + 0.25·Activity + 0.20·MemberScore + 0.15·CB_recency + 0.10·log(Battles)';
 
 const PlayerSearch: React.FC = () => {
     const { theme } = useTheme();
@@ -504,7 +504,7 @@ const PlayerSearch: React.FC = () => {
                                         <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Best approximation</p>
                                         <p className="mt-2 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_FORMULA_APPROXIMATION}</p>
                                         <p className="mt-2 leading-5 text-[var(--text-secondary)]">
-                                            Current clan Best is a thresholded competitive surface: require at least 100k total battles and at least 30% active members, then rank by clan WR with total battles as the first tie-break.
+                                            Clan Best uses a composite score: clan win rate, member activity ratio, average member skill score, recency-weighted clan battle participation, and battle volume. Hard filters require &gt;10 members, &ge;40% active, and &ge;50k total battles.
                                         </p>
                                     </div>
                                 </div>

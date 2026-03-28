@@ -9,10 +9,10 @@ Pre-load serialized player and clan detail API responses into Redis so most page
 
 ## How it works
 
-1. **Single DB query** fetches top N players (by player_score, then pvp_ratio) with `select_related('clan', 'explorer_summary')`
-2. **Serializes** each through `PlayerSerializer.to_representation()` — the same serializer the API uses
-3. **Writes all payloads** via `cache.set_many()` (pipelined on Redis backends)
-4. Same pattern for clans (top by cached_clan_wr, min 10K battles)
+1. **Three player cohorts**: top 50 by player_score, all members of top 25 "Best" clans (composite score), and pinned players
+2. **Best clan selection** uses `score_best_clans()` — composite scoring with hard filters (>10 members, ≥40% active, ≥50K battles, ≥5 tracked) and weighted components (WR, activity, member score, CB recency, volume). See `runbook-best-clan-eligibility.md` for full criteria.
+3. **Serializes** each through `PlayerSerializer.to_representation()` / `ClanSerializer.to_representation()` — the same serializers the API uses
+4. **Writes all payloads** via `cache.set_many()` (pipelined on Redis backends)
 5. **PlayerViewSet.retrieve()** checks cache before running the full `get_object()` + serializer path
 
 ### Cache key patterns

@@ -9,7 +9,7 @@ from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce
 from django.utils import timezone
 
-from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player
+from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
 from warships.models import Clan, Player
 from warships.visit_analytics import get_top_entities
 
@@ -64,7 +64,6 @@ LANDING_RECENT_CLANS_DIRTY_KEY = 'landing:recent_clans:dirty:v1'
 LANDING_RECENT_PLAYERS_DIRTY_KEY = 'landing:recent_players:dirty:v1'
 LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
-LANDING_CLAN_BEST_MIN_ACTIVE_SHARE = 0.30
 LANDING_CLAN_MODES = ('random', 'best')
 LANDING_PLAYER_LIMIT = 25
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
@@ -740,30 +739,24 @@ def resolve_landing_clans_by_id_order(clan_ids: list[int]) -> list[dict]:
 
 
 def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT) -> list[dict]:
+    best_clan_ids = score_best_clans(limit=limit)
+    if not best_clan_ids:
+        return []
+
     rows = list(
-        Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
+        Clan.objects.filter(clan_id__in=best_clan_ids).annotate(
             **_clan_agg_annotations(),
         ).annotate(
             **_clan_wr_annotation(),
-        ).filter(
-            total_battles__gte=LANDING_CLAN_MIN_TOTAL_BATTLES,
-            clan_wr__isnull=False,
         ).values(
             'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles', 'active_members'
         )
     )
 
-    rows = [
-        row for row in rows
-        if (int(row.get('active_members') or 0) / max(int(row.get('members_count') or 0), 1)) >= LANDING_CLAN_BEST_MIN_ACTIVE_SHARE
-    ]
-    rows.sort(key=lambda row: (
-        -(row.get('clan_wr') if row.get('clan_wr') is not None else float('-inf')),
-        -(row.get('total_battles') if row.get('total_battles')
-          is not None else float('-inf')),
-        (row.get('name') or '').lower(),
-    ))
-    return rows[:limit]
+    # Preserve the score_best_clans ordering
+    id_order = {cid: i for i, cid in enumerate(best_clan_ids)}
+    rows.sort(key=lambda row: id_order.get(row['clan_id'], len(best_clan_ids)))
+    return rows
 
 
 def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = False) -> tuple[list[dict], dict[str, str | int]]:
