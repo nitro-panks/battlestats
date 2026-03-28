@@ -24,10 +24,10 @@ Background task load per burst: 349 tasks, 141s combined worker time.
 The `/api/fetch/clan_members/<clan_id>/` view (`views.py:527-616`) does too much work per request:
 
 1. **Materializes full member list** with `select_related('explorer_summary')` — for a 50-member clan that's a large join
-2. **Two hydration queue passes** over all members:
-   - `queue_clan_ranked_hydration(members)` — iterates all, filters stale, queues up to 8
-   - `queue_clan_efficiency_hydration(members)` — two more passes (eligible + publication-stale)
-3. **Response building** loops through every member calling 4+ classification functions (`is_pve_player()`, `is_sleepy_player()`, etc.) and extracting ~12 fields from nested objects
+2. **Three hydration queue passes** over all members:
+   - `queue_clan_ranked_hydration(members)` — iterates all, filters stale, queues up to `CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT`
+   - `queue_clan_efficiency_hydration(members)` — two sub-passes: eligible players for efficiency data refresh, then publication-stale players for rank snapshot refresh
+3. **Response building** loops through every member calling 4 classification functions (`is_pve_player()`, `is_sleepy_player()`, `is_ranked_player()`, `is_clan_battle_enjoyer()`) and extracting ~12 fields from nested objects
 4. **Clan battle data refresh** — iterates members again, checking `clan_battle_summary_is_stale()` for each
 5. **No response caching** — every request rebuilds the full response from DB
 
@@ -87,7 +87,7 @@ The `is_pve_player()`, `is_sleepy_player()`, `is_ranked_player()`, `is_clan_batt
 | `recent_clans` | 50-100ms | LIMIT 40 query |
 | `recent_players` | 50-80ms | LIMIT 40 query |
 
-Total per-surface time: ~1.5-2.5s. But the task takes 156-212s because `_serialize_landing_player_rows()` makes additional WG API calls and DB queries per player for chart data assembly. The serialization is where the time goes, not the initial queries.
+Total per-surface time: ~1.5-2.5s. But the task takes 156-212s because each surface builds full player/clan payloads requiring DB queries with explorer_summary joins and Python-side JSON parsing of `battles_json`/`ranked_json` fields. No WG API calls are made — the bottleneck is DB query overhead and serialization across hundreds of candidate rows.
 
 ### Fix: Parallelize surface warming
 
@@ -140,7 +140,7 @@ JOIN warships_player ON ...
 GROUP BY clan_id
 ```
 
-This is a full table scan + group-by over 275K players every time.
+This is a group-by aggregation with indexed joins across 275K players every time.
 
 **Changes**:
 
@@ -225,15 +225,23 @@ These endpoints are called once per clan visit and p95 < 700ms is acceptable. Th
 
 ## Implementation Priority
 
-| Fix | Target | Impact | Effort | Risk |
-|-----|--------|--------|--------|------|
-| B1: Cache clan_members response | p95: 1598ms → ~200ms | High | 1-2h | Low |
-| B2a: Parallelize landing surface warming | 212s → ~40s | Medium | 2-3h | Low |
-| B2b: Reduce players_best candidate limit | Surface: 800ms → ~200ms | Medium | 1h | Low |
-| B2c: Denormalize clan aggregations | Surface: 400ms → ~50ms | Medium | 2-3h | Medium |
-| B3: Coalesce per-player refresh tasks | 349 → ~60 tasks per burst | Low | 3-4h | Medium |
-| B4: Clan detail/seasons | Not urgent | — | — | — |
+| Fix | Target | Impact | Effort | Risk | Status |
+|-----|--------|--------|--------|------|--------|
+| B1: Cache clan_members response | p95: 1598ms → ~200ms | High | 1-2h | Low | **Done** |
+| B2b: Reduce players_best candidate limit | Surface: 800ms → ~200ms | Medium | 1h | Low | **Done** |
+| B2a: Parallelize landing surface warming | 212s → ~40s | Medium | 2-3h | Low | **Done** |
+| B2c: Denormalize clan aggregations | Surface: 400ms → ~50ms | Medium | 2-3h | Medium | **Done** |
+| B3: Dedup per-player refresh dispatches | 349 → fewer tasks per burst | Low | 1h | Low | **Done** |
+| B4: Clan detail/seasons | Not urgent | — | — | — | Skipped |
 
-**Recommended order**: B1 → B2b → B2a → B2c → B3
+### Implementation Notes (2026-03-28)
 
-B1 has the highest user-facing impact (clan members is the slowest endpoint). B2b is a quick win. B2a+B2c improve background throughput. B3 is a nice-to-have that reduces worker pressure.
+**B1**: Added 5-minute Redis cache for serialized clan member payload in `views.py:clan_members`. Cache key `clan:members:{clan_id}`, invalidated in `update_clan_data()` and `update_clan_members()`.
+
+**B2b**: Reduced `LANDING_PLAYER_BEST_CANDIDATE_LIMIT` from 1200 to 400 in `landing.py`.
+
+**B2a**: Parallelized `warm_landing_page_content()` using `ThreadPoolExecutor(max_workers=4)`. Falls back to sequential execution in tests (`LANDING_WARM_PARALLEL = False`).
+
+**B2c**: Added denormalized fields to Clan model (`cached_total_wins`, `cached_total_battles`, `cached_active_member_count`, `cached_clan_wr`). Updated in `update_clan_members()`. Landing queries use `Coalesce` to prefer cached values with live aggregation fallback. Migration: `0033_clan_cached_aggregations.py`.
+
+**B3**: Simplified from full task coalescing to per-player dispatch dedup (cache key `player:refresh_dispatched:{player_id}`, 60s TTL). Lower risk than full coalescing, still eliminates duplicate fan-out from concurrent page loads.

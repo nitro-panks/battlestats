@@ -97,6 +97,10 @@ class Clan(models.Model):
     tag = models.CharField(max_length=200, null=True, blank=True)
     last_fetch = models.DateTimeField(null=True, blank=True)
     last_lookup = models.DateTimeField(null=True, blank=True)
+    cached_total_wins = models.BigIntegerField(null=True, blank=True)
+    cached_total_battles = models.BigIntegerField(null=True, blank=True)
+    cached_active_member_count = models.IntegerField(null=True, blank=True)
+    cached_clan_wr = models.FloatField(null=True, blank=True)
 
     def __str__(self):
         return str(self.clan_id) + '-' + self.name

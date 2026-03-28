@@ -553,6 +553,15 @@ def clan_members(request, clan_id: str) -> Response:
     if needs_member_refresh:
         _delay_task_safely(update_clan_members_task, clan_id=clan_id)
 
+    # B1: Check response cache before doing expensive member serialization
+    CLAN_MEMBERS_CACHE_TTL = 300  # 5 minutes
+    cache_key = f'clan:members:{clan_id}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        response = Response(cached)
+        response['X-Clan-Members-Cache'] = 'hit'
+        return response
+
     members = clan.player_set.select_related('explorer_summary').exclude(name='').order_by(
         *_player_score_ordering('last_battle_date'))
 
@@ -593,7 +602,13 @@ def clan_members(request, clan_id: str) -> Response:
     ]
 
     serializer = ClanMemberSerializer(member_rows, many=True)
-    response = Response(serializer.data)
+    serialized_data = serializer.data
+
+    # B1: Cache the serialized member payload
+    cache.set(cache_key, serialized_data, CLAN_MEMBERS_CACHE_TTL)
+
+    response = Response(serialized_data)
+    response['X-Clan-Members-Cache'] = 'miss'
     response['X-Ranked-Hydration-Queued'] = str(
         len(hydration_state['queued_player_ids']))
     response['X-Ranked-Hydration-Deferred'] = str(

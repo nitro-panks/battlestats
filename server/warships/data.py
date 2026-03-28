@@ -2187,27 +2187,30 @@ def fetch_player_summary(player_id: str) -> dict:
     player = Player.objects.get(player_id=player_id)
 
     if not player.is_hidden:
-        # Per-field lazy hydration: dispatch refresh for any missing or stale
-        # JSON field independently, so partial data (e.g. ranked_json set but
-        # battles_json missing) no longer blocks hydration.
-        if player.battles_json is None:
-            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
-        elif player_battle_data_needs_refresh(player):
-            _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+        # Dedup: skip dispatch if we already queued refreshes for this player recently
+        dedup_key = f'player:refresh_dispatched:{player_id}'
+        if cache.add(dedup_key, 1, timeout=60):
+            # Per-field lazy hydration: dispatch refresh for any missing or stale
+            # JSON field independently, so partial data (e.g. ranked_json set but
+            # battles_json missing) no longer blocks hydration.
+            if player.battles_json is None:
+                _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+            elif player_battle_data_needs_refresh(player):
+                _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
 
-        if player.activity_json is None:
-            _dispatch_async_refresh(update_snapshot_data_task, player_id)
-            _dispatch_async_refresh(update_activity_data_task, player_id)
-        elif player_activity_data_needs_refresh(player):
-            _dispatch_async_refresh(update_snapshot_data_task, player_id)
-            _dispatch_async_refresh(update_activity_data_task, player_id)
+            if player.activity_json is None:
+                _dispatch_async_refresh(update_snapshot_data_task, player_id)
+                _dispatch_async_refresh(update_activity_data_task, player_id)
+            elif player_activity_data_needs_refresh(player):
+                _dispatch_async_refresh(update_snapshot_data_task, player_id)
+                _dispatch_async_refresh(update_activity_data_task, player_id)
 
-        if player.ranked_json is None:
-            from warships.tasks import queue_ranked_data_refresh
-            queue_ranked_data_refresh(player_id)
-        elif player_ranked_data_needs_refresh(player):
-            from warships.tasks import queue_ranked_data_refresh
-            queue_ranked_data_refresh(player_id)
+            if player.ranked_json is None:
+                from warships.tasks import queue_ranked_data_refresh
+                queue_ranked_data_refresh(player_id)
+            elif player_ranked_data_needs_refresh(player):
+                from warships.tasks import queue_ranked_data_refresh
+                queue_ranked_data_refresh(player_id)
 
     if getattr(player, 'explorer_summary', None) is None and (
         player.battles_json is not None or player.activity_json is not None or player.ranked_json is not None
@@ -4288,6 +4291,7 @@ def update_clan_data(clan_id: str) -> None:
     clan.save()
     invalidate_landing_clan_caches()
     _invalidate_clan_battle_summary_cache(clan_id)
+    cache.delete(f'clan:members:{clan_id}')
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
 
@@ -4331,8 +4335,28 @@ def update_clan_members(clan_id: str) -> None:
 
         update_player_data(player)
 
+    # Denormalize clan aggregations for landing page surfaces
+    from django.db.models import Sum, Count, Q
+    agg = Clan.objects.filter(clan_id=clan_id).aggregate(
+        total_wins=Sum('player__pvp_wins'),
+        total_battles=Sum('player__pvp_battles'),
+        active_members=Count('player', filter=Q(
+            player__days_since_last_battle__lte=30)),
+    )
+    total_wins = agg['total_wins'] or 0
+    total_battles = agg['total_battles'] or 0
+    clan.cached_total_wins = total_wins
+    clan.cached_total_battles = total_battles
+    clan.cached_active_member_count = agg['active_members'] or 0
+    clan.cached_clan_wr = round(total_wins / total_battles * 100.0, 4) if total_battles > 0 else None
+    clan.save(update_fields=[
+        'cached_total_wins', 'cached_total_battles',
+        'cached_active_member_count', 'cached_clan_wr',
+    ])
+
     invalidate_landing_clan_caches()
     _invalidate_clan_battle_summary_cache(clan_id)
+    cache.delete(f'clan:members:{clan_id}')
 
 
 def update_player_data(player: Player, force_refresh: bool = False) -> None:

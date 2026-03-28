@@ -470,10 +470,8 @@ class LandingHelperTests(TestCase):
         ]) as mock_random_clans, \
                 patch('warships.landing.get_landing_best_clans_payload', return_value=[{'name': 'Best Clan'}]) as mock_best_clans, \
                 patch('warships.landing.get_landing_recent_clans_payload', return_value=[{'name': 'Recent Clan'}]) as mock_recent_clans, \
-                patch('warships.landing.get_landing_players_payload', side_effect=[
-                    [{'name': 'Random'}],
-                    [{'name': 'Best'}],
-                    [{'name': 'Sigma'}],
+                patch('warships.landing.get_landing_players_payload', side_effect=lambda mode, *a, **kw: [
+                    {'name': mode.capitalize()}
                 ]) as mock_players, \
                 patch('warships.landing.get_landing_recent_players_payload', return_value=[{'name': 'Recent Player'}]) as mock_recent_players:
             from warships.landing import warm_landing_page_content
@@ -489,24 +487,23 @@ class LandingHelperTests(TestCase):
                 'players_random': 1,
                 'players_best': 1,
                 'players_sigma': 1,
+                'players_popular': 1,
                 'recent_players': 1,
             },
         })
         mock_random_clans.assert_called_once_with(force_refresh=True)
         mock_best_clans.assert_called_once_with(force_refresh=True)
         mock_recent_clans.assert_called_once_with(force_refresh=True)
-        self.assertEqual(
-            mock_players.call_args_list[0].args, ('random', LANDING_PLAYER_LIMIT))
-        self.assertEqual(mock_players.call_args_list[0].kwargs, {
-                         'force_refresh': True})
-        self.assertEqual(
-            mock_players.call_args_list[1].args, ('best', LANDING_PLAYER_LIMIT))
-        self.assertEqual(mock_players.call_args_list[1].kwargs, {
-                         'force_refresh': True})
-        self.assertEqual(
-            mock_players.call_args_list[2].args, ('sigma', LANDING_PLAYER_LIMIT))
-        self.assertEqual(mock_players.call_args_list[2].kwargs, {
-                         'force_refresh': True})
+        # Surfaces are warmed concurrently so call order is non-deterministic
+        player_calls = {
+            call.args[0]: call
+            for call in mock_players.call_args_list
+        }
+        self.assertEqual(len(player_calls), 4)
+        for mode in ('random', 'best', 'sigma', 'popular'):
+            self.assertIn(mode, player_calls)
+            self.assertEqual(player_calls[mode].args, (mode, LANDING_PLAYER_LIMIT))
+            self.assertEqual(player_calls[mode].kwargs, {'force_refresh': True})
         mock_recent_players.assert_called_once_with(force_refresh=True)
 
     @patch('warships.data.warm_clan_entity_caches', return_value=4)

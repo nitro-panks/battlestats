@@ -6,7 +6,7 @@ import math
 
 from django.core.cache import cache
 from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
-from django.db.models.functions import Cast
+from django.db.models.functions import Cast, Coalesce
 from django.utils import timezone
 
 from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player
@@ -15,6 +15,33 @@ from warships.visit_analytics import get_top_entities
 
 
 logger = logging.getLogger(__name__)
+
+
+def _clan_agg_annotations():
+    """Clan stats annotations: use cached fields, fall back to live aggregation."""
+    return dict(
+        total_wins=Coalesce(F('cached_total_wins'), Sum('player__pvp_wins')),
+        total_battles=Coalesce(F('cached_total_battles'), Sum('player__pvp_battles')),
+        active_members=Coalesce(
+            F('cached_active_member_count'),
+            Count('player', filter=Q(player__days_since_last_battle__lte=30)),
+        ),
+    )
+
+
+def _clan_wr_annotation():
+    """Clan win-rate annotation: use cached value, fall back to live computation."""
+    return dict(
+        clan_wr=Case(
+            When(cached_clan_wr__isnull=False, then=F('cached_clan_wr')),
+            When(
+                total_battles__gt=0,
+                then=Cast(F('total_wins'), FloatField()) / Cast(F('total_battles'), FloatField()) * Value(100.0),
+            ),
+            default=None,
+            output_field=FloatField(),
+        ),
+    )
 
 
 LANDING_CACHE_TTL = 60 * 60 * 12
@@ -44,7 +71,7 @@ LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 LANDING_PLAYER_BEST_MIN_HIGH_TIER_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_TARGET_HIGH_TIER_PVP_BATTLES = 5000
-LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 1200
+LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 400
 LANDING_PLAYER_SIGMA_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_MODES = ('random', 'best', 'sigma', 'popular')
 LANDING_PLAYER_BEST_WR_WEIGHT = 0.40
@@ -522,17 +549,9 @@ def _set_random_landing_clan_queue(clan_ids: list[int]) -> None:
 def _build_random_landing_clan_eligible_ids() -> list[int]:
     return list(
         Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
-            total_wins=Sum('player__pvp_wins'),
-            total_battles=Sum('player__pvp_battles'),
-            active_members=Count('player', filter=Q(
-                player__days_since_last_battle__lte=30)),
+            **_clan_agg_annotations(),
         ).annotate(
-            clan_wr=Case(
-                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
-                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
-                default=None,
-                output_field=FloatField(),
-            ),
+            **_clan_wr_annotation(),
         ).filter(
             total_battles__gte=LANDING_CLAN_MIN_TOTAL_BATTLES,
             clan_wr__isnull=False,
@@ -705,17 +724,9 @@ def resolve_landing_clans_by_id_order(clan_ids: list[int]) -> list[dict]:
         Clan.objects.exclude(name__isnull=True).exclude(name='').filter(
             clan_id__in=normalized_ids,
         ).annotate(
-            total_wins=Sum('player__pvp_wins'),
-            total_battles=Sum('player__pvp_battles'),
-            active_members=Count('player', filter=Q(
-                player__days_since_last_battle__lte=30)),
+            **_clan_agg_annotations(),
         ).annotate(
-            clan_wr=Case(
-                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
-                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
-                default=None,
-                output_field=FloatField(),
-            ),
+            **_clan_wr_annotation(),
         ).filter(
             total_battles__gte=LANDING_CLAN_MIN_TOTAL_BATTLES,
             clan_wr__isnull=False,
@@ -731,17 +742,9 @@ def resolve_landing_clans_by_id_order(clan_ids: list[int]) -> list[dict]:
 def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT) -> list[dict]:
     rows = list(
         Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
-            total_wins=Sum('player__pvp_wins'),
-            total_battles=Sum('player__pvp_battles'),
-            active_members=Count('player', filter=Q(
-                player__days_since_last_battle__lte=30)),
+            **_clan_agg_annotations(),
         ).annotate(
-            clan_wr=Case(
-                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
-                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
-                default=None,
-                output_field=FloatField(),
-            ),
+            **_clan_wr_annotation(),
         ).filter(
             total_battles__gte=LANDING_CLAN_MIN_TOTAL_BATTLES,
             clan_wr__isnull=False,
@@ -1115,17 +1118,9 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
 
 def _build_landing_clans() -> list[dict]:
     qs = Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
-        total_wins=Sum('player__pvp_wins'),
-        total_battles=Sum('player__pvp_battles'),
-        active_members=Count('player', filter=Q(
-            player__days_since_last_battle__lte=30)),
+        **_clan_agg_annotations(),
     ).annotate(
-        clan_wr=Case(
-            When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
-            )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
-            default=None,
-            output_field=FloatField(),
-        ),
+        **_clan_wr_annotation(),
     ).values(
         'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles', 'active_members'
     ).order_by(F('last_lookup').desc(nulls_last=True))
@@ -1149,15 +1144,9 @@ def _build_recent_clans() -> list[dict]:
         Clan.objects.exclude(name__isnull=True).exclude(name='').exclude(
             last_lookup__isnull=True
         ).annotate(
-            total_wins=Sum('player__pvp_wins'),
-            total_battles=Sum('player__pvp_battles'),
+            **_clan_agg_annotations(),
         ).annotate(
-            clan_wr=Case(
-                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
-                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
-                default=None,
-                output_field=FloatField(),
-            ),
+            **_clan_wr_annotation(),
         ).values(
             'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles'
         ).order_by(
@@ -1491,24 +1480,36 @@ def get_landing_recent_players_payload(force_refresh: bool = False) -> list[dict
 
 
 def warm_landing_page_content(force_refresh: bool = False, include_recent: bool = True) -> dict:
-    random_players_payload = get_landing_players_payload(
-        'random',
-        LANDING_PLAYER_LIMIT,
-        force_refresh=force_refresh,
-    )
-    random_clans_payload = get_landing_clans_payload(
-        force_refresh=force_refresh,
-    )
-    warmed = {
-        'clans': len(random_clans_payload),
-        'clans_best': len(get_landing_best_clans_payload(force_refresh=force_refresh)),
-        'recent_clans': len(get_landing_recent_clans_payload(force_refresh=force_refresh if include_recent else False)),
-        'players_random': len(random_players_payload),
-        'players_best': len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
-        'players_sigma': len(get_landing_players_payload('sigma', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
-        'players_popular': len(get_landing_players_payload('popular', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
-        'recent_players': len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False)),
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    surfaces = {
+        'players_random': lambda: len(get_landing_players_payload('random', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
+        'players_best': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
+        'players_sigma': lambda: len(get_landing_players_payload('sigma', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
+        'players_popular': lambda: len(get_landing_players_payload('popular', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
+        'clans': lambda: len(get_landing_clans_payload(force_refresh=force_refresh)),
+        'clans_best': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh)),
+        'recent_clans': lambda: len(get_landing_recent_clans_payload(force_refresh=force_refresh if include_recent else False)),
+        'recent_players': lambda: len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False)),
     }
+
+    warmed = {}
+    from django.conf import settings
+    parallel = getattr(settings, 'LANDING_WARM_PARALLEL', True)
+    if parallel:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            future_to_name = {pool.submit(fn): name for name, fn in surfaces.items()}
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    warmed[name] = future.result()
+                except Exception:
+                    logging.exception("Failed to warm landing surface %s", name)
+                    warmed[name] = 0
+    else:
+        for name, fn in surfaces.items():
+            warmed[name] = fn()
+
     _clear_cache_family_dirty(
         LANDING_CLANS_DIRTY_KEY,
         LANDING_PLAYERS_DIRTY_KEY,

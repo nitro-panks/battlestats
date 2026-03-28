@@ -151,6 +151,7 @@ if RUNNING_TESTS:
             'TIMEOUT': 60,
         }
     }
+    LANDING_WARM_PARALLEL = False
 elif REDIS_URL:
     CACHES = {
         'default': {
