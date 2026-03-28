@@ -229,7 +229,7 @@ These endpoints are called once per clan visit and p95 < 700ms is acceptable. Th
 | Fix | Target | Impact | Effort | Risk | Status |
 |-----|--------|--------|--------|------|--------|
 | B1: Cache clan_members response | p95: 1598ms → ~200ms | High | 1-2h | Low | **Done** |
-| B2b: Reduce players_best candidate limit | Surface: 800ms → ~200ms | Medium | 1h | Low | **Done** |
+| B2b: Reduce players_best candidate limit | Surface: 800ms → ~200ms | Medium | 1h | Low | **Reverted** |
 | B2a: Parallelize landing surface warming | 212s → ~40s | Medium | 2-3h | Low | **Done** |
 | B2c: Denormalize clan aggregations | Surface: 400ms → ~50ms | Medium | 2-3h | Medium | **Done** |
 | B3: Dedup per-player refresh dispatches | 349 → fewer tasks per burst | Low | 1h | Low | **Done** |
@@ -239,7 +239,7 @@ These endpoints are called once per clan visit and p95 < 700ms is acceptable. Th
 
 **B1**: Added 5-minute Redis cache for serialized clan member payload in `views.py:clan_members`. Cache key `clan:members:{clan_id}`, invalidated in `update_clan_data()` and `update_clan_members()`.
 
-**B2b**: Reduced `LANDING_PLAYER_BEST_CANDIDATE_LIMIT` from 1200 to 400 in `landing.py`.
+**B2b**: **Reverted**. Reduced limit from 1200 to 400 but actual high-tier filter pass rate is 7.8% (not 25% as estimated), yielding only 5 players instead of 25. Limit restored to 1200. This optimization requires a denormalized `high_tier_pvp_battles` column to push the filter to SQL — not worth the migration for a background-only surface.
 
 **B2a**: Parallelized `warm_landing_page_content()` using `ThreadPoolExecutor(max_workers=4)`. Falls back to sequential execution in tests (`LANDING_WARM_PARALLEL = False`).
 
