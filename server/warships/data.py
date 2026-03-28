@@ -4736,8 +4736,9 @@ def warm_landing_best_entity_caches(
     }
 
 
-BULK_CACHE_PLAYER_LIMIT = max(1, int(os.getenv('BULK_CACHE_PLAYER_LIMIT', '500')))
-BULK_CACHE_CLAN_LIMIT = max(1, int(os.getenv('BULK_CACHE_CLAN_LIMIT', '100')))
+BULK_CACHE_TOP_PLAYER_LIMIT = max(1, int(os.getenv('BULK_CACHE_TOP_PLAYER_LIMIT', '50')))
+BULK_CACHE_CLAN_LIMIT = max(1, int(os.getenv('BULK_CACHE_CLAN_LIMIT', '25')))
+BULK_CACHE_CLAN_MEMBER_CLANS = max(1, int(os.getenv('BULK_CACHE_CLAN_MEMBER_CLANS', '25')))
 BULK_CACHE_PLAYER_TTL = int(os.getenv('BULK_CACHE_PLAYER_TTL', str(24 * 60 * 60)))
 BULK_CACHE_CLAN_TTL = int(os.getenv('BULK_CACHE_CLAN_TTL', str(24 * 60 * 60)))
 
@@ -4766,14 +4767,22 @@ def invalidate_clan_detail_cache(clan_id: int) -> None:
     cache.delete(_bulk_cache_key_clan(clan_id))
 
 
-def bulk_load_player_cache(limit: int = BULK_CACHE_PLAYER_LIMIT) -> dict[str, Any]:
-    """Bulk-load top player detail payloads into Redis from DB.
+def bulk_load_player_cache(
+    top_player_limit: int = BULK_CACHE_TOP_PLAYER_LIMIT,
+    clan_member_clans: int = BULK_CACHE_CLAN_MEMBER_CLANS,
+) -> dict[str, Any]:
+    """Bulk-load player detail payloads into Redis from DB.
 
-    Single query, no API calls, no Celery tasks. Uses cache.set_many()
-    which pipelines writes on Redis backends.
+    Loads three cohorts into a single cache.set_many() call:
+    1. Top N players by player_score (global best)
+    2. All members of the top M clans (covers clan-page click-through)
+    3. Pinned players (always included)
+
+    Single pass — no API calls, no Celery tasks.
     """
     from warships.serializers import PlayerSerializer
 
+    # Cohort 1: top players by score
     top_players = list(
         Player.objects
         .exclude(name='')
@@ -4782,20 +4791,37 @@ def bulk_load_player_cache(limit: int = BULK_CACHE_PLAYER_LIMIT) -> dict[str, An
         .order_by(
             F('explorer_summary__player_score').desc(nulls_last=True),
             F('pvp_ratio').desc(nulls_last=True),
-        )[:limit]
+        )[:top_player_limit]
     )
+    seen_ids = {p.player_id for p in top_players}
 
-    # Always include pinned players even if they fall outside the top-N
-    top_ids = {p.player_id for p in top_players}
+    # Cohort 2: members of the best clans
+    best_clan_ids = list(
+        Clan.objects
+        .exclude(name__isnull=True).exclude(name='')
+        .filter(cached_clan_wr__isnull=False, cached_total_battles__gte=10000)
+        .order_by(F('cached_clan_wr').desc(nulls_last=True), F('cached_total_battles').desc(nulls_last=True))
+        .values_list('clan_id', flat=True)[:clan_member_clans]
+    )
+    clan_members = list(
+        Player.objects
+        .filter(clan_id__in=best_clan_ids)
+        .exclude(name='')
+        .exclude(player_id__in=seen_ids)
+        .select_related('clan', 'explorer_summary')
+    )
+    top_players.extend(clan_members)
+    seen_ids.update(p.player_id for p in clan_members)
+
+    # Cohort 3: pinned players
     pinned_ids = _get_pinned_player_ids()
-    missing_pinned = [pid for pid in pinned_ids if pid not in top_ids]
+    missing_pinned = [pid for pid in pinned_ids if pid not in seen_ids]
     if missing_pinned:
-        pinned_players = list(
+        top_players.extend(
             Player.objects
             .filter(player_id__in=missing_pinned)
             .select_related('clan', 'explorer_summary')
         )
-        top_players.extend(pinned_players)
 
     payloads: dict[str, dict] = {}
     serializer = PlayerSerializer()
@@ -4810,11 +4836,16 @@ def bulk_load_player_cache(limit: int = BULK_CACHE_PLAYER_LIMIT) -> dict[str, An
     if payloads:
         cache.set_many(payloads, timeout=BULK_CACHE_PLAYER_TTL)
 
-    logging.info("bulk_load_player_cache: loaded %d player detail payloads into cache (limit=%d)", len(payloads), limit)
+    logging.info(
+        "bulk_load_player_cache: loaded %d player payloads (top=%d, clan_members=%d, clans=%d)",
+        len(payloads), top_player_limit, len(clan_members), len(best_clan_ids),
+    )
     return {
         'status': 'completed',
         'loaded': len(payloads),
-        'limit': limit,
+        'top_players': top_player_limit,
+        'clan_member_clans': len(best_clan_ids),
+        'clan_members_added': len(clan_members),
     }
 
 
@@ -4855,11 +4886,12 @@ def bulk_load_clan_cache(limit: int = BULK_CACHE_CLAN_LIMIT) -> dict[str, Any]:
 
 
 def bulk_load_entity_caches(
-    player_limit: int = BULK_CACHE_PLAYER_LIMIT,
+    top_player_limit: int = BULK_CACHE_TOP_PLAYER_LIMIT,
+    clan_member_clans: int = BULK_CACHE_CLAN_MEMBER_CLANS,
     clan_limit: int = BULK_CACHE_CLAN_LIMIT,
 ) -> dict[str, Any]:
-    """Bulk-load player and clan detail payloads into Redis. One DB query each, no tasks."""
-    player_result = bulk_load_player_cache(player_limit)
+    """Bulk-load player and clan detail payloads into Redis. DB reads only, no tasks."""
+    player_result = bulk_load_player_cache(top_player_limit, clan_member_clans)
     clan_result = bulk_load_clan_cache(clan_limit)
     return {
         'status': 'completed',
