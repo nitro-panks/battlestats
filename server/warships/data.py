@@ -1136,6 +1136,10 @@ def _recompute_efficiency_rank_snapshot_sql(
     Pushes the ranking computation (shrinkage estimator, percentile,
     tier assignment) into PostgreSQL using window functions instead of
     iterating 275K+ rows in Python.
+
+    Optimized to use a single UPDATE with LEFT JOIN that sets eligible
+    rows to computed values and non-eligible rows to NULL in one pass,
+    avoiding the expensive NOT IN subquery pattern.
     """
     shrinkage_k = EFFICIENCY_RANK_SHRINKAGE_K
     min_pvp = EFFICIENCY_RANK_MIN_PVP_BATTLES
@@ -1157,55 +1161,61 @@ def _recompute_efficiency_rank_snapshot_sql(
         if player_limit > 0 else ''
     )
 
-    # Step 1: Compute field_mean_strength and population_size in SQL.
-    mean_sql = f"""
-        {('WITH ' + player_scope_cte) if player_scope_cte else 'WITH'}
-        eligible AS (
-            SELECT es.normalized_badge_strength, es.eligible_ship_count
-            FROM warships_playerexplorersummary es
-            JOIN warships_player p ON p.id = es.player_id
-            {player_scope_join}
+    # Step 1: Compute field_mean_strength, population_size, and suppressed
+    # counts in a single table scan.
+    stats_sql = """
+        SELECT
+            COUNT(*) FILTER (WHERE eligible) AS pop,
+            COALESCE(AVG(nbs) FILTER (WHERE eligible), 0) AS mean,
+            COUNT(*) FILTER (WHERE has_summary AND NOT eligible
+                AND COALESCE(pvp_battles, 0) < %s) AS low_battles,
+            COUNT(*) FILTER (WHERE has_summary AND NOT eligible
+                AND COALESCE(pvp_battles, 0) >= %s
+                AND COALESCE(esc, 0) < %s) AS low_ships,
+            COUNT(*) FILTER (WHERE has_summary AND NOT eligible
+                AND COALESCE(pvp_battles, 0) >= %s
+                AND COALESCE(esc, 0) >= %s
+                AND COALESCE(ebrt, 0) > 0
+                AND nbs IS NOT NULL
+                AND (COALESCE(bru, 0)::float / ebrt) > %s) AS unmapped_badge_gate
+        FROM (
+            SELECT
+                es.id IS NOT NULL AS has_summary,
+                es.normalized_badge_strength AS nbs,
+                es.eligible_ship_count AS esc,
+                es.efficiency_badge_rows_total AS ebrt,
+                es.badge_rows_unmapped AS bru,
+                p.pvp_battles,
+                (p.is_hidden = false
+                 AND COALESCE(p.pvp_battles, 0) >= %s
+                 AND es.eligible_ship_count IS NOT NULL
+                 AND COALESCE(es.eligible_ship_count, 0) >= %s
+                 AND COALESCE(es.efficiency_badge_rows_total, 0) > 0
+                 AND es.normalized_badge_strength IS NOT NULL
+                 AND (COALESCE(es.badge_rows_unmapped, 0)::float
+                      / es.efficiency_badge_rows_total) <= %s
+                ) AS eligible
+            FROM warships_player p
+            LEFT JOIN warships_playerexplorersummary es ON es.player_id = p.id
             WHERE p.is_hidden = false
-              AND COALESCE(p.pvp_battles, 0) >= %s
-              AND es.eligible_ship_count IS NOT NULL
-              AND COALESCE(es.eligible_ship_count, 0) >= %s
-              AND COALESCE(es.efficiency_badge_rows_total, 0) > 0
-              AND es.normalized_badge_strength IS NOT NULL
-              AND (COALESCE(es.badge_rows_unmapped, 0)::float
-                   / es.efficiency_badge_rows_total) <= %s
-        )
-        SELECT COUNT(*) AS pop, COALESCE(AVG(normalized_badge_strength), 0) AS mean
-        FROM eligible
+        ) sub
     """
-    # Fix the WITH syntax when player_scope_cte is empty
-    if not player_scope_cte:
-        mean_sql = f"""
-            WITH eligible AS (
-                SELECT es.normalized_badge_strength, es.eligible_ship_count
-                FROM warships_playerexplorersummary es
-                JOIN warships_player p ON p.id = es.player_id
-                WHERE p.is_hidden = false
-                  AND COALESCE(p.pvp_battles, 0) >= %s
-                  AND es.eligible_ship_count IS NOT NULL
-                  AND COALESCE(es.eligible_ship_count, 0) >= %s
-                  AND COALESCE(es.efficiency_badge_rows_total, 0) > 0
-                  AND es.normalized_badge_strength IS NOT NULL
-                  AND (COALESCE(es.badge_rows_unmapped, 0)::float
-                       / es.efficiency_badge_rows_total) <= %s
-            )
-            SELECT COUNT(*) AS pop, COALESCE(AVG(normalized_badge_strength), 0) AS mean
-            FROM eligible
-        """
 
     with connection.cursor() as cursor:
-        cursor.execute(mean_sql, [min_pvp, min_ships, unmapped_limit])
+        cursor.execute(stats_sql, [
+            min_pvp, min_pvp, min_ships,
+            min_pvp, min_ships, unmapped_limit,
+            min_pvp, min_ships, unmapped_limit,
+        ])
         row = cursor.fetchone()
         population_size = row[0]
         field_mean_strength = round(float(row[1]), 6) if population_size else 0.0
+        suppressed_counts = {}
+        if row[2]: suppressed_counts['low_battles'] = row[2]
+        if row[3]: suppressed_counts['low_ships'] = row[3]
+        if row[4]: suppressed_counts['unmapped_badge_gate'] = row[4]
 
     if population_size == 0:
-        suppressed_counts = _count_suppressed_players(
-            min_pvp, min_ships, unmapped_limit)
         return {
             'publish_applied': False,
             'partial_population': player_limit > 0,
@@ -1232,13 +1242,18 @@ def _recompute_efficiency_rank_snapshot_sql(
     publish_applied = player_limit <= 0 or publish_partial
 
     if publish_applied:
-        # Step 2: Compute shrunken strength, percentile, and tier in SQL
-        # and apply the update in a single atomic operation.
+        # Single-pass UPDATE using LEFT JOIN: eligible rows get computed
+        # values, non-eligible rows get NULLed out. This avoids the
+        # expensive NOT IN subquery that was taking 80s+ on its own.
         #
         # PERCENT_RANK() gives (rank-1)/(count-1) with 0 at top,
         # but our percentile is (pop-rank)/(pop-1) with 1 at top.
         # So: our_percentile = 1.0 - PERCENT_RANK().
-        update_sql = f"""
+        scope_where = (
+            'AND es.player_id IN (SELECT id FROM player_scope)'
+            if player_limit > 0 else ''
+        )
+        unified_sql = f"""
             WITH {player_scope_cte if player_scope_cte else ''}
             eligible AS (
                 SELECT
@@ -1272,7 +1287,7 @@ def _recompute_efficiency_rank_snapshot_sql(
                     ))::numeric, 6) AS percentile
                 FROM eligible
             )
-            UPDATE warships_playerexplorersummary SET
+            UPDATE warships_playerexplorersummary es SET
                 shrunken_efficiency_strength = ranked.shrunken_strength,
                 efficiency_rank_percentile = ranked.percentile,
                 efficiency_rank_tier = CASE
@@ -1282,60 +1297,32 @@ def _recompute_efficiency_rank_snapshot_sql(
                     WHEN ranked.percentile >= %s THEN 'III'
                     ELSE NULL
                 END,
-                has_efficiency_rank_icon = (ranked.percentile >= %s),
-                efficiency_rank_population_size = %s,
+                has_efficiency_rank_icon = COALESCE(ranked.percentile >= %s, false),
+                efficiency_rank_population_size = CASE
+                    WHEN ranked.summary_id IS NOT NULL THEN %s ELSE NULL
+                END,
                 efficiency_rank_updated_at = %s
-            FROM ranked
-            WHERE warships_playerexplorersummary.id = ranked.summary_id
-        """
-
-        # Step 3: Clear ranks for non-eligible players.
-        clear_scope_join = (
-            'AND es.player_id IN (SELECT id FROM player_scope)'
-            if player_limit > 0 else ''
-        )
-        clear_sql = f"""
-            UPDATE warships_playerexplorersummary es SET
-                shrunken_efficiency_strength = NULL,
-                efficiency_rank_percentile = NULL,
-                efficiency_rank_tier = NULL,
-                has_efficiency_rank_icon = false,
-                efficiency_rank_population_size = NULL,
-                efficiency_rank_updated_at = %s
-            WHERE es.id NOT IN (
-                SELECT es2.id
-                FROM warships_playerexplorersummary es2
-                JOIN warships_player p ON p.id = es2.player_id
-                {player_scope_join}
-                WHERE p.is_hidden = false
-                  AND COALESCE(p.pvp_battles, 0) >= %s
-                  AND es2.eligible_ship_count IS NOT NULL
-                  AND COALESCE(es2.eligible_ship_count, 0) >= %s
-                  AND COALESCE(es2.efficiency_badge_rows_total, 0) > 0
-                  AND es2.normalized_badge_strength IS NOT NULL
-                  AND (COALESCE(es2.badge_rows_unmapped, 0)::float
-                       / es2.efficiency_badge_rows_total) <= %s
-            )
-            {clear_scope_join}
+            FROM (
+                SELECT es_all.id AS all_id, ranked.summary_id,
+                       ranked.shrunken_strength, ranked.percentile
+                FROM warships_playerexplorersummary es_all
+                LEFT JOIN ranked ON ranked.summary_id = es_all.id
+            ) ranked
+            WHERE es.id = ranked.all_id
+            {scope_where}
         """
 
         with transaction.atomic():
             with connection.cursor() as cursor:
-                cursor.execute(update_sql, [
+                cursor.execute(unified_sql, [
                     shrinkage_k, shrinkage_k, field_mean_strength,
                     min_pvp, min_ships, unmapped_limit,
                     expert_pct, grade_i_pct, grade_ii_pct, grade_iii_pct,
                     grade_iii_pct,
                     population_size, snapshot_updated_at,
                 ])
-                updated_count = cursor.rowcount
 
-                cursor.execute(clear_sql, [
-                    snapshot_updated_at,
-                    min_pvp, min_ships, unmapped_limit,
-                ])
-
-    # Step 4: Gather tier counts and distribution stats for the return value.
+    # Gather tier counts and distribution stats for the return value.
     tier_sql = """
         SELECT efficiency_rank_tier, COUNT(*)
         FROM warships_playerexplorersummary
@@ -1357,9 +1344,6 @@ def _recompute_efficiency_rank_snapshot_sql(
 
         cursor.execute(dist_sql, [snapshot_updated_at])
         sorted_strengths = [float(row[0]) for row in cursor.fetchall()]
-
-    suppressed_counts = _count_suppressed_players(
-        min_pvp, min_ships, unmapped_limit)
 
     return {
         'publish_applied': publish_applied,
