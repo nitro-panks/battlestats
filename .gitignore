@@ -22,6 +22,8 @@ server/ca-certificate.crt
 logs/
 *.log
 
+.next/
+
 client/playwright-report/
 client/test-results/
 
