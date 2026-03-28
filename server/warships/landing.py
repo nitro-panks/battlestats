@@ -1493,12 +1493,20 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
         'recent_players': lambda: len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False)),
     }
 
+    def _run_surface(fn):
+        from django.db import close_old_connections
+        close_old_connections()
+        try:
+            return fn()
+        finally:
+            close_old_connections()
+
     warmed = {}
     from django.conf import settings
     parallel = getattr(settings, 'LANDING_WARM_PARALLEL', True)
     if parallel:
         with ThreadPoolExecutor(max_workers=4) as pool:
-            future_to_name = {pool.submit(fn): name for name, fn in surfaces.items()}
+            future_to_name = {pool.submit(_run_surface, fn): name for name, fn in surfaces.items()}
             for future in as_completed(future_to_name):
                 name = future_to_name[future]
                 try:
