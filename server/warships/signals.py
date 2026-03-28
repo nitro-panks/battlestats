@@ -198,3 +198,21 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
             "description": "Keeps the hottest player and clan detail caches warm so detail routes can serve cached payloads and refresh in the background.",
         },
     )
+
+    bulk_cache_load_hours = int(os.getenv("BULK_CACHE_LOAD_HOURS", "12"))
+    bulk_cache_load_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=bulk_cache_load_hours * 60,
+        period=IntervalSchedule.MINUTES,
+    )
+
+    PeriodicTask.objects.update_or_create(
+        name="bulk-entity-cache-loader",
+        defaults={
+            "task": "warships.tasks.bulk_load_entity_caches_task",
+            "interval": bulk_cache_load_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Bulk-loads top player and clan detail payloads into Redis from DB. Single query, no API calls.",
+        },
+    )

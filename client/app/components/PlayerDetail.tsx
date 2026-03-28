@@ -378,8 +378,8 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                 </div>
 
                 {/* Second Column */}
-                <div className="min-w-0 text-left border-l border-[var(--border)] pl-4">
-                    <div className="mb-3 border-b border-[var(--border)] pb-3" data-perf-section="player-header">
+                <div className="min-w-0 text-left pl-4">
+                    <div className="mb-6 border-b border-[var(--border)] pb-3" data-perf-section="player-header">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                             <div className="flex min-w-0 flex-wrap items-center gap-2">
                                 <h1 className="text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
@@ -471,6 +471,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     ) : null}
                                 </div>
                             )}
+                            <div className="mt-6" />
                             <PlayerDetailInsightsTabs
                                 playerId={player.player_id}
                                 pvpRatio={player.pvp_ratio}

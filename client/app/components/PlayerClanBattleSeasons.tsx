@@ -149,7 +149,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Season</th>
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Ships</th>
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-right font-semibold">Battles</th>
-                                        <th className="sticky top-0 bg-[var(--bg-surface)] py-2 text-right font-semibold">WR</th>
+                                        <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-right font-semibold">WR</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -161,7 +161,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                             </td>
                                             <td className="py-2 pr-3 text-left text-[var(--text-secondary)]">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
                                             <td className="py-2 pr-3 text-right">{season.battles.toLocaleString()}</td>
-                                            <td className="py-2 text-right font-medium" style={{ color: selectColorByWR(season.win_rate) }}>
+                                            <td className="py-2 pr-3 text-right font-medium" style={{ color: selectColorByWR(season.win_rate) }}>
                                                 {season.win_rate.toFixed(1)}%
                                             </td>
                                         </tr>

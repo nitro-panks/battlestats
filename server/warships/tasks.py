@@ -50,6 +50,8 @@ LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_KEY = "warships:tasks:landing_random
 LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
 LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_KEY = "warships:tasks:landing_random_clan_queue_refill:dispatch"
 LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
+BULK_CACHE_LOAD_LOCK_KEY = "warships:tasks:bulk_load_entity_caches:lock"
+BULK_CACHE_LOAD_LOCK_TIMEOUT = 30 * 60
 
 
 def _configured_clan_battle_warm_ids(raw_value=None):
@@ -740,6 +742,27 @@ def refill_landing_random_clans_queue_task(self):
         return result
     finally:
         cache.delete(LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_KEY)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def bulk_load_entity_caches_task(self, player_limit=None, clan_limit=None):
+    from warships.data import BULK_CACHE_CLAN_LIMIT, BULK_CACHE_PLAYER_LIMIT, bulk_load_entity_caches
+
+    logger.info("Starting bulk_load_entity_caches_task player_limit=%s clan_limit=%s", player_limit, clan_limit)
+
+    if not cache.add(BULK_CACHE_LOAD_LOCK_KEY, self.request.id, timeout=BULK_CACHE_LOAD_LOCK_TIMEOUT):
+        logger.info("Skipping bulk_load_entity_caches_task because another bulk load is already running")
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        result = bulk_load_entity_caches(
+            player_limit=int(player_limit or BULK_CACHE_PLAYER_LIMIT),
+            clan_limit=int(clan_limit or BULK_CACHE_CLAN_LIMIT),
+        )
+        logger.info("Finished bulk_load_entity_caches_task: %s", result)
+        return result
+    finally:
+        cache.delete(BULK_CACHE_LOAD_LOCK_KEY)
 
 
 @app.task(bind=True, **CRAWL_TASK_OPTS)

@@ -102,6 +102,26 @@ class PlayerViewSet(viewsets.ModelViewSet):
     serializer_class = PlayerSerializer
     permission_classes = [permissions.AllowAny]
 
+    def retrieve(self, request, *args, **kwargs):
+        from warships.data import get_cached_player_detail, invalidate_player_detail_cache
+
+        # Try bulk-loaded cache before hitting DB + serializer
+        lookup_value = (self.kwargs.get(self.lookup_field) or '').strip()
+        if lookup_value:
+            player = Player.objects.alias(name_lower=Lower("name")).filter(
+                name_lower=lookup_value.casefold(),
+            ).values_list('player_id', flat=True).first()
+            if player:
+                cached = get_cached_player_detail(player)
+                if cached is not None:
+                    response = Response(cached)
+                    response['X-Player-Cache'] = 'hit'
+                    return response
+
+        response = super().retrieve(request, *args, **kwargs)
+        response['X-Player-Cache'] = 'miss'
+        return response
+
     def get_object(self):
         lookup_field_value = self.kwargs[self.lookup_field]
         normalized_lookup_value = (lookup_field_value or '').strip()

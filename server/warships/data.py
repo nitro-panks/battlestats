@@ -4295,6 +4295,7 @@ def update_clan_data(clan_id: str) -> None:
     invalidate_landing_clan_caches()
     _invalidate_clan_battle_summary_cache(clan_id)
     cache.delete(f'clan:members:{clan_id}')
+    invalidate_clan_detail_cache(int(clan_id))
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
 
@@ -4472,6 +4473,7 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
         update_player_efficiency_data(player, force_refresh=force_refresh)
     refresh_player_explorer_summary(player)
     invalidate_landing_player_caches(include_recent=True)
+    invalidate_player_detail_cache(player.player_id)
     logging.info(f"Updated player personal data: {player.name}")
 
 
@@ -4731,6 +4733,126 @@ def warm_landing_best_entity_caches(
             'players': len(player_ids),
             'clans': len(clan_ids),
         },
+    }
+
+
+BULK_CACHE_PLAYER_LIMIT = max(1, int(os.getenv('BULK_CACHE_PLAYER_LIMIT', '500')))
+BULK_CACHE_CLAN_LIMIT = max(1, int(os.getenv('BULK_CACHE_CLAN_LIMIT', '100')))
+BULK_CACHE_PLAYER_TTL = int(os.getenv('BULK_CACHE_PLAYER_TTL', str(24 * 60 * 60)))
+BULK_CACHE_CLAN_TTL = int(os.getenv('BULK_CACHE_CLAN_TTL', str(24 * 60 * 60)))
+
+
+def _bulk_cache_key_player(player_id: int) -> str:
+    return f'player:detail:v1:{player_id}'
+
+
+def _bulk_cache_key_clan(clan_id: int) -> str:
+    return f'clan:detail:v1:{clan_id}'
+
+
+def get_cached_player_detail(player_id: int) -> Optional[dict]:
+    return cache.get(_bulk_cache_key_player(player_id))
+
+
+def get_cached_clan_detail(clan_id: int) -> Optional[dict]:
+    return cache.get(_bulk_cache_key_clan(clan_id))
+
+
+def invalidate_player_detail_cache(player_id: int) -> None:
+    cache.delete(_bulk_cache_key_player(player_id))
+
+
+def invalidate_clan_detail_cache(clan_id: int) -> None:
+    cache.delete(_bulk_cache_key_clan(clan_id))
+
+
+def bulk_load_player_cache(limit: int = BULK_CACHE_PLAYER_LIMIT) -> dict[str, Any]:
+    """Bulk-load top player detail payloads into Redis from DB.
+
+    Single query, no API calls, no Celery tasks. Uses cache.set_many()
+    which pipelines writes on Redis backends.
+    """
+    from warships.serializers import PlayerSerializer
+
+    players = (
+        Player.objects
+        .exclude(name='')
+        .filter(is_hidden=False)
+        .select_related('clan', 'explorer_summary')
+        .order_by(
+            F('explorer_summary__player_score').desc(nulls_last=True),
+            F('pvp_ratio').desc(nulls_last=True),
+        )[:limit]
+    )
+
+    payloads: dict[str, dict] = {}
+    serializer = PlayerSerializer()
+    for player in players:
+        try:
+            data = serializer.to_representation(player)
+            key = _bulk_cache_key_player(player.player_id)
+            payloads[key] = data
+        except Exception:
+            logging.warning("bulk_load_player_cache: failed to serialize player %s", player.player_id, exc_info=True)
+
+    if payloads:
+        cache.set_many(payloads, timeout=BULK_CACHE_PLAYER_TTL)
+
+    logging.info("bulk_load_player_cache: loaded %d player detail payloads into cache (limit=%d)", len(payloads), limit)
+    return {
+        'status': 'completed',
+        'loaded': len(payloads),
+        'limit': limit,
+    }
+
+
+def bulk_load_clan_cache(limit: int = BULK_CACHE_CLAN_LIMIT) -> dict[str, Any]:
+    """Bulk-load top clan detail payloads into Redis from DB."""
+    from warships.serializers import ClanSerializer
+
+    clans = (
+        Clan.objects
+        .exclude(name__isnull=True)
+        .exclude(name='')
+        .filter(cached_clan_wr__isnull=False, cached_total_battles__gte=10000)
+        .order_by(
+            F('cached_clan_wr').desc(nulls_last=True),
+            F('cached_total_battles').desc(nulls_last=True),
+        )[:limit]
+    )
+
+    payloads: dict[str, dict] = {}
+    serializer = ClanSerializer()
+    for clan in clans:
+        try:
+            data = serializer.to_representation(clan)
+            key = _bulk_cache_key_clan(clan.clan_id)
+            payloads[key] = data
+        except Exception:
+            logging.warning("bulk_load_clan_cache: failed to serialize clan %s", clan.clan_id, exc_info=True)
+
+    if payloads:
+        cache.set_many(payloads, timeout=BULK_CACHE_CLAN_TTL)
+
+    logging.info("bulk_load_clan_cache: loaded %d clan detail payloads into cache (limit=%d)", len(payloads), limit)
+    return {
+        'status': 'completed',
+        'loaded': len(payloads),
+        'limit': limit,
+    }
+
+
+def bulk_load_entity_caches(
+    player_limit: int = BULK_CACHE_PLAYER_LIMIT,
+    clan_limit: int = BULK_CACHE_CLAN_LIMIT,
+) -> dict[str, Any]:
+    """Bulk-load player and clan detail payloads into Redis. One DB query each, no tasks."""
+    player_result = bulk_load_player_cache(player_limit)
+    clan_result = bulk_load_clan_cache(clan_limit)
+    return {
+        'status': 'completed',
+        'players': player_result,
+        'clans': clan_result,
     }
 
 
