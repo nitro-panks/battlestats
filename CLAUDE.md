@@ -67,6 +67,7 @@ npm run test:e2e:install                          # Install Playwright browsers
 ```bash
 ./client/deploy/deploy_to_droplet.sh battlestats.online   # Deploy frontend
 ./server/deploy/deploy_to_droplet.sh battlestats.online   # Deploy backend
+./umami/deploy/bootstrap_umami.sh battlestats.online       # Bootstrap/update Umami analytics
 ```
 
 ## Architecture
@@ -76,6 +77,7 @@ npm run test:e2e:install                          # Install Playwright browsers
 - `/player/[playerName]` — Player detail (URL-encoded name, reload-safe)
 - `/clan/[clanSlug]` — Clan detail (`<clan_id>-<optional-slug>`, reload-safe)
 - `/trace` — Agentic workflow trace dashboard
+- `/umami` — Umami analytics dashboard (admin login required)
 
 ### API proxy
 Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`). The frontend never calls the Wargaming API directly — all data flows through Django.
@@ -147,7 +149,16 @@ These rules from that file apply to every commit:
 - `BATTLESTATS_API_ORIGIN` — Backend URL (default `http://localhost:8888`)
 - `NEXT_PUBLIC_GA_MEASUREMENT_ID` — GA4 measurement ID (optional)
 
+### Umami analytics
+- Dashboard: `https://battlestats.online/umami/`
+- Runs as a standalone Next.js app on port 3002 behind nginx
+- Uses the same managed Postgres (separate `umami` database)
+- Bootstrap script: `umami/deploy/bootstrap_umami.sh`
+- Tracking script loaded via `<script>` tag in `client/app/layout.tsx`
+- Credentials stored on droplet; default user is `admin`
+
 ### Docker ports
 - 8888: Django/Gunicorn
 - 3001: Next.js (Docker dev)
+- 3002: Umami analytics (production droplet only)
 - 15672: RabbitMQ management
