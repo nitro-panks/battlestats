@@ -429,7 +429,16 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
         };
     }, [playerSurvivalRate, playerWR, svgHeight, svgWidth, theme]);
 
-    return <div ref={containerRef}></div>;
+    return (
+        <div ref={containerRef}>
+            <div
+                className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
+                style={{ minHeight: svgHeight }}
+            >
+                Loading win rate distribution…
+            </div>
+        </div>
+    );
 };
 
 export default WRDistributionDesign2SVG;

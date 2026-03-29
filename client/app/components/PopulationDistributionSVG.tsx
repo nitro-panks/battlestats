@@ -682,7 +682,16 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
         };
     }, [chartId, overlayMetric, overlayValue, primaryMetric, primaryValue, svgHeight, svgWidth, theme]);
 
-    return <div ref={containerRef}></div>;
+    return (
+        <div ref={containerRef}>
+            <div
+                className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
+                style={{ minHeight: svgHeight }}
+            >
+                Loading distribution…
+            </div>
+        </div>
+    );
 };
 
 export default PopulationDistributionSVG;
