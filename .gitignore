@@ -24,5 +24,11 @@ logs/
 
 client/playwright-report/
 client/test-results/
+test-results/
+tests/load/results/
+
+# Development artifacts
+updated-landing
+*.har
 
 server/static/rest_framework/**/*.png

@@ -33,8 +33,12 @@ services:
     command: >
       bash -c "python manage.py makemigrations &&
                   python manage.py migrate &&
-                  if [ \"${WARM_LANDING_PAGE_ON_STARTUP:-1}\" = \"1\" ]; then
-                    (sleep \"${LANDING_WARMUP_START_DELAY_SECONDS:-5}\"; python manage.py warm_landing_page_content) &
+                  if [ \"${WARM_CACHES_ON_STARTUP:-1}\" = \"1\" ]; then
+                    (sleep \"${CACHE_WARMUP_START_DELAY_SECONDS:-5}\";
+                     echo '[startup] Warming landing page cache...' && python manage.py warm_landing_page_content;
+                     echo '[startup] Warming hot entity caches...' && python manage.py warm_hot_entity_caches;
+                     echo '[startup] Bulk loading entity caches...' && python manage.py bulk_load_entity_caches;
+                     echo '[startup] All cache warmers complete.') &
                   fi;
                   gunicorn --config gunicorn.conf.py battlestats.wsgi:application --bind 0.0.0.0:8888"
     volumes:
@@ -45,8 +49,8 @@ services:
       - server/.env.secrets
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - WARM_LANDING_PAGE_ON_STARTUP=1
-      - LANDING_WARMUP_START_DELAY_SECONDS=5
+      - WARM_CACHES_ON_STARTUP=1
+      - CACHE_WARMUP_START_DELAY_SECONDS=5
       - RANKED_INCREMENTAL_LIMIT=150
       - RANKED_INCREMENTAL_SKIP_FRESH_HOURS=24
       - RANKED_INCREMENTAL_KNOWN_LIMIT=300
