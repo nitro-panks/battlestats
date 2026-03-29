@@ -828,19 +828,25 @@ def player_name_suggestions(request) -> Response:
     if len(query) < 2:
         return Response([])
 
-    suggestions = list(
-        Player.objects.exclude(name='').filter(name__icontains=query).annotate(
-            prefix_rank=Case(
-                When(name__istartswith=query, then=Value(0)),
-                default=Value(1),
-                output_field=IntegerField(),
-            ),
-        ).values('name', 'pvp_ratio', 'is_hidden').order_by(
-            'prefix_rank',
-            F('last_battle_date').desc(nulls_last=True),
-            'name',
-        )[:8]
-    )
+    # Raw SQL with ILIKE so the pg_trgm GIN index (warships_player_name_trgm) is used.
+    # Django's icontains generates UPPER(col) LIKE UPPER(pat) which bypasses trigram indexes.
+    from django.db import connection
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT name, pvp_ratio, is_hidden
+            FROM warships_player
+            WHERE name != '' AND name ILIKE %s
+            ORDER BY
+                CASE WHEN name ILIKE %s THEN 0 ELSE 1 END,
+                last_battle_date DESC NULLS LAST,
+                name
+            LIMIT 8
+            """,
+            [f'%{query}%', f'{query}%'],
+        )
+        columns = [col[0] for col in cursor.description]
+        suggestions = [dict(zip(columns, row)) for row in cursor.fetchall()]
     return Response(suggestions)
 
 
