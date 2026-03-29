@@ -523,7 +523,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const [allShips, setAllShips] = useState<RandomsRow[]>([]);
     const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
     const [selectedTiers, setSelectedTiers] = useState<number[]>([]);
-    const [isChartLoading, setIsChartLoading] = useState(false);
+    const [isChartLoading, setIsChartLoading] = useState(true);
     const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
