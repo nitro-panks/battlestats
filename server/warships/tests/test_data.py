@@ -1450,12 +1450,15 @@ class RankedDataRefreshTests(TestCase):
     @patch("warships.tasks.queue_efficiency_rank_snapshot_refresh")
     @patch("warships.tasks.is_efficiency_rank_snapshot_refresh_pending")
     @patch("warships.tasks.is_efficiency_data_refresh_pending", return_value=False)
-    def test_queue_clan_efficiency_hydration_marks_snapshot_stale_players_pending(
+    def test_queue_clan_efficiency_hydration_enqueues_snapshot_without_blocking_ui(
         self,
         mock_is_efficiency_data_refresh_pending,
         mock_is_efficiency_rank_snapshot_refresh_pending,
         mock_queue_efficiency_rank_snapshot_refresh,
     ):
+        """Publication-stale players trigger a snapshot refresh but do NOT
+        appear in pending_player_ids — the snapshot runs on the background
+        queue and must not block the client poll loop."""
         player = Player.objects.create(
             name="PublicationStaleMember",
             player_id=7121,
@@ -1479,8 +1482,8 @@ class RankedDataRefreshTests(TestCase):
 
         hydration_state = queue_clan_efficiency_hydration([player])
 
-        self.assertEqual(hydration_state["pending_player_ids"], {7121})
-        self.assertEqual(hydration_state["queued_player_ids"], {7121})
+        self.assertEqual(hydration_state["pending_player_ids"], set())
+        self.assertEqual(hydration_state["queued_player_ids"], set())
         self.assertEqual(hydration_state["deferred_player_ids"], set())
         mock_queue_efficiency_rank_snapshot_refresh.assert_called_once_with()
 

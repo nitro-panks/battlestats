@@ -694,30 +694,19 @@ def queue_clan_efficiency_hydration(players: Iterable[Player]) -> dict[str, Any]
 
     pending_player_ids.update(deferred_player_ids)
 
-    if publication_stale_players:
-        publication_player_ids = {
-            player.player_id for player in publication_stale_players}
-
-        if is_efficiency_rank_snapshot_refresh_pending():
-            pending_player_ids.update(publication_player_ids)
-        else:
-            enqueue_result = queue_efficiency_rank_snapshot_refresh()
-            if enqueue_result.get("status") == "queued":
-                pending_player_ids.update(publication_player_ids)
-                queued_player_ids.update(publication_player_ids)
-            elif enqueue_result.get("reason") == "already-queued":
-                pending_player_ids.update(publication_player_ids)
-            elif enqueue_result.get("reason") == "enqueue-failed":
-                pending_player_ids.update(publication_player_ids)
-                deferred_player_ids.update(publication_player_ids)
+    # Publication-stale players have fresh efficiency *data* but a stale rank
+    # *snapshot*.  The snapshot is a single global background task that can sit
+    # behind a long queue.  Enqueue it, but do NOT add these players to
+    # pending_player_ids — they should not block the client poll loop or show
+    # as "pending" in the UI.
+    if publication_stale_players and not is_efficiency_rank_snapshot_refresh_pending():
+        queue_efficiency_rank_snapshot_refresh()
 
     return {
         'pending_player_ids': pending_player_ids,
         'queued_player_ids': queued_player_ids,
         'deferred_player_ids': deferred_player_ids,
-        'eligible_player_ids': eligible_player_ids.union(
-            player.player_id for player in publication_stale_players
-        ),
+        'eligible_player_ids': eligible_player_ids,
         'max_in_flight': CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT,
     }
 
