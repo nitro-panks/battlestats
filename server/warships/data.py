@@ -2999,23 +2999,37 @@ def _build_geometric_bin_edges(max_value: int, seed_edges: list[int], growth_fac
 
 
 def _build_linear_distribution_bins(qs, field_name: str, value_min: float, value_max: float, bin_width: float) -> list[dict]:
-    bins: list[dict] = []
+    edges: list[float] = []
     current = value_min
-
     while current < value_max:
-        upper = round(current + bin_width, 6)
-        count = qs.filter(**{
-            f'{field_name}__gte': current,
-            f'{field_name}__lt': upper,
-        }).count()
-        bins.append({
-            'bin_min': round(current, 4),
-            'bin_max': round(upper, 4),
-            'count': count,
-        })
-        current = upper
+        edges.append(round(current, 6))
+        current = round(current + bin_width, 6)
+    edges.append(round(value_max, 6))
 
-    return bins
+    last = len(edges) - 2
+    whens = []
+    for index, lower in enumerate(edges[:-1]):
+        upper = edges[index + 1]
+        if index == last:
+            whens.append(When(**{f'{field_name}__gte': lower, f'{field_name}__lte': upper}, then=Value(index)))
+        else:
+            whens.append(When(**{f'{field_name}__gte': lower, f'{field_name}__lt': upper}, then=Value(index)))
+
+    counts_by_index = {
+        row['bin_index']: row['count']
+        for row in (
+            qs.annotate(bin_index=Case(*whens, output_field=IntegerField(), default=Value(-1)))
+            .filter(bin_index__gte=0)
+            .values('bin_index')
+            .annotate(count=Count('id'))
+            .order_by()
+        )
+    }
+
+    return [
+        {'bin_min': round(edges[i], 4), 'bin_max': round(edges[i + 1], 4), 'count': counts_by_index.get(i, 0)}
+        for i in range(len(edges) - 1)
+    ]
 
 
 def _build_explicit_distribution_bins(qs, field_name: str, bin_edges: list[int]) -> list[dict]:
