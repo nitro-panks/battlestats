@@ -115,6 +115,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Hot entity warmer**: Periodic task (every 30 min) keeps top-visited + pinned players/clans warm. Pinned players configured via `HOT_ENTITY_PINNED_PLAYER_NAMES` env var
 - **Bulk entity cache loader**: Periodic task (every 12h) pre-loads top 50 players + members of 25 best-scored clans + top 25 clans into Redis. Uses `score_best_clans()` composite ranking (WR 30%, activity 25%, member score 20%, CB recency 15%, volume 10%). See `runbook-best-clan-eligibility.md`.
 - **Landing page warmer**: Periodic task (every 55 min) refreshes all landing payloads; Best clan mode also uses `score_best_clans()`
+- **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) spawns a daemon thread that runs `startup_warm_all_caches` management command — sequentially warms landing page, hot entities, and bulk cache. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `runbook-startup-cache-warming.md`.
 - **Player search suggestions**: Three-tier cache — client-side `Map` (instant, session-scoped, 200-entry cap) → Redis (10 min TTL, `suggest:<query>` keys) → Postgres with `pg_trgm` GIN index (`player_name_trgm_idx`). Minimum 3-character query. Raw `ILIKE` in `views.py` (Django's `icontains` generates `UPPER()` which bypasses trigram indexes).
 - Redis-backed in production, LocMemCache in tests
 

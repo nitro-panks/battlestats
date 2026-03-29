@@ -5,6 +5,8 @@ from datetime import datetime, timezone, timedelta, date
 import logging
 import math
 import os
+
+logger = logging.getLogger(__name__)
 from django.core.cache import cache
 from django.db import connection, transaction
 from django.db.models import Avg, Case, Count, F, FloatField, IntegerField, Q, Sum, Value, When
@@ -4739,6 +4741,10 @@ def warm_landing_best_entity_caches(
     }
 
 
+RECENTLY_VIEWED_CACHE_KEY = 'recently_viewed:players:v1'
+RECENTLY_VIEWED_PLAYER_LIMIT = max(1, int(os.getenv('RECENTLY_VIEWED_PLAYER_LIMIT', '100')))
+RECENTLY_VIEWED_WARM_MINUTES = max(1, int(os.getenv('RECENTLY_VIEWED_WARM_MINUTES', '10')))
+
 BULK_CACHE_TOP_PLAYER_LIMIT = max(1, int(os.getenv('BULK_CACHE_TOP_PLAYER_LIMIT', '50')))
 BULK_CACHE_CLAN_LIMIT = max(1, int(os.getenv('BULK_CACHE_CLAN_LIMIT', '25')))
 BULK_CACHE_CLAN_MEMBER_CLANS = max(1, int(os.getenv('BULK_CACHE_CLAN_MEMBER_CLANS', '25')))
@@ -4768,6 +4774,89 @@ def invalidate_player_detail_cache(player_id: int) -> None:
 
 def invalidate_clan_detail_cache(clan_id: int) -> None:
     cache.delete(_bulk_cache_key_clan(clan_id))
+
+
+# ---------------------------------------------------------------------------
+# Recently-viewed player queue
+# ---------------------------------------------------------------------------
+
+def push_recently_viewed_player(player_id: int) -> None:
+    """Add a player to the recently-viewed queue (most-recent-first).
+
+    Best-effort: silently swallows errors so it never affects the request path.
+    """
+    try:
+        current: list[int] = cache.get(RECENTLY_VIEWED_CACHE_KEY) or []
+        try:
+            current.remove(player_id)
+        except ValueError:
+            pass
+        current.insert(0, player_id)
+        cache.set(
+            RECENTLY_VIEWED_CACHE_KEY,
+            current[:RECENTLY_VIEWED_PLAYER_LIMIT],
+            timeout=None,
+        )
+    except Exception:
+        logging.debug(
+            "push_recently_viewed_player: failed for player %s", player_id, exc_info=True,
+        )
+
+
+def get_recently_viewed_player_ids() -> list[int]:
+    """Return the list of recently-viewed player IDs, most-recent-first."""
+    return cache.get(RECENTLY_VIEWED_CACHE_KEY) or []
+
+
+def warm_recently_viewed_players() -> dict[str, Any]:
+    """Re-cache recently-viewed players whose detail cache entry is missing.
+
+    DB reads + serialization only — no WG API calls.
+    """
+    from warships.serializers import PlayerSerializer
+
+    player_ids = get_recently_viewed_player_ids()
+    if not player_ids:
+        return {'status': 'completed', 'total': 0, 'hits': 0, 'misses': 0, 'warmed': 0}
+
+    cache_keys = {pid: _bulk_cache_key_player(pid) for pid in player_ids}
+    cached = cache.get_many(list(cache_keys.values()))
+
+    missing_ids = [pid for pid, key in cache_keys.items() if key not in cached]
+    hits = len(player_ids) - len(missing_ids)
+
+    warmed = 0
+    if missing_ids:
+        players = (
+            Player.objects
+            .filter(player_id__in=missing_ids)
+            .select_related('clan', 'explorer_summary')
+        )
+        serializer = PlayerSerializer()
+        payloads: dict[str, dict] = {}
+        for player in players:
+            try:
+                payloads[_bulk_cache_key_player(player.player_id)] = serializer.to_representation(player)
+            except Exception:
+                logging.warning(
+                    "warm_recently_viewed_players: failed to serialize player %s",
+                    player.player_id, exc_info=True,
+                )
+        if payloads:
+            cache.set_many(payloads, timeout=BULK_CACHE_PLAYER_TTL)
+            warmed = len(payloads)
+
+    logging.info(
+        "warm_recently_viewed_players: total=%d hits=%d misses=%d warmed=%d",
+        len(player_ids), hits, len(missing_ids), warmed,
+    )
+    return {
+        'status': 'completed',
+        'total': len(player_ids),
+        'hits': hits,
+        'misses': len(missing_ids),
+        'warmed': warmed,
+    }
 
 
 BEST_CLAN_MIN_MEMBERS = 10
@@ -4975,6 +5064,19 @@ def bulk_load_player_cache(
             .filter(player_id__in=missing_pinned)
             .select_related('clan', 'explorer_summary')
         )
+        seen_ids.update(missing_pinned)
+
+    # Cohort 4: recently-viewed players
+    rv_ids = get_recently_viewed_player_ids()
+    missing_rv = [pid for pid in rv_ids if pid not in seen_ids]
+    if missing_rv:
+        rv_players = list(
+            Player.objects
+            .filter(player_id__in=missing_rv)
+            .select_related('clan', 'explorer_summary')
+        )
+        top_players.extend(rv_players)
+        seen_ids.update(p.player_id for p in rv_players)
 
     payloads: dict[str, dict] = {}
     serializer = PlayerSerializer()
@@ -4990,8 +5092,8 @@ def bulk_load_player_cache(
         cache.set_many(payloads, timeout=BULK_CACHE_PLAYER_TTL)
 
     logging.info(
-        "bulk_load_player_cache: loaded %d player payloads (top=%d, clan_members=%d, clans=%d)",
-        len(payloads), top_player_limit, len(clan_members), len(best_clan_ids),
+        "bulk_load_player_cache: loaded %d player payloads (top=%d, clan_members=%d, clans=%d, recently_viewed=%d)",
+        len(payloads), top_player_limit, len(clan_members), len(best_clan_ids), len(missing_rv),
     )
     return {
         'status': 'completed',
@@ -4999,6 +5101,7 @@ def bulk_load_player_cache(
         'top_players': top_player_limit,
         'clan_member_clans': len(best_clan_ids),
         'clan_members_added': len(clan_members),
+        'recently_viewed_added': len(missing_rv),
     }
 
 

@@ -24,7 +24,7 @@ const Footer: React.FC = () => {
                     </a>
                     {' · '}
                     <a
-                        href="https://github.com/august-schlubach/battlestats"
+                        href="https://github.com/nitro-panks/battlestats"
                         className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                         target="_blank"
                         rel="noreferrer"

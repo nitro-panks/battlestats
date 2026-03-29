@@ -14,7 +14,7 @@ describe('Footer', () => {
         render(<Footer />);
 
         expect(screen.getByRole('link', { name: 'CC BY-NC-SA 4.0' })).toHaveAttribute('href', 'https://creativecommons.org/licenses/by-nc-sa/4.0/');
-        expect(screen.getByRole('link', { name: 'Fork me on GitHub' })).toHaveAttribute('href', 'https://github.com/august-schlubach/battlestats');
+        expect(screen.getByRole('link', { name: 'Fork me on GitHub' })).toHaveAttribute('href', 'https://github.com/nitro-panks/battlestats');
         expect(screen.getByText(/not affiliated with Wargaming/i)).toBeInTheDocument();
 
         expect(screen.getByRole('link', { name: 'Official World of Warships website' })).toHaveAttribute('href', 'https://worldofwarships.com/');
