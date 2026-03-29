@@ -181,11 +181,33 @@ npm test -- --runInBand app/components/__tests__/ClanMembers.test.tsx app/compon
 
 ## Analytics
 
+### Umami
+
+The primary analytics platform is [Umami](https://umami.is), self-hosted on the production droplet.
+
+- Dashboard: `https://battlestats.online/umami/`
+- Tracking script loaded via `<script>` tag in `app/layout.tsx`
+- Runs as a standalone Next.js app on port 3002 behind nginx (`/umami` path)
+- Uses the same managed DigitalOcean Postgres (separate `umami` database)
+- Bootstrap / redeploy: `./umami/deploy/bootstrap_umami.sh battlestats.online`
+
+### First-party visit events
+
 The client-side analytics helper lives in `app/lib/visitAnalytics.ts`.
 
 - It posts first-party page-view events for routed player and clan detail pages.
 - It is fire-and-forget and should not block route rendering.
 - It optionally emits a parallel GA4 `entity_detail_view` event when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is configured and `window.gtag` is available.
+
+## Favicon
+
+The favicon is a blue rounded square with a crosshair reticle and bold white "B", matching the site's naval-stats theme and `--accent-dark` / `--accent-mid` gradient. Source files in `app/`:
+
+- `icon.svg` — primary SVG favicon (sharp at any resolution)
+- `favicon.ico` — multi-size ICO fallback (16/32/48px)
+- `apple-icon.png` — 180px Apple touch icon
+
+Next.js App Router auto-discovers these by convention from the `app/` directory.
 
 ## Font Awesome
 
