@@ -1445,6 +1445,8 @@ def _build_recent_players() -> list[dict]:
         row = {
             'name': player_obj.name,
             'pvp_ratio': player_obj.pvp_ratio,
+            'total_battles': player_obj.total_battles,
+            'pvp_battles': player_obj.pvp_battles,
             'is_pve_player': is_pve_player(
                 player_obj.total_battles, player_obj.pvp_battles),
             'is_sleepy_player': is_sleepy_player(
