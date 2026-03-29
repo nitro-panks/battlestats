@@ -9,7 +9,7 @@ const Footer: React.FC = () => {
         <footer className="border-t border-[var(--border)] py-4 text-center text-xs text-[var(--text-secondary)]">
             <div className="space-y-2 px-4 leading-5">
                 <p>
-                    Battlestats copyright 2026 by{' '}
+                    Battlestats v{process.env.NEXT_PUBLIC_APP_VERSION} copyright 2026 by{' '}
                     <Link href={buildPlayerPath('lil_boots')} className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline">
                         lil_boots
                     </Link>

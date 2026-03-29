@@ -70,6 +70,13 @@ npm run test:e2e:install                          # Install Playwright browsers
 ./umami/deploy/bootstrap_umami.sh battlestats.online       # Bootstrap/update Umami analytics
 ```
 
+### Releases
+```bash
+./scripts/release.sh patch    # 1.2.0 → 1.2.1  (bug fixes)
+./scripts/release.sh minor    # 1.2.0 → 1.3.0  (new features)
+./scripts/release.sh major    # 1.2.0 → 2.0.0  (breaking changes)
+```
+
 ## Architecture
 
 ### Routing
@@ -131,6 +138,29 @@ These rules from that file apply to every commit:
 - Avoid unbounded polling, queue fan-out, or retry loops.
 - Avoid new browser-triggered WG API calls when stored data already exists.
 - Avoid large unscoped refactors during feature delivery.
+
+## Versioning
+
+The project uses semantic versioning with a root `VERSION` file as the single source of truth. The version is surfaced in the client footer at build time via `NEXT_PUBLIC_APP_VERSION`.
+
+### Semver levels
+- **patch** — bug fixes, performance tuning, doc-only changes
+- **minor** — new features, new surfaces, meaningful UX changes
+- **major** — breaking data model migrations, API contract changes, major UX overhauls
+
+### Commit message prefixes (Conventional Commits)
+Use these prefixes on all commit messages to enable future automation:
+- `feat:` — new feature or surface (maps to **minor**)
+- `fix:` — bug fix (maps to **patch**)
+- `perf:` — performance improvement (maps to **patch**)
+- `refactor:` — code change that neither fixes a bug nor adds a feature (maps to **patch**)
+- `docs:` — documentation only (maps to **patch**)
+- `chore:` — build, CI, deps, tooling (maps to **patch**)
+- `test:` — adding or updating tests (maps to **patch**)
+- Append `!` after the prefix (e.g. `feat!:`) for breaking changes (maps to **major**)
+
+### Release workflow
+Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which bumps VERSION, commits, tags, and pushes.
 
 ## Environment
 
