@@ -42,7 +42,7 @@ Those routed detail views also emit first-party `entity_detail_view` analytics a
 
 Hidden accounts now use a shared mask icon treatment across suggestions, landing lists, explorer rows, clan members, and player detail headers.
 
-The clan roster mounted on both `ClanDetail` and `PlayerDetail` is also the shared owner of clan-member efficiency-rank icon hydration. It fetches the single `/api/fetch/clan_members/<clan_id>/` payload, shows a compact `Updating: N members.` shimmer status while any member row is still warming, and then renders inline sigma icons for Expert-ranked clan members once the published rank snapshot catches up.
+The clan roster mounted on both `ClanDetail` and `PlayerDetail` is also the shared owner of clan-member efficiency-rank icon hydration. It fetches the single `/api/fetch/clan_members/<clan_id>/` payload, shows a compact `Updating: N members.` shimmer status (green gradient text animation) while any member row is still warming, and then renders inline sigma icons for Expert-ranked clan members once the published rank snapshot catches up. The backend skips caching clan member responses while any member has pending hydration, so client polling always sees fresh data during warmup. Publication-stale players (those awaiting a background rank snapshot refresh) no longer block the hydration pending state, which prevents stalling on large clans.
 
 The clan plot now also tolerates backend warmup gaps more explicitly. When `/api/fetch/clan_data/<clan_id>:active` returns an empty payload with `X-Clan-Plot-Pending: true`, the client keeps the chart in a loading state, retries the fetch on a short cadence, and avoids briefly rendering `No clan chart data available.` while clan detail or member hydration is still catching up.
 
@@ -69,6 +69,8 @@ After the main player payload resolves, the inactive insights tabs now warm thei
 When the player payload includes a fresh published Expert efficiency-rank snapshot, the header renders the Battlestats sigma icon. Non-Expert published tiers and stored badge-only fallback rows no longer render a visible header sigma, which keeps the player-detail header aligned with the current `E`-only rule used on the other player-list surfaces. This header marker remains distinct from the lower `Efficiency Badges` section, which still represents the raw ship-level WG badge rows.
 
 The clan activity chart render path was also narrowed so icon-only hydration updates do not trigger full D3 redraws. That removes the flicker that previously appeared while ranked or clan-battle badges were hydrating in the background.
+
+The landing-page recent players chart shows a "Loading player chart data..." message while the payload is in flight, rather than flashing the empty-state message.
 
 The landing-page `Best` active-player mode is now resilient to sparse high-tier history. When a player has a strong recent overall PvP sample but not enough high-tier battle history, the landing payload falls back to overall PvP win rate instead of excluding the player entirely.
 

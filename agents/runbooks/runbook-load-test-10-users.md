@@ -152,9 +152,10 @@ The `/api/landing/recent/` endpoint was consistently the slowest at **median 94m
 
 2. **Dedup/throttle for lazy-refresh task enqueuing.** Added 60-second Redis dedup lock in `_delay_task_safely()` (`server/warships/views.py`). Uses `cache.add()` with a key derived from task name + kwargs hash. Prevents duplicate enqueuing of the same refresh task within the cooldown window. Deletes the key on broker failure so retries work.
 
-3. **Optimized `landing:recent-players` endpoint.** Two fixes in `server/warships/landing.py`:
+3. **Optimized `landing:recent-players` endpoint.** Three fixes in `server/warships/landing.py`:
    - **Query optimization:** Collapsed 2 queries (values query + N+1 select_related) into a single query using `.select_related('explorer_summary').only(...)`. Eliminates the second round-trip and reduces data transfer.
    - **Invalidation throttle:** Added 30-second cooldown on `invalidate_landing_recent_player_cache()`. Previously, every player lookup marked the cache dirty, forcing a rebuild on the next request. Now coalesces rapid lookups so the endpoint serves from cache under load.
+   - **Regression fix:** The query optimization initially omitted `total_battles` and `pvp_battles` from the row dict, causing the frontend to filter out all players and show an empty chart. Fixed by restoring both fields.
 
 4. **Gunicorn workers scaled dynamically.** Updated `server/gunicorn.conf.py` to use `min(max(cpu_count() * 2 + 1, 3), 9)` instead of hardcoded 3. Follows Gunicorn's recommended formula, capped at 9 for single-droplet memory budget.
 
