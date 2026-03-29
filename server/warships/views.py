@@ -828,7 +828,12 @@ def player_name_suggestions(request) -> Response:
     if len(query) < 3:
         return Response([])
 
-    # Raw SQL with ILIKE so the pg_trgm GIN index (warships_player_name_trgm) is used.
+    cache_key = f'suggest:{query.lower()}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached)
+
+    # Raw SQL with ILIKE so the pg_trgm GIN index (player_name_trgm_idx) is used.
     # Django's icontains generates UPPER(col) LIKE UPPER(pat) which bypasses trigram indexes.
     from django.db import connection
     with connection.cursor() as cursor:
@@ -847,6 +852,8 @@ def player_name_suggestions(request) -> Response:
         )
         columns = [col[0] for col in cursor.description]
         suggestions = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    cache.set(cache_key, suggestions, timeout=600)
     return Response(suggestions)
 
 
