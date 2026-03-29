@@ -234,11 +234,15 @@ const drawLandingPlayerChart = (
         })
         .on('mouseover', function (this: SVGCircleElement, _event: MouseEvent, datum: PlotDatum) {
             showDetails(datum);
-            d3.select(this).transition().duration(50).attr('fill', colors.surface);
+            d3.select(this)
+                .attr('fill', '#bcbddc')
+                .classed('clan-dot-pulse', true);
         })
         .on('mouseout', function (this: SVGCircleElement, _event: MouseEvent, datum: PlotDatum) {
             hideDetails();
-            d3.select(this).transition().duration(50).attr('fill', selectLandingPlayerColorByWR(datum.pvp_ratio));
+            d3.select(this)
+                .classed('clan-dot-pulse', false)
+                .attr('fill', selectLandingPlayerColorByWR(datum.pvp_ratio));
         });
 };
 
