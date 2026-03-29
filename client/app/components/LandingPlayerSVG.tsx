@@ -84,7 +84,7 @@ const drawLandingPlayerChart = (
             .attr('y', 16)
             .style('font-size', '12px')
             .style('fill', colors.labelText)
-            .text('No player chart data available.');
+            .text('Loading player chart data...');
         return;
     }
 
