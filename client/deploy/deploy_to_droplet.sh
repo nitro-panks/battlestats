@@ -37,6 +37,9 @@ rsync -az --delete \
   --exclude 'playwright-temp' \
   "${CLIENT_DIR}/" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/client/"
 
+# VERSION file lives at repo root; next.config.mjs reads ../VERSION
+scp "${CLIENT_DIR}/../VERSION" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/VERSION"
+
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \
   APP_USER="${APP_USER}" \
