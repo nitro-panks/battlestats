@@ -216,3 +216,22 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
             "description": "Bulk-loads top player and clan detail payloads into Redis from DB. Single query, no API calls.",
         },
     )
+
+    recently_viewed_warm_minutes = int(
+        os.getenv("RECENTLY_VIEWED_WARM_MINUTES", "10"))
+    recently_viewed_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=recently_viewed_warm_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+
+    PeriodicTask.objects.update_or_create(
+        name="recently-viewed-player-warmer",
+        defaults={
+            "task": "warships.tasks.warm_recently_viewed_players_task",
+            "interval": recently_viewed_warm_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Re-caches recently-viewed players whose detail cache entry is missing. DB reads only, no API calls.",
+        },
+    )

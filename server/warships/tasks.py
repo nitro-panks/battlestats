@@ -52,6 +52,8 @@ LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_KEY = "warships:tasks:landing_random_c
 LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
 BULK_CACHE_LOAD_LOCK_KEY = "warships:tasks:bulk_load_entity_caches:lock"
 BULK_CACHE_LOAD_LOCK_TIMEOUT = 30 * 60
+RECENTLY_VIEWED_WARM_LOCK_KEY = "warships:tasks:warm_recently_viewed_players:lock"
+RECENTLY_VIEWED_WARM_LOCK_TIMEOUT = 15 * 60
 
 
 def _configured_clan_battle_warm_ids(raw_value=None):
@@ -760,6 +762,24 @@ def bulk_load_entity_caches_task(self):
         return result
     finally:
         cache.delete(BULK_CACHE_LOAD_LOCK_KEY)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_recently_viewed_players_task(self):
+    from warships.data import warm_recently_viewed_players
+
+    logger.info("Starting warm_recently_viewed_players_task")
+
+    if not cache.add(RECENTLY_VIEWED_WARM_LOCK_KEY, self.request.id, timeout=RECENTLY_VIEWED_WARM_LOCK_TIMEOUT):
+        logger.info("Skipping warm_recently_viewed_players_task because another run is already active")
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        result = warm_recently_viewed_players()
+        logger.info("Finished warm_recently_viewed_players_task: %s", result)
+        return result
+    finally:
+        cache.delete(RECENTLY_VIEWED_WARM_LOCK_KEY)
 
 
 @app.task(bind=True, **CRAWL_TASK_OPTS)

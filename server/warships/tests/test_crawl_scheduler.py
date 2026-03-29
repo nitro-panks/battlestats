@@ -14,7 +14,7 @@ from django_celery_beat.models import CrontabSchedule, IntervalSchedule, Periodi
 
 from warships.signals import ensure_daily_clan_crawl_schedule
 from warships.landing import LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, get_landing_players_payload
-from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, HOT_ENTITY_CACHE_WARM_LOCK_KEY, LANDING_BEST_ENTITY_WARM_LOCK_KEY, LANDING_PAGE_WARM_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_efficiency_data_refresh_pending, is_efficiency_rank_snapshot_refresh_pending, is_ranked_data_refresh_pending, queue_clan_battle_data_refresh, queue_efficiency_data_refresh, queue_efficiency_rank_snapshot_refresh, queue_ranked_data_refresh, refresh_efficiency_rank_snapshot_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_player_efficiency_data_task, update_ranked_data_task, warm_clan_battle_summaries_task, warm_hot_entity_caches_task, warm_landing_best_entity_caches_task, warm_landing_page_content_task
+from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, HOT_ENTITY_CACHE_WARM_LOCK_KEY, LANDING_BEST_ENTITY_WARM_LOCK_KEY, LANDING_PAGE_WARM_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, RECENTLY_VIEWED_WARM_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_efficiency_data_refresh_pending, is_efficiency_rank_snapshot_refresh_pending, is_ranked_data_refresh_pending, queue_clan_battle_data_refresh, queue_efficiency_data_refresh, queue_efficiency_rank_snapshot_refresh, queue_ranked_data_refresh, refresh_efficiency_rank_snapshot_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_player_efficiency_data_task, update_ranked_data_task, warm_clan_battle_summaries_task, warm_hot_entity_caches_task, warm_landing_best_entity_caches_task, warm_landing_page_content_task, warm_recently_viewed_players_task
 from warships.models import Player
 
 
@@ -552,3 +552,35 @@ class RefreshTaskLockTests(TestCase):
             name="clan-battle-summary-warmer")
         self.assertEqual(warmer_task.task,
                          "warships.tasks.warm_clan_battle_summaries_task")
+
+        rv_task = PeriodicTask.objects.get(
+            name="recently-viewed-player-warmer")
+        self.assertEqual(rv_task.task,
+                         "warships.tasks.warm_recently_viewed_players_task")
+        self.assertTrue(rv_task.enabled)
+
+
+class WarmRecentlyViewedPlayersTaskTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_task_runs_warmer(self):
+        with patch("warships.data.warm_recently_viewed_players") as mock_warm:
+            mock_warm.return_value = {
+                "status": "completed", "total": 5, "hits": 3, "misses": 2, "warmed": 2}
+
+            result = warm_recently_viewed_players_task.run()
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["warmed"], 2)
+        mock_warm.assert_called_once()
+        self.assertIsNone(cache.get(RECENTLY_VIEWED_WARM_LOCK_KEY))
+
+    def test_task_skips_when_lock_exists(self):
+        cache.add(RECENTLY_VIEWED_WARM_LOCK_KEY, "existing-run", timeout=60)
+
+        with patch("warships.data.warm_recently_viewed_players") as mock_warm:
+            result = warm_recently_viewed_players_task.run()
+
+        self.assertEqual(result, {"status": "skipped", "reason": "already-running"})
+        mock_warm.assert_not_called()

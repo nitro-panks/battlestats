@@ -2795,3 +2795,111 @@ class PlayerExplorerSummaryTests(TestCase):
                          {"name": "recent-stale"}])
         self.assertIsNotNone(cache.get(LANDING_CLANS_DIRTY_KEY))
         self.assertIsNotNone(cache.get(LANDING_RECENT_CLANS_DIRTY_KEY))
+
+
+class RecentlyViewedPlayerQueueTests(TestCase):
+    """Tests for the recently-viewed player cache warming system."""
+
+    def setUp(self):
+        cache.clear()
+
+    def test_push_adds_player_to_queue(self):
+        from warships.data import push_recently_viewed_player, get_recently_viewed_player_ids
+
+        push_recently_viewed_player(1001)
+        push_recently_viewed_player(1002)
+
+        ids = get_recently_viewed_player_ids()
+        self.assertEqual(ids, [1002, 1001])
+
+    def test_push_moves_existing_player_to_front(self):
+        from warships.data import push_recently_viewed_player, get_recently_viewed_player_ids
+
+        push_recently_viewed_player(1001)
+        push_recently_viewed_player(1002)
+        push_recently_viewed_player(1001)
+
+        ids = get_recently_viewed_player_ids()
+        self.assertEqual(ids, [1001, 1002])
+
+    def test_push_respects_cap(self):
+        from warships.data import push_recently_viewed_player, get_recently_viewed_player_ids, RECENTLY_VIEWED_PLAYER_LIMIT
+
+        for i in range(RECENTLY_VIEWED_PLAYER_LIMIT + 20):
+            push_recently_viewed_player(i)
+
+        ids = get_recently_viewed_player_ids()
+        self.assertEqual(len(ids), RECENTLY_VIEWED_PLAYER_LIMIT)
+        # Most recent should be first
+        self.assertEqual(ids[0], RECENTLY_VIEWED_PLAYER_LIMIT + 19)
+
+    def test_get_returns_empty_list_when_no_data(self):
+        from warships.data import get_recently_viewed_player_ids
+
+        self.assertEqual(get_recently_viewed_player_ids(), [])
+
+    def test_warm_populates_missing_cache_entries(self):
+        from warships.data import (
+            push_recently_viewed_player, warm_recently_viewed_players,
+            get_cached_player_detail, BULK_CACHE_PLAYER_TTL,
+        )
+
+        player = Player.objects.create(
+            name="WarmMe", player_id=5001, pvp_battles=100, pvp_wins=55,
+        )
+        push_recently_viewed_player(player.player_id)
+
+        # No cache entry yet
+        self.assertIsNone(get_cached_player_detail(player.player_id))
+
+        result = warm_recently_viewed_players()
+
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(result['total'], 1)
+        self.assertEqual(result['misses'], 1)
+        self.assertEqual(result['warmed'], 1)
+        self.assertIsNotNone(get_cached_player_detail(player.player_id))
+
+    def test_warm_skips_already_cached_players(self):
+        from warships.data import (
+            push_recently_viewed_player, warm_recently_viewed_players,
+            _bulk_cache_key_player, BULK_CACHE_PLAYER_TTL,
+        )
+
+        player = Player.objects.create(
+            name="AlreadyCached", player_id=5002, pvp_battles=50, pvp_wins=25,
+        )
+        push_recently_viewed_player(player.player_id)
+
+        # Pre-populate cache
+        cache.set(_bulk_cache_key_player(player.player_id), {"name": "AlreadyCached"}, timeout=BULK_CACHE_PLAYER_TTL)
+
+        result = warm_recently_viewed_players()
+
+        self.assertEqual(result['total'], 1)
+        self.assertEqual(result['hits'], 1)
+        self.assertEqual(result['misses'], 0)
+        self.assertEqual(result['warmed'], 0)
+
+    def test_warm_noop_when_queue_empty(self):
+        from warships.data import warm_recently_viewed_players
+
+        result = warm_recently_viewed_players()
+
+        self.assertEqual(result['total'], 0)
+        self.assertEqual(result['warmed'], 0)
+
+    def test_bulk_loader_includes_recently_viewed_cohort(self):
+        from warships.data import push_recently_viewed_player, bulk_load_player_cache, get_cached_player_detail
+
+        # Hidden player won't be picked up by Cohort 1 (top by score, filters is_hidden=False)
+        player = Player.objects.create(
+            name="BulkRV", player_id=6001, pvp_battles=200, pvp_wins=110,
+            is_hidden=True,
+        )
+        push_recently_viewed_player(player.player_id)
+
+        result = bulk_load_player_cache()
+
+        self.assertGreaterEqual(result['recently_viewed_added'], 1)
+        self.assertIsNotNone(get_cached_player_detail(player.player_id))

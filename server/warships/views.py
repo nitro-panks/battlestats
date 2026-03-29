@@ -189,6 +189,9 @@ class PlayerViewSet(viewsets.ModelViewSet):
         obj.save(update_fields=update_fields)
         invalidate_landing_recent_player_cache()
 
+        from warships.data import push_recently_viewed_player
+        push_recently_viewed_player(obj.player_id)
+
         if not obj.is_hidden and _explorer_summary_needs_refresh(obj):
             refresh_player_explorer_summary(obj)
 
