@@ -73,7 +73,7 @@ const HeaderSearch: React.FC = () => {
 
     useEffect(() => {
         const trimmedQuery = query.trim().toLowerCase();
-        if (trimmedQuery.length < 2) {
+        if (trimmedQuery.length < 3) {
             setSuggestions([]);
             setHighlightedSuggestionIndex(-1);
             return;

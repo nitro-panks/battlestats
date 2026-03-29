@@ -825,7 +825,7 @@ def landing_best_warmup(request) -> Response:
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_name_suggestions(request) -> Response:
     query = (request.query_params.get('q') or '').strip()
-    if len(query) < 2:
+    if len(query) < 3:
         return Response([])
 
     # Raw SQL with ILIKE so the pg_trgm GIN index (warships_player_name_trgm) is used.
