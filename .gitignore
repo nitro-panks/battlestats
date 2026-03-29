@@ -10,10 +10,8 @@ htmlcov/
 env/
 .venv/
 .env
-server/.env.secrets
-server/.env.secrets.cloud
-server/.env.secrets.local
-server/.env.local-postgres.backup
+server/.env.*
+!server/.env.example
 server/ca-certificate.crt
 
 .vscode/

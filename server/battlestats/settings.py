@@ -84,7 +84,7 @@ DATABASES = {
         ),
         'NAME': os.getenv('DB_NAME', 'battlestats'),
         'USER': resolve_db_user(),
-        'PASSWORD': os.getenv('DB_PASSWORD', 'XVIB58E5rWnAsU6'),
+        'PASSWORD': os.getenv('DB_PASSWORD', ''),
         'HOST': resolve_db_host(),
         'PORT': os.getenv('DB_PORT', '5432'),
         'OPTIONS': db_options,
@@ -243,7 +243,7 @@ logging.config.dictConfig({
 
 # Celery settings
 CELERY_BROKER_URL = os.getenv(
-    'CELERY_BROKER_URL', 'amqp://guest:guest@rabbitmq:5672//')
+    'CELERY_BROKER_URL', 'amqp://rabbitmq:5672//')
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'rpc://')
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BROKER_POOL_LIMIT = int(os.getenv('CELERY_BROKER_POOL_LIMIT', '10'))
