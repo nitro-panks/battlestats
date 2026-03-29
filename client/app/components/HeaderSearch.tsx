@@ -18,6 +18,9 @@ const SEARCH_SUGGESTIONS_ID = "header-player-search-suggestions";
 
 const isAbortError = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
 
+const suggestionCache = new Map<string, HeaderSearchSuggestion[]>();
+const SUGGESTION_CACHE_MAX = 200;
+
 const HeaderSearch: React.FC = () => {
     const router = useRouter();
     const pathname = usePathname();
@@ -69,10 +72,17 @@ const HeaderSearch: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        const trimmedQuery = query.trim();
+        const trimmedQuery = query.trim().toLowerCase();
         if (trimmedQuery.length < 2) {
             setSuggestions([]);
             setHighlightedSuggestionIndex(-1);
+            return;
+        }
+
+        const cached = suggestionCache.get(trimmedQuery);
+        if (cached) {
+            setSuggestions(cached);
+            setHighlightedSuggestionIndex(cached.length > 0 ? 0 : -1);
             return;
         }
 
@@ -90,6 +100,13 @@ const HeaderSearch: React.FC = () => {
 
                 const payload: HeaderSearchSuggestion[] = await response.json();
                 const nextSuggestions = payload.slice(0, SEARCH_SUGGESTION_LIMIT);
+
+                if (suggestionCache.size >= SUGGESTION_CACHE_MAX) {
+                    const firstKey = suggestionCache.keys().next().value;
+                    if (firstKey !== undefined) suggestionCache.delete(firstKey);
+                }
+                suggestionCache.set(trimmedQuery, nextSuggestions);
+
                 setSuggestions(nextSuggestions);
                 setHighlightedSuggestionIndex(nextSuggestions.length > 0 ? 0 : -1);
             } catch (error) {
@@ -187,7 +204,7 @@ const HeaderSearch: React.FC = () => {
                     aria-autocomplete="list"
                     aria-controls={SEARCH_SUGGESTIONS_ID}
                     aria-activedescendant={highlightedSuggestionIndex >= 0 ? `header-player-search-suggestion-${highlightedSuggestionIndex}` : undefined}
-                    className="block w-full rounded-md border border-[var(--border)] px-3 py-2 text-sm shadow-sm focus:border-[var(--accent-light)] focus:outline-none focus:ring-[var(--accent-light)]"
+                    className="block w-full rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-sm placeholder:text-[var(--text-secondary)] focus:border-[var(--accent-light)] focus:outline-none focus:ring-[var(--accent-light)]"
                 />
                 {isSuggestionListOpen && suggestions.length > 0 && (
                     <ul
