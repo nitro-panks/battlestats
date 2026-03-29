@@ -307,7 +307,7 @@ test.describe('live player route component and performance sweep', () => {
                 const rankedTabMs = Number((performance.now() - rankedStart).toFixed(2));
 
                 const badgesStart = performance.now();
-                await page.getByRole('tab', { name: 'Badges', exact: true }).click();
+                await page.getByRole('tab', { name: 'Efficiency', exact: true }).click();
                 await waitForVisible(page.getByText('Efficiency Badges', { exact: true }), 30000);
                 await waitForVisible(page.getByText(candidate.topBadgeShip, { exact: true }).first(), 30000);
                 const badgesTabMs = Number((performance.now() - badgesStart).toFixed(2));

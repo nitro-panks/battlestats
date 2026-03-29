@@ -11,7 +11,7 @@ import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useTheme } from '../context/ThemeContext';
 
-type InsightsTabId = 'population' | 'ships' | 'ranked' | 'profile' | 'badges' | 'career';
+type InsightsTabId = 'profile' | 'ships' | 'ranked' | 'career' | 'badges' | 'population';
 
 interface PlayerDetailInsightsTabsProps {
     playerId: number;
@@ -91,11 +91,11 @@ const BattlesDistributionSVG = dynamic(() => resilientDynamicImport(() => import
 
 const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; minHeight: number; }> = [
     { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 920 },
-    { id: 'population', label: 'Population', panelLabel: 'Population insights', minHeight: 720 },
     { id: 'ships', label: 'Ships', panelLabel: 'Ship insights', minHeight: 560 },
     { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 620 },
-    { id: 'badges', label: 'Badges', panelLabel: 'Badge insights', minHeight: 360 },
     { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
+    { id: 'badges', label: 'Efficiency', panelLabel: 'Efficiency insights', minHeight: 360 },
+    { id: 'population', label: 'Population', panelLabel: 'Population insights', minHeight: 720 },
 ];
 
 const panelSectionIdByTab: Record<InsightsTabId, string> = {

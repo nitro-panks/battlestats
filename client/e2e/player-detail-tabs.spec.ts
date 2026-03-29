@@ -344,7 +344,7 @@ test('player detail tabs settle without error across all insights panels', async
         { tab: 'Population', title: 'Win Rate vs Survival', dataText: 'Battles Played Distribution', minSvgCount: 2 },
         { tab: 'Ships', title: 'Top Ships (Random Battles)', dataText: 'Montana', minSvgCount: 1 },
         { tab: 'Ranked', title: 'Ranked Seasons', dataText: 'S32', minSvgCount: 1 },
-        { tab: 'Badges', title: 'Efficiency Badges', dataText: 'Shimakaze', minSvgCount: 0 },
+        { tab: 'Efficiency', title: 'Efficiency Badges', dataText: 'Shimakaze', minSvgCount: 0 },
         { tab: 'Clan Battles', title: 'Clan Battle Seasons', dataText: 'S31', minSvgCount: 0 },
     ];
 

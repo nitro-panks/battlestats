@@ -123,7 +123,7 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.getByText('Loading profile charts...')).toBeInTheDocument();
         expect(screen.queryByText('Ranked Seasons')).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('tab', { name: 'Badges' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
         expect(screen.getByText('Efficiency Badges')).toBeInTheDocument();
         expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
 
@@ -221,7 +221,7 @@ describe('PlayerDetailInsightsTabs', () => {
 
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('tab', { name: 'Badges' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
 
         expect(screen.getByText('Efficiency Badges')).toBeInTheDocument();
         expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
