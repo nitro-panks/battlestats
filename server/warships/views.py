@@ -633,11 +633,14 @@ def clan_members(request, clan_id: str) -> Response:
     serializer = ClanMemberSerializer(member_rows, many=True)
     serialized_data = serializer.data
 
-    # B1: Cache the serialized member payload
-    cache.set(cache_key, serialized_data, CLAN_MEMBERS_CACHE_TTL)
+    # B1: Only cache when hydration is complete — pending responses must not
+    # be cached or the client poll loop will see stale "pending" flags forever.
+    has_pending = pending_player_ids or pending_efficiency_player_ids
+    if not has_pending:
+        cache.set(cache_key, serialized_data, CLAN_MEMBERS_CACHE_TTL)
 
     response = Response(serialized_data)
-    response['X-Clan-Members-Cache'] = 'miss'
+    response['X-Clan-Members-Cache'] = 'miss' if not has_pending else 'skip-pending'
     response['X-Ranked-Hydration-Queued'] = str(
         len(hydration_state['queued_player_ids']))
     response['X-Ranked-Hydration-Deferred'] = str(
