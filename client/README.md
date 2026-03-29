@@ -42,7 +42,7 @@ Those routed detail views also emit first-party `entity_detail_view` analytics a
 
 Hidden accounts now use a shared mask icon treatment across suggestions, landing lists, explorer rows, clan members, and player detail headers.
 
-The clan roster mounted on both `ClanDetail` and `PlayerDetail` is also the shared owner of clan-member efficiency-rank icon hydration. It fetches the single `/api/fetch/clan_members/<clan_id>/` payload, shows a compact `Updating Battlestats rank icons...` status while any member row is still warming, and then renders inline sigma icons for Expert-ranked clan members once the published rank snapshot catches up.
+The clan roster mounted on both `ClanDetail` and `PlayerDetail` is also the shared owner of clan-member efficiency-rank icon hydration. It fetches the single `/api/fetch/clan_members/<clan_id>/` payload, shows a compact `Updating: N members.` shimmer status while any member row is still warming, and then renders inline sigma icons for Expert-ranked clan members once the published rank snapshot catches up.
 
 The clan plot now also tolerates backend warmup gaps more explicitly. When `/api/fetch/clan_data/<clan_id>:active` returns an empty payload with `X-Clan-Plot-Pending: true`, the client keeps the chart in a loading state, retries the fetch on a short cadence, and avoids briefly rendering `No clan chart data available.` while clan detail or member hydration is still catching up.
 

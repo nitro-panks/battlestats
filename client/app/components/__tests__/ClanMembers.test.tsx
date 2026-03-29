@@ -45,7 +45,7 @@ describe('ClanMembers efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByText('Updating Battlestats rank icons for 2 clan members...')).toBeInTheDocument();
+        expect(screen.getByText('Updating: 2 members.')).toBeInTheDocument();
     });
 
     it('does not show a hydration status once efficiency warming is complete', () => {
@@ -56,7 +56,7 @@ describe('ClanMembers efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.queryByText(/Updating Battlestats rank icons/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Updating:/i)).not.toBeInTheDocument();
     });
 
     it('does not render the icon for non-Expert ranked members', () => {

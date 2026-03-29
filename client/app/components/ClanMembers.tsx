@@ -34,8 +34,8 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
             {loading && <p className="text-sm text-[var(--text-secondary)]">Syncing clan members...</p>}
             {!loading && error ? <p className="text-sm text-[var(--text-secondary)]">{error}</p> : null}
             {!loading && !error && isWarmingEfficiencyRanks ? (
-                <p className="text-sm text-[var(--text-secondary)]">
-                    {`Updating Battlestats rank icons for ${pendingEfficiencyCount} clan member${pendingEfficiencyCount === 1 ? '' : 's'}...`}
+                <p className="shimmer-green text-sm font-medium">
+                    {`Updating: ${pendingEfficiencyCount} member${pendingEfficiencyCount === 1 ? '' : 's'}.`}
                 </p>
             ) : null}
             {!loading && members.length === 0 && <p className="text-sm text-[var(--text-secondary)]">No clan members found.</p>}

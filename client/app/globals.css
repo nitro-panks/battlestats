@@ -61,6 +61,36 @@ body {
   }
 }
 
+/* Green shimmer text effect for hydration-pending status messages */
+.shimmer-green {
+  background: linear-gradient(
+    90deg,
+    #4ade80 0%,
+    #bbf7d0 40%,
+    #ffffff 50%,
+    #bbf7d0 60%,
+    #4ade80 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-green-sweep 2s ease-in-out infinite;
+}
+
+@keyframes shimmer-green-sweep {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-green {
+    background: none;
+    -webkit-text-fill-color: #4ade80;
+    animation: none;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

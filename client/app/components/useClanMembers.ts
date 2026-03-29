@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClanMemberData } from './clanMembersShared';
 
-const HYDRATION_POLL_LIMIT = 6;
-const HYDRATION_ACTIVE_POLL_INTERVAL_MS = 2500;
-const HYDRATION_DEFERRED_POLL_INTERVAL_MS = 8000;
+const HYDRATION_POLL_LIMIT = 12;
+const HYDRATION_ACTIVE_POLL_INTERVAL_MS = 3000;
+const HYDRATION_DEFERRED_POLL_INTERVAL_MS = 6000;
 
 interface ClanMembersHydrationState {
     rankedQueued: number;
