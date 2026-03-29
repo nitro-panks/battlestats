@@ -17,6 +17,16 @@ interface TierTypeHeatmapSVGProps {
 
 const SHIP_TYPE_ORDER = ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'];
 
+const SHIP_TYPE_ABBREV: Record<string, string> = {
+    'Destroyer': 'DD',
+    'Cruiser': 'CA',
+    'Battleship': 'BB',
+    'Aircraft Carrier': 'CV',
+    'AirCarrier': 'CV',
+    'Carrier': 'CV',
+    'Submarine': 'Sub',
+};
+
 const selectColorByWR = (winRatio: number): string => {
     if (winRatio > 0.65) return '#810c9e';
     if (winRatio >= 0.60) return '#D042F3';
@@ -93,7 +103,7 @@ const renderSummaryCard = (
     const headers = ['Type', 'Population', 'Player'];
     const values = [
         {
-            text: `${tile.ship_type} T${tile.ship_tier}`,
+            text: `${SHIP_TYPE_ABBREV[tile.ship_type] ?? tile.ship_type} T${tile.ship_tier}`,
             fill: colors.accentLink,
             weight: '700',
         },
@@ -225,7 +235,7 @@ const drawChart = (
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
         .style('color', colors.labelMuted)
-        .call(d3.axisBottom(x).tickSize(0))
+        .call(d3.axisBottom(x).tickSize(0).tickFormat((d: string) => SHIP_TYPE_ABBREV[d] ?? d))
         .selectAll('text')
         .style('font-size', axisFontSize)
         .style('font-weight', '500');
@@ -339,7 +349,7 @@ const drawChart = (
 const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
     playerId,
     data,
-    svgWidth = 680,
+    svgWidth = 570,
     svgHeight = 332,
     theme = 'light',
 }) => {
