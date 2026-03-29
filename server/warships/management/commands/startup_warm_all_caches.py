@@ -9,6 +9,7 @@ from warships.data import (
     HOT_ENTITY_PLAYER_LIMIT,
     bulk_load_entity_caches,
     warm_hot_entity_caches,
+    warm_player_distributions,
 )
 from warships.landing import warm_landing_page_content
 
@@ -43,9 +44,14 @@ class Command(BaseCommand):
         bulk_result = bulk_load_entity_caches()
         logger.info("[startup-warmer] Bulk load complete: %s", json.dumps(bulk_result, sort_keys=True))
 
+        logger.info("[startup-warmer] Warming player distribution caches...")
+        dist_result = warm_player_distributions()
+        logger.info("[startup-warmer] Distribution warm complete: %s", json.dumps(dist_result, sort_keys=True))
+
         logger.info("[startup-warmer] All startup cache warmers finished.")
         self.stdout.write(json.dumps({
             'landing': landing_result,
             'hot_entities': hot_result,
             'bulk_load': bulk_result,
+            'distributions': dist_result,
         }, sort_keys=True, indent=2))

@@ -642,6 +642,13 @@ def warm_landing_page_content_task(self, include_recent=True):
             include_recent=bool(include_recent),
         )
         logger.info("Finished warm_landing_page_content_task: %s", result)
+
+        from warships.data import warm_player_distributions
+        logger.info("Warming player distribution caches...")
+        dist_result = warm_player_distributions()
+        logger.info("Player distribution warm complete: %s", dist_result)
+        result['distributions'] = dist_result
+
         return result
     finally:
         cache.delete(LANDING_PAGE_WARM_LOCK_KEY)

@@ -2749,7 +2749,7 @@ def update_activity_data(player_id: int) -> None:
 
 LEAGUE_NAMES = {1: 'Gold', 2: 'Silver', 3: 'Bronze'}
 
-PLAYER_DISTRIBUTION_CACHE_TTL = 3600  # 1 hour
+PLAYER_DISTRIBUTION_CACHE_TTL = 7200  # 2 hours
 PLAYER_CORRELATION_CACHE_TTL = 3600  # 1 hour
 PLAYER_DISTRIBUTION_CONFIGS = {
     'win_rate': {
@@ -3096,12 +3096,26 @@ def fetch_player_population_distribution(metric: str) -> dict:
         'x_label': config['x_label'],
         'scale': config['scale'],
         'value_format': config['value_format'],
-        'tracked_population': qs.count(),
+        'tracked_population': sum(b['count'] for b in bins),
         'bins': bins,
     }
 
     cache.set(cache_key, payload, PLAYER_DISTRIBUTION_CACHE_TTL)
     return payload
+
+
+def warm_player_distributions() -> dict:
+    """Pre-warm all player distribution caches so users never hit cold queries."""
+    results = {}
+    for metric in PLAYER_DISTRIBUTION_CONFIGS:
+        cache_key = _player_distribution_cache_key(metric)
+        cache.delete(cache_key)
+        payload = fetch_player_population_distribution(metric)
+        results[metric] = {
+            'tracked_population': payload['tracked_population'],
+            'bins': len(payload['bins']),
+        }
+    return results
 
 
 def _clamp_to_open_upper_bound(value: float, value_min: float, value_max: float) -> float:
