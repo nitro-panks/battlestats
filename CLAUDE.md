@@ -17,7 +17,7 @@ Only confirm before: force-pushing to main, dropping database tables, or deletin
 
 ## Project
 
-Battlestats is a World of Warships player and clan statistics platform. Live at https://battlestats.online.
+Battlestats is a World of Warships player and clan statistics platform. Live at https://battlestats.online. Current version is in `VERSION` at the repo root (semver, surfaced in the client footer).
 
 - **Frontend**: Next.js 16 (App Router) + React 18 + Tailwind CSS + D3 charts — in `client/`
 - **Backend**: Django 5 + DRF + Celery (RabbitMQ + Redis) + PostgreSQL — in `server/`
