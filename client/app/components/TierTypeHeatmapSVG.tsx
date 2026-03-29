@@ -89,8 +89,8 @@ const renderSummaryCard = (
 ) => {
     const compact = chartWidth != null && chartWidth < 480;
     const availableWidth = compact ? Math.max(chartWidth - 40, 240) : 400;
-    const columns = [0, availableWidth * 0.27, availableWidth * 0.52, availableWidth * 0.82];
-    const headers = ['Type', 'Population', 'Player', 'Trend'];
+    const columns = [0, availableWidth * 0.33, availableWidth * 0.66];
+    const headers = ['Type', 'Population', 'Player'];
     const values = [
         {
             text: `${tile.ship_type} T${tile.ship_tier}`,
@@ -108,15 +108,6 @@ const renderSummaryCard = (
                 : 'No battles in cell',
             fill: playerCell ? selectColorByWR(playerCell.win_ratio) : colors.heatmapUnavailable,
             weight: playerCell ? '700' : '400',
-        },
-        {
-            text: trendDelta == null
-                ? 'Unavailable'
-                : Math.abs(trendDelta) < 0.15
-                    ? 'Aligned'
-                    : `${Math.abs(trendDelta).toFixed(1)} ${trendDelta > 0 ? 'above' : 'below'}`,
-            fill: trendDelta == null ? colors.heatmapUnavailable : (trendDelta >= 0 ? colors.heatmapAboveTrend : colors.heatmapBelowTrend),
-            weight: '600',
         },
     ];
 
