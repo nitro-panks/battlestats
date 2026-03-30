@@ -1,7 +1,39 @@
 # Runbook: Deleted Account Purge (GDPR / WG Account Deletion Request)
 
 **Created**: 2026-03-30
-**Status**: Implemented — pending deploy and execution
+**Status**: Complete — deployed v1.2.13, executed 2026-03-30, response sent to Wargaming
+
+## Context
+
+### Wargaming's request
+
+Received an email from Wargaming's data protection team stating:
+
+> You've received this email because (1) you have a Developer account (use Wargaming Developer Room) and accepted the Wargaming API Terms of Use or (2) you are a Wargaming partner who receives data from us and accepted the Data Protection Agreement.
+>
+> According to the Terms of Use and the Data Protection Agreement, you must delete personal data obtained from us without undue delay.
+>
+> Please consider this email as a request to delete all data that you process on behalf of Wargaming Group Limited, Wargaming.net Limited, Wargaming World Limited, or any other Wargaming company for the following Wargaming ID(s) (also referred to as "SPA ID").
+>
+> This request was created because the mentioned user(s) have requested deletion of their Wargaming.net account(s), i.e., data erasure.
+
+Attached file: `deleted_accounts.zip` containing `accounts.csv` with 11,839 Wargaming account IDs.
+
+### Our response (sent 2026-03-30)
+
+> Thank you for your email regarding the deletion of personal data for the account IDs listed in the attached file.
+>
+> We have completed processing of this request. The details are as follows:
+>
+> - **IDs received:** 11,839
+> - **IDs found in our system:** 0 (none of the listed accounts had been indexed by our application)
+> - **IDs blocklisted:** 11,839 (all IDs have been permanently blocked from future ingestion via the Wargaming API)
+>
+> Although none of the specified accounts existed in our database, we have added all 11,839 account IDs to a permanent blocklist to ensure they cannot be re-introduced through API queries, scheduled data refreshes, or any other ingestion pathway.
+>
+> A full machine-generated transcript documenting the per-account processing result is available upon request.
+
+---
 
 ## Problem Statement
 
@@ -63,8 +95,9 @@ A new `DeletedAccount` model stores purged IDs with a unique constraint on `acco
 
 ### Phase 1: Blocklist model + migration
 
-- `DeletedAccount` model in `models.py` with `account_id` (IntegerField, unique) and `deleted_at` (DateTimeField, auto_now_add)
-- Migration: `0035_deletedaccount.py`
+- `DeletedAccount` model in `models.py` with `account_id` (BigIntegerField, unique) and `deleted_at` (DateTimeField, auto_now_add)
+- Initially created with IntegerField; upgraded to BigIntegerField after discovering 1,379 account IDs exceed 2^31-1 (max observed: 3,012,966,527)
+- Migrations: `0035_deletedaccount.py`, `0036_deletedaccount_bigint.py`
 - Cached blocklist in `blocklist.py`: `is_account_blocked()` checks an in-memory set (5-min TTL via Django cache)
 
 ### Phase 2: Block re-entry at all 3 ingestion points
@@ -106,6 +139,38 @@ Summary line:
 
 ---
 
+## Execution Results (2026-03-30)
+
+Executed on droplet via:
+```bash
+/opt/battlestats-server/venv/bin/python manage.py purge_deleted_accounts /tmp/deleted_accounts.zip --transcript /tmp/purge_transcript_20260330.jsonl
+```
+
+```json
+{
+  "total_ids": 11839,
+  "found_in_db": 0,
+  "not_found": 11839,
+  "total_player_rows": 0,
+  "total_snapshot_rows": 0,
+  "total_achievement_rows": 0,
+  "total_explorer_rows": 0,
+  "total_visit_event_rows": 0,
+  "total_visit_daily_rows": 0,
+  "total_cache_keys_deleted": 0,
+  "total_clan_leaders_nulled": 0,
+  "blocked": 11839
+}
+```
+
+None of the 11,839 accounts had ever been indexed by BattleStats. All were blocklisted to prevent future ingestion.
+
+**Transcript**: `/tmp/purge_transcript_20260330.jsonl` on the droplet (11,840 lines: 11,839 per-account + 1 summary).
+
+**Tests**: 13/13 new tests passed on droplet. 457 existing tests passed (4 pre-existing failures unchanged).
+
+---
+
 ## Post-purge verification
 
 1. `SELECT COUNT(*) FROM warships_player WHERE player_id IN (...)` — must return 0
@@ -134,4 +199,5 @@ The blocklist (`DeletedAccount`) is permanent and should not be rolled back. Pla
 | `server/warships/clan_crawl.py` | `try/except BlockedAccountError` in `save_player()` |
 | `server/warships/management/commands/purge_deleted_accounts.py` | New management command |
 | `server/warships/migrations/0035_deletedaccount.py` | Auto-generated migration |
+| `server/warships/migrations/0036_deletedaccount_bigint.py` | IntegerField → BigIntegerField for account IDs > 2^31 |
 | `server/warships/tests/test_purge_deleted_accounts.py` | Tests for parsing, blocklist, gates, and full purge flow |
