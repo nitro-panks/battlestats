@@ -5,6 +5,9 @@ import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../../lib/playerRouteFetch';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
+    getChartFetchesInFlight: jest.fn(() => 0),
+    incrementChartFetches: jest.fn(),
+    decrementChartFetches: jest.fn(),
 }));
 
 const mockFetchSharedJson = fetchSharedJson as jest.MockedFunction<typeof fetchSharedJson>;

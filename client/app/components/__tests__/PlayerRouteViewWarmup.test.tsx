@@ -20,6 +20,9 @@ jest.mock('../../lib/visitAnalytics', () => ({
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
+    getChartFetchesInFlight: jest.fn(() => 0),
+    incrementChartFetches: jest.fn(),
+    decrementChartFetches: jest.fn(),
 }));
 
 jest.mock('next/dynamic', () => {

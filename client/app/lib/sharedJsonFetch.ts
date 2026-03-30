@@ -18,6 +18,12 @@ interface SettledCacheEntry {
     value: SharedJsonFetchResult<unknown>;
 }
 
+let chartFetchesInFlight = 0;
+
+export const getChartFetchesInFlight = (): number => chartFetchesInFlight;
+export const incrementChartFetches = (): void => { chartFetchesInFlight += 1; };
+export const decrementChartFetches = (): void => { chartFetchesInFlight = Math.max(0, chartFetchesInFlight - 1); };
+
 const inFlightRequests = new Map<string, Promise<SharedJsonFetchResult<unknown>>>();
 const settledRequests = new Map<string, SettledCacheEntry>();
 const resolvedCacheEnabled = process.env.NODE_ENV !== 'test';

@@ -100,7 +100,7 @@ EOF
 
 cat > /etc/systemd/system/battlestats-celery.service <<EOF
 [Unit]
-Description=Battlestats Celery worker (default queue — user-facing hydration)
+Description=Battlestats Celery worker (default queue — user-facing tasks)
 After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
 Requires=redis-server.service rabbitmq-server.service
 
@@ -111,7 +111,29 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q default -c 6 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n hydration@%%h
+ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q default -c 4 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n default@%%h
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/battlestats-celery-hydration.service <<EOF
+[Unit]
+Description=Battlestats Celery worker (hydration queue — ranked + efficiency refresh)
+After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
+Requires=redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q hydration -c 4 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n hydration@%%h
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
@@ -165,13 +187,13 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-background battlestats-beat
+systemctl enable redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
 systemctl restart redis-server rabbitmq-server
 
 if [[ -d "${APP_ROOT}/current/server" ]]; then
   # Clear crawl locks before restarting workers to prevent stale-lock watchdog triggers
   redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
-  systemctl restart battlestats-gunicorn battlestats-celery battlestats-celery-background battlestats-beat
+  systemctl restart battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
 fi
 REMOTE
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { buildClanPath } from '../lib/entityRoutes';
@@ -229,11 +229,16 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         : true;
     const [clanBattleSummary, setClanBattleSummary] = useState<PlayerClanBattleSummary | null>(() => getInitialClanBattleHeaderState(player));
     const [shouldLoadClanMembers, setShouldLoadClanMembers] = useState(false);
+    const [warmupSettled, setWarmupSettled] = useState(false);
+    const handleWarmupSettled = useCallback(() => setWarmupSettled(true), []);
     const isClanBattleEnjoyer = clanBattleSummary !== null;
     const { members: clanMembers, loading: clanMembersLoading, error: clanMembersError } = useClanMembers(player.clan_id || null, shouldLoadClanMembers);
 
     usePlayerRouteDiagnostics(player.player_id, player.name);
 
+    useEffect(() => {
+        setWarmupSettled(false);
+    }, [player.player_id]);
 
     useEffect(() => {
         setClanBattleSummary(getInitialClanBattleHeaderState(player));
@@ -245,34 +250,44 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         player.clan_battle_header_overall_win_rate,
     ]);
 
+    // Hard timeout: ensure clan members always load even if warmup fails
+    useEffect(() => {
+        if (warmupSettled || !player.clan_id) return;
+        const timeoutId = window.setTimeout(() => setWarmupSettled(true), 10_000);
+        return () => window.clearTimeout(timeoutId);
+    }, [warmupSettled, player.clan_id, player.player_id]);
+
+    // Gate clan member fetch on warmup completion
     useEffect(() => {
         if (!player.clan_id) {
             setShouldLoadClanMembers(false);
             return;
         }
 
-        setShouldLoadClanMembers(false);
+        if (!warmupSettled) {
+            setShouldLoadClanMembers(false);
+            return;
+        }
 
-        let timeoutId: number | null = null;
         let idleCallbackId: number | null = null;
-        const activateClanMembers = () => setShouldLoadClanMembers(true);
+        let timeoutId: number | null = null;
+        const activate = () => setShouldLoadClanMembers(true);
 
         if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-            idleCallbackId = window.requestIdleCallback(activateClanMembers, { timeout: 2500 });
+            idleCallbackId = window.requestIdleCallback(activate, { timeout: 500 });
         } else if (typeof window !== 'undefined') {
-            timeoutId = window.setTimeout(activateClanMembers, 2500);
+            timeoutId = window.setTimeout(activate, 500);
         }
 
         return () => {
             if (idleCallbackId != null && typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
                 window.cancelIdleCallback(idleCallbackId);
             }
-
-            if (timeoutId != null && typeof window !== 'undefined') {
+            if (timeoutId != null) {
                 window.clearTimeout(timeoutId);
             }
         };
-    }, [player.clan_id, player.player_id]);
+    }, [player.clan_id, player.player_id, warmupSettled]);
 
     useEffect(() => {
         if (shareState === 'idle') {
@@ -482,6 +497,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 hasClan={Boolean(player.clan_id)}
                                 efficiencyRows={player.efficiency_json}
                                 onClanBattleSummaryChange={handleClanBattleSummaryChange}
+                                onWarmupSettled={handleWarmupSettled}
                                 isLoading={isLoading}
                             />
                         </>

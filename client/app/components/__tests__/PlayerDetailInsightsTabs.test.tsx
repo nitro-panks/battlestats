@@ -5,6 +5,9 @@ import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
+    getChartFetchesInFlight: jest.fn(() => 0),
+    incrementChartFetches: jest.fn(),
+    decrementChartFetches: jest.fn(),
 }));
 
 let mockRankedHeatmapVisibility: boolean | undefined;

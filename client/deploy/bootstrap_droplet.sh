@@ -122,6 +122,11 @@ EOF
 ln -sfn /etc/nginx/sites-available/battlestats-client.conf /etc/nginx/sites-enabled/battlestats-client.conf
 rm -f /etc/nginx/sites-enabled/default
 
+# Enable HTTP/2 on certbot-managed 443 listeners (idempotent — only patches exact matches)
+SITE_CONF="/etc/nginx/sites-available/battlestats-client.conf"
+sed -i 's/listen 443 ssl;/listen 443 ssl http2;/g' "\${SITE_CONF}" 2>/dev/null || true
+sed -i 's/listen \[::\]:443 ssl;/listen [::]:443 ssl http2;/g' "\${SITE_CONF}" 2>/dev/null || true
+
 nginx -t
 systemctl daemon-reload
 systemctl enable nginx battlestats-client

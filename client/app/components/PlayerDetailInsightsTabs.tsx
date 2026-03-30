@@ -8,7 +8,7 @@ import type { TierTypePayload } from './playerProfileChartData';
 import { deriveTierRowsFromTierTypePayload, deriveTypeRowsFromTierTypePayload } from './playerProfileChartData';
 import { dispatchPlayerRouteSectionRendered } from './usePlayerRouteDiagnostics';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
-import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { decrementChartFetches, fetchSharedJson, incrementChartFetches } from '../lib/sharedJsonFetch';
 import { useTheme } from '../context/ThemeContext';
 
 type InsightsTabId = 'profile' | 'ships' | 'ranked' | 'career' | 'badges' | 'population';
@@ -32,6 +32,7 @@ interface PlayerDetailInsightsTabsProps {
         nation?: string | null;
     }> | null;
     onClanBattleSummaryChange?: (summary: PlayerClanBattleSummary | null) => void;
+    onWarmupSettled?: () => void;
     isLoading?: boolean;
 }
 
@@ -127,6 +128,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     hasClan,
     efficiencyRows = null,
     onClanBattleSummaryChange,
+    onWarmupSettled,
     isLoading = false,
 }) => {
     const { theme } = useTheme();
@@ -189,7 +191,12 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 );
             }
 
-            void Promise.allSettled(requests.map((request) => request.catch(() => undefined)));
+            incrementChartFetches();
+            Promise.allSettled(requests.map((request) => request.catch(() => undefined)))
+                .then(() => {
+                    decrementChartFetches();
+                    onWarmupSettled?.();
+                });
         };
 
         if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {

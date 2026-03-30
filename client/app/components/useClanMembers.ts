@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClanMemberData } from './clanMembersShared';
+import { getChartFetchesInFlight } from '../lib/sharedJsonFetch';
 
 const HYDRATION_POLL_LIMIT = 12;
 const HYDRATION_ACTIVE_POLL_INTERVAL_MS = 3000;
@@ -107,9 +108,13 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
                     || hydrationState.efficiencyPending > 0;
                 if (shouldPollAgain && attempt < HYDRATION_POLL_LIMIT) {
                     attemptsRef.current = attempt + 1;
+                    const baseDelay = resolveHydrationPollDelay(hydrationState);
+                    const priorityDelay = getChartFetchesInFlight() > 0
+                        ? Math.max(baseDelay, HYDRATION_DEFERRED_POLL_INTERVAL_MS)
+                        : baseDelay;
                     timeoutId = setTimeout(() => {
                         void fetchMembers(false, attempt + 1);
-                    }, resolveHydrationPollDelay(hydrationState));
+                    }, priorityDelay);
                 }
             } catch (fetchError) {
                 if (isAbortError(fetchError)) {

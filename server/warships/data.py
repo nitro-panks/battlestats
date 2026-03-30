@@ -2750,7 +2750,7 @@ def update_activity_data(player_id: int) -> None:
 LEAGUE_NAMES = {1: 'Gold', 2: 'Silver', 3: 'Bronze'}
 
 PLAYER_DISTRIBUTION_CACHE_TTL = 7200  # 2 hours
-PLAYER_CORRELATION_CACHE_TTL = 3600  # 1 hour
+PLAYER_CORRELATION_CACHE_TTL = 7200  # 2 hours
 PLAYER_DISTRIBUTION_CONFIGS = {
     'win_rate': {
         'label': 'Win Rate',
@@ -3317,6 +3317,26 @@ def _fetch_player_tier_type_population_correlation() -> dict:
     }
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
     return payload
+
+
+def warm_player_tier_type_population_correlation() -> dict:
+    """Force-rebuild the tier-type population correlation cache."""
+    cache_key = _player_correlation_cache_key('tier_type_population')
+    cache.delete(cache_key)
+    return _fetch_player_tier_type_population_correlation()
+
+
+def warm_player_correlations() -> dict:
+    """Pre-warm all population correlation caches."""
+    results = {}
+
+    tier_type = warm_player_tier_type_population_correlation()
+    results['tier_type'] = {'tracked_population': tier_type.get('tracked_population', 0)}
+
+    ranked = warm_player_ranked_wr_battles_population_correlation()
+    results['ranked_wr_battles'] = {'tracked_population': ranked.get('tracked_population', 0)}
+
+    return results
 
 
 def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None) -> dict:

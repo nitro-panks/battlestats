@@ -643,11 +643,16 @@ def warm_landing_page_content_task(self, include_recent=True):
         )
         logger.info("Finished warm_landing_page_content_task: %s", result)
 
-        from warships.data import warm_player_distributions
+        from warships.data import warm_player_correlations, warm_player_distributions
         logger.info("Warming player distribution caches...")
         dist_result = warm_player_distributions()
         logger.info("Player distribution warm complete: %s", dist_result)
         result['distributions'] = dist_result
+
+        logger.info("Warming player correlation caches...")
+        corr_result = warm_player_correlations()
+        logger.info("Player correlation warm complete: %s", corr_result)
+        result['correlations'] = corr_result
 
         return result
     finally:
