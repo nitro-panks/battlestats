@@ -1,6 +1,6 @@
 # Runbook: Database Optimization
 
-**Status:** Implemented (v1.2.11) — pending production deploy
+**Status:** Implemented and deployed (v1.2.11)
 **Date:** 2026-03-29
 
 ## Current State

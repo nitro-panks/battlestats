@@ -5,7 +5,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
+coverage/
 htmlcov/
+*.dump
 
 env/
 .venv/
@@ -21,6 +23,7 @@ logs/
 *.log
 
 .next/
+.swc/
 
 client/playwright-report/
 client/test-results/
