@@ -922,7 +922,8 @@ class AggregateChartDataTests(TestCase):
             any(row['bin_min'] == 100 and row['count'] == 1 for row in payload['bins']))
         self.assertTrue(
             any(row['bin_min'] == 6400 and row['count'] == 1 for row in payload['bins']))
-        self.assertLessEqual(len(queries), 2)
+        # 1 bin query + transaction overhead (SAVEPOINT, SET LOCAL, RELEASE)
+        self.assertLessEqual(len(queries), 5)
 
 
 class PlayerAchievementsDataTests(TestCase):

@@ -1,5 +1,6 @@
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from typing import Dict, Any, Optional, Iterable
 from datetime import datetime, timezone, timedelta, date
 import logging
@@ -23,6 +24,19 @@ from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_
 from warships.tasks import update_activity_data_task, update_battle_data_task, update_clan_data_task, update_clan_members_task, update_randoms_data_task, update_snapshot_data_task, update_tiers_data_task, update_type_data_task
 
 logging.basicConfig(level=logging.INFO)
+
+ANALYTICAL_WORK_MEM = os.getenv('ANALYTICAL_WORK_MEM', '8MB')
+
+
+@contextmanager
+def _elevated_work_mem():
+    """Temporarily raise work_mem for heavy analytical queries (distribution, correlation)."""
+    with connection.cursor() as cursor:
+        cursor.execute("SET LOCAL work_mem = %s", [ANALYTICAL_WORK_MEM])
+    try:
+        yield
+    finally:
+        pass  # SET LOCAL resets at transaction end
 
 
 PLAYSTYLE_RECRUIT_BATTLES_THRESHOLD = 100
@@ -3078,17 +3092,18 @@ def fetch_player_population_distribution(metric: str) -> dict:
         **{f'{field_name}__isnull': False},
     )
 
-    if config['scale'] == 'log':
-        bins = _build_explicit_distribution_bins(
-            qs, field_name, config['bin_edges'])
-    else:
-        bins = _build_linear_distribution_bins(
-            qs,
-            field_name,
-            config['range_min'],
-            config['range_max'],
-            config['bin_width'],
-        )
+    with transaction.atomic(), _elevated_work_mem():
+        if config['scale'] == 'log':
+            bins = _build_explicit_distribution_bins(
+                qs, field_name, config['bin_edges'])
+        else:
+            bins = _build_linear_distribution_bins(
+                qs,
+                field_name,
+                config['range_min'],
+                config['range_max'],
+                config['bin_width'],
+            )
 
     payload = {
         'metric': metric,
@@ -3257,29 +3272,30 @@ def _fetch_player_tier_type_population_correlation() -> dict:
     trend_battles: dict[str, int] = {}
     tracked_population = 0
 
-    rows = Player.objects.filter(
-        is_hidden=False,
-        pvp_battles__gte=config['min_population_battles'],
-        battles_json__isnull=False,
-    ).values_list('battles_json', flat=True)
+    with transaction.atomic(), _elevated_work_mem():
+        rows = Player.objects.filter(
+            is_hidden=False,
+            pvp_battles__gte=config['min_population_battles'],
+            battles_json__isnull=False,
+        ).values_list('battles_json', flat=True)
 
-    for battles_json in rows.iterator(chunk_size=1000):
-        normalized_rows = _extract_tier_type_battle_rows(battles_json)
-        if not normalized_rows:
-            continue
+        for battles_json in rows.iterator(chunk_size=1000):
+            normalized_rows = _extract_tier_type_battle_rows(battles_json)
+            if not normalized_rows:
+                continue
 
-        tracked_population += 1
-        for row in normalized_rows:
-            ship_type = str(row['ship_type'])
-            ship_tier = int(row['ship_tier'])
-            pvp_battles = int(row['pvp_battles'])
+            tracked_population += 1
+            for row in normalized_rows:
+                ship_type = str(row['ship_type'])
+                ship_tier = int(row['ship_tier'])
+                pvp_battles = int(row['pvp_battles'])
 
-            tile_counts[(ship_type, ship_tier)] = tile_counts.get(
-                (ship_type, ship_tier), 0) + pvp_battles
-            trend_tier_weighted_sum[ship_type] = trend_tier_weighted_sum.get(
-                ship_type, 0.0) + (ship_tier * pvp_battles)
-            trend_battles[ship_type] = trend_battles.get(
-                ship_type, 0) + pvp_battles
+                tile_counts[(ship_type, ship_tier)] = tile_counts.get(
+                    (ship_type, ship_tier), 0) + pvp_battles
+                trend_tier_weighted_sum[ship_type] = trend_tier_weighted_sum.get(
+                    ship_type, 0.0) + (ship_tier * pvp_battles)
+                trend_battles[ship_type] = trend_battles.get(
+                    ship_type, 0) + pvp_battles
 
     tiles = [
         {
@@ -3382,37 +3398,38 @@ def fetch_player_wr_survival_correlation() -> dict:
     sum_x2 = 0.0
     sum_y2 = 0.0
 
-    rows = Player.objects.filter(
-        is_hidden=False,
-        pvp_battles__gte=config['min_population_battles'],
-        pvp_ratio__isnull=False,
-        pvp_survival_rate__isnull=False,
-    ).values_list('pvp_ratio', 'pvp_survival_rate')
+    with transaction.atomic(), _elevated_work_mem():
+        rows = Player.objects.filter(
+            is_hidden=False,
+            pvp_battles__gte=config['min_population_battles'],
+            pvp_ratio__isnull=False,
+            pvp_survival_rate__isnull=False,
+        ).values_list('pvp_ratio', 'pvp_survival_rate')
 
-    for win_rate, survival_rate in rows.iterator(chunk_size=5000):
-        if win_rate is None or survival_rate is None:
-            continue
+        for win_rate, survival_rate in rows.iterator(chunk_size=5000):
+            if win_rate is None or survival_rate is None:
+                continue
 
-        x_value = float(win_rate)
-        y_value = float(survival_rate)
+            x_value = float(win_rate)
+            y_value = float(survival_rate)
 
-        tracked_population += 1
-        sum_x += x_value
-        sum_y += y_value
-        sum_xy += x_value * y_value
-        sum_x2 += x_value * x_value
-        sum_y2 += y_value * y_value
+            tracked_population += 1
+            sum_x += x_value
+            sum_y += y_value
+            sum_xy += x_value * y_value
+            sum_x2 += x_value * x_value
+            sum_y2 += y_value * y_value
 
-        x_clamped = _clamp_to_open_upper_bound(x_value, x_min, x_max)
-        y_clamped = _clamp_to_open_upper_bound(y_value, y_min, y_max)
+            x_clamped = _clamp_to_open_upper_bound(x_value, x_min, x_max)
+            y_clamped = _clamp_to_open_upper_bound(y_value, y_min, y_max)
 
-        x_index = min(int((x_clamped - x_min) / x_bin_width), x_bin_count - 1)
-        y_index = min(int((y_clamped - y_min) / y_bin_width), y_bin_count - 1)
+            x_index = min(int((x_clamped - x_min) / x_bin_width), x_bin_count - 1)
+            y_index = min(int((y_clamped - y_min) / y_bin_width), y_bin_count - 1)
 
-        tile_counts[(x_index, y_index)] = tile_counts.get(
-            (x_index, y_index), 0) + 1
-        trend_sum_y[x_index] += y_value
-        trend_counts[x_index] += 1
+            tile_counts[(x_index, y_index)] = tile_counts.get(
+                (x_index, y_index), 0) + 1
+            trend_sum_y[x_index] += y_value
+            trend_counts[x_index] += 1
 
     tiles = []
     for (x_index, y_index), count in sorted(tile_counts.items()):
@@ -3510,18 +3527,20 @@ def _build_player_ranked_wr_battles_population_correlation_payload() -> dict:
 
     records: list[tuple[int, float]] = []
     max_battles = config['min_battles']
-    rows = Player.objects.filter(
-        is_hidden=False,
-        ranked_json__isnull=False,
-    ).values_list('ranked_json', flat=True)
 
-    for ranked_rows in rows.iterator(chunk_size=2000):
-        total_battles, win_rate = _calculate_ranked_record(ranked_rows)
-        if total_battles < config['min_battles'] or win_rate is None:
-            continue
+    with transaction.atomic(), _elevated_work_mem():
+        rows = Player.objects.filter(
+            is_hidden=False,
+            ranked_json__isnull=False,
+        ).values_list('ranked_json', flat=True)
 
-        records.append((total_battles, win_rate))
-        max_battles = max(max_battles, total_battles)
+        for ranked_rows in rows.iterator(chunk_size=2000):
+            total_battles, win_rate = _calculate_ranked_record(ranked_rows)
+            if total_battles < config['min_battles'] or win_rate is None:
+                continue
+
+            records.append((total_battles, win_rate))
+            max_battles = max(max_battles, total_battles)
 
     x_edges = _build_geometric_bin_edges(
         max_battles,
