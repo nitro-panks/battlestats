@@ -287,7 +287,7 @@ class PlayerAchievementStat(models.Model):
 
 class DeletedAccount(models.Model):
     """Permanently blocklisted Wargaming account IDs (GDPR / account deletion)."""
-    account_id = models.IntegerField(unique=True)
+    account_id = models.BigIntegerField(unique=True)
     deleted_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
