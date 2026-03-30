@@ -14,7 +14,7 @@ from django.db.models import Avg, Case, Count, F, FloatField, IntegerField, Q, S
 from django.db.models.functions import Cast, Lower, TruncMonth
 from django.utils import timezone as django_timezone
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
-from warships.models import PlayerAchievementStat
+from warships.models import PlayerAchievementStat, MvPlayerDistributionStats
 from warships.player_records import get_or_create_canonical_player
 from warships.achievements_catalog import get_achievement_catalog_entry
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, _fetch_efficiency_badges_for_player, build_ship_chart_name
@@ -2698,9 +2698,10 @@ def update_snapshot_data(player_id: int) -> None:
             snap.interval_wins = max(
                 0, int(snap.wins or 0) - int(previous_wins or 0))
 
-        snap.save(update_fields=['interval_battles', 'interval_wins'])
         previous_battles = snap.battles
         previous_wins = snap.wins
+
+    Snapshot.objects.bulk_update(snapshots, ['interval_battles', 'interval_wins'])
 
     update_activity_data(player_id)
     logging.info(f'Updated snapshot data for player {player.name}')
@@ -3086,11 +3087,19 @@ def fetch_player_population_distribution(metric: str) -> dict:
         return cached
 
     field_name = config['field_name']
-    qs = Player.objects.filter(
-        is_hidden=False,
-        pvp_battles__gte=config['min_population_battles'],
-        **{f'{field_name}__isnull': False},
-    )
+    try:
+        qs = MvPlayerDistributionStats.objects.filter(
+            pvp_battles__gte=config['min_population_battles'],
+            **{f'{field_name}__isnull': False},
+        )
+        if not qs.exists():
+            raise MvPlayerDistributionStats.DoesNotExist
+    except Exception:
+        qs = Player.objects.filter(
+            is_hidden=False,
+            pvp_battles__gte=config['min_population_battles'],
+            **{f'{field_name}__isnull': False},
+        )
 
     with transaction.atomic(), _elevated_work_mem():
         if config['scale'] == 'log':
@@ -3121,6 +3130,14 @@ def fetch_player_population_distribution(metric: str) -> dict:
 
 def warm_player_distributions() -> dict:
     """Pre-warm all player distribution caches so users never hit cold queries."""
+    from django.db import connection as db_connection
+    try:
+        with db_connection.cursor() as cursor:
+            cursor.execute(
+                'REFRESH MATERIALIZED VIEW CONCURRENTLY mv_player_distribution_stats'
+            )
+    except Exception:
+        logger.warning('Could not refresh mv_player_distribution_stats — view may not exist yet')
     results = {}
     for metric in PLAYER_DISTRIBUTION_CONFIGS:
         cache_key = _player_distribution_cache_key(metric)
@@ -3399,12 +3416,22 @@ def fetch_player_wr_survival_correlation() -> dict:
     sum_y2 = 0.0
 
     with transaction.atomic(), _elevated_work_mem():
-        rows = Player.objects.filter(
-            is_hidden=False,
-            pvp_battles__gte=config['min_population_battles'],
-            pvp_ratio__isnull=False,
-            pvp_survival_rate__isnull=False,
-        ).values_list('pvp_ratio', 'pvp_survival_rate')
+        try:
+            mv_qs = MvPlayerDistributionStats.objects.filter(
+                pvp_battles__gte=config['min_population_battles'],
+                pvp_ratio__isnull=False,
+                pvp_survival_rate__isnull=False,
+            )
+            if not mv_qs.exists():
+                raise MvPlayerDistributionStats.DoesNotExist
+            rows = mv_qs.values_list('pvp_ratio', 'pvp_survival_rate')
+        except Exception:
+            rows = Player.objects.filter(
+                is_hidden=False,
+                pvp_battles__gte=config['min_population_battles'],
+                pvp_ratio__isnull=False,
+                pvp_survival_rate__isnull=False,
+            ).values_list('pvp_ratio', 'pvp_survival_rate')
 
         for win_rate, survival_rate in rows.iterator(chunk_size=5000):
             if win_rate is None or survival_rate is None:
@@ -4681,9 +4708,15 @@ def warm_hot_entity_caches(
 def warm_player_entity_caches(player_ids: Iterable[int], force_refresh: bool = False) -> int:
     warmed_players = 0
 
+    player_ids = list(player_ids)
+    players_by_id = {
+        p.player_id: p
+        for p in Player.objects.select_related('explorer_summary', 'clan')
+        .filter(player_id__in=player_ids)
+    }
+
     for player_id in player_ids:
-        player = Player.objects.select_related(
-            'explorer_summary', 'clan').filter(player_id=player_id).first()
+        player = players_by_id.get(player_id)
         if player is None:
             continue
 
@@ -4725,8 +4758,16 @@ def warm_player_entity_caches(player_ids: Iterable[int], force_refresh: bool = F
 def warm_clan_entity_caches(clan_ids: Iterable[int], force_refresh: bool = False) -> int:
     warmed_clans = 0
 
+    clan_ids = list(clan_ids)
+    clans = {
+        c.clan_id: c
+        for c in Clan.objects.filter(clan_id__in=clan_ids).annotate(
+            tracked_member_count=Count('player', filter=Q(player__name__gt=''))
+        )
+    }
+
     for clan_id in clan_ids:
-        clan = Clan.objects.filter(clan_id=clan_id).first()
+        clan = clans.get(clan_id)
         if clan is None:
             continue
 
@@ -4734,8 +4775,7 @@ def warm_clan_entity_caches(clan_ids: Iterable[int], force_refresh: bool = False
             update_clan_data(str(clan_id))
             clan.refresh_from_db()
 
-        member_count = clan.player_set.exclude(name='').count()
-        if force_refresh or clan_members_missing_or_incomplete(clan, member_count=member_count):
+        if force_refresh or clan_members_missing_or_incomplete(clan, member_count=clan.tracked_member_count):
             update_clan_members(str(clan_id))
 
         refresh_clan_battle_seasons_cache(str(clan_id))

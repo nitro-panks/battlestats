@@ -58,19 +58,13 @@ class Player(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=['is_hidden', 'last_battle_date'],
-                         name='player_hidden_battle_idx'),
             models.Index(fields=['last_lookup'],
                          name='player_last_lookup_idx'),
-            models.Index(fields=['clan', 'last_battle_date'],
-                         name='player_clan_battle_idx'),
             models.Index(fields=['pvp_battles', 'pvp_ratio'],
                          name='player_battles_ratio_idx'),
             models.Index(
                 fields=['pvp_battles', 'pvp_survival_rate'], name='player_battles_surv_idx'),
             models.Index(Lower('name'), name='player_name_lower_idx'),
-            models.Index(fields=['last_fetch'],
-                         name='player_last_fetch_idx'),
         ]
 
 
@@ -178,18 +172,8 @@ class PlayerExplorerSummary(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=['player_score'],
-                         name='explorer_score_idx'),
-            models.Index(fields=['battles_last_29_days'],
-                         name='explorer_battles29_idx'),
-            models.Index(fields=['active_days_last_29_days'],
-                         name='explorer_active29_idx'),
-            models.Index(fields=['ships_played_total'],
-                         name='explorer_ships_idx'),
             models.Index(fields=['efficiency_rank_percentile'],
                          name='explorer_eff_rank_idx'),
-            models.Index(fields=['ranked_seasons_participated'],
-                         name='explorer_ranked_idx'),
         ]
 
     def __str__(self):
@@ -295,12 +279,19 @@ class PlayerAchievementStat(models.Model):
                 name='unique_player_achievement_source',
             ),
         ]
-        indexes = [
-            models.Index(fields=['player', 'achievement_slug'],
-                         name='player_ach_slug_idx'),
-            models.Index(fields=['achievement_slug'],
-                         name='achievement_slug_idx'),
-        ]
+        indexes = []
 
     def __str__(self):
         return f"{self.player.name} - {self.achievement_label}"
+
+
+class MvPlayerDistributionStats(models.Model):
+    """Unmanaged model backed by the mv_player_distribution_stats materialized view."""
+    pvp_ratio = models.FloatField(null=True)
+    pvp_survival_rate = models.FloatField(null=True)
+    pvp_battles = models.IntegerField()
+    is_hidden = models.BooleanField()
+
+    class Meta:
+        managed = False
+        db_table = 'mv_player_distribution_stats'
