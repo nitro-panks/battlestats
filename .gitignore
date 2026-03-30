@@ -34,4 +34,7 @@ tests/load/results/
 updated-landing
 *.har
 
+# Account deletion requests (contains PII)
+deleted_accounts*
+
 server/static/rest_framework/**/*.png
