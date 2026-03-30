@@ -1,7 +1,7 @@
 # Runbook: Player Page Load Priority — Icon Hydration vs Chart Rendering
 
 **Created**: 2026-03-29
-**Status**: All 5 fixes implemented. Pending deploy.
+**Status**: All 5 fixes implemented and deployed (v1.2.9).
 
 ## Problem Statement
 

@@ -90,9 +90,9 @@ npm run test:e2e:install                          # Install Playwright browsers
 Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`). The frontend never calls the Wargaming API directly — all data flows through Django.
 
 ### Key backend modules
-- `server/warships/data.py` (~5K lines) — Core hydration, chart payload assembly, cache warming, hot entity warming, `score_best_clans()` composite ranking
+- `server/warships/data.py` (~5K lines) — Core hydration, chart payload assembly, cache warming, hot entity warming, population correlations/distributions, `score_best_clans()` composite ranking. Analytical queries use elevated `work_mem` via `_elevated_work_mem()` context manager.
 - `server/warships/landing.py` — Landing page modes (Best, Random, Sigma, Popular) with published-cache + durable fallback
-- `server/warships/tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing warmup
+- `server/warships/tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing warmup, distribution/correlation warming
 - `server/warships/signals.py` — Registers all Celery Beat periodic tasks via `@receiver(post_migrate)` (landing warmer, hot entity warmer, clan crawl, player refresh, etc.)
 - `server/warships/views.py` — DRF views and `@api_view` endpoints
 
@@ -102,7 +102,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - `client/app/components/ThemeToggle.tsx` — Theme selection dropdown (light/dark/system)
 - `client/app/lib/chartTheme.ts` — D3 color schemes keyed to active theme
 - `client/app/lib/wrColor.ts` — Shared win-rate → color mapping used across all surfaces
-- `client/app/lib/sharedJsonFetch.ts` — Fetch with retry and cache
+- `client/app/lib/sharedJsonFetch.ts` — Fetch with retry, cache, and chart fetch priority counter (`chartFetchesInFlight`) for coordinating request priority between chart rendering and hydration polling
 - `client/app/lib/entityRoutes.ts` — URL encoding/decoding for player/clan routes
 - `client/app/globals.css` — CSS custom properties for theming (`--bg-*`, `--text-*`, `--accent-*`), dark mode via `[data-theme="dark"]`
 - `client/app/components/HeaderSearch.tsx` — Player search autocomplete with client-side suggestion cache and themed input
@@ -112,12 +112,33 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Cache-first with lazy-refresh**: Return cached payload immediately, queue background refresh
 - **Durable fallback**: Keep last-published copy after TTL expiry
 - **Stale-while-revalidate**: `X-Clan-Plot-Pending: true` header signals pending warm-up
-- **Hot entity warmer**: Periodic task (every 30 min) keeps top-visited + pinned players/clans warm. Pinned players configured via `HOT_ENTITY_PINNED_PLAYER_NAMES` env var
+- **Hot entity warmer**: Periodic task (every 30 min) keeps top-visited + pinned + recently-viewed players/clans warm. Pinned players configured via `HOT_ENTITY_PINNED_PLAYER_NAMES` env var. Recently-viewed players (last N visitors within M minutes) configured via `RECENTLY_VIEWED_PLAYER_LIMIT` and `RECENTLY_VIEWED_WARM_MINUTES` env vars.
 - **Bulk entity cache loader**: Periodic task (every 12h) pre-loads top 50 players + members of 25 best-scored clans + top 25 clans into Redis. Uses `score_best_clans()` composite ranking (WR 30%, activity 25%, member score 20%, CB recency 15%, volume 10%). See `runbook-best-clan-eligibility.md`.
-- **Landing page warmer**: Periodic task (every 55 min) refreshes all landing payloads; Best clan mode also uses `score_best_clans()`
-- **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) spawns a daemon thread that runs `startup_warm_all_caches` management command — sequentially warms landing page, hot entities, and bulk cache. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `runbook-startup-cache-warming.md`.
+- **Landing page warmer**: Periodic task (every 55 min) refreshes all landing payloads + population distributions + population correlations; Best clan mode also uses `score_best_clans()`
+- **Distribution & correlation warming**: Proactive warming of player population distributions (WR, battles, avg tier) and correlations (tier-type, ranked WR-battles, WR-survival) every 55 min via the landing page task and on startup. TTL is 2 hours. Eliminates cold-cache penalty (10-30s full table scans).
+- **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) spawns a daemon thread that runs `startup_warm_all_caches` management command — sequentially warms landing page, hot entities, bulk cache, distributions, and correlations. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `runbook-startup-cache-warming.md`.
 - **Player search suggestions**: Three-tier cache — client-side `Map` (instant, session-scoped, 200-entry cap) → Redis (10 min TTL, `suggest:<query>` keys) → Postgres with `pg_trgm` GIN index (`player_name_trgm_idx`). Minimum 3-character query. Raw `ILIKE` in `views.py` (Django's `icontains` generates `UPPER()` which bypasses trigram indexes).
 - Redis-backed in production, LocMemCache in tests
+
+### Celery queue architecture
+Three queues with dedicated workers:
+- **default** (`-c 4`) — API-triggered tasks, general work
+- **hydration** (`-c 4`) — Player ranked/efficiency data hydration (capped to prevent flooding). Tasks: `update_ranked_data_task`, `update_player_efficiency_data_task`
+- **background** — Long-running crawls, warmers, incremental refreshes (all periodic tasks)
+
+### Nginx / HTTP
+- **HTTP/2** enabled on the production nginx 443 listeners. Eliminates the browser's 6-connection-per-origin limit under HTTP/1.1, allowing all concurrent chart and hydration requests to proceed without slot contention.
+
+### Frontend fetch priority
+Player detail pages coordinate chart rendering vs hydration polling:
+- Tab warmup fires 4 parallel chart requests via `requestIdleCallback` (250ms timeout)
+- Clan member fetch is deferred until warmup settles (with 10s hard timeout fallback)
+- `sharedJsonFetch.ts` exposes a `chartFetchesInFlight` counter; `useClanMembers` backs off to 6s poll intervals while charts are in-flight
+- See `runbook-player-page-load-priority.md` for full diagnosis and architecture
+
+### Database optimizations
+- **`CONN_HEALTH_CHECKS`**: Enabled — Django validates connections before use, preventing stale-connection errors with managed Postgres
+- **Elevated `work_mem`**: Analytical queries (distribution bins, tier-type/ranked/survival correlations) use `SET LOCAL work_mem` within `transaction.atomic()` to get 8MB (configurable via `ANALYTICAL_WORK_MEM`) instead of the default 2MB. This improves sort/hash performance for full table scans over ~194K players.
 
 ### Data models (server/warships/models.py)
 Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat.
@@ -177,6 +198,9 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `CLAN_BATTLE_WARM_CLAN_IDS` — Comma-separated clan IDs for clan battle summary warming
 - `HOT_ENTITY_PLAYER_LIMIT` / `HOT_ENTITY_CLAN_LIMIT` — Hot entity cache size (defaults: 20/10)
 - `ENABLE_CRAWLER_SCHEDULES` — Enable daily clan crawl (set `1` in production)
+- `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
+- `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
+- `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)
 
 ### Client env
 - `BATTLESTATS_API_ORIGIN` — Backend URL (default `http://localhost:8888`)
