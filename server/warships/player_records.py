@@ -146,7 +146,20 @@ def _merge_explorer_summary(canonical: Player, duplicate: Player) -> None:
     duplicate_summary.delete()
 
 
+class BlockedAccountError(Exception):
+    """Raised when attempting to create a Player for a blocklisted account."""
+
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        super().__init__(f"Account {player_id} is blocklisted and cannot be created")
+
+
 def get_or_create_canonical_player(player_id: int) -> tuple[Player, bool]:
+    from warships.blocklist import is_account_blocked
+
+    if is_account_blocked(player_id):
+        raise BlockedAccountError(player_id)
+
     with transaction.atomic():
         matches = list(
             Player.objects.select_for_update().filter(player_id=player_id).order_by("id")

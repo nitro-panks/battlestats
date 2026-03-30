@@ -10,7 +10,7 @@ import requests
 from django.conf import settings as django_settings
 
 from warships.models import Clan, Player
-from warships.player_records import get_or_create_canonical_player
+from warships.player_records import BlockedAccountError, get_or_create_canonical_player
 
 
 BASE_URL = "https://api.worldofwarships.com/wows/"
@@ -144,7 +144,11 @@ def save_player(player_data: Dict, clan: Clan) -> None:
     if not pid:
         return
 
-    player, _created = get_or_create_canonical_player(pid)
+    try:
+        player, _created = get_or_create_canonical_player(pid)
+    except BlockedAccountError:
+        log.info("Skipping blocked account %s during clan crawl", pid)
+        return
     player.name = player_data.get("nickname", player.name or "")
     player.clan = clan
 

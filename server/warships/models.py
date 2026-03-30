@@ -285,6 +285,18 @@ class PlayerAchievementStat(models.Model):
         return f"{self.player.name} - {self.achievement_label}"
 
 
+class DeletedAccount(models.Model):
+    """Permanently blocklisted Wargaming account IDs (GDPR / account deletion)."""
+    account_id = models.IntegerField(unique=True)
+    deleted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = []
+
+    def __str__(self):
+        return f"DeletedAccount({self.account_id})"
+
+
 class MvPlayerDistributionStats(models.Model):
     """Unmanaged model backed by the mv_player_distribution_stats materialized view."""
     pvp_ratio = models.FloatField(null=True)

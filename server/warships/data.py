@@ -15,7 +15,7 @@ from django.db.models.functions import Cast, Lower, TruncMonth
 from django.utils import timezone as django_timezone
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 from warships.models import PlayerAchievementStat, MvPlayerDistributionStats
-from warships.player_records import get_or_create_canonical_player
+from warships.player_records import BlockedAccountError, get_or_create_canonical_player
 from warships.achievements_catalog import get_achievement_catalog_entry
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, _fetch_efficiency_badges_for_player, build_ship_chart_name
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info, _fetch_player_achievements
@@ -4385,7 +4385,11 @@ def update_clan_data(clan_id: str) -> None:
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
 
     for member_id in _fetch_clan_member_ids(clan_id):
-        player, created = get_or_create_canonical_player(member_id)
+        try:
+            player, created = get_or_create_canonical_player(member_id)
+        except BlockedAccountError:
+            logging.info("Skipping blocked account %s during clan data update", member_id)
+            continue
         if created:
             logging.info(
                 f"Created new player: {player.player_id}\nPopulating data...")
@@ -4410,7 +4414,11 @@ def update_clan_members(clan_id: str) -> None:
         return
 
     for member_id in member_ids:
-        player, created = get_or_create_canonical_player(member_id)
+        try:
+            player, created = get_or_create_canonical_player(member_id)
+        except BlockedAccountError:
+            logging.info("Skipping blocked account %s during clan member sync", member_id)
+            continue
         if created:
             logging.info(
                 f"Created new player: {player.player_id}")

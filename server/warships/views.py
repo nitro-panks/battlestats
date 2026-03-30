@@ -152,6 +152,11 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 raise Http404("Player matching query does not exist.")
 
             cache.delete(missing_lookup_cache_key)
+
+            from warships.blocklist import is_account_blocked
+            if is_account_blocked(int(player_id)):
+                raise Http404("Player matching query does not exist.")
+
             obj, _ = Player.objects.get_or_create(
                 player_id=int(player_id),
                 defaults={"name": normalized_lookup_value}
