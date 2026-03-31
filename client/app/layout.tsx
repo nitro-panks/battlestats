@@ -18,9 +18,21 @@ const inter = Inter({ subsets: ["latin"] });
 const gaMeasurementId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 
 export const metadata: Metadata = {
-  title: "WoWs Battlestats",
-  description: "World of Warships player and clan statistics",
+  title: "WoWs Battlestats — World of Warships Player & Clan Statistics",
+  description:
+    "Look up any World of Warships player or clan. Win rates, battle history, ship stats, ranked performance, efficiency rankings, and population distributions.",
   metadataBase: new URL(getSiteOrigin()),
+  openGraph: {
+    title: "WoWs Battlestats",
+    description: "World of Warships player and clan statistics.",
+    siteName: "WoWs Battlestats",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: "WoWs Battlestats",
+    description: "World of Warships player and clan statistics.",
+  },
 };
 
 export default function RootLayout({
