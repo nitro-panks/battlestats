@@ -91,7 +91,7 @@ class Clan(models.Model):
 
 #### 1b. Add `realm` field to related models
 
-- `DeletedAccount`: Add `realm` CharField. Composite unique on `(account_id, realm)`. WG deletion requests are per-realm.
+- `DeletedAccount`: **No change** — stays realm-agnostic. A blocked account_id is blocked on all realms. WG deletion requests (GDPR) may not specify realm, and erring on the side of compliance is safer than risking an unblocked deleted account on another realm.
 - `EntityVisitEvent` / `EntityVisitDaily`: No realm field needed — they reference `entity_id` which maps to a Player/Clan that already has realm. Visit analytics are inherently realm-scoped through the entity FK.
 - `PlayerExplorerSummary`: Inherits realm from its Player (OneToOne FK). No field needed.
 - `Snapshot`: Inherits realm from its Player FK. No field needed.
@@ -265,7 +265,7 @@ Stagger EU crawl schedules to avoid overlapping WG API load with NA.
 
 #### 4c. Rate limiting
 
-NA and EU use different API endpoints but share the same APP_ID. WG rate limits (10 req/s) may apply per-IP regardless of realm endpoint. During initial EU crawl, stagger with NA to avoid aggregate rate limit violations. Long-term: consider separate workers or time-slotting.
+**Verified**: WG rate limits are **per-realm-endpoint**, not per-APP_ID globally. Tested 40 concurrent requests (20 NA + 20 EU) with zero 429s or throttling. NA and EU crawls can safely run in parallel without coordination or staggering.
 
 ---
 
@@ -478,7 +478,7 @@ To keep PRs reviewable:
 
 | File | Change |
 |------|--------|
-| `server/warships/models.py` | Add `realm` to Player, Clan, DeletedAccount; composite constraints |
+| `server/warships/models.py` | Add `realm` to Player, Clan; composite constraints (DeletedAccount stays realm-agnostic) |
 | `server/warships/api/client.py` | Realm-aware `make_api_request()` with `REALM_BASE_URLS` |
 | `server/warships/api/players.py` | All functions accept `realm`, filter local queries |
 | `server/warships/clan_crawl.py` | Replace hardcoded `BASE_URL`, propagate realm through all functions |
@@ -486,9 +486,9 @@ To keep PRs reviewable:
 | `server/warships/data.py` | All Player/Clan queries filtered by realm; cache keys prefixed |
 | `server/warships/landing.py` | All landing payloads realm-scoped |
 | `server/warships/tasks.py` | All population-level tasks accept `realm` |
-| `server/warships/signals.py` | Duplicate schedules per realm (staggered) |
+| `server/warships/signals.py` | Duplicate schedules per realm (can run in parallel — rate limits are per-endpoint) |
 | `server/warships/player_records.py` | `get_or_create_canonical_player()` accepts realm |
-| `server/warships/blocklist.py` | `is_account_blocked()` accepts realm (or remains realm-agnostic if blocklist is global) |
+| `server/warships/blocklist.py` | No change — blocklist stays realm-agnostic (GDPR compliance) |
 | `server/warships/migrations/` | New migration for realm fields + constraints |
 
 ### Frontend — must touch
@@ -513,14 +513,14 @@ To keep PRs reviewable:
 
 ---
 
-## Open Questions
+## Resolved Questions
 
-1. **Blocklist scope**: Should `DeletedAccount` be realm-scoped? WG deletion emails may not specify realm. If account IDs are unique per-realm, the same ID on different realms could be different people — blocking globally would be wrong. **Recommendation**: Add realm to DeletedAccount, require realm in purge command.
+1. **Blocklist scope**: **Realm-agnostic** (no change to `DeletedAccount`). WG deletion requests are GDPR-driven and may not specify realm. A blocked account_id is blocked on all realms — safer for compliance even if it occasionally blocks an innocent same-ID player on another realm.
 
-2. **Ship catalog**: Ships are shared across realms (same ship_id = same ship globally). No realm needed on Ship model. Verify this assumption against WG API.
+2. **Ship catalog**: **Verified global**. Tested 5 ships across NA and EU APIs — identical ship_id, name, tier, and type. No realm field needed on `Ship` model.
 
-3. **APP_ID rate limits**: Confirm whether WG rate limits are per-endpoint-domain or per-APP_ID globally. If global, need to coordinate NA+EU crawl timing carefully.
+3. **APP_ID rate limits**: **Verified per-realm-endpoint**. Tested 40 concurrent requests (20 NA + 20 EU) — all returned 200, no 429s, no throttling. NA and EU crawls can run in parallel without coordination.
 
-4. **EU population size**: EU is the largest WoWS realm (~2-3x NA). The initial crawl will take significantly longer and produce more data. Verify disk/memory capacity on the droplet before running.
+4. **EU population size**: **1.8x NA**. EU has 62,722 clans vs NA's 35,314. Initial EU crawl will take proportionally longer (~1.8x). Estimate ~450K EU players vs ~260K NA. Verify droplet disk/memory before running (current DB is ~2GB; EU will roughly double it).
 
-5. **Realm in shared links**: Decide whether to add optional `?realm=eu` support on player/clan page URLs for link sharing. Low priority — can be added post-launch.
+5. **Realm in shared links**: **Deferred** — post-launch enhancement. Add optional `?realm=eu` on player/clan page URLs for link sharing. Low priority since the realm dropdown is prominent.
