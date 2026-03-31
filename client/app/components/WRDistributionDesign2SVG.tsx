@@ -4,6 +4,8 @@ import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { getCorrelationTileBounds, getCorrelationTrendX } from './wrDistributionPayload';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 type D3Selection = ReturnType<typeof d3.select>;
 
@@ -383,6 +385,7 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
     theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const { realm } = useRealm();
 
     useEffect(() => {
         const containerElement = containerRef.current;
@@ -402,7 +405,7 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
 
         const load = async () => {
             try {
-                const { data: payload } = await fetchSharedJson<CorrelationPayload>('/api/fetch/player_correlation/win_rate_survival/', {
+                const { data: payload } = await fetchSharedJson<CorrelationPayload>(withRealm('/api/fetch/player_correlation/win_rate_survival/', realm), {
                     label: 'Win rate survival correlation',
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                 });
@@ -427,7 +430,7 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
             abortController.abort();
             window.removeEventListener('resize', onResize);
         };
-    }, [playerSurvivalRate, playerWR, svgHeight, svgWidth, theme]);
+    }, [playerSurvivalRate, playerWR, realm, svgHeight, svgWidth, theme]);
 
     return (
         <div ref={containerRef}>

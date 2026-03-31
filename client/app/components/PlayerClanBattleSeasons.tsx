@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 interface PlayerClanBattleSeason {
     season_id: number;
@@ -51,6 +53,7 @@ const selectColorByWR = (winRatio: number): string => {
 };
 
 const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playerId, onSummaryChange }) => {
+    const { realm } = useRealm();
     const [seasons, setSeasons] = useState<PlayerClanBattleSeason[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -62,7 +65,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
             setLoading(true);
             setError('');
             try {
-                const { data } = await fetchSharedJson<unknown>(`/api/fetch/player_clan_battle_seasons/${playerId}/`, {
+                const { data } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
                     label: `Player clan battle seasons ${playerId}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                 });
@@ -85,7 +88,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
         return () => {
             cancelled = true;
         };
-    }, [playerId]);
+    }, [playerId, realm]);
 
     const summary = useMemo<PlayerClanBattleSummary>(() => {
         const totalBattles = seasons.reduce((sum, season) => sum + season.battles, 0);

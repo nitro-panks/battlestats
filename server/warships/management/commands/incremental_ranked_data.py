@@ -9,7 +9,7 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from warships.data import update_ranked_data
-from warships.models import Player
+from warships.models import DEFAULT_REALM, Player
 
 
 DEFAULT_STATE_FILE = Path(settings.BASE_DIR) / 'logs' / \
@@ -123,6 +123,7 @@ def _build_candidate_queue(
     recent_lookup_days: int,
     recent_battle_days: int,
     min_discovery_pvp_battles: int,
+    realm: str = DEFAULT_REALM,
 ) -> list[int]:
     now = timezone.now()
     today = now.date()
@@ -130,7 +131,7 @@ def _build_candidate_queue(
     recent_lookup_cutoff = now - timedelta(days=recent_lookup_days)
     recent_battle_cutoff = today - timedelta(days=recent_battle_days)
 
-    base_queryset = Player.objects.exclude(player_id__isnull=True)
+    base_queryset = Player.objects.exclude(player_id__isnull=True).filter(realm=realm)
     if not include_hidden:
         base_queryset = base_queryset.filter(is_hidden=False)
 
@@ -200,12 +201,15 @@ class Command(BaseCommand):
                             help='Minimum PvP battles for discovery candidates without ranked data.')
         parser.add_argument('--max-errors', type=int, default=25,
                             help='Abort the run after this many errors in a single invocation.')
+        parser.add_argument('--realm', type=str, default=DEFAULT_REALM,
+                            help='Realm to refresh ranked data for (default: na).')
 
     def handle(self, *args, **options):
         limit = max(int(options['limit']), 0)
         batch_size = max(int(options['batch_size']), 1)
         max_errors = max(int(options['max_errors']), 1)
         include_hidden = bool(options['include_hidden'])
+        realm = options.get('realm', DEFAULT_REALM) or DEFAULT_REALM
         skip_fresh_hours = max(int(options['skip_fresh_hours']), 0)
         known_limit = max(int(options['known_limit']), 0)
         discovery_limit = max(int(options['discovery_limit']), 0)
@@ -232,6 +236,7 @@ class Command(BaseCommand):
                 recent_lookup_days=recent_lookup_days,
                 recent_battle_days=recent_battle_days,
                 min_discovery_pvp_battles=min_discovery_pvp_battles,
+                realm=realm,
             )
             state['pending_player_ids'] = pending_player_ids
             state['next_index'] = 0
@@ -294,7 +299,7 @@ class Command(BaseCommand):
                 _save_state(state_path, state)
                 continue
             try:
-                update_ranked_data(player.player_id)
+                update_ranked_data(player.player_id, realm=realm)
                 state['failed_player_ids'] = [
                     candidate_id for candidate_id in state['failed_player_ids'] if candidate_id != player.id]
                 record_success(is_retry=True)
@@ -314,7 +319,7 @@ class Command(BaseCommand):
                 continue
 
             try:
-                update_ranked_data(player.player_id)
+                update_ranked_data(player.player_id, realm=realm)
                 state['failed_player_ids'] = [
                     candidate_id for candidate_id in state['failed_player_ids'] if candidate_id != player.id]
                 record_success()

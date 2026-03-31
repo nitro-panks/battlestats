@@ -13,7 +13,7 @@ from django.db import connection, transaction
 from django.db.models import Avg, Case, Count, F, FloatField, IntegerField, Q, Sum, Value, When
 from django.db.models.functions import Cast, Lower, TruncMonth
 from django.utils import timezone as django_timezone
-from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
+from warships.models import DEFAULT_REALM, realm_cache_key, Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 from warships.models import PlayerAchievementStat, MvPlayerDistributionStats
 from warships.player_records import BlockedAccountError, get_or_create_canonical_player
 from warships.achievements_catalog import get_achievement_catalog_entry
@@ -415,7 +415,7 @@ def _build_efficiency_badge_rows(raw_rows: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def update_player_efficiency_data(player: Player, force_refresh: bool = False) -> list[dict[str, Any]]:
+def update_player_efficiency_data(player: Player, force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict[str, Any]]:
     if player.is_hidden:
         if player.efficiency_json is not None or player.efficiency_updated_at is not None:
             player.efficiency_json = None
@@ -434,7 +434,7 @@ def update_player_efficiency_data(player: Player, force_refresh: bool = False) -
         return []
 
     rows = _build_efficiency_badge_rows(
-        _fetch_efficiency_badges_for_player(player.player_id)
+        _fetch_efficiency_badges_for_player(player.player_id, realm=realm)
     )
     player.efficiency_json = rows
     player.efficiency_updated_at = django_timezone.now()
@@ -519,8 +519,8 @@ def normalize_player_achievement_rows(raw_payload: dict[str, Any]) -> list[dict[
     return rows
 
 
-def update_achievements_data(player_id: int, force_refresh: bool = False) -> list[dict[str, Any]]:
-    player = Player.objects.get(player_id=player_id)
+def update_achievements_data(player_id: int, force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict[str, Any]]:
+    player = Player.objects.get(player_id=player_id, realm=realm)
 
     if player.is_hidden:
         logging.info(
@@ -546,7 +546,7 @@ def update_achievements_data(player_id: int, force_refresh: bool = False) -> lis
             'source_kind',
         ))
 
-    raw_payload = _fetch_player_achievements(player.player_id)
+    raw_payload = _fetch_player_achievements(player.player_id, realm=realm)
     if raw_payload is None:
         logging.info(
             'Skipping achievements refresh because upstream returned no payload for player_id=%s',
@@ -588,7 +588,7 @@ def update_achievements_data(player_id: int, force_refresh: bool = False) -> lis
     return normalized_rows
 
 
-def queue_clan_ranked_hydration(players: Iterable[Player]) -> dict[str, Any]:
+def queue_clan_ranked_hydration(players: Iterable[Player], realm: str = DEFAULT_REALM) -> dict[str, Any]:
     from warships.tasks import is_ranked_data_refresh_pending, queue_ranked_data_refresh
 
     eligible_players = [
@@ -613,7 +613,7 @@ def queue_clan_ranked_hydration(players: Iterable[Player]) -> dict[str, Any]:
             deferred_player_ids.add(player.player_id)
             continue
 
-        enqueue_result = queue_ranked_data_refresh(player.player_id)
+        enqueue_result = queue_ranked_data_refresh(player.player_id, realm=realm)
         if enqueue_result.get("status") == "queued":
             pending_player_ids.add(player.player_id)
             queued_player_ids.add(player.player_id)
@@ -651,17 +651,17 @@ def clan_battle_summary_is_stale(player: Player) -> bool:
     return (django_timezone.now() - updated_at).days >= CLAN_BATTLE_SUMMARY_STALE_DAYS
 
 
-def maybe_refresh_clan_battle_data(player: Player) -> None:
+def maybe_refresh_clan_battle_data(player: Player, realm: str = DEFAULT_REALM) -> None:
     """Enqueue a background CB refresh if the player's summary is stale."""
     from warships.tasks import queue_clan_battle_data_refresh
     if player.is_hidden:
         return
     if not clan_battle_summary_is_stale(player):
         return
-    queue_clan_battle_data_refresh(player.player_id)
+    queue_clan_battle_data_refresh(player.player_id, realm=realm)
 
 
-def queue_clan_efficiency_hydration(players: Iterable[Player]) -> dict[str, Any]:
+def queue_clan_efficiency_hydration(players: Iterable[Player], realm: str = DEFAULT_REALM) -> dict[str, Any]:
     from warships.tasks import is_efficiency_data_refresh_pending, is_efficiency_rank_snapshot_refresh_pending, queue_efficiency_data_refresh, queue_efficiency_rank_snapshot_refresh
 
     eligible_players = [
@@ -692,7 +692,7 @@ def queue_clan_efficiency_hydration(players: Iterable[Player]) -> dict[str, Any]
             deferred_player_ids.add(player.player_id)
             continue
 
-        enqueue_result = queue_efficiency_data_refresh(player.player_id)
+        enqueue_result = queue_efficiency_data_refresh(player.player_id, realm=realm)
         if enqueue_result.get("status") == "queued":
             pending_player_ids.add(player.player_id)
             queued_player_ids.add(player.player_id)
@@ -716,7 +716,7 @@ def queue_clan_efficiency_hydration(players: Iterable[Player]) -> dict[str, Any]
     # pending_player_ids — they should not block the client poll loop or show
     # as "pending" in the UI.
     if publication_stale_players and not is_efficiency_rank_snapshot_refresh_pending():
-        queue_efficiency_rank_snapshot_refresh()
+        queue_efficiency_rank_snapshot_refresh(realm=realm)
 
     return {
         'pending_player_ids': pending_player_ids,
@@ -1090,8 +1090,9 @@ def recompute_efficiency_rank_snapshot(
     player_limit: int = 0,
     skip_refresh: bool = False,
     publish_partial: bool = False,
+    realm: str = DEFAULT_REALM,
 ) -> dict[str, Any]:
-    refresh_queryset = Player.objects.order_by('id')
+    refresh_queryset = Player.objects.filter(realm=realm).order_by('id')
     if player_limit > 0:
         refresh_queryset = refresh_queryset[:player_limit]
 
@@ -2191,8 +2192,8 @@ def refresh_player_explorer_summary(
     return explorer_summary
 
 
-def fetch_player_summary(player_id: str) -> dict:
-    player = Player.objects.get(player_id=player_id)
+def fetch_player_summary(player_id: str, realm: str = DEFAULT_REALM) -> dict:
+    player = Player.objects.get(player_id=player_id, realm=realm)
 
     if not player.is_hidden:
         # Dedup: skip dispatch if we already queued refreshes for this player recently
@@ -2215,10 +2216,10 @@ def fetch_player_summary(player_id: str) -> dict:
 
             if player.ranked_json is None:
                 from warships.tasks import queue_ranked_data_refresh
-                queue_ranked_data_refresh(player_id)
+                queue_ranked_data_refresh(player_id, realm=realm)
             elif player_ranked_data_needs_refresh(player):
                 from warships.tasks import queue_ranked_data_refresh
-                queue_ranked_data_refresh(player_id)
+                queue_ranked_data_refresh(player_id, realm=realm)
 
     if getattr(player, 'explorer_summary', None) is None and (
         player.battles_json is not None or player.activity_json is not None or player.ranked_json is not None
@@ -2234,6 +2235,7 @@ def fetch_player_explorer_rows(
     activity_bucket: str = 'all',
     ranked: str = 'all',
     min_pvp_battles: int = 0,
+    realm: str = DEFAULT_REALM,
 ) -> list[dict]:
     players = _build_player_explorer_queryset(
         query=query,
@@ -2241,6 +2243,7 @@ def fetch_player_explorer_rows(
         activity_bucket=activity_bucket,
         ranked=ranked,
         min_pvp_battles=min_pvp_battles,
+        realm=realm,
     )
 
     rows = []
@@ -2259,8 +2262,8 @@ def fetch_player_explorer_rows(
     return rows
 
 
-def _player_explorer_base_queryset():
-    return Player.objects.exclude(name='').select_related('explorer_summary').only(
+def _player_explorer_base_queryset(realm: str = DEFAULT_REALM):
+    return Player.objects.filter(realm=realm).exclude(name='').select_related('explorer_summary').only(
         'id',
         'name',
         'player_id',
@@ -2305,8 +2308,9 @@ def _build_player_explorer_queryset(
     ranked: str = 'all',
     min_pvp_battles: int = 0,
     apply_ranked_filter: bool = True,
+    realm: str = DEFAULT_REALM,
 ):
-    players = _player_explorer_base_queryset()
+    players = _player_explorer_base_queryset(realm=realm)
 
     if query:
         players = players.filter(name__icontains=query)
@@ -2398,6 +2402,7 @@ def fetch_player_explorer_page(
     direction: str = 'desc',
     page: int = 1,
     page_size: int = 25,
+    realm: str = DEFAULT_REALM,
 ) -> tuple[int, list[dict]]:
     players = _build_player_explorer_queryset(
         query=query,
@@ -2406,6 +2411,7 @@ def fetch_player_explorer_page(
         ranked=ranked,
         min_pvp_battles=min_pvp_battles,
         apply_ranked_filter=False,
+        realm=realm,
     )
 
     should_backfill = ranked != 'all' or _player_explorer_sort_uses_summary(
@@ -2499,7 +2505,7 @@ def _aggregate_battles_by_key(battles_json: Any, group_key: str) -> list[dict]:
     return result
 
 
-def update_battle_data(player_id: str) -> None:
+def update_battle_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     """
     Updates the battle data for a given player.
 
@@ -2508,11 +2514,12 @@ def update_battle_data(player_id: str) -> None:
 
     Args:
         player_id (str): The ID of the player whose battle data needs to be updated.
+        realm (str): The realm to scope the query to.
 
     Returns:
         None
     """
-    player = Player.objects.get(player_id=player_id)
+    player = Player.objects.get(player_id=player_id, realm=realm)
 
     # Check if the cached data is less than 15 minutes old
     if player.battles_json and player.battles_updated_at and datetime.now() - player.battles_updated_at < timedelta(minutes=15):
@@ -2585,7 +2592,7 @@ def update_battle_data(player_id: str) -> None:
     logging.info(f"Updated battles_json data: {player.name}")
 
 
-def fetch_tier_data(player_id: str) -> list:
+def fetch_tier_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     """
     Fetches and processes tier data for a given player. Tier data is a subset of battle data.
 
@@ -2594,12 +2601,13 @@ def fetch_tier_data(player_id: str) -> list:
 
     Args:
         player_id (str): The ID of the player whose tier data needs to be fetched.
+        realm (str): The realm to scope the query to.
 
     Returns:
         str: A JSON response containing the processed tier data.
     """
     try:
-        player = Player.objects.get(player_id=player_id)
+        player = Player.objects.get(player_id=player_id, realm=realm)
         if not player.battles_json:
             _dispatch_async_refresh(
                 update_battle_data_task, player_id=player_id)
@@ -2617,8 +2625,8 @@ def fetch_tier_data(player_id: str) -> list:
     return []
 
 
-def update_tiers_data(player_id: str) -> list:
-    player = Player.objects.get(player_id=player_id)
+def update_tiers_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
+    player = Player.objects.get(player_id=player_id, realm=realm)
     tier_aggregates = {tier: {'pvp_battles': 0, 'wins': 0}
                        for tier in range(1, 12)}
     for row in player.battles_json or []:
@@ -2649,7 +2657,7 @@ def update_tiers_data(player_id: str) -> list:
     player.save()
 
 
-def update_snapshot_data(player_id: int) -> None:
+def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM) -> None:
     """
     Records today's cumulative PvP stats as a Snapshot and computes
     daily interval_battles / interval_wins from successive snapshots.
@@ -2658,7 +2666,7 @@ def update_snapshot_data(player_id: int) -> None:
     so we use the Player model's pvp_battles / pvp_wins (kept current
     by update_player_data via account/info) as today's cumulative values.
     """
-    player = Player.objects.get(player_id=player_id)
+    player = Player.objects.get(player_id=player_id, realm=realm)
     player.last_lookup = datetime.now()
     player.save()
 
@@ -2707,9 +2715,9 @@ def update_snapshot_data(player_id: int) -> None:
     logging.info(f'Updated snapshot data for player {player.name}')
 
 
-def fetch_activity_data(player_id: str) -> list:
+def fetch_activity_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     try:
-        player = Player.objects.get(player_id=player_id)
+        player = Player.objects.get(player_id=player_id, realm=realm)
     except Player.DoesNotExist:
         return []
 
@@ -2732,8 +2740,8 @@ def fetch_activity_data(player_id: str) -> list:
     return []
 
 
-def update_activity_data(player_id: int) -> None:
-    player = Player.objects.get(player_id=player_id)
+def update_activity_data(player_id: int, realm: str = DEFAULT_REALM) -> None:
+    player = Player.objects.get(player_id=player_id, realm=realm)
     month = []
     snapshots = list(Snapshot.objects.filter(player=player).order_by('date'))
 
@@ -2872,8 +2880,8 @@ def _classify_population_signal(recent_active_avg: float, prior_active_avg: floa
     return 'stable', delta_pct
 
 
-def fetch_landing_activity_attrition() -> dict:
-    cache_key = 'landing:activity_attrition:v1'
+def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
+    cache_key = realm_cache_key(realm, 'landing:activity_attrition:v1')
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -2888,6 +2896,7 @@ def fetch_landing_activity_attrition() -> dict:
 
     cohort_rows = list(
         Player.objects.filter(
+            realm=realm,
             is_hidden=False,
             creation_date__isnull=False,
             creation_date__gte=earliest_month,
@@ -2972,16 +2981,16 @@ def fetch_landing_activity_attrition() -> dict:
     return payload
 
 
-def _player_distribution_cache_key(metric: str) -> str:
-    return f'players:distribution:v2:{metric}'
+def _player_distribution_cache_key(metric: str, realm: str = DEFAULT_REALM) -> str:
+    return realm_cache_key(realm, f'players:distribution:v2:{metric}')
 
 
-def _player_correlation_cache_key(metric: str) -> str:
-    return f'players:correlation:v2:{metric}'
+def _player_correlation_cache_key(metric: str, realm: str = DEFAULT_REALM) -> str:
+    return realm_cache_key(realm, f'players:correlation:v2:{metric}')
 
 
-def _player_correlation_published_cache_key(metric: str) -> str:
-    return f'{_player_correlation_cache_key(metric)}:published'
+def _player_correlation_published_cache_key(metric: str, realm: str = DEFAULT_REALM) -> str:
+    return f'{_player_correlation_cache_key(metric, realm=realm)}:published'
 
 
 def _build_doubling_bin_edges(max_value: int, seed_edges: list[int]) -> list[int]:
@@ -3076,12 +3085,12 @@ def _build_explicit_distribution_bins(qs, field_name: str, bin_edges: list[int])
     ]
 
 
-def fetch_player_population_distribution(metric: str) -> dict:
+def fetch_player_population_distribution(metric: str, realm: str = DEFAULT_REALM) -> dict:
     config = PLAYER_DISTRIBUTION_CONFIGS.get(metric)
     if config is None:
         raise ValueError(f'Unsupported player distribution metric: {metric}')
 
-    cache_key = _player_distribution_cache_key(metric)
+    cache_key = _player_distribution_cache_key(metric, realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -3089,6 +3098,7 @@ def fetch_player_population_distribution(metric: str) -> dict:
     field_name = config['field_name']
     try:
         qs = MvPlayerDistributionStats.objects.filter(
+            realm=realm,
             pvp_battles__gte=config['min_population_battles'],
             **{f'{field_name}__isnull': False},
         )
@@ -3096,6 +3106,7 @@ def fetch_player_population_distribution(metric: str) -> dict:
             raise MvPlayerDistributionStats.DoesNotExist
     except Exception:
         qs = Player.objects.filter(
+            realm=realm,
             is_hidden=False,
             pvp_battles__gte=config['min_population_battles'],
             **{f'{field_name}__isnull': False},
@@ -3128,7 +3139,7 @@ def fetch_player_population_distribution(metric: str) -> dict:
     return payload
 
 
-def warm_player_distributions() -> dict:
+def warm_player_distributions(realm: str = DEFAULT_REALM) -> dict:
     """Pre-warm all player distribution caches so users never hit cold queries."""
     from django.db import connection as db_connection
     try:
@@ -3140,9 +3151,9 @@ def warm_player_distributions() -> dict:
         logger.warning('Could not refresh mv_player_distribution_stats — view may not exist yet')
     results = {}
     for metric in PLAYER_DISTRIBUTION_CONFIGS:
-        cache_key = _player_distribution_cache_key(metric)
+        cache_key = _player_distribution_cache_key(metric, realm=realm)
         cache.delete(cache_key)
-        payload = fetch_player_population_distribution(metric)
+        payload = fetch_player_population_distribution(metric, realm=realm)
         results[metric] = {
             'tracked_population': payload['tracked_population'],
             'bins': len(payload['bins']),
@@ -3277,8 +3288,8 @@ def _build_tier_type_player_cells(battles_json: Any) -> list[dict]:
     return player_cells
 
 
-def _fetch_player_tier_type_population_correlation() -> dict:
-    cache_key = _player_correlation_cache_key('tier_type_population')
+def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -> dict:
+    cache_key = _player_correlation_cache_key('tier_type_population', realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -3291,6 +3302,7 @@ def _fetch_player_tier_type_population_correlation() -> dict:
 
     with transaction.atomic(), _elevated_work_mem():
         rows = Player.objects.filter(
+            realm=realm,
             is_hidden=False,
             pvp_battles__gte=config['min_population_battles'],
             battles_json__isnull=False,
@@ -3352,29 +3364,29 @@ def _fetch_player_tier_type_population_correlation() -> dict:
     return payload
 
 
-def warm_player_tier_type_population_correlation() -> dict:
+def warm_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -> dict:
     """Force-rebuild the tier-type population correlation cache."""
-    cache_key = _player_correlation_cache_key('tier_type_population')
+    cache_key = _player_correlation_cache_key('tier_type_population', realm=realm)
     cache.delete(cache_key)
-    return _fetch_player_tier_type_population_correlation()
+    return _fetch_player_tier_type_population_correlation(realm=realm)
 
 
-def warm_player_correlations() -> dict:
+def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
     """Pre-warm all population correlation caches."""
     results = {}
 
-    tier_type = warm_player_tier_type_population_correlation()
+    tier_type = warm_player_tier_type_population_correlation(realm=realm)
     results['tier_type'] = {'tracked_population': tier_type.get('tracked_population', 0)}
 
-    ranked = warm_player_ranked_wr_battles_population_correlation()
+    ranked = warm_player_ranked_wr_battles_population_correlation(realm=realm)
     results['ranked_wr_battles'] = {'tracked_population': ranked.get('tracked_population', 0)}
 
     return results
 
 
-def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None) -> dict:
-    player = player or Player.objects.get(player_id=player_id)
-    population_payload = _fetch_player_tier_type_population_correlation()
+def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None, realm: str = DEFAULT_REALM) -> dict:
+    player = player or Player.objects.get(player_id=player_id, realm=realm)
+    population_payload = _fetch_player_tier_type_population_correlation(realm=realm)
     if not player.battles_json:
         _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
         return {
@@ -3388,8 +3400,8 @@ def fetch_player_tier_type_correlation(player_id: str, player: Player | None = N
     }
 
 
-def fetch_player_wr_survival_correlation() -> dict:
-    cache_key = _player_correlation_cache_key('win_rate_survival')
+def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
+    cache_key = _player_correlation_cache_key('win_rate_survival', realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -3418,6 +3430,7 @@ def fetch_player_wr_survival_correlation() -> dict:
     with transaction.atomic(), _elevated_work_mem():
         try:
             mv_qs = MvPlayerDistributionStats.objects.filter(
+                realm=realm,
                 pvp_battles__gte=config['min_population_battles'],
                 pvp_ratio__isnull=False,
                 pvp_survival_rate__isnull=False,
@@ -3427,6 +3440,7 @@ def fetch_player_wr_survival_correlation() -> dict:
             rows = mv_qs.values_list('pvp_ratio', 'pvp_survival_rate')
         except Exception:
             rows = Player.objects.filter(
+                realm=realm,
                 is_hidden=False,
                 pvp_battles__gte=config['min_population_battles'],
                 pvp_ratio__isnull=False,
@@ -3502,17 +3516,17 @@ def fetch_player_wr_survival_correlation() -> dict:
     return payload
 
 
-def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
+def _fetch_player_ranked_wr_battles_population_correlation(realm: str = DEFAULT_REALM) -> dict:
     cache_key = _player_correlation_cache_key(
-        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
     published_cache_key = _player_correlation_published_cache_key(
-        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
         cache.set(published_cache_key, cached, timeout=None)
         return cached
 
-    payload = _build_player_ranked_wr_battles_population_correlation_payload()
+    payload = _build_player_ranked_wr_battles_population_correlation_payload(realm=realm)
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
     cache.set(published_cache_key, payload, timeout=None)
     return payload
@@ -3545,7 +3559,7 @@ def _build_empty_player_ranked_wr_battles_population_correlation_payload() -> di
     }
 
 
-def _build_player_ranked_wr_battles_population_correlation_payload() -> dict:
+def _build_player_ranked_wr_battles_population_correlation_payload(realm: str = DEFAULT_REALM) -> dict:
     config = PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG
     y_min = config['y_min']
     y_max = config['y_max']
@@ -3557,6 +3571,7 @@ def _build_player_ranked_wr_battles_population_correlation_payload() -> dict:
 
     with transaction.atomic(), _elevated_work_mem():
         rows = Player.objects.filter(
+            realm=realm,
             is_hidden=False,
             ranked_json__isnull=False,
         ).values_list('ranked_json', flat=True)
@@ -3646,27 +3661,27 @@ def _build_player_ranked_wr_battles_population_correlation_payload() -> dict:
     }
 
 
-def warm_player_ranked_wr_battles_population_correlation() -> dict:
-    payload = _build_player_ranked_wr_battles_population_correlation_payload()
+def warm_player_ranked_wr_battles_population_correlation(realm: str = DEFAULT_REALM) -> dict:
+    payload = _build_player_ranked_wr_battles_population_correlation_payload(realm=realm)
     cache_key = _player_correlation_cache_key(
-        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
     published_cache_key = _player_correlation_published_cache_key(
-        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
     cache.set(published_cache_key, payload, timeout=None)
     return payload
 
 
-def fetch_player_ranked_wr_battles_correlation(player_id: str) -> dict:
+def fetch_player_ranked_wr_battles_correlation(player_id: str, realm: str = DEFAULT_REALM) -> dict:
     from warships.tasks import queue_player_ranked_wr_battles_correlation_refresh
 
-    player = Player.objects.get(player_id=player_id)
+    player = Player.objects.get(player_id=player_id, realm=realm)
     ranked_rows = player.ranked_json if player.ranked_json is not None else []
     total_battles, win_rate = _calculate_ranked_record(ranked_rows)
     cache_key = _player_correlation_cache_key(
-        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
     published_cache_key = _player_correlation_published_cache_key(
-        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION)
+        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
     population_payload = cache.get(cache_key)
     pending = False
     if population_payload is not None:
@@ -3675,14 +3690,14 @@ def fetch_player_ranked_wr_battles_correlation(player_id: str) -> dict:
         published_payload = cache.get(published_cache_key)
         if published_payload is not None:
             population_payload = published_payload
-            queue_player_ranked_wr_battles_correlation_refresh()
+            queue_player_ranked_wr_battles_correlation_refresh(realm=realm)
         else:
-            queue_player_ranked_wr_battles_correlation_refresh()
+            queue_player_ranked_wr_battles_correlation_refresh(realm=realm)
             population_payload = _build_empty_player_ranked_wr_battles_population_correlation_payload()
             pending = True
 
     if population_payload is None:
-        queue_player_ranked_wr_battles_correlation_refresh()
+        queue_player_ranked_wr_battles_correlation_refresh(realm=realm)
         population_payload = _build_empty_player_ranked_wr_battles_population_correlation_payload()
         pending = True
 
@@ -3698,9 +3713,9 @@ def fetch_player_ranked_wr_battles_correlation(player_id: str) -> dict:
     return result
 
 
-def fetch_wr_distribution() -> list[dict]:
+def fetch_wr_distribution(realm: str = DEFAULT_REALM) -> list[dict]:
     """Return a histogram of player WR distribution, cached for 1 hour."""
-    payload = fetch_player_population_distribution('win_rate')
+    payload = fetch_player_population_distribution('win_rate', realm=realm)
     return [
         {
             'wr_min': row['bin_min'],
@@ -3719,16 +3734,16 @@ CLAN_BATTLE_PLAYER_STATS_CACHE_TTL = 21600
 CLAN_BATTLE_SUMMARY_CACHE_TTL = 3600
 
 
-def _get_clan_battle_summary_cache_key(clan_id: str) -> str:
-    return f'clan_battles:summary:v2:{clan_id}'
+def _get_clan_battle_summary_cache_key(clan_id: str, realm: str = DEFAULT_REALM) -> str:
+    return realm_cache_key(realm, f'clan_battles:summary:v2:{clan_id}')
 
 
-def has_clan_battle_summary_cache(clan_id: str) -> bool:
-    return cache.get(_get_clan_battle_summary_cache_key(clan_id)) is not None
+def has_clan_battle_summary_cache(clan_id: str, realm: str = DEFAULT_REALM) -> bool:
+    return cache.get(_get_clan_battle_summary_cache_key(clan_id, realm=realm)) is not None
 
 
-def _invalidate_clan_battle_summary_cache(clan_id: str) -> None:
-    cache.delete(_get_clan_battle_summary_cache_key(clan_id))
+def _invalidate_clan_battle_summary_cache(clan_id: str, realm: str = DEFAULT_REALM) -> None:
+    cache.delete(_get_clan_battle_summary_cache_key(clan_id, realm=realm))
 
 
 def _clan_battle_season_sort_key(summary: dict) -> tuple:
@@ -3812,9 +3827,9 @@ def _get_clan_battle_seasons_metadata() -> dict:
     return result
 
 
-def _get_player_clan_battle_season_stats(account_id: int) -> list:
+def _get_player_clan_battle_season_stats(account_id: int, realm: str = DEFAULT_REALM) -> list:
     """Return cached clan battle season stats for a player."""
-    cache_key = f'clan_battles:player:{account_id}'
+    cache_key = realm_cache_key(realm, f'clan_battles:player:{account_id}')
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -3825,15 +3840,15 @@ def _get_player_clan_battle_season_stats(account_id: int) -> list:
     return seasons
 
 
-def get_player_clan_battle_summary(account_id: Optional[int], allow_fetch: bool = True) -> dict[str, Any]:
+def get_player_clan_battle_summary(account_id: Optional[int], allow_fetch: bool = True, realm: str = DEFAULT_REALM) -> dict[str, Any]:
     if not account_id:
         return summarize_clan_battle_seasons([])
 
     player_account_id = int(account_id)
     if allow_fetch:
-        seasons = _get_player_clan_battle_season_stats(player_account_id)
+        seasons = _get_player_clan_battle_season_stats(player_account_id, realm=realm)
     else:
-        seasons = cache.get(f'clan_battles:player:{player_account_id}') or []
+        seasons = cache.get(realm_cache_key(realm, f'clan_battles:player:{player_account_id}')) or []
 
     return summarize_clan_battle_seasons(seasons)
 
@@ -3841,8 +3856,9 @@ def get_player_clan_battle_summary(account_id: Optional[int], allow_fetch: bool 
 def _persist_player_clan_battle_summary(
     account_id: int,
     summary: dict[str, Any],
+    realm: str = DEFAULT_REALM,
 ) -> None:
-    player = Player.objects.filter(player_id=account_id).first()
+    player = Player.objects.filter(player_id=account_id, realm=realm).first()
     if player is None:
         return
 
@@ -3874,16 +3890,17 @@ def _persist_player_clan_battle_summary(
         invalidate_landing_player_caches(include_recent=True)
 
 
-def fetch_player_clan_battle_seasons(account_id: int) -> list:
+def fetch_player_clan_battle_seasons(account_id: int, realm: str = DEFAULT_REALM) -> list:
     """Return a single player's clan battle seasons enriched with season metadata."""
     if not account_id:
         return []
 
     season_meta = _get_clan_battle_seasons_metadata()
-    seasons = _get_player_clan_battle_season_stats(int(account_id))
+    seasons = _get_player_clan_battle_season_stats(int(account_id), realm=realm)
     _persist_player_clan_battle_summary(
         int(account_id),
         summarize_clan_battle_seasons(seasons),
+        realm=realm,
     )
     result = []
 
@@ -3916,19 +3933,19 @@ def fetch_player_clan_battle_seasons(account_id: int) -> list:
     return sorted(result, key=_clan_battle_season_sort_key, reverse=True)
 
 
-def fetch_clan_battle_seasons(clan_id: str) -> list:
+def fetch_clan_battle_seasons(clan_id: str, realm: str = DEFAULT_REALM) -> list:
     """Return cached clan battle summary, enqueueing background refresh on misses."""
     if not clan_id:
         return []
 
-    cache_key = _get_clan_battle_summary_cache_key(clan_id)
+    cache_key = _get_clan_battle_summary_cache_key(clan_id, realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
         if cached:
             return cached
 
         try:
-            clan = Clan.objects.get(clan_id=clan_id)
+            clan = Clan.objects.get(clan_id=clan_id, realm=realm)
         except Clan.DoesNotExist:
             return []
 
@@ -3937,25 +3954,25 @@ def fetch_clan_battle_seasons(clan_id: str) -> list:
         if has_populated_roster:
             from warships.tasks import queue_clan_battle_summary_refresh
 
-            queue_clan_battle_summary_refresh(clan_id)
+            queue_clan_battle_summary_refresh(clan_id, realm=realm)
 
         return cached
 
     from warships.tasks import queue_clan_battle_summary_refresh
 
-    queue_clan_battle_summary_refresh(clan_id)
+    queue_clan_battle_summary_refresh(clan_id, realm=realm)
     return []
 
 
-def refresh_clan_battle_seasons_cache(clan_id: str) -> list:
+def refresh_clan_battle_seasons_cache(clan_id: str, realm: str = DEFAULT_REALM) -> list:
     """Aggregate clan battle season stats across the clan's current roster and cache them."""
     if not clan_id:
         return []
 
-    cache_key = _get_clan_battle_summary_cache_key(clan_id)
+    cache_key = _get_clan_battle_summary_cache_key(clan_id, realm=realm)
 
     try:
-        clan = Clan.objects.get(clan_id=clan_id)
+        clan = Clan.objects.get(clan_id=clan_id, realm=realm)
     except Clan.DoesNotExist:
         return []
 
@@ -3965,7 +3982,7 @@ def refresh_clan_battle_seasons_cache(clan_id: str) -> list:
     )
 
     if not members and clan.members_count:
-        update_clan_members(clan_id=clan_id)
+        update_clan_members(clan_id=clan_id, realm=realm)
         members = list(
             clan.player_set.exclude(name='').exclude(
                 player_id__isnull=True).values('player_id', 'name')
@@ -4146,10 +4163,10 @@ def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict, top_ship_names
     return seasons
 
 
-def fetch_ranked_data(player_id: str) -> list:
+def fetch_ranked_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     """Fetch ranked battles data for a player. Caches as ranked_json."""
     try:
-        player = Player.objects.get(player_id=player_id)
+        player = Player.objects.get(player_id=player_id, realm=realm)
     except Player.DoesNotExist:
         return []
 
@@ -4158,7 +4175,7 @@ def fetch_ranked_data(player_id: str) -> list:
         if player_ranked_data_needs_refresh(player):
             from warships.tasks import queue_ranked_data_refresh
 
-            queue_ranked_data_refresh(player_id)
+            queue_ranked_data_refresh(player_id, realm=realm)
         else:
             logging.info(f'Ranked data cache fresh for {player.name}')
         return player.ranked_json
@@ -4169,9 +4186,9 @@ def fetch_ranked_data(player_id: str) -> list:
     return player.ranked_json or []
 
 
-def update_ranked_data(player_id) -> None:
+def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
     """Fetch ranked data from WG API, aggregate, and cache on Player model."""
-    player = Player.objects.get(player_id=player_id)
+    player = Player.objects.get(player_id=player_id, realm=realm)
 
     # Get season metadata (cached globally)
     season_meta = _get_ranked_seasons_metadata()
@@ -4216,9 +4233,9 @@ def update_ranked_data(player_id) -> None:
         f'Updated ranked data for {player.name}: {len(result)} seasons')
 
 
-def fetch_type_data(player_id: str) -> list:
+def fetch_type_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     try:
-        player = Player.objects.get(player_id=player_id)
+        player = Player.objects.get(player_id=player_id, realm=realm)
         if not player.battles_json:
             _dispatch_async_refresh(
                 update_battle_data_task, player_id=player_id)
@@ -4236,8 +4253,8 @@ def fetch_type_data(player_id: str) -> list:
     return []
 
 
-def update_type_data(player_id: str) -> list:
-    player = Player.objects.get(player_id=player_id)
+def update_type_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
+    player = Player.objects.get(player_id=player_id, realm=realm)
     player.type_json = _aggregate_battles_by_key(
         player.battles_json, 'ship_type')
     player.type_updated_at = datetime.now()
@@ -4246,9 +4263,9 @@ def update_type_data(player_id: str) -> list:
     logging.info(f'Updated type data for player {player.name}')
 
 
-def fetch_randoms_data(player_id: str) -> list:
+def fetch_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     try:
-        player = Player.objects.get(player_id=player_id)
+        player = Player.objects.get(player_id=player_id, realm=realm)
         if not player.battles_json:
             _dispatch_async_refresh(
                 update_battle_data_task, player_id=player_id)
@@ -4280,7 +4297,7 @@ def fetch_randoms_data(player_id: str) -> list:
     return []
 
 
-def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
+def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active', realm: str = DEFAULT_REALM) -> list:
     def build_plot_payload(members_queryset) -> list:
         data = []
         for member in members_queryset:
@@ -4296,10 +4313,10 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
 
         return sorted(data, key=lambda row: row.get('pvp_battles', 0), reverse=True)
 
-    cache_key = f'clan:plot:v1:{clan_id}:{filter_type}'
+    cache_key = realm_cache_key(realm, f'clan:plot:v1:{clan_id}:{filter_type}')
     cached = cache.get(cache_key)
     try:
-        clan = Clan.objects.get(clan_id=clan_id)
+        clan = Clan.objects.get(clan_id=clan_id, realm=realm)
     except Clan.DoesNotExist:
         return cached if cached is not None else []
 
@@ -4335,8 +4352,8 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
     return payload
 
 
-def update_randoms_data(player_id: str) -> None:
-    player = Player.objects.get(player_id=player_id)
+def update_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
+    player = Player.objects.get(player_id=player_id, realm=realm)
     player.randoms_json = _extract_randoms_rows(player.battles_json, limit=20)
     player.randoms_updated_at = datetime.now()
     player.save()
@@ -4344,7 +4361,7 @@ def update_randoms_data(player_id: str) -> None:
     logging.info(f'Updated randoms data for player {player.name}')
 
 
-def update_clan_data(clan_id: str) -> None:
+def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     from warships.landing import invalidate_landing_clan_caches
 
     # return if no clan_id is provided
@@ -4352,7 +4369,7 @@ def update_clan_data(clan_id: str) -> None:
         return
 
     try:
-        clan = Clan.objects.get(clan_id=clan_id)
+        clan = Clan.objects.get(clan_id=clan_id, realm=realm)
     except Clan.DoesNotExist:
         logging.info(
             f"Clan {clan_id} not found\n")
@@ -4378,15 +4395,15 @@ def update_clan_data(clan_id: str) -> None:
     clan.last_fetch = datetime.now()
     clan.save()
     invalidate_landing_clan_caches()
-    _invalidate_clan_battle_summary_cache(clan_id)
-    cache.delete(f'clan:members:{clan_id}')
-    invalidate_clan_detail_cache(int(clan_id))
+    _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
+    cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
+    invalidate_clan_detail_cache(int(clan_id), realm=realm)
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
 
     for member_id in _fetch_clan_member_ids(clan_id):
         try:
-            player, created = get_or_create_canonical_player(member_id)
+            player, created = get_or_create_canonical_player(member_id, realm=realm)
         except BlockedAccountError:
             logging.info("Skipping blocked account %s during clan data update", member_id)
             continue
@@ -4400,10 +4417,10 @@ def update_clan_data(clan_id: str) -> None:
                 player.save()
 
 
-def update_clan_members(clan_id: str) -> None:
+def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     from warships.landing import invalidate_landing_clan_caches
 
-    clan = Clan.objects.get(clan_id=clan_id)
+    clan = Clan.objects.get(clan_id=clan_id, realm=realm)
     member_ids = _fetch_clan_member_ids(clan_id)
 
     if not member_ids and clan.members_count:
@@ -4415,7 +4432,7 @@ def update_clan_members(clan_id: str) -> None:
 
     for member_id in member_ids:
         try:
-            player, created = get_or_create_canonical_player(member_id)
+            player, created = get_or_create_canonical_player(member_id, realm=realm)
         except BlockedAccountError:
             logging.info("Skipping blocked account %s during clan member sync", member_id)
             continue
@@ -4434,7 +4451,7 @@ def update_clan_members(clan_id: str) -> None:
 
     # Denormalize clan aggregations for landing page surfaces
     from django.db.models import Sum, Count, Q
-    agg = Clan.objects.filter(clan_id=clan_id).aggregate(
+    agg = Clan.objects.filter(clan_id=clan_id, realm=realm).aggregate(
         total_wins=Sum('player__pvp_wins'),
         total_battles=Sum('player__pvp_battles'),
         active_members=Count('player', filter=Q(
@@ -4452,8 +4469,8 @@ def update_clan_members(clan_id: str) -> None:
     ])
 
     invalidate_landing_clan_caches()
-    _invalidate_clan_battle_summary_cache(clan_id)
-    cache.delete(f'clan:members:{clan_id}')
+    _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
+    cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
 
 
 def update_player_data(player: Player, force_refresh: bool = False) -> None:
@@ -4479,7 +4496,7 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
     clan_membership = _fetch_clan_membership_for_player(player.player_id)
     clan_id = clan_membership.get("clan_id") or player_data.get("clan_id")
     if clan_id:
-        clan, _ = Clan.objects.get_or_create(clan_id=clan_id)
+        clan, _ = Clan.objects.get_or_create(clan_id=clan_id, realm=player.realm)
         player.clan = clan
     else:
         player.clan = None
@@ -4563,10 +4580,10 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
     player.last_fetch = datetime.now()
     player.save()
     if not player.is_hidden:
-        update_player_efficiency_data(player, force_refresh=force_refresh)
+        update_player_efficiency_data(player, force_refresh=force_refresh, realm=player.realm)
     refresh_player_explorer_summary(player)
     invalidate_landing_player_caches(include_recent=True)
-    invalidate_player_detail_cache(player.player_id)
+    invalidate_player_detail_cache(player.player_id, realm=player.realm)
     logging.info(f"Updated player personal data: {player.name}")
 
 
@@ -4594,26 +4611,26 @@ def _top_visited_entity_ids(entity_type: str, limit: int) -> list[int]:
     return entity_ids
 
 
-def _get_pinned_player_ids() -> list[int]:
+def _get_pinned_player_ids(realm: str = DEFAULT_REALM) -> list[int]:
     if not HOT_ENTITY_PINNED_PLAYER_NAMES:
         return []
     return list(
-        Player.objects.filter(name__in=HOT_ENTITY_PINNED_PLAYER_NAMES)
+        Player.objects.filter(realm=realm, name__in=HOT_ENTITY_PINNED_PLAYER_NAMES)
         .values_list('player_id', flat=True)
     )
 
 
-def _get_hot_player_ids(limit: int = HOT_ENTITY_PLAYER_LIMIT) -> list[int]:
-    candidate_ids: list[int] = list(_get_pinned_player_ids())
+def _get_hot_player_ids(limit: int = HOT_ENTITY_PLAYER_LIMIT, realm: str = DEFAULT_REALM) -> list[int]:
+    candidate_ids: list[int] = list(_get_pinned_player_ids(realm=realm))
     candidate_ids.extend(_top_visited_entity_ids('player', limit))
     candidate_ids.extend(
-        Player.objects.exclude(name='').exclude(last_lookup__isnull=True).order_by(
+        Player.objects.filter(realm=realm).exclude(name='').exclude(last_lookup__isnull=True).order_by(
             F('last_lookup').desc(nulls_last=True),
             'name',
         ).values_list('player_id', flat=True)[:limit]
     )
     candidate_ids.extend(
-        Player.objects.exclude(name='').filter(is_hidden=False).select_related('explorer_summary').order_by(
+        Player.objects.filter(realm=realm).exclude(name='').filter(is_hidden=False).select_related('explorer_summary').order_by(
             F('explorer_summary__player_score').desc(nulls_last=True),
             F('pvp_ratio').desc(nulls_last=True),
             'name',
@@ -4636,17 +4653,17 @@ def _get_hot_player_ids(limit: int = HOT_ENTITY_PLAYER_LIMIT) -> list[int]:
     return ordered_ids
 
 
-def _get_hot_clan_ids(limit: int = HOT_ENTITY_CLAN_LIMIT) -> list[int]:
+def _get_hot_clan_ids(limit: int = HOT_ENTITY_CLAN_LIMIT, realm: str = DEFAULT_REALM) -> list[int]:
     candidate_ids: list[int] = []
     candidate_ids.extend(_top_visited_entity_ids('clan', limit))
     candidate_ids.extend(
-        Clan.objects.exclude(name__isnull=True).exclude(name='').exclude(last_lookup__isnull=True).order_by(
+        Clan.objects.filter(realm=realm).exclude(name__isnull=True).exclude(name='').exclude(last_lookup__isnull=True).order_by(
             F('last_lookup').desc(nulls_last=True),
             'name',
         ).values_list('clan_id', flat=True)[:limit]
     )
     candidate_ids.extend(
-        Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
+        Clan.objects.filter(realm=realm).exclude(name__isnull=True).exclude(name='').annotate(
             total_wins=Sum('player__pvp_wins'),
             total_battles=Sum('player__pvp_battles'),
             clan_wr=Case(
@@ -4685,10 +4702,11 @@ def warm_hot_entity_caches(
     player_limit: int = HOT_ENTITY_PLAYER_LIMIT,
     clan_limit: int = HOT_ENTITY_CLAN_LIMIT,
     force_refresh: bool = False,
+    realm: str = DEFAULT_REALM,
 ) -> dict[str, Any]:
-    pinned_ids = _get_pinned_player_ids()
-    player_ids = _get_hot_player_ids(player_limit)
-    clan_ids = _get_hot_clan_ids(clan_limit)
+    pinned_ids = _get_pinned_player_ids(realm=realm)
+    player_ids = _get_hot_player_ids(player_limit, realm=realm)
+    clan_ids = _get_hot_clan_ids(clan_limit, realm=realm)
     if pinned_ids:
         logger.info("Hot entity warm includes %d pinned player(s): %s", len(pinned_ids), pinned_ids)
     warmed_players = warm_player_entity_caches(
@@ -4713,14 +4731,14 @@ def warm_hot_entity_caches(
     }
 
 
-def warm_player_entity_caches(player_ids: Iterable[int], force_refresh: bool = False) -> int:
+def warm_player_entity_caches(player_ids: Iterable[int], force_refresh: bool = False, realm: str = DEFAULT_REALM) -> int:
     warmed_players = 0
 
     player_ids = list(player_ids)
     players_by_id = {
         p.player_id: p
         for p in Player.objects.select_related('explorer_summary', 'clan')
-        .filter(player_id__in=player_ids)
+        .filter(player_id__in=player_ids, realm=realm)
     }
 
     for player_id in player_ids:
@@ -4763,13 +4781,13 @@ def warm_player_entity_caches(player_ids: Iterable[int], force_refresh: bool = F
     return warmed_players
 
 
-def warm_clan_entity_caches(clan_ids: Iterable[int], force_refresh: bool = False) -> int:
+def warm_clan_entity_caches(clan_ids: Iterable[int], force_refresh: bool = False, realm: str = DEFAULT_REALM) -> int:
     warmed_clans = 0
 
     clan_ids = list(clan_ids)
     clans = {
         c.clan_id: c
-        for c in Clan.objects.filter(clan_id__in=clan_ids).annotate(
+        for c in Clan.objects.filter(clan_id__in=clan_ids, realm=realm).annotate(
             tracked_member_count=Count('player', filter=Q(player__name__gt=''))
         )
     }
@@ -4798,6 +4816,7 @@ def warm_landing_best_entity_caches(
     player_limit: int = 25,
     clan_limit: int = 25,
     force_refresh: bool = False,
+    realm: str = DEFAULT_REALM,
 ) -> dict[str, Any]:
     from warships.landing import get_landing_best_clans_payload, get_landing_players_payload, normalize_landing_clan_limit, normalize_landing_player_limit
 
@@ -4842,7 +4861,7 @@ def warm_landing_best_entity_caches(
     }
 
 
-RECENTLY_VIEWED_CACHE_KEY = 'recently_viewed:players:v1'
+RECENTLY_VIEWED_CACHE_KEY_BASE = 'recently_viewed:players:v1'
 RECENTLY_VIEWED_PLAYER_LIMIT = max(1, int(os.getenv('RECENTLY_VIEWED_PLAYER_LIMIT', '100')))
 RECENTLY_VIEWED_WARM_MINUTES = max(1, int(os.getenv('RECENTLY_VIEWED_WARM_MINUTES', '10')))
 
@@ -4853,48 +4872,49 @@ BULK_CACHE_PLAYER_TTL = int(os.getenv('BULK_CACHE_PLAYER_TTL', str(24 * 60 * 60)
 BULK_CACHE_CLAN_TTL = int(os.getenv('BULK_CACHE_CLAN_TTL', str(24 * 60 * 60)))
 
 
-def _bulk_cache_key_player(player_id: int) -> str:
-    return f'player:detail:v1:{player_id}'
+def _bulk_cache_key_player(player_id: int, realm: str = DEFAULT_REALM) -> str:
+    return realm_cache_key(realm, f'player:detail:v1:{player_id}')
 
 
-def _bulk_cache_key_clan(clan_id: int) -> str:
-    return f'clan:detail:v1:{clan_id}'
+def _bulk_cache_key_clan(clan_id: int, realm: str = DEFAULT_REALM) -> str:
+    return realm_cache_key(realm, f'clan:detail:v1:{clan_id}')
 
 
-def get_cached_player_detail(player_id: int) -> Optional[dict]:
-    return cache.get(_bulk_cache_key_player(player_id))
+def get_cached_player_detail(player_id: int, realm: str = DEFAULT_REALM) -> Optional[dict]:
+    return cache.get(_bulk_cache_key_player(player_id, realm=realm))
 
 
-def get_cached_clan_detail(clan_id: int) -> Optional[dict]:
-    return cache.get(_bulk_cache_key_clan(clan_id))
+def get_cached_clan_detail(clan_id: int, realm: str = DEFAULT_REALM) -> Optional[dict]:
+    return cache.get(_bulk_cache_key_clan(clan_id, realm=realm))
 
 
-def invalidate_player_detail_cache(player_id: int) -> None:
-    cache.delete(_bulk_cache_key_player(player_id))
+def invalidate_player_detail_cache(player_id: int, realm: str = DEFAULT_REALM) -> None:
+    cache.delete(_bulk_cache_key_player(player_id, realm=realm))
 
 
-def invalidate_clan_detail_cache(clan_id: int) -> None:
-    cache.delete(_bulk_cache_key_clan(clan_id))
+def invalidate_clan_detail_cache(clan_id: int, realm: str = DEFAULT_REALM) -> None:
+    cache.delete(_bulk_cache_key_clan(clan_id, realm=realm))
 
 
 # ---------------------------------------------------------------------------
 # Recently-viewed player queue
 # ---------------------------------------------------------------------------
 
-def push_recently_viewed_player(player_id: int) -> None:
+def push_recently_viewed_player(player_id: int, realm: str = DEFAULT_REALM) -> None:
     """Add a player to the recently-viewed queue (most-recent-first).
 
     Best-effort: silently swallows errors so it never affects the request path.
     """
     try:
-        current: list[int] = cache.get(RECENTLY_VIEWED_CACHE_KEY) or []
+        rv_cache_key = realm_cache_key(realm, RECENTLY_VIEWED_CACHE_KEY_BASE)
+        current: list[int] = cache.get(rv_cache_key) or []
         try:
             current.remove(player_id)
         except ValueError:
             pass
         current.insert(0, player_id)
         cache.set(
-            RECENTLY_VIEWED_CACHE_KEY,
+            rv_cache_key,
             current[:RECENTLY_VIEWED_PLAYER_LIMIT],
             timeout=None,
         )
@@ -4904,23 +4924,23 @@ def push_recently_viewed_player(player_id: int) -> None:
         )
 
 
-def get_recently_viewed_player_ids() -> list[int]:
+def get_recently_viewed_player_ids(realm: str = DEFAULT_REALM) -> list[int]:
     """Return the list of recently-viewed player IDs, most-recent-first."""
-    return cache.get(RECENTLY_VIEWED_CACHE_KEY) or []
+    return cache.get(realm_cache_key(realm, RECENTLY_VIEWED_CACHE_KEY_BASE)) or []
 
 
-def warm_recently_viewed_players() -> dict[str, Any]:
+def warm_recently_viewed_players(realm: str = DEFAULT_REALM) -> dict[str, Any]:
     """Re-cache recently-viewed players whose detail cache entry is missing.
 
     DB reads + serialization only — no WG API calls.
     """
     from warships.serializers import PlayerSerializer
 
-    player_ids = get_recently_viewed_player_ids()
+    player_ids = get_recently_viewed_player_ids(realm=realm)
     if not player_ids:
         return {'status': 'completed', 'total': 0, 'hits': 0, 'misses': 0, 'warmed': 0}
 
-    cache_keys = {pid: _bulk_cache_key_player(pid) for pid in player_ids}
+    cache_keys = {pid: _bulk_cache_key_player(pid, realm=realm) for pid in player_ids}
     cached = cache.get_many(list(cache_keys.values()))
 
     missing_ids = [pid for pid, key in cache_keys.items() if key not in cached]
@@ -4930,14 +4950,14 @@ def warm_recently_viewed_players() -> dict[str, Any]:
     if missing_ids:
         players = (
             Player.objects
-            .filter(player_id__in=missing_ids)
+            .filter(player_id__in=missing_ids, realm=realm)
             .select_related('clan', 'explorer_summary')
         )
         serializer = PlayerSerializer()
         payloads: dict[str, dict] = {}
         for player in players:
             try:
-                payloads[_bulk_cache_key_player(player.player_id)] = serializer.to_representation(player)
+                payloads[_bulk_cache_key_player(player.player_id, realm=realm)] = serializer.to_representation(player)
             except Exception:
                 logging.warning(
                     "warm_recently_viewed_players: failed to serialize player %s",
@@ -4983,7 +5003,7 @@ def _minmax_normalize(values: list[float]) -> list[float]:
     return [(v - lo) / span for v in values]
 
 
-def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS) -> list[int]:
+def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEFAULT_REALM) -> list[int]:
     """Score and rank clans using the composite Best Clan eligibility criteria.
 
     Returns a list of clan_id values for the top `limit` clans, sorted by
@@ -4994,7 +5014,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS) -> list[int]:
 
     # Hard filters via ORM annotation
     candidates = list(
-        Clan.objects
+        Clan.objects.filter(realm=realm)
         .exclude(name__isnull=True).exclude(name='')
         .filter(
             members_count__gt=BEST_CLAN_MIN_MEMBERS,
@@ -5119,6 +5139,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS) -> list[int]:
 def bulk_load_player_cache(
     top_player_limit: int = BULK_CACHE_TOP_PLAYER_LIMIT,
     clan_member_clans: int = BULK_CACHE_CLAN_MEMBER_CLANS,
+    realm: str = DEFAULT_REALM,
 ) -> dict[str, Any]:
     """Bulk-load player detail payloads into Redis from DB.
 
@@ -5134,6 +5155,7 @@ def bulk_load_player_cache(
     # Cohort 1: top players by score
     top_players = list(
         Player.objects
+        .filter(realm=realm)
         .exclude(name='')
         .filter(is_hidden=False)
         .select_related('clan', 'explorer_summary')
@@ -5145,10 +5167,10 @@ def bulk_load_player_cache(
     seen_ids = {p.player_id for p in top_players}
 
     # Cohort 2: members of the best clans (composite scoring)
-    best_clan_ids = score_best_clans(limit=clan_member_clans)
+    best_clan_ids = score_best_clans(limit=clan_member_clans, realm=realm)
     clan_members = list(
         Player.objects
-        .filter(clan_id__in=best_clan_ids)
+        .filter(realm=realm, clan_id__in=best_clan_ids)
         .exclude(name='')
         .exclude(player_id__in=seen_ids)
         .select_related('clan', 'explorer_summary')
@@ -5157,23 +5179,23 @@ def bulk_load_player_cache(
     seen_ids.update(p.player_id for p in clan_members)
 
     # Cohort 3: pinned players
-    pinned_ids = _get_pinned_player_ids()
+    pinned_ids = _get_pinned_player_ids(realm=realm)
     missing_pinned = [pid for pid in pinned_ids if pid not in seen_ids]
     if missing_pinned:
         top_players.extend(
             Player.objects
-            .filter(player_id__in=missing_pinned)
+            .filter(player_id__in=missing_pinned, realm=realm)
             .select_related('clan', 'explorer_summary')
         )
         seen_ids.update(missing_pinned)
 
     # Cohort 4: recently-viewed players
-    rv_ids = get_recently_viewed_player_ids()
+    rv_ids = get_recently_viewed_player_ids(realm=realm)
     missing_rv = [pid for pid in rv_ids if pid not in seen_ids]
     if missing_rv:
         rv_players = list(
             Player.objects
-            .filter(player_id__in=missing_rv)
+            .filter(player_id__in=missing_rv, realm=realm)
             .select_related('clan', 'explorer_summary')
         )
         top_players.extend(rv_players)
@@ -5184,7 +5206,7 @@ def bulk_load_player_cache(
     for player in top_players:
         try:
             data = serializer.to_representation(player)
-            key = _bulk_cache_key_player(player.player_id)
+            key = _bulk_cache_key_player(player.player_id, realm=realm)
             payloads[key] = data
         except Exception:
             logging.warning("bulk_load_player_cache: failed to serialize player %s", player.player_id, exc_info=True)
@@ -5206,14 +5228,14 @@ def bulk_load_player_cache(
     }
 
 
-def bulk_load_clan_cache(limit: int = BULK_CACHE_CLAN_LIMIT) -> dict[str, Any]:
+def bulk_load_clan_cache(limit: int = BULK_CACHE_CLAN_LIMIT, realm: str = DEFAULT_REALM) -> dict[str, Any]:
     """Bulk-load top clan detail payloads into Redis from DB."""
     from warships.serializers import ClanSerializer
 
-    best_clan_ids = score_best_clans(limit=limit)
+    best_clan_ids = score_best_clans(limit=limit, realm=realm)
     clans = (
         Clan.objects
-        .filter(clan_id__in=best_clan_ids)
+        .filter(clan_id__in=best_clan_ids, realm=realm)
     )
 
     payloads: dict[str, dict] = {}
@@ -5221,7 +5243,7 @@ def bulk_load_clan_cache(limit: int = BULK_CACHE_CLAN_LIMIT) -> dict[str, Any]:
     for clan in clans:
         try:
             data = serializer.to_representation(clan)
-            key = _bulk_cache_key_clan(clan.clan_id)
+            key = _bulk_cache_key_clan(clan.clan_id, realm=realm)
             payloads[key] = data
         except Exception:
             logging.warning("bulk_load_clan_cache: failed to serialize clan %s", clan.clan_id, exc_info=True)
@@ -5241,10 +5263,11 @@ def bulk_load_entity_caches(
     top_player_limit: int = BULK_CACHE_TOP_PLAYER_LIMIT,
     clan_member_clans: int = BULK_CACHE_CLAN_MEMBER_CLANS,
     clan_limit: int = BULK_CACHE_CLAN_LIMIT,
+    realm: str = DEFAULT_REALM,
 ) -> dict[str, Any]:
     """Bulk-load player and clan detail payloads into Redis. DB reads only, no tasks."""
-    player_result = bulk_load_player_cache(top_player_limit, clan_member_clans)
-    clan_result = bulk_load_clan_cache(clan_limit)
+    player_result = bulk_load_player_cache(top_player_limit, clan_member_clans, realm=realm)
+    clan_result = bulk_load_clan_cache(clan_limit, realm=realm)
     return {
         'status': 'completed',
         'players': player_result,
@@ -5252,24 +5275,24 @@ def bulk_load_entity_caches(
     }
 
 
-def preload_battles_json() -> None:
+def preload_battles_json(realm: str = DEFAULT_REALM) -> None:
     logging.info("Preloading battles_json data for all players")
-    players = Player.objects.all()
+    players = Player.objects.filter(realm=realm)
     for player in players:
         if not player.battles_json:
-            update_battle_data(player.player_id)
+            update_battle_data(player.player_id, realm=realm)
         logging.info(f"Preloaded battles json for player: {player.name}")
     logging.info("Preloading complete")
 
 
-def preload_activity_data() -> None:
+def preload_activity_data(realm: str = DEFAULT_REALM) -> None:
     # because this function isn't calling update_snapshot_data, it's just creating
     # an empty data structure for the player's activity_json field, which helps the
     # front end to render the activity faster, while it loads the actual data in the background
     logging.info("Preloading activity data for all players")
-    players = Player.objects.all()
+    players = Player.objects.filter(realm=realm)
     for player in players:
         if not player.activity_json:
-            update_activity_data(player.player_id)
+            update_activity_data(player.player_id, realm=realm)
         logging.info(f"Preloaded activity data for player: {player.name}")
     logging.info("Preloading complete")

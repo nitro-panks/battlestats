@@ -14,7 +14,7 @@ from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django.utils import timezone
-from warships.models import Player, Clan, Ship, EntityVisitDaily
+from warships.models import DEFAULT_REALM, VALID_REALMS, Player, Clan, Ship, EntityVisitDaily
 from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
@@ -38,6 +38,12 @@ logger = logging.getLogger(__name__)
 LAZY_REFRESH_DEDUP_TIMEOUT = 60  # seconds
 
 
+def _get_realm(request) -> str:
+    realm = (getattr(request, 'query_params', None) or request.GET).get('realm', DEFAULT_REALM)
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    return realm if realm in VALID_REALMS else DEFAULT_REALM
+
+
 def _delay_task_safely(task, **kwargs) -> None:
     task_name = getattr(task, 'name', repr(task))
     kw_hash = sha256(str(sorted(kwargs.items())).encode()).hexdigest()[:12]
@@ -55,10 +61,10 @@ def _delay_task_safely(task, **kwargs) -> None:
         )
 
 
-def _record_clan_lookup(clan: Clan) -> None:
+def _record_clan_lookup(clan: Clan, realm: str = DEFAULT_REALM) -> None:
     clan.last_lookup = timezone.now()
     clan.save(update_fields=["last_lookup"])
-    invalidate_landing_clan_caches()
+    invalidate_landing_clan_caches(realm=realm)
 
 
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
@@ -114,16 +120,19 @@ class PlayerViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         from warships.data import get_cached_player_detail
 
+        realm = _get_realm(request)
+
         # Try bulk-loaded cache before hitting DB + serializer
         lookup_value = (self.kwargs.get(self.lookup_field) or '').strip()
         if lookup_value:
             player_id = Player.objects.alias(name_lower=Lower("name")).filter(
                 name_lower=lookup_value.casefold(),
+                realm=realm,
             ).values_list('player_id', flat=True).first()
             if player_id:
-                cached = get_cached_player_detail(player_id)
+                cached = get_cached_player_detail(player_id, realm=realm)
                 if cached is not None:
-                    self._record_player_view(player_id)
+                    self._record_player_view(player_id, realm=realm)
                     if (
                         cached.get('actual_kdr') is None
                         and not cached.get('is_hidden')
@@ -142,7 +151,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
         response['X-Player-Cache'] = 'miss'
         return response
 
-    def _record_player_view(self, player_id: int, update_last_lookup: bool = True) -> None:
+    def _record_player_view(self, player_id: int, update_last_lookup: bool = True, realm: str = DEFAULT_REALM) -> None:
         """Mark recent-players cache dirty, push to recently-viewed list.
 
         When ``update_last_lookup`` is True (cache-hit path), also bump the
@@ -152,11 +161,12 @@ class PlayerViewSet(viewsets.ModelViewSet):
         from warships.data import push_recently_viewed_player
 
         if update_last_lookup:
-            Player.objects.filter(player_id=player_id).update(last_lookup=timezone.now())
-        invalidate_landing_recent_player_cache()
-        push_recently_viewed_player(player_id)
+            Player.objects.filter(player_id=player_id, realm=realm).update(last_lookup=timezone.now())
+        invalidate_landing_recent_player_cache(realm=realm)
+        push_recently_viewed_player(player_id, realm=realm)
 
     def get_object(self):
+        realm = _get_realm(self.request)
         lookup_field_value = self.kwargs[self.lookup_field]
         normalized_lookup_value = (lookup_field_value or '').strip()
         missing_lookup_cache_key = _missing_player_lookup_cache_key(
@@ -164,13 +174,14 @@ class PlayerViewSet(viewsets.ModelViewSet):
         try:
             obj = self.queryset.alias(name_lower=Lower("name")).get(
                 name_lower=normalized_lookup_value.casefold(),
+                realm=realm,
             )
             cache.delete(missing_lookup_cache_key)
         except Player.DoesNotExist:
             if cache.get(missing_lookup_cache_key):
                 raise Http404("Player matching query does not exist.")
 
-            player_id = _fetch_player_id_by_name(normalized_lookup_value)
+            player_id = _fetch_player_id_by_name(normalized_lookup_value, realm=realm)
             if not player_id:
                 cache.set(missing_lookup_cache_key, True,
                           MISSING_PLAYER_LOOKUP_CACHE_TTL)
@@ -184,6 +195,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
             obj, _ = Player.objects.get_or_create(
                 player_id=int(player_id),
+                realm=realm,
                 defaults={"name": normalized_lookup_value}
             )
 
@@ -224,7 +236,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 update_fields.append("verdict")
 
         obj.save(update_fields=update_fields)
-        self._record_player_view(obj.player_id, update_last_lookup=False)
+        self._record_player_view(obj.player_id, update_last_lookup=False, realm=realm)
 
         if not obj.is_hidden and _explorer_summary_needs_refresh(obj):
             refresh_player_explorer_summary(obj)
@@ -270,7 +282,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
                                player_id=obj.player_id)
 
         from warships.data import maybe_refresh_clan_battle_data
-        maybe_refresh_clan_battle_data(obj)
+        maybe_refresh_clan_battle_data(obj, realm=realm)
 
         return obj
 
@@ -288,9 +300,14 @@ class ClanViewSet(viewsets.ModelViewSet):
     lookup_field = 'clan_id'
     permission_classes = [permissions.AllowAny]
 
+    def get_queryset(self):
+        realm = _get_realm(self.request)
+        return Clan.objects.filter(realm=realm)
+
     def get_object(self):
+        realm = _get_realm(self.request)
         obj = super().get_object()
-        _record_clan_lookup(obj)
+        _record_clan_lookup(obj, realm=realm)
         if clan_detail_needs_refresh(obj):
             _delay_task_safely(update_clan_data_task, clan_id=obj.clan_id)
         if clan_members_missing_or_incomplete(obj):
@@ -361,13 +378,14 @@ def type_data(request, player_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def randoms_data(request, player_id: str) -> Response:
+    realm = _get_realm(request)
     fetch_all = request.query_params.get('all', '').lower() in ('true', '1')
 
     if fetch_all:
         # Prefer the full source cache, but fall back to derived randoms rows so
         # the player page does not blank out while source data is repopulating.
         cached_randoms_rows = fetch_randoms_data(player_id)
-        player = Player.objects.filter(player_id=player_id).first()
+        player = Player.objects.filter(player_id=player_id, realm=realm).first()
         if not player:
             data = []
         elif player.battles_json:
@@ -380,7 +398,7 @@ def randoms_data(request, player_id: str) -> Response:
 
     response = _validated_list_response(data, RandomsDataSerializer)
 
-    player = Player.objects.filter(player_id=player_id).first()
+    player = Player.objects.filter(player_id=player_id, realm=realm).first()
     if player and player.randoms_updated_at:
         response["X-Randoms-Updated-At"] = player.randoms_updated_at.isoformat()
     if player and player.battles_updated_at:
@@ -392,10 +410,11 @@ def randoms_data(request, player_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def ranked_data(request, player_id: str) -> Response:
+    realm = _get_realm(request)
     data = fetch_ranked_data(player_id)
     response = _validated_list_response(data, RankedDataSerializer)
 
-    player = Player.objects.filter(player_id=player_id).first()
+    player = Player.objects.filter(player_id=player_id, realm=realm).first()
     if not data and is_ranked_data_refresh_pending(player_id):
         response["X-Ranked-Pending"] = "true"
     if player and player.ranked_updated_at:
@@ -418,15 +437,17 @@ def player_summary(request, player_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def wr_distribution(request) -> Response:
-    data = fetch_wr_distribution()
+    realm = _get_realm(request)
+    data = fetch_wr_distribution(realm=realm)
     return _validated_list_response(data, WRDistributionBinSerializer)
 
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_distribution(request, metric: str) -> Response:
+    realm = _get_realm(request)
     try:
-        data = fetch_player_population_distribution(metric)
+        data = fetch_player_population_distribution(metric, realm=realm)
     except ValueError:
         return Response({'detail': 'Unsupported player distribution metric.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -436,13 +457,14 @@ def player_distribution(request, metric: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_correlation_distribution(request, metric: str, player_id: str | None = None) -> Response:
+    realm = _get_realm(request)
     if metric == 'win_rate_survival' and player_id is None:
-        data = fetch_player_wr_survival_correlation()
+        data = fetch_player_wr_survival_correlation(realm=realm)
         return _validated_single_response(data, CompactPlayerCorrelationDistributionSerializer)
 
     if metric == 'ranked_wr_battles' and player_id is not None:
         try:
-            data = fetch_player_ranked_wr_battles_correlation(player_id)
+            data = fetch_player_ranked_wr_battles_correlation(player_id, realm=realm)
         except Player.DoesNotExist:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception:
@@ -474,8 +496,8 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
     if metric == 'tier_type' and player_id is not None:
         try:
             player = Player.objects.only(
-                'player_id', 'battles_json').get(player_id=player_id)
-            data = fetch_player_tier_type_correlation(player_id, player=player)
+                'player_id', 'battles_json').get(player_id=player_id, realm=realm)
+            data = fetch_player_tier_type_correlation(player_id, player=player, realm=realm)
         except Player.DoesNotExist:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -491,6 +513,7 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def players_explorer(request) -> Response:
+    realm = _get_realm(request)
     query = (request.query_params.get('q') or '').strip()
     hidden = (request.query_params.get('hidden') or 'all').strip().lower()
     activity_bucket = (request.query_params.get(
@@ -552,6 +575,7 @@ def players_explorer(request) -> Response:
         'page_size': page_size,
         'q': query,
         'ranked': ranked,
+        'realm': realm,
         'sort': sort,
     })
     cached_payload = cache.get(cache_key)
@@ -572,6 +596,7 @@ def players_explorer(request) -> Response:
         direction=direction,
         page=page,
         page_size=page_size,
+        realm=realm,
     )
 
     serializer = PlayerExplorerRowSerializer(data=page_rows, many=True)
@@ -596,12 +621,13 @@ def clan_members(request, clan_id: str) -> Response:
     if not clan_id or clan_id in {"null", "None", "undefined"}:
         return Response([])
 
+    realm = _get_realm(request)
     try:
-        clan = Clan.objects.get(clan_id=clan_id)
+        clan = Clan.objects.get(clan_id=clan_id, realm=realm)
     except Clan.DoesNotExist:
         return Response([])
 
-    _record_clan_lookup(clan)
+    _record_clan_lookup(clan, realm=realm)
 
     from warships.data import queue_clan_efficiency_hydration, queue_clan_ranked_hydration, clan_battle_summary_is_stale, maybe_refresh_clan_battle_data, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT
     local_member_count = clan.player_set.exclude(name='').count()
@@ -632,9 +658,9 @@ def clan_members(request, clan_id: str) -> Response:
         *_player_score_ordering('last_battle_date'))
 
     members = list(members)
-    hydration_state = queue_clan_ranked_hydration(members)
+    hydration_state = queue_clan_ranked_hydration(members, realm=realm)
     pending_player_ids = hydration_state['pending_player_ids']
-    efficiency_hydration_state = queue_clan_efficiency_hydration(members)
+    efficiency_hydration_state = queue_clan_efficiency_hydration(members, realm=realm)
     pending_efficiency_player_ids = efficiency_hydration_state['pending_player_ids']
 
     leader_name = (clan.leader_name or '').strip().lower()
@@ -696,7 +722,7 @@ def clan_members(request, clan_id: str) -> Response:
         efficiency_hydration_state['max_in_flight'])
     stale_members = [m for m in members if clan_battle_summary_is_stale(m)]
     for member in stale_members[:CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT]:
-        maybe_refresh_clan_battle_data(member)
+        maybe_refresh_clan_battle_data(member, realm=realm)
     return response
 
 
@@ -714,9 +740,10 @@ def clan_data(request, clan_filter: str) -> Response:
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    clan = Clan.objects.filter(clan_id=clan_id).first()
+    realm = _get_realm(request)
+    clan = Clan.objects.filter(clan_id=clan_id, realm=realm).first()
     if clan is not None:
-        _record_clan_lookup(clan)
+        _record_clan_lookup(clan, realm=realm)
 
     data = fetch_clan_plot_data(clan_id=clan_id, filter_type=filter_type)
     response = _validated_list_response(data, ClanDataSerializer)
@@ -739,9 +766,10 @@ def clan_data(request, clan_filter: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def clan_battle_seasons(request, clan_id: str) -> Response:
-    clan = Clan.objects.filter(clan_id=clan_id).first()
+    realm = _get_realm(request)
+    clan = Clan.objects.filter(clan_id=clan_id, realm=realm).first()
     if clan is not None:
-        _record_clan_lookup(clan)
+        _record_clan_lookup(clan, realm=realm)
 
     had_cached_summary = has_clan_battle_summary_cache(clan_id)
     data = fetch_clan_battle_seasons(clan_id)
@@ -759,8 +787,9 @@ def clan_battle_seasons(request, clan_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_clan_battle_seasons(request, player_id: str) -> Response:
+    realm = _get_realm(request)
     player = Player.objects.select_related(
-        'clan').filter(player_id=player_id).first()
+        'clan').filter(player_id=player_id, realm=realm).first()
 
     try:
         data = fetch_player_clan_battle_seasons(player_id)
@@ -780,7 +809,8 @@ def player_clan_battle_seasons(request, player_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_activity_attrition(request) -> Response:
-    data = fetch_landing_activity_attrition()
+    realm = _get_realm(request)
+    data = fetch_landing_activity_attrition(realm=realm)
     return _validated_single_response(data, LandingActivityAttritionSerializer)
 
 
@@ -792,11 +822,12 @@ def landing_clans(request) -> Response:
     except ValueError:
         return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
 
+    realm = _get_realm(request)
     limit = normalize_landing_clan_limit(request.query_params.get('limit'))
     if mode == 'random':
-        payload, cache_metadata = get_landing_clans_payload_with_cache_metadata()
+        payload, cache_metadata = get_landing_clans_payload_with_cache_metadata(realm=realm)
     else:
-        payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata()
+        payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata(realm=realm)
 
     payload = payload[:limit]
 
@@ -814,7 +845,8 @@ def landing_clans(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_recent_clans(request) -> Response:
-    return Response(get_landing_recent_clans_payload())
+    realm = _get_realm(request)
+    return Response(get_landing_recent_clans_payload(realm=realm))
 
 
 @api_view(["GET"])
@@ -824,10 +856,12 @@ def landing_players(request) -> Response:
         mode = normalize_landing_player_mode(request.query_params.get('mode'))
     except ValueError:
         return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
+    realm = _get_realm(request)
     limit = normalize_landing_player_limit(request.query_params.get('limit'))
     payload, cache_metadata = get_landing_players_payload_with_cache_metadata(
         mode=mode,
         limit=limit,
+        realm=realm,
     )
     response = Response(payload)
     response['X-Landing-Players-Cache-Mode'] = mode
@@ -843,15 +877,18 @@ def landing_players(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_recent_players(request) -> Response:
-    return Response(get_landing_recent_players_payload())
+    realm = _get_realm(request)
+    return Response(get_landing_recent_players_payload(realm=realm))
 
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_best_warmup(request) -> Response:
+    realm = _get_realm(request)
     result = queue_landing_best_entity_warm(
         player_limit=LANDING_PLAYER_LIMIT,
         clan_limit=LANDING_PLAYER_LIMIT,
+        realm=realm,
     )
     status_code = status.HTTP_202_ACCEPTED if result.get(
         'status') == 'queued' else status.HTTP_200_OK
@@ -900,7 +937,8 @@ def player_name_suggestions(request) -> Response:
     if len(query) < 3:
         return Response([])
 
-    cache_key = f'suggest:{query.lower()}'
+    realm = _get_realm(request)
+    cache_key = f'{realm}:suggest:{query.lower()}'
     cached = cache.get(cache_key)
     if cached is not None:
         return Response(cached)
@@ -913,14 +951,14 @@ def player_name_suggestions(request) -> Response:
             """
             SELECT name, pvp_ratio, is_hidden
             FROM warships_player
-            WHERE name != '' AND name ILIKE %s
+            WHERE name != '' AND realm = %s AND name ILIKE %s
             ORDER BY
                 CASE WHEN name ILIKE %s THEN 0 ELSE 1 END,
                 last_battle_date DESC NULLS LAST,
                 name
             LIMIT 8
             """,
-            [f'%{query}%', f'{query}%'],
+            [realm, f'%{query}%', f'{query}%'],
         )
         columns = [col[0] for col in cursor.description]
         suggestions = [dict(zip(columns, row)) for row in cursor.fetchall()]
@@ -932,12 +970,14 @@ def player_name_suggestions(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def db_stats(request) -> Response:
+    realm = _get_realm(request)
+
     def _fetch_db_stats():
         return {
-            'players': Player.objects.count(),
-            'clans': Clan.objects.count(),
+            'players': Player.objects.filter(realm=realm).count(),
+            'clans': Clan.objects.filter(realm=realm).count(),
         }
-    data = cache.get_or_set('db:stats', _fetch_db_stats, 300)
+    data = cache.get_or_set(f'{realm}:db:stats', _fetch_db_stats, 300)
     return Response(data)
 
 

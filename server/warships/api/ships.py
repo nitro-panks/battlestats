@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any
 
 from django.core.cache import cache
 
-from warships.api.client import make_api_request, make_api_request_with_meta
+from warships.api.client import DEFAULT_REALM, make_api_request, make_api_request_with_meta
 from warships.models import Ship
 
 
@@ -188,7 +188,7 @@ def sync_ship_catalog(page_size: int = 100) -> dict[str, int]:
     }
 
 
-def _fetch_ranked_ship_stats_for_player(player_id: int, season_ids: Optional[list[int]] = None) -> list[dict[str, Any]]:
+def _fetch_ranked_ship_stats_for_player(player_id: int, season_ids: Optional[list[int]] = None, realm: str = DEFAULT_REALM) -> list[dict[str, Any]]:
     """Fetch ranked ship stats for a player, optionally scoped to one or more seasons."""
     params = {
         "account_id": player_id,
@@ -199,7 +199,7 @@ def _fetch_ranked_ship_stats_for_player(player_id: int, season_ids: Optional[lis
 
     logging.info(
         f' ---> Remote fetching ranked ship stats for player_id: {player_id}')
-    data = _make_api_request("seasons/shipstats/", params)
+    data = _make_api_request("seasons/shipstats/", params, realm=realm)
 
     try:
         rows = data[str(player_id)]
@@ -209,7 +209,7 @@ def _fetch_ranked_ship_stats_for_player(player_id: int, season_ids: Optional[lis
     return rows if isinstance(rows, list) else []
 
 
-def _fetch_efficiency_badges_for_player(player_id: int) -> list[dict[str, Any]]:
+def _fetch_efficiency_badges_for_player(player_id: int, realm: str = DEFAULT_REALM) -> list[dict[str, Any]]:
     """Fetch per-ship efficiency badge classes for a player."""
     params = {
         "account_id": player_id,
@@ -218,7 +218,7 @@ def _fetch_efficiency_badges_for_player(player_id: int) -> list[dict[str, Any]]:
         ' ---> Remote fetching efficiency badges for player_id: %s',
         player_id,
     )
-    data = _make_api_request("ships/badges/", params)
+    data = _make_api_request("ships/badges/", params, realm=realm)
 
     try:
         rows = data[str(player_id)]
@@ -228,14 +228,14 @@ def _fetch_efficiency_badges_for_player(player_id: int) -> list[dict[str, Any]]:
     return rows if isinstance(rows, list) else []
 
 
-def _fetch_ship_stats_for_player(player_id: str) -> Dict:
+def _fetch_ship_stats_for_player(player_id: str, realm: str = DEFAULT_REALM) -> Dict:
     """Fetch all competitive data for all ships for a given player_id."""
     params = {
         "account_id": player_id
     }
     logging.info(
         f' ---> EXPENSIVE: Remote fetching all battle stats for player_id: {player_id}')
-    data = _make_api_request("ships/stats/", params)
+    data = _make_api_request("ships/stats/", params, realm=realm)
 
     data_dict = {}
     try:
@@ -298,7 +298,7 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
     return ship
 
 
-def _make_api_request(endpoint: str, params: Dict) -> Optional[Dict]:
+def _make_api_request(endpoint: str, params: Dict, realm: str = DEFAULT_REALM) -> Optional[Dict]:
     """Helper function to make API requests and handle responses."""
-    data = make_api_request(endpoint, params)
+    data = make_api_request(endpoint, params, realm=realm)
     return data if isinstance(data, dict) or isinstance(data, list) else None

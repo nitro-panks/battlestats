@@ -19,8 +19,8 @@ from warships.data import (
     update_achievements_data,
     update_player_efficiency_data,
 )
-from warships.models import Player, PlayerExplorerSummary
-from warships.tasks import CLAN_CRAWL_LOCK_KEY
+from warships.models import DEFAULT_REALM, Player, PlayerExplorerSummary
+from warships.tasks import _clan_crawl_lock_key
 
 
 DEFAULT_STATE_FILE = Path(settings.BASE_DIR) / 'logs' / \
@@ -102,6 +102,7 @@ def _build_candidate_queue(
     hot_lookback_days: int,
     active_lookback_days: int,
     warm_lookback_days: int,
+    realm: str = DEFAULT_REALM,
 ) -> tuple[list[int], dict[str, int]]:
     """Build a prioritized candidate queue across Hot, Active, and Warm tiers.
 
@@ -110,7 +111,7 @@ def _build_candidate_queue(
     now = timezone.now()
     today = now.date()
 
-    base_qs = Player.objects.exclude(player_id__isnull=True)
+    base_qs = Player.objects.exclude(player_id__isnull=True).filter(realm=realm)
 
     # -- Hot tier: site visitors within lookback, stale > hot_stale_hours --
     hot_stale_cutoff = now - timedelta(hours=hot_stale_hours)
@@ -167,7 +168,7 @@ def _build_candidate_queue(
     return ordered, tier_counts
 
 
-def _refresh_player(player_id: int) -> None:
+def _refresh_player(player_id: int, realm: str = DEFAULT_REALM) -> None:
     """Refresh a single player: core stats via WG API, plus conditional
     achievements and efficiency updates."""
     player = Player.objects.filter(id=player_id).select_related('clan').first()
@@ -175,14 +176,14 @@ def _refresh_player(player_id: int) -> None:
         return
 
     # Fetch fresh data from WG API (bulk fetch with single ID)
-    player_map = fetch_players_bulk([player.player_id])
+    player_map = fetch_players_bulk([player.player_id], realm=realm)
     player_data = player_map.get(str(player.player_id))
     if player_data is None:
         return
 
     # save_player handles: core stats, clan FK, hidden clearing, verdict,
     # explorer summary, inline efficiency + achievements
-    save_player(player_data, clan=player.clan)
+    save_player(player_data, clan=player.clan, realm=realm)
 
     # Reload to pick up save_player changes
     player.refresh_from_db()
@@ -192,11 +193,11 @@ def _refresh_player(player_id: int) -> None:
     # explicitly check and refresh
     if not player.is_hidden:
         if player_efficiency_needs_refresh(player):
-            update_player_efficiency_data(player)
+            update_player_efficiency_data(player, realm=realm)
         if player_achievements_need_refresh(player):
-            update_achievements_data(player.player_id)
+            update_achievements_data(player.player_id, realm=realm)
         if clan_battle_summary_is_stale(player):
-            fetch_player_clan_battle_seasons(player.player_id)
+            fetch_player_clan_battle_seasons(player.player_id, realm=realm)
 
 
 class Command(BaseCommand):
@@ -272,16 +273,21 @@ class Command(BaseCommand):
             '--dry-run', action='store_true',
             help='Print candidate queue without refreshing any players.',
         )
+        parser.add_argument(
+            '--realm', type=str, default=DEFAULT_REALM,
+            help='Realm to refresh players for (default: na).',
+        )
 
     def handle(self, *args, **options):
         limit = max(int(options['limit']), 0)
         batch_size = max(int(options['batch_size']), 1)
         max_errors = max(int(options['max_errors']), 1)
         dry_run = bool(options['dry_run'])
+        realm = options.get('realm', DEFAULT_REALM) or DEFAULT_REALM
         state_path = Path(options['state_file']).expanduser().resolve()
 
         # Lock exclusion: skip if legacy clan crawl is running
-        if not dry_run and cache.get(CLAN_CRAWL_LOCK_KEY) is not None:
+        if not dry_run and cache.get(_clan_crawl_lock_key(realm)) is not None:
             self.stdout.write(self.style.WARNING(
                 'Clan crawl in progress — skipping this cycle.'))
             return
@@ -307,6 +313,7 @@ class Command(BaseCommand):
                 active_lookback_days=max(
                     int(options['active_lookback_days']), 0),
                 warm_lookback_days=max(int(options['warm_lookback_days']), 0),
+                realm=realm,
             )
             state['pending_player_ids'] = pending_player_ids
             state['next_index'] = 0
@@ -375,7 +382,7 @@ class Command(BaseCommand):
             if should_stop():
                 break
             try:
-                _refresh_player(player_id)
+                _refresh_player(player_id, realm=realm)
                 state['failed_player_ids'] = [
                     cid for cid in state['failed_player_ids'] if cid != player_id]
                 record_success(is_retry=True)
@@ -390,7 +397,7 @@ class Command(BaseCommand):
                 break
 
             try:
-                _refresh_player(player_id)
+                _refresh_player(player_id, realm=realm)
                 state['failed_player_ids'] = [
                     cid for cid in state['failed_player_ids'] if cid != player_id]
                 record_success()

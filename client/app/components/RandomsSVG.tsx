@@ -3,6 +3,8 @@ import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 interface RandomsSVGProps {
     playerId: number;
@@ -520,6 +522,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     design = DEFAULT_RANDOMS_DESIGN,
     theme = 'light',
 }) => {
+    const { realm } = useRealm();
     const [allShips, setAllShips] = useState<RandomsRow[]>([]);
     const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
     const [selectedTiers, setSelectedTiers] = useState<number[]>([]);
@@ -532,7 +535,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         const fetchData = async () => {
             setIsChartLoading(true);
             try {
-                const { data, headers } = await fetchSharedJson<unknown>(`/api/fetch/randoms_data/${playerId}/?all=true`, {
+                const { data, headers } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/randoms_data/${playerId}/?all=true`, realm), {
                     label: `Randoms data ${playerId}`,
                     responseHeaders: ['X-Randoms-Updated-At'],
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
@@ -554,7 +557,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             }
         };
         fetchData();
-    }, [playerId]);
+    }, [playerId, realm]);
 
     // Filter, sort, and take top N
     const chartData = useMemo(() => {

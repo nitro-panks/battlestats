@@ -13,6 +13,7 @@ from warships.data import (
     warm_player_distributions,
 )
 from warships.landing import warm_landing_page_content
+from warships.models import VALID_REALMS
 
 logger = logging.getLogger(__name__)
 
@@ -30,34 +31,41 @@ class Command(BaseCommand):
             logger.info("[startup-warmer] Waiting %ds for gunicorn to settle...", delay)
             time.sleep(delay)
 
-        logger.info("[startup-warmer] Warming landing page cache...")
-        landing_result = warm_landing_page_content()
-        logger.info("[startup-warmer] Landing page warm complete: %s", json.dumps(landing_result, sort_keys=True))
+        all_results = {}
+        for realm in sorted(VALID_REALMS):
+            logger.info("[startup-warmer] Warming realm=%s ...", realm)
 
-        logger.info("[startup-warmer] Warming hot entity caches...")
-        hot_result = warm_hot_entity_caches(
-            player_limit=HOT_ENTITY_PLAYER_LIMIT,
-            clan_limit=HOT_ENTITY_CLAN_LIMIT,
-        )
-        logger.info("[startup-warmer] Hot entity warm complete: %s", json.dumps(hot_result, sort_keys=True))
+            logger.info("[startup-warmer] [%s] Warming landing page cache...", realm)
+            landing_result = warm_landing_page_content(realm=realm)
+            logger.info("[startup-warmer] [%s] Landing page warm complete: %s", realm, json.dumps(landing_result, sort_keys=True))
 
-        logger.info("[startup-warmer] Bulk loading entity caches...")
-        bulk_result = bulk_load_entity_caches()
-        logger.info("[startup-warmer] Bulk load complete: %s", json.dumps(bulk_result, sort_keys=True))
+            logger.info("[startup-warmer] [%s] Warming hot entity caches...", realm)
+            hot_result = warm_hot_entity_caches(
+                player_limit=HOT_ENTITY_PLAYER_LIMIT,
+                clan_limit=HOT_ENTITY_CLAN_LIMIT,
+                realm=realm,
+            )
+            logger.info("[startup-warmer] [%s] Hot entity warm complete: %s", realm, json.dumps(hot_result, sort_keys=True))
 
-        logger.info("[startup-warmer] Warming player distribution caches...")
-        dist_result = warm_player_distributions()
-        logger.info("[startup-warmer] Distribution warm complete: %s", json.dumps(dist_result, sort_keys=True))
+            logger.info("[startup-warmer] [%s] Bulk loading entity caches...", realm)
+            bulk_result = bulk_load_entity_caches(realm=realm)
+            logger.info("[startup-warmer] [%s] Bulk load complete: %s", realm, json.dumps(bulk_result, sort_keys=True))
 
-        logger.info("[startup-warmer] Warming player correlation caches...")
-        corr_result = warm_player_correlations()
-        logger.info("[startup-warmer] Correlation warm complete: %s", json.dumps(corr_result, sort_keys=True))
+            logger.info("[startup-warmer] [%s] Warming player distribution caches...", realm)
+            dist_result = warm_player_distributions(realm=realm)
+            logger.info("[startup-warmer] [%s] Distribution warm complete: %s", realm, json.dumps(dist_result, sort_keys=True))
+
+            logger.info("[startup-warmer] [%s] Warming player correlation caches...", realm)
+            corr_result = warm_player_correlations(realm=realm)
+            logger.info("[startup-warmer] [%s] Correlation warm complete: %s", realm, json.dumps(corr_result, sort_keys=True))
+
+            all_results[realm] = {
+                'landing': landing_result,
+                'hot_entities': hot_result,
+                'bulk_load': bulk_result,
+                'distributions': dist_result,
+                'correlations': corr_result,
+            }
 
         logger.info("[startup-warmer] All startup cache warmers finished.")
-        self.stdout.write(json.dumps({
-            'landing': landing_result,
-            'hot_entities': hot_result,
-            'bulk_load': bulk_result,
-            'distributions': dist_result,
-            'correlations': corr_result,
-        }, sort_keys=True, indent=2))
+        self.stdout.write(json.dumps(all_results, sort_keys=True, indent=2))

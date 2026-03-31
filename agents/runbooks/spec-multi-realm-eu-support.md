@@ -1,7 +1,7 @@
 # Spec: Multi-Realm Support (EU)
 
 **Created**: 2026-03-31
-**Status**: Draft — plan approved, not yet implemented
+**Status**: Implemented — Phases 1-5 complete, Phase 6 (EU data population) pending deployment
 **Scope**: Add EU realm support with full data isolation from NA. Frontend realm selector, backend realm-aware queries, separate crawl/cache/statistics per realm.
 
 ---

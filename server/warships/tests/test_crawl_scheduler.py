@@ -14,7 +14,7 @@ from django_celery_beat.models import CrontabSchedule, IntervalSchedule, Periodi
 
 from warships.signals import ensure_daily_clan_crawl_schedule
 from warships.landing import LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, get_landing_players_payload
-from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, HOT_ENTITY_CACHE_WARM_LOCK_KEY, LANDING_BEST_ENTITY_WARM_LOCK_KEY, LANDING_PAGE_WARM_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, RECENTLY_VIEWED_WARM_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_efficiency_data_refresh_pending, is_efficiency_rank_snapshot_refresh_pending, is_ranked_data_refresh_pending, queue_clan_battle_data_refresh, queue_efficiency_data_refresh, queue_efficiency_rank_snapshot_refresh, queue_ranked_data_refresh, refresh_efficiency_rank_snapshot_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_player_efficiency_data_task, update_ranked_data_task, warm_clan_battle_summaries_task, warm_hot_entity_caches_task, warm_landing_best_entity_caches_task, warm_landing_page_content_task, warm_recently_viewed_players_task
+from warships.tasks import _clan_crawl_heartbeat_key, _clan_crawl_lock_key, _hot_entity_cache_warm_lock_key, _landing_best_entity_warm_lock_key, _landing_page_warm_lock_key, _ranked_incremental_lock_key, _recently_viewed_warm_lock_key, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_efficiency_data_refresh_pending, is_efficiency_rank_snapshot_refresh_pending, is_ranked_data_refresh_pending, queue_clan_battle_data_refresh, queue_efficiency_data_refresh, queue_efficiency_rank_snapshot_refresh, queue_ranked_data_refresh, refresh_efficiency_rank_snapshot_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_player_efficiency_data_task, update_ranked_data_task, warm_clan_battle_summaries_task, warm_hot_entity_caches_task, warm_landing_best_entity_caches_task, warm_landing_page_content_task, warm_recently_viewed_players_task
 from warships.models import Player
 
 
@@ -43,12 +43,12 @@ class ClanCrawlSchedulerTests(TestCase):
             limit=5,
             heartbeat_callback=ANY,
         )
-        self.assertIsNone(cache.get(CLAN_CRAWL_LOCK_KEY))
-        self.assertIsNone(cache.get(CLAN_CRAWL_HEARTBEAT_KEY))
+        self.assertIsNone(cache.get(_clan_crawl_lock_key()))
+        self.assertIsNone(cache.get(_clan_crawl_heartbeat_key()))
 
     def test_crawl_task_heartbeat_callback_refreshes_cache(self):
         def fake_run(*, resume, dry_run, limit, heartbeat_callback):
-            cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time() - 3600, timeout=60)
+            cache.set(_clan_crawl_heartbeat_key(), time.time() - 3600, timeout=60)
             heartbeat_callback()
             return {"clans_found": 12}
 
@@ -57,10 +57,10 @@ class ClanCrawlSchedulerTests(TestCase):
                 resume=True, dry_run=False, limit=5)
 
         self.assertEqual(result["status"], "completed")
-        self.assertIsNone(cache.get(CLAN_CRAWL_HEARTBEAT_KEY))
+        self.assertIsNone(cache.get(_clan_crawl_heartbeat_key()))
 
     def test_crawl_task_skips_when_lock_exists(self):
-        cache.add(CLAN_CRAWL_LOCK_KEY, "existing-run", timeout=60)
+        cache.add(_clan_crawl_lock_key(), "existing-run", timeout=60)
 
         with patch("warships.clan_crawl.run_clan_crawl") as mock_run:
             result = crawl_all_clans_task.run(resume=True)
@@ -75,9 +75,9 @@ class ClanCrawlSchedulerTests(TestCase):
         with patch.dict(os.environ, {"ENABLE_CRAWLER_SCHEDULES": "1"}, clear=False):
             ensure_daily_clan_crawl_schedule(sender=app_config)
 
-        task = PeriodicTask.objects.get(name="daily-clan-crawl")
+        task = PeriodicTask.objects.get(name="daily-clan-crawl-na")
         self.assertEqual(task.task, "warships.tasks.crawl_all_clans_task")
-        self.assertEqual(task.kwargs, '{"resume": false}')
+        self.assertEqual(task.kwargs, '{"resume": false, "realm": "na"}')
         self.assertTrue(task.enabled)
 
         schedule = CrontabSchedule.objects.get(id=task.crontab_id)
@@ -86,7 +86,7 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(str(schedule.timezone), "UTC")
 
         ranked_task = PeriodicTask.objects.get(
-            name="daily-ranked-incrementals")
+            name="daily-ranked-incrementals-na")
         self.assertEqual(ranked_task.task,
                          "warships.tasks.incremental_ranked_data_task")
         self.assertTrue(ranked_task.enabled)
@@ -97,7 +97,7 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(ranked_schedule.minute, "30")
         self.assertEqual(str(ranked_schedule.timezone), "UTC")
 
-        watchdog_task = PeriodicTask.objects.get(name="clan-crawl-watchdog")
+        watchdog_task = PeriodicTask.objects.get(name="clan-crawl-watchdog-na")
         self.assertEqual(watchdog_task.task,
                          "warships.tasks.ensure_crawl_all_clans_running_task")
         self.assertTrue(watchdog_task.enabled)
@@ -118,13 +118,13 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(warm_schedule.period, IntervalSchedule.MINUTES)
 
         landing_warm_task = PeriodicTask.objects.get(
-            name="landing-page-warmer")
+            name="landing-page-warmer-na")
         self.assertEqual(
             landing_warm_task.task,
             "warships.tasks.warm_landing_page_content_task",
         )
         self.assertTrue(landing_warm_task.enabled)
-        self.assertEqual(landing_warm_task.kwargs, '{"include_recent": true}')
+        self.assertEqual(landing_warm_task.kwargs, '{"include_recent": true, "realm": "na"}')
 
         landing_warm_schedule = IntervalSchedule.objects.get(
             id=landing_warm_task.interval_id)
@@ -133,7 +133,7 @@ class ClanCrawlSchedulerTests(TestCase):
                          IntervalSchedule.MINUTES)
 
         hot_cache_task = PeriodicTask.objects.get(
-            name="hot-entity-cache-warmer")
+            name="hot-entity-cache-warmer-na")
         self.assertEqual(
             hot_cache_task.task,
             "warships.tasks.warm_hot_entity_caches_task",
@@ -152,17 +152,17 @@ class ClanCrawlSchedulerTests(TestCase):
             ensure_daily_clan_crawl_schedule(sender=app_config)
 
         self.assertFalse(PeriodicTask.objects.get(
-            name="daily-clan-crawl").enabled)
+            name="daily-clan-crawl-na").enabled)
         self.assertFalse(PeriodicTask.objects.get(
-            name="incremental-player-refresh-am").enabled)
+            name="incremental-player-refresh-am-na").enabled)
         self.assertFalse(PeriodicTask.objects.get(
-            name="incremental-player-refresh-pm").enabled)
+            name="incremental-player-refresh-pm-na").enabled)
         self.assertFalse(PeriodicTask.objects.get(
-            name="daily-ranked-incrementals").enabled)
+            name="daily-ranked-incrementals-na").enabled)
         self.assertFalse(PeriodicTask.objects.get(
-            name="clan-crawl-watchdog").enabled)
+            name="clan-crawl-watchdog-na").enabled)
         self.assertTrue(PeriodicTask.objects.get(
-            name="landing-page-warmer").enabled)
+            name="landing-page-warmer-na").enabled)
 
     def test_watchdog_stays_idle_when_not_running(self):
         with patch("warships.tasks.crawl_all_clans_task.delay") as mock_delay:
@@ -172,8 +172,8 @@ class ClanCrawlSchedulerTests(TestCase):
         mock_delay.assert_not_called()
 
     def test_watchdog_skips_when_crawl_has_fresh_heartbeat(self):
-        cache.add(CLAN_CRAWL_LOCK_KEY, "existing-run", timeout=60)
-        cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time(), timeout=60)
+        cache.add(_clan_crawl_lock_key(), "existing-run", timeout=60)
+        cache.set(_clan_crawl_heartbeat_key(), time.time(), timeout=60)
 
         with patch("warships.tasks.crawl_all_clans_task.delay") as mock_delay:
             result = ensure_crawl_all_clans_running_task.run()
@@ -182,16 +182,16 @@ class ClanCrawlSchedulerTests(TestCase):
         mock_delay.assert_not_called()
 
     def test_watchdog_restarts_when_crawl_heartbeat_is_stale(self):
-        cache.add(CLAN_CRAWL_LOCK_KEY, "existing-run", timeout=60)
-        cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time() - 3600, timeout=60)
+        cache.add(_clan_crawl_lock_key(), "existing-run", timeout=60)
+        cache.set(_clan_crawl_heartbeat_key(), time.time() - 3600, timeout=60)
 
         with patch("warships.tasks.crawl_all_clans_task.delay") as mock_delay:
             result = ensure_crawl_all_clans_running_task.run()
 
         self.assertEqual(
             result, {"status": "scheduled", "reason": "stale-lock"})
-        self.assertIsNone(cache.get(CLAN_CRAWL_LOCK_KEY))
-        mock_delay.assert_called_once_with(resume=True)
+        self.assertIsNone(cache.get(_clan_crawl_lock_key()))
+        mock_delay.assert_called_once_with(resume=True, realm='na')
 
     def test_warm_clan_battle_summaries_task_refreshes_each_configured_clan(self):
         with patch("warships.data.refresh_clan_battle_seasons_cache") as mock_refresh:
@@ -213,10 +213,10 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(result["status"], "completed")
         mock_warm.assert_called_once_with(
             force_refresh=True, include_recent=True)
-        self.assertIsNone(cache.get(LANDING_PAGE_WARM_LOCK_KEY))
+        self.assertIsNone(cache.get(_landing_page_warm_lock_key()))
 
     def test_warm_landing_page_content_task_skips_when_lock_exists(self):
-        cache.add(LANDING_PAGE_WARM_LOCK_KEY, "existing-run", timeout=60)
+        cache.add(_landing_page_warm_lock_key(), "existing-run", timeout=60)
 
         with patch("warships.landing.warm_landing_page_content") as mock_warm:
             result = warm_landing_page_content_task.run(include_recent=True)
@@ -236,10 +236,10 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(result["status"], "completed")
         mock_warm.assert_called_once_with(
             player_limit=5, clan_limit=3, force_refresh=False)
-        self.assertIsNone(cache.get(HOT_ENTITY_CACHE_WARM_LOCK_KEY))
+        self.assertIsNone(cache.get(_hot_entity_cache_warm_lock_key()))
 
     def test_warm_hot_entity_caches_task_skips_when_lock_exists(self):
-        cache.add(HOT_ENTITY_CACHE_WARM_LOCK_KEY, "existing-run", timeout=60)
+        cache.add(_hot_entity_cache_warm_lock_key(), "existing-run", timeout=60)
 
         with patch("warships.data.warm_hot_entity_caches") as mock_warm:
             result = warm_hot_entity_caches_task.run()
@@ -259,10 +259,10 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(result["status"], "completed")
         mock_warm.assert_called_once_with(
             player_limit=25, clan_limit=25, force_refresh=False)
-        self.assertIsNone(cache.get(LANDING_BEST_ENTITY_WARM_LOCK_KEY))
+        self.assertIsNone(cache.get(_landing_best_entity_warm_lock_key()))
 
     def test_warm_landing_best_entity_caches_task_skips_when_lock_exists(self):
-        cache.add(LANDING_BEST_ENTITY_WARM_LOCK_KEY,
+        cache.add(_landing_best_entity_warm_lock_key(),
                   "existing-run", timeout=60)
 
         with patch("warships.data.warm_landing_best_entity_caches") as mock_warm:
@@ -313,7 +313,7 @@ class ClanCrawlSchedulerTests(TestCase):
             cache.get(LANDING_RECENT_CLANS_CACHE_KEY), ["stale"])
 
     def test_incremental_ranked_task_skips_when_crawl_lock_exists(self):
-        cache.add(CLAN_CRAWL_LOCK_KEY, "crawl-run", timeout=60)
+        cache.add(_clan_crawl_lock_key(), "crawl-run", timeout=60)
 
         with patch("warships.tasks.call_command") as mock_call_command:
             result = incremental_ranked_data_task.run()
@@ -328,7 +328,7 @@ class ClanCrawlSchedulerTests(TestCase):
 
         self.assertEqual(result, {"status": "completed"})
         mock_call_command.assert_called_once()
-        self.assertIsNone(cache.get(RANKED_INCREMENTAL_LOCK_KEY))
+        self.assertIsNone(cache.get(_ranked_incremental_lock_key()))
 
     def test_post_migrate_disables_warmer_when_no_clans_are_configured(self):
         app_config = apps.get_app_config("warships")
@@ -411,10 +411,10 @@ class RefreshTaskLockTests(TestCase):
 
         self.assertEqual(result, {"status": "queued"})
         self.assertTrue(is_ranked_data_refresh_pending(1234))
-        mock_delay.assert_called_once_with(player_id=1234)
+        mock_delay.assert_called_once_with(player_id=1234, realm='na')
 
     def test_queue_ranked_data_refresh_skips_when_already_pending(self):
-        cache.add("warships:tasks:update_ranked_data_dispatch:1234",
+        cache.add("warships:tasks:update_ranked_data_dispatch:na:1234",
                   "queued", timeout=60)
 
         with patch("warships.tasks.update_ranked_data_task.delay") as mock_delay:
@@ -425,7 +425,7 @@ class RefreshTaskLockTests(TestCase):
         mock_delay.assert_not_called()
 
     def test_queue_ranked_data_refresh_skips_during_broker_cooldown(self):
-        cache.add("warships:tasks:update_ranked_data_dispatch:cooldown",
+        cache.add("warships:tasks:update_ranked_data_dispatch:na:cooldown",
                   True, timeout=60)
 
         with patch("warships.tasks.update_ranked_data_task.delay") as mock_delay:
@@ -436,14 +436,14 @@ class RefreshTaskLockTests(TestCase):
         mock_delay.assert_not_called()
 
     def test_ranked_refresh_task_clears_pending_marker(self):
-        cache.add("warships:tasks:update_ranked_data_dispatch:4567",
+        cache.add("warships:tasks:update_ranked_data_dispatch:na:4567",
                   "queued", timeout=60)
 
         with patch("warships.data.update_ranked_data") as mock_update_ranked_data:
             result = update_ranked_data_task.run(player_id=4567)
 
         self.assertEqual(result, {"status": "completed"})
-        mock_update_ranked_data.assert_called_once_with(player_id=4567)
+        mock_update_ranked_data.assert_called_once_with(player_id=4567, realm='na')
         self.assertFalse(is_ranked_data_refresh_pending(4567))
 
     def test_queue_clan_battle_data_refresh_sets_pending_marker_until_task_finishes(self):
@@ -452,11 +452,11 @@ class RefreshTaskLockTests(TestCase):
 
         self.assertEqual(result, {"status": "queued"})
         self.assertTrue(
-            cache.get(f"warships:tasks:update_player_clan_battle_data_dispatch:2234"))
-        mock_delay.assert_called_once_with(player_id=2234)
+            cache.get(f"warships:tasks:update_player_clan_battle_data_dispatch:na:2234"))
+        mock_delay.assert_called_once_with(player_id=2234, realm='na')
 
     def test_queue_clan_battle_data_refresh_skips_during_broker_cooldown(self):
-        cache.add("warships:tasks:update_player_clan_battle_data_dispatch:cooldown",
+        cache.add("warships:tasks:update_player_clan_battle_data_dispatch:na:cooldown",
                   True, timeout=60)
 
         with patch("warships.tasks.update_player_clan_battle_data_task.delay") as mock_delay:
@@ -472,10 +472,10 @@ class RefreshTaskLockTests(TestCase):
 
         self.assertEqual(result, {"status": "queued"})
         self.assertTrue(is_efficiency_data_refresh_pending(3234))
-        mock_delay.assert_called_once_with(player_id=3234)
+        mock_delay.assert_called_once_with(player_id=3234, realm='na')
 
     def test_queue_efficiency_data_refresh_skips_during_broker_cooldown(self):
-        cache.add("warships:tasks:update_player_efficiency_data_dispatch:cooldown",
+        cache.add("warships:tasks:update_player_efficiency_data_dispatch:na:cooldown",
                   True, timeout=60)
 
         with patch("warships.tasks.update_player_efficiency_data_task.delay") as mock_delay:
@@ -486,7 +486,7 @@ class RefreshTaskLockTests(TestCase):
         mock_delay.assert_not_called()
 
     def test_efficiency_refresh_task_clears_pending_marker(self):
-        cache.add("warships:tasks:update_player_efficiency_data_dispatch:5567",
+        cache.add("warships:tasks:update_player_efficiency_data_dispatch:na:5567",
                   "queued", timeout=60)
         player = Player.objects.create(
             name="EfficiencyTaskPlayer", player_id=5567)
@@ -499,7 +499,7 @@ class RefreshTaskLockTests(TestCase):
         self.assertEqual(
             mock_update_efficiency_data.call_args.kwargs["player"].player_id, player.player_id)
         mock_refresh_summary.assert_called_once()
-        mock_queue_snapshot_refresh.assert_called_once_with()
+        mock_queue_snapshot_refresh.assert_called_once_with(realm='na')
         self.assertFalse(is_efficiency_data_refresh_pending(5567))
 
     def test_queue_efficiency_rank_snapshot_refresh_sets_pending_marker_until_task_finishes(self):
@@ -511,14 +511,14 @@ class RefreshTaskLockTests(TestCase):
         mock_delay.assert_called_once_with()
 
     def test_efficiency_rank_snapshot_refresh_task_clears_pending_marker(self):
-        cache.add("warships:tasks:refresh_efficiency_rank_snapshot_dispatch",
+        cache.add("warships:tasks:refresh_efficiency_rank_snapshot_dispatch:na",
                   "queued", timeout=60)
 
         with patch("warships.data.recompute_efficiency_rank_snapshot") as mock_recompute_snapshot:
             result = refresh_efficiency_rank_snapshot_task.run()
 
         self.assertEqual(result, {"status": "completed"})
-        mock_recompute_snapshot.assert_called_once_with(skip_refresh=True)
+        mock_recompute_snapshot.assert_called_once_with(skip_refresh=True, realm='na')
         self.assertFalse(is_efficiency_rank_snapshot_refresh_pending())
 
     def test_post_migrate_updates_existing_periodic_task(self):
@@ -530,7 +530,7 @@ class RefreshTaskLockTests(TestCase):
             month_of_year="*",
             timezone="UTC",
         )
-        task = PeriodicTask.objects.get(name="daily-clan-crawl")
+        task = PeriodicTask.objects.get(name="daily-clan-crawl-na")
         task.task = "warships.tasks.update_clan_data_task"
         task.crontab = schedule
         task.kwargs = "{}"
@@ -540,11 +540,11 @@ class RefreshTaskLockTests(TestCase):
         with patch.dict(os.environ, {"ENABLE_CRAWLER_SCHEDULES": "1"}, clear=False):
             ensure_daily_clan_crawl_schedule(sender=app_config)
 
-        task = PeriodicTask.objects.get(name="daily-clan-crawl")
+        task = PeriodicTask.objects.get(name="daily-clan-crawl-na")
         self.assertEqual(task.task, "warships.tasks.crawl_all_clans_task")
-        self.assertEqual(task.kwargs, '{"resume": false}')
+        self.assertEqual(task.kwargs, '{"resume": false, "realm": "na"}')
 
-        watchdog_task = PeriodicTask.objects.get(name="clan-crawl-watchdog")
+        watchdog_task = PeriodicTask.objects.get(name="clan-crawl-watchdog-na")
         self.assertEqual(watchdog_task.task,
                          "warships.tasks.ensure_crawl_all_clans_running_task")
 
@@ -554,7 +554,7 @@ class RefreshTaskLockTests(TestCase):
                          "warships.tasks.warm_clan_battle_summaries_task")
 
         rv_task = PeriodicTask.objects.get(
-            name="recently-viewed-player-warmer")
+            name="recently-viewed-player-warmer-na")
         self.assertEqual(rv_task.task,
                          "warships.tasks.warm_recently_viewed_players_task")
         self.assertTrue(rv_task.enabled)
@@ -574,10 +574,10 @@ class WarmRecentlyViewedPlayersTaskTests(TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["warmed"], 2)
         mock_warm.assert_called_once()
-        self.assertIsNone(cache.get(RECENTLY_VIEWED_WARM_LOCK_KEY))
+        self.assertIsNone(cache.get(_recently_viewed_warm_lock_key()))
 
     def test_task_skips_when_lock_exists(self):
-        cache.add(RECENTLY_VIEWED_WARM_LOCK_KEY, "existing-run", timeout=60)
+        cache.add(_recently_viewed_warm_lock_key(), "existing-run", timeout=60)
 
         with patch("warships.data.warm_recently_viewed_players") as mock_warm:
             result = warm_recently_viewed_players_task.run()

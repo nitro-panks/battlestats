@@ -14,7 +14,7 @@ from django.core.management.base import BaseCommand
 
 from warships.api.client import make_api_request
 from warships.data import _calculate_actual_kdr
-from warships.models import Player
+from warships.models import DEFAULT_REALM, Player
 
 logger = logging.getLogger(__name__)
 
@@ -42,16 +42,21 @@ class Command(BaseCommand):
             "--rate-delay", type=float, default=DEFAULT_RATE_DELAY,
             help="Seconds to sleep between API batches.",
         )
+        parser.add_argument(
+            "--realm", type=str, default=DEFAULT_REALM,
+            help="Realm to backfill (default: na).",
+        )
 
     def handle(self, *args, **options):
         batch_size = min(options["batch_size"], 100)
         limit = options["limit"]
         dry_run = options["dry_run"]
         rate_delay = options["rate_delay"]
+        realm = options.get("realm", DEFAULT_REALM) or DEFAULT_REALM
 
         qs = (
             Player.objects
-            .filter(is_hidden=False, actual_kdr__isnull=True, pvp_battles__gt=0)
+            .filter(realm=realm, is_hidden=False, actual_kdr__isnull=True, pvp_battles__gt=0)
             .order_by("id")
             .values_list("id", "player_id", flat=False)
         )
@@ -77,7 +82,7 @@ class Command(BaseCommand):
             data = make_api_request("account/info/", {
                 "account_id": account_ids,
                 "fields": "statistics.pvp.frags,statistics.pvp.survived_battles,statistics.pvp.battles,hidden_profile",
-            })
+            }, realm=realm)
 
             if not data:
                 errors += len(batch)

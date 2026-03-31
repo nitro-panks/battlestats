@@ -8,6 +8,8 @@ import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { trackEntityDetailView } from '../lib/visitAnalytics';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -27,6 +29,7 @@ interface PlayerRouteViewProps {
 
 const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
     const router = useRouter();
+    const { realm } = useRealm();
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
@@ -40,7 +43,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
             setError('');
 
             try {
-                const { data } = await fetchSharedJson<PlayerData>(`/api/player/${encodeURIComponent(playerName)}/`, {
+                const { data } = await fetchSharedJson<PlayerData>(withRealm(`/api/player/${encodeURIComponent(playerName)}/`, realm), {
                     label: `Player ${playerName}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                 });
@@ -64,7 +67,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
         return () => {
             cancelled = true;
         };
-    }, [playerName]);
+    }, [playerName, realm]);
 
     useEffect(() => {
         if (!playerData) {

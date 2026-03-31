@@ -3,6 +3,8 @@
 import React, { startTransition, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { buildPlayerPath } from "../lib/entityRoutes";
+import { useRealm } from "../context/RealmContext";
+import { withRealm } from "../lib/realmParams";
 import HiddenAccountIcon from "./HiddenAccountIcon";
 import wrColor from "../lib/wrColor";
 
@@ -25,6 +27,7 @@ const HeaderSearch: React.FC = () => {
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
+    const { realm } = useRealm();
     const [query, setQuery] = useState("");
     const [suggestions, setSuggestions] = useState<HeaderSearchSuggestion[]>([]);
     const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(-1);
@@ -79,7 +82,8 @@ const HeaderSearch: React.FC = () => {
             return;
         }
 
-        const cached = suggestionCache.get(trimmedQuery);
+        const cacheKey = `${realm}:${trimmedQuery}`;
+        const cached = suggestionCache.get(cacheKey);
         if (cached) {
             setSuggestions(cached);
             setHighlightedSuggestionIndex(cached.length > 0 ? 0 : -1);
@@ -89,7 +93,7 @@ const HeaderSearch: React.FC = () => {
         const controller = new AbortController();
         const timeoutId = setTimeout(async () => {
             try {
-                const response = await fetch(`/api/landing/player-suggestions?q=${encodeURIComponent(trimmedQuery)}`, {
+                const response = await fetch(withRealm(`/api/landing/player-suggestions?q=${encodeURIComponent(trimmedQuery)}`, realm), {
                     signal: controller.signal,
                 });
                 if (!response.ok) {
@@ -105,7 +109,7 @@ const HeaderSearch: React.FC = () => {
                     const firstKey = suggestionCache.keys().next().value;
                     if (firstKey !== undefined) suggestionCache.delete(firstKey);
                 }
-                suggestionCache.set(trimmedQuery, nextSuggestions);
+                suggestionCache.set(cacheKey, nextSuggestions);
 
                 setSuggestions(nextSuggestions);
                 setHighlightedSuggestionIndex(nextSuggestions.length > 0 ? 0 : -1);
@@ -123,7 +127,7 @@ const HeaderSearch: React.FC = () => {
             clearTimeout(timeoutId);
             controller.abort();
         };
-    }, [query]);
+    }, [query, realm]);
 
     const handleInputFocus = () => {
         if (suggestions.length > 0) {

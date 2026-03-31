@@ -13,7 +13,7 @@ from warships.management.commands.incremental_player_refresh import (
     _build_candidate_queue,
 )
 from warships.models import Player
-from warships.tasks import CLAN_CRAWL_LOCK_KEY
+from warships.tasks import _clan_crawl_lock_key
 
 
 class CandidateSelectionTests(TestCase):
@@ -343,8 +343,8 @@ class LockExclusionTests(TestCase):
         cache.clear()
 
     def test_skips_when_clan_crawl_lock_held(self):
-        """Skips cycle when CLAN_CRAWL_LOCK_KEY is set."""
-        cache.set(CLAN_CRAWL_LOCK_KEY, 'some-task-id', timeout=300)
+        """Skips cycle when clan crawl lock is set."""
+        cache.set(_clan_crawl_lock_key(), 'some-task-id', timeout=300)
 
         Player.objects.create(
             name='Locked', player_id=73001,

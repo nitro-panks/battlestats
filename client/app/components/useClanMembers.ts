@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClanMemberData } from './clanMembersShared';
 import { getChartFetchesInFlight } from '../lib/sharedJsonFetch';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 const HYDRATION_POLL_LIMIT = 12;
 const HYDRATION_ACTIVE_POLL_INTERVAL_MS = 3000;
@@ -59,6 +61,7 @@ const resolveHydrationPollDelay = (state: ClanMembersHydrationState): number => 
 };
 
 export const useClanMembers = (clanId: number | null | undefined, enabled = true) => {
+    const { realm } = useRealm();
     const [members, setMembers] = useState<ClanMemberData[]>([]);
     const [loading, setLoading] = useState(Boolean(clanId));
     const [error, setError] = useState('');
@@ -98,7 +101,7 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
             activeController = controller;
 
             try {
-                const response = await fetch(`/api/fetch/clan_members/${clanId}`, {
+                const response = await fetch(withRealm(`/api/fetch/clan_members/${clanId}`, realm), {
                     signal: controller.signal,
                 });
                 const data = await readJsonOrThrow<ClanMemberData[]>(response, `Clan members ${clanId}`);
@@ -151,7 +154,7 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
             }
             activeController?.abort();
         };
-    }, [clanId, enabled]);
+    }, [clanId, enabled, realm]);
 
     return { members, loading, error };
 };

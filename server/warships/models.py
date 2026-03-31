@@ -2,9 +2,19 @@ from django.db import models
 from django.db.models.functions import Lower
 
 
+REALM_CHOICES = [('na', 'NA'), ('eu', 'EU')]
+VALID_REALMS = {code for code, _label in REALM_CHOICES}
+DEFAULT_REALM = 'na'
+
+
+def realm_cache_key(realm: str, key: str) -> str:
+    return f'{realm}:{key}'
+
+
 class Player(models.Model):
     name = models.CharField(max_length=200)
     player_id = models.IntegerField(null=False, blank=False, db_index=True)
+    realm = models.CharField(max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     is_hidden = models.BooleanField(default=False)
     total_battles = models.IntegerField(default=0)
     pvp_battles = models.IntegerField(default=0)
@@ -57,6 +67,9 @@ class Player(models.Model):
         return f"{self.name} ({self.player_id}) {clan_name}"
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['player_id', 'realm'], name='unique_player_per_realm'),
+        ]
         indexes = [
             models.Index(fields=['last_lookup'],
                          name='player_last_lookup_idx'),
@@ -65,6 +78,10 @@ class Player(models.Model):
             models.Index(
                 fields=['pvp_battles', 'pvp_survival_rate'], name='player_battles_surv_idx'),
             models.Index(Lower('name'), name='player_name_lower_idx'),
+            models.Index(fields=['realm', 'pvp_battles', 'pvp_ratio'],
+                         name='player_realm_battles_ratio_idx'),
+            models.Index(fields=['realm', 'pvp_battles', 'pvp_survival_rate'],
+                         name='player_realm_battles_surv_idx'),
         ]
 
 
@@ -82,7 +99,8 @@ class Ship(models.Model):
 
 
 class Clan(models.Model):
-    clan_id = models.IntegerField(unique=True)
+    clan_id = models.IntegerField(db_index=True)
+    realm = models.CharField(max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     description = models.TextField(null=True, blank=True)
     leader_id = models.IntegerField(null=True, blank=True)
     leader_name = models.CharField(max_length=200, null=True, blank=True)
@@ -100,6 +118,9 @@ class Clan(models.Model):
         return str(self.clan_id) + '-' + self.name
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['clan_id', 'realm'], name='unique_clan_per_realm'),
+        ]
         indexes = [
             models.Index(fields=['last_lookup'], name='clan_last_lookup_idx'),
         ]
@@ -299,6 +320,7 @@ class DeletedAccount(models.Model):
 
 class MvPlayerDistributionStats(models.Model):
     """Unmanaged model backed by the mv_player_distribution_stats materialized view."""
+    realm = models.CharField(max_length=4)
     pvp_ratio = models.FloatField(null=True)
     pvp_survival_rate = models.FloatField(null=True)
     pvp_battles = models.IntegerField()

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 interface ClanActivityHistogramProps {
     clanId: number;
@@ -238,6 +240,7 @@ const drawChart = (containerElement: HTMLDivElement, bins: ActivityBin[], totalM
 
 const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, memberCount, svgHeight = 246, svgWidth = 900, theme = 'light' }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const { realm } = useRealm();
     const [members, setMembers] = useState<ClanMemberData[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
@@ -251,7 +254,7 @@ const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, m
             setLoadError(null);
 
             try {
-                const response = await fetch(`/api/fetch/clan_members/${clanId}`, { signal: controller.signal });
+                const response = await fetch(withRealm(`/api/fetch/clan_members/${clanId}`, realm), { signal: controller.signal });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch clan members: ${response.status}`);
                 }
@@ -271,7 +274,7 @@ const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, m
 
         fetchMembers();
         return () => controller.abort();
-    }, [clanId]);
+    }, [clanId, realm]);
 
     useEffect(() => {
         if (!containerRef.current) {

@@ -3,6 +3,8 @@ import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { ChartTheme, chartColors } from '../lib/chartTheme';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 type DistributionMetric = 'win_rate' | 'survival_rate' | 'battles_played';
 
@@ -600,8 +602,8 @@ const drawErrorState = (containerElement: HTMLDivElement, message: string, theme
         .text(message);
 };
 
-const fetchDistribution = async (metric: DistributionMetric, signal: AbortSignal): Promise<DistributionPayload> => {
-    const { data } = await fetchSharedJson<DistributionPayload>(`/api/fetch/player_distribution/${metric}/`, {
+const fetchDistribution = async (metric: DistributionMetric, signal: AbortSignal, realm: string): Promise<DistributionPayload> => {
+    const { data } = await fetchSharedJson<DistributionPayload>(withRealm(`/api/fetch/player_distribution/${metric}/`, realm), {
         label: `Player distribution ${metric}`,
         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
     });
@@ -623,6 +625,7 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
     theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const { realm } = useRealm();
     const chartId = useId().replace(/:/g, '-');
 
     useEffect(() => {
@@ -657,8 +660,8 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
         const load = async () => {
             try {
                 const [primaryPayload, overlayPayload] = await Promise.all([
-                    fetchDistribution(primaryMetric, abortController.signal),
-                    overlayMetric ? fetchDistribution(overlayMetric, abortController.signal) : Promise.resolve(null),
+                    fetchDistribution(primaryMetric, abortController.signal, realm),
+                    overlayMetric ? fetchDistribution(overlayMetric, abortController.signal, realm) : Promise.resolve(null),
                 ]);
 
                 if (abortController.signal.aborted) {
@@ -680,7 +683,7 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
             abortController.abort();
             window.removeEventListener('resize', onResize);
         };
-    }, [chartId, overlayMetric, overlayValue, primaryMetric, primaryValue, svgHeight, svgWidth, theme]);
+    }, [chartId, overlayMetric, overlayValue, primaryMetric, primaryValue, realm, svgHeight, svgWidth, theme]);
 
     return (
         <div ref={containerRef}>

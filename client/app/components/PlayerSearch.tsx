@@ -18,6 +18,8 @@ import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import useIntervalRefresh from './useIntervalRefresh';
 import useClanHydrationPoll from './useClanHydrationPoll';
 import { useTheme } from '../context/ThemeContext';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 import wrColor from '../lib/wrColor';
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -182,6 +184,7 @@ const CLAN_BEST_FORMULA_APPROXIMATION = 'Best_clan ≈ 0.30·WR + 0.25·Activity
 
 const PlayerSearch: React.FC = () => {
     const { theme } = useTheme();
+    const { realm } = useRealm();
     const router = useRouter();
     const searchParams = useSearchParams();
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
@@ -198,14 +201,14 @@ const PlayerSearch: React.FC = () => {
 
     const fetchLandingClans = useCallback(async (mode: LandingClanMode) => {
         const { data: payload } = await fetchSharedJson<LandingClan[]>(
-            `/api/landing/clans/?mode=${mode}&limit=${LANDING_CLAN_LIMIT}`,
+            withRealm(`/api/landing/clans/?mode=${mode}&limit=${LANDING_CLAN_LIMIT}`, realm),
             {
                 label: `Landing clans (${mode})`,
                 ttlMs: LANDING_FETCH_TTL_MS,
             },
         );
         setClans(Array.isArray(payload) ? payload : []);
-    }, []);
+    }, [realm]);
 
     const triggerBestLandingWarmup = useCallback(() => {
         if (bestLandingWarmupRequestedRef.current) {
@@ -213,24 +216,24 @@ const PlayerSearch: React.FC = () => {
         }
 
         bestLandingWarmupRequestedRef.current = true;
-        void fetchSharedJson('/api/landing/warm-best/', {
+        void fetchSharedJson(withRealm('/api/landing/warm-best/', realm), {
             label: 'Landing best warmup',
             ttlMs: 0,
         }).catch((err) => {
             console.warn('Error warming landing best entities:', err);
         });
-    }, []);
+    }, [realm]);
 
     const fetchLandingData = useCallback(async () => {
         triggerBestLandingWarmup();
 
         try {
             const [{ data: recentClansPayload }, { data: recentPlayersPayload }] = await Promise.all([
-                fetchSharedJson<LandingClan[]>('/api/landing/recent-clans/', {
+                fetchSharedJson<LandingClan[]>(withRealm('/api/landing/recent-clans/', realm), {
                     label: 'Recent clans',
                     ttlMs: LANDING_FETCH_TTL_MS,
                 }),
-                fetchSharedJson<LandingPlayer[]>('/api/landing/recent/', {
+                fetchSharedJson<LandingPlayer[]>(withRealm('/api/landing/recent/', realm), {
                     label: 'Recent players',
                     ttlMs: LANDING_FETCH_TTL_MS,
                 }),
@@ -245,7 +248,7 @@ const PlayerSearch: React.FC = () => {
     const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode) => {
         try {
             const { data: payload } = await fetchSharedJson<LandingPlayer[]>(
-                `/api/landing/players/?mode=${mode}&limit=${LANDING_PLAYER_LIMIT}`,
+                withRealm(`/api/landing/players/?mode=${mode}&limit=${LANDING_PLAYER_LIMIT}`, realm),
                 {
                     label: `Landing players (${mode})`,
                     ttlMs: LANDING_FETCH_TTL_MS,
@@ -256,7 +259,7 @@ const PlayerSearch: React.FC = () => {
             console.error('Error fetching landing players:', err);
             setPlayers([]);
         }
-    }, []);
+    }, [realm]);
 
     useEffect(() => {
         fetchLandingData();
@@ -311,7 +314,7 @@ const PlayerSearch: React.FC = () => {
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
         const { data } = await fetchSharedJson<PlayerData>(
-            `/api/player/${encodeURIComponent(playerName)}/`,
+            withRealm(`/api/player/${encodeURIComponent(playerName)}/`, realm),
             {
                 label: `Player ${playerName}`,
                 ttlMs: LANDING_FETCH_TTL_MS,
@@ -338,7 +341,7 @@ const PlayerSearch: React.FC = () => {
         } finally {
             setIsLoadingPlayer(false);
         }
-    }, []);
+    }, [realm]);
 
     const handleSelectClan = useCallback((clan: LandingClan) => {
         router.push(buildClanPath(clan.clan_id, clan.name || clan.tag));

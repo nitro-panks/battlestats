@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import * as d3 from 'd3';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 interface ActivityProps {
     playerId: number;
@@ -17,11 +19,12 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId, theme = 'light' }) => 
     const [isAllZeroWindow, setIsAllZeroWindow] = useState(false);
     const [chartData, setChartData] = useState<{ rows: ActivityRow[], error: boolean } | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const { realm } = useRealm();
 
     // 1. Fetch data ONCE whenever playerId changes
     useEffect(() => {
         let isMounted = true;
-        const path = `/api/fetch/activity_data/${playerId}/`;
+        const path = withRealm(`/api/fetch/activity_data/${playerId}/`, realm);
 
         fetch(path)
             .then(response => response.json())
@@ -44,7 +47,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId, theme = 'light' }) => 
         return () => {
             isMounted = false;
         };
-    }, [playerId]);
+    }, [playerId, realm]);
 
     // 2. Safely render D3 chart ONLY after data is available and state is settled
     useEffect(() => {

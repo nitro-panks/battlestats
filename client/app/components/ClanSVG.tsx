@@ -4,6 +4,8 @@ import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
 import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 interface ClanProps {
     clanId: number;
@@ -504,6 +506,7 @@ const drawClanPlot = (
 
 const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [], theme = 'light' }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const { realm } = useRealm();
     const onSelectMemberRef = useRef(onSelectMember);
     const chartMemberActivitySignature = useMemo(() => buildClanChartMemberActivitySignature(membersData), [membersData]);
     const chartMemberActivity = useMemo(() => buildClanChartMemberActivity(membersData), [chartMemberActivitySignature]);
@@ -523,7 +526,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
         const requestPlotData = async (): Promise<{ data: ClanData[]; pending: boolean } | null> => {
             for (let attempt = 0; attempt < CLAN_PLOT_FETCH_ATTEMPTS; attempt += 1) {
                 try {
-                    const payload = await fetchSharedJson<ClanData[]>(`/api/fetch/clan_data/${clanId}:active`, {
+                    const payload = await fetchSharedJson<ClanData[]>(withRealm(`/api/fetch/clan_data/${clanId}:active`, realm), {
                         label: 'Clan plot data',
                         ttlMs: 0,
                         cacheKey: `clan-plot:${clanId}:${pendingAttempts}:${attempt}`,
@@ -582,7 +585,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                 clearTimeout(timeoutId);
             }
         };
-    }, [clanId]);
+    }, [clanId, realm]);
 
     useEffect(() => {
         onSelectMemberRef.current = onSelectMember;

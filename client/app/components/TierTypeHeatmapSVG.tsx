@@ -3,6 +3,8 @@ import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 import type { TierTypePayload, TierTypePlayerCell, TierTypeTile, TierTypeTrendPoint } from './playerProfileChartData';
 
 type SvgGroupSelection = ReturnType<typeof d3.select>;
@@ -354,6 +356,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
     theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const { realm } = useRealm();
 
     useEffect(() => {
         const containerElement = containerRef.current;
@@ -382,7 +385,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
 
         const load = async () => {
             try {
-                const payload = data ?? (await fetchSharedJson<TierTypePayload>(`/api/fetch/player_correlation/tier_type/${playerId}/`, {
+                const payload = data ?? (await fetchSharedJson<TierTypePayload>(withRealm(`/api/fetch/player_correlation/tier_type/${playerId}/`, realm), {
                     label: `Tier type correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                 })).data;
@@ -406,7 +409,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
             window.removeEventListener('resize', onResize);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
-    }, [data, playerId, svgHeight, svgWidth, theme]);
+    }, [data, playerId, realm, svgHeight, svgWidth, theme]);
 
     return <div ref={containerRef} className="w-full" />;
 };

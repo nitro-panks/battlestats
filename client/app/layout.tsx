@@ -8,7 +8,9 @@ import HeaderSearch from "./components/HeaderSearch";
 import Logo from "./components/Logo";
 import Footer from "./components/Footer";
 import ThemeToggle from "./components/ThemeToggle";
+import RealmSelector from "./components/RealmSelector";
 import { ThemeProvider } from "./context/ThemeContext";
+import { RealmProvider } from "./context/RealmContext";
 import { getSiteOrigin } from "./lib/siteOrigin";
 import "./globals.css";
 
@@ -43,7 +45,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('bs-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;})();` }} />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('bs-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;var r=localStorage.getItem('bs-realm');if(r&&['na','eu'].indexOf(r)>=0)document.documentElement.dataset.realm=r;else document.documentElement.dataset.realm='na';})();` }} />
         <script defer src="/umami/script.js" data-website-id="27c0ee6a-f534-42d4-b49f-27bbadad9848" />
       </head>
       {gaMeasurementId ? (
@@ -65,19 +67,22 @@ export default function RootLayout({
       ) : null}
       <body className={inter.className}>
         <ThemeProvider>
-          <div className="mx-auto max-w-6xl px-4 md:px-6">
-            <header className="flex flex-col gap-4 bg-[var(--bg-page)] py-5 pl-5 md:flex-row md:items-center md:justify-between md:py-6">
-              <Logo />
-              <div className="flex w-full items-center justify-end gap-3 pr-2 md:w-auto">
-                <ThemeToggle />
-                <Suspense fallback={null}>
-                  <HeaderSearch />
-                </Suspense>
-              </div>
-            </header>
-            <main className="pt-6 pb-8">{children}</main>
-            <Footer />
-          </div>
+          <RealmProvider>
+            <div className="mx-auto max-w-6xl px-4 md:px-6">
+              <header className="flex flex-col gap-4 bg-[var(--bg-page)] py-5 pl-5 md:flex-row md:items-center md:justify-between md:py-6">
+                <Logo />
+                <div className="flex w-full items-center justify-end gap-3 pr-2 md:w-auto">
+                  <ThemeToggle />
+                  <RealmSelector />
+                  <Suspense fallback={null}>
+                    <HeaderSearch />
+                  </Suspense>
+                </div>
+              </header>
+              <main className="pt-6 pb-8">{children}</main>
+              <Footer />
+            </div>
+          </RealmProvider>
         </ThemeProvider>
       </body>
     </html>

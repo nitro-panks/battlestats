@@ -15,8 +15,14 @@ logger = logging.getLogger(__name__)
 # Contract notes for relied-on upstream endpoints live under
 # agents/contracts/upstream/.
 
+REALM_BASE_URLS = {
+    'na': 'https://api.worldofwarships.com/wows/',
+    'eu': 'https://api.worldofwarships.eu/wows/',
+}
+DEFAULT_REALM = 'na'
+
 BASE_URL = os.getenv(
-    "WG_API_BASE_URL", "https://api.worldofwarships.com/wows/")
+    "WG_API_BASE_URL", REALM_BASE_URLS[DEFAULT_REALM])
 APP_ID = os.getenv("WG_APP_ID")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("WG_REQUEST_TIMEOUT_SECONDS", "20"))
 RETRY_TOTAL = int(os.getenv("WG_API_RETRY_TOTAL", "2"))
@@ -45,7 +51,11 @@ def _get_session() -> requests.Session:
     return session
 
 
-def _request_api_payload(endpoint: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def get_base_url(realm: str = DEFAULT_REALM) -> str:
+    return REALM_BASE_URLS.get(realm, REALM_BASE_URLS[DEFAULT_REALM])
+
+
+def _request_api_payload(endpoint: str, params: Dict[str, Any], realm: str = DEFAULT_REALM) -> Optional[Dict[str, Any]]:
     if not APP_ID:
         logger.error("WG_APP_ID environment variable is not set")
         return None
@@ -55,9 +65,11 @@ def _request_api_payload(endpoint: str, params: Dict[str, Any]) -> Optional[Dict
                     value in params.items() if value is not None}
     clean_params.setdefault("application_id", APP_ID)
 
+    base_url = get_base_url(realm)
+
     try:
         response = _get_session().get(
-            BASE_URL + clean_endpoint,
+            base_url + clean_endpoint,
             params=clean_params,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
@@ -90,15 +102,15 @@ def _request_api_payload(endpoint: str, params: Dict[str, Any]) -> Optional[Dict
     return payload
 
 
-def make_api_request(endpoint: str, params: Dict[str, Any]) -> Optional[Any]:
-    payload = _request_api_payload(endpoint, params)
+def make_api_request(endpoint: str, params: Dict[str, Any], realm: str = DEFAULT_REALM) -> Optional[Any]:
+    payload = _request_api_payload(endpoint, params, realm=realm)
     if payload is None:
         return None
     return payload.get("data")
 
 
-def make_api_request_with_meta(endpoint: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    payload = _request_api_payload(endpoint, params)
+def make_api_request_with_meta(endpoint: str, params: Dict[str, Any], realm: str = DEFAULT_REALM) -> Optional[Dict[str, Any]]:
+    payload = _request_api_payload(endpoint, params, realm=realm)
     if payload is None:
         return None
 

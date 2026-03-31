@@ -3,6 +3,8 @@ import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 import { getRankedHeatmapTileBounds, getRankedHeatmapTrendX, getRankedHeatmapXDomain, type RankedHeatmapPayloadShape, type RankedHeatmapTile, type RankedHeatmapTrendPoint } from './rankedHeatmapPayload';
 
 interface RankedWRBattlesHeatmapSVGProps {
@@ -257,6 +259,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
     theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
+    const { realm } = useRealm();
 
     useEffect(() => {
         if (!containerRef.current || isLoading) {
@@ -283,7 +286,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
 
         const fetchAndDraw = async () => {
             try {
-                const { data: payload } = await fetchSharedJson<RankedWRBattlesPayload>(`/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`, {
+                const { data: payload } = await fetchSharedJson<RankedWRBattlesPayload>(withRealm(`/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`, realm), {
                     label: `Ranked correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                 });
@@ -319,7 +322,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
             window.removeEventListener('resize', onResize);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
-    }, [isLoading, onVisibilityChange, playerId, svgHeight, svgWidth, theme]);
+    }, [isLoading, onVisibilityChange, playerId, realm, svgHeight, svgWidth, theme]);
 
     return <div ref={containerRef} className="w-full overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg-surface)]" />;
 };

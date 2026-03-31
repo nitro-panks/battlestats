@@ -3,6 +3,8 @@ import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 import type { TierRow } from './playerProfileChartData';
 
 interface TierSVGProps {
@@ -35,7 +37,7 @@ const selectTierColorByWr = (winRatio: number): string => {
 
 type Colors = typeof chartColors['light'];
 
-const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: number, colors: Colors, data?: TierRow[]) => {
+const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: number, colors: Colors, data?: TierRow[], realm?: string) => {
     const containerWidth = Math.max(container.clientWidth || 0, 280);
     const compact = containerWidth < 420;
 
@@ -231,7 +233,7 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
         return;
     }
 
-    fetchSharedJson<unknown>(`/api/fetch/tier_data/${playerId}/`, {
+    fetchSharedJson<unknown>(withRealm(`/api/fetch/tier_data/${playerId}/`, realm || 'na'), {
         label: `Tier data ${playerId}`,
         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
     })
@@ -245,6 +247,7 @@ const drawTierPlot = (container: HTMLDivElement, playerId: number, svgHeight: nu
 
 const TierSVG: React.FC<TierSVGProps> = ({ playerId, data, svgHeight = 334, theme = 'light' }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
+    const { realm } = useRealm();
 
     useEffect(() => {
         const container = containerRef.current;
@@ -254,7 +257,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId, data, svgHeight = 334, them
 
         const colors = chartColors[theme];
         const render = () => {
-            drawTierPlot(container, playerId, svgHeight, colors, data);
+            drawTierPlot(container, playerId, svgHeight, colors, data, realm);
         };
 
         render();
@@ -263,7 +266,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId, data, svgHeight = 334, them
         return () => {
             window.removeEventListener('resize', render);
         };
-    }, [data, playerId, svgHeight, theme]);
+    }, [data, playerId, realm, svgHeight, theme]);
 
     return <div ref={containerRef} className="w-full"></div>;
 };

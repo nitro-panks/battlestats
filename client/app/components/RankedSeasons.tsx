@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 interface RankedSeasonsProps {
     playerId: number;
@@ -100,6 +102,7 @@ const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
 });
 
 const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = false }) => {
+    const { realm } = useRealm();
     const [seasons, setSeasons] = useState<RankedSeason[]>([]);
     const [isChartLoading, setIsChartLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -115,7 +118,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
         const requestRankedData = async (): Promise<{ data: RankedSeason[]; pending: boolean } | null> => {
             for (let attempt = 0; attempt < 2; attempt += 1) {
                 try {
-                    const payload = await fetchSharedJson<RankedSeason[]>(`/api/fetch/ranked_data/${playerId}/`, {
+                    const payload = await fetchSharedJson<RankedSeason[]>(withRealm(`/api/fetch/ranked_data/${playerId}/`, realm), {
                         label: `Ranked data ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                         cacheKey: `ranked-data:${playerId}:${pendingAttempts}:${attempt}`,
@@ -192,7 +195,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 clearTimeout(timeoutId);
             }
         };
-    }, [playerId]);
+    }, [playerId, realm]);
 
     const shouldGrayOut = isLoading || isChartLoading;
     const sortedSeasons = seasons.slice().sort((left, right) => {

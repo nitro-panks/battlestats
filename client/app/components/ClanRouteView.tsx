@@ -6,6 +6,8 @@ import ClanDetail from './ClanDetail';
 import type { LandingClan } from './entityTypes';
 import { buildPlayerPath, parseClanIdFromRouteSegment } from '../lib/entityRoutes';
 import { trackEntityDetailView } from '../lib/visitAnalytics';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -64,6 +66,7 @@ interface ClanRouteViewProps {
 
 const ClanRouteView: React.FC<ClanRouteViewProps> = ({ clanSlug }) => {
     const router = useRouter();
+    const { realm } = useRealm();
     const clanId = parseClanIdFromRouteSegment(clanSlug);
     const [clanData, setClanData] = useState<LandingClan | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -85,7 +88,7 @@ const ClanRouteView: React.FC<ClanRouteViewProps> = ({ clanSlug }) => {
             setError('');
 
             try {
-                const response = await fetch(`/api/clan/${clanId}`);
+                const response = await fetch(withRealm(`/api/clan/${clanId}`, realm));
                 const data = await readJsonOrThrow<Partial<LandingClan>>(response, `Clan ${clanId}`);
                 const normalizedClan = normalizeClanRoutePayload(data, clanId);
                 if (!cancelled) {
@@ -109,7 +112,7 @@ const ClanRouteView: React.FC<ClanRouteViewProps> = ({ clanSlug }) => {
         return () => {
             cancelled = true;
         };
-    }, [clanId]);
+    }, [clanId, realm]);
 
     useEffect(() => {
         if (!clanData) {

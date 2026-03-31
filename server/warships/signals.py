@@ -6,6 +6,8 @@ import os
 from django.db.models.signals import post_migrate
 from django.dispatch import receiver
 
+from warships.models import VALID_REALMS
+
 
 def _env_flag(name: str, default: bool) -> bool:
     raw_value = os.getenv(name)
@@ -40,17 +42,21 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         timezone="UTC",
     )
 
-    PeriodicTask.objects.update_or_create(
-        name="daily-clan-crawl",
-        defaults={
-            "task": "warships.tasks.crawl_all_clans_task",
-            "crontab": schedule,
-            "enabled": crawler_schedules_enabled,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({"resume": False}),
-            "description": "Daily full crawl of clans and players from the Wargaming API.",
-        },
-    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"daily-clan-crawl-{realm}",
+            defaults={
+                "task": "warships.tasks.crawl_all_clans_task",
+                "crontab": schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"resume": False, "realm": realm}),
+                "description": f"Daily full crawl of clans and players from the Wargaming API ({realm.upper()}).",
+            },
+        )
+
+    # Clean up legacy non-realm schedule
+    PeriodicTask.objects.filter(name="daily-clan-crawl").delete()
 
     # -- Incremental Player Refresh (AM + PM) --
     player_refresh_am_hour = os.getenv("PLAYER_REFRESH_SCHEDULE_HOUR_AM", "5")
@@ -65,17 +71,20 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         timezone="UTC",
     )
 
-    PeriodicTask.objects.update_or_create(
-        name="incremental-player-refresh-am",
-        defaults={
-            "task": "warships.tasks.incremental_player_refresh_task",
-            "crontab": player_am_schedule,
-            "enabled": crawler_schedules_enabled,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({}),
-            "description": "Morning incremental refresh of active player data.",
-        },
-    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"incremental-player-refresh-am-{realm}",
+            defaults={
+                "task": "warships.tasks.incremental_player_refresh_task",
+                "crontab": player_am_schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Morning incremental refresh of active player data ({realm.upper()}).",
+            },
+        )
+
+    PeriodicTask.objects.filter(name="incremental-player-refresh-am").delete()
 
     player_pm_schedule, _ = CrontabSchedule.objects.get_or_create(
         minute="0",
@@ -86,17 +95,20 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         timezone="UTC",
     )
 
-    PeriodicTask.objects.update_or_create(
-        name="incremental-player-refresh-pm",
-        defaults={
-            "task": "warships.tasks.incremental_player_refresh_task",
-            "crontab": player_pm_schedule,
-            "enabled": crawler_schedules_enabled,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({}),
-            "description": "Afternoon incremental refresh of active player data.",
-        },
-    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"incremental-player-refresh-pm-{realm}",
+            defaults={
+                "task": "warships.tasks.incremental_player_refresh_task",
+                "crontab": player_pm_schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Afternoon incremental refresh of active player data ({realm.upper()}).",
+            },
+        )
+
+    PeriodicTask.objects.filter(name="incremental-player-refresh-pm").delete()
 
     ranked_hour = os.getenv("RANKED_INCREMENTAL_SCHEDULE_HOUR", "10")
     ranked_minute = os.getenv("RANKED_INCREMENTAL_SCHEDULE_MINUTE", "30")
@@ -109,17 +121,20 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         timezone="UTC",
     )
 
-    PeriodicTask.objects.update_or_create(
-        name="daily-ranked-incrementals",
-        defaults={
-            "task": "warships.tasks.incremental_ranked_data_task",
-            "crontab": ranked_schedule,
-            "enabled": crawler_schedules_enabled,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({}),
-            "description": "Daily incremental refresh of ranked history, scheduled away from the clan crawl.",
-        },
-    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"daily-ranked-incrementals-{realm}",
+            defaults={
+                "task": "warships.tasks.incremental_ranked_data_task",
+                "crontab": ranked_schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Daily incremental refresh of ranked history ({realm.upper()}).",
+            },
+        )
+
+    PeriodicTask.objects.filter(name="daily-ranked-incrementals").delete()
 
     watchdog_minutes = int(os.getenv("CLAN_CRAWL_WATCHDOG_MINUTES", "5"))
     watchdog_schedule, _ = IntervalSchedule.objects.get_or_create(
@@ -127,17 +142,20 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         period=IntervalSchedule.MINUTES,
     )
 
-    PeriodicTask.objects.update_or_create(
-        name="clan-crawl-watchdog",
-        defaults={
-            "task": "warships.tasks.ensure_crawl_all_clans_running_task",
-            "interval": watchdog_schedule,
-            "enabled": crawler_schedules_enabled,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({}),
-            "description": "Checks every few minutes for a stale clan-crawl lock and resumes interrupted crawls only.",
-        },
-    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"clan-crawl-watchdog-{realm}",
+            defaults={
+                "task": "warships.tasks.ensure_crawl_all_clans_running_task",
+                "interval": watchdog_schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Checks for stale clan-crawl lock and resumes interrupted crawls ({realm.upper()}).",
+            },
+        )
+
+    PeriodicTask.objects.filter(name="clan-crawl-watchdog").delete()
 
     warm_clan_ids = _configured_clan_battle_warm_ids()
     if warm_clan_ids:
@@ -168,17 +186,20 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         period=IntervalSchedule.MINUTES,
     )
 
-    PeriodicTask.objects.update_or_create(
-        name="landing-page-warmer",
-        defaults={
-            "task": "warships.tasks.warm_landing_page_content_task",
-            "interval": landing_warm_schedule,
-            "enabled": True,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({"include_recent": True}),
-            "description": "Refreshes landing page caches on a short cadence so published landing payloads stay hot while the 12-hour freshness window remains cache-first.",
-        },
-    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"landing-page-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_landing_page_content_task",
+                "interval": landing_warm_schedule,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"include_recent": True, "realm": realm}),
+                "description": f"Refreshes landing page caches ({realm.upper()}).",
+            },
+        )
+
+    PeriodicTask.objects.filter(name="landing-page-warmer").delete()
 
     hot_entity_warm_minutes = int(
         os.getenv("HOT_ENTITY_CACHE_WARM_MINUTES", "30"))
@@ -187,17 +208,20 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         period=IntervalSchedule.MINUTES,
     )
 
-    PeriodicTask.objects.update_or_create(
-        name="hot-entity-cache-warmer",
-        defaults={
-            "task": "warships.tasks.warm_hot_entity_caches_task",
-            "interval": hot_entity_warm_schedule,
-            "enabled": True,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({}),
-            "description": "Keeps the hottest player and clan detail caches warm so detail routes can serve cached payloads and refresh in the background.",
-        },
-    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"hot-entity-cache-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_hot_entity_caches_task",
+                "interval": hot_entity_warm_schedule,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Keeps hottest player and clan detail caches warm ({realm.upper()}).",
+            },
+        )
+
+    PeriodicTask.objects.filter(name="hot-entity-cache-warmer").delete()
 
     bulk_cache_load_hours = int(os.getenv("BULK_CACHE_LOAD_HOURS", "12"))
     bulk_cache_load_schedule, _ = IntervalSchedule.objects.get_or_create(
@@ -205,17 +229,20 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         period=IntervalSchedule.MINUTES,
     )
 
-    PeriodicTask.objects.update_or_create(
-        name="bulk-entity-cache-loader",
-        defaults={
-            "task": "warships.tasks.bulk_load_entity_caches_task",
-            "interval": bulk_cache_load_schedule,
-            "enabled": True,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({}),
-            "description": "Bulk-loads top player and clan detail payloads into Redis from DB. Single query, no API calls.",
-        },
-    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"bulk-entity-cache-loader-{realm}",
+            defaults={
+                "task": "warships.tasks.bulk_load_entity_caches_task",
+                "interval": bulk_cache_load_schedule,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Bulk-loads top player and clan detail payloads into Redis ({realm.upper()}).",
+            },
+        )
+
+    PeriodicTask.objects.filter(name="bulk-entity-cache-loader").delete()
 
     recently_viewed_warm_minutes = int(
         os.getenv("RECENTLY_VIEWED_WARM_MINUTES", "10"))
@@ -224,14 +251,17 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         period=IntervalSchedule.MINUTES,
     )
 
-    PeriodicTask.objects.update_or_create(
-        name="recently-viewed-player-warmer",
-        defaults={
-            "task": "warships.tasks.warm_recently_viewed_players_task",
-            "interval": recently_viewed_warm_schedule,
-            "enabled": True,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({}),
-            "description": "Re-caches recently-viewed players whose detail cache entry is missing. DB reads only, no API calls.",
-        },
-    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"recently-viewed-player-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_recently_viewed_players_task",
+                "interval": recently_viewed_warm_schedule,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Re-caches recently-viewed players whose detail cache entry is missing ({realm.upper()}).",
+            },
+        )
+
+    PeriodicTask.objects.filter(name="recently-viewed-player-warmer").delete()

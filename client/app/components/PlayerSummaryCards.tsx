@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 interface PlayerSummaryCardsProps {
     playerId: number;
@@ -22,6 +24,7 @@ const formatMetric = (value: number | null | undefined, formatter?: (input: numb
 };
 
 const PlayerSummaryCards: React.FC<PlayerSummaryCardsProps> = ({ playerId, isLoading = false }) => {
+    const { realm } = useRealm();
     const [summary, setSummary] = useState<PlayerSummaryData | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isSummaryLoading, setIsSummaryLoading] = useState(false);
@@ -34,7 +37,7 @@ const PlayerSummaryCards: React.FC<PlayerSummaryCardsProps> = ({ playerId, isLoa
             setError(null);
 
             try {
-                const response = await fetch(`/api/fetch/player_summary/${playerId}`);
+                const response = await fetch(withRealm(`/api/fetch/player_summary/${playerId}`, realm));
                 if (!response.ok) {
                     throw new Error(`Failed to load player summary for ${playerId}`);
                 }
@@ -65,7 +68,7 @@ const PlayerSummaryCards: React.FC<PlayerSummaryCardsProps> = ({ playerId, isLoa
         return () => {
             isMounted = false;
         };
-    }, [playerId]);
+    }, [playerId, realm]);
 
     const shouldGrayOut = isLoading || isSummaryLoading;
     const cards = [

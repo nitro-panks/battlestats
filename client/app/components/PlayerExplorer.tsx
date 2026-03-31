@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import HiddenAccountIcon from './HiddenAccountIcon';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 interface PlayerExplorerProps {
     onSelectMember: (memberName: string) => void;
@@ -57,6 +59,7 @@ const formatPercent = (value: number | null | undefined): string => {
 };
 
 const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
+    const { realm } = useRealm();
     const [query, setQuery] = useState('');
     const [hiddenFilter, setHiddenFilter] = useState<HiddenFilter>('visible');
     const [rankedFilter, setRankedFilter] = useState<RankedFilter>('all');
@@ -85,7 +88,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                     page: String(page),
                     page_size: String(PAGE_SIZE),
                 });
-                const response = await fetch(`/api/players/explorer?${params.toString()}`, {
+                const response = await fetch(withRealm(`/api/players/explorer?${params.toString()}`, realm), {
                     signal: controller.signal,
                 });
 
@@ -114,7 +117,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
             controller.abort();
             clearTimeout(timeoutId);
         };
-    }, [activityBucket, direction, hiddenFilter, page, query, rankedFilter, sort]);
+    }, [activityBucket, direction, hiddenFilter, page, query, realm, rankedFilter, sort]);
 
     const totalPages = data ? Math.max(1, Math.ceil(data.count / data.page_size)) : 1;
 

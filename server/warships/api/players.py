@@ -4,12 +4,12 @@ from typing import Dict, Optional
 from django.db.models.functions import Lower
 
 from warships.models import Player
-from warships.api.client import make_api_request
+from warships.api.client import DEFAULT_REALM, make_api_request
 
 logging.basicConfig(level=logging.INFO)
 
 
-def _fetch_snapshot_data(player_id: int, dates: str = '') -> Dict:
+def _fetch_snapshot_data(player_id: int, dates: str = '', realm: str = DEFAULT_REALM) -> Dict:
     """Fetch JSON data containing recent battle stats for a given player_id."""
     params = {
         "account_id": player_id,
@@ -17,23 +17,23 @@ def _fetch_snapshot_data(player_id: int, dates: str = '') -> Dict:
         "fields": "pvp.account_id,pvp.battles,pvp.wins,pvp.survived_battles,pvp.battle_type,pvp.date"
     }
     logging.info(f' ---> Remote fetching snapshot for player_id: {player_id}')
-    data = _make_api_request("account/statsbydate/", params)
+    data = _make_api_request("account/statsbydate/", params, realm=realm)
 
     return data.get(str(player_id), {}).get('pvp', {}) if data else {}
 
 
-def _fetch_player_personal_data(player_id: int) -> Dict:
+def _fetch_player_personal_data(player_id: int, realm: str = DEFAULT_REALM) -> Dict:
     """Fetch JSON data for a given player_id."""
     params = {
         "account_id": player_id
     }
     logging.info(
         f' ---> Remote fetching player personal (account) data for player_id: {player_id}')
-    data = _make_api_request("account/info/", params)
+    data = _make_api_request("account/info/", params, realm=realm)
     return data.get(str(player_id), {}) if data else {}
 
 
-def _fetch_ranked_account_info(player_id: int) -> Dict:
+def _fetch_ranked_account_info(player_id: int, realm: str = DEFAULT_REALM) -> Dict:
     """Fetch ranked battles account info (rank_info) for a player."""
     params = {
         "account_id": player_id,
@@ -41,21 +41,21 @@ def _fetch_ranked_account_info(player_id: int) -> Dict:
     }
     logging.info(
         f' ---> Remote fetching ranked account info for player_id: {player_id}')
-    data = _make_api_request("seasons/accountinfo/", params)
+    data = _make_api_request("seasons/accountinfo/", params, realm=realm)
     return data.get(str(player_id), {}) if data else {}
 
 
-def _fetch_ranked_seasons_info() -> Dict:
+def _fetch_ranked_seasons_info(realm: str = DEFAULT_REALM) -> Dict:
     """Fetch all ranked season metadata (names, dates)."""
     params = {
         "fields": "season_id,season_name,start_at,close_at"
     }
     logging.info(' ---> Remote fetching ranked seasons metadata')
-    data = _make_api_request("seasons/info/", params)
+    data = _make_api_request("seasons/info/", params, realm=realm)
     return data if data else {}
 
 
-def _fetch_player_achievements(player_id: int) -> Optional[Dict]:
+def _fetch_player_achievements(player_id: int, realm: str = DEFAULT_REALM) -> Optional[Dict]:
     """Fetch the raw achievements payload for a single player account."""
     params = {
         "account_id": player_id,
@@ -63,14 +63,14 @@ def _fetch_player_achievements(player_id: int) -> Optional[Dict]:
     }
     logging.info(
         f' ---> Remote fetching achievements data for player_id: {player_id}')
-    data = _make_api_request("account/achievements/", params)
+    data = _make_api_request("account/achievements/", params, realm=realm)
     if not isinstance(data, dict):
         return None
     payload = data.get(str(player_id))
     return payload if isinstance(payload, dict) else None
 
 
-def _fetch_player_id_by_name(player_name: str) -> Optional[str]:
+def _fetch_player_id_by_name(player_name: str, realm: str = DEFAULT_REALM) -> Optional[str]:
     """Return a player_id from local cache first, then WoWS API exact lookup."""
     normalized_name = player_name.strip()
     if not normalized_name or len(normalized_name) > 64:
@@ -78,6 +78,7 @@ def _fetch_player_id_by_name(player_name: str) -> Optional[str]:
 
     local_player = Player.objects.alias(name_lower=Lower("name")).filter(
         name_lower=normalized_name.casefold(),
+        realm=realm,
     ).first()
     if local_player:
         return str(local_player.player_id)
@@ -89,7 +90,7 @@ def _fetch_player_id_by_name(player_name: str) -> Optional[str]:
         "fields": "account_id,nickname"
     }
     logging.info(f' ---> Remote fetching player info for: {normalized_name}')
-    data = _make_api_request("account/list/", params)
+    data = _make_api_request("account/list/", params, realm=realm)
 
     if not data:
         return None
@@ -111,7 +112,7 @@ def _fetch_player_id_by_name(player_name: str) -> Optional[str]:
         return None
 
 
-def _make_api_request(endpoint: str, params: Dict) -> Optional[Dict]:
+def _make_api_request(endpoint: str, params: Dict, realm: str = DEFAULT_REALM) -> Optional[Dict]:
     """Helper function to make API requests and handle responses."""
-    data = make_api_request(endpoint, params)
+    data = make_api_request(endpoint, params, realm=realm)
     return data if isinstance(data, dict) or isinstance(data, list) else None

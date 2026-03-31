@@ -5,7 +5,7 @@ from datetime import datetime
 
 from django.db import transaction
 
-from warships.models import Player, PlayerAchievementStat, PlayerExplorerSummary, Snapshot
+from warships.models import DEFAULT_REALM, Player, PlayerAchievementStat, PlayerExplorerSummary, Snapshot
 
 
 log = logging.getLogger("players")
@@ -154,7 +154,7 @@ class BlockedAccountError(Exception):
         super().__init__(f"Account {player_id} is blocklisted and cannot be created")
 
 
-def get_or_create_canonical_player(player_id: int) -> tuple[Player, bool]:
+def get_or_create_canonical_player(player_id: int, realm: str = DEFAULT_REALM) -> tuple[Player, bool]:
     from warships.blocklist import is_account_blocked
 
     if is_account_blocked(player_id):
@@ -162,10 +162,10 @@ def get_or_create_canonical_player(player_id: int) -> tuple[Player, bool]:
 
     with transaction.atomic():
         matches = list(
-            Player.objects.select_for_update().filter(player_id=player_id).order_by("id")
+            Player.objects.select_for_update().filter(player_id=player_id, realm=realm).order_by("id")
         )
         if not matches:
-            return Player.objects.create(name="", player_id=player_id), True
+            return Player.objects.create(name="", player_id=player_id, realm=realm), True
 
         canonical = matches[0]
         duplicates = matches[1:]

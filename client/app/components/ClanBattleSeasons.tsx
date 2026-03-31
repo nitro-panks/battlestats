@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { useRealm } from '../context/RealmContext';
+import { withRealm } from '../lib/realmParams';
 
 interface ClanBattleSeason {
     season_id: number;
@@ -43,6 +45,7 @@ const selectColorByWR = (winRatio: number): string => {
 };
 
 const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCount }) => {
+    const { realm } = useRealm();
     const [seasons, setSeasons] = useState<ClanBattleSeason[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -65,7 +68,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
             }
 
             try {
-                const response = await fetch(`/api/fetch/clan_battle_seasons/${clanId}`);
+                const response = await fetch(withRealm(`/api/fetch/clan_battle_seasons/${clanId}`, realm));
                 if (!response.ok) {
                     throw new Error(`Failed to fetch clan battle seasons: ${response.status}`);
                 }
@@ -105,7 +108,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
                 clearTimeout(timeoutId);
             }
         };
-    }, [clanId]);
+    }, [clanId, realm]);
 
     const handleSort = (nextSortKey: SortKey) => {
         if (sortKey === nextSortKey) {
