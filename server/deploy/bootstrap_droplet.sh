@@ -31,6 +31,22 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y python3 python3-venv python3-pip redis-server rabbitmq-server rsync
 
+# Ensure a swap file exists as an OOM safety net.  Startup cache warmers can
+# transiently spike memory ~300 MB above steady-state; a small swap file
+# prevents hard SIGKILL during those short-lived spikes.
+if [[ ! -f /swapfile ]]; then
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  if ! grep -q '/swapfile' /etc/fstab; then
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  fi
+  echo "Created 2 GB swap file"
+elif ! swapon --show | grep -q '/swapfile'; then
+  swapon /swapfile 2>/dev/null || true
+fi
+
 if ! id -u "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --home "${APP_ROOT}" --shell /usr/sbin/nologin "${APP_USER}"
 fi
@@ -111,7 +127,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q default -c 4 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n default@%%h
+ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q default -c 2 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n default@%%h
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
@@ -133,7 +149,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q hydration -c 4 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n hydration@%%h
+ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q hydration -c 2 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n hydration@%%h
 Restart=always
 RestartSec=5
 TimeoutStartSec=120

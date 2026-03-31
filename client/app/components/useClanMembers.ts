@@ -60,16 +60,27 @@ const resolveHydrationPollDelay = (state: ClanMembersHydrationState): number => 
 
 export const useClanMembers = (clanId: number | null | undefined, enabled = true) => {
     const [members, setMembers] = useState<ClanMemberData[]>([]);
-    const [loading, setLoading] = useState(Boolean(clanId && enabled));
+    const [loading, setLoading] = useState(Boolean(clanId));
     const [error, setError] = useState('');
     const attemptsRef = useRef(0);
 
+    // When the clan changes, reset to loading state so the component never
+    // flashes "No clan members found." while waiting for the fetch gate.
     useEffect(() => {
-        if (!clanId || !enabled) {
+        if (clanId) {
+            setMembers([]);
+            setLoading(true);
+            setError('');
+        } else {
             setMembers([]);
             setLoading(false);
             setError('');
-            attemptsRef.current = 0;
+        }
+        attemptsRef.current = 0;
+    }, [clanId]);
+
+    useEffect(() => {
+        if (!clanId || !enabled) {
             return;
         }
 

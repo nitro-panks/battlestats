@@ -1,7 +1,7 @@
 # Runbook: Deploy OOM — Startup Cache Warmers Exhaust Memory
 
 **Created**: 2026-03-30
-**Status**: Diagnosed. Fixes proposed, not yet implemented.
+**Status**: Complete — all fixes implemented in v1.2.14.
 
 ## Incident
 
@@ -103,17 +103,19 @@ The full-table scans in `data.py` that build correlation payloads load large que
 
 ---
 
-## Recommended Priority
+## Implementation Status
 
-| Priority | Fix | Effort | Impact |
-|----------|-----|--------|--------|
-| 1 | Fix 2: Add swap | 5 min | Eliminates OOM kills |
-| 2 | Fix 1: Kill stale Next.js | 10 min | ~200 MB headroom |
-| 3 | Fix 4: Celery dispatch | 30 min | No extra subprocess |
-| 4 | Fix 3: Reduce concurrency | 15 min | ~450 MB headroom |
-| 5 | Fix 5: Stream scans | 1-2 hrs | Lower peak RSS |
+All fixes implemented in v1.2.14:
 
-Fixes 1-3 together should provide sufficient headroom. Fix 4 is the architecturally cleanest solution. Fix 5 is worthwhile but lower urgency.
+| Fix | Status | File(s) Changed |
+|-----|--------|-----------------|
+| Fix 1: Kill stale Next.js | Done | `client/deploy/deploy_to_droplet.sh` — `pkill -f 'next-server'` before restart |
+| Fix 2: Add swap | Done | `server/deploy/bootstrap_droplet.sh` — 2 GB swapfile created idempotently |
+| Fix 3: Reduce concurrency | Done | `server/deploy/bootstrap_droplet.sh` — default `-c 4`→`-c 2`, hydration `-c 4`→`-c 2` |
+| Fix 4: Celery dispatch | Done | `server/gunicorn.conf.py` — `apply_async` to background queue; `server/warships/tasks.py` — `startup_warm_caches_task` |
+| Fix 5: Stream scans | Already done | All correlation scans already use `.iterator(chunk_size=...)`. Distribution scans use DB-level aggregation. |
+
+**Additional bug fix**: `server/deploy/deploy_to_droplet.sh` was missing `battlestats-celery-hydration` in the `systemctl restart` list — hydration worker was not being restarted on deploy. Fixed.
 
 ---
 

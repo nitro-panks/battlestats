@@ -513,6 +513,39 @@ class LandingWarmupViewTests(TestCase):
             {'name': 'stale'}])
         self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
 
+    def test_player_cache_hit_still_updates_last_lookup_and_invalidates_recent(self):
+        """When the player detail cache is pre-populated, the cache-hit path
+        should still bump last_lookup and mark the recent-players cache dirty
+        so newly viewed players propagate to the landing page."""
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=954, name="CacheHitClan", members_count=1, last_fetch=now,
+        )
+        player = Player.objects.create(
+            name="CacheHitPlayer", player_id=9054, clan=clan,
+            last_fetch=now, last_lookup=None,
+        )
+
+        # Pre-populate the player detail cache so the retrieve path hits it
+        from warships.data import _bulk_cache_key_player
+        from warships.serializers import PlayerSerializer
+        serialized = PlayerSerializer(player).data
+        cache.set(_bulk_cache_key_player(player.player_id), serialized, 300)
+
+        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY, [{'name': 'stale'}], 60)
+
+        request_started_at = timezone.now()
+        response = self.client.get("/api/player/CacheHitPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get('X-Player-Cache'), 'hit')
+        # last_lookup should have been bumped even on cache hit
+        player.refresh_from_db()
+        self.assertIsNotNone(player.last_lookup)
+        self.assertGreaterEqual(player.last_lookup, request_started_at)
+        # Dirty flag should be set
+        self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
+
     def test_clan_members_lookup_updates_clan_last_lookup_timestamp(self):
         cache.clear()
         request_started_at = timezone.now()

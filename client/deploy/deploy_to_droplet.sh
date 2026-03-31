@@ -55,6 +55,12 @@ npm run build
 chown -R "${APP_USER}:${APP_USER}" "${REMOTE_RELEASE}"
 ln -sfn "${REMOTE_RELEASE}" "${APP_ROOT}/current"
 
+# Kill any stale Next.js processes from prior deploys before restarting.
+# The systemd unit restarts the service, but orphaned node processes from
+# previous releases can linger and waste 100-200 MB of RAM each.
+pkill -f 'next-server' 2>/dev/null || true
+sleep 1
+
 systemctl restart battlestats-client
 systemctl --no-pager --full status battlestats-client | sed -n '1,25p'
 

@@ -112,17 +112,18 @@ class PlayerViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.AllowAny]
 
     def retrieve(self, request, *args, **kwargs):
-        from warships.data import get_cached_player_detail, invalidate_player_detail_cache
+        from warships.data import get_cached_player_detail
 
         # Try bulk-loaded cache before hitting DB + serializer
         lookup_value = (self.kwargs.get(self.lookup_field) or '').strip()
         if lookup_value:
-            player = Player.objects.alias(name_lower=Lower("name")).filter(
+            player_id = Player.objects.alias(name_lower=Lower("name")).filter(
                 name_lower=lookup_value.casefold(),
             ).values_list('player_id', flat=True).first()
-            if player:
-                cached = get_cached_player_detail(player)
+            if player_id:
+                cached = get_cached_player_detail(player_id)
                 if cached is not None:
+                    self._record_player_view(player_id)
                     response = Response(cached)
                     response['X-Player-Cache'] = 'hit'
                     return response
@@ -130,6 +131,20 @@ class PlayerViewSet(viewsets.ModelViewSet):
         response = super().retrieve(request, *args, **kwargs)
         response['X-Player-Cache'] = 'miss'
         return response
+
+    def _record_player_view(self, player_id: int, update_last_lookup: bool = True) -> None:
+        """Mark recent-players cache dirty, push to recently-viewed list.
+
+        When ``update_last_lookup`` is True (cache-hit path), also bump the
+        ``last_lookup`` timestamp in the database.  The cache-miss path already
+        saves ``last_lookup`` on the model instance, so it passes False.
+        """
+        from warships.data import push_recently_viewed_player
+
+        if update_last_lookup:
+            Player.objects.filter(player_id=player_id).update(last_lookup=timezone.now())
+        invalidate_landing_recent_player_cache()
+        push_recently_viewed_player(player_id)
 
     def get_object(self):
         lookup_field_value = self.kwargs[self.lookup_field]
@@ -192,10 +207,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 update_fields.append("verdict")
 
         obj.save(update_fields=update_fields)
-        invalidate_landing_recent_player_cache()
-
-        from warships.data import push_recently_viewed_player
-        push_recently_viewed_player(obj.player_id)
+        self._record_player_view(obj.player_id, update_last_lookup=False)
 
         if not obj.is_hidden and _explorer_summary_needs_refresh(obj):
             refresh_player_explorer_summary(obj)

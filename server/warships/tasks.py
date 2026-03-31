@@ -930,3 +930,18 @@ def incremental_ranked_data_task(self):
         return {"status": "completed"}
     finally:
         cache.delete(RANKED_INCREMENTAL_LOCK_KEY)
+
+
+@app.task(
+    queue='background',
+    time_limit=600,
+    soft_time_limit=540,
+    ignore_result=True,
+)
+def startup_warm_caches_task():
+    """Run all startup cache warmers as a Celery task instead of a subprocess.
+
+    Dispatched by gunicorn's when_ready hook so the warm runs inside an existing
+    background worker rather than spawning a new Python process (~170-500 MB).
+    """
+    call_command('startup_warm_all_caches', '--delay', '0')

@@ -116,14 +116,14 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Bulk entity cache loader**: Periodic task (every 12h) pre-loads top 50 players + members of 25 best-scored clans + top 25 clans into Redis. Uses `score_best_clans()` composite ranking (WR 30%, activity 25%, member score 20%, CB recency 15%, volume 10%). See `runbook-best-clan-eligibility.md`.
 - **Landing page warmer**: Periodic task (every 55 min) refreshes all landing payloads + population distributions + population correlations; Best clan mode also uses `score_best_clans()`
 - **Distribution & correlation warming**: Proactive warming of player population distributions (WR, battles, avg tier) and correlations (tier-type, ranked WR-battles, WR-survival) every 55 min via the landing page task and on startup. TTL is 2 hours. Eliminates cold-cache penalty (10-30s full table scans).
-- **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) spawns a daemon thread that runs `startup_warm_all_caches` management command — sequentially warms landing page, hot entities, bulk cache, distributions, and correlations. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `runbook-startup-cache-warming.md`.
+- **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) dispatches `startup_warm_caches_task` to the Celery background queue — sequentially warms landing page, hot entities, bulk cache, distributions, and correlations. Runs inside an existing worker rather than spawning a subprocess. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `runbook-deploy-oom-startup-warmers.md`.
 - **Player search suggestions**: Three-tier cache — client-side `Map` (instant, session-scoped, 200-entry cap) → Redis (10 min TTL, `suggest:<query>` keys) → Postgres with `pg_trgm` GIN index (`player_name_trgm_idx`). Minimum 3-character query. Raw `ILIKE` in `views.py` (Django's `icontains` generates `UPPER()` which bypasses trigram indexes).
 - Redis-backed in production, LocMemCache in tests
 
 ### Celery queue architecture
 Three queues with dedicated workers:
-- **default** (`-c 4`) — API-triggered tasks, general work
-- **hydration** (`-c 4`) — Player ranked/efficiency data hydration (capped to prevent flooding). Tasks: `update_ranked_data_task`, `update_player_efficiency_data_task`
+- **default** (`-c 2`) — API-triggered tasks, general work
+- **hydration** (`-c 2`) — Player ranked/efficiency data hydration (capped to prevent flooding). Tasks: `update_ranked_data_task`, `update_player_efficiency_data_task`
 - **background** — Long-running crawls, warmers, incremental refreshes (all periodic tasks)
 
 ### Nginx / HTTP
