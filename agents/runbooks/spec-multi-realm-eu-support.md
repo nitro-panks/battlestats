@@ -97,7 +97,7 @@ EU has **1.8x the clans** of NA (62,722 vs 35,314). Assuming proportional player
 |---|---|---|
 | **Disk** | No concern | DB is managed (off-droplet). Local disk only stores code + Redis dump + logs. |
 | **RAM** | Tight but OK | 3.8 GB total with ~1.1 GB free. EU adds modestly larger query working sets. The OOM fixes from v1.2.14 (reduced Celery concurrency, Celery task dispatch instead of subprocess) help. Swap should be configured as a safety net (2 GB swapfile was added in v1.2.14 bootstrap but not currently active — verify). |
-| **Managed DB storage** | **Check plan limit** | Current DB is 1.5 GB; EU pushes it to ~4.3 GB. DigitalOcean managed Postgres plans have storage limits (1 GB basic, 10 GB standard, etc.). **Must verify the current plan supports ≥5 GB before running the EU crawl.** If on a 1 GB plan, an upgrade is required. |
+| **Managed DB storage** | No concern | Current DB is 1.5 GB; EU pushes it to ~4.3 GB. Managed Postgres plan has **40 GB storage** (2 GB RAM, 1 vCPU, Standard edition) — 11% utilization after EU. Plenty of headroom. |
 | **DB connections** | OK | `max_connections=50`, current usage is well under. EU doubles the query surface but not concurrent connections. |
 | **DB query performance** | Monitor | Population distributions and correlations do full table scans with elevated `work_mem` (8 MB). With ~776K players, these scans take longer. The realm filter will help — each realm scans only its own rows. Add a composite index on `(realm, pvp_battles, pvp_ratio)` etc. |
 | **Redis** | No concern | 17.6 MB → ~36 MB. Redis can handle this trivially. |
@@ -106,7 +106,7 @@ EU has **1.8x the clans** of NA (62,722 vs 35,314). Assuming proportional player
 
 ### Action items before EU launch
 
-1. **Verify managed DB plan storage limit** — if < 5 GB, upgrade before running EU crawl
+1. ~~**Verify managed DB plan storage limit**~~ — **Confirmed OK**: 40 GB plan, ~4.3 GB projected usage (11%)
 2. **Verify swap is active** on the droplet (`swapon --show` returned empty — the 2 GB swapfile from v1.2.14 may not have persisted across a reboot)
 3. **Add realm-composite indexes** in the migration to keep query performance constant as population doubles
 
