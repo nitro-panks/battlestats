@@ -45,6 +45,9 @@ if [[ ! -f /swapfile ]]; then
   echo "Created 2 GB swap file"
 elif ! swapon --show | grep -q '/swapfile'; then
   swapon /swapfile 2>/dev/null || true
+  if ! grep -q '/swapfile' /etc/fstab; then
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  fi
 fi
 
 if ! id -u "${APP_USER}" >/dev/null 2>&1; then

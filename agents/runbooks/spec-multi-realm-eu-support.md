@@ -102,12 +102,12 @@ EU has **1.8x the clans** of NA (62,722 vs 35,314). Assuming proportional player
 | **DB query performance** | Monitor | Population distributions and correlations do full table scans with elevated `work_mem` (8 MB). With ~776K players, these scans take longer. The realm filter will help — each realm scans only its own rows. Add a composite index on `(realm, pvp_battles, pvp_ratio)` etc. |
 | **Redis** | No concern | 17.6 MB → ~36 MB. Redis can handle this trivially. |
 | **WG API bandwidth** | No concern | Rate limits are per-endpoint. EU crawl adds ~2,500 API calls (same as NA). Parallel execution is safe. |
-| **Initial crawl time** | Plan for it | EU first crawl: ~500K players at 100/batch = ~5,000 batches × ~0.5s = ~40 minutes for player data, plus clan fetching. Total: 1-2 hours. Run during off-peak. |
+| **Initial crawl time** | Plan for it | The full crawl makes 3+ API calls per player (account/info batched + per-player efficiency + achievements). Core data only (Stage 1): ~12 hours at 0.1s delay. Full enrichment (Stage 2): days, run as background trickle. See Phase 6a for phased strategy. |
 
 ### Action items before EU launch
 
 1. ~~**Verify managed DB plan storage limit**~~ — **Confirmed OK**: 40 GB plan, ~4.3 GB projected usage (11%)
-2. **Verify swap is active** on the droplet (`swapon --show` returned empty — the 2 GB swapfile from v1.2.14 may not have persisted across a reboot)
+2. ~~**Verify swap is active**~~ — **Fixed 2026-03-31**: Swap was inactive (fstab entry missing). Activated 2 GB swapfile and added fstab entry. Also fixed `bootstrap_droplet.sh` to persist fstab entry in the `elif` branch.
 3. **Add realm-composite indexes** in the migration to keep query performance constant as population doubles
 
 ---
@@ -325,11 +325,40 @@ PeriodicTask.objects.update_or_create(
     })
 ```
 
-Stagger EU crawl schedules to avoid overlapping WG API load with NA.
+Since rate limits are per-realm-endpoint (verified), NA and EU schedules can run at the same time without staggering.
 
 #### 4c. Rate limiting
 
 **Verified**: WG rate limits are **per-realm-endpoint**, not per-APP_ID globally. Tested 40 concurrent requests (20 NA + 20 EU) with zero 429s or throttling. NA and EU crawls can safely run in parallel without coordination or staggering.
+
+#### 4d. Lock keys must be realm-scoped
+
+All task lock keys must include realm to allow per-realm parallel execution:
+
+```python
+# Before: one global lock blocks all realms
+CLAN_CRAWL_LOCK_KEY = 'warships:tasks:crawl_all_clans:lock'
+
+# After: per-realm locks allow parallel crawls
+CLAN_CRAWL_LOCK_KEY = f'warships:tasks:crawl_all_clans:{realm}:lock'
+```
+
+Apply to all lock keys in tasks.py: `CLAN_CRAWL_LOCK_KEY`, `RANKED_INCREMENTAL_LOCK_KEY`, `PLAYER_REFRESH_LOCK_KEY`, `LANDING_PAGE_WARM_LOCK_KEY`, `HOT_ENTITY_CACHE_WARM_LOCK_KEY`, `LANDING_BEST_ENTITY_WARM_LOCK_KEY`, `BULK_CACHE_LOAD_LOCK_KEY`, `RECENTLY_VIEWED_WARM_LOCK_KEY`.
+
+Dispatch/cooldown keys that include a player_id or clan_id do NOT need realm prefix — the entity-specific key already prevents collisions (player_ids don't collide across realms since they resolve to different Player rows via the realm-scoped lookup).
+
+#### 4e. Player-specific tasks: realm derivation
+
+Tasks dispatched for a specific player (`update_ranked_data_task`, `update_player_efficiency_data_task`, `update_player_clan_battle_data_task`) receive a `player_id`. They must also accept a `realm` parameter to resolve the correct Player object:
+
+```python
+@app.task(...)
+def update_ranked_data_task(self, player_id, realm='na'):
+    player = Player.objects.get(player_id=player_id, realm=realm)
+    ...
+```
+
+All call sites that dispatch these tasks must pass `realm`.
 
 ---
 
@@ -451,37 +480,81 @@ When user switches realm:
 
 ### Phase 6: Initial EU Data Population
 
-#### 6a. EU clan crawl
+**This phase is the most time-intensive.** The clan crawl is not just `account/info` batches — `save_player()` calls `update_player_efficiency_data()` and `update_achievements_data()` per non-hidden player, each making 1+ WG API calls. For ~500K EU players, the naive full crawl would make **1.5M+ API calls** and take days.
 
-Run the first EU crawl manually or via a one-time task:
+#### 6a. Phased EU population strategy
 
-```bash
-python manage.py run_clan_crawl --realm eu
-```
+Split the initial load into stages to get EU live faster:
 
-Or trigger via Celery:
+**Stage 1: Core player data only (fast — ~2 hours)**
+
+Create a `backfill_eu_core_data` management command (or add a `--core-only` flag to the crawl) that:
+1. Paginates `clans/list/` on the EU endpoint to collect all clan IDs (~62K clans)
+2. For each clan: fetch `clans/info/` (save Clan row) + fetch member IDs
+3. Batch-fetch `account/info/` for all members (100 per request)
+4. Save Player rows with core fields (battles, WR, KDR, etc.) + realm='eu'
+5. Skip efficiency badges and achievements (these are the expensive per-player API calls)
+
+This gives us a working EU landing page, search, player profiles (without efficiency/achievement data), and population stats.
+
+**Estimated time**: 62,722 clans × (1 clan_info call + 1 member_ids call + ~5 account_info batches) ≈ ~440K API calls at 0.25s = ~30 hours. Can be accelerated by reducing rate delay to 0.1s for the initial bulk load (per-endpoint rate limit is 10/s, and batches of 100 players keep us well under).
+
+With 0.1s delay: ~12 hours. Run overnight or across a weekend.
+
+**Stage 2: Efficiency + achievements (slow, background — days)**
+
+After Stage 1, schedule a background task to backfill efficiency badges and achievements for EU players. This can trickle in over several days:
 
 ```python
-crawl_all_clans_task.apply_async(kwargs={'realm': 'eu'})
+# New management command: backfill_eu_enrichment --realm eu --batch-size 500
+# Iterates EU players missing efficiency_json, calls per-player WG APIs
+# Rate-limited, resumable with checkpoint file
 ```
 
-The first EU crawl will be slow (~hours) as it indexes the full EU population. Subsequent crawls are incremental.
+Or rely on the normal crawl schedule — subsequent daily crawls will fill these in over time as they process EU clans.
 
-#### 6b. EU cache warming
+**Stage 3: Cache warming + rankings**
 
-After initial crawl, trigger cache warming for EU:
+After Stage 1 has enough data:
 
 ```bash
 python manage.py startup_warm_all_caches --realm eu
 ```
 
-#### 6c. EU efficiency rankings
+This warms:
+- Landing page payloads (best/random/sigma/popular/recent)
+- Population distributions and correlations
+- Hot entity caches
 
-Run efficiency rank computation for EU separately:
+**Stage 4: Efficiency rank computation**
+
+After Stage 2 has sufficient efficiency data (or after first full crawl cycle):
 
 ```python
 queue_efficiency_rank_snapshot_refresh(realm='eu')
 ```
+
+#### 6b. Monitoring the initial load
+
+Track progress via:
+```bash
+# Player count
+python manage.py shell -c "from warships.models import Player; print(Player.objects.filter(realm='eu').count())"
+
+# Clan count
+python manage.py shell -c "from warships.models import Clan; print(Clan.objects.filter(realm='eu').count())"
+
+# Efficiency coverage
+python manage.py shell -c "from warships.models import Player; total=Player.objects.filter(realm='eu',is_hidden=False,pvp_battles__gt=0).count(); filled=Player.objects.filter(realm='eu',is_hidden=False,pvp_battles__gt=0,efficiency_json__isnull=False).count(); print(f'{filled}/{total} ({filled*100//max(total,1)}%)')"
+```
+
+#### 6c. Subsequent crawl cadence
+
+After the initial load, the normal crawl schedule handles EU. The existing `crawl_all_clans_task` runs per-realm on its Celery Beat schedule. Each subsequent crawl only updates players whose data has changed (staleness checks in `update_player_efficiency_data` and `update_achievements_data` skip recently-refreshed players).
+
+**NA crawl runtime** (observed): The NA crawl frequently fails to complete within the 6-hour task time limit (35K clans, ~276K players, 3+ API calls per non-hidden player). **This is a pre-existing issue** — it will be worse for EU (1.8x population). The incremental player refresh strategy from `spec-production-data-refresh-strategy.md` would solve this for both realms. Consider implementing it alongside or shortly after the EU launch.
+
+**Interim mitigation**: For the daily crawl, consider skipping efficiency/achievement updates for players refreshed within the last 7 days. This dramatically reduces API calls per crawl cycle.
 
 ---
 
@@ -494,7 +567,7 @@ queue_efficiency_rank_snapshot_refresh(realm='eu')
 | **3** | Backend realm-scoped queries + cache keys | **High** — largest surface area, risk of missed filters | Phase 1 |
 | **4** | Celery tasks + schedules per-realm | Medium — scheduling complexity | Phases 2–3 |
 | **5** | Frontend realm context + selector + API integration | Medium — many fetch call sites | Phases 2–3 |
-| **6** | Initial EU data population | Low — one-time crawl | Phases 1–4 |
+| **6** | Initial EU data population | Medium — long-running, multi-stage | Phases 1–4 |
 
 ### Recommended vertical slices
 
@@ -542,18 +615,21 @@ To keep PRs reviewable:
 
 | File | Change |
 |------|--------|
-| `server/warships/models.py` | Add `realm` to Player, Clan; composite constraints (DeletedAccount stays realm-agnostic) |
+| `server/warships/models.py` | Add `realm` to Player, Clan; composite constraints; update `MvPlayerDistributionStats` |
 | `server/warships/api/client.py` | Realm-aware `make_api_request()` with `REALM_BASE_URLS` |
-| `server/warships/api/players.py` | All functions accept `realm`, filter local queries |
+| `server/warships/api/players.py` | All functions accept `realm`, filter local queries by realm |
+| `server/warships/api/ships.py` | All fetch functions pass realm to `make_api_request()` |
 | `server/warships/clan_crawl.py` | Replace hardcoded `BASE_URL`, propagate realm through all functions |
-| `server/warships/views.py` | `_get_realm(request)` helper; all views filter by realm |
-| `server/warships/data.py` | All Player/Clan queries filtered by realm; cache keys prefixed |
-| `server/warships/landing.py` | All landing payloads realm-scoped |
-| `server/warships/tasks.py` | All population-level tasks accept `realm` |
+| `server/warships/views.py` | `_get_realm(request)` helper; all views filter by realm; raw SQL in suggestions adds `WHERE realm = %s` |
+| `server/warships/data.py` | ~60 ORM queries add realm filter; ~13 cache key patterns add realm prefix |
+| `server/warships/landing.py` | All landing payloads realm-scoped; ~28 cache key patterns add realm prefix |
+| `server/warships/tasks.py` | All population-level tasks accept `realm`; 8 lock keys add realm prefix; player-specific tasks accept realm |
 | `server/warships/signals.py` | Duplicate schedules per realm (can run in parallel — rate limits are per-endpoint) |
-| `server/warships/player_records.py` | `get_or_create_canonical_player()` accepts realm |
+| `server/warships/player_records.py` | `get_or_create_canonical_player()` accepts realm; dedup scoped to `(player_id, realm)` |
 | `server/warships/blocklist.py` | No change — blocklist stays realm-agnostic (GDPR compliance) |
-| `server/warships/migrations/` | New migration for realm fields + constraints |
+| `server/warships/migrations/` | New migration: realm fields, composite constraints, recreate materialized view with realm |
+| `server/warships/management/commands/backfill_player_kdr.py` | Accept `--realm` flag |
+| `server/warships/management/commands/startup_warm_all_caches.py` | Accept `--realm` flag or warm all realms |
 
 ### Frontend — must touch
 
@@ -561,12 +637,16 @@ To keep PRs reviewable:
 |------|--------|
 | `client/app/context/RealmContext.tsx` | New — realm context + provider + hook |
 | `client/app/components/RealmSelector.tsx` | New — dropdown component |
-| `client/app/layout.tsx` | Add RealmProvider, add RealmSelector to header |
-| `client/app/components/HeaderSearch.tsx` | Use `useRealm()`, pass realm to API, scope suggestion cache |
+| `client/app/layout.tsx` | Add RealmProvider, add RealmSelector to header, FOUC script |
+| `client/app/components/HeaderSearch.tsx` | Use `useRealm()`, pass realm to API, scope suggestion cache by realm |
+| `client/app/components/useClanMembers.ts` | Pass realm to fetch URL |
+| `client/app/components/PlayerSummaryCards.tsx` | Pass realm to fetch URL |
+| `client/app/components/ClanBattleSeasons.tsx` | Pass realm to fetch URL |
+| `client/app/components/ClanActivityHistogram.tsx` | Pass realm to fetch URL |
 | `client/app/lib/realmParams.ts` | New — `withRealm()` URL helper |
 | `client/app/lib/entityRoutes.ts` | No change needed (URLs stay realm-agnostic) |
 | `client/app/lib/sharedJsonFetch.ts` | Cache keys scoped by realm |
-| All components making fetch calls | Add `realm` to API URLs |
+| All SVG chart components (`TierSVG`, `TypeSVG`, `ActivitySVG`, `RandomsSVG`, `RankedSVG`, etc.) | Pass realm to data fetch URLs |
 
 ### Documentation
 
@@ -588,3 +668,105 @@ To keep PRs reviewable:
 4. **EU population size**: **1.8x NA**. EU has 62,722 clans vs NA's 35,314. Initial EU crawl will take proportionally longer (~1.8x). Estimate ~450K EU players vs ~260K NA. Verify droplet disk/memory before running (current DB is ~2GB; EU will roughly double it).
 
 5. **Realm in shared links**: **Deferred** — post-launch enhancement. Add optional `?realm=eu` on player/clan page URLs for link sharing. Low priority since the realm dropdown is prominent.
+
+---
+
+## QA Audit (2026-03-31)
+
+Comprehensive code audit to validate completeness of the spec.
+
+### Cache key inventory (must all get realm prefix)
+
+**data.py** — 13 key patterns:
+`players:distribution:v2:{metric}`, `players:correlation:v2:{metric}`, `players:correlation:v2:{metric}:published`, `clan_battles:summary:v2:{clan_id}`, `ranked:seasons:metadata`, `clan_battles:seasons:metadata`, `clan_battles:player:{account_id}`, `clan:plot:v1:{clan_id}:{filter_type}`, `clan:members:{clan_id}`, `recently_viewed:players:v1`, `bulk:player:{player_id}`, `bulk:clan:{clan_id}`, `landing:activity_attrition:v1`
+
+**landing.py** — 28 key patterns:
+- Cache keys: `landing:clans:v4`, `landing:clans:best:v1`, `landing:recent_clans:last_lookup:v2`, `landing:recent_players:last_lookup:v6`, `landing:players:v12:namespace`, `landing:players:v12:n{ns}:{mode}:{limit}` (+ `:published` and `:meta` variants for each)
+- Dirty flags: `landing:clans:dirty:v1`, `landing:players:dirty:v1`, `landing:recent_clans:dirty:v1`, `landing:recent_players:dirty:v1`, `landing:recent_players:invalidate_cooldown`
+- Queue keys: `landing:queue:players:random:{v1,eligible,lock}`, `landing:queue:clans:random:{v1,eligible,lock,preview}`
+
+**views.py** — 3 key patterns:
+`player:lookup:missing:v1:{name}`, `players:explorer:response:v1:{digest}`, `suggest:{query}`
+
+**tasks.py** — 8 lock keys + 10 dispatch keys + 5 cooldown keys + 1 heartbeat key.
+Lock keys need realm prefix (see Phase 4d). Dispatch/cooldown keys are entity-specific and don't need realm prefix.
+
+**Total: ~55 cache key patterns need realm prefix.**
+
+### ORM query inventory (must all get realm filter)
+
+**data.py**: ~60 Player/Clan ORM queries with no realm filter. Critical examples:
+- 15+ `Player.objects.get(player_id=...)` calls — all must add `realm=realm`
+- Population scans in distribution/correlation functions
+- `score_best_clans()` aggregation queries
+- Bulk cache loaders that iterate all players/clans
+
+**landing.py**: All landing payload queries filter Player/Clan without realm.
+
+**views.py**: `PlayerViewSet.get_object()`, `player_name_suggestions()` (raw SQL), explorer endpoint.
+
+**player_records.py**: `get_or_create_canonical_player()` — must accept and filter by realm. The deduplication logic (select_for_update + merge duplicates) must scope to `(player_id, realm)`.
+
+### Materialized view
+
+`mv_player_distribution_stats` (created in migration `0034`) must be recreated with a `realm` column:
+
+```sql
+CREATE MATERIALIZED VIEW mv_player_distribution_stats AS
+SELECT id, realm, pvp_ratio, pvp_survival_rate, pvp_battles, is_hidden
+FROM warships_player
+WHERE is_hidden = FALSE AND pvp_battles >= 100;
+```
+
+Add index on `(realm, pvp_ratio)` etc. The `MvPlayerDistributionStats` unmanaged model in `models.py` must also gain a `realm` field.
+
+The `REFRESH MATERIALIZED VIEW CONCURRENTLY` call in data.py remains unchanged — it refreshes the entire view. Distribution queries against the view must add `WHERE realm = %s`.
+
+### Frontend API endpoint inventory (must all pass `?realm=`)
+
+15 unique endpoints called from the client:
+
+| Endpoint | Component |
+|---|---|
+| `/api/landing/player-suggestions?q=` | HeaderSearch.tsx |
+| `/api/landing/warm-best/` | PlayerSearch.tsx |
+| `/api/landing/clans/?mode=&limit=` | PlayerSearch.tsx |
+| `/api/landing/players/?mode=&limit=` | PlayerSearch.tsx |
+| `/api/players/explorer?...` | PlayerExplorer.tsx |
+| `/api/player/{name}/` | PlayerRouteView (via sharedJsonFetch) |
+| `/api/clan/{clanId}` | ClanRouteView.tsx |
+| `/api/fetch/clan_members/{clanId}` | useClanMembers.ts |
+| `/api/fetch/player_summary/{playerId}` | PlayerSummaryCards.tsx |
+| `/api/fetch/clan_battle_seasons/{clanId}` | ClanBattleSeasons.tsx |
+| `/api/fetch/tier_data/{playerId}/` | TierSVG (via fetchSharedJson) |
+| `/api/fetch/activity_data/{playerId}/` | ActivitySVG (via fetchSharedJson) |
+| `/api/fetch/type_data/{playerId}/` | TypeSVG (via fetchSharedJson) |
+| `/api/fetch/randoms_data/{playerId}/` | RandomsSVG (via fetchSharedJson) |
+| `/api/fetch/ranked_data/{playerId}/` | RankedSVG (via fetchSharedJson) |
+
+Also: `/api/sitemap-entities/` (may need realm), `/api/agentic/traces` (no realm needed), visit analytics POST (no realm needed).
+
+### Additional files identified during audit
+
+| File | Change needed |
+|---|---|
+| `server/warships/api/ships.py` | `_fetch_efficiency_badges_for_player()`, `_fetch_ship_stats_for_player()`, `_fetch_ranked_ship_stats_for_player()` — all call `make_api_request()` and must pass realm |
+| `server/warships/management/commands/backfill_player_kdr.py` | Must accept `--realm` flag, filter queryset by realm, pass realm to API calls |
+| `server/warships/management/commands/purge_deleted_accounts.py` | No change needed (blocklist is realm-agnostic) |
+| `server/warships/management/commands/startup_warm_all_caches.py` | Must accept `--realm` flag or warm all realms |
+| `client/app/components/useClanMembers.ts` | Must pass realm to fetch URL |
+| `client/app/components/PlayerSummaryCards.tsx` | Must pass realm to fetch URL |
+| `client/app/components/ClanBattleSeasons.tsx` | Must pass realm to fetch URL |
+| `client/app/components/ClanActivityHistogram.tsx` | Fetches clan_members — must pass realm |
+| All SVG chart components | Fetch data via URLs that need realm param |
+
+### Crawl timing reality check
+
+The current NA crawl (`crawl_all_clans_task`) makes 3+ WG API calls per non-hidden player:
+1. `account/info/` (batched, 100/request) — via `fetch_players_bulk()`
+2. `ships/stats/` (per player) — via `update_player_efficiency_data()` → `_fetch_efficiency_badges_for_player()`
+3. `account/achievements/` (per player) — via `update_achievements_data()` → `_fetch_player_achievements()`
+
+For NA (~276K players), this is ~800K+ API calls. With 0.25s delay, that's ~55+ hours — well beyond the 6-hour task time limit. **The NA crawl is already not completing in a single run** (logs show repeated restarts with `resume=True`). It relies on the `resume` flag to make incremental progress across multiple cycles.
+
+EU (1.8x population) will be even slower. The phased population strategy in Phase 6a addresses this for initial load. For ongoing refresh, the incremental player refresh strategy (`spec-production-data-refresh-strategy.md`) is the long-term fix for both realms.
