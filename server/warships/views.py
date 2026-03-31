@@ -124,6 +124,16 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 cached = get_cached_player_detail(player_id)
                 if cached is not None:
                     self._record_player_view(player_id)
+                    if (
+                        cached.get('actual_kdr') is None
+                        and not cached.get('is_hidden')
+                        and (cached.get('pvp_battles') or 0) > 0
+                    ):
+                        _delay_task_safely(
+                            update_player_data_task,
+                            player_id=player_id,
+                            force_refresh=True,
+                        )
                     response = Response(cached)
                     response['X-Player-Cache'] = 'hit'
                     return response
@@ -187,6 +197,13 @@ class PlayerViewSet(viewsets.ModelViewSet):
             obj.actual_kdr is not None and
             (obj.pvp_battles or 0) > 0
         )
+        # Detect players ingested by the clan crawl before it populated
+        # pvp_frags / pvp_survived_battles / actual_kdr.
+        needs_kdr_backfill = (
+            not obj.is_hidden and
+            obj.actual_kdr is None and
+            (obj.pvp_battles or 0) > 0
+        )
 
         self.check_object_permissions(self.request, obj)
 
@@ -222,7 +239,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 player_id=obj.player_id,
                 force_refresh=True,
             )
-        elif needs_efficiency_refresh:
+        elif needs_kdr_backfill or needs_efficiency_refresh:
             _delay_task_safely(
                 update_player_data_task,
                 player_id=obj.player_id,

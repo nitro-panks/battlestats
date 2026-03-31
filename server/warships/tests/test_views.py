@@ -139,6 +139,10 @@ class PlayerViewSetTests(TestCase):
             clan=clan,
             last_fetch=now,
             pvp_battles=40,
+            pvp_frags=30,
+            pvp_survived_battles=16,
+            pvp_deaths=24,
+            actual_kdr=1.25,
             pvp_ratio=55.0,
             pvp_survival_rate=40.0,
             battles_json=[{
@@ -874,8 +878,13 @@ class LandingWarmupViewTests(TestCase):
             clan=clan,
             last_fetch=now,
             pvp_battles=1000,
+            pvp_frags=800,
+            pvp_survived_battles=350,
+            pvp_deaths=650,
+            actual_kdr=1.23,
             pvp_ratio=50.0,
             pvp_survival_rate=35.0,
+            efficiency_json=[],
             verdict=None,
         )
 

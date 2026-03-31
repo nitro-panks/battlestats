@@ -180,13 +180,21 @@ def save_player(player_data: Dict, clan: Clan) -> None:
         player.pvp_battles = pvp.get("battles", 0)
         player.pvp_wins = pvp.get("wins", 0)
         player.pvp_losses = pvp.get("losses", 0)
+        player.pvp_frags = pvp.get("frags", 0)
+        player.pvp_survived_battles = pvp.get("survived_battles", 0)
         if player.pvp_battles > 0:
             player.pvp_ratio = round(
                 player.pvp_wins / player.pvp_battles * 100, 2)
         player.pvp_survival_rate = (
-            round(pvp.get("survived_battles", 0) / pvp["battles"] * 100, 2)
-            if pvp.get("battles")
+            round(player.pvp_survived_battles / player.pvp_battles * 100, 2)
+            if player.pvp_battles
             else None
+        )
+        from warships.data import _calculate_actual_kdr
+        player.pvp_deaths, player.actual_kdr = _calculate_actual_kdr(
+            player.pvp_battles,
+            player.pvp_frags,
+            player.pvp_survived_battles,
         )
         player.verdict = compute_player_verdict(
             pvp_battles=player.pvp_battles,
