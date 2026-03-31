@@ -55,7 +55,7 @@ if [ ! -f /etc/battlestats-client.env ]; then
   cat > /etc/battlestats-client.env <<EOF
 BATTLESTATS_API_ORIGIN=${API_ORIGIN}
 BATTLESTATS_APP_ORIGIN=${APP_ORIGIN}
-# NEXT_PUBLIC_GA_MEASUREMENT_ID=
+NEXT_PUBLIC_GA_MEASUREMENT_ID=G-Z4GN5CHTY5
 EOF
 fi
 

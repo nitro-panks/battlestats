@@ -49,6 +49,12 @@ ssh "${DEPLOY_USER}@${HOST}" \
 set -euo pipefail
 
 cd "${REMOTE_RELEASE}/client"
+
+# Source env so NEXT_PUBLIC_* vars are available at build time
+set -a
+. /etc/battlestats-client.env
+set +a
+
 npm ci
 npm run build
 

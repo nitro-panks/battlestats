@@ -140,6 +140,12 @@ Player detail pages coordinate chart rendering vs hydration polling:
 - **`CONN_HEALTH_CHECKS`**: Enabled — Django validates connections before use, preventing stale-connection errors with managed Postgres
 - **Elevated `work_mem`**: Analytical queries (distribution bins, tier-type/ranked/survival correlations) use `SET LOCAL work_mem` within `transaction.atomic()` to get 8MB (configurable via `ANALYTICAL_WORK_MEM`) instead of the default 2MB. This improves sort/hash performance for full table scans over ~194K players.
 
+### SEO
+- **Dynamic metadata**: Player and clan pages export `generateMetadata()` with per-page title, description, OG tags, Twitter cards, and canonical URLs
+- **Dynamic sitemap**: `app/sitemap.ts` fetches recently-visited entities from `/api/sitemap-entities/` (hourly revalidation). Backend endpoint queries `EntityVisitDaily` for players/clans with ≥2 deduped views in last 30 days
+- **Structured data**: Homepage includes `WebSite` + `SearchAction` JSON-LD for Google sitelinks search box
+- **Google Analytics**: GA4 measurement ID configured via `NEXT_PUBLIC_GA_MEASUREMENT_ID` env var (build-time). Deploy script sources `/etc/battlestats-client.env` before `npm run build`
+
 ### Data models (server/warships/models.py)
 Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat.
 

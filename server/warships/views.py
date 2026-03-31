@@ -14,7 +14,7 @@ from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django.utils import timezone
-from warships.models import Player, Clan, Ship
+from warships.models import Player, Clan, Ship, EntityVisitDaily
 from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
@@ -856,6 +856,41 @@ def landing_best_warmup(request) -> Response:
     status_code = status.HTTP_202_ACCEPTED if result.get(
         'status') == 'queued' else status.HTTP_200_OK
     return Response(result, status=status_code)
+
+
+@api_view(["GET"])
+def sitemap_entities(request) -> Response:
+    """Return recently-visited players and clans for sitemap generation."""
+    cutoff = (timezone.now() - timedelta(days=30)).date()
+
+    player_visits = (
+        EntityVisitDaily.objects
+        .filter(entity_type='player', date__gte=cutoff)
+        .values('entity_id', 'entity_name_snapshot')
+        .annotate(total_views=Sum('views_deduped'))
+        .filter(total_views__gte=2)
+        .order_by('-total_views')[:200]
+    )
+
+    clan_visits = (
+        EntityVisitDaily.objects
+        .filter(entity_type='clan', date__gte=cutoff)
+        .values('entity_id', 'entity_name_snapshot')
+        .annotate(total_views=Sum('views_deduped'))
+        .filter(total_views__gte=2)
+        .order_by('-total_views')[:100]
+    )
+
+    return Response({
+        'players': [
+            {'name': v['entity_name_snapshot'], 'entity_id': v['entity_id']}
+            for v in player_visits
+        ],
+        'clans': [
+            {'name': v['entity_name_snapshot'], 'clan_id': v['entity_id']}
+            for v in clan_visits
+        ],
+    })
 
 
 @api_view(["GET"])
