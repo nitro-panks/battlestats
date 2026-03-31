@@ -48,6 +48,70 @@ All API calls from the frontend include `?realm=na` or `?realm=eu`. Backend view
 
 ---
 
+## Resource Analysis
+
+Measured 2026-03-31 against the production droplet and managed Postgres.
+
+### Current footprint (NA only)
+
+| Resource | Current |
+|---|---|
+| **Droplet** | 2 vCPU, 3.8 GB RAM (2.7 GB used, 1.1 GB free), no swap |
+| **Disk** | 87 GB total, 16 GB used (71 GB free) |
+| **Managed Postgres** | 1,530 MB total DB size |
+| **Redis** | 17.6 MB used (peak 23 MB), no max configured |
+
+### Database breakdown (NA)
+
+| Table | Rows | Data + Indexes |
+|---|---|---|
+| `warships_player` | 275,857 | 880 MB |
+| `warships_playerachievementstat` | 1,718,062 | 461 MB |
+| `warships_playerexplorersummary` | 275,856 | 139 MB |
+| `warships_clan` | 35,252 | 10 MB |
+| `warships_snapshot` | 436 | 168 kB |
+| Everything else | — | ~5 MB |
+
+The Player table dominates at 880 MB — mostly JSON fields. Average sizes per populated player: `battles_json` 17.8 KB, `achievements_json` 1.3 KB, `randoms_json` 1.0 KB, `efficiency_json` 917 bytes, `ranked_json` 633 bytes. The `ranked_json` field is the most widely populated (265K of 276K players).
+
+### Projected EU impact
+
+EU has **1.8x the clans** of NA (62,722 vs 35,314). Assuming proportional player counts (~500K EU players vs ~276K NA):
+
+| Resource | NA (current) | + EU (projected) | Total | Headroom |
+|---|---|---|---|---|
+| **Player rows** | 275,857 | ~500,000 | ~776K | N/A |
+| **Player table** | 880 MB | ~1,580 MB | ~2,460 MB | N/A |
+| **Achievement rows** | 1,718,062 | ~3,100,000 | ~4.8M | N/A |
+| **Achievement table** | 461 MB | ~830 MB | ~1,290 MB | N/A |
+| **Explorer summaries** | 139 MB | ~250 MB | ~390 MB | N/A |
+| **Clan table** | 10 MB | ~18 MB | ~28 MB | N/A |
+| **Total DB size** | 1,530 MB | ~2,750 MB | **~4,280 MB** | Managed DB plan dependent |
+| **Redis** | 17.6 MB | ~18 MB | ~36 MB | Plenty |
+| **Disk** | 16 GB used | +0 (DB is managed) | 16 GB | 71 GB free |
+| **RAM** | 2.7 GB used | ~+200 MB (larger query sets, more cache) | ~2.9 GB | ~900 MB free |
+
+### Assessment
+
+| Resource | Verdict | Notes |
+|---|---|---|
+| **Disk** | No concern | DB is managed (off-droplet). Local disk only stores code + Redis dump + logs. |
+| **RAM** | Tight but OK | 3.8 GB total with ~1.1 GB free. EU adds modestly larger query working sets. The OOM fixes from v1.2.14 (reduced Celery concurrency, Celery task dispatch instead of subprocess) help. Swap should be configured as a safety net (2 GB swapfile was added in v1.2.14 bootstrap but not currently active — verify). |
+| **Managed DB storage** | **Check plan limit** | Current DB is 1.5 GB; EU pushes it to ~4.3 GB. DigitalOcean managed Postgres plans have storage limits (1 GB basic, 10 GB standard, etc.). **Must verify the current plan supports ≥5 GB before running the EU crawl.** If on a 1 GB plan, an upgrade is required. |
+| **DB connections** | OK | `max_connections=50`, current usage is well under. EU doubles the query surface but not concurrent connections. |
+| **DB query performance** | Monitor | Population distributions and correlations do full table scans with elevated `work_mem` (8 MB). With ~776K players, these scans take longer. The realm filter will help — each realm scans only its own rows. Add a composite index on `(realm, pvp_battles, pvp_ratio)` etc. |
+| **Redis** | No concern | 17.6 MB → ~36 MB. Redis can handle this trivially. |
+| **WG API bandwidth** | No concern | Rate limits are per-endpoint. EU crawl adds ~2,500 API calls (same as NA). Parallel execution is safe. |
+| **Initial crawl time** | Plan for it | EU first crawl: ~500K players at 100/batch = ~5,000 batches × ~0.5s = ~40 minutes for player data, plus clan fetching. Total: 1-2 hours. Run during off-peak. |
+
+### Action items before EU launch
+
+1. **Verify managed DB plan storage limit** — if < 5 GB, upgrade before running EU crawl
+2. **Verify swap is active** on the droplet (`swapon --show` returned empty — the 2 GB swapfile from v1.2.14 may not have persisted across a reboot)
+3. **Add realm-composite indexes** in the migration to keep query performance constant as population doubles
+
+---
+
 ## Architecture Changes
 
 ### Phase 1: Data Model + Migration
