@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${SERVER_DIR}/.." && pwd)"
 
+# Hard gate: CI must be passing before deploy
+"${REPO_ROOT}/scripts/check_ci_status.sh"
+
 HOST="${1:-}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"

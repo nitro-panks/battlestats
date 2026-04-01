@@ -4,6 +4,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLIENT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${CLIENT_DIR}/.." && pwd)"
+
+# Hard gate: CI must be passing before deploy
+"${REPO_ROOT}/scripts/check_ci_status.sh"
 
 HOST="${1:-}"
 DEPLOY_USER="${DEPLOY_USER:-root}"
