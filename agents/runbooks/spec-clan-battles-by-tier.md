@@ -27,7 +27,14 @@ Introduce a horizontal or vertical bar chart underneath the primary plot on the 
    - If missing/stale, dispatch `update_clan_tier_distribution_task` and return `[]` combined with HTTP Header `X-Clan-Tiers-Pending: true`.
    - Add the route to `battlestats/urls.py` (e.g. `/api/fetch/clan_tiers/<clan_id>/`).
 
-### Tranche 2: Frontend Data Access & D3 Component
+### Tranche 2: Data Backfill & Cache Warming
+1. **Pre-Compute Bulk Script**:
+   - Write a temporary management script or Django shell script (e.g., `server/scripts/warm_clan_tiers.py` or a modified warmer task).
+   - Iterate over all actively tracked or top-viewed clans (e.g., leveraging the existing `score_best_clans()` cache or recent visitor lists).
+   - Dispatch `update_clan_tier_distribution_task` for each clan sequentially or in batch to populate Redis before frontend rollout.
+   - Run this script in the production environment prior to deploying the client changes to avoid a massive queue spike and frontend skeleton loaders en masse.
+
+### Tranche 3: Frontend Data Access & D3 Component
 1. **Component Creation (`client/app/components/ClanTierDistributionSVG.tsx`)**:
    - Model the component on standard conventions: accept `data`, `svgHeight`, `theme`, and use `d3.scaleBand()` for the 11 explicit tiers. 
    - Use `d3.scaleLinear()` for the Y-axis targeting the max battle count.
@@ -40,6 +47,10 @@ Introduce a horizontal or vertical bar chart underneath the primary plot on the 
    
 3. **Mount in UI (`client/app/clan/[clanSlug]/page.tsx`)**:
    - Insert the new component clearly below the primary `ClanSVG` or `ActivitySVG` slot but above individual member tables, wrapped in an `ErrorBoundary` that degrades to `"Tier data unavailable"`.
+
+## Testing & Quality Assurance
+- **Loading UX**: Force a cache miss (`cache.delete`) locally to verify that `"Aggregating clan tier distributions..."` skeleton renders without collapsing the layout.
+- **Backfill Safety**: Ensure the Tranche 2 backfill operates without locking up `update_tiers_data` or delaying main page hydration (run in background queue).
 
 ## Mock Agent Reviews
 
