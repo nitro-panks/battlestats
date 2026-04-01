@@ -18,7 +18,7 @@ Introduce a sub-filtering mechanism on the landing page's player chart. When a u
    - Clicking a class filter button retrieves the respective top 25 players calculated by our formula for that specific ship class.
    - The selected 25 players are then splayed out on the existing `LandingPlayerSVG` chart. 
    - The chart axes will dynamically map to the selected class's statistics (e.g. Battleship Win Rate & Battleship Battles limit) rather than overall account statistics to provide an accurate visual representation of the class skill.
-   - State transition leverages the `X-[Dataset]-Pending` header. If the Redis cache misses (e.g. `X-Landing-Pending: true` is returned), do not unmount the chart frame. Instead, show an explicit loading skeleton overlay while gracefully holding the active chart, falling back to "Overall" caching safely if completely missing.
+   - State transition leverages the `X-[Dataset]-Pending` header. If the Redis cache misses (e.g. `X-Landing-Pending: true` is returned), do not unmount the chart frame. Instead, show an explicit loading skeleton overlay WITH a clear message (e.g., `"Calculating top [Class] players... check back shortly"`) while gracefully holding the active chart. If the request 500s or hard-fails, display the standard `"Unable to load [Class] stats"` error message with a retry affordance.
 
 ## Backend & Database Optimization
 
@@ -65,8 +65,8 @@ The existing landing page warmer (`server/warships/tasks.py` -> `warm_landing_pa
 - Update landing page state (`LandingDropdowns.tsx` or similar controller) to track `selectedClass`.
 - Render the sub-navigation conditionally (`if mode === 'best'`).
 - Pipe the `selectedClass` state into the `sharedJsonFetch` payload call.
-- Add UI state behavior to explicitly handle missing specific-class cache `X-Landing-Pending: true`. 
-- **Tests (Mandatory):** Generate Playwright integration test at `e2e/landing-best-by-class.spec.ts` matching the UI behaviors.
+- Add UI state behavior to explicitly handle missing specific-class cache `X-Landing-Pending: true` by rendering the `"Calculating top [Class] players... check back shortly"` loading message. Provide an error-fallback UI (`"Unable to load [Class] stats."`) for network failures.
+- **Tests (Mandatory):** Generate Playwright integration test at `e2e/landing-best-by-class.spec.ts` matching the UI behaviors and asserting the exact loading/error texts.
 - **Validation:** Open live UI. Click "Best", click "Cruisers", verify chart updates without unmounting. Switch to "Sigma" to hide sub-nav. Switch to "Best", verify it resets to "Overall". 
 
 ## Safety & Limits
