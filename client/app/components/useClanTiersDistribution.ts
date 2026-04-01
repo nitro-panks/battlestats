@@ -78,7 +78,7 @@ export const useClanTiersDistribution = (clanId: number | null | undefined, enab
                     timeoutId = setTimeout(() => {
                         void fetchData(false, attempt + 1);
                     }, priorityDelay);
-                } else if (showLoading && !controller.signal.aborted) {
+                } else if (!controller.signal.aborted) {
                     setLoading(false);
                 }
             } catch (fetchError) {

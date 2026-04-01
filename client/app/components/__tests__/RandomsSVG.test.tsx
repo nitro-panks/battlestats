@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import RandomsSVG from '../RandomsSVG';
 
 jest.mock('d3', () => {
-    const chain = {
+    const chain: any = {
         append: jest.fn(() => chain),
         attr: jest.fn(() => chain),
         style: jest.fn(() => chain),

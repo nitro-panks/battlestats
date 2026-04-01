@@ -11,7 +11,7 @@ jest.mock('../../lib/sharedJsonFetch', () => ({
 }));
 
 jest.mock('d3', () => {
-    const chain = {
+    const chain: any = {
         append: jest.fn(() => chain),
         attr: jest.fn(() => chain),
         style: jest.fn(() => chain),
