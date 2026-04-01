@@ -1,8 +1,8 @@
 # Runbook: CI/CD Harness Rollout For Droplet Deploys
 
-_Last updated: 2026-03-31_
+_Last updated: 2026-04-01_
 
-_Status: Planning reference_
+_Status: Nearing completion - High ROI tranche implemented_
 
 ## Purpose
 
@@ -177,13 +177,18 @@ Use this order to keep risk bounded:
 5. Add protected-environment approval and post-deploy smoke checks.
 6. Only after the harness is stable, decide whether production deploys should auto-run on merge to `main`.
 
-## Suggested First Work Packet
+## QA Review & High ROI Implementation Tranche
 
-The first implementation tranche should be scoped to:
+_QA Note (2026-04-01): As the project is nearing completion, the ROI of fully automated DevOps pipelines (Phases 4 & 5) and strict coverage blocking (Phase 2) drops significantly. The primary risk during late-stage and maintenance development is accidental regression from context loss, not deployment speed._
 
-- create `ci.yml`
-- add a backend coverage command and reporting output
-- enforce branch protection on `main`
-- leave deploy automation for the next tranche
+**The highest-ROI implementation tranche should focus entirely on Phase 1 (Core PR Checks) to lock in the current quality baseline.**
 
-That is the smallest useful slice because it creates real merge protection before it automates production writes.
+**The exact scope executed for this tranche was:**
+1. **Created `.github/workflows/ci.yml`:**
+   - Trigger on `pull_request` and `push` to `main`.
+   - **Client Job:** Runs `npm ci`, `npm run lint`, `npm run test:ci`, and `npm run build`.
+   - **Server Job:** Setups Python, installs dependencies, provisions a PostgreSQL + Redis service directly in Actions, and runs the `pytest` suite safely with `--cov`. (SQLite was skipped because it doesn't support Materialized Views which the repo requires).
+2. **Branch protection instructions:** Required steps are now available to check `ci.yml` jobs before merging to `main`.
+3. **Deferred heavy automation:** Explicitly paused Playwright smoke tasks (Phase 3) and Droplet deploy workflows (Phases 4 & 5). The manual `deploy_to_droplet.sh` workflow is mature enough to remain the permanent production path. 
+
+This provides a permanent safety net for any final stabilization work or future bugfixes with minimal setup time.
