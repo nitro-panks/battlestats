@@ -4,6 +4,7 @@ import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { useClanMembers } from './useClanMembers';
 import { useTheme } from '../context/ThemeContext';
+import ClanTierDistributionSVG from './ClanTierDistributionSVG';
 
 interface ClanDetailProps {
     clan: {
@@ -16,14 +17,7 @@ interface ClanDetailProps {
     onSelectMember: (memberName: string) => void;
 }
 
-const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
-    <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--text-secondary)]"
-        style={{ minHeight }}
-    >
-        {label}
-    </div>
-);
+import LoadingPanel from './LoadingPanel';
 
 const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 'ClanDetail-ClanSVG'), {
     ssr: false,
@@ -98,6 +92,11 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
 
             <div className="mt-4">
                 <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={440} membersData={members} theme={theme} />
+            </div>
+
+            <div className="mt-8 border-t border-[var(--border)] pt-4">
+                <h3 className="text-lg font-bold text-[var(--accent)] mb-4">Tier Distribution</h3>
+                <ClanTierDistributionSVG clanId={clan.clan_id} theme={theme} />
             </div>
 
             <DeferredSection
