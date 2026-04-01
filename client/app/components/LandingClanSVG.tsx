@@ -227,7 +227,7 @@ const drawLandingClanChart = (
         .attr('class', 'data-circle')
         .attr('cx', (datum: PlotDatum) => x(datum.total_battles))
         .attr('cy', (datum: PlotDatum) => y(datum.clan_wr))
-        .attr('r', 5)
+        .attr('r', 5.5)
         .style('cursor', onSelectClan ? 'pointer' : 'default')
         .attr('fill', (datum: PlotDatum) => selectLandingClanColorByWR(datum.clan_wr, colors))
         .attr('stroke', colors.axisLine)

@@ -218,10 +218,10 @@ const drawLandingPlayerChart = (
         .attr('class', 'data-circle')
         .attr('cx', (datum: PlotDatum) => x(datum.pvp_battles))
         .attr('cy', (datum: PlotDatum) => y(datum.pvp_ratio))
-        .attr('r', 5)
+        .attr('r', 5.5)
         .style('cursor', onSelectPlayer ? 'pointer' : 'default')
         .attr('fill', (datum: PlotDatum) => selectLandingPlayerColorByWR(datum.pvp_ratio))
-        .attr('stroke', colors.axisText)
+        .attr('stroke', colors.axisLine)
         .attr('stroke-width', 1.25);
 
     const circles = svg.selectAll('.data-circle');
