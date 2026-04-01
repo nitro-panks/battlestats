@@ -7,7 +7,11 @@ from django.core.cache import cache
 from django.core.management import call_command
 
 from battlestats.celery import app
-from warships.models import DEFAULT_REALM
+
+# Duplicated here (instead of importing from warships.models) to avoid
+# importing models at module scope — gunicorn's when_ready hook loads this
+# file before Django's app registry is ready.
+DEFAULT_REALM = "na"
 
 
 logger = logging.getLogger(__name__)
