@@ -1,3 +1,5 @@
+[![CI](https://github.com/nitro-panks/battlestats/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nitro-panks/battlestats/actions/workflows/ci.yml)
+
 # battlestats
 
 visit live site: [battlestats.online](https://battlestats.online)

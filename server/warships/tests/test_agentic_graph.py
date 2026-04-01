@@ -35,6 +35,8 @@ class AgenticGraphTests(TestCase):
                 "DB_PASSWORD": "secret value",
                 "DB_HOST": "db",
                 "DB_PORT": "5432",
+                "DB_SSLMODE": "",
+                "DB_SSLROOTCERT": "",
             },
             clear=False,
         ):

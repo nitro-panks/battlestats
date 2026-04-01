@@ -2131,16 +2131,20 @@ class ApiContractTests(TestCase):
                 clan_id=5000 + index,
                 name=f"LandingGzipClan{index}",
                 tag=f"G{index}",
-                members_count=1,
+                members_count=12,
+                cached_clan_wr=53.0,
+                cached_total_battles=120000,
+                cached_active_member_count=10,
             )
-            Player.objects.create(
-                name=f"LandingGzipPlayer{index}",
-                player_id=700000 + index,
-                clan=clan,
-                pvp_battles=120000,
-                pvp_wins=62000,
-                days_since_last_battle=3,
-            )
+            for p in range(12):
+                Player.objects.create(
+                    name=f"LandingGzipPlayer{index}_{p}",
+                    player_id=700000 + index * 100 + p,
+                    clan=clan,
+                    pvp_battles=120000,
+                    pvp_wins=62000,
+                    days_since_last_battle=3,
+                )
 
         response = self.client.get(
             "/api/landing/clans/?mode=best",

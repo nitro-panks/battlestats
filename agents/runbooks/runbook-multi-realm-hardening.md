@@ -1,8 +1,8 @@
 # Runbook: Multi-Realm Hardening & Asia Expansion
 
 **Created**: 2026-03-31
-**Updated**: 2026-04-01 — Phases 1-6 implemented and validated
-**Status**: Phases 1-6 complete; Phase 7 (Asia) deferred
+**Updated**: 2026-04-01 — Phases 1-6 implemented and validated; Phase 8 (i18n) spec added
+**Status**: Phases 1-6 complete; Phase 7 (Asia) and Phase 8 (i18n) deferred
 **Depends on**: `spec-multi-realm-eu-support.md` (Phases 1-6 complete)
 **Goal**: Fix realm propagation gaps discovered post-EU launch, add comprehensive test coverage, and prepare infrastructure for Asia — but **do not add Asia data or activate Asia crawls yet**.
 
@@ -280,7 +280,7 @@ operations = [
 
 The materialized view already has the `realm` column from migration 0037 and doesn't filter by specific realm values, so it naturally includes Asia rows once they exist. A `REFRESH MATERIALIZED VIEW CONCURRENTLY` after migration ensures the unique index stays valid.
 
-### 7c. Frontend changes
+### 7c. Frontend changes (realm config)
 
 | File | Change |
 |---|---|
@@ -323,15 +323,19 @@ If Phase 6b stagger is implemented, the Asia schedule offsets are automatic.
 
 ### 7f. Population estimates and timing
 
-| Realm | Est. clans | Est. players | Core crawl duration | Full backfill |
+Actual counts queried from the WG API on 2026-04-01:
+
+| Realm | Clans (API) | Est. players | Core crawl duration | Full backfill |
 |---|---|---|---|---|
-| NA | ~35K | ~275K | 24-48h | Ongoing daily |
-| EU | ~63K | ~500K+ | 2-4 days | Ongoing daily |
-| ASIA | ~80K+ | ~600K+ | 3-5 days | Ongoing daily |
+| NA | 35,316 | ~275K (actual: 275,867) | 24-48h | Ongoing daily |
+| EU | 62,730 | ~500K (crawl in progress, 301K so far) | 2-4 days | Ongoing daily |
+| ASIA | **21,714** | **~430-520K** | 2-3 days | Ongoing daily |
 
-Asia is the largest realm. The `core_only` flag skips per-player efficiency and achievement API calls (2 extra API calls per player), reducing the initial crawl from weeks to days.
+Asia clan count (21,714) is **smaller than NA** (35K) and much smaller than EU (63K). Clan size distribution sampled from the API: top clans average ~50 members, median ~5, long tail of 1-member clans. Estimated ~260K clanned players. With non-clanned solo players (~40-50% of total), rough total is **430-520K players**.
 
-**Storage impact**: At ~1 KB per player row, 600K players ≈ 600 MB. With indexes, snapshots, and explorer summaries, estimate ~2-3 GB total for Asia. Current managed DB plan has 40 GB — well within limits.
+The original estimate of 80K+ clans / 600K+ players was too high. Asia is mid-sized — larger than NA in players but with fewer clans. The `core_only` flag skips per-player efficiency and achievement API calls (2 extra API calls per player), reducing the initial crawl from weeks to days.
+
+**Storage impact**: At ~1 KB per player row, 500K players ≈ 500 MB. With indexes, snapshots, and explorer summaries, estimate ~1.5-2 GB total for Asia. Current managed DB plan has 40 GB — well within limits.
 
 **Memory impact**: With Phase 6c's `MAX_CONCURRENT_REALM_CRAWLS=1` guard, only one crawl runs at a time on the 4GB droplet. No additional memory pressure.
 
@@ -349,16 +353,276 @@ After Phase 6b + Phase 7, the complete schedule matrix:
 | Hot entity warmer | Every 30 min (shared, runs per-realm sequentially) |
 | Bulk entity cache | Every 12h, offset 2h per realm |
 
-### 7h. Validation checklist
+---
 
-- [ ] `VALID_REALMS` returns `{'na', 'eu', 'asia'}`
-- [ ] `get_base_url('asia')` returns `https://api.worldofwarships.asia/wows/`
-- [ ] Frontend realm selector shows 3 options
-- [ ] Asia crawl starts and saves players/clans with `realm='asia'`
-- [ ] All Phase 5 isolation tests pass with 3 realms
-- [ ] `check_realm_health` command reports all 3 realms
-- [ ] No OOM during concurrent schedule windows
-- [ ] Existing NA and EU data unaffected (spot-check player counts, landing page content)
+## Phase 8 — Internationalization (i18n) for Asia realm
+
+**Priority**: Ship alongside or immediately after Phase 7
+**Prereq**: Phase 7 (Asia realm active)
+**Goal**: Serve the UI in the user's preferred language. The Asia WoWS server covers Japan, South Korea, China/Taiwan/HK, Southeast Asia, and Oceania — a linguistically diverse audience. This phase adds a language system to the frontend so that nav items, button labels, tab headers, chart text, and status messages render in the selected language.
+
+### 8a. Language strategy — which languages and why
+
+#### The Asia server audience
+
+The WoWS Asia server (`api.worldofwarships.asia`) covers:
+
+| Region | Primary language | WoWS launcher languages |
+|---|---|---|
+| Japan | Japanese (ja) | Japanese |
+| South Korea | Korean (ko) | Korean |
+| China (PRC) | Simplified Chinese (zh-Hans) | Simplified Chinese |
+| Taiwan / Hong Kong | Traditional Chinese (zh-Hant) | Traditional Chinese |
+| Southeast Asia | English, Thai, Vietnamese, Indonesian | Thai, Vietnamese, Indonesian |
+| Australia / NZ | English | English |
+| India | English / Hindi | English |
+
+#### Recommendation: start with 4 languages, expand later
+
+**Tier 1 — ship with Asia launch:**
+
+| Locale | Code | Rationale |
+|---|---|---|
+| English | `en` | Default. Already implemented. Lingua franca for SEA/Oceania/India players. |
+| Japanese | `ja` | Japan has the largest single-country player base on Asia server. |
+| Simplified Chinese | `zh-Hans` | China is the largest market by population. WG uses Simplified Chinese for PRC. |
+| Korean | `ko` | South Korea is the third-largest Asia player base and Korean players rarely use English-language tools. |
+
+**Tier 2 — add based on traffic analytics after Asia launch:**
+
+| Locale | Code | Trigger |
+|---|---|---|
+| Traditional Chinese | `zh-Hant` | If >5% of Asia visits come from TW/HK (check Umami geo reports) |
+| Thai | `th` | If >3% of Asia visits from Thailand |
+| Vietnamese | `vi` | If >3% of Asia visits from Vietnam |
+
+**Why not Mandarin Chinese only?** Simplified vs Traditional Chinese are not interchangeable — they use different character sets, vocabulary, and idioms. Serving `zh-Hans` to a Taiwanese player is jarring. However, Traditional Chinese can be deferred to Tier 2 because most TW/HK gamers are accustomed to English-language stat tools.
+
+**Why not just English?** The WoWS Asia community has large monolingual segments in Japan and Korea. English-only stat sites are functionally invisible to these players. Adding ja/zh-Hans/ko dramatically expands the addressable audience.
+
+### 8b. i18n library selection
+
+**Recommendation: `next-intl`**
+
+| Criterion | next-intl | react-i18next | next-i18n |
+|---|---|---|---|
+| App Router support | Native (v4+) | Requires adapter | No App Router |
+| Server Components | Yes | Partial | No |
+| Bundle size | ~3 KB | ~10 KB + i18next core | N/A |
+| ICU MessageFormat | Yes | Via plugin | No |
+| Next.js 16 compat | Yes | Yes | Stale |
+
+`next-intl` is the idiomatic choice for Next.js App Router. It supports server components, static generation, and dynamic locale routing with minimal config.
+
+### 8c. Locale routing strategy
+
+**Approach: query parameter `?lang=ja`, not path prefix**
+
+Rationale:
+- Battlestats already uses `?realm=` for realm scoping — `?lang=` is consistent.
+- Path prefixes (`/ja/player/...`) require rewriting every route, updating sitemap generation, canonical URLs, and OG metadata. High blast radius for a Tier 1 launch.
+- Query parameter approach can be upgraded to path prefixes later if SEO for non-English pages becomes a priority.
+
+| Component | Behavior |
+|---|---|
+| Default | `en` when no `?lang=` param and no saved preference |
+| Persistence | `localStorage('battlestats-lang')` — same pattern as realm |
+| URL override | `?lang=ja` overrides stored preference for that request |
+| FOUC prevention | Inline `<script>` in `layout.tsx` reads localStorage and sets `<html lang="...">` before paint (same pattern as realm/theme) |
+
+### 8d. Translation file structure
+
+```
+client/
+  messages/
+    en.json          # English (source of truth)
+    ja.json          # Japanese
+    zh-Hans.json     # Simplified Chinese
+    ko.json          # Korean
+```
+
+Each file is a flat namespace with dot-separated keys:
+
+```json
+{
+  "nav.searchPlaceholder": "Search player",
+  "nav.realmSelector.na": "NA",
+  "nav.realmSelector.eu": "EU",
+  "nav.realmSelector.asia": "ASIA",
+  "player.tabs.profile": "Profile",
+  "player.tabs.ships": "Ships",
+  "player.tabs.ranked": "Ranked",
+  "player.tabs.clanBattles": "Clan Battles",
+  "player.tabs.efficiency": "Efficiency",
+  "player.tabs.population": "Population",
+  "player.summary.battles29d": "29D Battles",
+  "player.summary.activeDays": "Active Days",
+  "player.summary.recentWR": "Recent WR",
+  "player.summary.shipsPlayed": "Ships Played",
+  "player.summary.rankedSeasons": "Ranked Seasons",
+  "chart.tier.xAxisLabel": "Random battles",
+  "chart.type.xAxisLabel": "Random battles",
+  "chart.randoms.winRate": "win rate",
+  "chart.randoms.battles": "battles",
+  "chart.randoms.wins": "wins",
+  "chart.randoms.legendShipWR": "Ship win rate",
+  "chart.randoms.legendBattles": "Random battles played",
+  "chart.activity.active": "Active 30d",
+  "chart.activity.cooling": "Cooling 31-90d",
+  "chart.activity.dormant": "Dormant 90d+",
+  "clan.members.title": "Clan Members",
+  "clan.activity.title": "Clan Activity",
+  "ranked.table.season": "Season",
+  "ranked.table.highestRank": "Highest Rank",
+  "ranked.table.topShip": "Top Ship",
+  "ranked.table.battles": "Battles",
+  "ranked.table.wins": "Wins",
+  "ranked.table.wr": "WR",
+  "ranked.loading": "Refreshing ranked seasons...",
+  "ranked.empty": "No ranked seasons found for this player.",
+  "footer.dataSource": "Data sourced from the Wargaming API. Not affiliated with Wargaming.net.",
+  "footer.license": "CC BY-NC-SA 4.0",
+  "common.noClan": "No Clan",
+  "common.loading": "Loading..."
+}
+```
+
+**Estimated string count**: ~80-100 translatable strings (nav, tabs, cards, chart labels, table headers, status messages, footer). Game-specific proper nouns (ship names, tier numbers, league names like "Gold", "Silver", "Bronze") are kept in English across all locales — they are WG API values, not UI copy.
+
+### 8e. Component changes — extracting hardcoded strings
+
+The codebase has **zero i18n infrastructure today**. Every user-facing string is hardcoded. The extraction is mechanical but touches many files.
+
+#### High-priority components (user sees these first)
+
+| Component | File | Strings to extract | Notes |
+|---|---|---|---|
+| HeaderSearch | `client/app/components/HeaderSearch.tsx` | `placeholder`, `aria-label` | 2 strings |
+| RealmSelector | `client/app/components/RealmSelector.tsx` | Realm option labels | 3 strings |
+| Logo | `client/app/components/Logo.tsx` | Brand name | Keep "WoWs Battlestats" in English (brand) |
+| Footer | `client/app/components/Footer.tsx` | 6+ strings | Legal disclaimer, attribution, links |
+| PlayerDetailInsightsTabs | `client/app/components/PlayerDetailInsightsTabs.tsx` | 6 tab labels, ~10 section titles | Critical — this is the main player page |
+| PlayerSummaryCards | `client/app/components/PlayerSummaryCards.tsx` | 5 card labels | "29D Battles", "Active Days", etc. |
+| RankedSeasons | `client/app/components/RankedSeasons.tsx` | 6 column headers, 2 status messages | Table headers + loading/empty states |
+
+#### Chart components (D3 text labels)
+
+| Component | File | Strings to extract | Approach |
+|---|---|---|---|
+| TierSVG | `client/app/components/TierSVG.tsx` | Axis label, detail text | Pass translated strings as props |
+| TypeSVG | `client/app/components/TypeSVG.tsx` | Axis label, detail text | Same pattern |
+| RandomsSVG | `client/app/components/RandomsSVG.tsx` | Axis label, legend items, tooltip text | ~10 strings, largest chart |
+| WRDistributionSVG | `client/app/components/WRDistributionDesign2SVG.tsx` | Stats labels, fallback text | 3-4 strings |
+| LandingPlayerSVG | `client/app/components/LandingPlayerSVG.tsx` | Axis labels, legend | 5 strings |
+| LandingActivityAttritionSVG | `client/app/components/LandingActivityAttritionSVG.tsx` | Cohort labels, legend | 4 strings |
+| ClanActivityHistogram | `client/app/components/ClanActivityHistogram.tsx` | Title | 1 string |
+
+**D3 chart i18n pattern**: Chart components are client-side D3 renders, not server components. Two options:
+
+1. **Props approach** (recommended): Parent component calls `useTranslations('chart.tier')` and passes translated strings as props. Chart component stays pure — it renders whatever strings it receives. No i18n dependency inside D3 code.
+2. **Hook approach**: Call `useTranslations()` inside the chart component. Simpler for standalone charts but couples D3 rendering to React context.
+
+Recommendation: **props approach**. It keeps the chart components testable without i18n mocking, and the parent already coordinates realm, theme, and data — adding language strings is consistent.
+
+#### Other components
+
+| Component | File | Strings |
+|---|---|---|
+| PlayerExplorer | `client/app/components/PlayerExplorer.tsx` | Column headers, empty/loading states (~6) |
+| ClanMembers | `client/app/components/ClanMembers.tsx` | Title, loading state (~2) |
+| ClanBattleSeasons | `client/app/components/ClanBattleSeasons.tsx` | Loading/empty messages (~2) |
+| PlayerDetail | `client/app/components/PlayerDetail.tsx` | "No Clan", status text (~3) |
+| PlayerSearch | `client/app/components/PlayerSearch.tsx` | Section headings, button labels (~4) |
+
+### 8f. Language selector UI
+
+Add a language selector to the nav bar, next to the existing realm selector. Design considerations:
+
+| Aspect | Decision |
+|---|---|
+| Location | Right side of nav, after realm selector |
+| Format | Dropdown with native-script labels: "English", "日本語", "简体中文", "한국어" |
+| Persistence | `localStorage('battlestats-lang')` |
+| Icon | Globe icon (FontAwesome `faGlobe`, already in deps) |
+| Interaction | Click opens dropdown, selection changes lang immediately (no page reload — `next-intl` client provider re-renders) |
+| Mobile | Same dropdown, stacked below realm selector in mobile menu |
+
+### 8g. CJK typography considerations
+
+Chinese, Japanese, and Korean text has different typographic needs than Latin text:
+
+| Concern | Solution |
+|---|---|
+| Font stack | Add `"Noto Sans JP", "Noto Sans SC", "Noto Sans KR"` to Tailwind `fontFamily.sans`. These are free Google Fonts with full CJK coverage. Or rely on system CJK fonts (`"Hiragino Sans", "Microsoft YaHei", "Malgun Gothic"`) to avoid loading external fonts. |
+| Character width | CJK characters are typically fullwidth (~2x Latin width). Tab labels and button text may need responsive width or `text-nowrap` adjustments. Test all tabs at ja/zh/ko to verify no overflow. |
+| Line breaking | CJK languages don't use spaces between words. CSS `word-break: keep-all` for Korean; default CJK break rules are fine for ja/zh. |
+| Text length variance | Japanese translations are often ~1.3x longer than English. Chinese is typically ~0.8x. Korean is ~1.1x. Chart labels and compact cards need tested at the longest locale. |
+| `<html lang="">` | Must be set dynamically: `en`, `ja`, `zh-Hans`, `ko`. Affects screen readers, browser spell-check, and search engine language detection. |
+| Number formatting | Use `Intl.NumberFormat(locale)` for battle counts, win rates. Japanese/Chinese use 万 (10K) grouping in some contexts, but WoWS community universally uses Western numerals — keep `toLocaleString()` with explicit locale. |
+
+### 8h. Translation workflow
+
+**Phase 1 (launch)**: Developer-authored translations.
+- `en.json` — source of truth, written by dev
+- `ja.json`, `zh-Hans.json`, `ko.json` — initially generated via LLM translation (Claude or GPT-4) from `en.json`, then reviewed by a native-speaking WoWS player for gaming terminology accuracy
+- Gaming terms like "win rate", "random battles", "ranked" have community-specific translations that differ from literal dictionary translations. E.g., Japanese WoWS community uses "ランダム戦" (random-sen) not "ランダムバトル" (random-batoru).
+
+**Phase 2 (post-launch)**: Community-contributed translations.
+- Accept PRs for new locale files
+- Add a "Help translate" link in the language selector dropdown pointing to the GitHub repo
+- Consider Crowdin or Weblate if translation volume grows
+
+### 8i. What stays in English
+
+Not everything should be translated:
+
+| Category | Example | Reason |
+|---|---|---|
+| Brand name | "WoWs Battlestats" | Brand identity |
+| Ship names | "Shimakaze", "Des Moines" | WG API values, recognized across all locales |
+| Tier labels | "I", "II", ..., "XI" | Roman numerals, universal in WoWS |
+| League names | "Gold", "Silver", "Bronze" | WG API values used in ranked data |
+| Player/clan names | User-generated content | Rendered as-is from API |
+| GitHub/legal links | "Fork me on GitHub" | Can translate link text, keep URL |
+
+### 8j. Implementation order
+
+The i18n work breaks into 4 sub-phases that can ship incrementally:
+
+| Sub-phase | Scope | Strings | Effort |
+|---|---|---|---|
+| 8j-1 | Install `next-intl`, add provider, language selector, FOUC script, `en.json` | 0 (English extraction only) | Small — plumbing |
+| 8j-2 | Extract nav, tabs, cards, table headers, status messages | ~50 strings | Medium — mechanical |
+| 8j-3 | Extract D3 chart labels via props | ~30 strings | Medium — requires testing chart layout at each locale |
+| 8j-4 | Add `ja.json`, `zh-Hans.json`, `ko.json` translations | ~80 strings x 3 locales | Medium — translation + review |
+
+**8j-1 and 8j-2 can ship before Phase 7** (Asia realm). They improve the codebase even for English-only — extracted strings are easier to find and update than scattered hardcoded text. Phase 8j-3 and 8j-4 should ship with or after Phase 7.
+
+### 8k. Testing i18n
+
+| Test | Method |
+|---|---|
+| All keys present in all locales | CI script: compare key sets of `ja.json`, `zh-Hans.json`, `ko.json` against `en.json`. Fail on missing keys. |
+| No hardcoded English in components | ESLint rule (eslint-plugin-i18next `no-literal-string`) — enforce after extraction is complete |
+| Visual regression | Playwright screenshots at each locale for player detail, landing, clan detail. Compare for overflow, truncation, layout breaks. |
+| Chart label fit | Manual QA: check TierSVG, TypeSVG, RandomsSVG at ja/zh/ko. CJK axis labels may need font-size or position adjustments. |
+| Locale persistence | E2E test: set `?lang=ja`, reload without param, verify ja persists via localStorage |
+| Fallback | If a key is missing in `ja.json`, `next-intl` falls back to `en.json`. Verify with a deliberately incomplete locale file. |
+
+### 8l. Validation checklist
+
+- [ ] `next-intl` installed and configured with App Router provider
+- [ ] Language selector visible in nav bar with globe icon
+- [ ] `<html lang="">` updates dynamically on language change
+- [ ] All 80+ UI strings extracted to `en.json` and rendered via `useTranslations()`
+- [ ] D3 chart labels passed as translated props — no hardcoded English in SVG output
+- [ ] `ja.json`, `zh-Hans.json`, `ko.json` complete with all keys
+- [ ] Translations reviewed by native WoWS player for gaming terminology
+- [ ] CJK font stack configured in Tailwind
+- [ ] No tab/card/chart label overflow at any locale (visual QA)
+- [ ] Locale persistence works via localStorage across page reloads
+- [ ] CI check for missing translation keys passes
+- [ ] Existing English-only experience unchanged (no regressions for NA/EU users)
 
 ---
 
@@ -366,17 +630,20 @@ After Phase 6b + Phase 7, the complete schedule matrix:
 
 | Phase | Scope | Risk addressed | Ship together? | Execute now? |
 |---|---|---|---|---|
-| 1 | `api/clans.py` realm propagation | EU clan pages return wrong/empty data | Yes — with 2 & 3 | **Yes** |
-| 2 | `views.py` → `data.py` pass-through | EU chart endpoints query NA API | Yes — with 1 & 3 | **Yes** |
-| 3 | `data.py` async dispatch realm (22 sites) | Background refreshes contaminate EU with NA data | Yes — with 1 & 2 | **Yes** |
-| 4 | EntityVisit realm field | Analytics can't distinguish cross-realm visits | Separate commit | **Yes** |
-| 5 | Test suite | No automated detection of future regressions | Separate commit | **Yes** |
-| 6 | Operational hardening | OOM, monitoring, crawl stagger | Separate commit | **Yes** |
+| 1 | `api/clans.py` realm propagation | EU clan pages return wrong/empty data | Yes — with 2 & 3 | **Done** |
+| 2 | `views.py` → `data.py` pass-through | EU chart endpoints query NA API | Yes — with 1 & 3 | **Done** |
+| 3 | `data.py` async dispatch realm (22 sites) | Background refreshes contaminate EU with NA data | Yes — with 1 & 2 | **Done** |
+| 4 | EntityVisit realm field | Analytics can't distinguish cross-realm visits | Separate commit | **Done** |
+| 5 | Test suite | No automated detection of future regressions | Separate commit | **Done** |
+| 6 | Operational hardening | OOM, monitoring, crawl stagger | Separate commit | **Done** |
 | 7 | Asia realm addition | Final expansion step | Separate runbook | **No — deferred** |
+| 8 | Internationalization (i18n) | Asia audience can't read English UI | Ship 8j-1/2 before Phase 7; 8j-3/4 with Phase 7 | **No — deferred** |
 
 **Critical path**: Phases 1-3 must ship together as one commit — they're all facets of the same bug (realm not propagated). Phase 6b (stagger) prepares the schedule infrastructure so that when Asia is eventually added, it slots in without OOM risk.
 
 **After Phases 1-6 complete**: The system is hardened for EU and Asia-ready. Adding Asia (Phase 7) requires only: one model field change, one API URL, one migration, three frontend constants, one deploy, and one crawl command. No architectural work remains.
+
+**i18n can begin before Asia**: Phases 8j-1 and 8j-2 (install library, extract English strings) are valuable independent of Asia — they eliminate hardcoded strings and prepare the frontend for any future locale. Phase 8j-3 (chart labels) and 8j-4 (translations) should ship with or after Asia to avoid maintaining translations for a realm that doesn't yet exist.
 
 ---
 
@@ -387,3 +654,5 @@ After Phase 6b + Phase 7, the complete schedule matrix:
 - Phase 5 (tests only): no bump
 - Phase 6 (operational): **patch** bump
 - Phase 7 (Asia realm, when executed): **minor** bump (new feature — 3rd realm)
+- Phase 8j-1/2 (i18n plumbing + extraction): **patch** bump (no user-visible change)
+- Phase 8j-3/4 (chart i18n + translations): **minor** bump (new feature — multi-language UI)

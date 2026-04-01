@@ -1,14 +1,26 @@
 from io import StringIO
 import os
+import shutil
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase
 
-from warships.agentic.memory import get_memory_store_snapshot, persist_phase0_memory_artifacts
+from warships.agentic.memory import get_memory_store_snapshot, persist_phase0_memory_artifacts, _pending_root, _reviewed_root
 
 
 class AgenticMemoryReviewCommandTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._pending_backup = None
+        self._reviewed_backup = None
+
+    def tearDown(self):
+        for root in (_pending_root(), _reviewed_root()):
+            if root.exists():
+                shutil.rmtree(root)
+        super().tearDown()
+
     def _queue_candidate(self) -> None:
         persist_phase0_memory_artifacts(
             {
@@ -36,8 +48,8 @@ class AgenticMemoryReviewCommandTests(TestCase):
                     "created_at": "2026-03-26T12:00:00Z",
                 }],
             },
-            context={"memory_backend": "langgraph_memory",
-                     "memory_environment": "local"},
+            review_context={"memory_backend": "langgraph_memory",
+                            "memory_environment": "local"},
         )
 
     def test_command_lists_pending_candidates_for_workflow(self):

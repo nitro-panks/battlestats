@@ -77,9 +77,12 @@ class LandingClansCacheTests(TestCase):
             clan_id=clan_id,
             name=name,
             tag=tag,
-            members_count=4,
+            members_count=12,
+            cached_clan_wr=53.0,
+            cached_total_battles=120000,
+            cached_active_member_count=10,
         )
-        for index in range(4):
+        for index in range(12):
             Player.objects.create(
                 name=f"{name}Player{index}",
                 player_id=(clan_id * 100) + index,
