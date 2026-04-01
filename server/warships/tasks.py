@@ -472,6 +472,19 @@ def update_clan_members_task(self, clan_id, realm=DEFAULT_REALM):
 
 
 @app.task(bind=True, **TASK_OPTS)
+def update_clan_tier_distribution_task(self, clan_id, realm=DEFAULT_REALM):
+    from warships.data import update_clan_tier_distribution
+
+    logger.info("Starting update_clan_tier_distribution_task for clan_id=%s realm=%s", clan_id, realm)
+    return _run_locked_task(
+        "update_clan_tier_distribution",
+        clan_id,
+        self.request.id,
+        lambda: update_clan_tier_distribution(clan_id=clan_id, realm=realm),
+    )
+
+
+@app.task(bind=True, **TASK_OPTS)
 def update_player_data_task(self, player_id, realm=DEFAULT_REALM, force_refresh=False):
     from warships.data import update_player_data
     from warships.models import Player

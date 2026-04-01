@@ -4190,6 +4190,43 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active', realm: str =
     return payload
 
 
+def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> list:
+    """
+    Computes an aggregated distribution of pvp_battles at each Ship Tier (1-11)
+    for all active players in the specified clan.
+    Returns: [{'ship_tier': 1, 'pvp_battles': 240}, ... {'ship_tier': 11, 'pvp_battles': 105}]
+    """
+    cache_key = realm_cache_key(realm, f'clan:tiers:v1:{clan_id}')
+    
+    # Pre-init summary
+    tier_aggregates = {tier: 0 for tier in range(1, 12)}
+    
+    player_tiers_list = Player.objects.filter(
+        clan_id=clan_id, realm=realm, is_hidden=False
+    ).values_list('tiers_json', flat=True)
+
+    for player_tiers in player_tiers_list:
+        if not player_tiers:
+            continue
+        for row in player_tiers:
+            tier = row.get('ship_tier')
+            battles = row.get('pvp_battles', 0)
+            if isinstance(tier, int) and 1 <= tier <= 11 and isinstance(battles, int):
+                tier_aggregates[tier] += battles
+
+    data = []
+    # Match the existing frontend TierSVG which iterates sorted natively, or just 11->1 or 1->11
+    for tier in range(11, 0, -1):
+        data.append({
+            'ship_tier': tier,
+            'pvp_battles': tier_aggregates[tier]
+        })
+        
+    # cache for 24h
+    cache.set(cache_key, data, 86400)
+    return data
+
+
 def update_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     player = Player.objects.get(player_id=player_id, realm=realm)
     player.randoms_json = _extract_randoms_rows(player.battles_json, limit=20)

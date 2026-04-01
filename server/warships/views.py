@@ -769,6 +769,28 @@ def clan_data(request, clan_filter: str) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def clan_tier_distribution(request, clan_id: str) -> Response:
+    realm = _get_realm(request)
+    clan = Clan.objects.filter(clan_id=clan_id, realm=realm).first()
+    if clan is not None:
+        _record_clan_lookup(clan, realm=realm)
+
+    cache_key = realm_cache_key(realm, f'clan:tiers:v1:{clan_id}')
+    cached = cache.get(cache_key)
+
+    if cached is not None:
+        return Response(cached)
+
+    from warships.tasks import update_clan_tier_distribution_task
+    _dispatch_async_refresh(update_clan_tier_distribution_task, clan_id=clan_id, realm=realm)
+    
+    response = Response([])
+    response['X-Clan-Tiers-Pending'] = 'true'
+    return response
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def clan_battle_seasons(request, clan_id: str) -> Response:
     realm = _get_realm(request)
     clan = Clan.objects.filter(clan_id=clan_id, realm=realm).first()
