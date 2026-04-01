@@ -1,23 +1,66 @@
 # Runbook: Recently-Viewed Player Cache Warming
 
 **Created**: 2026-03-29
-**Status**: Research complete, implementation pending
+**Updated**: 2026-04-01
+**Status**: Implemented
 
 ## Goal
 
 Ensure that players returning to check their stats get instant (cache-hit) responses by keeping a durable queue of ~100 most recently viewed player IDs perpetually warm in the `player:detail:v1:{id}` Redis cache.
 
+## 2026-04-01 Follow-Up: Footer/Profile Visits Missing From Landing Recent Queue
+
+### Symptom
+
+Clicking a player route such as `lil_boots` from the footer could load the player detail page successfully but fail to surface that player in the landing page's recent-player queue.
+
+### Root cause
+
+The client uses `fetchSharedJson()` with a short settled-response cache for player detail routes. On a cached client-side route hit, the browser can satisfy the page without reissuing the `/api/player/<name>/` request, which means `PlayerViewSet.get_object()` does not run and therefore does not update:
+
+1. `Player.last_lookup`
+2. the realm-scoped recently-viewed queue
+3. the landing recent-player dirty flag
+
+The one server-side path that still runs on those cached visits is analytics ingest (`POST /api/analytics/entity-view`). Before this fix, analytics persisted visit rows but did not synchronize the landing recent-player surface.
+
+### Implemented fix
+
+1. `warships.visit_analytics.record_entity_visit()` now updates the recent-player landing state for accepted player visits.
+2. The ingest path derives `realm` from `route_path` query params so multi-realm visits update the correct player row and queue.
+3. The ingest path now performs the same practical side effects needed by the landing recent surface:
+   - updates `Player.last_lookup`
+   - pushes the player into the realm-scoped recently-viewed queue
+   - marks the landing recent-player cache dirty
+4. `invalidate_landing_recent_player_cache()` now marks the dirty key before applying the republish cooldown. The cooldown still suppresses repeated task scheduling, but it no longer suppresses the dirty flag for a new rebuild.
+
+### Why this server-side repair was chosen
+
+Fixing only the client would leave multiple server entry paths out of sync and still rely on the detail API request actually happening. Syncing the recent-player surface from analytics ingest is the narrowest robust fix because analytics is the single path that still executes for both cached and uncached detail visits.
+
+### Validation
+
+Focused backend validation passed:
+
+```bash
+cd server && /home/august/code/archive/battlestats/.venv/bin/python manage.py test --keepdb \
+    warships.tests.test_entity_visit_analytics.EntityVisitAnalyticsTests \
+    warships.tests.test_landing.LandingHelperTests.test_invalidate_landing_recent_player_cache_still_marks_dirty_during_cooldown
+```
+
+Result: `Ran 10 tests ... OK`
+
 ## Current Warming Landscape
 
 Five warming systems exist today. Understanding them all is necessary to place the recently-viewed warmer correctly.
 
-| System | Entities | Selection | Frequency | Cost | Cache target |
-|--------|----------|-----------|-----------|------|-------------|
-| **Startup warmer** | Landing + 20 players + 10 clans + ~500 bulk | Sequential: landing → hot → bulk | On boot (5s delay) | High (WG API for hot, DB for bulk) | Landing keys + `player:detail:v1:*` |
-| **Hot entity warmer** | 20 players, 10 clans | Pinned + top-visited(7d) + last_lookup + top-scored | Every 30 min | **High** — ~8 WG API calls/player | Refreshes source data in DB, then **invalidates** `player:detail:v1:*` (does NOT repopulate) |
-| **Bulk entity cache loader** | ~500 players, ~100 clans | Top 50 by score + members of 25 best clans + pinned | Every 12h | **Low** — DB reads + serialization only | `player:detail:v1:*` via `cache.set_many()` |
-| **Landing page warmer** | 40 recent players (card payloads) | `last_lookup` DESC | Every 55 min | Low — lightweight ORM query | `landing:recent_players:*` (card data, NOT detail cache) |
-| **Lazy refresh** | Any player on request | Cache miss + stale detection | On-demand | Variable — WG API if stale | Per-entity on miss |
+| System                       | Entities                                    | Selection                                           | Frequency          | Cost                                    | Cache target                                                                                 |
+| ---------------------------- | ------------------------------------------- | --------------------------------------------------- | ------------------ | --------------------------------------- | -------------------------------------------------------------------------------------------- |
+| **Startup warmer**           | Landing + 20 players + 10 clans + ~500 bulk | Sequential: landing → hot → bulk                    | On boot (5s delay) | High (WG API for hot, DB for bulk)      | Landing keys + `player:detail:v1:*`                                                          |
+| **Hot entity warmer**        | 20 players, 10 clans                        | Pinned + top-visited(7d) + last_lookup + top-scored | Every 30 min       | **High** — ~8 WG API calls/player       | Refreshes source data in DB, then **invalidates** `player:detail:v1:*` (does NOT repopulate) |
+| **Bulk entity cache loader** | ~500 players, ~100 clans                    | Top 50 by score + members of 25 best clans + pinned | Every 12h          | **Low** — DB reads + serialization only | `player:detail:v1:*` via `cache.set_many()`                                                  |
+| **Landing page warmer**      | 40 recent players (card payloads)           | `last_lookup` DESC                                  | Every 55 min       | Low — lightweight ORM query             | `landing:recent_players:*` (card data, NOT detail cache)                                     |
+| **Lazy refresh**             | Any player on request                       | Cache miss + stale detection                        | On-demand          | Variable — WG API if stale              | Per-entity on miss                                                                           |
 
 ### The gap for returning visitors
 
@@ -61,6 +104,7 @@ push_recently_viewed_player(obj.player_id)
 ```
 
 Implementation in `data.py` — read-modify-write with dedup and cap:
+
 ```python
 def push_recently_viewed_player(player_id: int) -> None:
     current = cache.get(RECENTLY_VIEWED_CACHE_KEY) or []
@@ -71,6 +115,8 @@ def push_recently_viewed_player(player_id: int) -> None:
 ```
 
 Negligible latency. Silent failure — this is best-effort.
+
+For cached client-side revisits where `PlayerViewSet.get_object()` is bypassed, `record_entity_visit()` now mirrors the same state update on the server so the landing recent-player surface stays accurate.
 
 ### Bulk loader integration (Cohort 4)
 
@@ -102,6 +148,7 @@ def warm_recently_viewed_players_task(self):
 Lock key: `warships:tasks:warm_recently_viewed_players:lock` (15-minute timeout).
 
 Steps:
+
 1. Read player IDs from `recently_viewed:players:v1` cache key
 2. `cache.get_many([player:detail:v1:{id} for id in ids])` — single round-trip to check which are cached
 3. For each miss, serialize from DB via `PlayerSerializer.to_representation()` and `cache.set()` with 24h TTL
@@ -139,13 +186,13 @@ t=24h  Detail cache TTL expires. If player still in ZSET (viewed within last 100
 
 ### Overlap matrix
 
-| Player type | Hot warmer (30m) | Bulk loader (12h) | Recently-viewed (10m) | Landing warmer (55m) | Net coverage |
-|-------------|:---:|:---:|:---:|:---:|:---|
-| Pinned player | Yes (source refresh) | Yes (detail cache) | If recently viewed | If recently viewed | Fully covered |
-| Top-scored player | Maybe (if in top 20) | Yes (Cohort 1) | If recently viewed | No | Fully covered |
-| Best-clan member | No | Yes (Cohort 2) | If recently viewed | No | Fully covered |
-| **Casual returning visitor** | Maybe (if in top 20) | **No** | **Yes** ✅ | Card only (not detail) | **Now covered** |
-| One-time visitor (>100 views ago) | No | No | No (evicted from ZSET) | No | Lazy refresh only |
+| Player type                       |   Hot warmer (30m)   | Bulk loader (12h)  | Recently-viewed (10m)  |  Landing warmer (55m)  | Net coverage      |
+| --------------------------------- | :------------------: | :----------------: | :--------------------: | :--------------------: | :---------------- |
+| Pinned player                     | Yes (source refresh) | Yes (detail cache) |   If recently viewed   |   If recently viewed   | Fully covered     |
+| Top-scored player                 | Maybe (if in top 20) |   Yes (Cohort 1)   |   If recently viewed   |           No           | Fully covered     |
+| Best-clan member                  |          No          |   Yes (Cohort 2)   |   If recently viewed   |           No           | Fully covered     |
+| **Casual returning visitor**      | Maybe (if in top 20) |       **No**       |       **Yes** ✅       | Card only (not detail) | **Now covered**   |
+| One-time visitor (>100 views ago) |          No          |         No         | No (evicted from ZSET) |           No           | Lazy refresh only |
 
 ### Complementary roles (no redundant work)
 
@@ -165,19 +212,19 @@ Worst case: a player in both the hot warmer set and the recently-viewed set gets
 
 ### Files to modify
 
-| File | Change |
-|------|--------|
-| `server/warships/data.py` | Add `push_recently_viewed_player()`, `get_recently_viewed_player_ids()`, `warm_recently_viewed_players()`. Add Cohort 4 to `bulk_load_player_cache()`. |
-| `server/warships/views.py` | Call `push_recently_viewed_player(player_id)` after `obj.save(update_fields=...)` in `get_object()` |
-| `server/warships/tasks.py` | Add `warm_recently_viewed_players_task()` |
-| `server/warships/signals.py` | Register the 10-minute periodic task in Beat schedule |
+| File                         | Change                                                                                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `server/warships/data.py`    | Add `push_recently_viewed_player()`, `get_recently_viewed_player_ids()`, `warm_recently_viewed_players()`. Add Cohort 4 to `bulk_load_player_cache()`. |
+| `server/warships/views.py`   | Call `push_recently_viewed_player(player_id)` after `obj.save(update_fields=...)` in `get_object()`                                                    |
+| `server/warships/tasks.py`   | Add `warm_recently_viewed_players_task()`                                                                                                              |
+| `server/warships/signals.py` | Register the 10-minute periodic task in Beat schedule                                                                                                  |
 
 ### Configuration
 
-| Env var | Default | Description |
-|---------|---------|-------------|
-| `RECENTLY_VIEWED_PLAYER_LIMIT` | 100 | Max players in the recently-viewed ZSET |
-| `RECENTLY_VIEWED_WARM_MINUTES` | 10 | Supplemental warm cycle interval |
+| Env var                        | Default | Description                             |
+| ------------------------------ | ------- | --------------------------------------- |
+| `RECENTLY_VIEWED_PLAYER_LIMIT` | 100     | Max players in the recently-viewed ZSET |
+| `RECENTLY_VIEWED_WARM_MINUTES` | 10      | Supplemental warm cycle interval        |
 
 ### Tests to add
 

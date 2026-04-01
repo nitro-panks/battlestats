@@ -48,6 +48,9 @@ BULK_CACHE_LOAD_LOCK_TIMEOUT = 30 * 60
 RECENTLY_VIEWED_WARM_LOCK_TIMEOUT = 15 * 60
 
 
+MAX_CONCURRENT_REALM_CRAWLS = int(os.getenv("MAX_CONCURRENT_REALM_CRAWLS", "1"))
+
+
 # ---------------------------------------------------------------------------
 # Realm-scoped lock / dispatch / heartbeat key helpers
 # ---------------------------------------------------------------------------
@@ -874,9 +877,22 @@ def warm_recently_viewed_players_task(self, realm=DEFAULT_REALM):
 @app.task(bind=True, **CRAWL_TASK_OPTS)
 def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEFAULT_REALM, core_only=False):
     from warships.clan_crawl import run_clan_crawl
+    from warships.models import VALID_REALMS as _realms
 
     lock_key = _clan_crawl_lock_key(realm)
     heartbeat_key = _clan_crawl_heartbeat_key(realm)
+
+    # Cross-realm crawl mutex: limit concurrent full crawls to prevent OOM.
+    active_crawl_realms = [
+        r for r in sorted(_realms)
+        if r != realm and cache.get(_clan_crawl_lock_key(r)) is not None
+    ]
+    if len(active_crawl_realms) >= MAX_CONCURRENT_REALM_CRAWLS:
+        logger.warning(
+            "Skipping crawl for realm=%s — %d other crawl(s) active: %s (max=%d)",
+            realm, len(active_crawl_realms), active_crawl_realms, MAX_CONCURRENT_REALM_CRAWLS,
+        )
+        return {"status": "skipped", "reason": "cross-realm-mutex", "active": active_crawl_realms}
 
     if not cache.add(lock_key, self.request.id, timeout=CLAN_CRAWL_LOCK_TIMEOUT):
         logger.warning(

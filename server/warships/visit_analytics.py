@@ -4,13 +4,14 @@ import hashlib
 import re
 from collections import defaultdict
 from datetime import timedelta, timezone as dt_timezone
+from urllib.parse import parse_qs, urlparse
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 
-from warships.models import Clan, EntityVisitDaily, EntityVisitEvent, Player
+from warships.models import Clan, DEFAULT_REALM, EntityVisitDaily, EntityVisitEvent, Player, VALID_REALMS
 
 
 VISIT_DEDUPE_WINDOW = timedelta(minutes=30)
@@ -43,6 +44,34 @@ def is_bot_user_agent(user_agent: str) -> bool:
     return bool(_BOT_USER_AGENT_RE.search(user_agent))
 
 
+def _realm_from_route_path(route_path: str) -> str:
+    try:
+        realm = parse_qs(urlparse(route_path or '').query).get(
+            'realm', [DEFAULT_REALM])[0]
+    except Exception:
+        return DEFAULT_REALM
+
+    normalized_realm = (realm or DEFAULT_REALM).strip().lower()
+    return normalized_realm if normalized_realm in VALID_REALMS else DEFAULT_REALM
+
+
+def _sync_recent_player_surface(entity_type: str, entity_id: int, occurred_at, route_path: str) -> None:
+    if entity_type != EntityVisitEvent.ENTITY_TYPE_PLAYER:
+        return
+
+    realm = _realm_from_route_path(route_path)
+    updated = Player.objects.filter(
+        player_id=entity_id, realm=realm).update(last_lookup=occurred_at)
+    if not updated:
+        return
+
+    from warships.data import push_recently_viewed_player
+    from warships.landing import invalidate_landing_recent_player_cache
+
+    push_recently_viewed_player(entity_id, realm=realm)
+    invalidate_landing_recent_player_cache(realm=realm)
+
+
 def record_entity_visit(payload: dict, user_agent: str = '') -> dict:
     if is_bot_user_agent(user_agent):
         return {
@@ -55,6 +84,7 @@ def record_entity_visit(payload: dict, user_agent: str = '') -> dict:
     event_date = occurred_at.date()
     entity_type = payload['entity_type']
     entity_id = payload['entity_id']
+    realm = _realm_from_route_path(payload.get('route_path') or '')
     source = payload.get('source') or EntityVisitEvent.SOURCE_WEB_FIRST_PARTY
     visitor_key_hash = hash_identifier(payload['visitor_key'])
     session_key_hash = hash_identifier(payload['session_key'])
@@ -88,6 +118,7 @@ def record_entity_visit(payload: dict, user_agent: str = '') -> dict:
                 event_date=event_date,
                 entity_type=entity_type,
                 entity_id=entity_id,
+                realm=realm,
                 entity_name_snapshot=payload['entity_name'],
                 entity_slug_snapshot=payload.get('entity_slug') or '',
                 route_path=payload['route_path'],
@@ -109,6 +140,7 @@ def record_entity_visit(payload: dict, user_agent: str = '') -> dict:
             date=event_date,
             entity_type=entity_type,
             entity_id=entity_id,
+            realm=realm,
             defaults={
                 'entity_name_snapshot': payload['entity_name'],
                 'last_view_at': occurred_at,
@@ -136,6 +168,13 @@ def record_entity_visit(payload: dict, user_agent: str = '') -> dict:
         daily_row.unique_sessions = day_events.values(
             'session_key_hash').distinct().count()
         daily_row.save()
+
+    _sync_recent_player_surface(
+        entity_type,
+        entity_id,
+        occurred_at,
+        payload.get('route_path') or '',
+    )
 
     return {
         'accepted': True,
@@ -246,6 +285,7 @@ def rebuild_entity_visit_daily(*, start_date=None, end_date=None, entity_type: s
             'event_date',
             'entity_type',
             'entity_id',
+            'realm',
             'entity_name_snapshot',
             'occurred_at',
             'visitor_key_hash',
@@ -267,7 +307,7 @@ def rebuild_entity_visit_daily(*, start_date=None, end_date=None, entity_type: s
     })
 
     for row in event_rows:
-        key = (row['event_date'], row['entity_type'], row['entity_id'])
+        key = (row['event_date'], row['entity_type'], row['entity_id'], row.get('realm', DEFAULT_REALM))
         bucket = grouped[key]
         if not bucket['entity_name_snapshot']:
             bucket['entity_name_snapshot'] = row['entity_name_snapshot']
@@ -284,11 +324,12 @@ def rebuild_entity_visit_daily(*, start_date=None, end_date=None, entity_type: s
             bucket['source_ga4_views'] += 1
 
     rebuilt_rows = []
-    for (event_date, resolved_entity_type, entity_id), bucket in grouped.items():
+    for (event_date, resolved_entity_type, entity_id, realm), bucket in grouped.items():
         rebuilt_rows.append(EntityVisitDaily(
             date=event_date,
             entity_type=resolved_entity_type,
             entity_id=entity_id,
+            realm=realm,
             entity_name_snapshot=bucket['entity_name_snapshot'],
             views_raw=bucket['views_raw'],
             views_deduped=bucket['views_deduped'],

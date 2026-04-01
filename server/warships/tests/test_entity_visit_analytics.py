@@ -1,13 +1,19 @@
 import uuid
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
-from warships.models import Clan, EntityVisitDaily, EntityVisitEvent, Player
+from warships.data import get_recently_viewed_player_ids
+from warships.landing import LANDING_RECENT_PLAYERS_DIRTY_KEY
+from warships.models import Clan, EntityVisitDaily, EntityVisitEvent, Player, realm_cache_key
 
 
 class EntityVisitAnalyticsTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     def _payload(self, **overrides):
         payload = {
             'event_uuid': str(uuid.uuid4()),
@@ -42,6 +48,30 @@ class EntityVisitAnalyticsTests(TestCase):
         self.assertEqual(daily.views_deduped, 1)
         self.assertEqual(daily.unique_visitors, 1)
         self.assertEqual(daily.unique_sessions, 1)
+
+        player = Player.objects.get(player_id=1001)
+        self.assertIsNotNone(player.last_lookup)
+        self.assertEqual(get_recently_viewed_player_ids(), [1001])
+        self.assertIsNotNone(cache.get(realm_cache_key(
+            'na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
+
+    def test_entity_view_ingest_uses_realm_from_route_path_for_recent_player_updates(self):
+        Player.objects.create(name='NA Player', player_id=1001, realm='na')
+        Player.objects.create(name='EU Player', player_id=1001, realm='eu')
+
+        response = self.client.post(
+            '/api/analytics/entity-view/',
+            data=self._payload(route_path='/player/player-one?realm=eu'),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(Player.objects.get(
+            player_id=1001, realm='na').last_lookup)
+        self.assertIsNotNone(Player.objects.get(
+            player_id=1001, realm='eu').last_lookup)
+        self.assertEqual(get_recently_viewed_player_ids(realm='eu'), [1001])
+        self.assertEqual(get_recently_viewed_player_ids(realm='na'), [])
 
     def test_entity_view_ingest_accepts_no_trailing_slash(self):
         Player.objects.create(name='Player One', player_id=1001)

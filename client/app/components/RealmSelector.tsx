@@ -16,6 +16,10 @@ const REALM_OPTIONS: RealmOption[] = [
     { value: 'eu', label: 'EU' },
 ];
 
+const INACTIVE_OPTION_COLOR = 'var(--text-secondary)';
+const ACTIVE_OPTION_BACKGROUND = 'var(--accent-faint)';
+const ACTIVE_OPTION_COLOR = 'var(--text-primary)';
+
 const RealmSelector: React.FC = () => {
     const { realm, setRealm } = useRealm();
     const [open, setOpen] = useState(false);
@@ -115,17 +119,21 @@ const RealmSelector: React.FC = () => {
                                     height: '32px',
                                     paddingLeft: '8px',
                                     paddingRight: '8px',
-                                    color: isActive ? 'var(--text-primary)' : 'rgba(107, 114, 128, 0.6)',
+                                    color: isActive ? ACTIVE_OPTION_COLOR : INACTIVE_OPTION_COLOR,
                                     cursor: 'pointer',
-                                    backgroundColor: 'transparent',
+                                    backgroundColor: isActive ? ACTIVE_OPTION_BACKGROUND : 'transparent',
                                     border: 'none',
-                                    fontWeight: isActive ? 600 : 400,
+                                    fontWeight: isActive ? 600 : 500,
                                 }}
                                 onMouseEnter={(e) => {
-                                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--bg-hover)';
+                                    if (!isActive) {
+                                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--bg-hover)';
+                                    }
                                 }}
                                 onMouseLeave={(e) => {
-                                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent';
+                                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = isActive
+                                        ? ACTIVE_OPTION_BACKGROUND
+                                        : 'transparent';
                                 }}
                             >
                                 <span style={{ fontSize: '13px' }}>

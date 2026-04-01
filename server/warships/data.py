@@ -71,6 +71,7 @@ CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT', '8')))
 CLAN_BATTLE_SUMMARY_STALE_DAYS = max(
     1, int(os.getenv('CLAN_BATTLE_SUMMARY_STALE_DAYS', '7')))
+CLAN_BATTLE_BADGE_REFRESH_DAYS = CLAN_BATTLE_SUMMARY_STALE_DAYS
 CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT', '8')))
 PLAYER_EFFICIENCY_STALE_AFTER = timedelta(hours=24)
@@ -2006,17 +2007,21 @@ def fetch_player_summary(player_id: str, realm: str = DEFAULT_REALM) -> dict:
             # battles_json missing) no longer blocks hydration.
             if player.battles_json is None:
                 _dispatch_async_refresh(
-                    update_battle_data_task, player_id=player_id)
+                    update_battle_data_task, player_id=player_id, realm=realm)
             elif player_battle_data_needs_refresh(player):
                 _dispatch_async_refresh(
-                    update_battle_data_task, player_id=player_id)
+                    update_battle_data_task, player_id=player_id, realm=realm)
 
             if player.activity_json is None:
-                _dispatch_async_refresh(update_snapshot_data_task, player_id)
-                _dispatch_async_refresh(update_activity_data_task, player_id)
+                _dispatch_async_refresh(
+                    update_snapshot_data_task, player_id, realm=realm)
+                _dispatch_async_refresh(
+                    update_activity_data_task, player_id, realm=realm)
             elif player_activity_data_needs_refresh(player):
-                _dispatch_async_refresh(update_snapshot_data_task, player_id)
-                _dispatch_async_refresh(update_activity_data_task, player_id)
+                _dispatch_async_refresh(
+                    update_snapshot_data_task, player_id, realm=realm)
+                _dispatch_async_refresh(
+                    update_activity_data_task, player_id, realm=realm)
 
             if player.ranked_json is None:
                 from warships.tasks import queue_ranked_data_refresh
@@ -2335,7 +2340,7 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
         f'Battles data empty or outdated: fetching new data for {player.name}')
 
     # Fetch ship stats for the player
-    ship_data = _fetch_ship_stats_for_player(player_id)
+    ship_data = _fetch_ship_stats_for_player(player_id, realm=realm)
     if not ship_data:
         logging.warning(
             f'No ship stats returned for player_id={player_id}; recording attempt timestamp to avoid tight retry loop.'
@@ -2414,7 +2419,7 @@ def fetch_tier_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
         player = Player.objects.get(player_id=player_id, realm=realm)
         if not player.battles_json:
             _dispatch_async_refresh(
-                update_battle_data_task, player_id=player_id)
+                update_battle_data_task, player_id=player_id, realm=realm)
             return player.tiers_json or []
     except Player.DoesNotExist:
         return []
@@ -2422,10 +2427,10 @@ def fetch_tier_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     if player.tiers_json is not None:
         if player_battle_data_needs_refresh(player):
             _dispatch_async_refresh(
-                update_battle_data_task, player_id=player_id)
+                update_battle_data_task, player_id=player_id, realm=realm)
         return player.tiers_json
 
-    _dispatch_async_refresh(update_tiers_data_task, player_id)
+    _dispatch_async_refresh(update_tiers_data_task, player_id, realm=realm)
     return []
 
 
@@ -2535,13 +2540,14 @@ def fetch_activity_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
                 player.player_id,
             )
             _dispatch_async_refresh(
-                update_snapshot_data_task, player.player_id)
+                update_snapshot_data_task, player.player_id, realm=realm)
         else:
             logging.info(
                 f'Activity fetch datetime is fresh: returning cached data for player {player.name}')
         return player.activity_json
 
-    _dispatch_async_refresh(update_snapshot_data_task, player.player_id)
+    _dispatch_async_refresh(update_snapshot_data_task,
+                            player.player_id, realm=realm)
     return []
 
 
@@ -2750,8 +2756,7 @@ def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
-                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)                          :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -3208,7 +3213,8 @@ def fetch_player_tier_type_correlation(player_id: str, player: Player | None = N
     population_payload = _fetch_player_tier_type_population_correlation(
         realm=realm)
     if not player.battles_json:
-        _dispatch_async_refresh(update_battle_data_task, player_id=player_id)
+        _dispatch_async_refresh(update_battle_data_task,
+                                player_id=player_id, realm=realm)
         return {
             **population_payload,
             'player_cells': [],
@@ -3658,7 +3664,7 @@ def _get_player_clan_battle_season_stats(account_id: int, realm: str = DEFAULT_R
     if cached is not None:
         return cached
 
-    raw = _fetch_clan_battle_season_stats(account_id)
+    raw = _fetch_clan_battle_season_stats(account_id, realm=realm)
     seasons = raw.get('seasons', []) if raw else []
     cache.set(cache_key, seasons, CLAN_BATTLE_PLAYER_STATS_CACHE_TTL)
     return seasons
@@ -4021,7 +4027,7 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
     season_meta = _get_ranked_seasons_metadata()
 
     # Get player's rank_info
-    account_data = _fetch_ranked_account_info(int(player_id))
+    account_data = _fetch_ranked_account_info(int(player_id), realm=realm)
     rank_info = account_data.get('rank_info') if account_data else None
 
     if not rank_info:
@@ -4036,7 +4042,7 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
          for season_id in rank_info.keys() if str(season_id).isdigit()]
     )
     ranked_ship_stats_rows = _fetch_ranked_ship_stats_for_player(
-        int(player_id), season_ids=requested_season_ids)
+        int(player_id), season_ids=requested_season_ids, realm=realm)
     top_ship_names_by_season = _build_top_ranked_ship_names_by_season(
         ranked_ship_stats_rows, requested_season_ids)
 
@@ -4065,7 +4071,7 @@ def fetch_type_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
         player = Player.objects.get(player_id=player_id, realm=realm)
         if not player.battles_json:
             _dispatch_async_refresh(
-                update_battle_data_task, player_id=player_id)
+                update_battle_data_task, player_id=player_id, realm=realm)
             return player.type_json or []
     except Player.DoesNotExist:
         return []
@@ -4073,10 +4079,10 @@ def fetch_type_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     if player.type_json is not None:
         if player_battle_data_needs_refresh(player):
             _dispatch_async_refresh(
-                update_battle_data_task, player_id=player_id)
+                update_battle_data_task, player_id=player_id, realm=realm)
         return player.type_json
 
-    _dispatch_async_refresh(update_type_data_task, player_id)
+    _dispatch_async_refresh(update_type_data_task, player_id, realm=realm)
     return []
 
 
@@ -4095,7 +4101,7 @@ def fetch_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
         player = Player.objects.get(player_id=player_id, realm=realm)
         if not player.battles_json:
             _dispatch_async_refresh(
-                update_battle_data_task, player_id=player_id)
+                update_battle_data_task, player_id=player_id, realm=realm)
             return _extract_randoms_rows(player.randoms_json, limit=20)
     except Player.DoesNotExist:
         return []
@@ -4107,21 +4113,23 @@ def fetch_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
         )
 
         if not has_required_fields:
-            _dispatch_async_refresh(update_randoms_data_task, player_id)
+            _dispatch_async_refresh(
+                update_randoms_data_task, player_id, realm=realm)
             return []
 
         if player_battle_data_needs_refresh(player):
             _dispatch_async_refresh(
-                update_battle_data_task, player_id=player_id)
+                update_battle_data_task, player_id=player_id, realm=realm)
         return _extract_randoms_rows(player.randoms_json, limit=20)
 
     extracted_battle_rows = _extract_randoms_rows(
         player.battles_json, limit=20)
     if extracted_battle_rows:
-        _dispatch_async_refresh(update_randoms_data_task, player_id)
+        _dispatch_async_refresh(
+            update_randoms_data_task, player_id, realm=realm)
         return extracted_battle_rows
 
-    _dispatch_async_refresh(update_randoms_data_task, player_id)
+    _dispatch_async_refresh(update_randoms_data_task, player_id, realm=realm)
     return []
 
 
@@ -4157,9 +4165,11 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active', realm: str =
     )
 
     if needs_clan_refresh:
-        _dispatch_async_refresh(update_clan_data_task, clan_id=clan_id)
+        _dispatch_async_refresh(update_clan_data_task,
+                                clan_id=clan_id, realm=realm)
     if needs_member_refresh:
-        _dispatch_async_refresh(update_clan_members_task, clan_id=clan_id)
+        _dispatch_async_refresh(update_clan_members_task,
+                                clan_id=clan_id, realm=realm)
 
     if cached is not None:
         if cached:
@@ -4208,7 +4218,7 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
             f'{clan.name}: Clan data is fresh')
         return
 
-    data = _fetch_clan_data(clan_id)
+    data = _fetch_clan_data(clan_id, realm=realm)
     if not data:
         logging.warning(
             "Skipping clan update because upstream returned no data for clan_id=%s", clan_id)
@@ -4229,7 +4239,7 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
 
-    for member_id in _fetch_clan_member_ids(clan_id):
+    for member_id in _fetch_clan_member_ids(clan_id, realm=realm):
         try:
             player, created = get_or_create_canonical_player(
                 member_id, realm=realm)
@@ -4251,7 +4261,7 @@ def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     from warships.landing import invalidate_landing_clan_caches
 
     clan = Clan.objects.get(clan_id=clan_id, realm=realm)
-    member_ids = _fetch_clan_member_ids(clan_id)
+    member_ids = _fetch_clan_member_ids(clan_id, realm=realm)
 
     if not member_ids and clan.members_count:
         logging.warning(
@@ -4314,7 +4324,8 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
             f'Player data is fresh')
         return
 
-    player_data = _fetch_player_personal_data(player.player_id)
+    player_data = _fetch_player_personal_data(
+        player.player_id, realm=player.realm)
     if not player_data:
         logging.warning(
             "Skipping player update because upstream returned no data for player_id=%s",
@@ -4326,7 +4337,8 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
     player.name = player_data.get("nickname", "")
     player.player_id = player_data.get("account_id", player.player_id)
 
-    clan_membership = _fetch_clan_membership_for_player(player.player_id)
+    clan_membership = _fetch_clan_membership_for_player(
+        player.player_id, realm=player.realm)
     clan_id = clan_membership.get("clan_id") or player_data.get("clan_id")
     if clan_id:
         clan, _ = Clan.objects.get_or_create(

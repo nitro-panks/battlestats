@@ -242,6 +242,7 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
                 .attr('opacity', 0.82);
         })
         .on('mouseout', function (this: SVGRectElement) {
+            renderDetails(null);
             d3.select(this).transition()
                 .duration(70)
                 .attr('opacity', 1);
@@ -257,10 +258,6 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         .style('fill', colors.labelMuted)
         .attr('text-anchor', (datum: RandomsChartRow) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
         .text((datum: RandomsChartRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
-
-    if (data[0]) {
-        renderDetails(data[0]);
-    }
 };
 
 const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRow[], theme: ChartTheme) => {

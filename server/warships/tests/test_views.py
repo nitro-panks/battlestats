@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
-from warships.models import Player, Clan, PlayerExplorerSummary
+from warships.models import Player, Clan, PlayerExplorerSummary, realm_cache_key
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
@@ -438,6 +438,7 @@ class LandingWarmupViewTests(TestCase):
         mock_queue.assert_called_once_with(
             player_limit=LANDING_PLAYER_LIMIT,
             clan_limit=LANDING_PLAYER_LIMIT,
+            realm='na',
         )
 
     @patch("warships.views.queue_landing_best_entity_warm")
@@ -515,7 +516,7 @@ class LandingWarmupViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
             {'name': 'stale'}])
-        self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
 
     def test_player_cache_hit_still_updates_last_lookup_and_invalidates_recent(self):
         """When the player detail cache is pre-populated, the cache-hit path
@@ -548,7 +549,7 @@ class LandingWarmupViewTests(TestCase):
         self.assertIsNotNone(player.last_lookup)
         self.assertGreaterEqual(player.last_lookup, request_started_at)
         # Dirty flag should be set
-        self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
 
     def test_clan_members_lookup_updates_clan_last_lookup_timestamp(self):
         cache.clear()
@@ -1719,7 +1720,7 @@ class ApiContractTests(TestCase):
             else:
                 Player.objects.create(
                     name=f"PriorCooling-{month_delta}",
-                    player_id=4700 + (month_delta + 11) * 10,
+                    player_id=4800 + (month_delta + 11) * 10,
                     is_hidden=False,
                     creation_date=creation_date,
                     days_since_last_battle=55,
@@ -1727,7 +1728,7 @@ class ApiContractTests(TestCase):
                 )
                 Player.objects.create(
                     name=f"PriorDormantA-{month_delta}",
-                    player_id=4701 + (month_delta + 11) * 10,
+                    player_id=4801 + (month_delta + 11) * 10,
                     is_hidden=False,
                     creation_date=creation_date,
                     days_since_last_battle=130,
@@ -1735,7 +1736,7 @@ class ApiContractTests(TestCase):
                 )
                 Player.objects.create(
                     name=f"PriorDormantB-{month_delta}",
-                    player_id=4702 + (month_delta + 11) * 10,
+                    player_id=4802 + (month_delta + 11) * 10,
                     is_hidden=False,
                     creation_date=creation_date,
                     days_since_last_battle=190,
@@ -2694,11 +2695,11 @@ class ApiContractTests(TestCase):
         result = warm_landing_page_content()
 
         self.assertEqual(result['status'], 'completed')
-        self.assertIsNotNone(cache.get(LANDING_CLANS_CACHE_KEY))
-        self.assertIsNotNone(cache.get(LANDING_CLANS_PUBLISHED_CACHE_KEY))
-        self.assertIsNotNone(cache.get(LANDING_CLANS_BEST_CACHE_KEY))
-        self.assertIsNotNone(cache.get(LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY))
-        self.assertIsNotNone(cache.get(LANDING_RECENT_CLANS_CACHE_KEY))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_CLANS_CACHE_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_CLANS_PUBLISHED_CACHE_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_CLANS_BEST_CACHE_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_RECENT_CLANS_CACHE_KEY)))
         self.assertIsNotNone(
             cache.get(landing_player_cache_key('random', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
@@ -2711,7 +2712,7 @@ class ApiContractTests(TestCase):
             cache.get(landing_player_cache_key('sigma', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
             cache.get(landing_player_published_cache_key('sigma', LANDING_PLAYER_LIMIT)))
-        self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)))
 
     def test_landing_recent_clans_orders_by_last_lookup_desc(self):
         cache.clear()
@@ -3167,7 +3168,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["metric"], "tier_type")
         self.assertEqual(payload["player_cells"], [])
         self.assertTrue(payload["tiles"])
-        mock_update_battle_data_task.assert_called_once_with(player_id='8834')
+        mock_update_battle_data_task.assert_called_once_with(player_id='8834', realm='na')
 
     def test_player_correlation_distribution_returns_ranked_wr_battles_payload(self):
         cache.clear()
@@ -3313,7 +3314,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["player_point"]["y"], 60.0)
         self.assertIsNotNone(
             cache.get(_player_correlation_published_cache_key("ranked_wr_battles:v6")))
-        mock_queue_refresh.assert_called_once_with()
+        mock_queue_refresh.assert_called_once_with(realm='na')
 
     @patch("warships.tasks.queue_player_ranked_wr_battles_correlation_refresh")
     def test_ranked_wr_battles_cold_cache_returns_200_with_pending_header(self, mock_queue_refresh):
@@ -3704,7 +3705,7 @@ class ApiThrottleTests(TestCase):
                          PUBLIC_API_THROTTLES)
 
     def test_landing_recent_players_orders_by_last_lookup_desc_and_limits_to_40(self):
-        cache.delete(LANDING_RECENT_PLAYERS_CACHE_KEY)
+        cache.delete(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY))
         now = timezone.now()
 
         for index in range(45):
@@ -3912,7 +3913,7 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(len(response.json()), 1)
         self.assertEqual(response.json()[0]["ship_name"], "Fallback Ship")
         self.assertIn("X-Randoms-Updated-At", response)
-        mock_fetch_randoms_data.assert_called_once_with("654")
+        mock_fetch_randoms_data.assert_called_once_with("654", realm='na')
 
     @patch("warships.views.is_clan_battle_summary_refresh_pending", return_value=True)
     @patch("warships.tasks.queue_clan_battle_summary_refresh")
@@ -3925,7 +3926,7 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
         self.assertEqual(response["X-Clan-Battles-Pending"], "true")
-        mock_queue_refresh.assert_called_once_with("42")
+        mock_queue_refresh.assert_called_once_with("42", realm='na')
 
     @patch("warships.views.fetch_clan_plot_data", return_value=[])
     def test_clan_data_flags_pending_refresh_on_empty_plot_warmup(self, _mock_fetch_plot):
@@ -4102,7 +4103,7 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.json(), [])
         self.assertEqual(response["X-Ranked-Pending"], "true")
         self.assertIn("X-Ranked-Updated-At", response)
-        mock_fetch_ranked_data.assert_called_once_with("778")
+        mock_fetch_ranked_data.assert_called_once_with("778", realm='na')
 
     @patch("warships.views._fetch_player_id_by_name", return_value=None)
     def test_missing_player_lookup_uses_standard_drf_error_shape(self, _mock_lookup):
@@ -4127,4 +4128,4 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(first_response.status_code, 404)
         self.assertEqual(second_response.status_code, 404)
         self.assertTrue(cache.get(cache_key))
-        mock_lookup.assert_called_once_with("PlayerThatWillNeverExist")
+        mock_lookup.assert_called_once_with("PlayerThatWillNeverExist", realm='na')

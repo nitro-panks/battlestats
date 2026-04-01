@@ -1,6 +1,7 @@
 from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
@@ -55,7 +56,7 @@ class MaybeRefreshClanBattleDataTests(TestCase):
     def test_dispatches_when_stale(self, mock_dispatch):
         # No explorer summary → stale
         maybe_refresh_clan_battle_data(self.player)
-        mock_dispatch.assert_called_once_with(self.player.player_id)
+        mock_dispatch.assert_called_once_with(self.player.player_id, realm='na')
 
     @patch('warships.tasks.queue_clan_battle_data_refresh')
     def test_no_dispatch_when_fresh(self, mock_dispatch):
@@ -79,6 +80,7 @@ class ClanMembersShieldTests(TestCase):
     """Integration tests for the clan_members view."""
 
     def setUp(self):
+        cache.clear()
         self.now = timezone.now()
         self.clan = Clan.objects.create(
             clan_id=88001, name='ShieldClan', members_count=1,
@@ -145,8 +147,8 @@ class ClanMembersShieldTests(TestCase):
            return_value={'pending_player_ids': set(), 'queued_player_ids': set(),
                          'deferred_player_ids': set(), 'max_in_flight': 5})
     @patch('warships.tasks.queue_clan_battle_data_refresh')
-    def test_does_not_dispatch_refresh_for_stale(self, mock_cb_dispatch,
-                                                 mock_eff_hydration, mock_ranked):
+    def test_dispatches_refresh_for_stale(self, mock_cb_dispatch,
+                                          mock_eff_hydration, mock_ranked):
         stale = Player.objects.create(
             name='StaleMember', player_id=88103, clan=self.clan,
             last_battle_date=self.now.date(), total_battles=50,
@@ -158,7 +160,7 @@ class ClanMembersShieldTests(TestCase):
         response = self.client.get(
             f'/api/fetch/clan_members/{self.clan.clan_id}/')
         self.assertEqual(response.status_code, 200)
-        mock_cb_dispatch.assert_not_called()
+        mock_cb_dispatch.assert_called_once_with(88103, realm='na')
 
     @patch('warships.data.queue_clan_ranked_hydration',
            return_value={'pending_player_ids': set(), 'queued_player_ids': set(),
@@ -275,7 +277,7 @@ class IncrementalRefreshCBBackfillTests(TestCase):
         from warships.management.commands.incremental_player_refresh import _refresh_player
         _refresh_player(player.id)
 
-        mock_fetch_cb.assert_called_once_with(player.player_id)
+        mock_fetch_cb.assert_called_once_with(player.player_id, realm='na')
 
     @patch('warships.management.commands.incremental_player_refresh.update_achievements_data')
     @patch('warships.management.commands.incremental_player_refresh.update_player_efficiency_data')
@@ -319,7 +321,7 @@ class IncrementalRefreshCBBackfillTests(TestCase):
         from warships.management.commands.incremental_player_refresh import _refresh_player
         _refresh_player(player.id)
 
-        mock_fetch_cb.assert_called_once_with(player.player_id)
+        mock_fetch_cb.assert_called_once_with(player.player_id, realm='na')
 
 
 class GetPublishedClanBattleSummaryPayloadTests(TestCase):

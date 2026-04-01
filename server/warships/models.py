@@ -221,6 +221,7 @@ class EntityVisitEvent(models.Model):
     event_date = models.DateField(db_index=True)
     entity_type = models.CharField(max_length=16, choices=ENTITY_TYPE_CHOICES)
     entity_id = models.IntegerField()
+    realm = models.CharField(max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     entity_name_snapshot = models.CharField(max_length=200)
     entity_slug_snapshot = models.CharField(
         max_length=255, blank=True, default='')
@@ -253,6 +254,7 @@ class EntityVisitDaily(models.Model):
     entity_type = models.CharField(
         max_length=16, choices=EntityVisitEvent.ENTITY_TYPE_CHOICES)
     entity_id = models.IntegerField()
+    realm = models.CharField(max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     entity_name_snapshot = models.CharField(max_length=200)
     views_raw = models.IntegerField(default=0)
     views_deduped = models.IntegerField(default=0)
@@ -266,7 +268,7 @@ class EntityVisitDaily(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['date', 'entity_type', 'entity_id'], name='unique_entity_visit_daily'),
+                fields=['date', 'entity_type', 'entity_id', 'realm'], name='unique_entity_visit_daily_realm'),
         ]
         indexes = [
             models.Index(fields=['entity_type', 'date'],

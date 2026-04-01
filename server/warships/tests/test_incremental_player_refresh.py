@@ -256,7 +256,7 @@ class CheckpointTests(TestCase):
                 )
 
             self.assertEqual(mock_refresh.call_count, 1)
-            mock_refresh.assert_called_with(second.id)
+            mock_refresh.assert_called_with(second.id, realm='na')
 
     def test_fresh_run_ignores_stale_checkpoint(self):
         """--reset-state forces queue rebuild."""
@@ -481,7 +481,7 @@ class RefreshPlayerTests(TestCase):
 
         _refresh_player(player.id)
 
-        mock_fetch.assert_called_once_with([player.player_id])
+        mock_fetch.assert_called_once_with([player.player_id], realm='na')
         mock_save.assert_called_once()
         # Efficiency and achievements should be checked (player reloaded from DB)
 

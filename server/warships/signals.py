@@ -8,6 +8,13 @@ from django.dispatch import receiver
 
 from warships.models import VALID_REALMS
 
+# Per-realm cron hour offsets for staggering heavy tasks.
+# Prevents concurrent full crawls from competing for worker memory.
+REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}
+REALM_REFRESH_AM_OFFSETS = {'eu': 0, 'na': 2, 'asia': 4}
+REALM_REFRESH_PM_OFFSETS = {'eu': 0, 'na': 2, 'asia': 4}
+REALM_RANKED_OFFSETS = {'eu': 0, 'na': 1, 'asia': 2}
+
 
 def _env_flag(name: str, default: bool) -> bool:
     raw_value = os.getenv(name)
@@ -30,19 +37,19 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
 
     crawler_schedules_enabled = _env_flag("ENABLE_CRAWLER_SCHEDULES", False)
 
-    hour = os.getenv("CLAN_CRAWL_SCHEDULE_HOUR", "3")
+    base_hour = int(os.getenv("CLAN_CRAWL_SCHEDULE_HOUR", "3"))
     minute = os.getenv("CLAN_CRAWL_SCHEDULE_MINUTE", "0")
 
-    schedule, _ = CrontabSchedule.objects.get_or_create(
-        minute=minute,
-        hour=hour,
-        day_of_week="*",
-        day_of_month="*",
-        month_of_year="*",
-        timezone="UTC",
-    )
-
     for realm in sorted(VALID_REALMS):
+        realm_hour = (base_hour + REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+        schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute,
+            hour=str(realm_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"daily-clan-crawl-{realm}",
             defaults={
@@ -59,19 +66,19 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
     PeriodicTask.objects.filter(name="daily-clan-crawl").delete()
 
     # -- Incremental Player Refresh (AM + PM) --
-    player_refresh_am_hour = os.getenv("PLAYER_REFRESH_SCHEDULE_HOUR_AM", "5")
-    player_refresh_pm_hour = os.getenv("PLAYER_REFRESH_SCHEDULE_HOUR_PM", "15")
-
-    player_am_schedule, _ = CrontabSchedule.objects.get_or_create(
-        minute="0",
-        hour=player_refresh_am_hour,
-        day_of_week="*",
-        day_of_month="*",
-        month_of_year="*",
-        timezone="UTC",
-    )
+    base_am_hour = int(os.getenv("PLAYER_REFRESH_SCHEDULE_HOUR_AM", "5"))
+    base_pm_hour = int(os.getenv("PLAYER_REFRESH_SCHEDULE_HOUR_PM", "15"))
 
     for realm in sorted(VALID_REALMS):
+        am_hour = (base_am_hour + REALM_REFRESH_AM_OFFSETS.get(realm, 0)) % 24
+        player_am_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour=str(am_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"incremental-player-refresh-am-{realm}",
             defaults={
@@ -86,16 +93,16 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
 
     PeriodicTask.objects.filter(name="incremental-player-refresh-am").delete()
 
-    player_pm_schedule, _ = CrontabSchedule.objects.get_or_create(
-        minute="0",
-        hour=player_refresh_pm_hour,
-        day_of_week="*",
-        day_of_month="*",
-        month_of_year="*",
-        timezone="UTC",
-    )
-
     for realm in sorted(VALID_REALMS):
+        pm_hour = (base_pm_hour + REALM_REFRESH_PM_OFFSETS.get(realm, 0)) % 24
+        player_pm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute="0",
+            hour=str(pm_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"incremental-player-refresh-pm-{realm}",
             defaults={
@@ -110,18 +117,19 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
 
     PeriodicTask.objects.filter(name="incremental-player-refresh-pm").delete()
 
-    ranked_hour = os.getenv("RANKED_INCREMENTAL_SCHEDULE_HOUR", "10")
+    base_ranked_hour = int(os.getenv("RANKED_INCREMENTAL_SCHEDULE_HOUR", "10"))
     ranked_minute = os.getenv("RANKED_INCREMENTAL_SCHEDULE_MINUTE", "30")
-    ranked_schedule, _ = CrontabSchedule.objects.get_or_create(
-        minute=ranked_minute,
-        hour=ranked_hour,
-        day_of_week="*",
-        day_of_month="*",
-        month_of_year="*",
-        timezone="UTC",
-    )
 
     for realm in sorted(VALID_REALMS):
+        ranked_hour = (base_ranked_hour + REALM_RANKED_OFFSETS.get(realm, 0)) % 24
+        ranked_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=ranked_minute,
+            hour=str(ranked_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"daily-ranked-incrementals-{realm}",
             defaults={

@@ -4,7 +4,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.models import Player, Clan, PlayerExplorerSummary, Ship
+from warships.models import Player, Clan, PlayerExplorerSummary, Ship, realm_cache_key
 
 
 LOCMEM_CACHES = {
@@ -346,7 +346,7 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
 
         result1 = _get_player_clan_battle_season_stats(12345)
         self.assertEqual(result1[0]["season_id"], 50)
-        mock_fetch.assert_called_once_with(12345)
+        mock_fetch.assert_called_once_with(12345, realm='na')
 
         mock_fetch.reset_mock()
         result2 = _get_player_clan_battle_season_stats(12345)
@@ -424,7 +424,7 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
         original_random_key = landing_player_cache_key(
             'random', LANDING_PLAYER_LIMIT)
         cache.set(original_random_key, [{'name': 'stale'}], 60)
-        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY,
+        cache.set(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY),
                   [{'name': 'recent-stale'}], 60)
 
         result = fetch_player_clan_battle_seasons(5510)
@@ -438,13 +438,13 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
             player.explorer_summary.clan_battle_overall_win_rate, 53.3)
         self.assertIsNotNone(
             player.explorer_summary.clan_battle_summary_updated_at)
-        self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
+        self.assertEqual(cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)), [
                          {'name': 'recent-stale'}])
         self.assertEqual(cache.get(original_random_key), [{'name': 'stale'}])
         self.assertEqual(original_random_key,
                          landing_player_cache_key('random', LANDING_PLAYER_LIMIT))
-        self.assertIsNotNone(cache.get(LANDING_PLAYERS_DIRTY_KEY))
-        self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
 
 
 @override_settings(CACHES=LOCMEM_CACHES)
@@ -558,7 +558,7 @@ class ClanBattleSummaryCacheTests(TestCase):
         result = fetch_clan_battle_seasons("91")
 
         self.assertEqual(result, [])
-        mock_delay.assert_called_once_with(clan_id="91")
+        mock_delay.assert_called_once_with(clan_id="91", realm='na')
 
     @patch("warships.tasks.queue_clan_battle_summary_refresh")
     def test_fetch_clan_battle_seasons_keeps_empty_cache_and_queues_refresh_for_populated_clan(self, mock_queue_refresh):
@@ -573,4 +573,4 @@ class ClanBattleSummaryCacheTests(TestCase):
         result = fetch_clan_battle_seasons("92")
 
         self.assertEqual(result, [])
-        mock_queue_refresh.assert_called_once_with("92")
+        mock_queue_refresh.assert_called_once_with("92", realm='na')

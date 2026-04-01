@@ -14,7 +14,7 @@ from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django.utils import timezone
-from warships.models import DEFAULT_REALM, VALID_REALMS, Player, Clan, Ship, EntityVisitDaily
+from warships.models import DEFAULT_REALM, VALID_REALMS, Player, Clan, Ship, EntityVisitDaily, realm_cache_key
 from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
@@ -357,21 +357,24 @@ def _player_explorer_response_cache_key(params: dict[str, object]) -> str:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def tier_data(request, player_id: str) -> Response:
-    data = fetch_tier_data(player_id)
+    realm = _get_realm(request)
+    data = fetch_tier_data(player_id, realm=realm)
     return _validated_list_response(data, TierDataSerializer)
 
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def activity_data(request, player_id: str) -> Response:
-    data = fetch_activity_data(player_id)
+    realm = _get_realm(request)
+    data = fetch_activity_data(player_id, realm=realm)
     return _validated_list_response(data, ActivityDataSerializer)
 
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def type_data(request, player_id: str) -> Response:
-    data = fetch_type_data(player_id)
+    realm = _get_realm(request)
+    data = fetch_type_data(player_id, realm=realm)
     return _validated_list_response(data, TypeDataSerializer)
 
 
@@ -384,7 +387,7 @@ def randoms_data(request, player_id: str) -> Response:
     if fetch_all:
         # Prefer the full source cache, but fall back to derived randoms rows so
         # the player page does not blank out while source data is repopulating.
-        cached_randoms_rows = fetch_randoms_data(player_id)
+        cached_randoms_rows = fetch_randoms_data(player_id, realm=realm)
         player = Player.objects.filter(player_id=player_id, realm=realm).first()
         if not player:
             data = []
@@ -394,7 +397,7 @@ def randoms_data(request, player_id: str) -> Response:
             data = _extract_randoms_rows(
                 player.randoms_json, limit=None) or cached_randoms_rows
     else:
-        data = fetch_randoms_data(player_id)
+        data = fetch_randoms_data(player_id, realm=realm)
 
     response = _validated_list_response(data, RandomsDataSerializer)
 
@@ -411,7 +414,7 @@ def randoms_data(request, player_id: str) -> Response:
 @throttle_classes(PUBLIC_API_THROTTLES)
 def ranked_data(request, player_id: str) -> Response:
     realm = _get_realm(request)
-    data = fetch_ranked_data(player_id)
+    data = fetch_ranked_data(player_id, realm=realm)
     response = _validated_list_response(data, RankedDataSerializer)
 
     player = Player.objects.filter(player_id=player_id, realm=realm).first()
@@ -426,8 +429,9 @@ def ranked_data(request, player_id: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_summary(request, player_id: str) -> Response:
+    realm = _get_realm(request)
     try:
-        data = fetch_player_summary(player_id)
+        data = fetch_player_summary(player_id, realm=realm)
     except Player.DoesNotExist:
         return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -647,7 +651,7 @@ def clan_members(request, clan_id: str) -> Response:
 
     # B1: Check response cache before doing expensive member serialization
     CLAN_MEMBERS_CACHE_TTL = 300  # 5 minutes
-    cache_key = f'clan:members:{clan_id}'
+    cache_key = realm_cache_key(realm, f'clan:members:{clan_id}')
     cached = cache.get(cache_key)
     if cached is not None:
         response = Response(cached)
@@ -745,7 +749,7 @@ def clan_data(request, clan_filter: str) -> Response:
     if clan is not None:
         _record_clan_lookup(clan, realm=realm)
 
-    data = fetch_clan_plot_data(clan_id=clan_id, filter_type=filter_type)
+    data = fetch_clan_plot_data(clan_id=clan_id, filter_type=filter_type, realm=realm)
     response = _validated_list_response(data, ClanDataSerializer)
 
     if clan is not None and not data:
@@ -772,7 +776,7 @@ def clan_battle_seasons(request, clan_id: str) -> Response:
         _record_clan_lookup(clan, realm=realm)
 
     had_cached_summary = has_clan_battle_summary_cache(clan_id)
-    data = fetch_clan_battle_seasons(clan_id)
+    data = fetch_clan_battle_seasons(clan_id, realm=realm)
     response = _validated_list_response(
         data, ClanBattleSeasonSummarySerializer)
     if not data and (
