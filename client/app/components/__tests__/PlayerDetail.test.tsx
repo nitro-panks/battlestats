@@ -122,7 +122,24 @@ describe('PlayerDetail efficiency-rank icon', () => {
         mockClanBattleSummary = undefined;
         mockRankedHeatmapVisibility = undefined;
         mockFetchSharedJson.mockReset();
-        mockFetchSharedJson.mockResolvedValue({ data: [], headers: {} });
+        mockFetchSharedJson.mockImplementation((url: string) => {
+            if (typeof url === 'string' && url.includes('/api/fetch/player_correlation/tier_type/')) {
+                return Promise.resolve({
+                    data: {
+                        metric: 'tier_type',
+                        label: 'Tier vs Ship Type',
+                        x_label: 'Ship Type',
+                        y_label: 'Tier',
+                        tracked_population: 1,
+                        tiles: [],
+                        trend: [],
+                        player_cells: [],
+                    },
+                    headers: {},
+                });
+            }
+            return Promise.resolve({ data: [], headers: {} });
+        });
         mockClipboardWriteText.mockReset();
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
@@ -489,7 +506,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
 
     it('wires clan and back navigation controls from the rendered detail view', () => {
         const onBack = jest.fn();
-        const onSelectClan = jest.fn();
 
         render(
             <PlayerDetail
@@ -501,14 +517,13 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={onBack}
                 onSelectMember={() => undefined}
-                onSelectClan={onSelectClan}
+                onSelectClan={() => undefined}
             />,
         );
 
-        fireEvent.click(screen.getByRole('button', { name: 'Open clan page for Fixture Clan' }));
+        expect(screen.getByRole('link', { name: 'Open clan page for Fixture Clan' })).toHaveAttribute('href', '/clan/4444-fixture-clan');
         fireEvent.click(screen.getByRole('button', { name: 'Return to landing page' }));
 
-        expect(onSelectClan).toHaveBeenCalledWith(4444, 'Fixture Clan');
         expect(onBack).toHaveBeenCalled();
     });
 
@@ -547,7 +562,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
     });
 
-    it('moves clan battle seasons, efficiency badges, and performance by tier behind focused tabs', () => {
+    it('moves clan battle seasons, efficiency badges, and performance by tier behind focused tabs', async () => {
         render(
             <PlayerDetail
                 player={{
@@ -562,10 +577,12 @@ describe('PlayerDetail efficiency-rank icon', () => {
         );
 
         expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
-        expect(screen.getByText('Performance by Tier')).toBeInTheDocument();
+        await waitFor(() => {
+            expect(screen.getByText('Performance by Tier')).toBeInTheDocument();
+        });
         expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('tab', { name: 'Badges' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
 
         expect(screen.getByText('Efficiency badges')).toBeInTheDocument();
         expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
@@ -649,7 +666,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(consoleErrorSpy).toHaveBeenCalled();
     });
 
-    it('renders the default profile insight tab on the player page', () => {
+    it('renders the default profile insight tab on the player page', async () => {
         render(
             <PlayerDetail
                 player={{
@@ -663,7 +680,9 @@ describe('PlayerDetail efficiency-rank icon', () => {
         );
 
         expect(screen.getByRole('tab', { name: 'Profile' })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.getByText('Tier vs Type Profile')).toBeInTheDocument();
+        await waitFor(() => {
+            expect(screen.getByText('Tier vs Type Profile')).toBeInTheDocument();
+        });
         expect(screen.queryByText('Ranked Games vs Win Rate')).not.toBeInTheDocument();
     });
 

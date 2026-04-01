@@ -88,7 +88,7 @@ describe('TierSVG', () => {
         render(<TierSVG playerId={303} />);
 
         await waitFor(() => {
-            expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/tier_data/303/', {
+            expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/tier_data/303/?realm=na', {
                 label: 'Tier data 303',
                 ttlMs: 30000,
             });

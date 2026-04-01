@@ -149,13 +149,13 @@ describe('PlayerRouteView tab warmup smoke', () => {
         consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockImplementation((url) => {
-            if (url === '/api/player/Player%20One/') {
+            if (url === '/api/player/Player%20One/?realm=na') {
                 return new Promise((resolve) => {
                     resolvePlayerRoute = resolve as typeof resolvePlayerRoute;
                 });
             }
 
-            if (url === '/api/fetch/player_correlation/tier_type/77/') {
+            if (url === '/api/fetch/player_correlation/tier_type/77/?realm=na') {
                 return Promise.resolve({ data: profileChartPayload, headers: {} });
             }
 
@@ -173,7 +173,7 @@ describe('PlayerRouteView tab warmup smoke', () => {
         render(<PlayerRouteView playerName="Player One" />);
 
         expect(screen.getByText('Loading player profile...')).toBeInTheDocument();
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/player/Player%20One/', {
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/player/Player%20One/?realm=na', {
             label: 'Player Player One',
             ttlMs: 1500,
         });
@@ -195,14 +195,14 @@ describe('PlayerRouteView tab warmup smoke', () => {
         });
 
         await waitFor(() => {
-            expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/77/', expect.objectContaining({ ttlMs: 30000 }));
+            expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/77/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
         });
 
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/77/', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:77:0:0' }));
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/tier_type/77/', expect.objectContaining({ ttlMs: 30000 }));
-        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/type_data/77/', expect.anything());
-        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/tier_data/77/', expect.anything());
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_clan_battle_seasons/77/', expect.objectContaining({ ttlMs: 30000 }));
-        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/randoms_data/77/?all=true', expect.anything());
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/77/?realm=na', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:77:0:0' }));
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/tier_type/77/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
+        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/type_data/77/?realm=na', expect.anything());
+        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/tier_data/77/?realm=na', expect.anything());
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_clan_battle_seasons/77/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
+        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/randoms_data/77/?all=true&realm=na', expect.anything());
     });
 });

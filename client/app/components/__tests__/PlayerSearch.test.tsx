@@ -185,21 +185,21 @@ const installFetchMock = ({
             return Promise.resolve(buildJsonResponse(clans));
         }
 
-        if (url === '/api/landing/recent-clans/' || url === '/api/landing/recent-clans') {
+        if (url.startsWith('/api/landing/recent-clans')) {
             if (recentClansResponse) {
                 return Promise.resolve(recentClansResponse);
             }
             return Promise.resolve(buildJsonResponse(recentClans));
         }
 
-        if (url === '/api/landing/recent/' || url === '/api/landing/recent') {
+        if (url.startsWith('/api/landing/recent')) {
             if (recentPlayersQueue && recentPlayersQueue.length > 0) {
                 return Promise.resolve(buildJsonResponse(recentPlayersQueue.shift() ?? []));
             }
             return Promise.resolve(buildJsonResponse(recentPlayers));
         }
 
-        if (url === '/api/landing/warm-best/' || url === '/api/landing/warm-best') {
+        if (url.startsWith('/api/landing/warm-best')) {
             return Promise.resolve(buildJsonResponse({ status: 'queued' }));
         }
 
@@ -209,7 +209,8 @@ const installFetchMock = ({
         }
 
         if (url.startsWith('/api/player/')) {
-            const playerName = decodeURIComponent(url.replace('/api/player/', '').replace(/\/$/, ''));
+            const strippedPath = url.replace(/\?.*$/, '');
+            const playerName = decodeURIComponent(strippedPath.replace('/api/player/', '').replace(/\/$/, ''));
             const queue = responseQueues.get(playerName);
             if (!queue || queue.length === 0) {
                 return Promise.reject(new Error(`Unexpected player fetch: ${playerName}`));
@@ -301,7 +302,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/players/?mode=sigma&limit=25' || url === '/api/landing/players?mode=sigma&limit=25',
+                ([url]) => url === '/api/landing/players?mode=sigma&limit=25&realm=na',
             )).toBe(true);
         });
 
@@ -328,7 +329,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         fireEvent.click(recentButton);
 
-        expect(await screen.findByRole('button', { name: /Show recent player RecentCaptain/i })).toBeInTheDocument();
+        expect(await screen.findByRole('button', { name: /Show player RecentCaptain/i })).toBeInTheDocument();
         expect(screen.queryByText('Recently Viewed')).not.toBeInTheDocument();
         expect(await getPlayerRecentButton()).toHaveAttribute('aria-pressed', 'true');
     });
@@ -342,12 +343,12 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/clans/?mode=random&limit=30' || url === '/api/landing/clans?mode=random&limit=30',
+                ([url]) => url === '/api/landing/clans?mode=random&limit=30&realm=na',
             )).toBe(true);
         });
 
         expect((global.fetch as jest.Mock).mock.calls.some(
-            ([url]) => url === '/api/landing/players/?mode=random&limit=25' || url === '/api/landing/players?mode=random&limit=25',
+            ([url]) => url === '/api/landing/players?mode=random&limit=25&realm=na',
         )).toBe(true);
     });
 
@@ -356,12 +357,12 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/warm-best/' || url === '/api/landing/warm-best',
+                ([url]) => url === '/api/landing/warm-best?realm=na',
             )).toBe(true);
         });
 
         const warmupCalls = (global.fetch as jest.Mock).mock.calls.filter(
-            ([url]) => url === '/api/landing/warm-best/' || url === '/api/landing/warm-best',
+            ([url]) => url === '/api/landing/warm-best?realm=na',
         );
         expect(warmupCalls).toHaveLength(1);
     });
@@ -375,13 +376,13 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/warm-best/' || url === '/api/landing/warm-best',
+                ([url]) => url === '/api/landing/warm-best?realm=na',
             )).toBe(true);
         });
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/recent-clans/' || url === '/api/landing/recent-clans',
+                ([url]) => url === '/api/landing/recent-clans?realm=na',
             )).toBe(true);
         });
     });
@@ -508,7 +509,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         fireEvent.click(await getClanRecentButton());
 
-        expect(await screen.findByRole('button', { name: /Show recent clan RecentClan/i })).toBeInTheDocument();
+        expect(await screen.findByRole('button', { name: /Show clan RecentClan/i })).toBeInTheDocument();
         expect(screen.queryByText('Recently Viewed Clans')).not.toBeInTheDocument();
         expect(await getClanRecentButton()).toHaveAttribute('aria-pressed', 'true');
     });
@@ -522,8 +523,8 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         fireEvent.click(await getClanRecentButton());
 
-        expect(await screen.findByText('No recently viewed clans yet.')).toBeInTheDocument();
-        expect(screen.queryByText('Recently Viewed Clans')).not.toBeInTheDocument();
+        expect(await getClanRecentButton()).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.queryAllByRole('button', { name: /Show clan /i })).toHaveLength(0);
     });
 
     it('loads player detail from the q parameter and returns to landing on back', async () => {
@@ -565,7 +566,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         fireEvent.click(await getPlayerRecentButton());
 
-        expect(await screen.findByRole('button', { name: /Show recent player for_the_kingdom_2022/i })).toBeInTheDocument();
+        expect(await screen.findByRole('button', { name: /Show player for_the_kingdom_2022/i })).toBeInTheDocument();
 
         Object.defineProperty(document, 'visibilityState', {
             configurable: true,
@@ -576,7 +577,7 @@ describe('PlayerSearch landing efficiency icon', () => {
             document.dispatchEvent(new Event('visibilitychange'));
         });
 
-        expect(await screen.findByRole('button', { name: /Show recent player AnotherCaptain/i })).toBeInTheDocument();
+        expect(await screen.findByRole('button', { name: /Show player AnotherCaptain/i })).toBeInTheDocument();
     });
 
     it('shows the recent player empty state inside the shared player surface', async () => {
@@ -588,8 +589,8 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         fireEvent.click(await getPlayerRecentButton());
 
-        expect(await screen.findByText('No recently viewed players yet.')).toBeInTheDocument();
-        expect(screen.queryByText('Recently Viewed')).not.toBeInTheDocument();
+        expect(await getPlayerRecentButton()).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.queryAllByRole('button', { name: /Show player /i })).toHaveLength(0);
     });
 
     it('executes nav search events and shows an error when player lookup fails', async () => {
@@ -653,9 +654,9 @@ describe('PlayerSearch landing efficiency icon', () => {
             expect(screen.getByText('Hydrated Clan')).toBeInTheDocument();
         });
         expect((global.fetch as jest.Mock).mock.calls.some(
-            ([url]) => url === '/api/player/Hydrated%20Player',
+            ([url]) => url === '/api/player/Hydrated%20Player?realm=na',
         )).toBe(true);
-        expect((global.fetch as jest.Mock).mock.calls.filter(([url]) => url === '/api/player/Hydrated%20Player')).toHaveLength(2);
+        expect((global.fetch as jest.Mock).mock.calls.filter(([url]) => url === '/api/player/Hydrated%20Player?realm=na')).toHaveLength(2);
     });
 
     it('shows the best formula tooltip without cache timing copy', async () => {

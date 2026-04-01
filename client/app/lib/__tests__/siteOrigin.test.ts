@@ -47,10 +47,10 @@ describe("site origin helpers", () => {
     });
   });
 
-  it("builds a sitemap rooted at the canonical site origin", () => {
+  it("builds a sitemap rooted at the canonical site origin", async () => {
     process.env.BATTLESTATS_APP_ORIGIN = "https://battlestats.online";
 
-    const entries = sitemap();
+    const entries = await sitemap();
 
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({

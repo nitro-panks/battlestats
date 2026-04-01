@@ -277,12 +277,12 @@ describe('PlayerDetailInsightsTabs', () => {
             expect(mockFetchSharedJson).toHaveBeenCalledTimes(6);
         });
 
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/101/', expect.objectContaining({ ttlMs: 30000 }));
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/101/', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:101:0:0' }));
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/tier_type/101/', expect.objectContaining({ ttlMs: 30000 }));
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_clan_battle_seasons/101/', expect.objectContaining({ ttlMs: 30000 }));
-        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/type_data/101/', expect.anything());
-        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/tier_data/101/', expect.anything());
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/101/?realm=na', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:101:0:0' }));
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/tier_type/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_clan_battle_seasons/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
+        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/type_data/101/?realm=na', expect.anything());
+        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/tier_data/101/?realm=na', expect.anything());
     });
 
     it('skips clan battle warmup for clanless players', async () => {
@@ -310,11 +310,11 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith(
-            '/api/fetch/player_clan_battle_seasons/202/',
+            '/api/fetch/player_clan_battle_seasons/202/?realm=na',
             expect.anything(),
         );
-        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/type_data/202/', expect.anything());
-        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/tier_data/202/', expect.anything());
+        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/type_data/202/?realm=na', expect.anything());
+        expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/tier_data/202/?realm=na', expect.anything());
     });
 
     it('retries pending profile charts instead of freezing the empty placeholder payload', async () => {

@@ -59,7 +59,7 @@ describe('RankedSeasons', () => {
             expect(screen.getByText('S1')).toBeInTheDocument();
         });
 
-        expect(mockFetchSharedJson).toHaveBeenNthCalledWith(1, '/api/fetch/ranked_data/123/', expect.objectContaining({
+        expect(mockFetchSharedJson).toHaveBeenNthCalledWith(1, '/api/fetch/ranked_data/123/?realm=na', expect.objectContaining({
             ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
             cacheKey: 'ranked-data:123:0:0',
         }));

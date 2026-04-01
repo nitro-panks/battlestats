@@ -32,6 +32,7 @@ jest.mock('d3', () => {
         transition: jest.fn(() => chain),
         duration: jest.fn(() => chain),
         filter: jest.fn(() => chain),
+        empty: jest.fn(() => true),
         raise: jest.fn(() => chain),
         insert: jest.fn(() => chain),
         node: jest.fn(() => ({
