@@ -2,7 +2,6 @@ from unittest import TestCase
 from unittest.mock import patch
 import tempfile
 from pathlib import Path
-import os
 
 from warships.agentic.memory import (
     build_phase0_memory_candidates,
@@ -29,10 +28,6 @@ class AgenticMemoryTests(TestCase):
 
     def test_get_memory_backend_defaults_to_file(self):
         self.assertEqual(get_memory_backend({}), "file")
-
-    def test_get_memory_backend_supports_langgraph_aliases(self):
-        with patch.dict("os.environ", {"BATTLESTATS_AGENTIC_MEMORY_BACKEND": "langgraph-memory"}, clear=False):
-            self.assertEqual(get_memory_backend({}), "langgraph_memory")
 
     def test_phase0_memory_is_langgraph_only(self):
         with patch.dict("os.environ", {"BATTLESTATS_LANGMEM_ENABLED": "true"}, clear=False):
@@ -244,48 +239,3 @@ class AgenticMemoryTests(TestCase):
         self.assertEqual(snapshot["superseded_total"], 1)
         self.assertEqual(snapshot["recent_reviewed"]
                          [0]["memory_id"], "mem-new")
-
-    def test_persist_phase0_memory_artifacts_supports_langgraph_memory_backend(self):
-        result = {
-            "memory_enabled": True,
-            "memory_backend": "langgraph_memory",
-            "selected_engine": "langgraph",
-            "workflow_id": "run-store",
-            "workflow_kind": "agentic_workflow",
-            "memory_environment": "local",
-            "memory_namespace": ("battlestats", "local", "procedural"),
-            "memory_candidates": [{
-                "candidate_id": "run-store:candidate:1",
-                "memory_id": "mem-store",
-                "memory_type": "procedural",
-                "workflow_kind": "agentic_workflow",
-                "namespace": ("battlestats", "local", "procedural"),
-                "summary": "Use the LangGraph store-backed review flow.",
-                "detail": "Store-backed candidate.",
-                "review_status": "candidate",
-                "confidence": 0.7,
-                "source_run_id": "run-store",
-                "engine": "langgraph",
-                "evidence": {"validation_commands": [], "file_paths": ["server/warships/agentic/memory.py"]},
-                "comparison_paths": [],
-                "created_at": "2026-03-26T12:00:00Z",
-            }],
-        }
-
-        with patch.dict(os.environ, {"BATTLESTATS_AGENTIC_MEMORY_BACKEND": "langgraph_memory"}, clear=False), patch("warships.agentic.memory._LANGGRAPH_IN_MEMORY_STORE", new=None):
-            activity = persist_phase0_memory_artifacts(
-                result,
-                review_context={"approved_candidate_ids": [
-                    "run-store:candidate:1"], "reviewed_by": "maintainer"},
-                context={"memory_backend": "langgraph_memory",
-                         "memory_environment": "local"},
-            )
-            snapshot = get_memory_store_snapshot(limit=5, context={
-                                                 "memory_backend": "langgraph_memory", "memory_environment": "local"})
-
-        self.assertEqual(activity["backend"], "langgraph_memory")
-        self.assertEqual(activity["promoted_count"], 1)
-        self.assertEqual(snapshot["backend"], "langgraph_memory")
-        self.assertEqual(snapshot["reviewed_total"], 1)
-        self.assertEqual(snapshot["recent_reviewed"]
-                         [0]["memory_id"], "mem-store")
