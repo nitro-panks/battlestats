@@ -14,8 +14,9 @@ Introduce a sub-filtering mechanism on the landing page's player chart. When a u
    - Disappears immediately if another primary mode is selected.
    - Options: `Overall` (default), `Battleships`, `Cruisers`, `Destroyers`, `Carriers`, `Submarines`.
 2. **Chart Updates:**
-   - Clicking a class button switches the chart's data payload to the top 25 players for that specific class.
-   - The chart axes (`pvp_battles` vs `pvp_ratio`) and `LandingPlayerSVG` logic remain exactly the same; only the injected JSON payload changes.
+   - Clicking a class filter button retrieves the respective top 25 players calculated by our formula for that specific ship class.
+   - The selected 25 players are then splayed out on the existing `LandingPlayerSVG` chart. 
+   - The chart axes will dynamically map to the selected class's statistics (e.g. Battleship Win Rate & Battleship Battles limit) rather than overall account statistics to provide an accurate visual representation of the class skill.
    - State transition should leverage the existing stale-while-revalidate / cache-first patterns (no full-page spinners).
 
 ## Backend & Database Optimization
