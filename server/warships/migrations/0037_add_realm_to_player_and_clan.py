@@ -33,23 +33,25 @@ class Migration(migrations.Migration):
             model_name='player',
             index=models.Index(fields=['realm', 'pvp_battles', 'pvp_survival_rate'], name='player_realm_battles_surv_idx'),
         ),
-        # Deduplicate any player rows before adding unique constraint
+        # Deduplicate player rows (keep lowest id per player_id+realm)
         migrations.RunSQL(
             sql="""
-                DELETE FROM warships_player
-                WHERE id NOT IN (
-                    SELECT MIN(id) FROM warships_player GROUP BY player_id, realm
-                );
+                DELETE FROM warships_player p
+                USING warships_player p2
+                WHERE p.player_id = p2.player_id
+                  AND p.realm = p2.realm
+                  AND p.id > p2.id;
             """,
             reverse_sql=migrations.RunSQL.noop,
         ),
-        # Deduplicate any clan rows before adding unique constraint
+        # Deduplicate clan rows (keep lowest id per clan_id+realm)
         migrations.RunSQL(
             sql="""
-                DELETE FROM warships_clan
-                WHERE id NOT IN (
-                    SELECT MIN(id) FROM warships_clan GROUP BY clan_id, realm
-                );
+                DELETE FROM warships_clan c
+                USING warships_clan c2
+                WHERE c.clan_id = c2.clan_id
+                  AND c.realm = c2.realm
+                  AND c.id > c2.id;
             """,
             reverse_sql=migrations.RunSQL.noop,
         ),
