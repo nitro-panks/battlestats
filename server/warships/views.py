@@ -782,7 +782,7 @@ def clan_tier_distribution(request, clan_id: str) -> Response:
         return Response(cached)
 
     from warships.tasks import update_clan_tier_distribution_task
-    _dispatch_async_refresh(update_clan_tier_distribution_task, clan_id=clan_id, realm=realm)
+    _delay_task_safely(update_clan_tier_distribution_task, clan_id=clan_id, realm=realm)
     
     response = Response([])
     response['X-Clan-Tiers-Pending'] = 'true'
