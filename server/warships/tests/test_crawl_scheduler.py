@@ -276,6 +276,7 @@ class ClanCrawlSchedulerTests(TestCase):
                          "reason": "already-running"})
         mock_warm.assert_not_called()
 
+    @override_settings(LANDING_WARM_PARALLEL=False)
     def test_force_refresh_rebuilds_landing_cache_without_manual_invalidation(self):
         today = timezone.now().date()
         Player.objects.create(
