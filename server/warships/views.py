@@ -775,7 +775,7 @@ def clan_tier_distribution(request, clan_id: str) -> Response:
     if clan is not None:
         _record_clan_lookup(clan, realm=realm)
 
-    cache_key = realm_cache_key(realm, f'clan:tiers:v1:{clan_id}')
+    cache_key = realm_cache_key(realm, f'clan:tiers:v2:{clan_id}')
     cached = cache.get(cache_key)
 
     if cached is not None:

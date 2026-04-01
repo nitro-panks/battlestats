@@ -4196,13 +4196,13 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
     for all active players in the specified clan.
     Returns: [{'ship_tier': 1, 'pvp_battles': 240}, ... {'ship_tier': 11, 'pvp_battles': 105}]
     """
-    cache_key = realm_cache_key(realm, f'clan:tiers:v1:{clan_id}')
+    cache_key = realm_cache_key(realm, f'clan:tiers:v2:{clan_id}')
     
     # Pre-init summary
     tier_aggregates = {tier: 0 for tier in range(1, 12)}
     
     player_tiers_list = Player.objects.filter(
-        clan_id=clan_id, realm=realm, is_hidden=False
+        clan__clan_id=clan_id, realm=realm, is_hidden=False
     ).values_list('tiers_json', flat=True)
 
     for player_tiers in player_tiers_list:
