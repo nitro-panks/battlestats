@@ -16,6 +16,7 @@ jobs:
       CI: "true"
       BATTLESTATS_API_ORIGIN: ${{ secrets.BATTLESTATS_API_ORIGIN }}
       BATTLESTATS_BENCHMARK_TIMESTAMP: ${{ github.run_id }}-${{ github.run_attempt }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -77,6 +78,7 @@ jobs:
         with:
           name: client-benchmark-artifacts-${{ github.run_id }}
           retention-days: 90
+          if-no-files-found: ignore
           path: |
             client/test-results/playwright/benchmarks/
             logs/benchmarks/client/
