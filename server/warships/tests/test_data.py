@@ -11,7 +11,7 @@ from warships.clan_crawl import run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
 from warships.data import update_snapshot_data, fetch_activity_data, fetch_clan_plot_data, fetch_randoms_data, fetch_player_summary, fetch_tier_data, fetch_type_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile, fetch_player_population_distribution
 from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
-from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship
+from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship, realm_cache_key
 
 
 class SnapshotDataTests(TestCase):
@@ -1333,7 +1333,7 @@ class RankedDataRefreshTests(TestCase):
         self.assertEqual(hydration_state["pending_player_ids"], {7105, 7106})
         self.assertEqual(hydration_state["queued_player_ids"], {7105})
         self.assertEqual(hydration_state["deferred_player_ids"], set())
-        mock_queue_ranked_data_refresh.assert_called_once_with(7105)
+        mock_queue_ranked_data_refresh.assert_called_once_with(7105, realm='na')
 
     @patch("warships.tasks.queue_ranked_data_refresh")
     @patch("warships.tasks.is_ranked_data_refresh_pending")
@@ -1409,7 +1409,7 @@ class RankedDataRefreshTests(TestCase):
         self.assertEqual(hydration_state["pending_player_ids"], {7117, 7118})
         self.assertEqual(hydration_state["queued_player_ids"], {7117})
         self.assertEqual(hydration_state["deferred_player_ids"], set())
-        mock_queue_efficiency_data_refresh.assert_called_once_with(7117)
+        mock_queue_efficiency_data_refresh.assert_called_once_with(7117, realm='na')
 
     @patch("warships.tasks.queue_efficiency_data_refresh")
     @patch("warships.tasks.is_efficiency_data_refresh_pending")
@@ -1486,7 +1486,7 @@ class RankedDataRefreshTests(TestCase):
         self.assertEqual(hydration_state["pending_player_ids"], set())
         self.assertEqual(hydration_state["queued_player_ids"], set())
         self.assertEqual(hydration_state["deferred_player_ids"], set())
-        mock_queue_efficiency_rank_snapshot_refresh.assert_called_once_with()
+        mock_queue_efficiency_rank_snapshot_refresh.assert_called_once_with(realm='na')
 
 
 class PlayerDataHardeningTests(TestCase):
@@ -1801,8 +1801,8 @@ class PlayerDataHardeningTests(TestCase):
             "random", LANDING_PLAYER_LIMIT)), [{"name": "stale"}])
         self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
                          {"name": "recent-stale"}])
-        self.assertIsNotNone(cache.get(LANDING_PLAYERS_DIRTY_KEY))
-        self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
+        self.assertIsNotNone(cache.get(realm_cache_key("na", LANDING_PLAYERS_DIRTY_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key("na", LANDING_RECENT_PLAYERS_DIRTY_KEY)))
 
     @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
     @patch("warships.data._fetch_clan_membership_for_player")
@@ -2794,8 +2794,8 @@ class PlayerExplorerSummaryTests(TestCase):
                          [{"name": "stale"}])
         self.assertEqual(cache.get(LANDING_RECENT_CLANS_CACHE_KEY), [
                          {"name": "recent-stale"}])
-        self.assertIsNotNone(cache.get(LANDING_CLANS_DIRTY_KEY))
-        self.assertIsNotNone(cache.get(LANDING_RECENT_CLANS_DIRTY_KEY))
+        self.assertIsNotNone(cache.get(realm_cache_key("na", LANDING_CLANS_DIRTY_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key("na", LANDING_RECENT_CLANS_DIRTY_KEY)))
 
 
 class RecentlyViewedPlayerQueueTests(TestCase):
