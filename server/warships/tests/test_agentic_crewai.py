@@ -27,9 +27,18 @@ class AgenticCrewAITests(TestCase):
         self.assertEqual(plan["process"], "hierarchical")
         self.assertEqual(len(plan["roles"]), 8)
         self.assertEqual(plan["roles"][0]["key"], "project_coordinator")
+        self.assertIn("crew_goal", plan["roles"][0])
+        self.assertIn("expected_output", plan["roles"][0])
+        self.assertIn("artifact_fields", plan["roles"][0])
         self.assertEqual(plan["tasks"][1]["depends_on"], "project_coordinator")
         self.assertEqual(
             plan["tasks"][0]["artifact_model"], "RoutingPlanArtifact")
+
+    def test_build_crewai_uses_full_persona_registry_artifact_fields(self):
+        plan = build_crewai_plan("Review persona orchestration")
+
+        qa_role = next(role for role in plan["roles"] if role["key"] == "qa")
+        self.assertIn("release_recommendation", qa_role["artifact_fields"])
 
     def test_run_crewai_workflow_returns_planned_status_without_llm(self):
         result = run_crewai_workflow(

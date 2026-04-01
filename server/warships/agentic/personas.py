@@ -135,5 +135,32 @@ def read_persona_markdown(key: str) -> str:
     return target.read_text(encoding="utf-8")
 
 
+def get_persona_artifact_fields(key: str) -> list[str]:
+    spec = get_persona_specs()[key]
+    return list(spec.artifact_model.model_fields.keys())
+
+
+def build_persona_runtime_brief(key: str) -> str:
+    spec = get_persona_specs()[key]
+    artifact_fields = ", ".join(get_persona_artifact_fields(key)) or "none"
+    return (
+        f"Persona key: {spec.key}\n"
+        f"Persona label: {spec.label}\n"
+        f"Crew role: {spec.crew_role}\n"
+        f"Primary goal: {spec.crew_goal}\n"
+        f"Expected output: {spec.expected_output}\n"
+        f"Artifact fields: {artifact_fields}"
+    )
+
+
+def render_persona_backstory(key: str) -> str:
+    return build_persona_runtime_brief(key) + "\n\nRole contract:\n" + read_persona_markdown(key)
+
+
+def read_persona_context(keys: list[str] | None = None) -> dict[str, str]:
+    specs = get_persona_sequence(keys)
+    return {spec.key: read_persona_markdown(spec.key) for spec in specs}
+
+
 def persona_keys() -> list[str]:
     return [spec.key for spec in PERSONA_SPECS]

@@ -24,6 +24,13 @@ Ensure features solve real user problems with clear, efficient flows and underst
 - Content microcopy recommendations.
 - Accessibility requirements (keyboard, focus, semantics, contrast expectations).
 
+## Agentic UX Rules
+
+- For agentic surfaces, optimize for operator clarity before novelty.
+- Make state transitions legible: planned, blocked, needs review, verified, released.
+- Prefer summaries that help humans decide the next action quickly.
+- Avoid adding workflow ceremony that increases reading time without improving decisions.
+
 ## UX Checklist
 
 - Is the primary task obvious?
@@ -32,11 +39,25 @@ Ensure features solve real user problems with clear, efficient flows and underst
 - Is feedback immediate and meaningful?
 - Are edge states handled (empty, loading, stale, partial failure)?
 
+## Battlestats UX Patterns
+
+These are validated interaction patterns from the live product:
+
+- **Search → Detail flow**: User searches by player name (autocomplete with 3-char minimum, three-tier cache). Selecting a result navigates to `/player/{name}`. The detail page loads immediately with cached data; stale data triggers background refresh with no spinner.
+- **Tab warmup**: Player detail fires 4 parallel chart requests on mount via `requestIdleCallback`. Users see the Profile tab instantly while Ships/Ranked/Efficiency charts load in background. Tab order reflects information hierarchy: Profile → Ships → Ranked → Clan Battles → Efficiency → Population.
+- **Clan member deferred load**: Clan member table defers its fetch until chart warmup settles (with 10s hard timeout). This prevents member list fetching from competing with chart renders.
+- **Cache-first perception**: Users always see _something_ immediately. "Pending" headers signal that fresher data is coming. Never show a full-page spinner for a page that has cached data.
+- **Player classification**: Icons communicate player types at a glance — Hidden (locked), PvE Enjoyer (anchor), Inactive (zzz), Ranked (star), Clan Battle (shield), Efficiency Rank (medal), Leader (crown). These appear consistently across surfaces (explorer, detail, landing cards).
+- **Population context**: Distribution and correlation charts overlay the current player's value onto the population. This "you are here" pattern is core to the product's value proposition — always preserve it.
+- **Landing page modes**: Best (curated top players/clans), Random (discovery), Sigma (statistical outliers), Popular (recently viewed). Each mode serves a different user intent. Best is the default.
+- **Mobile considerations**: Tab bars scroll horizontally. Charts scale to viewport. Touch targets are minimum 44px. Clan slug URLs use `{id}-{name}` format for readability in mobile browsers.
+
 ## Guardrails
 
 - Do not add complexity without measurable value.
 - Prefer familiar patterns over novelty.
 - Keep user-facing terminology consistent.
+- Do not let internal tool jargon replace plain language in summaries or operator guidance.
 
 ## Definition of Done
 

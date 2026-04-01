@@ -209,6 +209,23 @@ class AgenticGraphTests(TestCase):
             for note in result["doctrine_notes"]
         ))
 
+    def test_run_graph_loads_full_persona_role_context(self):
+        result = run_graph(
+            "Review agent personas for runtime quality",
+            context={
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                }
+            },
+        )
+
+        self.assertIn("project_coordinator", result["role_context"])
+        self.assertIn("project_manager", result["role_context"])
+        self.assertIn("architect", result["role_context"])
+        self.assertIn("designer", result["role_context"])
+        self.assertIn("safety", result["role_context"])
+
     def test_run_graph_applies_team_doctrine_overrides_and_style_snippets(self):
         result = run_graph(
             "Design a safer player detail caching flow",

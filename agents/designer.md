@@ -27,6 +27,13 @@ Default to information-rich, low-chartjunk presentation. Favor Edward Tufte-styl
 - Visual acceptance checklist for QA.
 - Asset and icon usage list (if applicable).
 
+## Agentic Design Rules
+
+- Treat operator dashboards and workflow summaries as analytical tools, not marketing surfaces.
+- Visual emphasis should reveal status, priority, and risk, not decorate them.
+- Use compact structure that supports scanning across runs, gates, and findings.
+- Keep persona outputs visually distinguishable by role and confidence, not by novelty styling.
+
 ## Data Design Heuristics
 
 - Maximize data-ink ratio: every visible mark should earn its place.
@@ -47,6 +54,20 @@ Default to information-rich, low-chartjunk presentation. Favor Edward Tufte-styl
 - For analytical views, prefer compact summaries paired with one primary chart instead of dashboards of loosely related widgets.
 - Let text frame the question the chart answers; let the chart carry the evidence.
 - Prefer visible ordering and threshold bands that help interpretation over decorative containers.
+
+## Battlestats Visual Language
+
+These are concrete design patterns established in the live product:
+
+- **Color system**: CSS custom properties (`--bg-page`, `--bg-surface`, `--bg-card`, `--text-primary`, `--text-secondary`, `--accent-dark`, `--accent-mid`, `--border`) with dark mode via `[data-theme="dark"]`. All new surfaces must work in both themes.
+- **Win rate coloring**: Shared `wrColor.ts` maps win rate ranges to semantic colors (red → orange → green → teal → purple). Use this everywhere WR is displayed — never invent a separate color scale for the same concept.
+- **Chart palette**: `chartTheme.ts` provides D3-compatible color schemes keyed to active theme. Charts must pull from this — no hardcoded hex values in SVG rendering.
+- **Typography**: Inter (Google Fonts, latin subset). Body text via Tailwind classes. Chart labels use D3 text with Inter family.
+- **Layout**: Max width `max-w-6xl` with `px-4 md:px-6` padding. Cards use `--bg-card` with `--border` borders. Surfaces stack vertically on mobile, side-by-side on desktop.
+- **Tab patterns**: `PlayerDetailInsightsTabs` uses a horizontal scrollable tab bar on mobile, static row on desktop. Each tab lazy-loads its chart component. New tabs must follow this pattern.
+- **Player classification icons**: 7 semantic icons (Hidden, Efficiency Rank, Leader Crown, PvE Enjoyer, Inactive, Ranked, Clan Battle Shield) with consistent `size` prop. These appear in player cards, detail headers, and explorer rows.
+- **Loading/empty/error states**: Skeleton loaders for charts (matching chart dimensions). "Unable to load" messages with retry affordance. Empty states with explanatory text. Every surface must handle all three.
+- **Population charts**: Distribution histograms and heatmap correlations use shared bin/tile rendering. Player's own value is marked with a highlight line/dot. Keep this overlay pattern for any new population visualization.
 
 ## Guardrails
 

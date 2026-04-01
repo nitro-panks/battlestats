@@ -13,6 +13,7 @@ from langgraph.graph import END, START, StateGraph
 from .checkpoints import get_graph_checkpointer
 from .doctrine import merge_team_doctrine, summarize_team_doctrine
 from .memory import PHASE0_MEMORY_LIMIT, build_phase0_memory_candidates, prepare_phase0_memory_context
+from .personas import read_persona_context
 from .retrieval import retrieve_doctrine_guidance
 from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
 
@@ -99,23 +100,7 @@ def _repo_root() -> Path:
 
 
 def _read_role_files() -> dict[str, str]:
-    role_files = {
-        "architect": "agents/architect.md",
-        "engineer": "agents/engineer-web-dev.md",
-        "qa": "agents/qa.md",
-    }
-    out: dict[str, str] = {}
-    root = _repo_root()
-
-    for role, rel_path in role_files.items():
-        target = root / rel_path
-        if not target.exists():
-            out[role] = ""
-            continue
-        with target.open("r", encoding="utf-8") as f:
-            out[role] = f.read()
-
-    return out
+    return read_persona_context()
 
 
 def _append_transition(state: AgentState, node_name: str) -> list[str]:

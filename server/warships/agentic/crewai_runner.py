@@ -7,7 +7,14 @@ from uuid import uuid4
 
 from crewai import Agent, Crew, Process, Task
 
-from .personas import PersonaSpec, get_persona_sequence, persona_keys, read_persona_markdown
+from .personas import (
+    PersonaSpec,
+    build_persona_runtime_brief,
+    get_persona_artifact_fields,
+    get_persona_sequence,
+    persona_keys,
+    render_persona_backstory,
+)
 from .policy import resolve_crewai_policy
 from .runlog import write_agent_run_log
 from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
@@ -34,10 +41,14 @@ def _build_task_description(spec: PersonaSpec, task: str, context: dict[str, Any
 
     context_block = "\n".join(
         context_lines) if context_lines else "- No additional workflow context supplied."
+    artifact_fields = ", ".join(
+        get_persona_artifact_fields(spec.key)) or "none"
     return (
         f"Primary request: {task}\n"
         f"Assigned persona: {spec.label}\n"
+        f"{build_persona_runtime_brief(spec.key)}\n"
         "Produce the best contribution for your role while respecting the existing battlestats architecture and role contract.\n"
+        f"Return output that can satisfy the expected artifact fields: {artifact_fields}.\n"
         "Workflow context:\n"
         f"{context_block}"
     )
@@ -68,9 +79,12 @@ def build_crewai_plan(
                 "key": spec.key,
                 "label": spec.label,
                 "crew_role": spec.crew_role,
+                "crew_goal": spec.crew_goal,
                 "file_path": spec.file_path,
                 "allow_delegation": spec.allow_delegation,
+                "expected_output": spec.expected_output,
                 "artifact_model": spec.artifact_model.__name__,
+                "artifact_fields": list(spec.artifact_model.model_fields.keys()),
             }
             for spec in specs
         ],
@@ -107,7 +121,7 @@ def build_crewai_crew(
         agents_by_key[spec.key] = Agent(
             role=spec.crew_role,
             goal=spec.crew_goal,
-            backstory=read_persona_markdown(spec.key),
+            backstory=render_persona_backstory(spec.key),
             allow_delegation=spec.allow_delegation,
             verbose=verbose,
             llm=resolved_llm,

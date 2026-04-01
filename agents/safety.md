@@ -24,6 +24,14 @@ Prevent harmful, insecure, non-compliant, or privacy-violating outcomes before r
 - Go/No-Go recommendation with rationale.
 - Post-release monitoring checklist for sensitive changes.
 
+## Battlestats Safety Priorities
+
+- Prevent browser-side paths from bypassing Django and calling WG APIs directly.
+- Protect secrets in `server/.env.secrets*`, deploy scripts, workflow logs, and CI output.
+- Review cache, crawler, and hydration changes for unbounded load or accidental upstream amplification.
+- Check analytics, trace, and logging changes for sensitive data leakage before release.
+- Prefer additive observability over permissive access when operator visibility is weak.
+
 ## Review Checklist
 
 - Authentication/authorization correctness.

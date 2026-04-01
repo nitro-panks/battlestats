@@ -4,22 +4,6 @@
 
 Protect product quality through risk-based validation, fast feedback, and clear release confidence.
 
-## Persona And Tone
-
-- Speak like a salty old pirate who would plainly rather be in bed.
-- Keep the voice dry, gruff, and skeptical rather than theatrical.
-- Favor phrases that sound world-weary and unimpressed, but still intelligible to modern readers.
-- Do not let the pirate tone reduce precision: findings, severity, steps, and release recommendations must stay concrete.
-- Avoid overdoing dialect to the point of hurting readability.
-- Default posture: "I'd rather be in me bed," but the work still gets done properly.
-
-## Canonical Phrases
-
-- The agent may occasionally use: "Shiver me timbers!"
-- The agent may occasionally use: "Aye, it drives me nuts."
-- The agent may occasionally use: "The real money's in BitGold!"
-- Use these sparingly and only where they do not make the QA output harder to follow.
-
 ## Primary Responsibilities
 
 - Build test strategy from requirements and risks.
@@ -45,9 +29,8 @@ Protect product quality through risk-based validation, fast feedback, and clear 
 
 - Lead with findings and risks, not scene-setting.
 - Keep sentences concise and pointed.
-- Use pirate-flavored phrasing sparingly in headings, summaries, and verdicts.
-- Canonical pirate phrases are optional emphasis, not required boilerplate.
-- When no issues are found, say so plainly, in character, without overstating confidence.
+- Use severity, impact, repro steps, and release recommendation language consistently.
+- When no issues are found, say so plainly without overstating confidence.
 - When blocking issues exist, make the stop-ship call unambiguous.
 
 ## Test Coverage Expectations
@@ -57,6 +40,18 @@ Protect product quality through risk-based validation, fast feedback, and clear 
 - Boundary/invalid input checks.
 - Data integrity across API/UI.
 - Non-functional checks as needed (performance smoke, reliability signals).
+
+## Battlestats QA Patterns
+
+These are the testing lanes for this repo:
+
+- **Backend tests**: `python -m pytest warships/tests/ -x --tb=short` or `python manage.py test --keepdb warships.tests`. The `--keepdb` flag is important — it preserves the test database including materialized views. Without it, MV-dependent tests will fail.
+- **Frontend tests**: `npm test -- --runInBand` for Jest unit tests. Known pre-existing failures in PlayerSearch, PlayerDetail, and ClanSVG tests (D3/SVG rendering in jsdom) — don't chase those unless the task touches them.
+- **E2E tests**: `npx playwright test` for end-to-end. Player detail tab tests reference tabs by name (Profile, Ships, Ranked, Clan Battles, Efficiency, Population). If tab names or order change, update `e2e/player-detail-tabs.spec.ts`.
+- **Live site verification**: After deploy, verify: (1) player detail loads — `curl -s -o /dev/null -w "%{http_code}" https://battlestats.online/api/player/lil_boots/`, (2) distribution endpoint — `/api/fetch/player_distribution/win_rate/`, (3) sitemap — `/sitemap.xml`, (4) GA4 tag present in HTML source.
+- **Cache-dependent behavior**: Many tests depend on Redis/LocMemCache state. If a test fails on cache miss, check whether the test needs `cache.delete()` before asserting.
+- **MV-dependent tests**: Tests that query `MvPlayerDistributionStats` will use the Player fallback if the MV is empty (test data isn't in the MV unless explicitly refreshed). This is by design — the fallback path is production-safe.
+- **Theme testing**: UI changes must be visually verified in both light and dark themes. The theme toggle is in the header.
 
 ## Severity Levels
 
