@@ -114,9 +114,12 @@ const drawTierPlot = (container: HTMLDivElement, svgHeight: number, colors: Colo
     renderData();
 };
 
-const ClanTierSVG: React.FC<ClanTierDistributionSVGProps> = ({ clanId, svgHeight = 220, theme = 'light' }) => {
+interface InternalClanTierSVGProps extends ClanTierDistributionSVGProps {
+    data: ClanTierData[];
+}
+
+const ClanTierSVG: React.FC<InternalClanTierSVGProps> = ({ clanId, svgHeight = 220, theme = 'light', data }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
-    const { data } = useClanTiersDistribution(clanId);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -146,7 +149,7 @@ const ClanTierSVG: React.FC<ClanTierDistributionSVGProps> = ({ clanId, svgHeight
 
 // Wrapper with error boundary and loader
 const ClanTierDistributionContainer: React.FC<ClanTierDistributionSVGProps> = (props) => {
-    const { loading, error } = useClanTiersDistribution(props.clanId);
+    const { data, loading, error } = useClanTiersDistribution(props.clanId);
     
     if (error) {
         return <div className="p-4 text-sm text-red-500 bg-red-100 dark:bg-red-900/20 rounded-md">Tier data unavailable: {error}</div>;
@@ -158,7 +161,7 @@ const ClanTierDistributionContainer: React.FC<ClanTierDistributionSVGProps> = (p
     
     return (
         <ErrorBoundary fallback={<div className="p-4 text-sm text-red-500">Tier data unavailable</div>}>
-            <ClanTierSVG {...props} />
+            <ClanTierSVG {...props} data={data} />
         </ErrorBoundary>
     );
 };
