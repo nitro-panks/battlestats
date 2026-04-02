@@ -4193,12 +4193,15 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active', realm: str =
 def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> list:
     """
     Computes an aggregated distribution of pvp_battles at each Ship Tier (1-11)
-    for all active players in the specified clan.
+    for all active players in the specified clan.  Uses partial data when some
+    members are still missing tiers_json — queues hydration for those players
+    and caches a shorter TTL so the next poll picks up the completed data.
     Returns: [{'ship_tier': 1, 'pvp_battles': 240}, ... {'ship_tier': 11, 'pvp_battles': 105}]
     """
     cache_key = realm_cache_key(realm, f'clan:tiers:v3:{clan_id}')
 
-    requires_hydration = False
+    hydrating_count = 0
+    hydrated_count = 0
     tier_aggregates = {tier: 0 for tier in range(1, 12)}
 
     players = Player.objects.filter(
@@ -4210,29 +4213,37 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
     for player_id, tiers_json in players:
         if not tiers_json:
             update_tiers_data_task.delay(player_id=player_id, realm=realm)
-            requires_hydration = True
+            hydrating_count += 1
             continue
 
+        hydrated_count += 1
         for row in tiers_json:
             tier = row.get('ship_tier')
             battles = row.get('pvp_battles', 0)
             if isinstance(tier, int) and 1 <= tier <= 11 and isinstance(battles, int):
                 tier_aggregates[tier] += battles
 
-    # If any player needs hydration, we do not resolve the cache to force the frontend to poll
-    if requires_hydration:
+    # If zero members have data, return empty so frontend shows pending state
+    if hydrated_count == 0:
         return []
 
     data = []
-    # Match the existing frontend TierSVG which iterates sorted natively, or just 11->1 or 1->11
     for tier in range(11, 0, -1):
         data.append({
             'ship_tier': tier,
             'pvp_battles': tier_aggregates[tier]
         })
 
-    # cache for 24h
-    cache.set(cache_key, data, 86400)
+    pending_key = realm_cache_key(realm, f'clan:tiers:v3:{clan_id}:pending')
+    if hydrating_count > 0:
+        # Partial data — cache for 10 minutes so next poll picks up newly hydrated members
+        cache.set(cache_key, data, 600)
+        cache.set(pending_key, True, 600)
+    else:
+        # Complete data — cache for 24h
+        cache.set(cache_key, data, 86400)
+        cache.delete(pending_key)
+
     return data
 
 

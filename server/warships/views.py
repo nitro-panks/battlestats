@@ -790,7 +790,11 @@ def clan_tier_distribution(request, clan_id: str) -> Response:
     cached = cache.get(cache_key)
 
     if cached is not None:
-        return Response(cached)
+        response = Response(cached)
+        pending_key = realm_cache_key(realm, f'clan:tiers:v3:{clan_id}:pending')
+        if cache.get(pending_key):
+            response['X-Clan-Tiers-Pending'] = 'true'
+        return response
 
     from warships.tasks import update_clan_tier_distribution_task
     _delay_task_safely(update_clan_tier_distribution_task,
