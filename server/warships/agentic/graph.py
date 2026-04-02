@@ -461,7 +461,8 @@ def _load_memory_context(state: AgentState) -> dict:
     )
     notes = list(state.get("memory_notes", []))
     notes.extend(memory_context.get("memory_notes", []))
-    workflow_kind = str(state.get("workflow_kind") or "").strip() or memory_context["workflow_kind"]
+    workflow_kind = str(state.get("workflow_kind")
+                        or "").strip() or memory_context["workflow_kind"]
     return {
         "memory_enabled": memory_context["memory_enabled"],
         "memory_environment": memory_context["memory_environment"],
