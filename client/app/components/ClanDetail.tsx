@@ -5,6 +5,7 @@ import { resilientDynamicImport } from './resilientDynamicImport';
 import { useClanMembers } from './useClanMembers';
 import { useTheme } from '../context/ThemeContext';
 import ClanTierDistributionSVG from './ClanTierDistributionSVG';
+import { incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
 
 interface ClanDetailProps {
     clan: {
@@ -37,6 +38,22 @@ const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMem
 const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember }) => {
     const { theme } = useTheme();
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+    // Pre-signal chart loading before ClanSVG's dynamic import resolves.
+    // This ensures useClanTiersDistribution and useClanMembers see
+    // chartFetchesInFlight > 0 at mount time and defer their fetches.
+    // ClanSVG will call incrementChartFetches again when it mounts, so
+    // we release this pre-signal once the dynamic import has had time to
+    // initialize (200ms is well under the dynamic import resolution time).
+    useEffect(() => {
+        incrementChartFetches();
+        const id = setTimeout(() => decrementChartFetches(), 200);
+        return () => {
+            clearTimeout(id);
+            decrementChartFetches();
+        };
+    }, [clan.clan_id]);
+
     const { members, loading: membersLoading, error: membersError } = useClanMembers(clan.clan_id);
 
     useEffect(() => {
