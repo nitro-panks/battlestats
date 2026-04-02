@@ -1,7 +1,7 @@
 # Spec: Multi-Realm Support (EU)
 
 **Created**: 2026-03-31
-**Status**: Implemented — Phases 1-5 complete, Phase 6 (EU data population) pending deployment
+**Status**: Implemented — Phases 1-6 deployed; EU core population is live, while enrichment backfill remains sparse
 **Scope**: Add EU realm support with full data isolation from NA. Frontend realm selector, backend realm-aware queries, separate crawl/cache/statistics per realm.
 
 ---
@@ -90,6 +90,19 @@ EU has **1.8x the clans** of NA (62,722 vs 35,314). Assuming proportional player
 | **Redis**              | 17.6 MB      | ~18 MB                                   | ~36 MB        | Plenty                    |
 | **Disk**               | 16 GB used   | +0 (DB is managed)                       | 16 GB         | 71 GB free                |
 | **RAM**                | 2.7 GB used  | ~+200 MB (larger query sets, more cache) | ~2.9 GB       | ~900 MB free              |
+
+### Current EU load snapshot (2026-04-02)
+
+Observed via `python manage.py check_realm_health` against the active database.
+
+| Metric                  | Current EU                          | Original projection       | Progress vs projection | Relative to NA           |
+| ----------------------- | ----------------------------------- | ------------------------- | ---------------------- | ------------------------ |
+| **Player rows**         | 466,774                             | ~500,000                  | 93.4%                  | 1.69x NA                 |
+| **Clan rows**           | 58,223                              | 62,722                    | 92.8%                  | 1.65x NA                 |
+| **Fresh players (7d)**  | 466,774 / 466,774                   | N/A                       | 100.0% fresh           | stronger than NA's 35.7% |
+| **Efficiency coverage** | 62 / 435,782 visible active players | eventual Stage 2 backfill | effectively 0.01%      | well behind NA           |
+
+This confirms the EU core crawl is live and materially populated, but the realm is still in a Stage 1-heavy state: core player and clan rows are present and fresh, while expensive enrichment lanes have barely started.
 
 ### Assessment
 
@@ -559,6 +572,16 @@ python manage.py shell -c "from warships.models import Clan; print(Clan.objects.
 # Efficiency coverage
 python manage.py shell -c "from warships.models import Player; total=Player.objects.filter(realm='eu',is_hidden=False,pvp_battles__gt=0).count(); filled=Player.objects.filter(realm='eu',is_hidden=False,pvp_battles__gt=0,efficiency_json__isnull=False).count(); print(f'{filled}/{total} ({filled*100//max(total,1)}%)')"
 ```
+
+Observed snapshot on 2026-04-02:
+
+| Metric              | Value                               |
+| ------------------- | ----------------------------------- |
+| Player count        | 466,774                             |
+| Clan count          | 58,223                              |
+| Latest EU fetch     | 2026-04-02 13:11:24                 |
+| Fresh within 7 days | 466,774 / 466,774 (100.0%)          |
+| Efficiency coverage | 62 / 435,782 visible active players |
 
 #### 6c. Subsequent crawl cadence
 

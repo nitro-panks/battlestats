@@ -47,6 +47,7 @@ When an agent is told to review project docs, the default runbook read order is:
 Open these only when the task matches them directly:
 
 - `runbook-clan-tier-distribution-recovery-2026-04-02.md`
+- `runbook-eu-heatmap-rollout-2026-04-02.md`
 - `runbook-player-achievements-data-lane.md`
 - `runbook-best-clan-eligibility.md`
 - `runbook-seo.md`

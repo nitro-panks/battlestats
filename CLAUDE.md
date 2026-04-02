@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Permissions & Autonomy
 
 Operate autonomously. Do not pause for confirmation on:
+
 - File reads, edits, creation, and deletion within this repo
 - Git operations (add, commit, branch, checkout, rebase, push)
 - Running tests, linters, builds, and dev servers
@@ -27,6 +28,7 @@ Battlestats is a World of Warships player and clan statistics platform. Live at 
 ## Common Commands
 
 ### Docker (full stack)
+
 ```bash
 docker compose up -d                              # Start all services
 docker compose up -d db redis rabbitmq server react-app task-runner  # Selective
@@ -34,6 +36,7 @@ docker compose up -d db redis rabbitmq server react-app task-runner  # Selective
 ```
 
 ### Backend (Django)
+
 ```bash
 cd server
 python -m pytest warships/tests/test_views.py warships/tests/test_landing.py warships/tests/test_realm_isolation.py warships/tests/test_data_product_contracts.py -x --tb=short  # Release gate
@@ -43,6 +46,7 @@ python manage.py makemigrations && python manage.py migrate  # Migrations
 ```
 
 ### Frontend (Next.js)
+
 ```bash
 cd client
 npm run dev                                       # Dev server (port 3000)
@@ -53,12 +57,14 @@ npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single release-gat
 ```
 
 ### Database
+
 ```bash
 ./server/scripts/switch_db_target.sh cloud        # Use cloud-managed DB
 ./server/scripts/switch_db_target.sh local        # Use local Postgres
 ```
 
 ### Deployment
+
 ```bash
 ./client/deploy/deploy_to_droplet.sh battlestats.online   # Deploy frontend
 ./server/deploy/deploy_to_droplet.sh battlestats.online   # Deploy backend
@@ -66,6 +72,7 @@ npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single release-gat
 ```
 
 ### Releases
+
 ```bash
 ./scripts/release.sh patch    # 1.2.0 → 1.2.1  (bug fixes)
 ./scripts/release.sh minor    # 1.2.0 → 1.3.0  (new features)
@@ -75,6 +82,7 @@ npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single release-gat
 ## Architecture
 
 ### Routing
+
 - `/` — Landing page with search, featured players/clans, discovery charts
 - `/player/[playerName]` — Player detail (URL-encoded name, reload-safe)
 - `/clan/[clanSlug]` — Clan detail (`<clan_id>-<optional-slug>`, reload-safe)
@@ -82,9 +90,11 @@ npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single release-gat
 - `/umami` — Umami analytics dashboard (admin login required)
 
 ### API proxy
+
 Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`). The frontend never calls the Wargaming API directly — all data flows through Django.
 
 ### Key backend modules
+
 - `server/warships/data.py` (~5K lines) — Core hydration, chart payload assembly, cache warming, hot entity warming, population correlations/distributions, `score_best_clans()` composite ranking. Analytical queries use elevated `work_mem` via `_elevated_work_mem()` context manager.
 - `server/warships/landing.py` — Landing page modes (Best, Random, Sigma, Popular) with published-cache + durable fallback
 - `server/warships/tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing warmup, distribution/correlation warming
@@ -92,6 +102,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - `server/warships/views.py` — DRF views and `@api_view` endpoints
 
 ### Key frontend patterns
+
 - D3-based SVG chart components (TierSVG, TypeSVG, ActivitySVG, RankedWRBattlesHeatmapSVG, etc.)
 - `client/app/context/ThemeContext.tsx` — Dark/light theme with localStorage persistence
 - `client/app/components/ThemeToggle.tsx` — Theme selection dropdown (light/dark/system)
@@ -104,6 +115,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - Shared icon components in `client/app/components/` — 7 player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon) with `size` prop for surface variants
 
 ### Caching strategy
+
 - **Cache-first with lazy-refresh**: Return cached payload immediately, queue background refresh
 - **Durable fallback**: Keep last-published copy after TTL expiry
 - **Stale-while-revalidate**: `X-Clan-Plot-Pending: true` header signals pending warm-up
@@ -116,32 +128,40 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - Redis-backed in production, LocMemCache in tests
 
 ### Celery queue architecture
+
 Three queues with dedicated workers:
+
 - **default** (`-c 2`) — API-triggered tasks, general work
 - **hydration** (`-c 2`) — Player ranked/efficiency data hydration (capped to prevent flooding). Tasks: `update_ranked_data_task`, `update_player_efficiency_data_task`
 - **background** — Long-running crawls, warmers, incremental refreshes (all periodic tasks)
 
 ### Nginx / HTTP
+
 - **HTTP/2** enabled on the production nginx 443 listeners. Eliminates the browser's 6-connection-per-origin limit under HTTP/1.1, allowing all concurrent chart and hydration requests to proceed without slot contention.
 
 ### Frontend fetch priority
+
 Player detail pages coordinate chart rendering vs hydration polling:
+
 - Tab warmup fires 4 parallel chart requests via `requestIdleCallback` (250ms timeout)
 - Clan member fetch is deferred until warmup settles (with 10s hard timeout fallback)
 - `sharedJsonFetch.ts` exposes a `chartFetchesInFlight` counter; `useClanMembers` backs off to 6s poll intervals while charts are in-flight
 - See `runbook-player-page-load-priority.md` for full diagnosis and architecture
 
 ### Database optimizations
+
 - **`CONN_HEALTH_CHECKS`**: Enabled — Django validates connections before use, preventing stale-connection errors with managed Postgres
 - **Elevated `work_mem`**: Analytical queries (distribution bins, tier-type/ranked/survival correlations) use `SET LOCAL work_mem` within `transaction.atomic()` to get 8MB (configurable via `ANALYTICAL_WORK_MEM`) instead of the default 2MB. This improves sort/hash performance for full table scans over ~194K players.
 
 ### SEO
+
 - **Dynamic metadata**: Player and clan pages export `generateMetadata()` with per-page title, description, OG tags, Twitter cards, and canonical URLs
 - **Dynamic sitemap**: `app/sitemap.ts` fetches recently-visited entities from `/api/sitemap-entities/` (hourly revalidation). Backend endpoint queries `EntityVisitDaily` for players/clans with ≥2 deduped views in last 30 days
 - **Structured data**: Homepage includes `WebSite` + `SearchAction` JSON-LD for Google sitelinks search box
 - **Google Analytics**: GA4 measurement ID configured via `NEXT_PUBLIC_GA_MEASUREMENT_ID` env var (build-time). Deploy script sources `/etc/battlestats-client.env` before `npm run build`
 
 ### Data models (server/warships/models.py)
+
 Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat.
 
 ## Team Doctrine (Pre-commit Requirements)
@@ -158,6 +178,7 @@ These rules from that file apply to every commit:
 6. **Runbook reconciliation** — When implementing changes described in a runbook or spec, update it to reflect implementation status, fixes applied, and validation results.
 
 ### Decision rules
+
 - Smallest safe vertical slice. Reversible changes over clever shortcuts.
 - Correctness before optimization. Preserve existing user-facing behavior unless the task explicitly changes it.
 - Avoid unbounded polling, queue fan-out, or retry loops.
@@ -169,12 +190,15 @@ These rules from that file apply to every commit:
 The project uses semantic versioning with a root `VERSION` file as the single source of truth. The version is surfaced in the client footer at build time via `NEXT_PUBLIC_APP_VERSION`.
 
 ### Semver levels
+
 - **patch** — bug fixes, performance tuning, doc-only changes
 - **minor** — new features, new surfaces, meaningful UX changes
 - **major** — breaking data model migrations, API contract changes, major UX overhauls
 
 ### Commit message prefixes (Conventional Commits)
+
 Use these prefixes on all commit messages to enable future automation:
+
 - `feat:` — new feature or surface (maps to **minor**)
 - `fix:` — bug fix (maps to **patch**)
 - `perf:` — performance improvement (maps to **patch**)
@@ -185,6 +209,7 @@ Use these prefixes on all commit messages to enable future automation:
 - Append `!` after the prefix (e.g. `feat!:`) for breaking changes (maps to **major**)
 
 ### Release workflow
+
 Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which bumps VERSION, commits, tags, and pushes.
 
 - `patch` releases may skip the release gate.
@@ -193,11 +218,13 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 ## Environment
 
 ### Server env files (in `server/`)
+
 - `.env` — Non-secret connection values (DB_HOST, DB_ENGINE, DJANGO_ALLOWED_HOSTS)
 - `.env.secrets` — Secrets (WG_APP_ID, DB_PASSWORD, DJANGO_SECRET_KEY)
 - `.env.cloud` / `.env.secrets.cloud` — Cloud database overrides
 
 ### Server runtime env (configurable, not secrets)
+
 - `HOT_ENTITY_PINNED_PLAYER_NAMES` — Comma-separated player names to always keep warm (default: `lil_boots`)
 - `CLAN_BATTLE_WARM_CLAN_IDS` — Comma-separated clan IDs for clan battle summary warming
 - `BEST_CLAN_EXCLUDED_IDS` — Comma-separated clan IDs excluded from Best clan ranking
@@ -208,10 +235,12 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)
 
 ### Client env
+
 - `BATTLESTATS_API_ORIGIN` — Backend URL (default `http://localhost:8888`)
 - `NEXT_PUBLIC_GA_MEASUREMENT_ID` — GA4 measurement ID (optional)
 
 ### Umami analytics
+
 - Dashboard: `https://battlestats.online/umami/`
 - Runs as a standalone Next.js app on port 3002 behind nginx
 - Uses the same managed Postgres (separate `umami` database)
@@ -220,6 +249,7 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - Credentials stored on droplet; default user is `admin`
 
 ### Docker ports
+
 - 8888: Django/Gunicorn
 - 3001: Next.js (Docker dev)
 - 3002: Umami analytics (production droplet only)

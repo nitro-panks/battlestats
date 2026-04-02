@@ -32,6 +32,8 @@ const EMPTY_TIER_TYPE_PAYLOAD = {
     x_label: 'Ship Type',
     y_label: 'Tier',
     tracked_population: 0,
+    x_labels: ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'],
+    y_values: [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
     tiles: [],
     trend: [],
     player_cells: [],

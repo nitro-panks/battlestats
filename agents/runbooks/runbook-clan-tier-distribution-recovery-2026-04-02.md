@@ -16,23 +16,23 @@ Track the clan tier histogram restoration. The histogram was removed from the cl
 
 ## What Shipped (2026-04-02)
 
-| Change | Status |
-|--------|--------|
-| Removed `ClanTierDistributionSVG` from ClanDetail | Deployed (v1.5.1) |
-| 3D scatter chart with KDR Z-axis | Deployed (v1.5.2) |
+| Change                                                  | Status            |
+| ------------------------------------------------------- | ----------------- |
+| Removed `ClanTierDistributionSVG` from ClanDetail       | Deployed (v1.5.1) |
+| 3D scatter chart with KDR Z-axis                        | Deployed (v1.5.2) |
 | `clan_member_tiers` endpoint returns `avg_tier` + `kdr` | Deployed (v1.5.2) |
-| ColorBrewer Set2 axis styling, drag fix | Deployed (v1.5.3) |
-| Daily tier distribution warmer (EU 02:30, NA 08:30 UTC) | Running |
-| 97.8% of clans have 3D available (KDR coverage) | Verified |
+| ColorBrewer Set2 axis styling, drag fix                 | Deployed (v1.5.3) |
+| Daily tier distribution warmer (EU 02:30, NA 08:30 UTC) | Running           |
+| 97.8% of clans have 3D available (KDR coverage)         | Verified          |
 
 ## Data Coverage Snapshot (2026-04-02)
 
-| Metric | Value |
-|--------|-------|
-| Total non-hidden players | 715,763 |
-| Players with `battles_json` | 1,027 (0.1%) |
-| Players with `tiers_json` | 267,154 (37.3%) |
-| Clans with >=50% tier coverage | 34,752 / 96,034 (36.2%) |
+| Metric                                | Value                   |
+| ------------------------------------- | ----------------------- |
+| Total non-hidden players              | 715,763                 |
+| Players with `battles_json`           | 1,027 (0.1%)            |
+| Players with `tiers_json`             | 267,154 (37.3%)         |
+| Clans with >=50% tier coverage        | 34,752 / 96,034 (36.2%) |
 | Clans with KDR coverage (3D eligible) | 93,924 / 96,034 (97.8%) |
 
 **Why the gap**: `tiers_json` is computed from `battles_json`, which only gets populated when a player is individually viewed or hit by the daily clan crawl. The daily tier warmer reads existing `tiers_json` but does not trigger `battles_json` hydration for players that lack it.
@@ -67,21 +67,21 @@ The histogram should be restored when:
 
 ## Key Files
 
-| File | Role |
-|------|------|
-| `server/warships/data.py` | `update_clan_tier_distribution()` — aggregate lane; `compute_clan_member_avg_tiers()` — per-member lane |
-| `server/warships/views.py` | `clan_tier_distribution` and `clan_member_tiers` endpoints |
-| `server/warships/tasks.py` | `warm_all_clan_tier_distributions_task` — daily warmer |
-| `server/warships/signals.py` | Schedules daily tier warmer per realm |
-| `client/app/components/ClanTierDistributionSVG.tsx` | Aggregate histogram component (exists, not mounted) |
-| `client/app/components/useClanTiersDistribution.ts` | Aggregate data hook (exists, not used) |
-| `client/app/components/ClanDetail.tsx` | Integration point for histogram restoration |
+| File                                                | Role                                                                                                    |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `server/warships/data.py`                           | `update_clan_tier_distribution()` — aggregate lane; `compute_clan_member_avg_tiers()` — per-member lane |
+| `server/warships/views.py`                          | `clan_tier_distribution` and `clan_member_tiers` endpoints                                              |
+| `server/warships/tasks.py`                          | `warm_all_clan_tier_distributions_task` — daily warmer                                                  |
+| `server/warships/signals.py`                        | Schedules daily tier warmer per realm                                                                   |
+| `client/app/components/ClanTierDistributionSVG.tsx` | Aggregate histogram component (exists, not mounted)                                                     |
+| `client/app/components/useClanTiersDistribution.ts` | Aggregate data hook (exists, not used)                                                                  |
+| `client/app/components/ClanDetail.tsx`              | Integration point for histogram restoration                                                             |
 
 ## Decision Log
 
-| Date | Decision |
-|------|----------|
+| Date       | Decision                                                        |
+| ---------- | --------------------------------------------------------------- |
 | 2026-04-02 | Removed tier histogram from production — hanging for most clans |
-| 2026-04-02 | Shipped 3D scatter with KDR Z-axis instead of tier |
-| 2026-04-02 | Deferred histogram restoration until after Asia data migration |
-| 2026-04-02 | Tier data collection continues in background via daily warmers |
+| 2026-04-02 | Shipped 3D scatter with KDR Z-axis instead of tier              |
+| 2026-04-02 | Deferred histogram restoration until after Asia data migration  |
+| 2026-04-02 | Tier data collection continues in background via daily warmers  |

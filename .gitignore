@@ -37,4 +37,7 @@ updated-landing
 # Account deletion requests (contains PII)
 deleted_accounts*
 
+# Generated transcript purge artifacts
+server/purge_transcript_*.jsonl
+
 server/static/rest_framework/**/*.png
