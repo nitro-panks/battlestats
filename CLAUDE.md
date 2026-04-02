@@ -200,6 +200,7 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 ### Server runtime env (configurable, not secrets)
 - `HOT_ENTITY_PINNED_PLAYER_NAMES` — Comma-separated player names to always keep warm (default: `lil_boots`)
 - `CLAN_BATTLE_WARM_CLAN_IDS` — Comma-separated clan IDs for clan battle summary warming
+- `BEST_CLAN_EXCLUDED_IDS` — Comma-separated clan IDs excluded from Best clan ranking
 - `HOT_ENTITY_PLAYER_LIMIT` / `HOT_ENTITY_CLAN_LIMIT` — Hot entity cache size (defaults: 20/10)
 - `ENABLE_CRAWLER_SCHEDULES` — Enable daily clan crawl (set `1` in production)
 - `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)

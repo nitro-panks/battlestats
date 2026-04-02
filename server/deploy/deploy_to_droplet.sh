@@ -165,6 +165,7 @@ set_env_value CELERY_BACKGROUND_MAX_TASKS_PER_CHILD 50
 set_env_value CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB 786432
+set_env_value BEST_CLAN_EXCLUDED_IDS 1000068602
 
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"
