@@ -4203,14 +4203,14 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
 
     players = Player.objects.filter(
         clan__clan_id=clan_id, realm=realm, is_hidden=False
-    ).values_list('account_id', 'tiers_json')
+    ).values_list('player_id', 'tiers_json')
 
     from warships.utils import _delay_task_safely
     from warships.tasks import update_tiers_data_task
 
-    for account_id, tiers_json in players:
+    for player_id, tiers_json in players:
         if not tiers_json:
-            _delay_task_safely(update_tiers_data_task, player_id=account_id, realm=realm)
+            _delay_task_safely(update_tiers_data_task, player_id=player_id, realm=realm)
             requires_hydration = True
             continue
 
@@ -4703,6 +4703,7 @@ def warm_clan_entity_caches(clan_ids: Iterable[int], force_refresh: bool = False
         refresh_clan_battle_seasons_cache(str(clan_id))
         fetch_clan_plot_data(str(clan_id), 'active')
         fetch_clan_plot_data(str(clan_id), 'all')
+        update_clan_tier_distribution(str(clan_id), realm=realm)
         warmed_clans += 1
 
     return warmed_clans
