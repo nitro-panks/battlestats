@@ -2661,6 +2661,7 @@ PLAYER_TIER_TYPE_ORDER = {
     'Aircraft Carrier': 3,
     'Submarine': 4,
 }
+PLAYER_TIER_TYPE_CACHE_VERSION = 'tier_type_population:v2'
 LANDING_ACTIVITY_ATTRITION_CACHE_TTL = 900
 LANDING_ACTIVITY_ATTRITION_MONTHS = 18
 LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW = 6
@@ -2756,7 +2757,7 @@ def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)                          :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -3046,6 +3047,44 @@ def _tier_type_sort_key(ship_type: str, ship_tier: Optional[int] = None) -> tupl
     return (PLAYER_TIER_TYPE_ORDER.get(ship_type, len(PLAYER_TIER_TYPE_ORDER)), ship_type, tier_component)
 
 
+def _build_tier_type_x_labels(observed_ship_types: set[str]) -> list[str]:
+    canonical_labels = [
+        ship_type
+        for ship_type, _ in sorted(
+            PLAYER_TIER_TYPE_ORDER.items(),
+            key=lambda item: item[1],
+        )
+    ]
+    extra_labels = sorted(
+        [
+            ship_type
+            for ship_type in observed_ship_types
+            if ship_type not in PLAYER_TIER_TYPE_ORDER
+        ],
+        key=lambda ship_type: _tier_type_sort_key(ship_type),
+    )
+    return canonical_labels + extra_labels
+
+
+def _build_tier_type_y_values() -> list[int]:
+    return list(range(11, 0, -1))
+
+
+def _extend_tier_type_x_labels(x_labels: list[str], player_cells: list[dict]) -> list[str]:
+    labels = list(x_labels)
+    seen = set(labels)
+    extra_labels = sorted(
+        {
+            str(cell['ship_type'])
+            for cell in player_cells
+            if str(cell['ship_type']) not in seen
+        },
+        key=lambda ship_type: _tier_type_sort_key(ship_type),
+    )
+    labels.extend(extra_labels)
+    return labels
+
+
 def _extract_tier_type_battle_rows(battles_json: Any) -> list[dict[str, int | float | str]]:
     if not isinstance(battles_json, list):
         return []
@@ -3110,15 +3149,19 @@ def _build_tier_type_player_cells(battles_json: Any) -> list[dict]:
 
 def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -> dict:
     cache_key = _player_correlation_cache_key(
-        'tier_type_population', realm=realm)
+        PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
+    published_cache_key = _player_correlation_published_cache_key(
+        PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
+        cache.set(published_cache_key, cached, timeout=None)
         return cached
 
     config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
     tile_counts: dict[tuple[str, int], int] = {}
     trend_tier_weighted_sum: dict[str, float] = {}
     trend_battles: dict[str, int] = {}
+    observed_ship_types: set[str] = set()
     tracked_population = 0
 
     with transaction.atomic(), _elevated_work_mem():
@@ -3139,6 +3182,7 @@ def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -
                 ship_type = str(row['ship_type'])
                 ship_tier = int(row['ship_tier'])
                 pvp_battles = int(row['pvp_battles'])
+                observed_ship_types.add(ship_type)
 
                 tile_counts[(ship_type, ship_tier)] = tile_counts.get(
                     (ship_type, ship_tier), 0) + pvp_battles
@@ -3147,21 +3191,27 @@ def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -
                 trend_battles[ship_type] = trend_battles.get(
                     ship_type, 0) + pvp_battles
 
+    x_labels = _build_tier_type_x_labels(observed_ship_types)
+    y_values = _build_tier_type_y_values()
+    x_index_by_label = {label: index for index, label in enumerate(x_labels)}
+    y_index_by_value = {value: index for index, value in enumerate(y_values)}
+
     tiles = [
         {
-            'ship_type': ship_type,
-            'ship_tier': ship_tier,
+            'x_index': x_index_by_label[ship_type],
+            'y_index': y_index_by_value[ship_tier],
             'count': count,
         }
         for (ship_type, ship_tier), count in sorted(
             tile_counts.items(),
             key=lambda item: _tier_type_sort_key(item[0][0], item[0][1]),
         )
+        if ship_type in x_index_by_label and ship_tier in y_index_by_value
     ]
 
     trend = [
         {
-            'ship_type': ship_type,
+            'x_index': x_index_by_label[ship_type],
             'avg_tier': round(trend_tier_weighted_sum[ship_type] / total_battles, 4),
             'count': total_battles,
         }
@@ -3169,7 +3219,7 @@ def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -
             trend_battles.items(),
             key=lambda item: _tier_type_sort_key(item[0]),
         )
-        if total_battles > 0
+        if total_battles > 0 and ship_type in x_index_by_label
     ]
 
     payload = {
@@ -3178,19 +3228,35 @@ def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -
         'x_label': config['x_label'],
         'y_label': config['y_label'],
         'tracked_population': tracked_population,
+        'x_labels': x_labels,
+        'y_values': y_values,
         'tiles': tiles,
         'trend': trend,
     }
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
+    cache.set(published_cache_key, payload, timeout=None)
     return payload
 
 
 def warm_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -> dict:
     """Force-rebuild the tier-type population correlation cache."""
     cache_key = _player_correlation_cache_key(
-        'tier_type_population', realm=realm)
+        PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
+    published_cache_key = _player_correlation_published_cache_key(
+        PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
     cache.delete(cache_key)
+    cache.delete(published_cache_key)
     return _fetch_player_tier_type_population_correlation(realm=realm)
+
+
+def warm_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
+    """Force-rebuild the win-rate vs survival correlation cache."""
+    cache_key = _player_correlation_cache_key('win_rate_survival', realm=realm)
+    published_cache_key = _player_correlation_published_cache_key(
+        'win_rate_survival', realm=realm)
+    cache.delete(cache_key)
+    cache.delete(published_cache_key)
+    return fetch_player_wr_survival_correlation(realm=realm)
 
 
 def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
@@ -3200,6 +3266,10 @@ def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
     tier_type = warm_player_tier_type_population_correlation(realm=realm)
     results['tier_type'] = {
         'tracked_population': tier_type.get('tracked_population', 0)}
+
+    win_rate_survival = warm_player_wr_survival_correlation(realm=realm)
+    results['win_rate_survival'] = {
+        'tracked_population': win_rate_survival.get('tracked_population', 0)}
 
     ranked = warm_player_ranked_wr_battles_population_correlation(realm=realm)
     results['ranked_wr_battles'] = {
@@ -3220,16 +3290,22 @@ def fetch_player_tier_type_correlation(player_id: str, player: Player | None = N
             'player_cells': [],
         }
 
+    player_cells = _build_tier_type_player_cells(player.battles_json)
+
     return {
         **population_payload,
-        'player_cells': _build_tier_type_player_cells(player.battles_json),
+        'x_labels': _extend_tier_type_x_labels(population_payload['x_labels'], player_cells),
+        'player_cells': player_cells,
     }
 
 
 def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
     cache_key = _player_correlation_cache_key('win_rate_survival', realm=realm)
+    published_cache_key = _player_correlation_published_cache_key(
+        'win_rate_survival', realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
+        cache.set(published_cache_key, cached, timeout=None)
         return cached
 
     config = PLAYER_WR_SURVIVAL_CORRELATION_CONFIG
@@ -3341,6 +3417,7 @@ def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
     }
 
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
+    cache.set(published_cache_key, payload, timeout=None)
     return payload
 
 
@@ -4265,10 +4342,12 @@ def compute_clan_member_avg_tiers(clan_id: str, realm: str = DEFAULT_REALM) -> l
     results = []
     missing_count = 0
     for player_id, name, tiers_json, pvp_frags, pvp_deaths in players:
-        kdr = round(pvp_frags / pvp_deaths, 2) if pvp_deaths and pvp_deaths > 0 else None
+        kdr = round(pvp_frags / pvp_deaths,
+                    2) if pvp_deaths and pvp_deaths > 0 else None
 
         if not tiers_json:
-            results.append({'player_id': player_id, 'name': name, 'avg_tier': None, 'kdr': kdr})
+            results.append({'player_id': player_id, 'name': name,
+                           'avg_tier': None, 'kdr': kdr})
             missing_count += 1
             continue
 
@@ -4281,10 +4360,12 @@ def compute_clan_member_avg_tiers(clan_id: str, realm: str = DEFAULT_REALM) -> l
                 weighted_sum += tier * battles
                 total_battles += battles
 
-        avg_tier = round(weighted_sum / total_battles, 1) if total_battles > 0 else None
+        avg_tier = round(weighted_sum / total_battles,
+                         1) if total_battles > 0 else None
         if avg_tier is None:
             missing_count += 1
-        results.append({'player_id': player_id, 'name': name, 'avg_tier': avg_tier, 'kdr': kdr})
+        results.append({'player_id': player_id, 'name': name,
+                       'avg_tier': avg_tier, 'kdr': kdr})
 
     if missing_count > 0 and missing_count < len(results):
         cache.set(cache_key, results, 600)
@@ -4316,10 +4397,11 @@ def warm_all_clan_tier_distributions(realm: str = DEFAULT_REALM, batch_size: int
     )
 
     for i in range(0, total, batch_size):
-        batch = clan_ids[i : i + batch_size]
+        batch = clan_ids[i: i + batch_size]
         for clan_id in batch:
             try:
-                result = update_clan_tier_distribution(str(clan_id), realm=realm)
+                result = update_clan_tier_distribution(
+                    str(clan_id), realm=realm)
                 if result:
                     warmed += 1
                 else:
@@ -4998,6 +5080,9 @@ BEST_CLAN_MIN_MEMBERS = 10
 BEST_CLAN_MIN_TRACKED = 5
 BEST_CLAN_MIN_ACTIVE_SHARE = 0.40
 BEST_CLAN_MIN_TOTAL_BATTLES = 50_000
+BEST_CLAN_EXCLUDED_IDS: set[int] = {
+    int(x) for x in os.environ.get('BEST_CLAN_EXCLUDED_IDS', '').split(',') if x.strip()
+} if os.environ.get('BEST_CLAN_EXCLUDED_IDS') else set()
 
 BEST_CLAN_W_WR = 0.30
 BEST_CLAN_W_ACTIVITY = 0.25
@@ -5030,6 +5115,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     candidates = list(
         Clan.objects.filter(realm=realm)
         .exclude(name__isnull=True).exclude(name='')
+        .exclude(clan_id__in=BEST_CLAN_EXCLUDED_IDS)
         .filter(
             members_count__gt=BEST_CLAN_MIN_MEMBERS,
             cached_total_battles__gte=BEST_CLAN_MIN_TOTAL_BATTLES,

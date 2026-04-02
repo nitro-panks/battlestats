@@ -516,7 +516,8 @@ class LandingWarmupViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
             {'name': 'stale'}])
-        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key(
+            'na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
 
     def test_player_cache_hit_still_updates_last_lookup_and_invalidates_recent(self):
         """When the player detail cache is pre-populated, the cache-hit path
@@ -549,7 +550,8 @@ class LandingWarmupViewTests(TestCase):
         self.assertIsNotNone(player.last_lookup)
         self.assertGreaterEqual(player.last_lookup, request_started_at)
         # Dirty flag should be set
-        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key(
+            'na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
 
     def test_clan_members_lookup_updates_clan_last_lookup_timestamp(self):
         cache.clear()
@@ -660,7 +662,8 @@ class LandingWarmupViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["kill_ratio"])
         mock_update_battle_data.assert_not_called()
-        mock_update_battle_data_task.assert_called_once_with(player_id=player.player_id)
+        mock_update_battle_data_task.assert_called_once_with(
+            player_id=player.player_id)
         player.refresh_from_db()
         self.assertIsNotNone(player.last_lookup)
         self.assertGreaterEqual(player.last_lookup, request_started_at)
@@ -2699,11 +2702,16 @@ class ApiContractTests(TestCase):
         result = warm_landing_page_content()
 
         self.assertEqual(result['status'], 'completed')
-        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_CLANS_CACHE_KEY)))
-        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_CLANS_PUBLISHED_CACHE_KEY)))
-        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_CLANS_BEST_CACHE_KEY)))
-        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY)))
-        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_RECENT_CLANS_CACHE_KEY)))
+        self.assertIsNotNone(
+            cache.get(realm_cache_key('na', LANDING_CLANS_CACHE_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key(
+            'na', LANDING_CLANS_PUBLISHED_CACHE_KEY)))
+        self.assertIsNotNone(
+            cache.get(realm_cache_key('na', LANDING_CLANS_BEST_CACHE_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key(
+            'na', LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key(
+            'na', LANDING_RECENT_CLANS_CACHE_KEY)))
         self.assertIsNotNone(
             cache.get(landing_player_cache_key('random', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
@@ -2716,7 +2724,8 @@ class ApiContractTests(TestCase):
             cache.get(landing_player_cache_key('sigma', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
             cache.get(landing_player_published_cache_key('sigma', LANDING_PLAYER_LIMIT)))
-        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)))
+        self.assertIsNotNone(cache.get(realm_cache_key(
+            'na', LANDING_RECENT_PLAYERS_CACHE_KEY)))
 
     def test_landing_recent_clans_orders_by_last_lookup_desc(self):
         cache.clear()
@@ -3070,6 +3079,71 @@ class ApiContractTests(TestCase):
             any(point["x_index"] == 23 and point["count"] == 1 for point in payload["trend"]))
         self.assertTrue(all("x" not in point for point in payload["trend"]))
 
+    def test_warm_player_correlations_populates_all_heatmap_caches(self):
+        from warships.data import (
+            PLAYER_TIER_TYPE_CACHE_VERSION,
+            _player_correlation_cache_key,
+            _player_correlation_published_cache_key,
+            warm_player_correlations,
+        )
+
+        cache.clear()
+
+        Player.objects.create(
+            name="WarmCorrelationOne",
+            player_id=8826,
+            is_hidden=False,
+            pvp_battles=1600,
+            pvp_ratio=52.0,
+            pvp_survival_rate=34.0,
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 40, "wins": 24},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 20, "wins": 10},
+            ],
+            ranked_updated_at=timezone.now(),
+            ranked_json=[
+                {"season_id": 12, "total_battles": 80,
+                    "total_wins": 45, "win_rate": 0.5625, "top_ship_name": None},
+            ],
+        )
+        Player.objects.create(
+            name="WarmCorrelationTwo",
+            player_id=8827,
+            is_hidden=False,
+            pvp_battles=2200,
+            pvp_ratio=58.0,
+            pvp_survival_rate=42.0,
+            battles_json=[
+                {"ship_name": "Ship C", "ship_type": "Battleship",
+                    "ship_tier": 9, "pvp_battles": 25, "wins": 14},
+            ],
+            ranked_updated_at=timezone.now(),
+            ranked_json=[
+                {"season_id": 11, "total_battles": 120,
+                    "total_wins": 72, "win_rate": 0.6, "top_ship_name": None},
+            ],
+        )
+
+        result = warm_player_correlations()
+
+        self.assertEqual(result["tier_type"]["tracked_population"], 2)
+        self.assertEqual(result["win_rate_survival"]["tracked_population"], 2)
+        self.assertEqual(result["ranked_wr_battles"]["tracked_population"], 2)
+        self.assertIsNotNone(
+            cache.get(_player_correlation_cache_key(PLAYER_TIER_TYPE_CACHE_VERSION)))
+        self.assertIsNotNone(
+            cache.get(_player_correlation_published_cache_key(PLAYER_TIER_TYPE_CACHE_VERSION)))
+        self.assertIsNotNone(
+            cache.get(_player_correlation_cache_key("win_rate_survival")))
+        self.assertIsNotNone(
+            cache.get(_player_correlation_published_cache_key("win_rate_survival")))
+        self.assertIsNotNone(
+            cache.get(_player_correlation_cache_key("ranked_wr_battles:v6")))
+        self.assertIsNotNone(
+            cache.get(_player_correlation_published_cache_key("ranked_wr_battles:v6")))
+
     def test_player_correlation_distribution_returns_tier_type_payload(self):
         cache.clear()
 
@@ -3122,18 +3196,24 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["x_label"], "Ship Type")
         self.assertEqual(payload["y_label"], "Tier")
         self.assertEqual(payload["tracked_population"], 2)
+        self.assertEqual(
+            payload["x_labels"][:5],
+            ["Destroyer", "Cruiser", "Battleship",
+                "Aircraft Carrier", "Submarine"],
+        )
+        self.assertEqual(payload["y_values"][:3], [11, 10, 9])
         self.assertEqual(payload["player_cells"][0]["ship_type"], "Destroyer")
         self.assertEqual(payload["player_cells"][0]["ship_tier"], 10)
         self.assertEqual(payload["player_cells"][0]["pvp_battles"], 40)
         self.assertAlmostEqual(payload["player_cells"][0]["win_ratio"], 0.6)
         self.assertTrue(any(
-            tile["ship_type"] == "Destroyer"
-            and tile["ship_tier"] == 10
+            tile["x_index"] == 0
+            and tile["y_index"] == 1
             and tile["count"] == 55
             for tile in payload["tiles"]
         ))
         self.assertTrue(any(
-            point["ship_type"] == "Battleship"
+            point["x_index"] == 2
             and point["count"] == 35
             and point["avg_tier"] > 8.7
             for point in payload["trend"]
@@ -3172,7 +3252,8 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["metric"], "tier_type")
         self.assertEqual(payload["player_cells"], [])
         self.assertTrue(payload["tiles"])
-        mock_update_battle_data_task.assert_called_once_with(player_id='8834', realm='na')
+        mock_update_battle_data_task.assert_called_once_with(
+            player_id='8834', realm='na')
 
     def test_player_correlation_distribution_returns_ranked_wr_battles_payload(self):
         cache.clear()
@@ -4132,4 +4213,5 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(first_response.status_code, 404)
         self.assertEqual(second_response.status_code, 404)
         self.assertTrue(cache.get(cache_key))
-        mock_lookup.assert_called_once_with("PlayerThatWillNeverExist", realm='na')
+        mock_lookup.assert_called_once_with(
+            "PlayerThatWillNeverExist", realm='na')
