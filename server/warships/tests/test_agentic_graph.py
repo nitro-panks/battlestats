@@ -1,4 +1,5 @@
 import os
+import subprocess
 from contextlib import contextmanager
 from unittest import TestCase
 from unittest.mock import Mock, patch
@@ -191,6 +192,50 @@ class AgenticGraphTests(TestCase):
         self.assertFalse(result["checks_passed"])
         self.assertTrue(result["command_results"])
         self.assertEqual(result["command_results"][0]["returncode"], 2)
+
+    @patch("warships.agentic.graph.subprocess.run")
+    def test_run_graph_retries_verification_by_rerunning_commands(self, mock_run):
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(["python"], 2, stdout="", stderr="first failure"),
+            subprocess.CompletedProcess(["python"], 0, stdout="ok", stderr=""),
+        ]
+
+        result = run_graph(
+            "retry verification command",
+            context={
+                "verification_commands": ["python -c \"print('ok')\""],
+                "verification_cwd": "server",
+                "max_retries": 1,
+            },
+        )
+
+        self.assertEqual(mock_run.call_count, 2)
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["checks_passed"])
+        self.assertEqual(result["retry_count"], 1)
+
+    def test_run_graph_applies_planner_handoff_notes_to_plan(self):
+        result = run_graph(
+            "implement agentic planning improvements",
+            context={
+                "planning_notes": [
+                    "Follow the persona sequence shaped by CrewAI: Project Coordinator -> Architect",
+                ],
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+            },
+        )
+
+        self.assertTrue(any(
+            step.startswith("Honor planner handoff:")
+            for step in result["plan"]
+        ))
+        self.assertTrue(any(
+            "planner handoff" in note.lower()
+            for note in result["guidance_notes"]
+        ))
 
     def test_run_graph_loads_default_team_doctrine(self):
         result = run_graph(

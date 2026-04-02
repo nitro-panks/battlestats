@@ -76,3 +76,15 @@ class AgenticRetrievalTests(TestCase):
             "trace" in item["path"] or "trace" in item["title"].lower()
             for item in guidance
         ))
+
+    def test_retrieve_doctrine_guidance_includes_knowledge_base_matches(self):
+        guidance = retrieve_doctrine_guidance(
+            "Review the encyclopedia surface and upstream contract behavior",
+            limit=5,
+        )
+
+        self.assertTrue(guidance)
+        self.assertTrue(any(
+            item["path"].startswith("agents/knowledge/")
+            for item in guidance
+        ))

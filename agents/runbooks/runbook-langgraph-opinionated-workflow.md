@@ -1,6 +1,6 @@
 # Runbook: Opinionated LangGraph Workflow
 
-_Last updated: 2026-03-15_
+_Last updated: 2026-04-02_
 
 _Status: Active workflow reference_
 
@@ -16,10 +16,10 @@ The LangGraph workflow under `server/warships/agentic/graph.py` now includes:
 
 1. repo-backed doctrine loading from `agents/knowledge/agentic-team-doctrine.json`
 2. runtime doctrine overrides from workflow context
-3. curated guidance retrieval from `agents/runbooks/` and `agents/reviews/`
+3. curated guidance retrieval from `agents/knowledge/`, `agents/runbooks/`, and `agents/reviews/`
 4. a `design_pattern_review` gate with a bounded plan-revision loop
 5. an `api_contract_review` gate with a bounded plan-revision loop
-6. the existing boundary and verification gates
+6. the existing boundary and verification gates, including real command re-execution on bounded verification retries
 
 The goal is not to mimic model fine-tuning. The goal is to make battlestats preferences visible, testable, and enforceable at runtime.
 
@@ -44,9 +44,15 @@ The goal is not to mimic model fine-tuning. The goal is to make battlestats pref
 ### Curated guidance retrieval
 
 - sources:
+  - `agents/knowledge/*.md`
   - `agents/runbooks/*.md`
   - `agents/reviews/*.md`
 - use: pull battlestats-specific guidance into state before planning
+
+### Planner handoff notes
+
+- context key: `planning_notes`
+- use: carry persona-shaped planning guidance from hybrid routing into LangGraph so implementation planning can preserve the intended role sequence and handoff order
 
 ## When To Use This Workflow
 
@@ -168,6 +174,7 @@ PYTHONPATH=$PWD \
 2. run a risky task like cache or hydration work and confirm the plan is amended with rollback or bounded-load steps before implementation
 3. run a task that matches an existing runbook and confirm retrieved guidance paths are mentioned in the summary or logs
 4. confirm the graph still reaches `completed` on safe tasks when verification passes
+5. confirm failed verification commands are rerun on retry instead of only rechecking stale state
 
 ## Extension Guidance
 

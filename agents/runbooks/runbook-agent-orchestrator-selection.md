@@ -51,6 +51,7 @@ python scripts/run_agent_crew.py "plan CrewAI integration" --dry-run --json
 - Tasks that start as planning/design work and end in implementation.
 - Requests like: "plan, implement, test, and summarize".
 - Work that benefits from CrewAI shaping the work packet before LangGraph runs guarded execution.
+- The current runtime hands CrewAI's planned role sequence and task handoff order into LangGraph as planning notes so implementation planning can honor the persona pass instead of running independently.
 
 Typical prompt shape:
 
@@ -67,6 +68,8 @@ python scripts/run_agent_workflow.py "plan and implement a ranked player workflo
 - Implementation or verification signals: prefer LangGraph.
 - Mixed planning and implementation signals: prefer Hybrid.
 - Explicit `--engine` always wins.
+
+In hybrid mode, CrewAI still runs as a dry planning pass by default, but its generated plan now informs LangGraph's planning stage rather than being logged and ignored.
 
 ## Provider Policy
 

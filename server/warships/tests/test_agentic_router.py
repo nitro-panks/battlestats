@@ -41,7 +41,20 @@ class AgenticRouterTests(TestCase):
     @patch("warships.agentic.router.run_graph")
     def test_run_routed_workflow_hybrid_combines_both_engines(self, mock_run_graph, mock_run_crewai_workflow, mock_persist_phase0_memory_artifacts, mock_write_agent_run_log):
         mock_run_crewai_workflow.return_value = {
-            "workflow_id": "crew-1", "status": "planned", "summary": ["crew"]}
+            "workflow_id": "crew-1",
+            "status": "planned",
+            "summary": ["crew"],
+            "crew_plan": {
+                "roles": [
+                    {"label": "Project Coordinator"},
+                    {"label": "Architect"},
+                ],
+                "tasks": [
+                    {"assigned_to": "project_coordinator"},
+                    {"assigned_to": "architect"},
+                ],
+            },
+        }
         mock_run_graph.return_value = {
             "workflow_id": "graph-1", "status": "completed", "summary": ["graph"]}
         mock_persist_phase0_memory_artifacts.return_value = {
@@ -54,6 +67,12 @@ class AgenticRouterTests(TestCase):
         self.assertEqual(result["selected_engine"], "hybrid")
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["run_log_path"], "/tmp/hybrid.json")
+        mock_run_graph.assert_called_once()
+        graph_context = mock_run_graph.call_args.kwargs["context"]
+        self.assertIn("planning_notes", graph_context)
+        self.assertTrue(any(
+            "Project Coordinator" in note for note in graph_context["planning_notes"]
+        ))
         mock_persist_phase0_memory_artifacts.assert_not_called()
 
     @patch("warships.agentic.router.write_agent_run_log")

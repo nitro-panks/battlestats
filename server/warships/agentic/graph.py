@@ -37,6 +37,7 @@ class AgentState(TypedDict, total=False):
     doctrine_notes: list[str]
     retrieved_guidance: list[dict[str, Any]]
     guidance_notes: list[str]
+    planning_notes: list[str]
     workflow_kind: str
     memory_enabled: bool
     memory_environment: str
@@ -209,6 +210,11 @@ def _plan_task(state: AgentState) -> dict:
     doctrine_summary = summarize_team_doctrine(doctrine)
     retrieved_memories = list(state.get("retrieved_memories", []))
     memory_notes = list(state.get("memory_notes", []))
+    planning_notes = [
+        str(note).strip()
+        for note in state.get("planning_notes", [])
+        if str(note).strip()
+    ]
 
     if _is_clan_hydration_use_case(task):
         plan = [
@@ -240,6 +246,14 @@ def _plan_task(state: AgentState) -> dict:
     doctrine_notes = list(state.get("doctrine_notes", []))
     guidance = list(state.get("retrieved_guidance", []))
     guidance_notes = list(state.get("guidance_notes", []))
+    if planning_notes:
+        plan.extend(
+            f"Honor planner handoff: {note}"
+            for note in planning_notes
+        )
+        guidance_notes.append(
+            f"Applied planner handoff with {len(planning_notes)} note(s) before implementation planning."
+        )
     doctrine_notes.append(
         "Planning used battlestats doctrine for discouraged patterns, review priorities, decision rules, and pre-commit requirements."
     )
@@ -831,7 +845,7 @@ def build_graph(checkpointer: Any | None = None):
         "verify_changes",
         _route_after_verification,
     )
-    graph_builder.add_edge("retry_verification", "verify_changes")
+    graph_builder.add_edge("retry_verification", "run_verification_commands")
     graph_builder.add_edge("summarize", END)
 
     return graph_builder.compile(checkpointer=checkpointer or MemorySaver())
@@ -866,6 +880,7 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
             "doctrine_notes": [],
             "retrieved_guidance": [],
             "guidance_notes": [],
+            "planning_notes": list(context.get("planning_notes", [])),
             "workflow_kind": str(context.get("workflow_kind", "")),
             "memory_enabled": bool(context.get("memory_enabled", False)),
             "memory_environment": str(context.get("memory_environment", "")),

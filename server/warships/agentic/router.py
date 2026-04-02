@@ -94,6 +94,40 @@ def _route_trace_outputs(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_hybrid_langgraph_context(
+    context: dict[str, Any],
+    crew_result: dict[str, Any],
+) -> dict[str, Any]:
+    prepared = _prepare_langgraph_context(context)
+    crew_plan = crew_result.get("crew_plan") if isinstance(crew_result, dict) else None
+    if not isinstance(crew_plan, dict):
+        return prepared
+
+    roles = [
+        str(role.get("label", "")).strip()
+        for role in crew_plan.get("roles", [])
+        if isinstance(role, dict) and str(role.get("label", "")).strip()
+    ]
+    tasks = [
+        str(task.get("assigned_to", "")).strip()
+        for task in crew_plan.get("tasks", [])
+        if isinstance(task, dict) and str(task.get("assigned_to", "")).strip()
+    ]
+    planning_notes = list(prepared.get("planning_notes", []))
+    if roles:
+        planning_notes.append(
+            "Follow the persona sequence shaped by CrewAI: " + " -> ".join(roles)
+        )
+    if tasks:
+        planning_notes.append(
+            "Preserve the planned execution handoff order: " + " -> ".join(tasks)
+        )
+    if planning_notes:
+        prepared["planning_notes"] = planning_notes
+    prepared["hybrid_crew_plan"] = crew_plan
+    return prepared
+
+
 def run_routed_workflow(
     task: str,
     context: dict[str, Any] | None = None,
@@ -135,7 +169,12 @@ def run_routed_workflow(
             crew_result = run_crewai_workflow(
                 task, context=resolved_context, dry_run=True, llm=llm)
             graph_result = run_graph(
-                task, context=_prepare_langgraph_context(resolved_context))
+                task,
+                context=_build_hybrid_langgraph_context(
+                    resolved_context,
+                    crew_result,
+                ),
+            )
             result = {
                 "workflow_id": graph_result.get("workflow_id"),
                 "status": "completed" if graph_result.get("status") == "completed" else "needs_attention",
@@ -145,6 +184,7 @@ def run_routed_workflow(
                     "Hybrid workflow executed: CrewAI planning plus LangGraph guarded execution.",
                     f"CrewAI status: {crew_result.get('status')}",
                     f"LangGraph status: {graph_result.get('status')}",
+                    "CrewAI planning notes were handed off to LangGraph before implementation planning.",
                 ],
                 "crew_result": crew_result,
                 "langgraph_result": graph_result,

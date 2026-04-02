@@ -7,6 +7,7 @@ from typing import Any
 
 
 GUIDANCE_GLOBS = (
+    "agents/knowledge/*.md",
     "agents/runbooks/*.md",
     "agents/reviews/*.md",
 )
