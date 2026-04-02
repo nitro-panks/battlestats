@@ -807,6 +807,15 @@ def clan_tier_distribution(request, clan_id: str) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def clan_member_tiers(request, clan_id: str) -> Response:
+    from warships.data import compute_clan_member_avg_tiers
+    realm = _get_realm(request)
+    data = compute_clan_member_avg_tiers(clan_id=clan_id, realm=realm)
+    return Response(data)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def clan_battle_seasons(request, clan_id: str) -> Response:
     realm = _get_realm(request)
     clan = Clan.objects.filter(clan_id=clan_id, realm=realm).first()

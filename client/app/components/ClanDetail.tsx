@@ -3,9 +3,9 @@ import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { useClanMembers } from './useClanMembers';
+import { useClanMemberTiers } from './useClanMemberTiers';
 import { useRealm } from '../context/RealmContext';
 import { useTheme } from '../context/ThemeContext';
-import ClanTierDistributionSVG from './ClanTierDistributionSVG';
 import { incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
 
 interface ClanDetailProps {
@@ -26,6 +26,11 @@ const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 
     loading: () => <LoadingPanel label="Loading clan chart..." minHeight={440} />,
 });
 
+const Clan3DSVG = dynamic(() => resilientDynamicImport(() => import('./Clan3DSVG'), 'ClanDetail-Clan3DSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading 3D clan chart..." minHeight={480} />,
+});
+
 const ClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./ClanBattleSeasons'), 'ClanDetail-ClanBattleSeasons'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={240} />,
@@ -40,6 +45,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
     const { theme } = useTheme();
     const { realm } = useRealm();
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
+    const [chartMode, setChartMode] = useState<'2d' | '3d'>('2d');
 
     // Pre-signal chart loading so hooks that check chartFetchesInFlight
     // during their first effect see > 0 and defer to the clan chart.
@@ -67,6 +73,13 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
     }, []);
 
     const { members, loading: membersLoading, error: membersError } = useClanMembers(clan.clan_id);
+    const { data: memberTiers, loading: tiersLoading } = useClanMemberTiers(clan.clan_id);
+
+    // Determine if 3D is available: >= 50% of members have avg_tier
+    const tierCoverage = memberTiers.length > 0
+        ? memberTiers.filter((m) => m.avg_tier != null).length / memberTiers.length
+        : 0;
+    const is3DAvailable = tierCoverage >= 0.5 && !tiersLoading;
 
     useEffect(() => {
         if (shareState === 'idle') {
@@ -123,13 +136,54 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 </p>
             </div>
 
-            <div className="mt-4">
-                <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={440} membersData={members} theme={theme} />
+            {/* 2D/3D toggle — desktop only */}
+            <div className="hidden md:flex items-center gap-1 mb-3">
+                <div className="inline-flex rounded-md border border-[var(--border)] text-xs font-medium">
+                    <button
+                        type="button"
+                        onClick={() => setChartMode('2d')}
+                        className={`px-3 py-1 rounded-l-md transition-colors ${
+                            chartMode === '2d'
+                                ? 'bg-[var(--accent)] text-white'
+                                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                        }`}
+                    >
+                        2D
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => { if (is3DAvailable) setChartMode('3d'); }}
+                        disabled={!is3DAvailable}
+                        title={!is3DAvailable ? 'Tier data not yet available' : 'View 3D scatter with avg tier'}
+                        className={`px-3 py-1 rounded-r-md transition-colors ${
+                            chartMode === '3d'
+                                ? 'bg-[var(--accent)] text-white'
+                                : is3DAvailable
+                                    ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                                    : 'text-[var(--text-secondary)] opacity-40 cursor-not-allowed'
+                        }`}
+                    >
+                        3D
+                    </button>
+                </div>
+                {chartMode === '3d' && (
+                    <span className="text-xs text-[var(--text-secondary)] ml-2">
+                        Drag to rotate · Z-axis: avg ship tier
+                    </span>
+                )}
+                {!is3DAvailable && !tiersLoading && memberTiers.length > 0 && (
+                    <span className="text-xs text-[var(--text-secondary)] ml-2">
+                        Tier data available for {Math.round(tierCoverage * 100)}% of members
+                    </span>
+                )}
             </div>
 
-            <div className="mt-8 border-t border-[var(--border)] pt-4">
-                <h3 className="text-lg font-bold text-[var(--accent)] mb-4">Tier Distribution</h3>
-                <ClanTierDistributionSVG clanId={clan.clan_id} theme={theme} />
+            <div className="mt-4">
+                {chartMode === '2d' ? (
+                    <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={440} membersData={members} theme={theme} />
+                ) : (
+                    <Clan3DSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={480} membersData={members} memberTiers={memberTiers} theme={theme} />
+                )}
             </div>
 
             <DeferredSection

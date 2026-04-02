@@ -4247,6 +4247,51 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
     return data
 
 
+def compute_clan_member_avg_tiers(clan_id: str, realm: str = DEFAULT_REALM) -> list:
+    """
+    Returns per-member weighted average tier for a clan.
+    Each entry: {'player_id': int, 'name': str, 'avg_tier': float|null}
+    Caches for 24h (full data) or 10 min (partial, some members missing tiers_json).
+    """
+    cache_key = realm_cache_key(realm, f'clan:member_tiers:v1:{clan_id}')
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    players = Player.objects.filter(
+        clan__clan_id=clan_id, realm=realm, is_hidden=False
+    ).values_list('player_id', 'name', 'tiers_json')
+
+    results = []
+    missing_count = 0
+    for player_id, name, tiers_json in players:
+        if not tiers_json:
+            results.append({'player_id': player_id, 'name': name, 'avg_tier': None})
+            missing_count += 1
+            continue
+
+        total_battles = 0
+        weighted_sum = 0
+        for row in tiers_json:
+            tier = row.get('ship_tier')
+            battles = row.get('pvp_battles', 0)
+            if isinstance(tier, int) and 1 <= tier <= 11 and isinstance(battles, int) and battles > 0:
+                weighted_sum += tier * battles
+                total_battles += battles
+
+        avg_tier = round(weighted_sum / total_battles, 1) if total_battles > 0 else None
+        if avg_tier is None:
+            missing_count += 1
+        results.append({'player_id': player_id, 'name': name, 'avg_tier': avg_tier})
+
+    if missing_count > 0 and missing_count < len(results):
+        cache.set(cache_key, results, 600)
+    elif len(results) > 0:
+        cache.set(cache_key, results, 86400)
+
+    return results
+
+
 def warm_all_clan_tier_distributions(realm: str = DEFAULT_REALM, batch_size: int = 100) -> dict:
     """
     Recalculates and caches tier distribution data for every clan with members.
