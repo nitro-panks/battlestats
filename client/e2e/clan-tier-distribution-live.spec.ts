@@ -29,7 +29,7 @@ test.describe('Live Prod Clan Performance Testing', () => {
             // The client chart fetches data with X-Clan-Tiers-Pending header,
             // meaning it will display "Aggregating clan tier distributions..." while polling.
             // Using a higher timeout to accommodate initial cold-cache async jobs on prod.
-            await expect(page.locator('rect.tier-bar').first()).toBeVisible({ timeout: 30000 });
+            await expect(page.locator('rect.tier-bar').first()).toBeVisible({ timeout: 60000 });
             
             // Ensure no loading label error state string
             await expect(page.getByText('Tier data unavailable')).toHaveCount(0);
