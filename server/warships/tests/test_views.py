@@ -930,7 +930,8 @@ class LandingWarmupViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_update_player_task.assert_called_once_with(player_id=9002)
         mock_update_clan_task.assert_called_once_with(clan_id=901, realm='na')
-        mock_update_clan_members_task.assert_called_once_with(clan_id=901, realm='na')
+        mock_update_clan_members_task.assert_called_once_with(
+            clan_id=901, realm='na')
 
 
 class ClanMembersEndpointTests(TestCase):
@@ -1063,8 +1064,10 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(response.json()[0]["name"], "ExistingMember")
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
-        mock_update_clan_data_task.assert_called_once_with(clan_id="420", realm='na')
-        mock_update_clan_members_task.assert_called_once_with(clan_id="420", realm='na')
+        mock_update_clan_data_task.assert_called_once_with(
+            clan_id="420", realm='na')
+        mock_update_clan_members_task.assert_called_once_with(
+            clan_id="420", realm='na')
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
@@ -1093,8 +1096,10 @@ class ClanMembersEndpointTests(TestCase):
         response = self.client.get("/api/fetch/clan_members/421/?realm=eu")
 
         self.assertEqual(response.status_code, 200)
-        mock_update_clan_data_task.assert_called_once_with(clan_id="421", realm='eu')
-        mock_update_clan_members_task.assert_called_once_with(clan_id="421", realm='eu')
+        mock_update_clan_data_task.assert_called_once_with(
+            clan_id="421", realm='eu')
+        mock_update_clan_members_task.assert_called_once_with(
+            clan_id="421", realm='eu')
 
     def test_clan_members_exposes_ranked_hydration_metadata(self):
         self.mock_queue_clan_ranked_hydration.return_value = {

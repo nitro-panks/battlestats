@@ -273,11 +273,18 @@ class PlayerViewSet(viewsets.ModelViewSet):
             if clan_refresh_stale:
                 logging.info(
                     f'Updating clan data: {obj.name} : {clan.name} {obj.player_id}')
-                _delay_task_safely(update_clan_data_task, clan_id=clan.clan_id)
+                _delay_task_safely(
+                    update_clan_data_task,
+                    clan_id=clan.clan_id,
+                    realm=realm,
+                )
 
             if clan_refresh_stale or clan_members_incomplete:
-                _delay_task_safely(update_clan_members_task,
-                                   clan_id=clan.clan_id)
+                _delay_task_safely(
+                    update_clan_members_task,
+                    clan_id=clan.clan_id,
+                    realm=realm,
+                )
 
         if not obj.is_hidden and (obj.battles_json is None or player_battle_data_needs_refresh(obj)):
             from warships.tasks import update_battle_data_task
@@ -313,9 +320,17 @@ class ClanViewSet(viewsets.ModelViewSet):
         obj = super().get_object()
         _record_clan_lookup(obj, realm=realm)
         if clan_detail_needs_refresh(obj):
-            _delay_task_safely(update_clan_data_task, clan_id=obj.clan_id)
+            _delay_task_safely(
+                update_clan_data_task,
+                clan_id=obj.clan_id,
+                realm=realm,
+            )
         if clan_members_missing_or_incomplete(obj):
-            _delay_task_safely(update_clan_members_task, clan_id=obj.clan_id)
+            _delay_task_safely(
+                update_clan_members_task,
+                clan_id=obj.clan_id,
+                realm=realm,
+            )
         return obj
 
 
@@ -654,9 +669,17 @@ def clan_members(request, clan_id: str) -> Response:
     )
 
     if needs_clan_refresh:
-        _delay_task_safely(update_clan_data_task, clan_id=clan_id)
+        _delay_task_safely(
+            update_clan_data_task,
+            clan_id=clan_id,
+            realm=realm,
+        )
     if needs_member_refresh:
-        _delay_task_safely(update_clan_members_task, clan_id=clan_id)
+        _delay_task_safely(
+            update_clan_members_task,
+            clan_id=clan_id,
+            realm=realm,
+        )
 
     # B1: Check response cache before doing expensive member serialization
     CLAN_MEMBERS_CACHE_TTL = 300  # 5 minutes
@@ -791,7 +814,8 @@ def clan_tier_distribution(request, clan_id: str) -> Response:
 
     if cached is not None:
         response = Response(cached)
-        pending_key = realm_cache_key(realm, f'clan:tiers:v3:{clan_id}:pending')
+        pending_key = realm_cache_key(
+            realm, f'clan:tiers:v3:{clan_id}:pending')
         if cache.get(pending_key):
             response['X-Clan-Tiers-Pending'] = 'true'
         return response

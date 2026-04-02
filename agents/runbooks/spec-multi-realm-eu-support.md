@@ -104,6 +104,8 @@ Observed via `python manage.py check_realm_health` against the active database.
 
 This confirms the EU core crawl is live and materially populated, but the realm is still in a Stage 1-heavy state: core player and clan rows are present and fresh, while expensive enrichment lanes have barely started.
 
+EU best-clan readiness also depends on realm-aware clan aggregate backfill. The landing prerequisites `cached_total_battles`, `cached_clan_wr`, and `cached_active_member_count` are produced by the clan-member aggregation path rather than by raw clan metadata refresh alone, so full crawl and follow-on clan refresh paths must populate those fields in the active realm.
+
 ### Assessment
 
 | Resource                 | Verdict      | Notes                                                                                                                                                                                                                                                                                                             |
