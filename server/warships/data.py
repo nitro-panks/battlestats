@@ -4249,24 +4249,26 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
 
 def compute_clan_member_avg_tiers(clan_id: str, realm: str = DEFAULT_REALM) -> list:
     """
-    Returns per-member weighted average tier for a clan.
-    Each entry: {'player_id': int, 'name': str, 'avg_tier': float|null}
+    Returns per-member weighted average tier and KDR for a clan.
+    Each entry: {'player_id': int, 'name': str, 'avg_tier': float|null, 'kdr': float|null}
     Caches for 24h (full data) or 10 min (partial, some members missing tiers_json).
     """
-    cache_key = realm_cache_key(realm, f'clan:member_tiers:v1:{clan_id}')
+    cache_key = realm_cache_key(realm, f'clan:member_tiers:v2:{clan_id}')
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
     players = Player.objects.filter(
         clan__clan_id=clan_id, realm=realm, is_hidden=False
-    ).values_list('player_id', 'name', 'tiers_json')
+    ).values_list('player_id', 'name', 'tiers_json', 'pvp_frags', 'pvp_deaths')
 
     results = []
     missing_count = 0
-    for player_id, name, tiers_json in players:
+    for player_id, name, tiers_json, pvp_frags, pvp_deaths in players:
+        kdr = round(pvp_frags / pvp_deaths, 2) if pvp_deaths and pvp_deaths > 0 else None
+
         if not tiers_json:
-            results.append({'player_id': player_id, 'name': name, 'avg_tier': None})
+            results.append({'player_id': player_id, 'name': name, 'avg_tier': None, 'kdr': kdr})
             missing_count += 1
             continue
 
@@ -4282,7 +4284,7 @@ def compute_clan_member_avg_tiers(clan_id: str, realm: str = DEFAULT_REALM) -> l
         avg_tier = round(weighted_sum / total_battles, 1) if total_battles > 0 else None
         if avg_tier is None:
             missing_count += 1
-        results.append({'player_id': player_id, 'name': name, 'avg_tier': avg_tier})
+        results.append({'player_id': player_id, 'name': name, 'avg_tier': avg_tier, 'kdr': kdr})
 
     if missing_count > 0 and missing_count < len(results):
         cache.set(cache_key, results, 600)

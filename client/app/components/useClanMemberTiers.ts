@@ -6,6 +6,7 @@ export interface ClanMemberTier {
     player_id: number;
     name: string;
     avg_tier: number | null;
+    kdr: number | null;
 }
 
 export const useClanMemberTiers = (clanId: number | null | undefined) => {

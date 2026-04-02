@@ -75,11 +75,11 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
     const { members, loading: membersLoading, error: membersError } = useClanMembers(clan.clan_id);
     const { data: memberTiers, loading: tiersLoading } = useClanMemberTiers(clan.clan_id);
 
-    // Determine if 3D is available: >= 50% of members have avg_tier
-    const tierCoverage = memberTiers.length > 0
-        ? memberTiers.filter((m) => m.avg_tier != null).length / memberTiers.length
+    // Determine if 3D is available: >= 50% of members have KDR
+    const kdrCoverage = memberTiers.length > 0
+        ? memberTiers.filter((m) => m.kdr != null).length / memberTiers.length
         : 0;
-    const is3DAvailable = tierCoverage >= 0.5 && !tiersLoading;
+    const is3DAvailable = kdrCoverage >= 0.5 && !tiersLoading;
 
     useEffect(() => {
         if (shareState === 'idle') {
@@ -153,7 +153,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                         type="button"
                         onClick={() => { if (is3DAvailable) setChartMode('3d'); }}
                         disabled={!is3DAvailable}
-                        title={!is3DAvailable ? 'Tier data not yet available' : 'View 3D scatter with avg tier'}
+                        title={!is3DAvailable ? 'KDR data not yet available' : 'View 3D scatter with KDR'}
                         className={`px-3 py-1 rounded-r-md transition-colors ${chartMode === '3d'
                                 ? 'bg-[var(--accent)] text-white'
                                 : is3DAvailable
@@ -166,12 +166,12 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 </div>
                 {chartMode === '3d' && (
                     <span className="text-xs text-[var(--text-secondary)] ml-2">
-                        Drag to rotate · Z-axis: avg ship tier
+                        Drag to rotate · Z-axis: KDR
                     </span>
                 )}
                 {!is3DAvailable && !tiersLoading && memberTiers.length > 0 && (
                     <span className="text-xs text-[var(--text-secondary)] ml-2">
-                        Tier data available for {Math.round(tierCoverage * 100)}% of members
+                        KDR data available for {Math.round(kdrCoverage * 100)}% of members
                     </span>
                 )}
             </div>

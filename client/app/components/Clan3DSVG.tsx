@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { ClanMemberData } from './clanMembersShared';
-import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature } from './clanChartActivity';
+import { buildClanChartMemberActivitySignature } from './clanChartActivity';
 import { incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
@@ -28,8 +28,7 @@ interface Point3D {
     name: string;
     battles: number;
     wr: number;
-    avgTier: number;
-    // normalised to [-1, 1] for projection
+    kdr: number;
     nx: number;
     ny: number;
     nz: number;
@@ -85,44 +84,32 @@ interface AxisDef {
 const AXES: AxisDef[] = [
     { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: 1, ny: -1, nz: -1 }, label: 'Battles →' },
     { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: -1, ny: 1, nz: -1 }, label: 'Win Rate →' },
-    { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: -1, ny: -1, nz: 1 }, label: 'Avg Tier →' },
+    { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: -1, ny: -1, nz: 1 }, label: 'KDR →' },
 ];
 
-// ── Draw ─────────────────────────────────────────────────────────
+// ── Draw (updates existing SVG content) ─────────────────────────
 
-const draw3DPlot = (
-    container: HTMLDivElement,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const renderFrame = (
+    g: any,
+    tooltipG: any,
     points: Point3D[],
     rotY: number,
-    rotX: number,
-    svgWidth: number,
-    svgHeight: number,
+    rotXVal: number,
+    cx: number,
+    cy: number,
+    scale: number,
     theme: ChartTheme,
     onSelectMember?: (name: string) => void,
 ) => {
     const colors = chartColors[theme];
-    const el = d3.select(container);
-    el.selectAll('*').remove();
-
-    const margin = { top: 24, right: 20, bottom: 30, left: 20 };
-    const plotW = svgWidth - margin.left - margin.right;
-    const plotH = svgHeight - margin.top - margin.bottom;
-    const cx = margin.left + plotW / 2;
-    const cy = margin.top + plotH / 2;
-    const scale = Math.min(plotW, plotH) * 0.38;
-
-    const svg = el.append('svg')
-        .attr('width', svgWidth)
-        .attr('height', svgHeight)
-        .style('cursor', 'grab')
-        .style('user-select', 'none');
-
-    const g = svg.append('g');
+    g.selectAll('*').remove();
+    tooltipG.selectAll('*').remove();
 
     // Draw axes
     for (const axis of AXES) {
-        const fromR = rotateX(rotateY(axis.from, rotY), rotX);
-        const toR = rotateX(rotateY(axis.to, rotY), rotX);
+        const fromR = rotateX(rotateY(axis.from, rotY), rotXVal);
+        const toR = rotateX(rotateY(axis.to, rotY), rotXVal);
         const p1 = project(fromR, cx, cy, scale);
         const p2 = project(toR, cx, cy, scale);
 
@@ -150,39 +137,34 @@ const draw3DPlot = (
 
     // XY back-plane (z = -1)
     for (const s of gridSteps) {
-        // horizontal
-        const h1 = project(rotateX(rotateY({ nx: -1, ny: s, nz: -1 }, rotY), rotX), cx, cy, scale);
-        const h2 = project(rotateX(rotateY({ nx: 1, ny: s, nz: -1 }, rotY), rotX), cx, cy, scale);
+        const h1 = project(rotateX(rotateY({ nx: -1, ny: s, nz: -1 }, rotY), rotXVal), cx, cy, scale);
+        const h2 = project(rotateX(rotateY({ nx: 1, ny: s, nz: -1 }, rotY), rotXVal), cx, cy, scale);
         g.append('line').attr('x1', h1.x).attr('y1', h1.y).attr('x2', h2.x).attr('y2', h2.y)
             .attr('stroke', gridColor).attr('stroke-opacity', 0.08).attr('stroke-width', 0.5);
-        // vertical
-        const v1 = project(rotateX(rotateY({ nx: s, ny: -1, nz: -1 }, rotY), rotX), cx, cy, scale);
-        const v2 = project(rotateX(rotateY({ nx: s, ny: 1, nz: -1 }, rotY), rotX), cx, cy, scale);
+        const v1 = project(rotateX(rotateY({ nx: s, ny: -1, nz: -1 }, rotY), rotXVal), cx, cy, scale);
+        const v2 = project(rotateX(rotateY({ nx: s, ny: 1, nz: -1 }, rotY), rotXVal), cx, cy, scale);
         g.append('line').attr('x1', v1.x).attr('y1', v1.y).attr('x2', v2.x).attr('y2', v2.y)
             .attr('stroke', gridColor).attr('stroke-opacity', 0.08).attr('stroke-width', 0.5);
     }
 
     // XZ floor-plane (y = -1)
     for (const s of gridSteps) {
-        const h1 = project(rotateX(rotateY({ nx: -1, ny: -1, nz: s }, rotY), rotX), cx, cy, scale);
-        const h2 = project(rotateX(rotateY({ nx: 1, ny: -1, nz: s }, rotY), rotX), cx, cy, scale);
+        const h1 = project(rotateX(rotateY({ nx: -1, ny: -1, nz: s }, rotY), rotXVal), cx, cy, scale);
+        const h2 = project(rotateX(rotateY({ nx: 1, ny: -1, nz: s }, rotY), rotXVal), cx, cy, scale);
         g.append('line').attr('x1', h1.x).attr('y1', h1.y).attr('x2', h2.x).attr('y2', h2.y)
             .attr('stroke', gridColor).attr('stroke-opacity', 0.08).attr('stroke-width', 0.5);
-        const v1 = project(rotateX(rotateY({ nx: s, ny: -1, nz: -1 }, rotY), rotX), cx, cy, scale);
-        const v2 = project(rotateX(rotateY({ nx: s, ny: -1, nz: 1 }, rotY), rotX), cx, cy, scale);
+        const v1 = project(rotateX(rotateY({ nx: s, ny: -1, nz: -1 }, rotY), rotXVal), cx, cy, scale);
+        const v2 = project(rotateX(rotateY({ nx: s, ny: -1, nz: 1 }, rotY), rotXVal), cx, cy, scale);
         g.append('line').attr('x1', v1.x).attr('y1', v1.y).attr('x2', v2.x).attr('y2', v2.y)
             .attr('stroke', gridColor).attr('stroke-opacity', 0.08).attr('stroke-width', 0.5);
     }
 
     // Project & depth-sort points
     const projected = points.map((p) => {
-        const rotated = rotateX(rotateY(p, rotY), rotX);
+        const rotated = rotateX(rotateY(p, rotY), rotXVal);
         const proj = project(rotated, cx, cy, scale);
         return { ...p, px: proj.x, py: proj.y, pz: proj.z, ps: proj.s };
-    }).sort((a, b) => a.pz - b.pz); // back-to-front
-
-    // Tooltip group (rendered last for z-order)
-    const tooltipG = svg.append('g').style('pointer-events', 'none');
+    }).sort((a, b) => a.pz - b.pz);
 
     // Draw dots
     for (const pt of projected) {
@@ -213,7 +195,7 @@ const draw3DPlot = (
             const lines = [
                 pt.name,
                 `${pt.battles.toLocaleString()} battles  ·  ${pt.wr.toFixed(1)}% WR`,
-                `Avg tier ${pt.avgTier.toFixed(1)}`,
+                `KDR ${pt.kdr.toFixed(2)}`,
             ];
 
             const texts = lines.map((line, i) =>
@@ -267,12 +249,19 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
 }) => {
     const { realm } = useRealm();
     const containerRef = useRef<HTMLDivElement>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const svgRef = useRef<any>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gRef = useRef<any>(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tooltipGRef = useRef<any>(null);
     const [plotData, setPlotData] = useState<PlotData[] | null>(null);
     const [plotError, setPlotError] = useState(false);
-    const rotYRef = useRef(0.6); // initial Y rotation (radians)
-    const rotXRef = useRef(0.3); // initial X rotation
+    const rotYRef = useRef(0.6);
+    const rotXRef = useRef(0.3);
     const autoRotateRef = useRef(true);
     const animFrameRef = useRef<number | null>(null);
+    const isDraggingRef = useRef(false);
 
     const memberActivitySig = buildClanChartMemberActivitySignature(membersData ?? []);
 
@@ -335,43 +324,95 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
         };
     }, [clanId, realm]);
 
-    // Build 3D points and render
+    // Create persistent SVG once, attach drag handler
     useEffect(() => {
-        if (!containerRef.current || !plotData) return;
+        if (!containerRef.current) return;
+        const container = containerRef.current;
 
-        const tierMap = new Map<string, number>();
+        // Clear any previous SVG
+        d3.select(container).selectAll('*').remove();
+
+        const svg = d3.select(container).append('svg')
+            .attr('width', svgWidth)
+            .attr('height', svgHeight)
+            .style('cursor', 'grab')
+            .style('user-select', 'none');
+
+        svgRef.current = svg.node();
+        gRef.current = svg.append('g');
+        tooltipGRef.current = svg.append('g').style('pointer-events', 'none');
+
+        // Drag handler — persists across renders
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const drag = (d3.drag as any)()
+            .on('start', () => {
+                isDraggingRef.current = true;
+                autoRotateRef.current = false;
+                svg.style('cursor', 'grabbing');
+            })
+            .on('drag', (event: { dx: number; dy: number }) => {
+                rotYRef.current += event.dx * 0.008;
+                rotXRef.current -= event.dy * 0.008;
+                rotXRef.current = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, rotXRef.current));
+            })
+            .on('end', () => {
+                isDraggingRef.current = false;
+                svg.style('cursor', 'grab');
+            });
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        svg.call(drag as any);
+
+        return () => {
+            d3.select(container).selectAll('*').remove();
+            svgRef.current = null;
+            gRef.current = null;
+            tooltipGRef.current = null;
+        };
+    }, [svgWidth, svgHeight]);
+
+    // Build 3D points and run animation loop
+    useEffect(() => {
+        if (!gRef.current || !tooltipGRef.current || !plotData) return;
+
+        const kdrMap = new Map<string, number>();
         for (const mt of memberTiers) {
-            if (mt.avg_tier != null) {
-                tierMap.set(mt.name, mt.avg_tier);
+            if (mt.kdr != null) {
+                kdrMap.set(mt.name, mt.kdr);
             }
         }
 
-        // Compute median tier for fallback
-        const validTiers = memberTiers.filter((m) => m.avg_tier != null).map((m) => m.avg_tier!);
-        const medianTier = validTiers.length > 0
-            ? validTiers.sort((a, b) => a - b)[Math.floor(validTiers.length / 2)]
-            : 6;
+        // Compute median KDR for fallback
+        const validKdrs = memberTiers.filter((m) => m.kdr != null).map((m) => m.kdr!);
+        const medianKdr = validKdrs.length > 0
+            ? validKdrs.sort((a, b) => a - b)[Math.floor(validKdrs.length / 2)]
+            : 1.0;
 
         const maxBattles = Math.max(...plotData.map((d) => d.pvp_battles), 1);
         const wrValues = plotData.map((d) => d.pvp_ratio);
         const minWr = Math.min(...wrValues) - 2;
         const maxWr = Math.max(...wrValues) + 2;
 
+        // KDR range for normalisation — clamp outliers at 3.0
+        const kdrValues = plotData.map((d) => Math.min(kdrMap.get(d.player_name) ?? medianKdr, 3.0));
+        const minKdr = Math.min(...kdrValues);
+        const maxKdr = Math.max(...kdrValues);
+        const kdrRange = maxKdr - minKdr || 1;
+
         const points: Point3D[] = plotData.map((d) => {
-            const avgTier = tierMap.get(d.player_name) ?? medianTier;
+            const rawKdr = kdrMap.get(d.player_name) ?? medianKdr;
+            const kdr = Math.min(rawKdr, 3.0);
             return {
                 name: d.player_name,
                 battles: d.pvp_battles,
                 wr: d.pvp_ratio,
-                avgTier,
+                kdr: rawKdr,
                 nx: (d.pvp_battles / maxBattles) * 2 - 1,
                 ny: ((d.pvp_ratio - minWr) / (maxWr - minWr)) * 2 - 1,
-                nz: ((avgTier - 1) / 10) * 2 - 1,
+                nz: ((kdr - minKdr) / kdrRange) * 2 - 1,
                 color: wrColor(d.pvp_ratio, theme),
             };
         });
-
-        const container = containerRef.current;
 
         // Cancel any existing animation
         if (animFrameRef.current != null) {
@@ -379,41 +420,26 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
             animFrameRef.current = null;
         }
 
-        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const margin = { top: 24, right: 20, bottom: 30, left: 20 };
+        const plotW = svgWidth - margin.left - margin.right;
+        const plotH = svgHeight - margin.top - margin.bottom;
+        const cx = margin.left + plotW / 2;
+        const cy = margin.top + plotH / 2;
+        const scale = Math.min(plotW, plotH) * 0.38;
 
-        const render = () => {
-            draw3DPlot(container, points, rotYRef.current, rotXRef.current, svgWidth, svgHeight, theme, onSelectMember);
-        };
+        const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const g = gRef.current;
+        const tooltipG = tooltipGRef.current;
 
         const animate = () => {
             if (autoRotateRef.current && !prefersReducedMotion) {
                 rotYRef.current += 0.003;
             }
-            render();
+            renderFrame(g, tooltipG, points, rotYRef.current, rotXRef.current, cx, cy, scale, theme, onSelectMember);
             animFrameRef.current = requestAnimationFrame(animate);
         };
 
         animate();
-
-        // Drag to rotate
-        const svgEl = d3.select(container).select('svg');
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const drag = (d3.drag as any)()
-            .on('start', () => {
-                autoRotateRef.current = false;
-                svgEl.style('cursor', 'grabbing');
-            })
-            .on('drag', (event: { dx: number; dy: number }) => {
-                rotYRef.current += event.dx * 0.008;
-                rotXRef.current -= event.dy * 0.008;
-                // Clamp X rotation to avoid flipping
-                rotXRef.current = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, rotXRef.current));
-            })
-            .on('end', () => {
-                svgEl.style('cursor', 'grab');
-            });
-
-        svgEl.call(drag as any);
 
         return () => {
             if (animFrameRef.current != null) {
