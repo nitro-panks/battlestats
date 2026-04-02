@@ -39,7 +39,8 @@ LAZY_REFRESH_DEDUP_TIMEOUT = 60  # seconds
 
 
 def _get_realm(request) -> str:
-    realm = (getattr(request, 'query_params', None) or request.GET).get('realm', DEFAULT_REALM)
+    realm = (getattr(request, 'query_params', None)
+             or request.GET).get('realm', DEFAULT_REALM)
     realm = (realm or DEFAULT_REALM).lower().strip()
     return realm if realm in VALID_REALMS else DEFAULT_REALM
 
@@ -161,7 +162,8 @@ class PlayerViewSet(viewsets.ModelViewSet):
         from warships.data import push_recently_viewed_player
 
         if update_last_lookup:
-            Player.objects.filter(player_id=player_id, realm=realm).update(last_lookup=timezone.now())
+            Player.objects.filter(player_id=player_id, realm=realm).update(
+                last_lookup=timezone.now())
         invalidate_landing_recent_player_cache(realm=realm)
         push_recently_viewed_player(player_id, realm=realm)
 
@@ -181,7 +183,8 @@ class PlayerViewSet(viewsets.ModelViewSet):
             if cache.get(missing_lookup_cache_key):
                 raise Http404("Player matching query does not exist.")
 
-            player_id = _fetch_player_id_by_name(normalized_lookup_value, realm=realm)
+            player_id = _fetch_player_id_by_name(
+                normalized_lookup_value, realm=realm)
             if not player_id:
                 cache.set(missing_lookup_cache_key, True,
                           MISSING_PLAYER_LOOKUP_CACHE_TTL)
@@ -236,7 +239,8 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 update_fields.append("verdict")
 
         obj.save(update_fields=update_fields)
-        self._record_player_view(obj.player_id, update_last_lookup=False, realm=realm)
+        self._record_player_view(
+            obj.player_id, update_last_lookup=False, realm=realm)
 
         if not obj.is_hidden and _explorer_summary_needs_refresh(obj):
             refresh_player_explorer_summary(obj)
@@ -388,7 +392,8 @@ def randoms_data(request, player_id: str) -> Response:
         # Prefer the full source cache, but fall back to derived randoms rows so
         # the player page does not blank out while source data is repopulating.
         cached_randoms_rows = fetch_randoms_data(player_id, realm=realm)
-        player = Player.objects.filter(player_id=player_id, realm=realm).first()
+        player = Player.objects.filter(
+            player_id=player_id, realm=realm).first()
         if not player:
             data = []
         elif player.battles_json:
@@ -468,11 +473,13 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
 
     if metric == 'ranked_wr_battles' and player_id is not None:
         try:
-            data = fetch_player_ranked_wr_battles_correlation(player_id, realm=realm)
+            data = fetch_player_ranked_wr_battles_correlation(
+                player_id, realm=realm)
         except Player.DoesNotExist:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
         except Exception:
-            logger.exception("ranked_wr_battles correlation failed for player_id=%s", player_id)
+            logger.exception(
+                "ranked_wr_battles correlation failed for player_id=%s", player_id)
             data = {
                 'metric': 'ranked_wr_battles',
                 'label': 'Ranked Games vs Win Rate',
@@ -492,7 +499,8 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
             }
 
         is_pending = data.pop('_pending', False)
-        response = _validated_single_response(data, RankedPlayerCorrelationDistributionSerializer)
+        response = _validated_single_response(
+            data, RankedPlayerCorrelationDistributionSerializer)
         if is_pending:
             response['X-Ranked-WR-Battles-Pending'] = 'true'
         return response
@@ -501,7 +509,8 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
         try:
             player = Player.objects.only(
                 'player_id', 'battles_json').get(player_id=player_id, realm=realm)
-            data = fetch_player_tier_type_correlation(player_id, player=player, realm=realm)
+            data = fetch_player_tier_type_correlation(
+                player_id, player=player, realm=realm)
         except Player.DoesNotExist:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -664,7 +673,8 @@ def clan_members(request, clan_id: str) -> Response:
     members = list(members)
     hydration_state = queue_clan_ranked_hydration(members, realm=realm)
     pending_player_ids = hydration_state['pending_player_ids']
-    efficiency_hydration_state = queue_clan_efficiency_hydration(members, realm=realm)
+    efficiency_hydration_state = queue_clan_efficiency_hydration(
+        members, realm=realm)
     pending_efficiency_player_ids = efficiency_hydration_state['pending_player_ids']
 
     leader_name = (clan.leader_name or '').strip().lower()
@@ -749,7 +759,8 @@ def clan_data(request, clan_filter: str) -> Response:
     if clan is not None:
         _record_clan_lookup(clan, realm=realm)
 
-    data = fetch_clan_plot_data(clan_id=clan_id, filter_type=filter_type, realm=realm)
+    data = fetch_clan_plot_data(
+        clan_id=clan_id, filter_type=filter_type, realm=realm)
     response = _validated_list_response(data, ClanDataSerializer)
 
     if clan is not None and not data:
@@ -775,15 +786,16 @@ def clan_tier_distribution(request, clan_id: str) -> Response:
     if clan is not None:
         _record_clan_lookup(clan, realm=realm)
 
-    cache_key = realm_cache_key(realm, f'clan:tiers:v2:{clan_id}')
+    cache_key = realm_cache_key(realm, f'clan:tiers:v3:{clan_id}')
     cached = cache.get(cache_key)
 
     if cached is not None:
         return Response(cached)
 
     from warships.tasks import update_clan_tier_distribution_task
-    _delay_task_safely(update_clan_tier_distribution_task, clan_id=clan_id, realm=realm)
-    
+    _delay_task_safely(update_clan_tier_distribution_task,
+                       clan_id=clan_id, realm=realm)
+
     response = Response([])
     response['X-Clan-Tiers-Pending'] = 'true'
     return response
@@ -851,9 +863,11 @@ def landing_clans(request) -> Response:
     realm = _get_realm(request)
     limit = normalize_landing_clan_limit(request.query_params.get('limit'))
     if mode == 'random':
-        payload, cache_metadata = get_landing_clans_payload_with_cache_metadata(realm=realm)
+        payload, cache_metadata = get_landing_clans_payload_with_cache_metadata(
+            realm=realm)
     else:
-        payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata(realm=realm)
+        payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata(
+            realm=realm)
 
     payload = payload[:limit]
 

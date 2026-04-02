@@ -4196,23 +4196,33 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
     for all active players in the specified clan.
     Returns: [{'ship_tier': 1, 'pvp_battles': 240}, ... {'ship_tier': 11, 'pvp_battles': 105}]
     """
-    cache_key = realm_cache_key(realm, f'clan:tiers:v2:{clan_id}')
-    
-    # Pre-init summary
-    tier_aggregates = {tier: 0 for tier in range(1, 12)}
-    
-    player_tiers_list = Player.objects.filter(
-        clan__clan_id=clan_id, realm=realm, is_hidden=False
-    ).values_list('tiers_json', flat=True)
+    cache_key = realm_cache_key(realm, f'clan:tiers:v3:{clan_id}')
 
-    for player_tiers in player_tiers_list:
-        if not player_tiers:
+    requires_hydration = False
+    tier_aggregates = {tier: 0 for tier in range(1, 12)}
+
+    players = Player.objects.filter(
+        clan__clan_id=clan_id, realm=realm, is_hidden=False
+    ).values_list('account_id', 'tiers_json')
+
+    from warships.utils import _delay_task_safely
+    from warships.tasks import update_tiers_data_task
+
+    for account_id, tiers_json in players:
+        if not tiers_json:
+            _delay_task_safely(update_tiers_data_task, player_id=account_id, realm=realm)
+            requires_hydration = True
             continue
-        for row in player_tiers:
+
+        for row in tiers_json:
             tier = row.get('ship_tier')
             battles = row.get('pvp_battles', 0)
             if isinstance(tier, int) and 1 <= tier <= 11 and isinstance(battles, int):
                 tier_aggregates[tier] += battles
+
+    # If any player needs hydration, we do not resolve the cache to force the frontend to poll
+    if requires_hydration:
+        return []
 
     data = []
     # Match the existing frontend TierSVG which iterates sorted natively, or just 11->1 or 1->11
@@ -4221,7 +4231,7 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
             'ship_tier': tier,
             'pvp_battles': tier_aggregates[tier]
         })
-        
+
     # cache for 24h
     cache.set(cache_key, data, 86400)
     return data
