@@ -450,22 +450,21 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
     }, [plotData, memberTiers, memberActivitySig, svgWidth, svgHeight, theme, onSelectMember]);
 
     return (
-        <div>
+        <div style={{ minHeight: svgHeight }}>
+            {plotError && (
+                <div className="text-sm text-[var(--text-secondary)]">
+                    Unable to load clan chart data.
+                </div>
+            )}
+            {!plotData && !plotError && (
+                <div className="text-sm text-[var(--text-secondary)]">
+                    Loading 3D clan chart...
+                </div>
+            )}
             <div
                 ref={containerRef}
-                style={{ width: svgWidth, maxWidth: '100%', minHeight: svgHeight, touchAction: 'none' }}
-            >
-                {plotError && (
-                    <div className="text-sm text-[var(--text-secondary)]">
-                        Unable to load clan chart data.
-                    </div>
-                )}
-                {!plotData && !plotError && (
-                    <div className="text-sm text-[var(--text-secondary)]">
-                        Loading 3D clan chart...
-                    </div>
-                )}
-            </div>
+                style={{ width: svgWidth, maxWidth: '100%', touchAction: 'none' }}
+            />
             {plotData && (
                 <button
                     type="button"
