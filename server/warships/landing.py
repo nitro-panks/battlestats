@@ -1365,8 +1365,14 @@ def _build_sigma_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list
     rows = []
     for player in players:
         explorer_summary = getattr(player, 'explorer_summary', None)
-        published_efficiency = _get_published_efficiency_rank_payload(player)
-        if published_efficiency.get('efficiency_rank_percentile') is None:
+        if explorer_summary is None:
+            continue
+
+        # Use stored percentile directly — the landing surface tolerates
+        # minor input-data drift (unlike individual player pages, which
+        # use the stricter _get_published_efficiency_rank_payload check).
+        percentile = explorer_summary.efficiency_rank_percentile
+        if percentile is None:
             continue
 
         rows.append({
@@ -1386,7 +1392,11 @@ def _build_sigma_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list
                         'clan_battle_seasons_participated', None),
             ),
             'clan_battle_win_rate': getattr(explorer_summary, 'clan_battle_overall_win_rate', None),
-            **published_efficiency,
+            'efficiency_rank_percentile': percentile,
+            'efficiency_rank_tier': explorer_summary.efficiency_rank_tier,
+            'has_efficiency_rank_icon': bool(explorer_summary.has_efficiency_rank_icon),
+            'efficiency_rank_population_size': explorer_summary.efficiency_rank_population_size,
+            'efficiency_rank_updated_at': explorer_summary.efficiency_rank_updated_at,
         })
 
     return rows
