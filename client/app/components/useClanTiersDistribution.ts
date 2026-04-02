@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getChartFetchesInFlight } from '../lib/sharedJsonFetch';
+import { getChartFetchesInFlight, incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -42,8 +42,24 @@ export const useClanTiersDistribution = (clanId: number | null | undefined, enab
         }
 
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let gateIntervalId: ReturnType<typeof setInterval> | null = null;
         let activeController: AbortController | null = null;
+        let chartFetchSignalled = false;
         attemptsRef.current = 0;
+
+        const acquireChartSignal = () => {
+            if (!chartFetchSignalled) {
+                chartFetchSignalled = true;
+                incrementChartFetches();
+            }
+        };
+
+        const releaseChartSignal = () => {
+            if (chartFetchSignalled) {
+                chartFetchSignalled = false;
+                decrementChartFetches();
+            }
+        };
 
         const fetchData = async (showLoading: boolean, attempt: number) => {
             if (showLoading) {
@@ -80,6 +96,7 @@ export const useClanTiersDistribution = (clanId: number | null | undefined, enab
                     }, priorityDelay);
                 } else if (!controller.signal.aborted) {
                     setLoading(false);
+                    releaseChartSignal();
                 }
             } catch (fetchError) {
                 if (isAbortError(fetchError)) {
@@ -89,17 +106,37 @@ export const useClanTiersDistribution = (clanId: number | null | undefined, enab
                 if (!controller.signal.aborted) {
                     setError('Tier data unavailable');
                     setLoading(false);
+                    releaseChartSignal();
                 }
             }
         };
 
-        void fetchData(true, 0);
+        const startFetch = () => {
+            acquireChartSignal();
+            void fetchData(true, 0);
+        };
+
+        if (getChartFetchesInFlight() > 0) {
+            gateIntervalId = setInterval(() => {
+                if (getChartFetchesInFlight() === 0) {
+                    clearInterval(gateIntervalId!);
+                    gateIntervalId = null;
+                    startFetch();
+                }
+            }, 500);
+        } else {
+            startFetch();
+        }
 
         return () => {
             if (timeoutId) {
                 clearTimeout(timeoutId);
             }
+            if (gateIntervalId) {
+                clearInterval(gateIntervalId);
+            }
             activeController?.abort();
+            releaseChartSignal();
         };
     }, [clanId, enabled, realm]);
 

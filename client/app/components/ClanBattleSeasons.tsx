@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
+import { getChartFetchesInFlight } from '../lib/sharedJsonFetch';
 
 interface ClanBattleSeason {
     season_id: number;
@@ -55,6 +56,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
     useEffect(() => {
         let cancelled = false;
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let gateIntervalId: ReturnType<typeof setInterval> | null = null;
         let attempts = 0;
 
         const fetchSeasons = async () => {
@@ -100,12 +102,25 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
             }
         };
 
-        void fetchSeasons();
+        if (getChartFetchesInFlight() > 0) {
+            gateIntervalId = setInterval(() => {
+                if (getChartFetchesInFlight() === 0) {
+                    clearInterval(gateIntervalId!);
+                    gateIntervalId = null;
+                    void fetchSeasons();
+                }
+            }, 500);
+        } else {
+            void fetchSeasons();
+        }
 
         return () => {
             cancelled = true;
             if (timeoutId) {
                 clearTimeout(timeoutId);
+            }
+            if (gateIntervalId) {
+                clearInterval(gateIntervalId);
             }
         };
     }, [clanId, realm]);

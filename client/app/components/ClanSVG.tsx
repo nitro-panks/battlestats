@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
 import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
-import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
@@ -551,6 +551,16 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
             return null;
         };
 
+        let chartFetchSignalled = true;
+        incrementChartFetches();
+
+        const releaseChartSignal = () => {
+            if (chartFetchSignalled) {
+                chartFetchSignalled = false;
+                decrementChartFetches();
+            }
+        };
+
         const loadPlotData = async () => {
             timeoutId = null;
 
@@ -562,6 +572,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
             if (result === null) {
                 setPlotError(true);
                 setIsPlotPendingRefresh(false);
+                releaseChartSignal();
                 return;
             }
 
@@ -574,6 +585,8 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                 timeoutId = setTimeout(() => {
                     void loadPlotData();
                 }, CLAN_PLOT_PENDING_RETRY_DELAY_MS);
+            } else {
+                releaseChartSignal();
             }
         };
 
@@ -584,6 +597,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
             if (timeoutId) {
                 clearTimeout(timeoutId);
             }
+            releaseChartSignal();
         };
     }, [clanId, realm]);
 

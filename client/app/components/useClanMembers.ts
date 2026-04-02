@@ -88,6 +88,7 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
         }
 
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let gateIntervalId: ReturnType<typeof setInterval> | null = null;
         let activeController: AbortController | null = null;
         attemptsRef.current = 0;
 
@@ -146,11 +147,24 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
             }
         };
 
-        void fetchMembers(true, 0);
+        if (getChartFetchesInFlight() > 0) {
+            gateIntervalId = setInterval(() => {
+                if (getChartFetchesInFlight() === 0) {
+                    clearInterval(gateIntervalId!);
+                    gateIntervalId = null;
+                    void fetchMembers(true, 0);
+                }
+            }, 500);
+        } else {
+            void fetchMembers(true, 0);
+        }
 
         return () => {
             if (timeoutId) {
                 clearTimeout(timeoutId);
+            }
+            if (gateIntervalId) {
+                clearInterval(gateIntervalId);
             }
             activeController?.abort();
         };
