@@ -94,13 +94,13 @@ Important drift note:
 
 Largest observed RSS consumers:
 
-| Process | Approx RSS | Notes |
-| --- | ---: | --- |
-| `/dev/shm/f43np -c /dev/shm/LoT2dH -B` | `1,810,032 KiB` | Unidentified process; by far the largest resident set |
-| Celery background child | `182,500 KiB` | background queue worker child |
-| `systemd-journald` | `161,532 KiB` | larger than expected, but not dominant |
+| Process                                              |                 Approx RSS | Notes                                                     |
+| ---------------------------------------------------- | -------------------------: | --------------------------------------------------------- |
+| `/dev/shm/f43np -c /dev/shm/LoT2dH -B`               |            `1,810,032 KiB` | Unidentified process; by far the largest resident set     |
+| Celery background child                              |              `182,500 KiB` | background queue worker child                             |
+| `systemd-journald`                                   |              `161,532 KiB` | larger than expected, but not dominant                    |
 | Celery background/default/hydration parents+children | `141,620-147,992 KiB` each | app worker footprint is material but not the main outlier |
-| Gunicorn master/workers | `35,624-144,168 KiB` | smaller than Celery aggregate footprint |
+| Gunicorn master/workers                              |       `35,624-144,168 KiB` | smaller than Celery aggregate footprint                   |
 
 Primary implication:
 

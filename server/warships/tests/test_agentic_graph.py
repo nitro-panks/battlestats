@@ -162,6 +162,7 @@ class AgenticGraphTests(TestCase):
         )
 
         self.assertGreaterEqual(len(result["plan"]), 4)
+        self.assertEqual(result["plan_template"], "clan_hydration")
         self.assertIn("PlayerSearch.tsx", " ".join(result["target_files"]))
 
     def test_run_graph_executes_verification_commands_success(self):
@@ -196,7 +197,8 @@ class AgenticGraphTests(TestCase):
     @patch("warships.agentic.graph.subprocess.run")
     def test_run_graph_retries_verification_by_rerunning_commands(self, mock_run):
         mock_run.side_effect = [
-            subprocess.CompletedProcess(["python"], 2, stdout="", stderr="first failure"),
+            subprocess.CompletedProcess(
+                ["python"], 2, stdout="", stderr="first failure"),
             subprocess.CompletedProcess(["python"], 0, stdout="ok", stderr=""),
         ]
 
@@ -312,10 +314,11 @@ class AgenticGraphTests(TestCase):
             for note in result["doctrine_notes"]
         ))
 
-    def test_run_graph_design_review_revises_risky_plan_before_implementation(self):
+    def test_run_graph_design_review_revises_risky_api_plan_before_implementation(self):
         result = run_graph(
-            "Add cache hydration guardrails for ranked API",
+            "Migrate queue workers without breaking consumers",
             context={
+                "workflow_kind": "other",
                 "verification": {
                     "tests_passed": True,
                     "lint_passed": True,
@@ -352,6 +355,10 @@ class AgenticGraphTests(TestCase):
         self.assertTrue(any(
             "retrieved battlestats guidance" in note.lower()
             for note in result["guidance_notes"]
+        ))
+        self.assertTrue(any(
+            item.get("ranking_reasons")
+            for item in result["retrieved_guidance"]
         ))
 
     def test_run_graph_uses_reviewed_memory_when_phase0_enabled(self):
@@ -427,8 +434,9 @@ class AgenticGraphTests(TestCase):
 
         self.assertTrue(result["api_review_required"])
         self.assertTrue(result["api_review_passed"])
+        self.assertTrue(result["api_review_reasons"])
         self.assertIn(
-            "Add API contract, serializer, and backward-compatibility checks for touched endpoints.",
+            "Implement the smallest safe API change and preserve backward compatibility where required",
             result["plan"],
         )
         self.assertIn(
@@ -453,10 +461,31 @@ class AgenticGraphTests(TestCase):
         self.assertFalse(result["api_review_passed"])
         self.assertTrue(result["api_review_notes"])
 
+    def test_run_graph_requires_api_review_from_file_hints_without_task_keywords(self):
+        result = run_graph(
+            "Tighten compatibility checks for player summary consumers",
+            context={
+                "touched_files": ["server/warships/views.py"],
+                "verification_commands": ["python -m pytest warships/tests/test_views.py -q"],
+                "verification": {
+                    "tests_passed": True,
+                    "lint_passed": True,
+                },
+            },
+        )
+
+        self.assertTrue(result["api_review_required"])
+        self.assertTrue(any(
+            "structured task or file hints" in reason.lower(
+            ) or "api-adjacent modules" in reason.lower()
+            for reason in result["api_review_reasons"]
+        ))
+
     def test_run_graph_stops_when_design_review_cannot_retry(self):
         result = run_graph(
-            "Add cache hydration guardrails for ranked API",
+            "Migrate queue workers without breaking consumers",
             context={
+                "workflow_kind": "other",
                 "verification": {
                     "tests_passed": True,
                     "lint_passed": True,

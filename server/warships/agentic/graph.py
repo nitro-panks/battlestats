@@ -12,7 +12,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .checkpoints import get_graph_checkpointer
 from .doctrine import merge_team_doctrine, summarize_team_doctrine
-from .memory import PHASE0_MEMORY_LIMIT, build_phase0_memory_candidates, prepare_phase0_memory_context
+from .memory import PHASE0_MEMORY_LIMIT, build_phase0_memory_candidates, infer_workflow_kind, prepare_phase0_memory_context
 from .personas import read_persona_context
 from .retrieval import retrieve_doctrine_guidance
 from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
@@ -38,6 +38,7 @@ class AgentState(TypedDict, total=False):
     retrieved_guidance: list[dict[str, Any]]
     guidance_notes: list[str]
     planning_notes: list[str]
+    plan_template: str
     workflow_kind: str
     memory_enabled: bool
     memory_environment: str
@@ -50,10 +51,13 @@ class AgentState(TypedDict, total=False):
     design_review_retry_count: int
     max_design_review_retries: int
     api_review_notes: list[str]
+    api_review_reasons: list[str]
     api_review_passed: bool
     api_review_required: bool
+    api_review_override: bool | None
     api_review_retry_count: int
     max_api_review_retries: int
+    crew_artifacts: list[dict[str, Any]]
     verification_commands: list[str]
     verification_cwd: str
     command_results: list[dict[str, Any]]
@@ -144,9 +148,158 @@ def _safe_cwd(cwd_hint: str | None) -> Path:
     return requested
 
 
-def _is_clan_hydration_use_case(task: str) -> bool:
-    normalized = task.lower()
-    return "clan" in normalized and "hydrate" in normalized
+PLAN_TEMPLATE_TARGETS: dict[str, list[str]] = {
+    "clan_hydration": [
+        "client/app/components/PlayerSearch.tsx",
+        "server/warships/views.py",
+        "server/warships/tasks.py",
+        "server/warships/tests/test_views.py",
+    ],
+    "api_contract_change": [
+        "server/warships/views.py",
+        "server/warships/tests/test_views.py",
+        "agents/runbooks/runbook-api-surface.md",
+    ],
+    "agentic_workflow": [
+        "server/warships/agentic/graph.py",
+        "server/warships/tests/test_agentic_graph.py",
+    ],
+    "performance_regression": [
+        "server/warships/data.py",
+        "server/warships/tests/test_data.py",
+    ],
+}
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
+
+
+def _state_workflow_kind(state: AgentState) -> str:
+    workflow_kind = str(state.get("workflow_kind") or "").strip()
+    if workflow_kind:
+        return workflow_kind
+    return infer_workflow_kind(
+        str(state.get("task") or ""),
+        touched_files=list(state.get("touched_files", [])),
+        verification_commands=list(state.get("verification_commands", [])),
+    )
+
+
+def _select_plan_template(state: AgentState) -> str:
+    task = str(state.get("task") or "").lower()
+    if "clan" in task and "hydrate" in task:
+        return "clan_hydration"
+
+    workflow_kind = _state_workflow_kind(state)
+    if workflow_kind in {"cache_behavior", "api_contract_change", "agentic_workflow", "performance_regression"}:
+        return workflow_kind
+    return "default"
+
+
+def _template_plan_steps(template_name: str, task: str, doctrine_summary: dict[str, str]) -> list[str]:
+    if template_name == "clan_hydration":
+        return [
+            "Reproduce the stale player page state where clan fields are initially missing",
+            "Add bounded player re-fetch in the frontend while clan hydration is pending",
+            "Force a backend refresh task when clan is missing to avoid fresh-cache lock",
+            "Add tests for forced refresh behavior and run focused test suite",
+        ]
+    if template_name == "cache_behavior":
+        return [
+            f"Clarify the cache or hydration failure mode for: {task}",
+            "Identify stale-data, TTL, or background-refresh boundaries before changing behavior",
+            "Add bounded rollback, guardrail, or load-control checks for cache-related changes",
+            "Run focused validation that proves the revised cache flow does not fan out unbounded work",
+        ]
+    if template_name == "api_contract_change":
+        return [
+            f"Clarify acceptance criteria for the API-facing change: {task}",
+            "Identify the touched endpoint, payload, serializer, or route consumers",
+            "Implement the smallest safe API change and preserve backward compatibility where required",
+            "Run focused regression coverage for the affected API surface",
+        ]
+    if template_name == "agentic_workflow":
+        return [
+            f"Clarify the agentic workflow acceptance criteria for: {task}",
+            "Identify the routing, doctrine, review-gate, or dashboard surfaces involved",
+            "Implement the smallest guarded workflow change and preserve existing boundaries",
+            "Run focused agentic validation covering docs, tests, and operator-visible summaries",
+        ]
+    if template_name == "performance_regression":
+        return [
+            f"Clarify the observed regression and target improvement for: {task}",
+            "Capture the current baseline and identify the hottest query, endpoint, or workflow path",
+            "Apply the smallest safe performance change without payload drift",
+            "Run focused regression validation and compare the new result against the baseline",
+        ]
+    return [
+        f"Clarify acceptance criteria for: {task}",
+        "Identify files and tests affected by the task",
+        "Implement the smallest safe change and validate",
+    ]
+
+
+def _task_has_api_keywords(text: str) -> bool:
+    normalized = text.lower()
+    return any(
+        token in normalized
+        for token in ("api", "endpoint", "payload", "serializer", "schema", "response", "route", "contract", "fetch")
+    )
+
+
+def _collect_api_review_signals(state: AgentState) -> tuple[bool, list[str]]:
+    override = state.get("api_review_override")
+    if isinstance(override, bool):
+        reason = "Explicit api_review_required override enabled review." if override else "Explicit api_review_required override skipped review."
+        return override, [reason]
+
+    reasons: list[str] = []
+    touched_paths = _dedupe_strings(
+        list(state.get("touched_files", [])) +
+        list(state.get("target_files", []))
+    )
+    lowered_paths = [path.lower() for path in touched_paths]
+    verification_commands = [str(command).lower()
+                             for command in state.get("verification_commands", [])]
+    task = str(state.get("task") or "")
+    workflow_kind = _state_workflow_kind(state)
+
+    if workflow_kind == "api_contract_change":
+        reasons.append(
+            "Workflow kind classified as api_contract_change from structured task or file hints."
+        )
+    if any(
+        path.endswith(("views.py", "urls.py", "serializers.py"))
+        or "/api/" in path
+        or "/contracts/" in path
+        for path in lowered_paths
+    ):
+        reasons.append(
+            "Touched or targeted files include API-adjacent modules such as views, urls, serializers, or contract paths."
+        )
+    if any(
+        token in command
+        for command in verification_commands
+        for token in ("test_views", "api", "schema", "contract", "serializer")
+    ):
+        reasons.append(
+            "Verification commands target API-adjacent coverage."
+        )
+    if _task_has_api_keywords(task):
+        reasons.append(
+            "Task wording includes API-contract keywords."
+        )
+
+    return bool(reasons), reasons[:4]
 
 
 def _load_team_doctrine(state: AgentState) -> dict:
@@ -185,7 +338,11 @@ def _load_team_doctrine(state: AgentState) -> dict:
 
 def _retrieve_guidance(state: AgentState) -> dict:
     task = state.get("task", "")
-    guidance = retrieve_doctrine_guidance(task, limit=3)
+    guidance = retrieve_doctrine_guidance(
+        task,
+        limit=3,
+        workflow_kind=_state_workflow_kind(state),
+    )
     notes = list(state.get("guidance_notes", []))
     if guidance:
         notes.append(
@@ -215,37 +372,26 @@ def _plan_task(state: AgentState) -> dict:
         for note in state.get("planning_notes", [])
         if str(note).strip()
     ]
-
-    if _is_clan_hydration_use_case(task):
-        plan = [
-            "Reproduce the stale player page state where clan fields are initially missing",
-            "Add bounded player re-fetch in the frontend while clan hydration is pending",
-            "Force a backend refresh task when clan is missing to avoid fresh-cache lock",
-            "Add tests for forced refresh behavior and run focused test suite",
-            f"Avoid doctrine anti-patterns while revising the flow: {doctrine_summary.get('discouraged_patterns', 'None recorded.')}",
-            f"Check the approach against review priorities: {doctrine_summary.get('review_priorities', 'None recorded.')}",
-            f"Confirm the change can clear pre-commit doctrine requirements: {doctrine_summary.get('pre_commit_requirements', 'None recorded.')}",
-        ]
-        target_files = [
-            "client/app/components/PlayerSearch.tsx",
-            "server/warships/views.py",
-            "server/warships/tasks.py",
-            "server/warships/tests/test_views.py",
-        ]
-    else:
-        plan = [
-            f"Clarify acceptance criteria for: {task}",
-            "Identify files and tests affected by the task",
-            "Implement the smallest safe change and validate",
-            f"Avoid battlestats doctrine anti-patterns: {doctrine_summary.get('discouraged_patterns', 'None recorded.')}",
-            f"Review the approach against battlestats doctrine: {doctrine_summary.get('decision_rules', 'None recorded.')}",
-            f"Confirm the change can clear pre-commit doctrine requirements: {doctrine_summary.get('pre_commit_requirements', 'None recorded.')}",
-        ]
-        target_files = []
+    plan_template = _select_plan_template(state)
+    plan = _template_plan_steps(plan_template, task, doctrine_summary)
+    plan.extend([
+        f"Avoid battlestats doctrine anti-patterns: {doctrine_summary.get('discouraged_patterns', 'None recorded.')}",
+        f"Review the approach against battlestats doctrine: {doctrine_summary.get('decision_rules', 'None recorded.')}",
+        f"Confirm the change can clear pre-commit doctrine requirements: {doctrine_summary.get('pre_commit_requirements', 'None recorded.')}",
+    ])
+    target_files = _dedupe_strings(
+        list(state.get("target_files", [])) +
+        PLAN_TEMPLATE_TARGETS.get(plan_template, [])
+    )
 
     doctrine_notes = list(state.get("doctrine_notes", []))
     guidance = list(state.get("retrieved_guidance", []))
     guidance_notes = list(state.get("guidance_notes", []))
+    crew_artifacts = [
+        artifact
+        for artifact in state.get("crew_artifacts", [])
+        if isinstance(artifact, dict)
+    ]
     if planning_notes:
         plan.extend(
             f"Honor planner handoff: {note}"
@@ -265,6 +411,17 @@ def _plan_task(state: AgentState) -> dict:
         guidance_notes.append(
             f"Planning referenced {len(guidance)} retrieved guidance artifact(s)."
         )
+    if crew_artifacts:
+        plan.append(
+            "Use structured CrewAI role artifacts during guarded planning: "
+            + "; ".join(
+                f"{artifact.get('label', artifact.get('persona_key', 'unknown'))} ({', '.join(artifact.get('artifact_fields', [])[:3])})"
+                for artifact in crew_artifacts[:3]
+            )
+        )
+        guidance_notes.append(
+            f"Planning received {len(crew_artifacts)} structured CrewAI artifact blueprint(s)."
+        )
     if retrieved_memories:
         plan.append(
             "Apply bounded reviewed procedural memory before implementation: "
@@ -280,6 +437,7 @@ def _plan_task(state: AgentState) -> dict:
 
     return {
         "plan": plan,
+        "plan_template": plan_template,
         "target_files": target_files,
         "role_context": _read_role_files(),
         "doctrine_notes": doctrine_notes,
@@ -303,11 +461,12 @@ def _load_memory_context(state: AgentState) -> dict:
     )
     notes = list(state.get("memory_notes", []))
     notes.extend(memory_context.get("memory_notes", []))
+    workflow_kind = str(state.get("workflow_kind") or "").strip() or memory_context["workflow_kind"]
     return {
         "memory_enabled": memory_context["memory_enabled"],
         "memory_environment": memory_context["memory_environment"],
         "memory_namespace": memory_context["memory_namespace"],
-        "workflow_kind": memory_context["workflow_kind"],
+        "workflow_kind": workflow_kind,
         "retrieved_memories": memory_context["retrieved_memories"],
         "memory_notes": notes,
         "status": "memory_loaded",
@@ -353,11 +512,7 @@ def _task_needs_risk_controls(task: str) -> bool:
 
 
 def _task_needs_api_contract_review(task: str) -> bool:
-    normalized = task.lower()
-    return any(
-        token in normalized
-        for token in ("api", "endpoint", "payload", "serializer", "schema", "response", "route", "contract", "fetch")
-    )
+    return _task_has_api_keywords(task)
 
 
 def _plan_has_api_contract_step(plan: list[str]) -> bool:
@@ -465,9 +620,8 @@ def _revise_plan(state: AgentState) -> dict:
 
 
 def _api_contract_review(state: AgentState) -> dict:
-    task = state.get("task", "")
     plan = list(state.get("plan", []))
-    review_required = _task_needs_api_contract_review(task)
+    review_required, review_reasons = _collect_api_review_signals(state)
     review_notes: list[str] = []
 
     if review_required and not _plan_has_api_contract_step(plan):
@@ -492,10 +646,11 @@ def _api_contract_review(state: AgentState) -> dict:
             )
     else:
         doctrine_notes.append(
-            "API contract review skipped because the task does not appear API-facing.")
+            "API contract review skipped because no structured API-facing signals were detected.")
 
     return {
         "api_review_notes": review_notes,
+        "api_review_reasons": review_reasons,
         "api_review_passed": api_review_passed,
         "api_review_required": review_required,
         "doctrine_notes": doctrine_notes,
@@ -691,6 +846,7 @@ def _summarize(state: AgentState) -> dict:
         "pass" if state.get("api_review_passed", False) else "fail")
     summary = [
         f"Task: {state.get('task', '')}",
+        f"Plan template: {state.get('plan_template', 'default')}",
         f"Plan steps: {len(state.get('plan', []))}",
         f"Touched files: {len(state.get('touched_files', []))}",
         f"Design review: {'pass' if state.get('design_review_passed', False) else 'fail'}",
@@ -704,9 +860,18 @@ def _summarize(state: AgentState) -> dict:
     guidance_notes = list(state.get("guidance_notes", []))
     if guidance_notes:
         summary.append("Guidance: " + " | ".join(guidance_notes[:1]))
+    api_review_reasons = list(state.get("api_review_reasons", []))
+    if api_review_reasons:
+        summary.append("API review reasons: " +
+                       " | ".join(api_review_reasons[:2]))
     memory_notes = list(state.get("memory_notes", []))
     if memory_notes:
         summary.append("Memory: " + " | ".join(memory_notes[:2]))
+    crew_artifacts = list(state.get("crew_artifacts", []))
+    if crew_artifacts:
+        summary.append(
+            f"CrewAI artifacts: {len(crew_artifacts)} blueprint(s) informed planning."
+        )
     if state.get("issues"):
         summary.append("Issues: " + " | ".join(state.get("issues", [])))
 
@@ -881,6 +1046,7 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
             "retrieved_guidance": [],
             "guidance_notes": [],
             "planning_notes": list(context.get("planning_notes", [])),
+            "plan_template": str(context.get("plan_template", "")),
             "workflow_kind": str(context.get("workflow_kind", "")),
             "memory_enabled": bool(context.get("memory_enabled", False)),
             "memory_environment": str(context.get("memory_environment", "")),
@@ -893,10 +1059,13 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
             "design_review_retry_count": int(context.get("design_review_retry_count", 0)),
             "max_design_review_retries": int(context.get("max_design_review_retries", 1)),
             "api_review_notes": [],
+            "api_review_reasons": [],
             "api_review_passed": False,
             "api_review_required": False,
+            "api_review_override": context.get("api_review_required") if isinstance(context.get("api_review_required"), bool) else None,
             "api_review_retry_count": int(context.get("api_review_retry_count", 0)),
             "max_api_review_retries": int(context.get("max_api_review_retries", 1)),
+            "crew_artifacts": list(context.get("crew_artifacts", [])),
             "verification_commands": list(context.get("verification_commands", [])),
             "verification_cwd": str(context.get("verification_cwd", "")),
             "command_results": [],

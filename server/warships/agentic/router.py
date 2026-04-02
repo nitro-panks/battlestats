@@ -99,7 +99,8 @@ def _build_hybrid_langgraph_context(
     crew_result: dict[str, Any],
 ) -> dict[str, Any]:
     prepared = _prepare_langgraph_context(context)
-    crew_plan = crew_result.get("crew_plan") if isinstance(crew_result, dict) else None
+    crew_plan = crew_result.get("crew_plan") if isinstance(
+        crew_result, dict) else None
     if not isinstance(crew_plan, dict):
         return prepared
 
@@ -113,18 +114,30 @@ def _build_hybrid_langgraph_context(
         for task in crew_plan.get("tasks", [])
         if isinstance(task, dict) and str(task.get("assigned_to", "")).strip()
     ]
+    crew_artifacts = [
+        artifact
+        for artifact in crew_result.get("crew_artifacts", [])
+        if isinstance(artifact, dict)
+    ]
     planning_notes = list(prepared.get("planning_notes", []))
     if roles:
         planning_notes.append(
-            "Follow the persona sequence shaped by CrewAI: " + " -> ".join(roles)
+            "Follow the persona sequence shaped by CrewAI: " +
+            " -> ".join(roles)
         )
     if tasks:
         planning_notes.append(
-            "Preserve the planned execution handoff order: " + " -> ".join(tasks)
+            "Preserve the planned execution handoff order: " +
+            " -> ".join(tasks)
+        )
+    if crew_artifacts:
+        planning_notes.append(
+            f"Use {len(crew_artifacts)} structured CrewAI role artifact blueprints during guarded implementation planning."
         )
     if planning_notes:
         prepared["planning_notes"] = planning_notes
     prepared["hybrid_crew_plan"] = crew_plan
+    prepared["crew_artifacts"] = crew_artifacts
     return prepared
 
 
@@ -166,8 +179,15 @@ def run_routed_workflow(
             result["route_rationale"] = route["rationale"]
             result["run_log_path"] = write_agent_run_log("crewai", result)
         else:
+            hybrid_kickoff_enabled = bool(
+                resolved_context.get("hybrid_crewai_kickoff")
+            )
             crew_result = run_crewai_workflow(
-                task, context=resolved_context, dry_run=True, llm=llm)
+                task,
+                context=resolved_context,
+                dry_run=not hybrid_kickoff_enabled,
+                llm=llm,
+            )
             graph_result = run_graph(
                 task,
                 context=_build_hybrid_langgraph_context(
@@ -187,6 +207,7 @@ def run_routed_workflow(
                     "CrewAI planning notes were handed off to LangGraph before implementation planning.",
                 ],
                 "crew_result": crew_result,
+                "crew_artifacts": list(crew_result.get("crew_artifacts", [])),
                 "langgraph_result": graph_result,
                 "memory_store_activity": {
                     "backend": get_memory_backend(resolved_context),
@@ -198,6 +219,10 @@ def run_routed_workflow(
                     "note": "Durable memory writes remain LangGraph-owned in this tranche.",
                 },
             }
+            if result["crew_artifacts"]:
+                result["summary"].append(
+                    f"Structured CrewAI artifacts surfaced: {len(result['crew_artifacts'])}."
+                )
             result["run_log_path"] = write_agent_run_log("hybrid", result)
 
         trace_url = get_current_trace_url()

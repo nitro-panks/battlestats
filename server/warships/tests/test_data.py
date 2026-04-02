@@ -53,7 +53,8 @@ class ClanCrawlPublicationTests(TestCase):
         self.assertEqual(summary["players_saved"], 3)
         mock_crawl_clan_ids.assert_called_once()
         mock_crawl_clan_members.assert_called_once()
-        mock_queue_efficiency_rank_snapshot_refresh.assert_called_once_with(realm='na')
+        mock_queue_efficiency_rank_snapshot_refresh.assert_called_once_with(
+            realm='na')
 
     @patch("warships.clan_crawl.crawl_clan_members", return_value={"clans_processed": 1, "players_saved": 0, "skipped": 1})
     @patch("warships.clan_crawl.crawl_clan_ids", return_value=[{"clan_id": 1001}])
@@ -176,7 +177,8 @@ class ActivityDataRefreshTests(TestCase):
         rows = fetch_activity_data(player.player_id)
 
         self.assertEqual(rows, player.activity_json)
-        mock_update_snapshot_task.assert_called_once_with(player.player_id, realm='na')
+        mock_update_snapshot_task.assert_called_once_with(
+            player.player_id, realm='na')
 
     @patch("warships.data.update_snapshot_data_task.delay")
     def test_fetch_activity_data_returns_empty_and_queues_refresh_when_cache_missing(
@@ -192,7 +194,8 @@ class ActivityDataRefreshTests(TestCase):
         rows = fetch_activity_data(player.player_id)
 
         self.assertEqual(rows, [])
-        mock_update_snapshot_task.assert_called_once_with(player.player_id, realm='na')
+        mock_update_snapshot_task.assert_called_once_with(
+            player.player_id, realm='na')
 
 
 class RandomsDataRefreshTests(TestCase):
@@ -302,7 +305,8 @@ class RandomsDataRefreshTests(TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["ship_name"], "Fallback Ship")
-        mock_update_randoms_task.assert_called_once_with(player.player_id, realm='na')
+        mock_update_randoms_task.assert_called_once_with(
+            player.player_id, realm='na')
 
     @patch("warships.tasks.queue_ranked_data_refresh")
     def test_fetch_ranked_data_returns_stale_cache_and_queues_refresh(self, mock_queue_ranked_data_refresh):
@@ -396,7 +400,8 @@ class DerivedChartCacheRefreshTests(TestCase):
         rows = fetch_type_data(player.player_id)
 
         self.assertEqual(rows, [])
-        mock_update_type_task.assert_called_once_with(player.player_id, realm='na')
+        mock_update_type_task.assert_called_once_with(
+            player.player_id, realm='na')
 
     @patch("warships.data.update_type_data_task.delay")
     @patch("warships.data.update_battle_data_task.delay")
@@ -464,8 +469,10 @@ class DerivedChartCacheRefreshTests(TestCase):
         rows = fetch_clan_plot_data("4601", filter_type="active")
 
         self.assertEqual(rows, cached_plot)
-        mock_update_clan_data_task.assert_called_once_with(clan_id="4601", realm='na')
-        mock_update_clan_members_task.assert_called_once_with(clan_id="4601", realm='na')
+        mock_update_clan_data_task.assert_called_once_with(
+            clan_id="4601", realm='na')
+        mock_update_clan_members_task.assert_called_once_with(
+            clan_id="4601", realm='na')
 
     @patch("warships.data.update_clan_members_task.delay")
     @patch("warships.data.update_clan_data_task.delay")
@@ -549,7 +556,8 @@ class DerivedChartCacheRefreshTests(TestCase):
             ],
         )
         self.assertEqual(cache.get("na:clan:plot:v1:4603:active"), rows)
-        mock_update_clan_data_task.assert_called_once_with(clan_id="4603", realm='na')
+        mock_update_clan_data_task.assert_called_once_with(
+            clan_id="4603", realm='na')
         mock_update_clan_members_task.assert_not_called()
 
     @patch("warships.data.update_clan_members_task.delay")
@@ -592,7 +600,8 @@ class DerivedChartCacheRefreshTests(TestCase):
         )
         self.assertEqual(cache.get("na:clan:plot:v1:4604:active"), rows)
         mock_update_clan_data_task.assert_not_called()
-        mock_update_clan_members_task.assert_called_once_with(clan_id="4604", realm='na')
+        mock_update_clan_members_task.assert_called_once_with(
+            clan_id="4604", realm='na')
 
 
 class PlayerSummaryRefreshTests(TestCase):
@@ -623,7 +632,8 @@ class PlayerSummaryRefreshTests(TestCase):
         self.assertIsNone(summary["kill_ratio"])
         mock_update_battle_task.assert_called_once_with(
             player_id=player.player_id, realm='na')
-        mock_update_snapshot_task.assert_called_once_with(player.player_id, realm='na')
+        mock_update_snapshot_task.assert_called_once_with(
+            player.player_id, realm='na')
         mock_queue_ranked_data_refresh.assert_called_once_with(
             player.player_id, realm='na')
 
@@ -682,7 +692,8 @@ class PlayerSummaryRefreshTests(TestCase):
         self.assertEqual(summary["player_score"], 1.5)
         mock_update_battle_task.assert_called_once_with(
             player_id=player.player_id, realm='na')
-        mock_update_snapshot_task.assert_called_once_with(player.player_id, realm='na')
+        mock_update_snapshot_task.assert_called_once_with(
+            player.player_id, realm='na')
         mock_queue_ranked_data_refresh.assert_called_once_with(
             player.player_id, realm='na')
         mock_refresh_player_explorer_summary.assert_not_called()
@@ -716,7 +727,8 @@ class PlayerSummaryRefreshTests(TestCase):
         self.assertEqual(summary["player_id"], player.player_id)
         mock_update_battle_task.assert_called_once_with(
             player_id=player.player_id, realm='na')
-        mock_update_snapshot_task.assert_called_once_with(player.player_id, realm='na')
+        mock_update_snapshot_task.assert_called_once_with(
+            player.player_id, realm='na')
         # ranked_json is set but ranked_updated_at is None (stale), so refresh fires
         mock_queue_ranked_data_refresh.assert_called_once_with(
             player.player_id, realm='na')

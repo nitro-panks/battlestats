@@ -11,7 +11,8 @@ _SENSITIVE_KEY_RE = re.compile(
     r"(?:password|secret|token|api[_-]?key|credential|private[_-]?key|authorization|cookie)",
     re.IGNORECASE,
 )
-_CONNECTION_URL_RE = re.compile(r"([a-zA-Z][a-zA-Z0-9+.-]*://[^:/\s:@]+:)([^@\s]+)(@)")
+_CONNECTION_URL_RE = re.compile(
+    r"([a-zA-Z][a-zA-Z0-9+.-]*://[^:/\s:@]+:)([^@\s]+)(@)")
 _ASSIGNMENT_SECRET_RE = re.compile(
     r"((?:password|secret|token|api[_-]?key|authorization)\s*[=:]\s*)([^,\s]+)",
     re.IGNORECASE,

@@ -302,7 +302,8 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
             skipped += 1
             continue
 
-        info = fetch_clan_info(clan_id, realm=realm, request_delay=request_delay)
+        info = fetch_clan_info(clan_id, realm=realm,
+                               request_delay=request_delay)
         if not info:
             log.warning("[%d/%d] Failed to fetch info for clan %d",
                         i, total, clan_id)
@@ -315,7 +316,8 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
             clans_processed += 1
             continue
 
-        member_ids = fetch_member_ids(clan_id, realm=realm, request_delay=request_delay)
+        member_ids = fetch_member_ids(
+            clan_id, realm=realm, request_delay=request_delay)
         if not member_ids:
             log.warning("[%d/%d] No member IDs for [%s] %s",
                         i, total, clan.tag, clan.name)
@@ -324,7 +326,8 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
 
         for batch_start in range(0, len(member_ids), BATCH_SIZE):
             batch_ids = member_ids[batch_start: batch_start + BATCH_SIZE]
-            player_map = fetch_players_bulk(batch_ids, realm=realm, request_delay=request_delay)
+            player_map = fetch_players_bulk(
+                batch_ids, realm=realm, request_delay=request_delay)
 
             for _pid_str, pdata in player_map.items():
                 save_player(pdata, clan, realm=realm, core_only=core_only)

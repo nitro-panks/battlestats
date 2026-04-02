@@ -175,6 +175,8 @@ def _extract_run_summary(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         verification_source.get("api_review_passed"), bool) else None
     api_review_required = verification_source.get("api_review_required") if isinstance(
         verification_source.get("api_review_required"), bool) else False
+    api_review_reasons = verification_source.get("api_review_reasons") if isinstance(
+        verification_source.get("api_review_reasons"), list) else []
     doctrine_notes = verification_source.get("doctrine_notes") if isinstance(
         verification_source.get("doctrine_notes"), list) else []
     guidance_notes = verification_source.get("guidance_notes") if isinstance(
@@ -195,6 +197,8 @@ def _extract_run_summary(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     workflow_kind = verification_source.get("workflow_kind")
     memory_store_activity = verification_source.get("memory_store_activity") if isinstance(
         verification_source.get("memory_store_activity"), dict) else payload.get("memory_store_activity") if isinstance(payload.get("memory_store_activity"), dict) else {}
+    crew_artifacts = payload.get("crew_artifacts") if isinstance(payload.get("crew_artifacts"), list) else verification_source.get(
+        "crew_artifacts") if isinstance(verification_source.get("crew_artifacts"), list) else []
 
     return {
         "workflow_id": str(payload.get("workflow_id") or verification_source.get("workflow_id") or path.stem),
@@ -210,6 +214,7 @@ def _extract_run_summary(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "design_review_passed": design_review_passed,
         "api_review_passed": api_review_passed,
         "api_review_required": api_review_required,
+        "api_review_reason_count": len(api_review_reasons),
         "issue_count": len(issues),
         "command_failure_count": len([result for result in command_results if not result.get("ok")]),
         "verification_command_count": len(verification_commands),
@@ -220,6 +225,7 @@ def _extract_run_summary(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "memory_enabled": memory_enabled,
         "memory_retrieval_count": len(retrieved_memories),
         "memory_candidate_count": len(memory_candidates),
+        "crew_artifact_count": len(crew_artifacts),
         "memory_store_activity": memory_store_activity,
         "workflow_kind": workflow_kind,
         "langsmith_trace_url": trace_url,

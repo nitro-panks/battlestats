@@ -50,6 +50,8 @@ class AgenticCrewAITests(TestCase):
 
         self.assertEqual(result["status"], "planned")
         self.assertIn("crew_plan", result)
+        self.assertIn("crew_artifacts", result)
+        self.assertTrue(result["crew_artifacts"])
         self.assertIn("No CrewAI LLM configured", " ".join(result["summary"]))
         self.assertTrue(result["run_log_path"])
 

@@ -142,11 +142,10 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                     <button
                         type="button"
                         onClick={() => setChartMode('2d')}
-                        className={`px-3 py-1 rounded-l-md transition-colors ${
-                            chartMode === '2d'
+                        className={`px-3 py-1 rounded-l-md transition-colors ${chartMode === '2d'
                                 ? 'bg-[var(--accent)] text-white'
                                 : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                        }`}
+                            }`}
                     >
                         2D
                     </button>
@@ -155,13 +154,12 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                         onClick={() => { if (is3DAvailable) setChartMode('3d'); }}
                         disabled={!is3DAvailable}
                         title={!is3DAvailable ? 'Tier data not yet available' : 'View 3D scatter with avg tier'}
-                        className={`px-3 py-1 rounded-r-md transition-colors ${
-                            chartMode === '3d'
+                        className={`px-3 py-1 rounded-r-md transition-colors ${chartMode === '3d'
                                 ? 'bg-[var(--accent)] text-white'
                                 : is3DAvailable
                                     ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                                     : 'text-[var(--text-secondary)] opacity-40 cursor-not-allowed'
-                        }`}
+                            }`}
                     >
                         3D
                     </button>

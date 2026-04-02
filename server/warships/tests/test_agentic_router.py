@@ -44,6 +44,13 @@ class AgenticRouterTests(TestCase):
             "workflow_id": "crew-1",
             "status": "planned",
             "summary": ["crew"],
+            "crew_artifacts": [
+                {
+                    "persona_key": "project_coordinator",
+                    "label": "Project Coordinator",
+                    "artifact_fields": ["problem_statement", "execution_sequence"],
+                }
+            ],
             "crew_plan": {
                 "roles": [
                     {"label": "Project Coordinator"},
@@ -70,9 +77,11 @@ class AgenticRouterTests(TestCase):
         mock_run_graph.assert_called_once()
         graph_context = mock_run_graph.call_args.kwargs["context"]
         self.assertIn("planning_notes", graph_context)
+        self.assertIn("crew_artifacts", graph_context)
         self.assertTrue(any(
             "Project Coordinator" in note for note in graph_context["planning_notes"]
         ))
+        self.assertEqual(len(result["crew_artifacts"]), 1)
         mock_persist_phase0_memory_artifacts.assert_not_called()
 
     @patch("warships.agentic.router.write_agent_run_log")

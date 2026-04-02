@@ -88,3 +88,15 @@ class AgenticRetrievalTests(TestCase):
             item["path"].startswith("agents/knowledge/")
             for item in guidance
         ))
+
+    def test_retrieve_doctrine_guidance_includes_rank_reasons_and_workflow_kind(self):
+        guidance = retrieve_doctrine_guidance(
+            "Improve cache hydration and stale refresh behavior for the player page",
+            limit=3,
+        )
+
+        self.assertTrue(guidance)
+        self.assertIn("workflow_kind", guidance[0])
+        self.assertIn("ranking_reasons", guidance[0])
+        self.assertIn("score_breakdown", guidance[0])
+        self.assertTrue(guidance[0]["ranking_reasons"])

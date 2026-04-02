@@ -108,9 +108,9 @@ def get_memory_postgres_url(context: dict[str, Any] | None = None) -> str | None
     resolved_context = context or {}
     candidates = [
         resolved_context.get("memory_postgres_url"),
-    os.getenv("BATTLESTATS_AGENTIC_MEMORY_POSTGRES_URL"),
-    os.getenv("LANGGRAPH_STORE_POSTGRES_URL"),
-    os.getenv("LANGGRAPH_CHECKPOINT_POSTGRES_URL"),
+        os.getenv("BATTLESTATS_AGENTIC_MEMORY_POSTGRES_URL"),
+        os.getenv("LANGGRAPH_STORE_POSTGRES_URL"),
+        os.getenv("LANGGRAPH_CHECKPOINT_POSTGRES_URL"),
     ]
     for value in candidates:
         normalized = str(value or "").strip()
@@ -123,9 +123,9 @@ def get_memory_backend(context: dict[str, Any] | None = None) -> MemoryBackend:
     resolved_context = context or {}
     explicit = str(
         resolved_context.get("memory_backend")
-    or os.getenv("BATTLESTATS_AGENTIC_MEMORY_BACKEND")
-    or os.getenv("BATTLESTATS_LANGMEM_BACKEND")
-    or "file"
+        or os.getenv("BATTLESTATS_AGENTIC_MEMORY_BACKEND")
+        or os.getenv("BATTLESTATS_LANGMEM_BACKEND")
+        or "file"
     ).strip().lower()
     if explicit in {"", "file", "filesystem", "json"}:
         return "file"
@@ -158,12 +158,35 @@ def infer_workflow_kind(
     verification_commands: list[str] | None = None,
 ) -> str:
     normalized_task = task.lower()
-    file_hints = " ".join((touched_files or [])).lower()
-    command_hints = " ".join((verification_commands or [])).lower()
+    normalized_paths = [str(path).lower() for path in (touched_files or [])]
+    normalized_commands = [str(command).lower()
+                           for command in (verification_commands or [])]
+    file_hints = " ".join(normalized_paths)
+    command_hints = " ".join(normalized_commands)
     corpus = " ".join([normalized_task, file_hints, command_hints])
 
-    if any(token in corpus for token in ("playwright", "e2e", "route smoke", "browser")):
+    if any(token in corpus for token in ("playwright", "e2e", "route smoke", "browser")) or any(
+        path.endswith(".spec.ts") or "/e2e/" in path
+        for path in normalized_paths
+    ):
         return "client_route_smoke"
+    if any(
+        path.endswith(("views.py", "urls.py", "serializers.py"))
+        or "/api/" in path
+        or "/contracts/" in path
+        for path in normalized_paths
+    ):
+        return "api_contract_change"
+    if any(
+        "/agentic/" in path or path.endswith("dashboard.py")
+        for path in normalized_paths
+    ):
+        return "agentic_workflow"
+    if any(
+        "/benchmarks/" in path or "performance" in path
+        for path in normalized_paths
+    ):
+        return "performance_regression"
     if any(token in corpus for token in ("cache", "ttl", "hydrate", "warming", "poll", "stale")):
         return "cache_behavior"
     if any(token in corpus for token in ("api", "serializer", "endpoint", "payload", "contract")):
@@ -209,7 +232,7 @@ def _normalize_created_at(record: dict[str, Any]) -> datetime:
 
 
 def _relative_memory_path(path: Path) -> str:
-    repo_root=_project_root()
+    repo_root = _project_root()
     try:
         return str(path.relative_to(repo_root))
     except ValueError:
@@ -233,7 +256,7 @@ def _read_json_file(path: Path, default: dict[str, Any]) -> dict[str, Any]:
         return dict(default)
 
     try:
-        payload=json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return dict(default)
 
@@ -246,8 +269,8 @@ def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
                     sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _dedupe_strings(values: list[str], limit: int | None=None) -> list[str]:
-    deduped: list[str]=[]
+def _dedupe_strings(values: list[str], limit: int | None = None) -> list[str]:
+    deduped: list[str] = []
     for value in values:
         if value and value not in deduped:
             deduped.append(value)
@@ -257,8 +280,8 @@ def _dedupe_strings(values: list[str], limit: int | None=None) -> list[str]:
 
 
 def _record_identity(record: dict[str, Any]) -> str:
-    namespace=tuple(record.get("namespace") or ())
-    raw="::".join([
+    namespace = tuple(record.get("namespace") or ())
+    raw = "::".join([
         "/".join(str(part) for part in namespace),
         str(record.get("memory_type") or ""),
         str(record.get("workflow_kind") or ""),
@@ -287,7 +310,7 @@ def _merge_evidence(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[
 
 
 def _merge_reviewed_record(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
-    merged=dict(existing)
+    merged = dict(existing)
     merged.update({
         "summary": incoming.get("summary") or existing.get("summary"),
         "detail": incoming.get("detail") or existing.get("detail"),
@@ -300,11 +323,11 @@ def _merge_reviewed_record(existing: dict[str, Any], incoming: dict[str, Any]) -
         "updated_at": incoming.get("updated_at") or datetime.utcnow().isoformat() + "Z",
         "provenance": incoming.get("provenance") or existing.get("provenance") or {},
     })
-    merged["supersedes"]=_dedupe_strings([
+    merged["supersedes"] = _dedupe_strings([
         *[str(item) for item in existing.get("supersedes", [])],
         *[str(item) for item in incoming.get("supersedes", [])],
     ])
-    merged["evidence"]=_merge_evidence(
+    merged["evidence"] = _merge_evidence(
         existing.get("evidence") if isinstance(
             existing.get("evidence"), dict) else {},
         incoming.get("evidence") if isinstance(
@@ -314,17 +337,17 @@ def _merge_reviewed_record(existing: dict[str, Any], incoming: dict[str, Any]) -
 
 
 def load_reviewed_memory_records(namespace: tuple[str, str, str]) -> list[dict[str, Any]]:
-    payload=_read_json_file(
+    payload = _read_json_file(
         _reviewed_namespace_path(namespace),
         {"version": MEMORY_STORE_VERSION,
             "namespace": list(namespace), "records": []},
     )
-    records=payload.get("records")
+    records = payload.get("records")
     return [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
 
 
 def _store_reviewed_memory_records(namespace: tuple[str, str, str], records: list[dict[str, Any]]) -> str:
-    path=_reviewed_namespace_path(namespace)
+    path = _reviewed_namespace_path(namespace)
     _write_json_file(
         path,
         {
@@ -349,17 +372,17 @@ def _candidate_provenance(result: dict[str, Any], candidate: dict[str, Any]) -> 
 
 
 def queue_memory_candidates(result: dict[str, Any]) -> dict[str, Any]:
-    candidates=result.get("memory_candidates") if isinstance(
+    candidates = result.get("memory_candidates") if isinstance(
         result.get("memory_candidates"), list) else []
-    workflow_id=str(result.get("workflow_id") or "").strip()
+    workflow_id = str(result.get("workflow_id") or "").strip()
     if not candidates or not workflow_id:
         return {
             "queued_candidate_count": 0,
             "candidate_queue_path": None,
         }
 
-    path=_pending_workflow_path(workflow_id)
-    payload=_read_json_file(
+    path = _pending_workflow_path(workflow_id)
+    payload = _read_json_file(
         path,
         {
             "version": MEMORY_STORE_VERSION,
@@ -370,29 +393,29 @@ def queue_memory_candidates(result: dict[str, Any]) -> dict[str, Any]:
             "candidates": [],
         },
     )
-    existing_by_id={
+    existing_by_id = {
         str(candidate.get("candidate_id")): candidate
         for candidate in payload.get("candidates", [])
         if isinstance(candidate, dict) and candidate.get("candidate_id")
     }
-    queued_at=datetime.utcnow().isoformat() + "Z"
+    queued_at = datetime.utcnow().isoformat() + "Z"
 
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
-        candidate_id=str(candidate.get("candidate_id")
-                         or _record_identity(candidate))
-        queued=dict(existing_by_id.get(candidate_id, {}))
+        candidate_id = str(candidate.get("candidate_id")
+                           or _record_identity(candidate))
+        queued = dict(existing_by_id.get(candidate_id, {}))
         queued.update(candidate)
-        queued["candidate_id"]=candidate_id
+        queued["candidate_id"] = candidate_id
         queued.setdefault("memory_id", candidate.get(
             "memory_id") or _record_identity(candidate))
         if _normalize_review_status(queued) in {"", "candidate"}:
-            queued["review_status"]=_PENDING_REVIEW_STATUS
+            queued["review_status"] = _PENDING_REVIEW_STATUS
         queued.setdefault("queued_at", queued_at)
-        queued["updated_at"]=queued_at
-        queued["provenance"]=_candidate_provenance(result, queued)
-        existing_by_id[candidate_id]=queued
+        queued["updated_at"] = queued_at
+        queued["provenance"] = _candidate_provenance(result, queued)
+        existing_by_id[candidate_id] = queued
 
     payload.update(
         {
@@ -413,23 +436,23 @@ def queue_memory_candidates(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _review_context_mapping(review_context: dict[str, Any], key: str) -> dict[str, list[str]]:
-    raw=review_context.get(key)
+    raw = review_context.get(key)
     if not isinstance(raw, dict):
         return {}
-    mapping: dict[str, list[str]]={}
+    mapping: dict[str, list[str]] = {}
     for candidate_id, values in raw.items():
         if isinstance(values, list):
-            mapping[str(candidate_id)]=[str(value)
-                        for value in values if value]
+            mapping[str(candidate_id)] = [str(value)
+                                          for value in values if value]
     return mapping
 
 
-def promote_reviewed_candidates(result: dict[str, Any], review_context: dict[str, Any] | None=None) -> dict[str, Any]:
-    review_context=review_context or {}
-    workflow_id=str(result.get("workflow_id") or "").strip()
-    approved_ids={str(value) for value in review_context.get(
+def promote_reviewed_candidates(result: dict[str, Any], review_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    review_context = review_context or {}
+    workflow_id = str(result.get("workflow_id") or "").strip()
+    approved_ids = {str(value) for value in review_context.get(
         "approved_candidate_ids", []) if value}
-    rejected_ids={str(value) for value in review_context.get(
+    rejected_ids = {str(value) for value in review_context.get(
         "rejected_candidate_ids", []) if value}
     if not workflow_id:
         return {
@@ -438,33 +461,33 @@ def promote_reviewed_candidates(result: dict[str, Any], review_context: dict[str
             "reviewed_store_paths": [],
         }
 
-    path=_pending_workflow_path(workflow_id)
-    payload=_read_json_file(
+    path = _pending_workflow_path(workflow_id)
+    payload = _read_json_file(
         path,
         {"version": MEMORY_STORE_VERSION,
             "workflow_id": workflow_id, "candidates": []},
     )
-    candidates=[candidate for candidate in payload.get(
+    candidates = [candidate for candidate in payload.get(
         "candidates", []) if isinstance(candidate, dict)]
-    supersedes_map=_review_context_mapping(review_context, "supersedes")
-    reviewer=str(review_context.get("reviewed_by") or "explicit-review")
-    reviewed_store_paths: list[str]=[]
-    promoted_count=0
-    rejected_count=0
-    reviewed_at=datetime.utcnow().isoformat() + "Z"
+    supersedes_map = _review_context_mapping(review_context, "supersedes")
+    reviewer = str(review_context.get("reviewed_by") or "explicit-review")
+    reviewed_store_paths: list[str] = []
+    promoted_count = 0
+    rejected_count = 0
+    reviewed_at = datetime.utcnow().isoformat() + "Z"
 
     for candidate in candidates:
-        candidate_id=str(candidate.get("candidate_id") or "")
+        candidate_id = str(candidate.get("candidate_id") or "")
         if candidate_id in approved_ids:
-            namespace=tuple(candidate.get("namespace")
-                            or result.get("memory_namespace") or ())
+            namespace = tuple(candidate.get("namespace")
+                              or result.get("memory_namespace") or ())
             if len(namespace) != 3:
-                namespace=get_memory_namespace(
+                namespace = get_memory_namespace(
                     "procedural", environment=result.get("memory_environment"))
-            records=load_reviewed_memory_records(namespace)
-            memory_id=str(candidate.get("memory_id")
-                          or _record_identity(candidate))
-            promoted=dict(candidate)
+            records = load_reviewed_memory_records(namespace)
+            memory_id = str(candidate.get("memory_id")
+                            or _record_identity(candidate))
+            promoted = dict(candidate)
             promoted.update(
                 {
                     "memory_id": memory_id,
@@ -477,39 +500,39 @@ def promote_reviewed_candidates(result: dict[str, Any], review_context: dict[str
                 }
             )
 
-            replaced=False
+            replaced = False
             for index, record in enumerate(records):
                 if str(record.get("memory_id") or "") == memory_id:
-                    records[index]=_merge_reviewed_record(record, promoted)
-                    replaced=True
+                    records[index] = _merge_reviewed_record(record, promoted)
+                    replaced = True
                     break
             if not replaced:
                 records.append(promoted)
 
-            superseded_ids=set(promoted.get("supersedes") or [])
+            superseded_ids = set(promoted.get("supersedes") or [])
             if superseded_ids:
                 for record in records:
                     if str(record.get("memory_id") or "") in superseded_ids:
-                        record["review_status"]=_SUPERSEDED_STATUS
-                        record["superseded_by"]=memory_id
-                        record["updated_at"]=reviewed_at
+                        record["review_status"] = _SUPERSEDED_STATUS
+                        record["superseded_by"] = memory_id
+                        record["updated_at"] = reviewed_at
 
             reviewed_store_paths.append(
                 _store_reviewed_memory_records(namespace, records))
-            candidate["review_status"]="reviewed"
-            candidate["reviewed_at"]=reviewed_at
-            candidate["reviewed_by"]=reviewer
-            candidate["memory_id"]=memory_id
+            candidate["review_status"] = "reviewed"
+            candidate["reviewed_at"] = reviewed_at
+            candidate["reviewed_by"] = reviewer
+            candidate["memory_id"] = memory_id
             promoted_count += 1
         elif candidate_id in rejected_ids:
-            candidate["review_status"]=_REJECTED_STATUS
-            candidate["rejected_at"]=reviewed_at
-            candidate["reviewed_by"]=reviewer
+            candidate["review_status"] = _REJECTED_STATUS
+            candidate["rejected_at"] = reviewed_at
+            candidate["reviewed_by"] = reviewer
             rejected_count += 1
 
     if candidates:
-        payload["candidates"]=candidates
-        payload["updated_at"]=reviewed_at
+        payload["candidates"] = candidates
+        payload["updated_at"] = reviewed_at
         _write_json_file(path, payload)
 
     return {
@@ -519,7 +542,7 @@ def promote_reviewed_candidates(result: dict[str, Any], review_context: dict[str
     }
 
 
-def persist_phase0_memory_artifacts(result: dict[str, Any], review_context: dict[str, Any] | None=None) -> dict[str, Any]:
+def persist_phase0_memory_artifacts(result: dict[str, Any], review_context: dict[str, Any] | None = None) -> dict[str, Any]:
     if not result.get("memory_enabled"):
         return {
             "backend": "disabled",
@@ -540,8 +563,8 @@ def persist_phase0_memory_artifacts(result: dict[str, Any], review_context: dict
             "note": "Durable memory writes remain LangGraph-owned in this tranche.",
         }
 
-    queue_activity=queue_memory_candidates(result)
-    promotion_activity=promote_reviewed_candidates(
+    queue_activity = queue_memory_candidates(result)
+    promotion_activity = promote_reviewed_candidates(
         result, review_context=review_context)
     return {
         "backend": get_memory_backend(result),
@@ -550,37 +573,37 @@ def persist_phase0_memory_artifacts(result: dict[str, Any], review_context: dict
     }
 
 
-def get_pending_memory_candidates(workflow_id: str, context: dict[str, Any] | None=None) -> list[dict[str, Any]]:
-    path=_pending_workflow_path(str(workflow_id))
-    payload=_read_json_file(path, {"candidates": []})
+def get_pending_memory_candidates(workflow_id: str, context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    path = _pending_workflow_path(str(workflow_id))
+    payload = _read_json_file(path, {"candidates": []})
     return [candidate for candidate in payload.get("candidates", []) if isinstance(candidate, dict)]
 
 
-def review_memory_candidates(workflow_id: str, review_context: dict[str, Any] | None, context: dict[str, Any] | None=None) -> dict[str, Any]:
-    result: dict[str, Any]={"workflow_id": str(workflow_id)}
+def review_memory_candidates(workflow_id: str, review_context: dict[str, Any] | None, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    result: dict[str, Any] = {"workflow_id": str(workflow_id)}
     return promote_reviewed_candidates(result, review_context)
 
 
-def get_memory_store_snapshot(limit: int=12, context: dict[str, Any] | None=None) -> dict[str, Any]:
-    reviewed_records: list[dict[str, Any]]=[]
-    pending_candidates: list[dict[str, Any]]=[]
-    reviewed_root=_reviewed_root()
-    pending_root=_pending_root()
+def get_memory_store_snapshot(limit: int = 12, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    reviewed_records: list[dict[str, Any]] = []
+    pending_candidates: list[dict[str, Any]] = []
+    reviewed_root = _reviewed_root()
+    pending_root = _pending_root()
 
     for path in reviewed_root.glob("*.json") if reviewed_root.exists() else []:
-        payload=_read_json_file(path, {"records": []})
+        payload = _read_json_file(path, {"records": []})
         for record in payload.get("records", []):
             if isinstance(record, dict):
-                enriched=dict(record)
+                enriched = dict(record)
                 enriched.setdefault("namespace", payload.get("namespace", []))
                 enriched.setdefault("store_path", _relative_memory_path(path))
                 reviewed_records.append(enriched)
 
     for path in pending_root.glob("*.json") if pending_root.exists() else []:
-        payload=_read_json_file(path, {"candidates": []})
+        payload = _read_json_file(path, {"candidates": []})
         for candidate in payload.get("candidates", []):
             if isinstance(candidate, dict):
-                enriched=dict(candidate)
+                enriched = dict(candidate)
                 enriched.setdefault("namespace", payload.get("namespace", []))
                 enriched.setdefault("store_path", _relative_memory_path(path))
                 enriched.setdefault("workflow_id", payload.get("workflow_id"))
@@ -618,26 +641,26 @@ def retrieve_reviewed_memories(
     *,
     workflow_kind: str,
     namespace: tuple[str, str, str],
-    limit: int=PHASE0_MEMORY_LIMIT,
+    limit: int = PHASE0_MEMORY_LIMIT,
 ) -> list[dict[str, Any]]:
     if not records:
         return []
 
-    filtered: list[dict[str, Any]]=[]
+    filtered: list[dict[str, Any]] = []
     for record in records:
         if not isinstance(record, dict):
             continue
         if str(record.get("memory_type") or "").strip().lower() != namespace[2]:
             continue
 
-        record_namespace=record.get("namespace")
+        record_namespace = record.get("namespace")
         if record_namespace is not None and tuple(record_namespace) != namespace:
             continue
 
         if _normalize_review_status(record) not in _REVIEWED_STATUSES:
             continue
 
-        record_workflow_kind=str(record.get(
+        record_workflow_kind = str(record.get(
             "workflow_kind") or "").strip().lower()
         if record_workflow_kind and record_workflow_kind != workflow_kind:
             continue
@@ -655,27 +678,27 @@ def retrieve_reviewed_memories(
 
 
 def _memory_note(record: dict[str, Any]) -> str:
-    summary=str(record.get("summary") or "").strip()
-    evidence=record.get("evidence") if isinstance(
+    summary = str(record.get("summary") or "").strip()
+    evidence = record.get("evidence") if isinstance(
         record.get("evidence"), dict) else {}
-    command_count=len(evidence.get("validation_commands") or [])
-    file_count=len(evidence.get("file_paths") or [])
+    command_count = len(evidence.get("validation_commands") or [])
+    file_count = len(evidence.get("file_paths") or [])
     return f"Reviewed procedural memory: {summary} (files: {file_count}, commands: {command_count})"
 
 
-def prepare_phase0_memory_context(task: str, context: dict[str, Any] | None=None) -> dict[str, Any]:
-    resolved_context=context or {}
-    enabled=is_phase0_memory_enabled("langgraph", resolved_context)
-    workflow_kind=infer_workflow_kind(
+def prepare_phase0_memory_context(task: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    resolved_context = context or {}
+    enabled = is_phase0_memory_enabled("langgraph", resolved_context)
+    workflow_kind = infer_workflow_kind(
         task,
         touched_files=list(resolved_context.get("touched_files", [])),
         verification_commands=list(
             resolved_context.get("verification_commands", [])),
     )
-    environment=get_memory_environment()
-    namespace=get_memory_namespace("procedural", environment=environment)
-    limit=int(resolved_context.get("memory_limit",
-              PHASE0_MEMORY_LIMIT) or PHASE0_MEMORY_LIMIT)
+    environment = get_memory_environment()
+    namespace = get_memory_namespace("procedural", environment=environment)
+    limit = int(resolved_context.get("memory_limit",
+                                     PHASE0_MEMORY_LIMIT) or PHASE0_MEMORY_LIMIT)
 
     if not enabled:
         return {
@@ -689,17 +712,17 @@ def prepare_phase0_memory_context(task: str, context: dict[str, Any] | None=None
             ],
         }
 
-    stored_records=load_reviewed_memory_records(
+    stored_records = load_reviewed_memory_records(
         namespace) if get_memory_backend(resolved_context) == "file" else []
-    inline_records=resolved_context.get("memory_records") if isinstance(
+    inline_records = resolved_context.get("memory_records") if isinstance(
         resolved_context.get("memory_records"), list) else []
-    retrieved_memories=retrieve_reviewed_memories(
+    retrieved_memories = retrieve_reviewed_memories(
         [*stored_records, *inline_records],
         workflow_kind=workflow_kind,
         namespace=namespace,
         limit=limit,
     )
-    notes=[
+    notes = [
         f"Phase 0 agentic memory enabled for {workflow_kind} in {environment}.",
     ]
     if retrieved_memories:
@@ -721,13 +744,13 @@ def prepare_phase0_memory_context(task: str, context: dict[str, Any] | None=None
 
 
 def _comparison_paths(result: dict[str, Any]) -> list[str]:
-    paths: list[str]=[]
+    paths: list[str] = []
     for item in result.get("retrieved_guidance", []):
         if isinstance(item, dict) and item.get("path"):
             paths.append(str(item["path"]))
 
-    workflow_kind=str(result.get("workflow_kind") or "")
-    default_paths={
+    workflow_kind = str(result.get("workflow_kind") or "")
+    default_paths = {
         "cache_behavior": [
             "/memories/repo/performance-notes.md",
             "/memories/repo/battlestats-notes.md",
@@ -742,7 +765,7 @@ def _comparison_paths(result: dict[str, Any]) -> list[str]:
     }
     paths.extend(default_paths.get(workflow_kind, []))
 
-    deduped: list[str]=[]
+    deduped: list[str] = []
     for path in paths:
         if path not in deduped:
             deduped.append(path)
@@ -755,11 +778,11 @@ def build_phase0_memory_candidates(result: dict[str, Any]) -> list[dict[str, Any
     if str(result.get("status") or "") != "completed":
         return []
 
-    workflow_kind=str(result.get("workflow_kind") or "agentic_workflow")
-    environment=str(result.get("memory_environment")
-                    or get_memory_environment())
-    namespace=get_memory_namespace("procedural", environment=environment)
-    evidence={
+    workflow_kind = str(result.get("workflow_kind") or "agentic_workflow")
+    environment = str(result.get("memory_environment")
+                      or get_memory_environment())
+    namespace = get_memory_namespace("procedural", environment=environment)
+    evidence = {
         "file_paths": list(result.get("touched_files", []))[:6],
         "validation_commands": list(result.get("verification_commands", []))[:4],
         "run_log_path": result.get("run_log_path"),
@@ -770,10 +793,10 @@ def build_phase0_memory_candidates(result: dict[str, Any]) -> list[dict[str, Any
             if isinstance(item, dict) and item.get("path")
         ][:3],
     }
-    candidates: list[dict[str, Any]]=[]
+    candidates: list[dict[str, Any]] = []
 
     if evidence["validation_commands"]:
-        candidate_id=f"{result.get('workflow_id')}:candidate:1"
+        candidate_id = f"{result.get('workflow_id')}:candidate:1"
         candidates.append(
             {
                 "candidate_id": candidate_id,
@@ -799,7 +822,7 @@ def build_phase0_memory_candidates(result: dict[str, Any]) -> list[dict[str, Any
         )
 
     if evidence["file_paths"]:
-        candidate_id=f"{result.get('workflow_id')}:candidate:2"
+        candidate_id = f"{result.get('workflow_id')}:candidate:2"
         candidates.append(
             {
                 "candidate_id": candidate_id,
@@ -828,11 +851,11 @@ def build_phase0_memory_candidates(result: dict[str, Any]) -> list[dict[str, Any
 
 
 def summarize_phase0_memory_activity(result: dict[str, Any]) -> dict[str, Any]:
-    retrieved=result.get("retrieved_memories") if isinstance(
+    retrieved = result.get("retrieved_memories") if isinstance(
         result.get("retrieved_memories"), list) else []
-    candidates=result.get("memory_candidates") if isinstance(
+    candidates = result.get("memory_candidates") if isinstance(
         result.get("memory_candidates"), list) else []
-    store_activity=result.get("memory_store_activity") if isinstance(
+    store_activity = result.get("memory_store_activity") if isinstance(
         result.get("memory_store_activity"), dict) else {}
     return {
         "enabled": bool(result.get("memory_enabled")),

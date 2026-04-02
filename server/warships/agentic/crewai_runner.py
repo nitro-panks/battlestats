@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
-from typing import Any
+from typing import Any, get_origin
 from uuid import uuid4
 
 from crewai import Agent, Crew, Process, Task
@@ -21,6 +21,27 @@ from .tracing import get_current_trace_url, get_langsmith_project_name, trace_bl
 
 
 DEFAULT_CREW_PROCESS = "hierarchical"
+
+
+def _artifact_placeholder_value(field_info: Any) -> Any:
+    origin = get_origin(field_info.annotation)
+    if origin is list:
+        return []
+    return ""
+
+
+def _build_planned_artifact(spec: PersonaSpec) -> dict[str, Any]:
+    return {
+        "persona_key": spec.key,
+        "label": spec.label,
+        "artifact_model": spec.artifact_model.__name__,
+        "artifact_fields": list(spec.artifact_model.model_fields.keys()),
+        "artifact_template": {
+            field_name: _artifact_placeholder_value(field_info)
+            for field_name, field_info in spec.artifact_model.model_fields.items()
+        },
+        "expected_output": spec.expected_output,
+    }
 
 
 def _resolve_process(process: str | None) -> Process:
@@ -67,6 +88,7 @@ def build_crewai_plan(
     resolved_process = _resolve_process(process)
     resolved_llm = _resolve_llm(llm)
     resolved_workflow_id = workflow_id or f"crew-{uuid4().hex[:12]}"
+    planned_artifacts = [_build_planned_artifact(spec) for spec in specs]
 
     return {
         "workflow_id": resolved_workflow_id,
@@ -85,6 +107,11 @@ def build_crewai_plan(
                 "expected_output": spec.expected_output,
                 "artifact_model": spec.artifact_model.__name__,
                 "artifact_fields": list(spec.artifact_model.model_fields.keys()),
+                "artifact_template": next(
+                    artifact["artifact_template"]
+                    for artifact in planned_artifacts
+                    if artifact["persona_key"] == spec.key
+                ),
             }
             for spec in specs
         ],
@@ -99,6 +126,7 @@ def build_crewai_plan(
             }
             for index, spec in enumerate(specs)
         ],
+        "planned_artifacts": planned_artifacts,
         "context": resolved_context,
     }
 
@@ -232,12 +260,14 @@ def run_crewai_workflow(
                 "status": "planned",
                 "summary": summary,
                 "crew_plan": plan,
+                "crew_artifacts": list(plan.get("planned_artifacts", [])),
                 "available_roles": persona_keys(),
                 "started_at": datetime.utcnow().isoformat() + "Z",
                 "run_log_path": write_agent_run_log("crewai", {
                     "workflow_id": plan["workflow_id"],
                     "status": "planned",
                     "crew_plan": plan,
+                    "crew_artifacts": list(plan.get("planned_artifacts", [])),
                     "summary": summary,
                 }),
             }
@@ -260,6 +290,7 @@ def run_crewai_workflow(
                     f"Participating personas: {', '.join(role['label'] for role in plan['roles'])}",
                 ],
                 "crew_plan": plan,
+                "crew_artifacts": list(plan.get("planned_artifacts", [])),
                 "output": str(output),
                 "started_at": datetime.utcnow().isoformat() + "Z",
             }

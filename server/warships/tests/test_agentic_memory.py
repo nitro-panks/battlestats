@@ -43,6 +43,17 @@ class AgenticMemoryTests(TestCase):
         )
         self.assertEqual(workflow_kind, "client_route_smoke")
 
+    def test_infer_workflow_kind_uses_api_adjacent_file_hints(self):
+        workflow_kind = infer_workflow_kind(
+            "Tighten compatibility checks",
+            touched_files=["server/warships/views.py",
+                           "server/battlestats/urls.py"],
+            verification_commands=[
+                "python -m pytest warships/tests/test_views.py -q"],
+        )
+
+        self.assertEqual(workflow_kind, "api_contract_change")
+
     def test_retrieve_reviewed_memories_filters_and_bounds_results(self):
         records = [
             {

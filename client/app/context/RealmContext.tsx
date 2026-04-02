@@ -23,9 +23,9 @@ export const RealmProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         try {
             const urlRealm = new URLSearchParams(window.location.search).get('realm') as Realm | null;
             const stored = localStorage.getItem('bs-realm') as Realm | null;
-            
-            const initial = (urlRealm && VALID_REALMS.includes(urlRealm)) 
-                ? urlRealm 
+
+            const initial = (urlRealm && VALID_REALMS.includes(urlRealm))
+                ? urlRealm
                 : (stored && VALID_REALMS.includes(stored) ? stored : null);
 
             if (initial) {
@@ -33,7 +33,7 @@ export const RealmProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 if (initial !== stored) {
                     try {
                         localStorage.setItem('bs-realm', initial);
-                    } catch {}
+                    } catch { }
                 }
             }
         } catch {
