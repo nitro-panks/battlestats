@@ -73,19 +73,43 @@ const wrColor = (wr: number, theme: ChartTheme) => {
     return c.wrBad;
 };
 
-// ── Axis line helpers ────────────────────────────────────────────
+// ── Axis definitions ─────────────────────────────────────────────
+// Per-axis colors from ColorBrewer Set2 — muted, distinguishable, accessible
 
 interface AxisDef {
     from: { nx: number; ny: number; nz: number };
     to: { nx: number; ny: number; nz: number };
     label: string;
+    lightColor: string;
+    darkColor: string;
 }
 
 const AXES: AxisDef[] = [
-    { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: 1, ny: -1, nz: -1 }, label: 'Battles →' },
-    { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: -1, ny: 1, nz: -1 }, label: 'Win Rate →' },
-    { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: -1, ny: -1, nz: 1 }, label: 'KDR →' },
+    { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: 1, ny: -1, nz: -1 }, label: 'Battles', lightColor: '#66c2a5', darkColor: '#66c2a5' },
+    { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: -1, ny: 1, nz: -1 }, label: 'Win Rate', lightColor: '#fc8d62', darkColor: '#fc8d62' },
+    { from: { nx: -1, ny: -1, nz: -1 }, to: { nx: -1, ny: -1, nz: 1 }, label: 'KDR', lightColor: '#8da0cb', darkColor: '#8da0cb' },
 ];
+
+interface DataRanges {
+    maxBattles: number;
+    minWr: number;
+    maxWr: number;
+    minKdr: number;
+    maxKdr: number;
+}
+
+const formatTickValue = (axisIndex: number, normalized: number, ranges: DataRanges): string => {
+    if (axisIndex === 0) {
+        const val = Math.round(((normalized + 1) / 2) * ranges.maxBattles);
+        return val >= 1000 ? `${(val / 1000).toFixed(0)}k` : `${val}`;
+    }
+    if (axisIndex === 1) {
+        const val = ranges.minWr + ((normalized + 1) / 2) * (ranges.maxWr - ranges.minWr);
+        return `${val.toFixed(0)}%`;
+    }
+    const val = ranges.minKdr + ((normalized + 1) / 2) * (ranges.maxKdr - ranges.minKdr);
+    return val.toFixed(1);
+};
 
 // ── Draw (updates existing SVG content) ─────────────────────────
 
@@ -100,51 +124,26 @@ const renderFrame = (
     cy: number,
     scale: number,
     theme: ChartTheme,
+    ranges: DataRanges,
     onSelectMember?: (name: string) => void,
 ) => {
     const colors = chartColors[theme];
     g.selectAll('*').remove();
     tooltipG.selectAll('*').remove();
 
-    // Draw axes
-    for (const axis of AXES) {
-        const fromR = rotateX(rotateY(axis.from, rotY), rotXVal);
-        const toR = rotateX(rotateY(axis.to, rotY), rotXVal);
-        const p1 = project(fromR, cx, cy, scale);
-        const p2 = project(toR, cx, cy, scale);
-
-        g.append('line')
-            .attr('x1', p1.x).attr('y1', p1.y)
-            .attr('x2', p2.x).attr('y2', p2.y)
-            .attr('stroke', colors.gridLine || colors.labelText)
-            .attr('stroke-opacity', 0.3)
-            .attr('stroke-width', 1);
-
-        g.append('text')
-            .attr('x', p2.x + (p2.x - p1.x) * 0.06)
-            .attr('y', p2.y + (p2.y - p1.y) * 0.06)
-            .attr('text-anchor', 'middle')
-            .attr('dominant-baseline', 'middle')
-            .style('font-size', '10px')
-            .style('fill', colors.labelText)
-            .style('fill-opacity', 0.6)
-            .text(axis.label);
-    }
-
-    // Draw grid lines on back planes
+    // Draw grid lines first (behind axes)
     const gridSteps = [-1, -0.5, 0, 0.5, 1];
-    const gridColor = colors.gridLine || colors.labelText;
 
-    // XY back-plane (z = -1)
+    // XY back-plane (z = -1) — tinted by KDR axis color
     for (const s of gridSteps) {
         const h1 = project(rotateX(rotateY({ nx: -1, ny: s, nz: -1 }, rotY), rotXVal), cx, cy, scale);
         const h2 = project(rotateX(rotateY({ nx: 1, ny: s, nz: -1 }, rotY), rotXVal), cx, cy, scale);
         g.append('line').attr('x1', h1.x).attr('y1', h1.y).attr('x2', h2.x).attr('y2', h2.y)
-            .attr('stroke', gridColor).attr('stroke-opacity', 0.08).attr('stroke-width', 0.5);
+            .attr('stroke', colors.gridLine).attr('stroke-opacity', 0.15).attr('stroke-width', 0.5);
         const v1 = project(rotateX(rotateY({ nx: s, ny: -1, nz: -1 }, rotY), rotXVal), cx, cy, scale);
         const v2 = project(rotateX(rotateY({ nx: s, ny: 1, nz: -1 }, rotY), rotXVal), cx, cy, scale);
         g.append('line').attr('x1', v1.x).attr('y1', v1.y).attr('x2', v2.x).attr('y2', v2.y)
-            .attr('stroke', gridColor).attr('stroke-opacity', 0.08).attr('stroke-width', 0.5);
+            .attr('stroke', colors.gridLine).attr('stroke-opacity', 0.15).attr('stroke-width', 0.5);
     }
 
     // XZ floor-plane (y = -1)
@@ -152,11 +151,69 @@ const renderFrame = (
         const h1 = project(rotateX(rotateY({ nx: -1, ny: -1, nz: s }, rotY), rotXVal), cx, cy, scale);
         const h2 = project(rotateX(rotateY({ nx: 1, ny: -1, nz: s }, rotY), rotXVal), cx, cy, scale);
         g.append('line').attr('x1', h1.x).attr('y1', h1.y).attr('x2', h2.x).attr('y2', h2.y)
-            .attr('stroke', gridColor).attr('stroke-opacity', 0.08).attr('stroke-width', 0.5);
+            .attr('stroke', colors.gridLine).attr('stroke-opacity', 0.15).attr('stroke-width', 0.5);
         const v1 = project(rotateX(rotateY({ nx: s, ny: -1, nz: -1 }, rotY), rotXVal), cx, cy, scale);
         const v2 = project(rotateX(rotateY({ nx: s, ny: -1, nz: 1 }, rotY), rotXVal), cx, cy, scale);
         g.append('line').attr('x1', v1.x).attr('y1', v1.y).attr('x2', v2.x).attr('y2', v2.y)
-            .attr('stroke', gridColor).attr('stroke-opacity', 0.08).attr('stroke-width', 0.5);
+            .attr('stroke', colors.gridLine).attr('stroke-opacity', 0.15).attr('stroke-width', 0.5);
+    }
+
+    // Draw axes — each with its own ColorBrewer Set2 color
+    for (let ai = 0; ai < AXES.length; ai++) {
+        const axis = AXES[ai];
+        const axisColor = theme === 'dark' ? axis.darkColor : axis.lightColor;
+        const fromR = rotateX(rotateY(axis.from, rotY), rotXVal);
+        const toR = rotateX(rotateY(axis.to, rotY), rotXVal);
+        const p1 = project(fromR, cx, cy, scale);
+        const p2 = project(toR, cx, cy, scale);
+
+        // Axis line
+        g.append('line')
+            .attr('x1', p1.x).attr('y1', p1.y)
+            .attr('x2', p2.x).attr('y2', p2.y)
+            .attr('stroke', axisColor)
+            .attr('stroke-opacity', 0.8)
+            .attr('stroke-width', 2);
+
+        // Small arrowhead at the end
+        const dx = p2.x - p1.x, dy = p2.y - p1.y;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const ux = dx / len, uy = dy / len;
+        const arrowLen = 6;
+        g.append('line')
+            .attr('x1', p2.x).attr('y1', p2.y)
+            .attr('x2', p2.x - arrowLen * ux + arrowLen * 0.4 * uy)
+            .attr('y2', p2.y - arrowLen * uy - arrowLen * 0.4 * ux)
+            .attr('stroke', axisColor).attr('stroke-opacity', 0.8).attr('stroke-width', 1.5);
+        g.append('line')
+            .attr('x1', p2.x).attr('y1', p2.y)
+            .attr('x2', p2.x - arrowLen * ux - arrowLen * 0.4 * uy)
+            .attr('y2', p2.y - arrowLen * uy + arrowLen * 0.4 * ux)
+            .attr('stroke', axisColor).attr('stroke-opacity', 0.8).attr('stroke-width', 1.5);
+
+        // Axis label — offset further from endpoint
+        g.append('text')
+            .attr('x', p2.x + (p2.x - p1.x) * 0.1)
+            .attr('y', p2.y + (p2.y - p1.y) * 0.1)
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'middle')
+            .style('font-size', '12px')
+            .style('font-weight', '600')
+            .style('fill', axisColor)
+            .text(axis.label);
+
+        // Tick value at max end
+        const maxTick = formatTickValue(ai, 1, ranges);
+        g.append('text')
+            .attr('x', p2.x + (p2.x - p1.x) * 0.1)
+            .attr('y', p2.y + (p2.y - p1.y) * 0.1 + 13)
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'middle')
+            .style('font-size', '10px')
+            .style('font-weight', '400')
+            .style('fill', axisColor)
+            .style('fill-opacity', 0.7)
+            .text(maxTick);
     }
 
     // Project & depth-sort points
@@ -430,12 +487,13 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
         const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         const g = gRef.current;
         const tooltipG = tooltipGRef.current;
+        const ranges: DataRanges = { maxBattles, minWr, maxWr, minKdr, maxKdr };
 
         const animate = () => {
             if (autoRotateRef.current && !prefersReducedMotion) {
                 rotYRef.current += 0.003;
             }
-            renderFrame(g, tooltipG, points, rotYRef.current, rotXRef.current, cx, cy, scale, theme, onSelectMember);
+            renderFrame(g, tooltipG, points, rotYRef.current, rotXRef.current, cx, cy, scale, theme, ranges, onSelectMember);
             animFrameRef.current = requestAnimationFrame(animate);
         };
 
