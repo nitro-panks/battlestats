@@ -4205,12 +4205,11 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
         clan__clan_id=clan_id, realm=realm, is_hidden=False
     ).values_list('player_id', 'tiers_json')
 
-    from warships.utils import _delay_task_safely
     from warships.tasks import update_tiers_data_task
 
     for player_id, tiers_json in players:
         if not tiers_json:
-            _delay_task_safely(update_tiers_data_task, player_id=player_id, realm=realm)
+            update_tiers_data_task.delay(player_id=player_id, realm=realm)
             requires_hydration = True
             continue
 
