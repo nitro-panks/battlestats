@@ -17,10 +17,32 @@ from warships.player_records import BlockedAccountError, get_or_create_canonical
 APP_ID = os.environ.get("WG_APP_ID")
 REQUEST_TIMEOUT = 20
 PAGE_SIZE = 100
-RATE_LIMIT_DELAY = 0.25
 BATCH_SIZE = 100
 
 log = logging.getLogger("crawl")
+
+
+def _env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return default
+
+    return value if value >= 0 else default
+
+
+def _crawl_request_delay(core_only: bool = False) -> float:
+    if core_only:
+        return _env_float(
+            "CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY",
+            _env_float("CLAN_CRAWL_RATE_LIMIT_DELAY", 0.25),
+        )
+
+    return _env_float("CLAN_CRAWL_RATE_LIMIT_DELAY", 0.25)
 
 
 def _touch_crawl_heartbeat(heartbeat_callback: Optional[Callable[[], None]]) -> None:
@@ -40,8 +62,9 @@ def _from_ts(ts):
     return datetime.fromtimestamp(ts)
 
 
-def _api_get(endpoint: str, params: Dict, realm: str = DEFAULT_REALM) -> Optional[Dict]:
-    time.sleep(RATE_LIMIT_DELAY)
+def _api_get(endpoint: str, params: Dict, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> Optional[Dict]:
+    if request_delay > 0:
+        time.sleep(request_delay)
     params["application_id"] = APP_ID
     base_url = get_base_url(realm)
     try:
@@ -66,7 +89,7 @@ def _api_get(endpoint: str, params: Dict, realm: str = DEFAULT_REALM) -> Optiona
     return body
 
 
-def fetch_clan_list_page(page: int, realm: str = DEFAULT_REALM) -> tuple[List[Dict], int]:
+def fetch_clan_list_page(page: int, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> tuple[List[Dict], int]:
     body = _api_get(
         "clans/list/",
         {
@@ -75,6 +98,7 @@ def fetch_clan_list_page(page: int, realm: str = DEFAULT_REALM) -> tuple[List[Di
             "limit": PAGE_SIZE,
         },
         realm=realm,
+        request_delay=request_delay,
     )
     if body is None:
         return [], 0
@@ -84,11 +108,12 @@ def fetch_clan_list_page(page: int, realm: str = DEFAULT_REALM) -> tuple[List[Di
     return body.get("data", []) or [], total_pages
 
 
-def fetch_member_ids(clan_id: int, realm: str = DEFAULT_REALM) -> List[int]:
+def fetch_member_ids(clan_id: int, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> List[int]:
     body = _api_get(
         "clans/info/",
         {"clan_id": clan_id, "fields": "members_ids"},
         realm=realm,
+        request_delay=request_delay,
     )
     if body is None:
         return []
@@ -96,7 +121,7 @@ def fetch_member_ids(clan_id: int, realm: str = DEFAULT_REALM) -> List[int]:
     return clan_data.get("members_ids", []) or []
 
 
-def fetch_clan_info(clan_id: int, realm: str = DEFAULT_REALM) -> Dict:
+def fetch_clan_info(clan_id: int, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> Dict:
     body = _api_get(
         "clans/info/",
         {
@@ -104,19 +129,21 @@ def fetch_clan_info(clan_id: int, realm: str = DEFAULT_REALM) -> Dict:
             "fields": "members_count,tag,name,clan_id,description,leader_id,leader_name",
         },
         realm=realm,
+        request_delay=request_delay,
     )
     if body is None:
         return {}
     return body.get("data", {}).get(str(clan_id)) or {}
 
 
-def fetch_players_bulk(player_ids: List[int], realm: str = DEFAULT_REALM) -> Dict:
+def fetch_players_bulk(player_ids: List[int], realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> Dict:
     if not player_ids:
         return {}
     body = _api_get(
         "account/info/",
         {"account_id": ",".join(str(pid) for pid in player_ids)},
         realm=realm,
+        request_delay=request_delay,
     )
     if body is None:
         return {}
@@ -219,12 +246,16 @@ def save_player(player_data: Dict, clan: Clan, realm: str = DEFAULT_REALM, core_
         refresh_player_explorer_summary(player)
 
 
-def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM) -> List[Dict]:
+def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> List[Dict]:
     all_clans: List[Dict] = []
     page = 1
     _touch_crawl_heartbeat(heartbeat_callback)
 
-    first_batch, total_pages = fetch_clan_list_page(page, realm=realm)
+    first_batch, total_pages = fetch_clan_list_page(
+        page,
+        realm=realm,
+        request_delay=request_delay,
+    )
     if not first_batch:
         log.error("Failed to fetch first page of clans/list/")
         return []
@@ -237,7 +268,11 @@ def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Cal
         _touch_crawl_heartbeat(heartbeat_callback)
         if limit and len(all_clans) >= limit:
             break
-        batch, _ = fetch_clan_list_page(page, realm=realm)
+        batch, _ = fetch_clan_list_page(
+            page,
+            realm=realm,
+            request_delay=request_delay,
+        )
         if not batch:
             log.warning("Empty page %d, stopping pagination", page)
             break
@@ -253,7 +288,7 @@ def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Cal
     return all_clans
 
 
-def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, core_only: bool = False) -> dict[str, int]:
+def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, core_only: bool = False, request_delay: float = 0.25) -> dict[str, int]:
     total = len(clan_stubs)
     clans_processed = 0
     players_saved = 0
@@ -267,7 +302,7 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
             skipped += 1
             continue
 
-        info = fetch_clan_info(clan_id, realm=realm)
+        info = fetch_clan_info(clan_id, realm=realm, request_delay=request_delay)
         if not info:
             log.warning("[%d/%d] Failed to fetch info for clan %d",
                         i, total, clan_id)
@@ -280,7 +315,7 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
             clans_processed += 1
             continue
 
-        member_ids = fetch_member_ids(clan_id, realm=realm)
+        member_ids = fetch_member_ids(clan_id, realm=realm, request_delay=request_delay)
         if not member_ids:
             log.warning("[%d/%d] No member IDs for [%s] %s",
                         i, total, clan.tag, clan.name)
@@ -289,7 +324,7 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
 
         for batch_start in range(0, len(member_ids), BATCH_SIZE):
             batch_ids = member_ids[batch_start: batch_start + BATCH_SIZE]
-            player_map = fetch_players_bulk(batch_ids, realm=realm)
+            player_map = fetch_players_bulk(batch_ids, realm=realm, request_delay=request_delay)
 
             for _pid_str, pdata in player_map.items():
                 save_player(pdata, clan, realm=realm, core_only=core_only)
@@ -325,16 +360,19 @@ def run_clan_crawl(
 ) -> dict[str, int | bool]:
     from warships.tasks import queue_efficiency_rank_snapshot_refresh
 
+    request_delay = _crawl_request_delay(core_only=core_only)
+
     if not APP_ID:
         raise RuntimeError("WG_APP_ID environment variable is not set")
 
-    log.info("Starting crawl (realm=%s, resume=%s, dry_run=%s, limit=%s, core_only=%s)",
-             realm, resume, dry_run, limit, core_only)
+    log.info("Starting crawl (realm=%s, resume=%s, dry_run=%s, limit=%s, core_only=%s, request_delay=%.3fs)",
+             realm, resume, dry_run, limit, core_only, request_delay)
 
     clan_stubs = crawl_clan_ids(
         limit=limit,
         heartbeat_callback=heartbeat_callback,
         realm=realm,
+        request_delay=request_delay,
     )
     if not clan_stubs:
         raise RuntimeError("Failed to fetch clan list")
@@ -355,6 +393,7 @@ def run_clan_crawl(
         heartbeat_callback=heartbeat_callback,
         realm=realm,
         core_only=core_only,
+        request_delay=request_delay,
     )
     if summary.get("players_saved", 0) > 0 and not core_only:
         queue_efficiency_rank_snapshot_refresh(realm=realm)

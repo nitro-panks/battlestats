@@ -90,6 +90,11 @@ chmod 640 /etc/battlestats-server.secrets.env
 chmod 644 /etc/ssl/certs/battlestats-do-ca-certificate.crt
 rm -f "${REMOTE_TMP_ENV}" "${REMOTE_TMP_SECRETS}" "${REMOTE_TMP_CERT}"
 
+cat > /etc/sysctl.d/99-battlestats-memory.conf <<'EOF'
+vm.swappiness=10
+EOF
+sysctl --system >/dev/null 2>&1 || true
+
 if [[ -s /etc/battlestats-server.env ]] && [[ -n "$(tail -c1 /etc/battlestats-server.env 2>/dev/null || true)" ]]; then
   printf '\n' >> /etc/battlestats-server.env
 fi
@@ -138,6 +143,29 @@ else
   echo 'ENABLE_CRAWLER_SCHEDULES=1' >> /etc/battlestats-server.env
 fi
 
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" /etc/battlestats-server.env; then
+    sed -i "s|^${key}=.*|${key}=${value}|" /etc/battlestats-server.env
+  else
+    echo "${key}=${value}" >> /etc/battlestats-server.env
+  fi
+}
+
+set_env_value CELERY_DEFAULT_CONCURRENCY 3
+set_env_value CELERY_HYDRATION_CONCURRENCY 3
+set_env_value CELERY_BACKGROUND_CONCURRENCY 2
+set_env_value MAX_CONCURRENT_REALM_CRAWLS 1
+set_env_value CLAN_CRAWL_RATE_LIMIT_DELAY 0.25
+set_env_value CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY 0.10
+set_env_value CELERY_DEFAULT_MAX_TASKS_PER_CHILD 200
+set_env_value CELERY_HYDRATION_MAX_TASKS_PER_CHILD 200
+set_env_value CELERY_BACKGROUND_MAX_TASKS_PER_CHILD 50
+set_env_value CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB 393216
+set_env_value CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB 393216
+set_env_value CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB 786432
+
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"
 
@@ -152,7 +180,74 @@ cd "${REMOTE_RELEASE}/server"
 chown -R "${APP_USER}:${APP_USER}" "${REMOTE_RELEASE}"
 ln -sfn "${REMOTE_RELEASE}" "${APP_ROOT}/current"
 
+cat > /etc/systemd/system/battlestats-celery.service <<EOF
+[Unit]
+Description=Battlestats Celery worker (default queue — user-facing tasks)
+After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
+Requires=redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q default -c "${CELERY_DEFAULT_CONCURRENCY:-3}" --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_DEFAULT_MAX_TASKS_PER_CHILD:-200}" --max-memory-per-child="${CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB:-393216}" --without-gossip --without-mingle -n default@%%h'
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/battlestats-celery-hydration.service <<EOF
+[Unit]
+Description=Battlestats Celery worker (hydration queue — ranked + efficiency refresh)
+After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
+Requires=redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q hydration -c "${CELERY_HYDRATION_CONCURRENCY:-3}" --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_HYDRATION_MAX_TASKS_PER_CHILD:-200}" --max-memory-per-child="${CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB:-393216}" --without-gossip --without-mingle -n hydration@%%h'
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/battlestats-celery-background.service <<EOF
+[Unit]
+Description=Battlestats Celery worker (background queue — crawls, warmers, snapshots)
+After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
+Requires=redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q background -c "${CELERY_BACKGROUND_CONCURRENCY:-2}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_BACKGROUND_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n background@%%h'
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
+redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
 redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
 systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
 systemctl --no-pager --full status battlestats-gunicorn | sed -n '1,25p'

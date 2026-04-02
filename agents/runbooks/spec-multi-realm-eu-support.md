@@ -499,7 +499,12 @@ This gives us a working EU landing page, search, player profiles (without effici
 
 **Estimated time**: 62,722 clans × (1 clan_info call + 1 member_ids call + ~5 account_info batches) ≈ ~440K API calls at 0.25s = ~30 hours. Can be accelerated by reducing rate delay to 0.1s for the initial bulk load (per-endpoint rate limit is 10/s, and batches of 100 players keep us well under).
 
-With 0.1s delay: ~12 hours. Run overnight or across a weekend.
+With a `0.1s` core-only delay: ~12 hours. Run overnight or across a weekend.
+
+Implementation note:
+
+- `warships.clan_crawl.run_clan_crawl(core_only=True)` now uses `CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY` (default `0.10`) while normal crawls continue to use `CLAN_CRAWL_RATE_LIMIT_DELAY` (default `0.25`).
+- This keeps the ongoing full-refresh cadence conservative while allowing the staged EU population crawl to move faster.
 
 **Stage 2: Efficiency + achievements (slow, background — days)**
 
@@ -555,6 +560,10 @@ After the initial load, the normal crawl schedule handles EU. The existing `craw
 **NA crawl runtime** (observed): The NA crawl frequently fails to complete within the 6-hour task time limit (35K clans, ~276K players, 3+ API calls per non-hidden player). **This is a pre-existing issue** — it will be worse for EU (1.8x population). The incremental player refresh strategy from `spec-production-data-refresh-strategy.md` would solve this for both realms. Consider implementing it alongside or shortly after the EU launch.
 
 **Interim mitigation**: For the daily crawl, consider skipping efficiency/achievement updates for players refreshed within the last 7 days. This dramatically reduces API calls per crawl cycle.
+
+Operational note:
+
+- Deploy/bootstrap should set `MAX_CONCURRENT_REALM_CRAWLS=1` and clear realm-scoped crawl locks on restart so an interrupted EU migration crawl resumes cleanly after a backend deploy.
 
 ---
 

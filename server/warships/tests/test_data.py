@@ -7,7 +7,7 @@ from django.test.utils import CaptureQueriesContext
 from django.core.cache import cache
 from django.utils import timezone
 
-from warships.clan_crawl import run_clan_crawl, save_player
+from warships.clan_crawl import _crawl_request_delay, run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
 from warships.data import update_snapshot_data, fetch_activity_data, fetch_clan_plot_data, fetch_randoms_data, fetch_player_summary, fetch_tier_data, fetch_type_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile, fetch_player_population_distribution
 from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key
@@ -88,6 +88,47 @@ class ClanCrawlPublicationTests(TestCase):
         mock_crawl_clan_ids.assert_called_once()
         mock_crawl_clan_members.assert_not_called()
         mock_queue_efficiency_rank_snapshot_refresh.assert_not_called()
+
+    @patch("warships.clan_crawl.crawl_clan_members", return_value={"clans_processed": 1, "players_saved": 3, "skipped": 0})
+    @patch("warships.clan_crawl.crawl_clan_ids", return_value=[{"clan_id": 1001}])
+    @patch("warships.tasks.queue_efficiency_rank_snapshot_refresh")
+    @patch("warships.clan_crawl.APP_ID", "fixture-app-id")
+    def test_run_clan_crawl_uses_faster_delay_for_core_only_runs(
+        self,
+        mock_queue_efficiency_rank_snapshot_refresh,
+        mock_crawl_clan_ids,
+        mock_crawl_clan_members,
+    ):
+        with patch.dict("os.environ", {
+            "CLAN_CRAWL_RATE_LIMIT_DELAY": "0.25",
+            "CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY": "0.10",
+        }, clear=False):
+            summary = run_clan_crawl(core_only=True)
+
+        self.assertEqual(summary["players_saved"], 3)
+        mock_crawl_clan_ids.assert_called_once_with(
+            limit=None,
+            heartbeat_callback=None,
+            realm='na',
+            request_delay=0.10,
+        )
+        mock_crawl_clan_members.assert_called_once_with(
+            [{"clan_id": 1001}],
+            resume=False,
+            heartbeat_callback=None,
+            realm='na',
+            core_only=True,
+            request_delay=0.10,
+        )
+        mock_queue_efficiency_rank_snapshot_refresh.assert_not_called()
+
+    def test_crawl_request_delay_falls_back_to_default_for_invalid_env(self):
+        with patch.dict("os.environ", {
+            "CLAN_CRAWL_RATE_LIMIT_DELAY": "invalid",
+            "CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY": "-1",
+        }, clear=False):
+            self.assertEqual(_crawl_request_delay(core_only=False), 0.25)
+            self.assertEqual(_crawl_request_delay(core_only=True), 0.25)
 
 
 class ActivityDataRefreshTests(TestCase):

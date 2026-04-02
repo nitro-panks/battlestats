@@ -181,6 +181,7 @@ const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 
 const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18·Eff + 0.10·Vol_5-10 + 0.06·Ranked + 0.04·Clan) × M_share';
 const CLAN_BEST_FORMULA_APPROXIMATION = 'Best_clan ≈ 0.30·WR + 0.25·Activity + 0.20·MemberScore + 0.15·CB_recency + 0.10·log(Battles)';
+const BEST_CLAN_FALLBACK_NOTICE = 'Best clan rankings are still warming up for this realm. Showing recent clans until enough tracked data is available.';
 
 const PlayerSearch: React.FC = () => {
     const { theme } = useTheme();
@@ -357,7 +358,7 @@ const PlayerSearch: React.FC = () => {
         }
 
         if (clanMode === 'best') {
-            return [...clans]
+            const bestClans = [...clans]
                 .filter((clan) => {
                     if ((clan.total_battles ?? 0) < BEST_CLAN_MIN_TOTAL_BATTLES) {
                         return false;
@@ -382,10 +383,18 @@ const PlayerSearch: React.FC = () => {
                     return left.name.localeCompare(right.name);
                 })
                 .slice(0, LANDING_CLAN_LIMIT);
+
+            if (bestClans.length > 0) {
+                return bestClans;
+            }
+
+            return recentClans.slice(0, LANDING_CLAN_LIMIT);
         }
 
         return clans.slice(0, LANDING_CLAN_LIMIT);
     }, [clanMode, clans, recentClans]);
+
+    const isBestClanFallbackActive = clanMode === 'best' && clans.length === 0 && recentClans.length > 0;
 
     const visibleLandingPlayers = useMemo(() => {
         if (playerMode === 'recent') {
@@ -505,6 +514,11 @@ const PlayerSearch: React.FC = () => {
                                 </div>
                             </div>
                             <div className="mt-3">
+                                {isBestClanFallbackActive ? (
+                                    <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+                                        {BEST_CLAN_FALLBACK_NOTICE}
+                                    </p>
+                                ) : null}
                                 <LandingClanSVG
                                     clans={visibleLandingClans}
                                     heatmapClans={clans}

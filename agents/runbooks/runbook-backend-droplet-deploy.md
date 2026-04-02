@@ -65,6 +65,14 @@ The deploy uses these droplet files:
 
 The deploy script populates them from the existing repo cloud target files, so the backend continues using the established managed Postgres connection details instead of a second config source.
 
+The deploy also enforces droplet memory tuning for the Django and Celery process set:
+
+- `/etc/sysctl.d/99-battlestats-memory.conf` sets `vm.swappiness=10` so the kernel prefers keeping hot gunicorn and Celery workers in RAM, using swap as a transient safety net rather than an eager spill target.
+- `/etc/battlestats-server.env` carries Celery concurrency and recycling defaults sized for the 4 GB droplet: default queue `3`, hydration queue `3`, background queue `2`.
+- `/etc/battlestats-server.env` also carries migration guardrails for multi-realm population: `MAX_CONCURRENT_REALM_CRAWLS=1`, `CLAN_CRAWL_RATE_LIMIT_DELAY=0.25`, and `CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY=0.10`.
+- Celery workers are restarted from systemd units that read those env vars and apply `--max-memory-per-child` to recycle unusually large worker children before memory drift accumulates.
+- Before restarting services, the deploy clears realm-scoped clan-crawl Redis keys so an interrupted EU resume crawl does not remain blocked behind stale locks after a rollout.
+
 When you are serving the app from a custom domain, pass the root domain and any aliases as a comma-separated `EXTRA_ALLOWED_HOSTS` value so Django accepts the incoming `Host` header.
 
 ## Service checks

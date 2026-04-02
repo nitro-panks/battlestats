@@ -50,6 +50,13 @@ elif ! swapon --show | grep -q '/swapfile'; then
   fi
 fi
 
+# Prefer RAM over swap for the hot Django/Celery working set. Swap stays
+# available as an OOM safety net for transient warm-up spikes.
+cat > /etc/sysctl.d/99-battlestats-memory.conf <<'EOF'
+vm.swappiness=10
+EOF
+sysctl --system >/dev/null 2>&1 || true
+
 if ! id -u "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --home "${APP_ROOT}" --shell /usr/sbin/nologin "${APP_USER}"
 fi
@@ -81,6 +88,18 @@ ENABLE_CRAWLER_SCHEDULES=1
 WARM_LANDING_PAGE_ON_STARTUP=1
 LANDING_WARMUP_START_DELAY_SECONDS=5
 HOT_ENTITY_PINNED_PLAYER_NAMES=lil_boots
+MAX_CONCURRENT_REALM_CRAWLS=1
+CLAN_CRAWL_RATE_LIMIT_DELAY=0.25
+CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY=0.10
+CELERY_DEFAULT_CONCURRENCY=3
+CELERY_HYDRATION_CONCURRENCY=3
+CELERY_BACKGROUND_CONCURRENCY=2
+CELERY_DEFAULT_MAX_TASKS_PER_CHILD=200
+CELERY_HYDRATION_MAX_TASKS_PER_CHILD=200
+CELERY_BACKGROUND_MAX_TASKS_PER_CHILD=50
+CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB=393216
+CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB=393216
+CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB=786432
 EOF
 fi
 
@@ -130,7 +149,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q default -c 2 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n default@%%h
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q default -c "${CELERY_DEFAULT_CONCURRENCY:-3}" --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_DEFAULT_MAX_TASKS_PER_CHILD:-200}" --max-memory-per-child="${CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB:-393216}" --without-gossip --without-mingle -n default@%%h'
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
@@ -152,7 +171,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q hydration -c 2 --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle -n hydration@%%h
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q hydration -c "${CELERY_HYDRATION_CONCURRENCY:-3}" --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_HYDRATION_MAX_TASKS_PER_CHILD:-200}" --max-memory-per-child="${CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB:-393216}" --without-gossip --without-mingle -n hydration@%%h'
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
@@ -174,7 +193,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO -Q background -c 2 --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child=50 --without-gossip --without-mingle -n background@%%h
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q background -c "${CELERY_BACKGROUND_CONCURRENCY:-2}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_BACKGROUND_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n background@%%h'
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
@@ -211,6 +230,8 @@ systemctl restart redis-server rabbitmq-server
 
 if [[ -d "${APP_ROOT}/current/server" ]]; then
   # Clear crawl locks before restarting workers to prevent stale-lock watchdog triggers
+  # or a stranded EU resume crawl after an interrupted deploy.
+  redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
   redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
   systemctl restart battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
 fi

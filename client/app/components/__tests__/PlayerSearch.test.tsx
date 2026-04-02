@@ -352,6 +352,32 @@ describe('PlayerSearch landing efficiency icon', () => {
         )).toBe(true);
     });
 
+    it('falls back to recent clans when best clan results are empty', async () => {
+        installFetchMock({
+            clans: [],
+            recentClans: [
+                {
+                    clan_id: 902,
+                    name: 'FallbackClan',
+                    tag: 'FALL',
+                    members_count: 32,
+                    clan_wr: 54.2,
+                    total_battles: 120000,
+                    active_members: 16,
+                },
+            ],
+        });
+
+        render(<PlayerSearch />);
+
+        const bestClanButton = (await screen.findAllByRole('button', { name: 'Best' }))[0];
+        fireEvent.click(bestClanButton);
+
+        expect(await screen.findByText(/Best clan rankings are still warming up for this realm\./i)).toBeInTheDocument();
+        expect(await screen.findByRole('button', { name: /Show clan FallbackClan/i })).toBeInTheDocument();
+        expect(screen.getByTestId('landing-clan-svg')).toHaveAttribute('data-clan-count', '1');
+    });
+
     it('queues a best landing warmup once on page load', async () => {
         render(<PlayerSearch />);
 
