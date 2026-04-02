@@ -8,15 +8,17 @@ const slugifySegment = (value: string): string => {
 };
 
 
-export const buildPlayerPath = (playerName: string): string => {
-    return `/player/${encodeURIComponent(playerName.trim())}`;
+export const buildPlayerPath = (playerName: string, realm?: string): string => {
+    const base = `/player/${encodeURIComponent(playerName.trim())}`;
+    return realm ? `${base}?realm=${realm}` : base;
 };
 
 
-export const buildClanPath = (clanId: number | string, clanName?: string): string => {
+export const buildClanPath = (clanId: number | string, clanName?: string, realm?: string): string => {
     const normalizedId = String(clanId).trim();
     const slug = slugifySegment(clanName || '');
-    return slug ? `/clan/${normalizedId}-${slug}` : `/clan/${normalizedId}`;
+    const base = slug ? `/clan/${normalizedId}-${slug}` : `/clan/${normalizedId}`;
+    return realm ? `${base}?realm=${realm}` : base;
 };
 
 

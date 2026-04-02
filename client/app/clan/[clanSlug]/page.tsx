@@ -8,14 +8,19 @@ interface ClanPageProps {
     params: Promise<{
         clanSlug: string;
     }>;
+    searchParams: Promise<{
+        realm?: string;
+    }>;
 }
 
 
-export async function generateMetadata({ params }: ClanPageProps): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: ClanPageProps): Promise<Metadata> {
     const { clanSlug } = await params;
+    const { realm } = await searchParams;
+    const realmParam = realm && ['na', 'eu'].includes(realm) ? realm : 'na';
     const decoded = decodeURIComponent(clanSlug);
     const label = decoded.replace(/^\d+-/, '') || decoded;
-    const url = getSiteUrl(`/clan/${clanSlug}`);
+    const url = getSiteUrl(`/clan/${clanSlug}?realm=${realmParam}`);
 
     return {
         title: `${label} — Clan — WoWs Battlestats`,

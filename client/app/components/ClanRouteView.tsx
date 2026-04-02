@@ -145,7 +145,7 @@ const ClanRouteView: React.FC<ClanRouteViewProps> = ({ clanSlug }) => {
         <ClanDetail
             clan={clanData}
             onBack={() => router.push('/')}
-            onSelectMember={(memberName) => router.push(buildPlayerPath(memberName))}
+            onSelectMember={(memberName) => router.push(buildPlayerPath(memberName, realm))}
         />
     );
 };

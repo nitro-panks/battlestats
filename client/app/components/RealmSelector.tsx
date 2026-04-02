@@ -61,11 +61,9 @@ const RealmSelector: React.FC = () => {
         setRealm(newRealm);
         setOpen(false);
 
-        // If on a player or clan detail page, redirect to landing
-        // since the entity may not exist on the other realm
-        if (pathname.startsWith('/player/') || pathname.startsWith('/clan/')) {
-            router.push('/');
-        }
+        const url = new URL(window.location.href);
+        url.searchParams.set('realm', newRealm);
+        router.replace(url.pathname + url.search);
     };
 
     const currentLabel = realm.toUpperCase();

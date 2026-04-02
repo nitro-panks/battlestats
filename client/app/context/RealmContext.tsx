@@ -21,9 +21,20 @@ export const RealmProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     useEffect(() => {
         try {
+            const urlRealm = new URLSearchParams(window.location.search).get('realm') as Realm | null;
             const stored = localStorage.getItem('bs-realm') as Realm | null;
-            if (stored && VALID_REALMS.includes(stored)) {
-                setRealmState(stored);
+            
+            const initial = (urlRealm && VALID_REALMS.includes(urlRealm)) 
+                ? urlRealm 
+                : (stored && VALID_REALMS.includes(stored) ? stored : null);
+
+            if (initial) {
+                setRealmState(initial);
+                if (initial !== stored) {
+                    try {
+                        localStorage.setItem('bs-realm', initial);
+                    } catch {}
+                }
             }
         } catch {
             // localStorage unavailable

@@ -184,11 +184,12 @@ _QA Note (2026-04-01): As the project is nearing completion, the ROI of fully au
 **The highest-ROI implementation tranche should focus entirely on Phase 1 (Core PR Checks) to lock in the current quality baseline.**
 
 **The exact scope executed for this tranche was:**
+
 1. **Created `.github/workflows/ci.yml`:**
    - Trigger on `pull_request` and `push` to `main`.
    - **Client Job:** Runs `npm ci`, `npm run lint`, `npm run test:ci`, and `npm run build`.
    - **Server Job:** Setups Python, installs dependencies, provisions a PostgreSQL + Redis service directly in Actions, and runs the `pytest` suite safely with `--cov`. (SQLite was skipped because it doesn't support Materialized Views which the repo requires).
 2. **Branch protection instructions:** Required steps are now available to check `ci.yml` jobs before merging to `main`.
-3. **Deferred heavy automation:** Explicitly paused Playwright smoke tasks (Phase 3) and Droplet deploy workflows (Phases 4 & 5). The manual `deploy_to_droplet.sh` workflow is mature enough to remain the permanent production path. 
+3. **Deferred heavy automation:** Explicitly paused Playwright smoke tasks (Phase 3) and Droplet deploy workflows (Phases 4 & 5). The manual `deploy_to_droplet.sh` workflow is mature enough to remain the permanent production path.
 
 This provides a permanent safety net for any final stabilization work or future bugfixes with minimal setup time.

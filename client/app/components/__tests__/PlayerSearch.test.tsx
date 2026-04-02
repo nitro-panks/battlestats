@@ -419,8 +419,8 @@ describe('PlayerSearch landing efficiency icon', () => {
         fireEvent.click(playerButton);
         fireEvent.click(screen.getByRole('button', { name: /Show clan ClanAlpha/i }));
 
-        expect(pushMock).toHaveBeenNthCalledWith(1, '/player/AcePlayer');
-        expect(pushMock).toHaveBeenNthCalledWith(2, '/clan/501-clanalpha');
+        expect(pushMock).toHaveBeenNthCalledWith(1, '/player/AcePlayer?realm=na');
+        expect(pushMock).toHaveBeenNthCalledWith(2, '/clan/501-clanalpha?realm=na');
         expect(screen.getByLabelText('HiddenSkipper has hidden stats')).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /Show player HiddenSkipper/i })).not.toBeInTheDocument();
     });

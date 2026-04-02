@@ -45,7 +45,7 @@ const HeaderSearch: React.FC = () => {
         setSuggestions([]);
         setHighlightedSuggestionIndex(-1);
 
-        const targetPath = buildPlayerPath(trimmedQuery);
+        const targetPath = buildPlayerPath(trimmedQuery, realm);
         startTransition(() => {
             router.push(targetPath);
         });

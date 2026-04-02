@@ -100,8 +100,8 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
         <PlayerDetail
             player={playerData}
             onBack={() => router.push('/')}
-            onSelectMember={(memberName) => router.push(buildPlayerPath(memberName))}
-            onSelectClan={(clanId, clanName) => router.push(buildClanPath(clanId, clanName))}
+            onSelectMember={(memberName) => router.push(buildPlayerPath(memberName, realm))}
+            onSelectClan={(clanId, clanName) => router.push(buildClanPath(clanId, clanName, realm))}
             isLoading={false}
         />
     );

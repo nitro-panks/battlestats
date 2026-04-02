@@ -8,13 +8,18 @@ interface PlayerPageProps {
     params: Promise<{
         playerName: string;
     }>;
+    searchParams: Promise<{
+        realm?: string;
+    }>;
 }
 
 
-export async function generateMetadata({ params }: PlayerPageProps): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: PlayerPageProps): Promise<Metadata> {
     const { playerName } = await params;
+    const { realm } = await searchParams;
+    const realmParam = realm && ['na', 'eu'].includes(realm) ? realm : 'na';
     const decoded = decodeURIComponent(playerName);
-    const url = getSiteUrl(`/player/${playerName}`);
+    const url = getSiteUrl(`/player/${playerName}?realm=${realmParam}`);
 
     return {
         title: `${decoded} — WoWs Battlestats`,

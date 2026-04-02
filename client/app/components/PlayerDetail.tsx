@@ -18,6 +18,7 @@ import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
 import { useTheme } from '../context/ThemeContext';
+import { useRealm } from '../context/RealmContext';
 import wrColor from '../lib/wrColor';
 
 interface PlayerDetailProps {
@@ -211,6 +212,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     isLoading = false,
 }) => {
     const { theme } = useTheme();
+    const { realm } = useRealm();
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
     const isPveEnjoyer = Boolean(player.is_pve_player);
@@ -315,7 +317,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 
     const handleShare = async () => {
         try {
-            await navigator.clipboard.writeText(window.location.href);
+            const url = new URL(window.location.href);
+            if (!url.searchParams.has('realm')) {
+                url.searchParams.set('realm', realm);
+            }
+            await navigator.clipboard.writeText(url.toString());
             setShareState('copied');
         } catch (error) {
             console.error('Failed to copy player URL:', error);
@@ -350,7 +356,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     <div className="mb-4 pb-1">
                         {player.clan_id ? (
                             <Link
-                                href={buildClanPath(player.clan_id, player.clan_name || "Clan")}
+                                href={buildClanPath(player.clan_id, player.clan_name || "Clan", realm)}
                                 className="mt-1 text-xl font-semibold text-[var(--accent-mid)] underline-offset-4 hover:underline"
                                 aria-label={`Open clan page for ${player.clan_name || "clan"}`}
                             >

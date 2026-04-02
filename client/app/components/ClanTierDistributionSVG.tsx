@@ -59,12 +59,12 @@ const drawTierPlot = (container: HTMLDivElement, svgHeight: number, colors: Colo
         const sortedData = [...data].sort((a, b) => a.ship_tier - b.ship_tier);
 
         const maxBattles = Math.max(d3.max(sortedData, (d: ClanTierData) => d.pvp_battles) || 0, 10);
-        
+
         const x = d3.scaleBand()
             .range([0, width])
             .domain(sortedData.map(d => getRomanTier(d.ship_tier)))
             .padding(0.2);
-            
+
         const y = d3.scaleLinear()
             .domain([0, maxBattles * 1.05])
             .range([height, 0]);
@@ -86,7 +86,7 @@ const drawTierPlot = (container: HTMLDivElement, svgHeight: number, colors: Colo
             .selectAll('text')
             .style('font-size', axisFontSize)
             .style('fill', colors.axisText);
-            
+
         svg.select('.tier-y-axis')?.select('.domain')?.remove();
         svg.selectAll('.tier-y-axis line')
             .style('stroke', colors.gridLine)
@@ -107,7 +107,7 @@ const drawTierPlot = (container: HTMLDivElement, svgHeight: number, colors: Colo
             .attr('stroke', colors.axisLine)
             .attr('stroke-width', 1)
             .style('cursor', 'pointer');
-            
+
         bars.append('title').text((d: ClanTierData) => `${d.pvp_battles.toLocaleString()} Total Battles`);
     };
 
@@ -150,15 +150,15 @@ const ClanTierSVG: React.FC<InternalClanTierSVGProps> = ({ clanId, svgHeight = 2
 // Wrapper with error boundary and loader
 const ClanTierDistributionContainer: React.FC<ClanTierDistributionSVGProps> = (props) => {
     const { data, loading, error } = useClanTiersDistribution(props.clanId);
-    
+
     if (error) {
         return <div className="p-4 text-sm text-red-500 bg-red-100 dark:bg-red-900/20 rounded-md">Tier data unavailable: {error}</div>;
     }
-    
+
     if (loading) {
         return <LoadingPanel label="Aggregating clan tier distributions..." minHeight={props.svgHeight ?? 220} />;
     }
-    
+
     return (
         <ErrorBoundary fallback={<div className="p-4 text-sm text-red-500">Tier data unavailable</div>}>
             <ClanTierSVG {...props} data={data} />

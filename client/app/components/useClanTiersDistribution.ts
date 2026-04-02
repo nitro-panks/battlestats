@@ -116,17 +116,15 @@ export const useClanTiersDistribution = (clanId: number | null | undefined, enab
             void fetchData(true, 0);
         };
 
-        if (getChartFetchesInFlight() > 0) {
-            gateIntervalId = setInterval(() => {
-                if (getChartFetchesInFlight() === 0) {
-                    clearInterval(gateIntervalId!);
-                    gateIntervalId = null;
-                    startFetch();
-                }
-            }, 500);
-        } else {
-            startFetch();
-        }
+        // Always defer the first check by one tick so that ClanSVG's
+        // dynamic import has time to mount and signal chartFetchesInFlight.
+        gateIntervalId = setInterval(() => {
+            if (getChartFetchesInFlight() === 0) {
+                clearInterval(gateIntervalId!);
+                gateIntervalId = null;
+                startFetch();
+            }
+        }, 500);
 
         return () => {
             if (timeoutId) {

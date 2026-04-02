@@ -10,7 +10,7 @@ const Footer: React.FC = () => {
             <div className="space-y-2 px-4 leading-5">
                 <p>
                     Battlestats v{process.env.NEXT_PUBLIC_APP_VERSION} by{' '}
-                    <Link href={buildPlayerPath('lil_boots')} className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline">
+                    <Link href={buildPlayerPath('lil_boots', 'na')} className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline">
                         lil_boots
                     </Link>
                     {' · '}

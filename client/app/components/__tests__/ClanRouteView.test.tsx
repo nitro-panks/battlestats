@@ -86,7 +86,7 @@ describe('ClanRouteView', () => {
         props.onSelectMember('Player One');
 
         expect(pushMock).toHaveBeenNthCalledWith(1, '/');
-        expect(pushMock).toHaveBeenNthCalledWith(2, '/player/Player%20One');
+        expect(pushMock).toHaveBeenNthCalledWith(2, '/player/Player%20One?realm=na');
     });
 
     it('normalizes sparse clan payloads using route fallbacks', async () => {

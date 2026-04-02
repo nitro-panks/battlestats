@@ -344,11 +344,11 @@ const PlayerSearch: React.FC = () => {
     }, [realm]);
 
     const handleSelectClan = useCallback((clan: LandingClan) => {
-        router.push(buildClanPath(clan.clan_id, clan.name || clan.tag));
-    }, [router]);
+        router.push(buildClanPath(clan.clan_id, clan.name || clan.tag, realm));
+    }, [router, realm]);
 
     const handleSelectClanById = async (clanId: number, clanName: string) => {
-        router.push(buildClanPath(clanId, clanName));
+        router.push(buildClanPath(clanId, clanName, realm));
     };
 
     const visibleLandingClans = useMemo(() => {
@@ -396,8 +396,8 @@ const PlayerSearch: React.FC = () => {
     }, [playerMode, players, recentPlayers]);
 
     const handleSelectMember = useCallback(async (memberName: string) => {
-        router.push(buildPlayerPath(memberName));
-    }, [router]);
+        router.push(buildPlayerPath(memberName, realm));
+    }, [router, realm]);
 
     useEffect(() => {
         const query = (searchParams.get('q') || '').trim();

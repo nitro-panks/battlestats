@@ -7,7 +7,7 @@ describe('Footer', () => {
         render(<Footer />);
 
         const creatorLink = screen.getByRole('link', { name: 'lil_boots' });
-        expect(creatorLink).toHaveAttribute('href', '/player/lil_boots');
+        expect(creatorLink).toHaveAttribute('href', '/player/lil_boots?realm=na');
     });
 
     it('renders CC license, GitHub link, and Wargaming attribution', () => {

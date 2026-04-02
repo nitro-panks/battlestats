@@ -521,7 +521,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByRole('link', { name: 'Open clan page for Fixture Clan' })).toHaveAttribute('href', '/clan/4444-fixture-clan');
+        expect(screen.getByRole('link', { name: 'Open clan page for Fixture Clan' })).toHaveAttribute('href', '/clan/4444-fixture-clan?realm=na');
         fireEvent.click(screen.getByRole('button', { name: 'Return to landing page' }));
 
         expect(onBack).toHaveBeenCalled();

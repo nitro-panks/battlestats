@@ -108,8 +108,8 @@ describe('PlayerRouteView', () => {
         props.onSelectClan(1000067803, 'The Best Clan');
 
         expect(pushMock).toHaveBeenNthCalledWith(1, '/');
-        expect(pushMock).toHaveBeenNthCalledWith(2, '/player/Other%20Player');
-        expect(pushMock).toHaveBeenNthCalledWith(3, '/clan/1000067803-the-best-clan');
+        expect(pushMock).toHaveBeenNthCalledWith(2, '/player/Other%20Player?realm=na');
+        expect(pushMock).toHaveBeenNthCalledWith(3, '/clan/1000067803-the-best-clan?realm=na');
     });
 
     it('shows a not found state when the player API request fails', async () => {

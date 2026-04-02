@@ -3,6 +3,7 @@ import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { useClanMembers } from './useClanMembers';
+import { useRealm } from '../context/RealmContext';
 import { useTheme } from '../context/ThemeContext';
 import ClanTierDistributionSVG from './ClanTierDistributionSVG';
 import { incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
@@ -37,6 +38,7 @@ const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMem
 
 const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember }) => {
     const { theme } = useTheme();
+    const { realm } = useRealm();
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
     // Pre-signal chart loading so hooks that check chartFetchesInFlight
@@ -80,7 +82,11 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
 
     const handleShare = async () => {
         try {
-            await navigator.clipboard.writeText(window.location.href);
+            const url = new URL(window.location.href);
+            if (!url.searchParams.has('realm')) {
+                url.searchParams.set('realm', realm);
+            }
+            await navigator.clipboard.writeText(url.toString());
             setShareState('copied');
         } catch (error) {
             console.error('Failed to copy clan URL:', error);

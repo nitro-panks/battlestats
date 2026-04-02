@@ -25,7 +25,7 @@ describe('HeaderSearch', () => {
     });
 
     it('keeps the search bar clear on routed player detail views', () => {
-        mockPathname = '/player/Player%20One';
+        mockPathname = '/player/Player%20One?realm=na';
 
         render(<HeaderSearch />);
 
@@ -50,7 +50,7 @@ describe('HeaderSearch', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Go' }));
 
         await waitFor(() => {
-            expect(pushMock).toHaveBeenCalledWith('/player/Player%20One');
+            expect(pushMock).toHaveBeenCalledWith('/player/Player%20One?realm=na');
         });
     });
 });
