@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck, faChevronDown, faGlobe } from '@fortawesome/free-solid-svg-icons';
 import { useRealm, type Realm } from '../context/RealmContext';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 interface RealmOption {
     value: Realm;
@@ -25,7 +25,6 @@ const RealmSelector: React.FC = () => {
     const [open, setOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
-    const pathname = usePathname();
 
     useEffect(() => {
         if (!open) {
@@ -60,10 +59,7 @@ const RealmSelector: React.FC = () => {
     const handleRealmChange = (newRealm: Realm) => {
         setRealm(newRealm);
         setOpen(false);
-
-        const url = new URL(window.location.href);
-        url.searchParams.set('realm', newRealm);
-        router.replace(url.pathname + url.search);
+        router.replace(`/?realm=${newRealm}`);
     };
 
     const currentLabel = realm.toUpperCase();
