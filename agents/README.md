@@ -1,22 +1,60 @@
-# Agent Federation Process
+# Agent Documentation Map
 
-This directory defines role personas used to coordinate AI-assisted development.
+This directory is the shortest useful path for agents that are told to review project documentation before working.
 
-See `agents/langgraph-usage-note.md` for when it makes sense to use the repo's LangGraph workflow versus a direct implementation request.
+## First-Read Order
 
-CrewAI integration guidance now lives in `agents/runbooks/runbook-crewai-integration.md`. LangGraph remains the guarded implementation workflow; CrewAI is the persona-first orchestration option.
+1. `../CLAUDE.md`
+   Use this for the current architecture, deployment/runtime commands, multi-realm shape, caching strategy, and repo doctrine summary.
+2. `knowledge/agentic-team-doctrine.json`
+   This is the authoritative repo decision rule set for planning, implementation, tests, documentation, and runbook hygiene.
+3. `runbooks/README.md`
+   This is the active runbook index. Use it to select the few runbooks relevant to the task instead of scanning the whole directory.
 
-Agentic memory guidance now lives in `agents/runbooks/spec-langmem-agentic-memory-pilot-2026-03-26.md` and the operator review loop is documented in `agents/runbooks/runbook-agentic-memory-review.md`.
+## Default Mental Model
 
-## Recommended Structure
+- Battlestats is a Django + Next.js stats platform with a cache-first, background-hydration architecture.
+- The browser should not call the Wargaming API directly.
+- Realm-aware behavior matters. `na` and `eu` are both active product concerns.
+- Operational changes usually involve scheduled warmers, Celery queue behavior, deploy scripts, and published-cache fallbacks, not just endpoint code.
+- The repo has an internal agentic platform. LangGraph is the guarded implementation lane; CrewAI is the persona-oriented planning lane; hybrid routing combines them.
 
-- One role spec per file (already set up).
-- One shared process contract (this file).
-- One durable knowledge base under `agents/knowledge/` for research write-ups, verified system notes, and investigation handoffs.
-- One dedicated runbook directory under `agents/runbooks/` for reusable operational and implementation guides.
-- One set of shared templates under `agents/templates/` (optional next step).
+## Task-To-Doc Routing
 
-## Current Roles
+- App architecture or runtime behavior:
+  Start with `../CLAUDE.md`.
+- Which runbooks are current:
+  Start with `runbooks/README.md`.
+- API contracts or smoke coverage:
+  Read `runbooks/runbook-api-surface.md`.
+- Multi-realm behavior, crawl/warmup, or EU migration:
+  Read `runbooks/spec-multi-realm-eu-support.md` and then the related operational runbooks from the active index.
+- Deploy, droplet runtime, or memory tuning:
+  Read `runbooks/runbook-backend-droplet-deploy.md` or `runbooks/runbook-client-droplet-deploy.md`.
+- Agentic workflow behavior:
+  Read `runbooks/runbook-agent-orchestrator-selection.md`, `runbooks/runbook-langgraph-opinionated-workflow.md`, and `langgraph-usage-note.md`.
+- Agentic memory or review flow:
+  Read `runbooks/runbook-agentic-memory-review.md` and `runbooks/spec-langmem-agentic-memory-pilot-2026-03-26.md`.
+
+## Documentation Rules
+
+- Keep durable facts in `knowledge/`.
+- Keep current operational or implementation guides in `runbooks/`.
+- Move completed, historical, incident-specific, or superseded runbooks to `runbooks/archive/`.
+- Prefer a small number of maintained entry docs over large narrative duplicates.
+
+## Commit Gate
+
+Before each commit:
+
+- reconcile changed docs with code and tests
+- update the durable docs that describe shipped behavior
+- keep focused coverage aligned with the change
+- archive runbooks whose status no longer matches the live repo state
+
+## Roles
+
+The role files in this directory remain the persona source material for the agentic stack:
 
 - Project Coordinator
 - Project Manager
@@ -26,73 +64,3 @@ Agentic memory guidance now lives in `agents/runbooks/spec-langmem-agentic-memor
 - Engineer (Web Dev)
 - QA
 - Safety
-
-## Suggested Execution Loop
-
-1. **Intake (Coordinator + PM)**
-   - Convert request into a work packet.
-2. **Solution Framing (Architect + UX + Designer)**
-   - Align technical approach and user experience before implementation.
-3. **Build (Engineering)**
-   - Implement in small vertical slices.
-4. **Validation (QA + Safety)**
-   - Verify acceptance criteria and risk posture.
-5. **Release Decision (PM + Coordinator)**
-   - Approve, defer, or rollback with explicit rationale.
-
-## Work Packet Template (minimum)
-
-- Problem statement
-- Scope / non-goals
-- Acceptance criteria
-- Constraints (tech, time, policy)
-- Dependencies
-- Owner + due date
-
-## Handoff Contract (between any two agents)
-
-- What changed
-- Why this approach
-- Open risks
-- Exact next action expected from receiver
-- Blocking questions
-
-## Better-Than-Basic Process (recommended)
-
-Instead of only role markdown files, add these lightweight controls:
-
-- **Decision Log**: `agents/decision-log.md` for architecture/product tradeoffs.
-- **Risk Register**: `agents/risk-register.md` with owner + mitigation due date.
-- **Definition of Ready / Done** checklists used by PM, QA, Safety.
-- **Release Gate** checklist requiring QA + Safety signoff for high-risk changes.
-
-## Operating Principles
-
-- Prefer small, testable increments.
-- Make assumptions explicit.
-- Keep a single source of truth for status and decisions.
-- Escalate blockers quickly; do not silently workaround requirement gaps.
-
-## Commit Gate
-
-Before each and every commit, the active agent workflow must complete all of the following:
-
-- Review changed project documentation and update or synthesize the durable docs that now describe the shipped behavior, contract, or workflow.
-- Check documentation against code and tests wherever there is uncertainty, instead of committing doc guesses.
-- Ensure the changed behavior has appropriate test coverage and update the focused or broader test suite when existing coverage no longer proves the new behavior.
-- Move old, superseded, or now-historical runbooks from `agents/runbooks/` into `agents/runbooks/archive/` so the active runbook directory stays current.
-
-No commit is considered ready until that documentation, verification, and runbook-hygiene pass is complete.
-
-## Knowledge Base
-
-- Store reusable findings under `agents/knowledge/` when they would save future investigation time.
-- Prefer one topic per file with a clear title, verification date, evidence summary, current conclusion, and next checks.
-- Use this for upstream API behavior, environment quirks, architectural decisions, and repeated debugging outcomes.
-
-## Runbooks
-
-- Store reusable execution guides under `agents/runbooks/`.
-- Keep runbooks task-oriented: include context, exact commands, validation steps, and rollback notes when applicable.
-- Before committing, archive runbooks whose planning state or feature status no longer matches the live code.
-- For agentic memory work, start with `agents/runbooks/spec-langmem-agentic-memory-pilot-2026-03-26.md` for scope and `agents/runbooks/runbook-agentic-memory-review.md` for day-to-day review operations.

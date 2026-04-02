@@ -1,9 +1,23 @@
 # Runbook: 3D Clan Scatter Chart with Tier Distribution
 
-**Status**: Proposed
+**Status**: Superseded by product-direction update
 **Created**: 2026-04-02
 **Author**: Claude (agentic)
 **Complexity**: Minor feature (estimated ~400-500 lines net new)
+
+## Update
+
+This runbook is no longer the active direction for the main clan chart.
+
+Updated product direction:
+
+1. tier should not be reintroduced as the primary dimension in the main clan chart
+2. the main clan chart should remain KDR-based or use another non-tier stat
+3. the aggregate tier histogram should return later as a separate secondary chart only after the tier data lane is complete and operationally trusted
+
+Use `agents/runbooks/runbook-clan-tier-distribution-recovery-2026-04-02.md` as the current planning source of truth.
+
+The remaining content in this runbook is retained as historical context for the earlier tier-based 3D exploration.
 
 ## Summary
 

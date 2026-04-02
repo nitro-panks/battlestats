@@ -10,7 +10,7 @@ This comparison covers the migration-safe backend tuning that was deployed for t
 
 Reference baseline:
 
-- `agents/runbooks/spec-api-surface-performance-baseline-2026-04-02.md`
+- `agents/runbooks/archive/spec-api-surface-performance-baseline-2026-04-02.md`
 
 ## Landing Page Validation
 
@@ -51,11 +51,11 @@ That made the homepage safe to use as part of the after-state capture.
 
 ### Memory
 
-| Metric | Baseline | After | Delta |
-| --- | ---: | ---: | ---: |
-| RAM used | `3.6 GiB` | `1.4 GiB` | improved by about `2.2 GiB` |
+| Metric        |  Baseline |     After |                        Delta |
+| ------------- | --------: | --------: | ---------------------------: |
+| RAM used      | `3.6 GiB` | `1.4 GiB` |  improved by about `2.2 GiB` |
 | RAM available | `243 MiB` | `2.5 GiB` | improved by about `2.26 GiB` |
-| Swap used | `501 MiB` | `1.4 GiB` | increased |
+| Swap used     | `501 MiB` | `1.4 GiB` |                    increased |
 
 Interpretation:
 
