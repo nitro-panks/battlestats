@@ -449,39 +449,36 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
         };
     }, [plotData, memberTiers, memberActivitySig, svgWidth, svgHeight, theme, onSelectMember]);
 
-    if (plotError) {
-        return (
-            <div className="text-sm text-[var(--text-secondary)]">
-                Unable to load clan chart data.
-            </div>
-        );
-    }
-
-    if (!plotData) {
-        return (
-            <div className="text-sm text-[var(--text-secondary)]">
-                Loading 3D clan chart...
-            </div>
-        );
-    }
-
     return (
         <div>
             <div
                 ref={containerRef}
-                style={{ width: svgWidth, maxWidth: '100%', touchAction: 'none' }}
-            />
-            <button
-                type="button"
-                onClick={() => {
-                    rotYRef.current = 0.6;
-                    rotXRef.current = 0.3;
-                    autoRotateRef.current = true;
-                }}
-                className="mt-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                style={{ width: svgWidth, maxWidth: '100%', minHeight: svgHeight, touchAction: 'none' }}
             >
-                Reset view
-            </button>
+                {plotError && (
+                    <div className="text-sm text-[var(--text-secondary)]">
+                        Unable to load clan chart data.
+                    </div>
+                )}
+                {!plotData && !plotError && (
+                    <div className="text-sm text-[var(--text-secondary)]">
+                        Loading 3D clan chart...
+                    </div>
+                )}
+            </div>
+            {plotData && (
+                <button
+                    type="button"
+                    onClick={() => {
+                        rotYRef.current = 0.6;
+                        rotXRef.current = 0.3;
+                        autoRotateRef.current = true;
+                    }}
+                    className="mt-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                >
+                    Reset view
+                </button>
+            )}
         </div>
     );
 };
