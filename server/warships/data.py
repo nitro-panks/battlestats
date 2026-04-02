@@ -2476,8 +2476,6 @@ def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM) -> None:
     by update_player_data via account/info) as today's cumulative values.
     """
     player = Player.objects.get(player_id=player_id, realm=realm)
-    player.last_lookup = datetime.now()
-    player.save()
 
     # Ensure the player model has fresh stats
     from warships.data import update_player_data
@@ -4496,9 +4494,35 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
                 player.save()
 
 
-def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
+def refresh_clan_cached_aggregates(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     from warships.landing import invalidate_landing_clan_caches
+    from django.db.models import Sum, Count, Q
 
+    clan = Clan.objects.get(clan_id=clan_id, realm=realm)
+    agg = Clan.objects.filter(clan_id=clan_id, realm=realm).aggregate(
+        total_wins=Sum('player__pvp_wins'),
+        total_battles=Sum('player__pvp_battles'),
+        active_members=Count('player', filter=Q(
+            player__days_since_last_battle__lte=30)),
+    )
+    total_wins = agg['total_wins'] or 0
+    total_battles = agg['total_battles'] or 0
+    clan.cached_total_wins = total_wins
+    clan.cached_total_battles = total_battles
+    clan.cached_active_member_count = agg['active_members'] or 0
+    clan.cached_clan_wr = round(
+        total_wins / total_battles * 100.0, 4) if total_battles > 0 else None
+    clan.save(update_fields=[
+        'cached_total_wins', 'cached_total_battles',
+        'cached_active_member_count', 'cached_clan_wr',
+    ])
+
+    invalidate_landing_clan_caches(realm=realm)
+    _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
+    cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
+
+
+def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     clan = Clan.objects.get(clan_id=clan_id, realm=realm)
     member_ids = _fetch_clan_member_ids(clan_id, realm=realm)
 
@@ -4530,29 +4554,7 @@ def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
 
         update_player_data(player)
 
-    # Denormalize clan aggregations for landing page surfaces
-    from django.db.models import Sum, Count, Q
-    agg = Clan.objects.filter(clan_id=clan_id, realm=realm).aggregate(
-        total_wins=Sum('player__pvp_wins'),
-        total_battles=Sum('player__pvp_battles'),
-        active_members=Count('player', filter=Q(
-            player__days_since_last_battle__lte=30)),
-    )
-    total_wins = agg['total_wins'] or 0
-    total_battles = agg['total_battles'] or 0
-    clan.cached_total_wins = total_wins
-    clan.cached_total_battles = total_battles
-    clan.cached_active_member_count = agg['active_members'] or 0
-    clan.cached_clan_wr = round(
-        total_wins / total_battles * 100.0, 4) if total_battles > 0 else None
-    clan.save(update_fields=[
-        'cached_total_wins', 'cached_total_battles',
-        'cached_active_member_count', 'cached_clan_wr',
-    ])
-
-    invalidate_landing_clan_caches()
-    _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
-    cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
+    refresh_clan_cached_aggregates(clan_id, realm=realm)
 
 
 def update_player_data(player: Player, force_refresh: bool = False) -> None:
@@ -4886,15 +4888,15 @@ def warm_clan_entity_caches(clan_ids: Iterable[int], force_refresh: bool = False
             continue
 
         if force_refresh or clan_detail_needs_refresh(clan):
-            update_clan_data(str(clan_id))
+            update_clan_data(str(clan_id), realm=realm)
             clan.refresh_from_db()
 
         if force_refresh or clan_members_missing_or_incomplete(clan, member_count=clan.tracked_member_count):
-            update_clan_members(str(clan_id))
+            update_clan_members(str(clan_id), realm=realm)
 
-        refresh_clan_battle_seasons_cache(str(clan_id))
-        fetch_clan_plot_data(str(clan_id), 'active')
-        fetch_clan_plot_data(str(clan_id), 'all')
+        refresh_clan_battle_seasons_cache(str(clan_id), realm=realm)
+        fetch_clan_plot_data(str(clan_id), 'active', realm=realm)
+        fetch_clan_plot_data(str(clan_id), 'all', realm=realm)
         update_clan_tier_distribution(str(clan_id), realm=realm)
         warmed_clans += 1
 
