@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
@@ -39,20 +39,30 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
     const { theme } = useTheme();
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
-    // Pre-signal chart loading before ClanSVG's dynamic import resolves.
-    // This ensures useClanTiersDistribution and useClanMembers see
-    // chartFetchesInFlight > 0 at mount time and defer their fetches.
-    // ClanSVG will call incrementChartFetches again when it mounts, so
-    // we release this pre-signal once the dynamic import has had time to
-    // initialize (200ms is well under the dynamic import resolution time).
-    useEffect(() => {
+    // Pre-signal chart loading so hooks that check chartFetchesInFlight
+    // during their first effect see > 0 and defer to the clan chart.
+    // ClanSVG is dynamically imported, so its own increment fires late.
+    // useLayoutEffect fires before all useEffects, bridging the gap:
+    // increment here, then release after ClanSVG has had time to mount.
+    const preSignalReleasedRef = useRef(false);
+    useLayoutEffect(() => {
         incrementChartFetches();
-        const id = setTimeout(() => decrementChartFetches(), 200);
-        return () => {
-            clearTimeout(id);
+        preSignalReleasedRef.current = false;
+    }, []);
+    useEffect(() => {
+        // Release pre-signal after a tick — ClanSVG will have called
+        // incrementChartFetches in its own useEffect by now.
+        const id = requestAnimationFrame(() => {
+            preSignalReleasedRef.current = true;
             decrementChartFetches();
+        });
+        return () => {
+            cancelAnimationFrame(id);
+            if (!preSignalReleasedRef.current) {
+                decrementChartFetches();
+            }
         };
-    }, [clan.clan_id]);
+    }, []);
 
     const { members, loading: membersLoading, error: membersError } = useClanMembers(clan.clan_id);
 
