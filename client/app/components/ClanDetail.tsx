@@ -143,7 +143,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                         type="button"
                         onClick={() => setChartMode('2d')}
                         className={`px-3 py-1 rounded-l-md transition-colors ${chartMode === '2d'
-                                ? 'bg-[var(--accent)] text-white'
+                                ? 'bg-[var(--accent-mid)] text-white'
                                 : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                             }`}
                     >
@@ -155,7 +155,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                         disabled={!is3DAvailable}
                         title={!is3DAvailable ? 'KDR data not yet available' : 'View 3D scatter with KDR'}
                         className={`px-3 py-1 rounded-r-md transition-colors ${chartMode === '3d'
-                                ? 'bg-[var(--accent)] text-white'
+                                ? 'bg-[var(--accent-mid)] text-white'
                                 : is3DAvailable
                                     ? 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                                     : 'text-[var(--text-secondary)] opacity-40 cursor-not-allowed'
