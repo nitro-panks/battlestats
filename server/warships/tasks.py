@@ -46,9 +46,11 @@ LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
 LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
 BULK_CACHE_LOAD_LOCK_TIMEOUT = 30 * 60
 RECENTLY_VIEWED_WARM_LOCK_TIMEOUT = 15 * 60
+CLAN_TIER_DIST_WARM_LOCK_TIMEOUT = 3 * 60 * 60  # 3h — iterates all clans
 
 
-MAX_CONCURRENT_REALM_CRAWLS = int(os.getenv("MAX_CONCURRENT_REALM_CRAWLS", "1"))
+MAX_CONCURRENT_REALM_CRAWLS = int(
+    os.getenv("MAX_CONCURRENT_REALM_CRAWLS", "1"))
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +107,10 @@ def _bulk_cache_load_lock_key(realm: str = DEFAULT_REALM) -> str:
 
 def _recently_viewed_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_recently_viewed_players:{realm}:lock"
+
+
+def _clan_tier_dist_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_all_clan_tier_distributions:{realm}:lock"
 
 
 def _configured_clan_battle_warm_ids(raw_value=None):
@@ -212,7 +218,8 @@ def queue_random_landing_clan_queue_refill(realm: str = DEFAULT_REALM):
 
 
 def queue_clan_battle_summary_refresh(clan_id: object, realm: str = DEFAULT_REALM):
-    dispatch_key = _clan_battle_summary_refresh_dispatch_key(clan_id, realm=realm)
+    dispatch_key = _clan_battle_summary_refresh_dispatch_key(
+        clan_id, realm=realm)
     if not cache.add(
         dispatch_key,
         "queued",
@@ -352,7 +359,8 @@ def queue_clan_battle_data_refresh(player_id: object, realm: str = DEFAULT_REALM
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        update_player_clan_battle_data_task.delay(player_id=player_id, realm=realm)
+        update_player_clan_battle_data_task.delay(
+            player_id=player_id, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -379,7 +387,8 @@ def queue_efficiency_data_refresh(player_id: object, realm: str = DEFAULT_REALM)
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        update_player_efficiency_data_task.delay(player_id=player_id, realm=realm)
+        update_player_efficiency_data_task.delay(
+            player_id=player_id, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -423,7 +432,8 @@ def queue_player_ranked_wr_battles_correlation_refresh(realm: str = DEFAULT_REAL
     if cache.get(_player_ranked_wr_battles_correlation_refresh_failure_key(realm=realm)):
         return {"status": "skipped", "reason": "broker-unavailable"}
 
-    dispatch_key = _player_ranked_wr_battles_correlation_refresh_dispatch_key(realm=realm)
+    dispatch_key = _player_ranked_wr_battles_correlation_refresh_dispatch_key(
+        realm=realm)
     if not cache.add(dispatch_key, "queued", timeout=PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT):
         return {"status": "skipped", "reason": "already-queued"}
 
@@ -449,7 +459,8 @@ def queue_player_ranked_wr_battles_correlation_refresh(realm: str = DEFAULT_REAL
 def update_clan_data_task(self, clan_id, realm=DEFAULT_REALM):
     from warships.data import update_clan_data
 
-    logger.info("Starting update_clan_data_task for clan_id=%s realm=%s", clan_id, realm)
+    logger.info(
+        "Starting update_clan_data_task for clan_id=%s realm=%s", clan_id, realm)
     return _run_locked_task(
         "update_clan_data",
         clan_id,
@@ -462,7 +473,8 @@ def update_clan_data_task(self, clan_id, realm=DEFAULT_REALM):
 def update_clan_members_task(self, clan_id, realm=DEFAULT_REALM):
     from warships.data import update_clan_members
 
-    logger.info("Starting update_clan_members_task for clan_id=%s realm=%s", clan_id, realm)
+    logger.info(
+        "Starting update_clan_members_task for clan_id=%s realm=%s", clan_id, realm)
     return _run_locked_task(
         "update_clan_members",
         clan_id,
@@ -475,7 +487,8 @@ def update_clan_members_task(self, clan_id, realm=DEFAULT_REALM):
 def update_clan_tier_distribution_task(self, clan_id, realm=DEFAULT_REALM):
     from warships.data import update_clan_tier_distribution
 
-    logger.info("Starting update_clan_tier_distribution_task for clan_id=%s realm=%s", clan_id, realm)
+    logger.info(
+        "Starting update_clan_tier_distribution_task for clan_id=%s realm=%s", clan_id, realm)
     return _run_locked_task(
         "update_clan_tier_distribution",
         clan_id,
@@ -498,7 +511,8 @@ def update_player_data_task(self, player_id, realm=DEFAULT_REALM, force_refresh=
 
     def _refresh_player():
         player = Player.objects.get(player_id=player_id, realm=realm)
-        update_player_data(player=player, force_refresh=force_refresh, realm=realm)
+        update_player_data(
+            player=player, force_refresh=force_refresh, realm=realm)
 
     return _run_locked_task(
         "update_player_data",
@@ -512,7 +526,8 @@ def update_player_data_task(self, player_id, realm=DEFAULT_REALM, force_refresh=
 def update_battle_data_task(self, player_id, realm=DEFAULT_REALM):
     from warships.data import update_battle_data
 
-    logger.info("Starting update_battle_data_task for player_id=%s realm=%s", player_id, realm)
+    logger.info(
+        "Starting update_battle_data_task for player_id=%s realm=%s", player_id, realm)
     return _run_locked_task(
         "update_battle_data",
         player_id,
@@ -538,35 +553,40 @@ def preload_activity_data_task():
 @app.task(**TASK_OPTS)
 def update_randoms_data_task(player_id, realm=DEFAULT_REALM):
     from warships.data import update_randoms_data
-    logger.info("Starting update_randoms_data_task for player_id=%s realm=%s", player_id, realm)
+    logger.info(
+        "Starting update_randoms_data_task for player_id=%s realm=%s", player_id, realm)
     update_randoms_data(player_id=player_id, realm=realm)
 
 
 @app.task(**TASK_OPTS)
 def update_tiers_data_task(player_id, realm=DEFAULT_REALM):
     from warships.data import update_tiers_data
-    logger.info("Starting update_tiers_data_task for player_id=%s realm=%s", player_id, realm)
+    logger.info(
+        "Starting update_tiers_data_task for player_id=%s realm=%s", player_id, realm)
     update_tiers_data(player_id=player_id, realm=realm)
 
 
 @app.task(**TASK_OPTS)
 def update_snapshot_data_task(player_id, realm=DEFAULT_REALM):
     from warships.data import update_snapshot_data
-    logger.info("Starting update_snapshot_data_task for player_id=%s realm=%s", player_id, realm)
+    logger.info(
+        "Starting update_snapshot_data_task for player_id=%s realm=%s", player_id, realm)
     update_snapshot_data(player_id=player_id, realm=realm)
 
 
 @app.task(**TASK_OPTS)
 def update_activity_data_task(player_id, realm=DEFAULT_REALM):
     from warships.data import update_activity_data
-    logger.info("Starting update_activity_data_task for player_id=%s realm=%s", player_id, realm)
+    logger.info(
+        "Starting update_activity_data_task for player_id=%s realm=%s", player_id, realm)
     update_activity_data(player_id=player_id, realm=realm)
 
 
 @app.task(**TASK_OPTS)
 def update_type_data_task(player_id, realm=DEFAULT_REALM):
     from warships.data import update_type_data
-    logger.info("Starting update_type_data_task for player_id=%s realm=%s", player_id, realm)
+    logger.info(
+        "Starting update_type_data_task for player_id=%s realm=%s", player_id, realm)
     update_type_data(player_id=player_id, realm=realm)
 
 
@@ -574,7 +594,8 @@ def update_type_data_task(player_id, realm=DEFAULT_REALM):
 def update_ranked_data_task(self, player_id, realm=DEFAULT_REALM):
     from warships.data import update_ranked_data
 
-    logger.info("Starting update_ranked_data_task for player_id=%s realm=%s", player_id, realm)
+    logger.info(
+        "Starting update_ranked_data_task for player_id=%s realm=%s", player_id, realm)
     try:
         return _run_locked_task(
             "update_ranked_data",
@@ -638,7 +659,8 @@ def refresh_efficiency_rank_snapshot_task(self, realm=DEFAULT_REALM):
             "refresh_efficiency_rank_snapshot",
             "global",
             self.request.id,
-            lambda: recompute_efficiency_rank_snapshot(skip_refresh=True, realm=realm),
+            lambda: recompute_efficiency_rank_snapshot(
+                skip_refresh=True, realm=realm),
         )
     finally:
         cache.delete(_efficiency_snapshot_refresh_dispatch_key(realm=realm))
@@ -648,13 +670,15 @@ def refresh_efficiency_rank_snapshot_task(self, realm=DEFAULT_REALM):
 def warm_player_ranked_wr_battles_correlation_task(self, realm=DEFAULT_REALM):
     from warships.data import warm_player_ranked_wr_battles_population_correlation
 
-    logger.info("Starting warm_player_ranked_wr_battles_correlation_task realm=%s", realm)
+    logger.info(
+        "Starting warm_player_ranked_wr_battles_correlation_task realm=%s", realm)
     try:
         return _run_locked_task(
             "warm_player_ranked_wr_battles_correlation",
             "population",
             self.request.id,
-            lambda: warm_player_ranked_wr_battles_population_correlation(realm=realm),
+            lambda: warm_player_ranked_wr_battles_population_correlation(
+                realm=realm),
         )
     finally:
         cache.delete(
@@ -675,7 +699,8 @@ def update_clan_battle_summary_task(self, clan_id, realm=DEFAULT_REALM):
             lambda: refresh_clan_battle_seasons_cache(clan_id, realm=realm),
         )
     finally:
-        cache.delete(_clan_battle_summary_refresh_dispatch_key(clan_id, realm=realm))
+        cache.delete(_clan_battle_summary_refresh_dispatch_key(
+            clan_id, realm=realm))
 
 
 @app.task(bind=True, **TASK_OPTS)
@@ -694,7 +719,8 @@ def warm_clan_battle_summaries_task(self, clan_ids=None, realm=DEFAULT_REALM):
             "update_clan_battle_summary",
             clan_id,
             self.request.id,
-            lambda clan_id=clan_id: refresh_clan_battle_seasons_cache(clan_id, realm=realm),
+            lambda clan_id=clan_id: refresh_clan_battle_seasons_cache(
+                clan_id, realm=realm),
         )
         results.append({"clan_id": str(clan_id), **result})
 
@@ -814,7 +840,8 @@ def warm_landing_best_entity_caches_task(self, player_limit=25, clan_limit=25, f
 def refill_landing_random_players_queue_task(self, realm=DEFAULT_REALM):
     from warships.landing import refill_random_landing_player_queue
 
-    logger.info("Starting refill_landing_random_players_queue_task realm=%s", realm)
+    logger.info(
+        "Starting refill_landing_random_players_queue_task realm=%s", realm)
     try:
         result = refill_random_landing_player_queue(realm=realm)
         logger.info(
@@ -830,11 +857,13 @@ def refill_landing_random_players_queue_task(self, realm=DEFAULT_REALM):
 def refill_landing_random_clans_queue_task(self, realm=DEFAULT_REALM):
     from warships.landing import refill_random_landing_clan_queue, warm_random_landing_clan_queue_preview
 
-    logger.info("Starting refill_landing_random_clans_queue_task realm=%s", realm)
+    logger.info(
+        "Starting refill_landing_random_clans_queue_task realm=%s", realm)
     try:
         result = refill_random_landing_clan_queue(realm=realm)
         if result.get("status") == "completed":
-            preview_payload, preview_metadata = warm_random_landing_clan_queue_preview(realm=realm)
+            preview_payload, preview_metadata = warm_random_landing_clan_queue_preview(
+                realm=realm)
             result = {
                 **result,
                 "preview_count": len(preview_payload),
@@ -857,7 +886,8 @@ def bulk_load_entity_caches_task(self, realm=DEFAULT_REALM):
 
     lock_key = _bulk_cache_load_lock_key(realm)
     if not cache.add(lock_key, self.request.id, timeout=BULK_CACHE_LOAD_LOCK_TIMEOUT):
-        logger.info("Skipping bulk_load_entity_caches_task because another bulk load is already running")
+        logger.info(
+            "Skipping bulk_load_entity_caches_task because another bulk load is already running")
         return {"status": "skipped", "reason": "already-running"}
 
     try:
@@ -876,12 +906,40 @@ def warm_recently_viewed_players_task(self, realm=DEFAULT_REALM):
 
     lock_key = _recently_viewed_warm_lock_key(realm)
     if not cache.add(lock_key, self.request.id, timeout=RECENTLY_VIEWED_WARM_LOCK_TIMEOUT):
-        logger.info("Skipping warm_recently_viewed_players_task because another run is already active")
+        logger.info(
+            "Skipping warm_recently_viewed_players_task because another run is already active")
         return {"status": "skipped", "reason": "already-running"}
 
     try:
         result = warm_recently_viewed_players(realm=realm)
         logger.info("Finished warm_recently_viewed_players_task: %s", result)
+        return result
+    finally:
+        cache.delete(lock_key)
+
+
+CLAN_TIER_DIST_WARM_TASK_OPTS = {
+    "time_limit": 3 * 60 * 60,       # 3h hard limit
+    "soft_time_limit": 2 * 60 * 60 + 45 * 60,  # 2h45m soft limit
+    "ignore_result": True,
+}
+
+
+@app.task(bind=True, **CLAN_TIER_DIST_WARM_TASK_OPTS)
+def warm_all_clan_tier_distributions_task(self, realm=DEFAULT_REALM):
+    from warships.data import warm_all_clan_tier_distributions
+
+    logger.info("Starting warm_all_clan_tier_distributions_task realm=%s", realm)
+
+    lock_key = _clan_tier_dist_warm_lock_key(realm)
+    if not cache.add(lock_key, self.request.id, timeout=CLAN_TIER_DIST_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_all_clan_tier_distributions_task — another run is already active")
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        result = warm_all_clan_tier_distributions(realm=realm)
+        logger.info("Finished warm_all_clan_tier_distributions_task: %s", result)
         return result
     finally:
         cache.delete(lock_key)
@@ -903,7 +961,8 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
     if len(active_crawl_realms) >= MAX_CONCURRENT_REALM_CRAWLS:
         logger.warning(
             "Skipping crawl for realm=%s — %d other crawl(s) active: %s (max=%d)",
-            realm, len(active_crawl_realms), active_crawl_realms, MAX_CONCURRENT_REALM_CRAWLS,
+            realm, len(
+                active_crawl_realms), active_crawl_realms, MAX_CONCURRENT_REALM_CRAWLS,
         )
         return {"status": "skipped", "reason": "cross-realm-mutex", "active": active_crawl_realms}
 
@@ -926,7 +985,8 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
             resume=resume,
             dry_run=dry_run,
             limit=limit,
-            heartbeat_callback=lambda ts=None: touch_clan_crawl_heartbeat(timestamp=ts, realm=realm),
+            heartbeat_callback=lambda ts=None: touch_clan_crawl_heartbeat(
+                timestamp=ts, realm=realm),
             realm=realm,
             core_only=core_only,
         )

@@ -273,3 +273,29 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         )
 
     PeriodicTask.objects.filter(name="recently-viewed-player-warmer").delete()
+
+    # -- Daily Clan Tier Distribution Warmer --
+    # Recalculates tier distribution cache for every clan with members.
+    # Staggered by realm to avoid concurrent DB pressure.
+    clan_tier_dist_warm_hour = int(os.getenv("CLAN_TIER_DIST_WARM_HOUR", "2"))
+    for realm in sorted(VALID_REALMS):
+        realm_hour = (clan_tier_dist_warm_hour + REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+        clan_tier_dist_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute="30",
+            hour=str(realm_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"daily-clan-tier-dist-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_all_clan_tier_distributions_task",
+                "crontab": clan_tier_dist_schedule,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Daily recalculation of clan tier distribution cache for all clans ({realm.upper()}).",
+            },
+        )

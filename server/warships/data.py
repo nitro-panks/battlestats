@@ -4236,6 +4236,59 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
     return data
 
 
+def warm_all_clan_tier_distributions(realm: str = DEFAULT_REALM, batch_size: int = 100) -> dict:
+    """
+    Recalculates and caches tier distribution data for every clan with members.
+    Processes in batches with short sleeps to avoid monopolising DB connections.
+    Runs on the background queue — typically completes in 15-30 minutes.
+    """
+    import time as _time
+
+    clan_ids = list(
+        Clan.objects.filter(realm=realm, members_count__gt=0)
+        .values_list('clan_id', flat=True)
+        .order_by('clan_id')
+    )
+    total = len(clan_ids)
+    warmed = 0
+    skipped = 0
+
+    logging.info(
+        "warm_all_clan_tier_distributions: starting %d clans (realm=%s)", total, realm
+    )
+
+    for i in range(0, total, batch_size):
+        batch = clan_ids[i : i + batch_size]
+        for clan_id in batch:
+            try:
+                result = update_clan_tier_distribution(str(clan_id), realm=realm)
+                if result:
+                    warmed += 1
+                else:
+                    skipped += 1  # needs player hydration, returned []
+            except Exception:
+                logging.exception(
+                    "warm_all_clan_tier_distributions: error on clan %s", clan_id
+                )
+                skipped += 1
+
+        # Brief pause between batches to yield DB connections
+        if i + batch_size < total:
+            _time.sleep(0.5)
+
+        if (i + batch_size) % 1000 == 0 or i + batch_size >= total:
+            logging.info(
+                "warm_all_clan_tier_distributions: progress %d/%d (warmed=%d, skipped=%d)",
+                min(i + batch_size, total), total, warmed, skipped,
+            )
+
+    logging.info(
+        "warm_all_clan_tier_distributions: done (warmed=%d, skipped=%d, total=%d)",
+        warmed, skipped, total,
+    )
+    return {"warmed": warmed, "skipped": skipped, "total": total}
+
+
 def update_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     player = Player.objects.get(player_id=player_id, realm=realm)
     player.randoms_json = _extract_randoms_rows(player.battles_json, limit=20)
