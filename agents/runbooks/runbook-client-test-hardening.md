@@ -1,6 +1,6 @@
 # Runbook: Client Test Hardening
 
-_Last updated: 2026-04-01_
+_Last updated: 2026-04-02_
 
 _Status: Active maintenance reference_
 
@@ -10,112 +10,55 @@ Capture the current client-side regression coverage, the highest-risk uncovered 
 
 ## Current Test Baseline
 
-The client currently uses two test lanes:
+The client now uses a single lean Jest release gate.
 
-- Jest + React Testing Library for component and route-loader regressions.
-- Playwright for browser-level route smoke tests.
+The goal is end-of-cycle speed, not broad historical coverage. We keep only the tests that protect the current routed site experience and retire the rest from the active path.
 
 ### Test entry points
 
-- `cd client && npm test -- --runInBand`
+- `cd client && npm test`
 - `cd client && npm run test:ci`
-- `cd client && npm run test:e2e`
 
 ## Current Covered Files
 
-- `client/app/components/__tests__/ClanSVG.test.tsx`
-- `client/app/components/__tests__/ClanRouteView.test.tsx`
-- `client/app/components/__tests__/Footer.test.tsx`
-- `client/app/components/__tests__/HeaderSearch.test.tsx`
-- `client/app/components/__tests__/LandingDropdowns.test.tsx`
-- `client/app/components/__tests__/PlayerClanBattleSeasons.test.tsx`
+- `client/app/lib/__tests__/entityRoutes.test.ts`
+- `client/app/lib/__tests__/visitAnalytics.test.ts`
+- `client/app/components/__tests__/PlayerSearch.test.tsx`
+- `client/app/components/__tests__/PlayerRouteViewWarmup.test.tsx`
 - `client/app/components/__tests__/PlayerDetail.test.tsx`
 - `client/app/components/__tests__/PlayerDetailInsightsTabs.test.tsx`
-- `client/app/components/__tests__/PlayerEfficiencyBadges.test.tsx`
-- `client/app/components/__tests__/PlayerRouteView.test.tsx`
-- `client/app/components/__tests__/PlayerRouteViewWarmup.test.tsx`
-- `client/app/components/__tests__/RankedSeasons.test.tsx`
-- `client/app/components/__tests__/TierSVG.test.tsx`
-- `client/app/components/__tests__/clanChartActivity.test.ts`
-- `client/app/lib/__tests__/entityRoutes.test.ts`
-- `client/e2e/clan-route-clan-chart-pending.spec.ts`
-- `client/e2e/player-detail-tabs.spec.ts`
-- `client/e2e/player-route-warmup.spec.ts`
-- `client/e2e/ranked-heatmap-performance.spec.ts`
+- `client/app/components/__tests__/ClanRouteView.test.tsx`
+- `client/app/components/__tests__/ClanDetail.test.tsx`
 
 ## Current Covered Behaviors
 
-1. `ClanRouteView`
-   - loads clan detail from the correct singular API endpoint,
-   - rejects invalid clan slugs without fetching.
-2. `HeaderSearch`
-   - keeps the search box empty on routed player detail pages,
-   - reflects active `q` query state,
-   - routes to the selected player on submit.
-3. `LandingDropdowns`
-   - keeps inactive theme-menu options readable via theme-aware text color,
-   - keeps inactive realm-menu options readable via theme-aware text color,
-   - protects against hardcoded low-opacity gray values in landing header controls.
-4. `PlayerRouteView`
-   - loads player detail from the routed player API,
-   - wires back/member/clan navigation correctly,
-   - shows `Player not found.` on failed fetch.
-5. `PlayerRouteViewWarmup`
+1. `entityRoutes`
+   - covers player-route encoding, clan-route slugging, and clan-id parsing.
+2. `visitAnalytics`
+   - protects the first-party entity view emission path.
+3. `PlayerSearch`
+   - protects landing search behavior and the current best-clan fallback behavior.
+4. `PlayerRouteViewWarmup`
    - delays inactive-tab warmup until the routed player payload has mounted.
-6. `PlayerDetail` and `PlayerDetailInsightsTabs`
+5. `PlayerDetail` and `PlayerDetailInsightsTabs`
    - preserve the current tab shell,
    - keep one active lane at a time,
    - avoid clan-battle warmup on clanless players.
-7. `PlayerClanBattleSeasons`
-   - covers empty state, summary cards, and callback updates.
-8. `PlayerEfficiencyBadges`
-   - covers empty state, totals, compact summaries, and ship sorting.
-9. `RankedSeasons`, `TierSVG`, `ClanSVG`, and `clanChartActivity`
-   - protect panel fetch flow, clan pending/retry handling, and chart redraw gating.
-10. `entityRoutes`
-   - covers player-route encoding, clan-route slugging, and clan-id parsing.
-11. Playwright smoke specs
-   - cover routed player warmup timing,
-   - clan chart pending/retry browser behavior,
-   - player-detail tab interaction,
-   - ranked heatmap render diagnostics.
-
-## 2026-04-01 Dropdown Follow-Up
-
-### Production symptom
-
-The landing-page theme and realm dropdowns rendered inactive options with a hardcoded low-opacity gray. In practice, the non-selected menu item looked too dark, especially in dark theme, and appeared nearly unselectable.
-
-### Implemented fix
-
-- `client/app/components/ThemeToggle.tsx`
-  - replaced the hardcoded inactive option color with `var(--text-secondary)`.
-  - added a visible active-row background using `var(--accent-faint)`.
-- `client/app/components/RealmSelector.tsx`
-  - applied the same inactive/active treatment for visual consistency.
-- `client/app/components/__tests__/LandingDropdowns.test.tsx`
-  - added focused regression coverage for both menus.
-
-### Validation
-
-```bash
-cd client && npm test -- --runInBand app/components/__tests__/LandingDropdowns.test.tsx
-```
-
-Result on 2026-04-01: `PASS` (`2` tests, `1` suite).
+6. `ClanRouteView`
+   - loads clan detail from the correct singular API endpoint,
+   - rejects invalid clan slugs without fetching.
+7. `ClanDetail`
+   - protects the current clan detail rendering contract and clan-member integration.
 
 ## Known Gaps
 
-The highest-value uncovered client areas are still:
+The deliberately accepted gaps are:
 
-1. `PlayerSearch.tsx`
-   - landing orchestration, transitions, and result handling remain high-branching.
-2. `ClanBattleSeasons.tsx`
-   - still needs deeper loading/error/pending coverage.
-3. search-to-route browser flow
-   - still lacks a full landing-search browser smoke.
-4. additional D3-heavy chart components
-   - remain lightly protected outside the most route-critical surfaces.
+1. D3-heavy visual components outside the routed player and clan shells.
+2. broader landing-page presentation coverage beyond search/fallback behavior.
+3. historical benchmark and browser-smoke coverage.
+
+Those tests were retired on purpose to keep CI fast near the end of the delivery cycle.
 
 ## CI Recommendations
 
@@ -123,11 +66,11 @@ Use these commands in client CI:
 
 ```bash
 cd client && npm run test:ci
-cd client && npm run test:e2e
+cd client && npm run build
 ```
 
-Keep Jest serialized with `--runInBand` for now. The suite is still small, and this avoids low-value flake from shared mocks or environment reuse.
+Keep Jest serialized with `--runInBand`. The active suite is intentionally small and favors determinism over parallelism.
 
 ## Summary
 
-The client has a meaningful regression layer around route safety, warmup behavior, pending/retry surfaces, and a small set of header/UI controls. Keep this runbook additive: when a new frontend regression test lands, update the covered-files list and the focused validation note in the same change.
+The client release gate is now a small routed-site smoke layer, not a general-purpose frontend test harness. Add a new frontend test only when it protects a release-critical contract that is currently missing from this curated set.

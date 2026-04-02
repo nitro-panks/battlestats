@@ -44,6 +44,15 @@ NEW="${MAJOR}.${MINOR}.${PATCH}"
 
 echo "Bumping version: ${CURRENT} → ${NEW} (${LEVEL})"
 
+if [[ "${LEVEL}" =~ ^(minor|major)$ ]]; then
+  echo ""
+  echo "Running required release tests for ${LEVEL} release"
+  "${REPO_ROOT}/scripts/run_release_gate.sh"
+elif [[ "${LEVEL}" == "patch" ]]; then
+  echo ""
+  echo "Skipping release tests for patch release"
+fi
+
 printf '%s\n' "${NEW}" > "${VERSION_FILE}"
 
 cd "${REPO_ROOT}"

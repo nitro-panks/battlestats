@@ -217,7 +217,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 window.clearTimeout(timeoutId);
             }
         };
-    }, [hasClan, isLoading, playerId, realm]);
+    }, [hasClan, isLoading, onWarmupSettled, playerId, realm]);
 
     useEffect(() => {
         if (isLoading || activeTab !== 'profile' || profileChartPayload || profileChartState === 'error' || profileChartState === 'warming') {

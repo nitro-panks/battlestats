@@ -509,7 +509,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
     const { realm } = useRealm();
     const onSelectMemberRef = useRef(onSelectMember);
     const chartMemberActivitySignature = useMemo(() => buildClanChartMemberActivitySignature(membersData), [membersData]);
-    const chartMemberActivity = useMemo(() => buildClanChartMemberActivity(membersData), [chartMemberActivitySignature]);
+    const chartMemberActivity = useMemo(() => buildClanChartMemberActivity(membersData), [membersData]);
     const [plotData, setPlotData] = useState<ClanData[] | null>(null);
     const [plotError, setPlotError] = useState(false);
     const [isPlotPendingRefresh, setIsPlotPendingRefresh] = useState(false);

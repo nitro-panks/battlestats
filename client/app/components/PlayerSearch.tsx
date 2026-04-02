@@ -244,7 +244,7 @@ const PlayerSearch: React.FC = () => {
         } catch (err) {
             console.error('Error fetching landing data:', err);
         }
-    }, [triggerBestLandingWarmup]);
+    }, [realm, triggerBestLandingWarmup]);
 
     const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode) => {
         try {
@@ -313,7 +313,7 @@ const PlayerSearch: React.FC = () => {
         if (playerMode !== 'recent') void fetchLandingPlayers(playerMode);
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
-    const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
+    const fetchPlayerByName = useCallback(async (playerName: string): Promise<PlayerData | null> => {
         const { data } = await fetchSharedJson<PlayerData>(
             withRealm(`/api/player/${encodeURIComponent(playerName)}/`, realm),
             {
@@ -322,7 +322,7 @@ const PlayerSearch: React.FC = () => {
             },
         );
         return data;
-    };
+    }, [realm]);
 
     const executePlayerSearch = useCallback(async (playerName: string) => {
         const trimmedPlayerName = playerName.trim();
@@ -342,7 +342,7 @@ const PlayerSearch: React.FC = () => {
         } finally {
             setIsLoadingPlayer(false);
         }
-    }, [realm]);
+    }, [fetchPlayerByName]);
 
     const handleSelectClan = useCallback((clan: LandingClan) => {
         router.push(buildClanPath(clan.clan_id, clan.name || clan.tag, realm));

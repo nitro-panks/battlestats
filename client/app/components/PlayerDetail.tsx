@@ -245,6 +245,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     useEffect(() => {
         setClanBattleSummary(getInitialClanBattleHeaderState(player));
     }, [
+        player,
         player.player_id,
         player.clan_battle_header_eligible,
         player.clan_battle_header_total_battles,

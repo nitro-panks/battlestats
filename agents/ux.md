@@ -31,6 +31,16 @@ Ensure features solve real user problems with clear, efficient flows and underst
 - Prefer summaries that help humans decide the next action quickly.
 - Avoid adding workflow ceremony that increases reading time without improving decisions.
 
+## Color Direction
+
+- Strongly prefer color palettes derived from ColorBrewer2 for charts, status ramps, and structured data encoding: https://colorbrewer2.org/
+- Choose ColorBrewer palette types by meaning, not taste: sequential for ordered magnitude, diverging for centered comparisons, qualitative for categories.
+- Default to ColorBrewer before inventing a custom palette. Custom palettes should be the exception, not the baseline.
+- When adapting a ColorBrewer palette to battlestats surfaces, preserve the underlying ramp logic so visual meaning stays legible across charts and states.
+- Do not force ColorBrewer where product semantics already depend on an established palette that users recognize. In those cases, extend or harmonize with the existing palette rather than replacing it casually.
+- Palette choices still need to clear accessibility and contrast checks. If a ColorBrewer option is semantically right but too weak for the actual surface, adjust it conservatively instead of abandoning the palette logic entirely.
+- Prefer reusing the same ColorBrewer family across related surfaces so the product feels coherent instead of palette-shopping per component.
+
 ## UX Checklist
 
 - Is the primary task obvious?
@@ -58,6 +68,7 @@ These are validated interaction patterns from the live product:
 - Prefer familiar patterns over novelty.
 - Keep user-facing terminology consistent.
 - Do not let internal tool jargon replace plain language in summaries or operator guidance.
+- Do not introduce arbitrary new color systems when a suitable ColorBrewer2 palette already fits the task.
 
 ## Definition of Done
 

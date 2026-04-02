@@ -30,15 +30,16 @@ jest.mock('next/dynamic', () => {
         title?: string;
     }) {
         const React = require('react');
+        const { onSummaryChange, onVisibilityChange, playerId } = props;
 
         React.useEffect(() => {
-            if (typeof props?.onSummaryChange === 'function' && props?.playerId && mockClanBattleSummary !== undefined) {
-                props.onSummaryChange(mockClanBattleSummary);
+            if (typeof onSummaryChange === 'function' && playerId && mockClanBattleSummary !== undefined) {
+                onSummaryChange(mockClanBattleSummary);
             }
-            if (typeof props?.onVisibilityChange === 'function' && mockRankedHeatmapVisibility !== undefined) {
-                props.onVisibilityChange(mockRankedHeatmapVisibility);
+            if (typeof onVisibilityChange === 'function' && mockRankedHeatmapVisibility !== undefined) {
+                onVisibilityChange(mockRankedHeatmapVisibility);
             }
-        }, [props?.onSummaryChange, props?.onVisibilityChange, props?.playerId]);
+        }, [onSummaryChange, onVisibilityChange, playerId]);
 
         return <div data-testid="dynamic-component" />;
     };
@@ -131,6 +132,8 @@ describe('PlayerDetail efficiency-rank icon', () => {
                         x_label: 'Ship Type',
                         y_label: 'Tier',
                         tracked_population: 1,
+                        x_labels: ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'],
+                        y_values: [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
                         tiles: [],
                         trend: [],
                         player_cells: [],

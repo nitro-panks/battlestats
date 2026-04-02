@@ -30,16 +30,15 @@ Battlestats is a World of Warships player and clan statistics platform. Live at 
 ```bash
 docker compose up -d                              # Start all services
 docker compose up -d db redis rabbitmq server react-app task-runner  # Selective
-./run_test_suite.sh                               # Full test suite (docker-based)
+./run_test_suite.sh                               # Lean release gate (docker-based)
 ```
 
 ### Backend (Django)
 ```bash
 cd server
-python -m pytest warships/tests/ -x --tb=short              # All backend tests
-python -m pytest warships/tests/test_data.py -x --tb=short   # Single test file
+python -m pytest warships/tests/test_views.py warships/tests/test_landing.py warships/tests/test_realm_isolation.py warships/tests/test_data_product_contracts.py -x --tb=short  # Release gate
+python -m pytest warships/tests/test_views.py -x --tb=short   # Single release-gate file
 python -m pytest warships/tests/test_views.py::TestPlayerViewSet::test_player_detail -x  # Single test
-python manage.py test --keepdb warships.tests                # Via Django test runner (docker)
 python manage.py makemigrations && python manage.py migrate  # Migrations
 ```
 
@@ -49,12 +48,8 @@ cd client
 npm run dev                                       # Dev server (port 3000)
 npm run build                                     # Production build
 npm run lint                                      # ESLint
-npm test -- --runInBand                           # Jest unit tests
-npm test -- --runInBand path/to/test.tsx          # Single Jest test
-npx playwright test                               # All E2E tests
-npx playwright test e2e/some-spec.spec.ts         # Single E2E test
-npx playwright test --grep "test name"            # E2E by name
-npm run test:e2e:install                          # Install Playwright browsers
+npm test                                          # Lean frontend release gate
+npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single release-gate file
 ```
 
 ### Database
@@ -191,6 +186,9 @@ Use these prefixes on all commit messages to enable future automation:
 
 ### Release workflow
 Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which bumps VERSION, commits, tags, and pushes.
+
+- `patch` releases may skip the release gate.
+- `minor` and `major` releases run the curated release gate before bumping the version.
 
 ## Environment
 

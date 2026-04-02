@@ -258,15 +258,19 @@ jest.mock('../LandingClanSVG', () => {
 });
 
 describe('PlayerSearch landing efficiency icon', () => {
+    let consoleErrorSpy: jest.SpyInstance;
+
     beforeEach(() => {
         pushMock.mockReset();
         capturedPlayerDetailProps.current = null;
         mockQueryParam = '';
         jest.useRealTimers();
         installFetchMock();
+        consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     });
 
     afterEach(() => {
+        consoleErrorSpy.mockRestore();
         jest.useRealTimers();
     });
 

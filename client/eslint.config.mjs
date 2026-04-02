@@ -1,9 +1,11 @@
 import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
 
 const config = [
+  {
+    ignores: [".next/**", "coverage/**", "**/coverage/**", "node_modules/**"],
+  },
   ...nextCoreWebVitals,
   {
-    ignores: [".next/**", "coverage/**", "node_modules/**"],
     rules: {
       "react-hooks/preserve-manual-memoization": "off",
       "react-hooks/set-state-in-effect": "off",

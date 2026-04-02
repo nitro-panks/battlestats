@@ -112,8 +112,6 @@ const formatTickValue = (axisIndex: number, normalized: number, ranges: DataRang
 };
 
 // ── Draw (updates existing SVG content) ─────────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const renderFrame = (
     g: any,
     tooltipG: any,
@@ -306,11 +304,8 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
 }) => {
     const { realm } = useRealm();
     const containerRef = useRef<HTMLDivElement>(null);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const svgRef = useRef<any>(null);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const gRef = useRef<any>(null);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tooltipGRef = useRef<any>(null);
     const [plotData, setPlotData] = useState<PlotData[] | null>(null);
     const [plotError, setPlotError] = useState(false);
@@ -400,7 +395,6 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
         tooltipGRef.current = svg.append('g').style('pointer-events', 'none');
 
         // Drag handler — persists across renders
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const drag = (d3.drag as any)()
             .on('start', () => {
                 isDraggingRef.current = true;
@@ -417,7 +411,6 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
                 svg.style('cursor', 'grab');
             });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         svg.call(drag as any);
 
         return () => {
