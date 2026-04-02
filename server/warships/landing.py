@@ -9,7 +9,7 @@ from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce
 from django.utils import timezone
 
-from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
+from warships.data import _calculate_tier_filtered_pvp_record, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
 from warships.models import Clan, DEFAULT_REALM, Player, realm_cache_key
 from warships.visit_analytics import get_top_entities
 
@@ -1153,8 +1153,21 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             es, 'clan_battle_overall_win_rate', None)
         row['highest_ranked_league'] = get_highest_ranked_league_name(
             ranked_rows)
-        row.update(_get_published_efficiency_rank_payload(
-            players_by_id.get(player_id)))
+        # Use stored percentile directly — landing surfaces tolerate minor
+        # input-data drift (unlike player detail, which uses the stricter
+        # _get_published_efficiency_rank_payload freshness gate).
+        if es and es.efficiency_rank_percentile is not None:
+            row['efficiency_rank_percentile'] = es.efficiency_rank_percentile
+            row['efficiency_rank_tier'] = es.efficiency_rank_tier
+            row['has_efficiency_rank_icon'] = bool(es.has_efficiency_rank_icon)
+            row['efficiency_rank_population_size'] = es.efficiency_rank_population_size
+            row['efficiency_rank_updated_at'] = es.efficiency_rank_updated_at
+        else:
+            row['efficiency_rank_percentile'] = None
+            row['efficiency_rank_tier'] = None
+            row['has_efficiency_rank_icon'] = False
+            row['efficiency_rank_population_size'] = None
+            row['efficiency_rank_updated_at'] = None
         row.pop('player_id', None)
         row.pop('days_since_last_battle', None)
 
@@ -1501,6 +1514,11 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
             'explorer_summary__clan_battle_total_battles',
             'explorer_summary__clan_battle_seasons_participated',
             'explorer_summary__clan_battle_overall_win_rate',
+            'explorer_summary__efficiency_rank_percentile',
+            'explorer_summary__efficiency_rank_tier',
+            'explorer_summary__has_efficiency_rank_icon',
+            'explorer_summary__efficiency_rank_population_size',
+            'explorer_summary__efficiency_rank_updated_at',
         )
         .order_by(F('last_lookup').desc(nulls_last=True), 'name')[:40]
     )
@@ -1528,7 +1546,18 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
             'highest_ranked_league': get_highest_ranked_league_name(
                 ranked_rows),
         }
-        row.update(_get_published_efficiency_rank_payload(player_obj))
+        if es and es.efficiency_rank_percentile is not None:
+            row['efficiency_rank_percentile'] = es.efficiency_rank_percentile
+            row['efficiency_rank_tier'] = es.efficiency_rank_tier
+            row['has_efficiency_rank_icon'] = bool(es.has_efficiency_rank_icon)
+            row['efficiency_rank_population_size'] = es.efficiency_rank_population_size
+            row['efficiency_rank_updated_at'] = es.efficiency_rank_updated_at
+        else:
+            row['efficiency_rank_percentile'] = None
+            row['efficiency_rank_tier'] = None
+            row['has_efficiency_rank_icon'] = False
+            row['efficiency_rank_population_size'] = None
+            row['efficiency_rank_updated_at'] = None
         rows.append(row)
 
     return rows

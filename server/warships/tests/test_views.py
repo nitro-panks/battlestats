@@ -929,8 +929,8 @@ class LandingWarmupViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_update_player_task.assert_called_once_with(player_id=9002)
-        mock_update_clan_task.assert_called_once_with(clan_id=901)
-        mock_update_clan_members_task.assert_called_once_with(clan_id=901)
+        mock_update_clan_task.assert_called_once_with(clan_id=901, realm='na')
+        mock_update_clan_members_task.assert_called_once_with(clan_id=901, realm='na')
 
 
 class ClanMembersEndpointTests(TestCase):
@@ -1063,8 +1063,38 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(response.json()[0]["name"], "ExistingMember")
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
-        mock_update_clan_data_task.assert_called_once_with(clan_id="420")
-        mock_update_clan_members_task.assert_called_once_with(clan_id="420")
+        mock_update_clan_data_task.assert_called_once_with(clan_id="420", realm='na')
+        mock_update_clan_members_task.assert_called_once_with(clan_id="420", realm='na')
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    def test_clan_members_enqueues_realm_aware_refresh_for_eu_clan(
+        self,
+        mock_update_clan_data_task,
+        mock_update_clan_members_task,
+    ):
+        clan = Clan.objects.create(
+            clan_id=421,
+            name="EU Incomplete Clan",
+            realm='eu',
+            members_count=2,
+            leader_id=None,
+            leader_name="",
+        )
+        Player.objects.create(
+            name="EuExistingMember",
+            player_id=4211,
+            clan=clan,
+            realm='eu',
+            days_since_last_battle=4,
+            last_battle_date=timezone.now().date() - timedelta(days=4),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/421/?realm=eu")
+
+        self.assertEqual(response.status_code, 200)
+        mock_update_clan_data_task.assert_called_once_with(clan_id="421", realm='eu')
+        mock_update_clan_members_task.assert_called_once_with(clan_id="421", realm='eu')
 
     def test_clan_members_exposes_ranked_hydration_metadata(self):
         self.mock_queue_clan_ranked_hydration.return_value = {
@@ -2316,8 +2346,13 @@ class ApiContractTests(TestCase):
         response = self.client.get("/api/landing/players/?mode=sigma&limit=40")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([row["name"]
-                         for row in response.json()], ["LandingSigmaVisible"])
+        names = [row["name"] for row in response.json()]
+        # Visible and "stale" both have valid percentiles — landing surfaces
+        # tolerate input-data drift. Hidden and unpublished are excluded.
+        self.assertIn("LandingSigmaVisible", names)
+        self.assertIn("LandingSigmaStale", names)
+        self.assertNotIn("LandingSigmaHidden", names)
+        self.assertNotIn("LandingSigmaUnpublished", names)
 
     def test_landing_players_sigma_mode_caps_results_to_requested_limit(self):
         cache.clear()
