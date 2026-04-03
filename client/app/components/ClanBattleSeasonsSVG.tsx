@@ -111,14 +111,11 @@ const drawChart = (
     const n = fullTimeline.length;
     const bandPadding = 0.2;
     const totalBandWidth = width / n;
-    const groupWidth = totalBandWidth * (1 - bandPadding);
-    const barWidth = Math.max(1, (groupWidth - 1) / 2); // two bars per group, 1px gap
+    const barWidth = Math.max(1, totalBandWidth * (1 - bandPadding));
     const xScale = d3.scaleLinear()
         .domain([0, n - 1])
-        .range([totalBandWidth / 2 - groupWidth / 2, width - totalBandWidth / 2 + groupWidth / 2 - barWidth * 2 - 1]);
-
-    // Left offset for each bar within a group
-    const barOffset = (barIndex: number) => barIndex * (barWidth + 1);
+        .range([totalBandWidth / 2 - barWidth / 2, width - totalBandWidth / 2 - barWidth / 2]);
+    const barCenter = (index: number) => xScale(index) + barWidth / 2;
 
     // Y scale — percentage 0-100
     const maxPct = Math.max(
@@ -152,7 +149,7 @@ const drawChart = (
     const wrColor = colors.metricWR;
     const activityColor = colors.activityActive;
 
-    // --- Draw bars ---
+    // --- Draw WR bars ---
     const cornerR = Math.min(3, barWidth / 2);
 
     // Rounded top-corner bar path
@@ -164,18 +161,14 @@ const drawChart = (
 
     const activeRows = rows.filter(d => d.hasData);
 
-    // Bar groups — one <g> per season, for coordinated hover
-    const barGroups = svg.selectAll('.bar-group')
+    // WR bars
+    svg.selectAll('.wr-bar')
         .data(activeRows)
         .enter()
-        .append('g')
-        .attr('class', 'bar-group')
-        .style('cursor', 'crosshair');
-
-    // WR bar in each group
-    barGroups.append('path')
+        .append('path')
+        .attr('class', 'wr-bar')
         .attr('d', (d: SeasonRow) => {
-            const bx = xScale(d.index) + barOffset(0);
+            const bx = xScale(d.index);
             const by = yScale(d.wr);
             return roundedTopBar(bx, by, barWidth, height - by, cornerR);
         })
@@ -185,27 +178,31 @@ const drawChart = (
         .attr('stroke-width', 0.5)
         .attr('stroke-opacity', 0.9);
 
-    // Activity bar in each group
-    barGroups.append('path')
-        .attr('d', (d: SeasonRow) => {
-            const bx = xScale(d.index) + barOffset(1);
-            const by = yScale(d.activity);
-            return roundedTopBar(bx, by, barWidth, height - by, cornerR);
-        })
-        .attr('fill', activityColor)
-        .attr('fill-opacity', 0.75)
-        .attr('stroke', activityColor)
-        .attr('stroke-width', 0.5)
-        .attr('stroke-opacity', 0.9);
+    // --- Activity line overlay ---
+    const lineCoords: [number, number][] = activeRows.map(d => [barCenter(d.index), yScale(d.activity)]);
+    const lineGen = d3.line().curve(d3.curveMonotoneX);
 
-    // Hover: brighten both bars in the group
-    barGroups
-        .on('mouseover', (event: MouseEvent) => {
-            d3.select(event.currentTarget as SVGGElement).selectAll('path').attr('fill-opacity', 0.95);
-        })
-        .on('mouseout', (event: MouseEvent) => {
-            d3.select(event.currentTarget as SVGGElement).selectAll('path').attr('fill-opacity', 0.75);
-        });
+    if (lineCoords.length > 1) {
+        svg.append('path')
+            .attr('d', lineGen(lineCoords))
+            .attr('fill', 'none')
+            .attr('stroke', activityColor)
+            .attr('stroke-width', 2)
+            .attr('stroke-opacity', 0.9);
+    }
+
+    // Activity dots
+    svg.selectAll('.activity-dot')
+        .data(activeRows)
+        .enter()
+        .append('circle')
+        .attr('class', 'activity-dot')
+        .attr('cx', (d: SeasonRow) => barCenter(d.index))
+        .attr('cy', (d: SeasonRow) => yScale(d.activity))
+        .attr('r', Math.min(4, barWidth / 3))
+        .attr('fill', activityColor)
+        .attr('stroke', colors.surface)
+        .attr('stroke-width', 1.5);
 
     // --- X axis ---
     const xAxisG = svg.append('g')
@@ -216,7 +213,7 @@ const drawChart = (
 
     fullTimeline.forEach((d, i) => {
         if (i % tickStep !== 0 && i !== fullTimeline.length - 1) return;
-        const tx = xScale(i) + barOffset(0) + barWidth; // center of the two-bar group
+        const tx = barCenter(i);
         const rotate = compact && fullTimeline.length > 12;
         xAxisG.append('text')
             .attr('x', tx)
@@ -293,34 +290,52 @@ const drawChart = (
     const legendG = svgRoot.append('g')
         .attr('transform', `translate(${margin.left}, ${legendY})`);
 
-    const legendItems = [
-        { label: 'Win Rate %', color: wrColor },
-        { label: 'Clan Activity %', color: activityColor },
-    ];
-
+    // WR legend — bar swatch
     let legendX = 0;
-    for (const item of legendItems) {
-        legendG.append('rect')
-            .attr('x', legendX)
-            .attr('y', -5)
-            .attr('width', 12)
-            .attr('height', 10)
-            .attr('rx', 3)
-            .attr('fill', item.color)
-            .attr('fill-opacity', 0.75)
-            .attr('stroke', item.color)
-            .attr('stroke-width', 0.5);
+    legendG.append('rect')
+        .attr('x', legendX)
+        .attr('y', -5)
+        .attr('width', 12)
+        .attr('height', 10)
+        .attr('rx', 3)
+        .attr('fill', wrColor)
+        .attr('fill-opacity', 0.75)
+        .attr('stroke', wrColor)
+        .attr('stroke-width', 0.5);
 
-        legendG.append('text')
-            .attr('x', legendX + 16)
-            .attr('y', 0)
-            .attr('dy', '0.35em')
-            .style('font-size', legendFontSize)
-            .style('fill', colors.labelText)
-            .text(item.label);
+    legendG.append('text')
+        .attr('x', legendX + 16)
+        .attr('y', 0)
+        .attr('dy', '0.35em')
+        .style('font-size', legendFontSize)
+        .style('fill', colors.labelText)
+        .text('Win Rate %');
 
-        legendX += 16 + item.label.length * (compact ? 6 : 7) + 16;
-    }
+    legendX += 16 + 'Win Rate %'.length * (compact ? 6 : 7) + 16;
+
+    // Activity legend — line + dot swatch
+    legendG.append('line')
+        .attr('x1', legendX)
+        .attr('y1', 0)
+        .attr('x2', legendX + 12)
+        .attr('y2', 0)
+        .attr('stroke', activityColor)
+        .attr('stroke-width', 2);
+    legendG.append('circle')
+        .attr('cx', legendX + 6)
+        .attr('cy', 0)
+        .attr('r', 3)
+        .attr('fill', activityColor)
+        .attr('stroke', colors.surface)
+        .attr('stroke-width', 1);
+
+    legendG.append('text')
+        .attr('x', legendX + 16)
+        .attr('y', 0)
+        .attr('dy', '0.35em')
+        .style('font-size', legendFontSize)
+        .style('fill', colors.labelText)
+        .text('Clan Activity %');
 };
 
 const ClanBattleSeasonsSVG: React.FC<ClanBattleSeasonsSVGProps> = ({
