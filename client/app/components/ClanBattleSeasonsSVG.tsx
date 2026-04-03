@@ -93,21 +93,22 @@ const drawChart = (
     const xAxisG = svg.append('g')
         .attr('transform', `translate(0, ${height})`);
 
+    const maxTicks = 20;
+    const tickStep = sorted.length > maxTicks ? Math.ceil(sorted.length / maxTicks) : 1;
+
     sorted.forEach((d, i) => {
+        if (i % tickStep !== 0 && i !== sorted.length - 1) return;
+
         const tx = xScale(i);
-        const label = d.season_label;
-        // Skip labels on compact if too many seasons
-        const skip = compact && sorted.length > 16 && i % 2 !== 0;
-        if (!skip) {
-            xAxisG.append('text')
-                .attr('x', tx)
-                .attr('y', compact && sorted.length > 12 ? 12 : 14)
-                .attr('text-anchor', compact && sorted.length > 12 ? 'end' : 'middle')
-                .attr('transform', compact && sorted.length > 12 ? `rotate(-45, ${tx}, 12)` : '')
-                .style('font-size', axisFontSize)
-                .style('fill', colors.axisText)
-                .text(label);
-        }
+        const rotate = compact && sorted.length > 12;
+        xAxisG.append('text')
+            .attr('x', tx)
+            .attr('y', rotate ? 12 : 14)
+            .attr('text-anchor', rotate ? 'end' : 'middle')
+            .attr('transform', rotate ? `rotate(-45, ${tx}, 12)` : '')
+            .style('font-size', axisFontSize)
+            .style('fill', colors.axisText)
+            .text(d.season_label);
     });
 
     // Left Y axis (percentage)
