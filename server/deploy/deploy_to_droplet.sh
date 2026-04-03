@@ -43,6 +43,7 @@ install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/releases"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/server"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/agents"
+install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/logs"
 REMOTE
 
 scp "${SERVER_DIR}/.env.cloud" "${DEPLOY_USER}@${HOST}:${REMOTE_TMP_ENV}"
@@ -166,6 +167,13 @@ set_env_value CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB 786432
 set_env_value BEST_CLAN_EXCLUDED_IDS 1000068602
+set_env_value PLAYER_REFRESH_STATE_FILE "${APP_ROOT}/shared/logs/incremental_player_refresh_state.json"
+set_env_value RANKED_INCREMENTAL_STATE_FILE "${APP_ROOT}/shared/logs/incremental_ranked_data_state.json"
+set_env_value ENRICH_BATCH_SIZE 200
+set_env_value ENRICH_MIN_PVP_BATTLES 500
+set_env_value ENRICH_MIN_WR 48.0
+set_env_value ENRICH_DELAY 0.5
+set_env_value ENRICH_PLAYER_DATA_HOUR 14
 
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"

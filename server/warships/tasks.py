@@ -47,6 +47,7 @@ LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
 BULK_CACHE_LOAD_LOCK_TIMEOUT = 30 * 60
 RECENTLY_VIEWED_WARM_LOCK_TIMEOUT = 15 * 60
 CLAN_TIER_DIST_WARM_LOCK_TIMEOUT = 3 * 60 * 60  # 3h — iterates all clans
+ENRICH_PLAYER_DATA_LOCK_TIMEOUT = 6 * 60 * 60
 
 
 MAX_CONCURRENT_REALM_CRAWLS = int(
@@ -107,6 +108,10 @@ def _bulk_cache_load_lock_key(realm: str = DEFAULT_REALM) -> str:
 
 def _recently_viewed_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_recently_viewed_players:{realm}:lock"
+
+
+def _enrich_player_data_lock_key() -> str:
+    return "warships:tasks:enrich_player_data:lock"
 
 
 def _clan_tier_dist_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -1107,6 +1112,42 @@ def incremental_ranked_data_task(self, realm=DEFAULT_REALM):
             realm=realm,
         )
         return {"status": "completed"}
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, **CRAWL_TASK_OPTS)
+def enrich_player_data_task(self):
+    """Background enrichment of players missing battles/ranked/snapshot data.
+
+    Fills battles_json, tiers_json, type_json, randoms_json, ranked_json,
+    and snapshot/activity data for the highest-WR players first.
+    Alternates NA and EU to give both realms steady progress.
+
+    Uses batch API optimisations:
+    - Ship cache pre-warm (all Ship records loaded to Redis before loop)
+    - refresh_player=False on snapshot (skips 2 redundant API calls/player)
+    - No separate update_activity_data call (snapshot already cascades)
+    """
+    lock_key = _enrich_player_data_lock_key()
+    if not cache.add(lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT):
+        logger.info("Skipping enrich_player_data_task — another enrichment is already running")
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        from warships.management.commands.enrich_player_data import enrich_players
+
+        summary = enrich_players(
+            batch=int(os.getenv("ENRICH_BATCH_SIZE", "200")),
+            min_pvp_battles=int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500")),
+            min_wr=float(os.getenv("ENRICH_MIN_WR", "48.0")),
+            delay=float(os.getenv("ENRICH_DELAY", "0.5")),
+            heartbeat_callback=lambda: cache.set(
+                lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT,
+            ),
+        )
+        logger.info("enrich_player_data_task completed: %s", summary)
+        return summary
     finally:
         cache.delete(lock_key)
 

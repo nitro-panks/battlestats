@@ -299,3 +299,28 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
                 "description": f"Daily recalculation of clan tier distribution cache for all clans ({realm.upper()}).",
             },
         )
+
+    # -- Daily Player Enrichment Crawler --
+    # Fills battles_json, ranked_json, snapshot/activity for players missing
+    # this data.  Runs once daily, staggered after clan crawls finish.
+    enrich_hour = int(os.getenv("ENRICH_PLAYER_DATA_HOUR", "14"))
+    enrich_minute = os.getenv("ENRICH_PLAYER_DATA_MINUTE", "0")
+    enrich_schedule, _ = CrontabSchedule.objects.get_or_create(
+        minute=enrich_minute,
+        hour=str(enrich_hour),
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        timezone="UTC",
+    )
+    PeriodicTask.objects.update_or_create(
+        name="daily-player-enrichment",
+        defaults={
+            "task": "warships.tasks.enrich_player_data_task",
+            "crontab": enrich_schedule,
+            "enabled": crawler_schedules_enabled,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Daily enrichment of players missing battle/ranked/activity data, ordered by WR desc.",
+        },
+    )
