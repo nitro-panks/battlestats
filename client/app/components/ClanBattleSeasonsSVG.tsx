@@ -19,6 +19,13 @@ interface ClanBattleSeasonsSVGProps {
 
 type Colors = typeof chartColors['light'];
 
+interface SeasonRow {
+    index: number;
+    wr: number;
+    activity: number;
+    season: ClanBattleSeasonPoint;
+}
+
 const drawChart = (
     container: HTMLDivElement,
     seasons: ClanBattleSeasonPoint[],
@@ -37,8 +44,8 @@ const drawChart = (
     const totalSvgWidth = containerWidth;
     const totalSvgHeight = compact ? Math.min(svgHeight, 240) : svgHeight;
     const margin = compact
-        ? { top: 16, right: 40, bottom: 46, left: 42 }
-        : { top: 20, right: 52, bottom: 52, left: 52 };
+        ? { top: 16, right: 14, bottom: 46, left: 42 }
+        : { top: 20, right: 20, bottom: 52, left: 52 };
 
     const width = totalSvgWidth - margin.left - margin.right;
     const height = totalSvgHeight - margin.top - margin.bottom;
@@ -57,39 +64,65 @@ const drawChart = (
         .append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
+    // --- Build per-season rows ---
+    const rows: SeasonRow[] = sorted.map((d, i) => ({
+        index: i,
+        wr: d.roster_win_rate,
+        activity: memberCount > 0 ? (d.participants / memberCount) * 100 : 0,
+        season: d,
+    }));
+
     // --- Scales ---
     const xScale = d3.scaleLinear()
         .domain([0, sorted.length - 1])
         .range([0, width]);
-    const xPos = (d: ClanBattleSeasonPoint) => xScale(sorted.indexOf(d));
 
-    // Left Y: percentage (WR and activity)
-    const maxPct = Math.max(
-        d3.max(sorted, (d: ClanBattleSeasonPoint) => d.roster_win_rate) || 60,
-        d3.max(sorted, (d: ClanBattleSeasonPoint) => memberCount > 0 ? (d.participants / memberCount) * 100 : 0) || 60,
-    );
-    const yPct = d3.scaleLinear()
-        .domain([0, Math.min(Math.ceil(maxPct / 10) * 10 + 10, 100)])
+    // Stack the two series so they flow together as a streamgraph.
+    // d3.stack + stackOffsetWiggle centers the stream around the midline.
+    const keys = ['wr', 'activity'];
+    const stackData = rows.map(r => ({ index: r.index, wr: r.wr, activity: r.activity }));
+    const stack = d3.stack()
+        .keys(keys)
+        .offset(d3.stackOffsetWiggle)
+        .order(d3.stackOrderNone);
+    const series = stack(stackData as Iterable<{ [key: string]: number }>);
+
+    // Y domain from stacked extents
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const yMin = d3.min(series, (s: any) => d3.min(s, (d: any) => d[0] as number)) || 0;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const yMax = d3.max(series, (s: any) => d3.max(s, (d: any) => d[1] as number)) || 100;
+    const yScale = d3.scaleLinear()
+        .domain([yMin, yMax])
         .range([height, 0]);
 
-    // Right Y: participant count
-    const maxParticipants = d3.max(sorted, (d: ClanBattleSeasonPoint) => d.participants) || 10;
-    const yCount = d3.scaleLinear()
-        .domain([0, Math.ceil(maxParticipants * 1.15)])
-        .range([height, 0]);
+    // --- Area generator ---
+    const area = d3.area()
+        .x((_d: [number, number], i: number) => xScale(i))
+        .y0((d: [number, number]) => yScale(d[0]))
+        .y1((d: [number, number]) => yScale(d[1]))
+        .curve(d3.curveBasis);
 
-    // --- Grid lines ---
-    svg.append('g')
-        .attr('class', 'cb-grid')
-        .call(d3.axisLeft(yPct).ticks(5).tickSize(-width).tickFormat(() => ''))
-        .select('.domain').remove();
-    svg.selectAll('.cb-grid line')
-        .style('stroke', colors.gridLine)
-        .style('stroke-width', 1)
-        .attr('stroke-dasharray', '2,2');
+    const wrColor = colors.metricWR;
+    const activityColor = colors.activityActive;
+    const seriesColors = [wrColor, activityColor];
 
-    // --- Axes ---
-    // X axis — manual tick marks at each season position
+    // --- Draw streams ---
+    svg.selectAll('.stream')
+        .data(series)
+        .enter()
+        .append('path')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .attr('d', (d: any) => area(d as [number, number][]))
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .attr('fill', (_d: any, i: number) => seriesColors[i])
+        .attr('fill-opacity', 0.55)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .attr('stroke', (_d: any, i: number) => seriesColors[i])
+        .attr('stroke-width', 1.5)
+        .attr('stroke-opacity', 0.8);
+
+    // --- X axis ---
     const xAxisG = svg.append('g')
         .attr('transform', `translate(0, ${height})`);
 
@@ -98,7 +131,6 @@ const drawChart = (
 
     sorted.forEach((d, i) => {
         if (i % tickStep !== 0 && i !== sorted.length - 1) return;
-
         const tx = xScale(i);
         const rotate = compact && sorted.length > 12;
         xAxisG.append('text')
@@ -110,91 +142,6 @@ const drawChart = (
             .style('fill', colors.axisText)
             .text(d.season_label);
     });
-
-    // Left Y axis (percentage)
-    const leftAxis = svg.append('g')
-        .call(d3.axisLeft(yPct).ticks(5).tickFormat((value: number) => `${value}%`).tickSize(0).tickPadding(6));
-    leftAxis.selectAll('text')
-        .style('font-size', axisFontSize)
-        .style('fill', colors.axisText);
-    leftAxis.select('.domain').remove();
-
-    // Right Y axis (participants)
-    const rightAxis = svg.append('g')
-        .attr('transform', `translate(${width}, 0)`)
-        .call(d3.axisRight(yCount).ticks(5).tickFormat((value: number) => `${value}`).tickSize(0).tickPadding(6));
-    rightAxis.selectAll('text')
-        .style('font-size', axisFontSize)
-        .style('fill', colors.axisText);
-    rightAxis.select('.domain').remove();
-
-    // --- Line data as coordinate arrays ---
-    const wrPoints: [number, number][] = sorted.map(d => [xPos(d), yPct(d.roster_win_rate)]);
-    const actPoints: [number, number][] = sorted.map(d => [xPos(d), yPct(memberCount > 0 ? (d.participants / memberCount) * 100 : 0)]);
-    const partPoints: [number, number][] = sorted.map(d => [xPos(d), yCount(d.participants)]);
-
-    const line = d3.line().curve(d3.curveMonotoneX);
-
-    const wrColor = colors.metricWR;
-    const activityColor = colors.activityActive;
-    const participantColor = colors.accentMid;
-
-    // --- Draw lines ---
-    svg.append('path')
-        .attr('fill', 'none')
-        .attr('stroke', wrColor)
-        .attr('stroke-width', 2)
-        .attr('d', line(wrPoints));
-
-    svg.append('path')
-        .attr('fill', 'none')
-        .attr('stroke', activityColor)
-        .attr('stroke-width', 2)
-        .attr('stroke-dasharray', '6,3')
-        .attr('d', line(actPoints));
-
-    svg.append('path')
-        .attr('fill', 'none')
-        .attr('stroke', participantColor)
-        .attr('stroke-width', 2)
-        .attr('stroke-dasharray', '2,2')
-        .attr('d', line(partPoints));
-
-    // --- Data points ---
-    const dotRadius = compact ? 3 : 4;
-
-    svg.selectAll('.dot-wr')
-        .data(sorted)
-        .enter()
-        .append('circle')
-        .attr('cx', (d: ClanBattleSeasonPoint) => xPos(d))
-        .attr('cy', (d: ClanBattleSeasonPoint) => yPct(d.roster_win_rate))
-        .attr('r', dotRadius)
-        .attr('fill', wrColor)
-        .attr('stroke', colors.chartBg)
-        .attr('stroke-width', 1.5);
-
-    svg.selectAll('.dot-act')
-        .data(sorted)
-        .enter()
-        .append('circle')
-        .attr('cx', (d: ClanBattleSeasonPoint) => xPos(d))
-        .attr('cy', (d: ClanBattleSeasonPoint) => yPct(memberCount > 0 ? (d.participants / memberCount) * 100 : 0))
-        .attr('r', dotRadius)
-        .attr('fill', activityColor)
-        .attr('stroke', colors.chartBg)
-        .attr('stroke-width', 1.5);
-
-    svg.selectAll('.dot-part')
-        .data(sorted)
-        .enter()
-        .append('circle')
-        .attr('cx', (d: ClanBattleSeasonPoint) => xPos(d))
-        .attr('cy', (d: ClanBattleSeasonPoint) => yCount(d.participants))
-        .attr('r', dotRadius)
-        .attr('fill', participantColor)
-        .attr('stroke', colors.chartBg)
-        .attr('stroke-width', 1.5);
 
     // --- Tooltip overlay ---
     const tooltip = d3.select(container)
@@ -212,35 +159,32 @@ const drawChart = (
         .style('opacity', 0)
         .style('z-index', '10');
 
-    // Invisible hit areas per season for hover
     const hitWidth = sorted.length > 1
         ? Math.abs(xScale(1) - xScale(0))
         : width;
 
     svg.selectAll('.hit-area')
-        .data(sorted)
+        .data(rows)
         .enter()
         .append('rect')
-        .attr('x', (d: ClanBattleSeasonPoint) => xPos(d) - hitWidth / 2)
+        .attr('x', (d: SeasonRow) => xScale(d.index) - hitWidth / 2)
         .attr('y', 0)
         .attr('width', hitWidth)
         .attr('height', height)
         .attr('fill', 'transparent')
         .style('cursor', 'crosshair')
-        .on('mousemove', function (_event: MouseEvent, d: ClanBattleSeasonPoint) {
-            const actPct = memberCount > 0 ? ((d.participants / memberCount) * 100).toFixed(0) : '\u2014';
+        .on('mousemove', function (_event: MouseEvent, d: SeasonRow) {
             tooltip
                 .html(
-                    `<strong>${d.season_name}</strong><br/>` +
-                    `<span style="color:${wrColor}">WR: ${d.roster_win_rate.toFixed(1)}%</span><br/>` +
-                    `<span style="color:${activityColor}">Activity: ${actPct}%</span><br/>` +
-                    `<span style="color:${participantColor}">Players: ${d.participants}</span>`
+                    `<strong>${d.season.season_name}</strong><br/>` +
+                    `<span style="color:${wrColor}">WR: ${d.wr.toFixed(1)}%</span><br/>` +
+                    `<span style="color:${activityColor}">Activity: ${d.activity.toFixed(0)}%</span>`
                 )
                 .style('opacity', 1);
 
             const tooltipNode = tooltip.node() as HTMLDivElement;
             const tooltipWidth = tooltipNode.offsetWidth;
-            const px = xPos(d) + margin.left;
+            const px = xScale(d.index) + margin.left;
             const left = px + tooltipWidth + 12 > containerWidth
                 ? px - tooltipWidth - 8
                 : px + 12;
@@ -258,31 +202,32 @@ const drawChart = (
         .attr('transform', `translate(${margin.left}, ${legendY})`);
 
     const legendItems = [
-        { label: 'Win Rate', color: wrColor, dash: '' },
-        { label: 'Activity %', color: activityColor, dash: '6,3' },
-        { label: 'Players', color: participantColor, dash: '2,2' },
+        { label: 'Win Rate %', color: wrColor },
+        { label: 'Clan Activity %', color: activityColor },
     ];
 
     let legendX = 0;
     for (const item of legendItems) {
-        legendG.append('line')
-            .attr('x1', legendX)
-            .attr('y1', 0)
-            .attr('x2', legendX + 16)
-            .attr('y2', 0)
+        legendG.append('rect')
+            .attr('x', legendX)
+            .attr('y', -5)
+            .attr('width', 12)
+            .attr('height', 10)
+            .attr('rx', 2)
+            .attr('fill', item.color)
+            .attr('fill-opacity', 0.55)
             .attr('stroke', item.color)
-            .attr('stroke-width', 2)
-            .attr('stroke-dasharray', item.dash || 'none');
+            .attr('stroke-width', 1);
 
         legendG.append('text')
-            .attr('x', legendX + 20)
+            .attr('x', legendX + 16)
             .attr('y', 0)
             .attr('dy', '0.35em')
             .style('font-size', legendFontSize)
             .style('fill', colors.labelText)
             .text(item.label);
 
-        legendX += 20 + item.label.length * (compact ? 6 : 7) + 16;
+        legendX += 16 + item.label.length * (compact ? 6 : 7) + 16;
     }
 };
 
