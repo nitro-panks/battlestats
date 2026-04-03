@@ -13,6 +13,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('true', '1', 't')
+ENABLE_AGENTIC_RUNTIME = os.getenv('ENABLE_AGENTIC_RUNTIME', '0').lower() in (
+    '1', 'true', 'yes', 'on'
+)
 
 ALLOWED_HOSTS = [
     host.strip() for host in os.getenv(

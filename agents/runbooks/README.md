@@ -19,6 +19,7 @@ When an agent is told to review project docs, the default runbook read order is:
 - `runbook-client-droplet-deploy.md`: client deployment and frontend runtime notes.
 - `runbook-db-target-switching.md`: local vs cloud database target switching.
 - `runbook-cache-audit.md`: cache design and current operational expectations.
+- `runbook-flower-observability-2026-04-02.md`: production Flower plan for Celery queue visibility on the droplet.
 
 ## Architecture And Product Policy
 
@@ -48,6 +49,7 @@ Open these only when the task matches them directly:
 
 - `runbook-clan-tier-distribution-recovery-2026-04-02.md`
 - `runbook-efficiency-rank-qa-2026-04-02.md`
+- `runbook-eu-best-player-population-2026-04-02.md`
 - `runbook-eu-heatmap-rollout-2026-04-02.md`
 - `runbook-player-achievements-data-lane.md`
 - `runbook-best-clan-eligibility.md`

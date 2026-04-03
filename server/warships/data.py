@@ -188,6 +188,45 @@ def player_derived_chart_data_needs_refresh(
     return _is_stale_timestamp(updated_at, stale_after)
 
 
+def refresh_player_detail_payloads(
+    player: Player,
+    *,
+    force_refresh: bool = False,
+    refresh_core: bool = True,
+) -> None:
+    realm = player.realm or DEFAULT_REALM
+
+    if refresh_core and (force_refresh or player_detail_needs_refresh(player)):
+        update_player_data(player, force_refresh=force_refresh)
+        player.refresh_from_db()
+
+    if player.is_hidden:
+        return
+
+    if force_refresh or player_battle_data_needs_refresh(player):
+        update_battle_data(player.player_id, realm=realm)
+        player.refresh_from_db()
+
+    if force_refresh or player.activity_json is None or player_activity_data_needs_refresh(player):
+        update_snapshot_data(player.player_id, realm=realm,
+                             refresh_player=False)
+        player.refresh_from_db()
+
+    if force_refresh or player.tiers_json is None or _has_newer_source_timestamp(player.tiers_updated_at, player.battles_updated_at):
+        update_tiers_data(player.player_id, realm=realm)
+    if force_refresh or player.type_json is None or _has_newer_source_timestamp(player.type_updated_at, player.battles_updated_at):
+        update_type_data(player.player_id, realm=realm)
+    if force_refresh or player.randoms_json is None or _has_newer_source_timestamp(player.randoms_updated_at, player.battles_updated_at):
+        update_randoms_data(player.player_id, realm=realm)
+    if force_refresh or player_ranked_data_needs_refresh(player):
+        update_ranked_data(player.player_id, realm=realm)
+
+    player.refresh_from_db()
+    if force_refresh or _player_explorer_summary_source_changed(player):
+        refresh_player_explorer_summary(player)
+        player.refresh_from_db()
+
+
 def _player_explorer_summary_source_changed(player: Player) -> bool:
     explorer_summary = getattr(player, 'explorer_summary', None)
     if explorer_summary is None:
@@ -2394,9 +2433,9 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     player.battles_updated_at = datetime.now()
     player.battles_json = sorted_data
     player.save()
-    update_tiers_data(player.player_id)
-    update_type_data(player.player_id)
-    update_randoms_data(player.player_id)
+    update_tiers_data(player.player_id, realm=realm)
+    update_type_data(player.player_id, realm=realm)
+    update_randoms_data(player.player_id, realm=realm)
     refresh_player_explorer_summary(player, battles_rows=sorted_data)
     logging.info(f"Updated battles_json data: {player.name}")
 
@@ -2466,7 +2505,7 @@ def update_tiers_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     player.save()
 
 
-def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM) -> None:
+def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM, refresh_player: bool = True) -> None:
     """
     Records today's cumulative PvP stats as a Snapshot and computes
     daily interval_battles / interval_wins from successive snapshots.
@@ -2478,9 +2517,10 @@ def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM) -> None:
     player = Player.objects.get(player_id=player_id, realm=realm)
 
     # Ensure the player model has fresh stats
-    from warships.data import update_player_data
-    update_player_data(player, force_refresh=True)
-    player.refresh_from_db()
+    if refresh_player:
+        from warships.data import update_player_data
+        update_player_data(player, force_refresh=True)
+        player.refresh_from_db()
 
     today = datetime.now().date()
     start_date = today - timedelta(days=28)
@@ -2519,7 +2559,7 @@ def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM) -> None:
     Snapshot.objects.bulk_update(
         snapshots, ['interval_battles', 'interval_wins'])
 
-    update_activity_data(player_id)
+    update_activity_data(player_id, realm=realm)
     logging.info(f'Updated snapshot data for player {player.name}')
 
 
@@ -2755,7 +2795,8 @@ def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
+                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -4089,7 +4130,7 @@ def fetch_ranked_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
         return player.ranked_json
 
     logging.info(f'Fetching ranked data for {player.name}')
-    update_ranked_data(player_id)
+    update_ranked_data(player_id, realm=realm)
     player.refresh_from_db()
     return player.ranked_json or []
 
@@ -4545,7 +4586,7 @@ def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
             logging.info(
                 f"Created new player: {player.player_id}")
             update_player_data(player)
-            update_battle_data(player.player_id)
+            update_battle_data(player.player_id, realm=realm)
 
         else:
             if player.clan != clan:
@@ -4557,8 +4598,11 @@ def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     refresh_clan_cached_aggregates(clan_id, realm=realm)
 
 
-def update_player_data(player: Player, force_refresh: bool = False) -> None:
+def update_player_data(player: Player, force_refresh: bool = False, realm: str | None = None) -> None:
     from warships.landing import invalidate_landing_player_caches
+
+    if realm is not None and player.realm != realm:
+        player.realm = realm
 
     if not force_refresh and player.last_fetch and datetime.now() - player.last_fetch < timedelta(minutes=1400):
         logging.debug(
@@ -4836,36 +4880,14 @@ def warm_player_entity_caches(player_ids: Iterable[int], force_refresh: bool = F
         if player is None:
             continue
 
-        if force_refresh or player_detail_needs_refresh(player):
-            update_player_data(player, force_refresh=force_refresh)
-            player.refresh_from_db()
-
-        if player.is_hidden:
-            warmed_players += 1
-            continue
-
-        if force_refresh or player_battle_data_needs_refresh(player):
-            update_battle_data(player.player_id)
-            player.refresh_from_db()
-
-        if force_refresh or player.activity_json is None or player_activity_data_needs_refresh(player):
-            update_snapshot_data(player.player_id)
-            update_activity_data(player.player_id)
-            player.refresh_from_db()
-
-        if force_refresh or player.tiers_json is None or _has_newer_source_timestamp(player.tiers_updated_at, player.battles_updated_at):
-            update_tiers_data(player.player_id)
-        if force_refresh or player.type_json is None or _has_newer_source_timestamp(player.type_updated_at, player.battles_updated_at):
-            update_type_data(player.player_id)
-        if force_refresh or player.randoms_json is None or _has_newer_source_timestamp(player.randoms_updated_at, player.battles_updated_at):
-            update_randoms_data(player.player_id)
-        if force_refresh or player_ranked_data_needs_refresh(player):
-            update_ranked_data(player.player_id)
-
+        refresh_player_detail_payloads(
+            player,
+            force_refresh=force_refresh,
+            refresh_core=True,
+        )
         player.refresh_from_db()
-        if force_refresh or _player_explorer_summary_source_changed(player):
-            refresh_player_explorer_summary(player)
-        fetch_player_clan_battle_seasons(player.player_id)
+        if not player.is_hidden:
+            fetch_player_clan_battle_seasons(player.player_id, realm=realm)
         warmed_players += 1
 
     return warmed_players

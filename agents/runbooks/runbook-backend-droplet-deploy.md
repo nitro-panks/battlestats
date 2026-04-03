@@ -46,14 +46,24 @@ That deploy does all of the following:
 - uploads `server/.env.secrets.cloud`
 - uploads `server/ca-certificate.crt`
 - syncs the `server/` directory to a timestamped release
-- syncs the top-level `agents/` directory because the backend agentic runtime reads it at runtime
-- updates the remote env files to use the absolute CA cert path, droplet-local Redis/RabbitMQ values, and the explicit domain/IP allow-list you passed in
+- defaults `ENABLE_AGENTIC_RUNTIME=0` on the droplet so the core site boots without LangGraph, CrewAI, or the top-level `agents/` tree
+- updates the remote env files to use the absolute CA cert path, droplet-local Redis/RabbitMQ values, the explicit domain/IP allow-list you passed in, and the agentic runtime flag
 - installs Python dependencies into `/opt/battlestats-server/venv`
 - runs `manage.py migrate`
 - runs `manage.py collectstatic --noinput`
 - runs `manage.py check`
 - flips `/opt/battlestats-server/current` to the new release
 - restarts gunicorn, celery worker, and celery beat
+
+To deploy the optional agentic runtime on purpose, enable it explicitly:
+
+```bash
+DEPLOY_AGENTIC_RUNTIME=1 \
+EXTRA_ALLOWED_HOSTS=battlestats.online,www.battlestats.online \
+./server/deploy/deploy_to_droplet.sh YOUR_DROPLET_IP
+```
+
+With `DEPLOY_AGENTIC_RUNTIME=1`, the deploy also syncs the top-level `agents/` directory and installs `server/requirements-agentic.txt`.
 
 ## Remote config files
 

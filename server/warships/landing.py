@@ -1156,7 +1156,7 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
         # Use stored percentile directly — landing surfaces tolerate minor
         # input-data drift (unlike player detail, which uses the stricter
         # _get_published_efficiency_rank_payload freshness gate).
-        if es and es.efficiency_rank_percentile is not None:
+        if not player_obj.is_hidden and es and es.efficiency_rank_percentile is not None:
             row['efficiency_rank_percentile'] = es.efficiency_rank_percentile
             row['efficiency_rank_tier'] = es.efficiency_rank_tier
             row['has_efficiency_rank_icon'] = bool(es.has_efficiency_rank_icon)
@@ -1546,7 +1546,7 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
             'highest_ranked_league': get_highest_ranked_league_name(
                 ranked_rows),
         }
-        if es and es.efficiency_rank_percentile is not None:
+        if not player_obj.is_hidden and es and es.efficiency_rank_percentile is not None:
             row['efficiency_rank_percentile'] = es.efficiency_rank_percentile
             row['efficiency_rank_tier'] = es.efficiency_rank_tier
             row['has_efficiency_rank_icon'] = bool(es.has_efficiency_rank_icon)

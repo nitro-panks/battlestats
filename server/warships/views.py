@@ -4,6 +4,7 @@ from functools import partial
 from datetime import timedelta
 from hashlib import sha256
 from kombu.exceptions import OperationalError as KombuOperationalError
+from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Sum, F, FloatField, Case, When, Value, IntegerField, Count, Q
 from django.db.models.functions import Cast, Lower
@@ -28,7 +29,6 @@ from warships.data import clan_detail_needs_refresh, clan_members_missing_or_inc
     is_sleepy_player, get_highest_ranked_league_name
 from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
-from warships.agentic.dashboard import get_agentic_trace_dashboard
 from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, queue_landing_best_entity_warm, update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
@@ -203,7 +203,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
             )
 
             from warships.data import update_player_data
-            update_player_data(player=obj, force_refresh=True)
+            update_player_data(player=obj, force_refresh=True, realm=realm)
             obj.refresh_from_db()
 
         needs_efficiency_refresh = (
@@ -254,16 +254,21 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 update_player_data_task,
                 player_id=obj.player_id,
                 force_refresh=True,
+                realm=realm,
             )
         elif needs_kdr_backfill or needs_efficiency_refresh:
             _delay_task_safely(
                 update_player_data_task,
                 player_id=obj.player_id,
                 force_refresh=True,
+                realm=realm,
             )
         elif player_refresh_stale:
-            _delay_task_safely(update_player_data_task,
-                               player_id=obj.player_id)
+            _delay_task_safely(
+                update_player_data_task,
+                player_id=obj.player_id,
+                realm=realm,
+            )
 
         if obj.clan:
             clan = obj.clan
@@ -289,8 +294,11 @@ class PlayerViewSet(viewsets.ModelViewSet):
         if not obj.is_hidden and (obj.battles_json is None or player_battle_data_needs_refresh(obj)):
             from warships.tasks import update_battle_data_task
 
-            _delay_task_safely(update_battle_data_task,
-                               player_id=obj.player_id)
+            _delay_task_safely(
+                update_battle_data_task,
+                player_id=obj.player_id,
+                realm=realm,
+            )
 
         from warships.data import maybe_refresh_clan_battle_data
         maybe_refresh_clan_battle_data(obj, realm=realm)
@@ -371,6 +379,12 @@ def _player_explorer_response_cache_key(params: dict[str, object]) -> str:
     ]
     digest = sha256('&'.join(parts).encode('utf-8')).hexdigest()
     return f'players:explorer:response:v1:{digest}'
+
+
+def _get_agentic_trace_dashboard_data(limit: int = 12) -> dict:
+    from warships.agentic.dashboard import get_agentic_trace_dashboard
+
+    return get_agentic_trace_dashboard(limit=limit)
 
 
 @api_view(["GET"])
@@ -1061,9 +1075,15 @@ def db_stats(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def agentic_trace_dashboard(request) -> Response:
+    if not settings.ENABLE_AGENTIC_RUNTIME:
+        return Response(
+            {'detail': 'Agentic runtime is not enabled.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
     data = cache.get_or_set(
         'agentic:trace_dashboard:v2',
-        partial(get_agentic_trace_dashboard, limit=12),
+        partial(_get_agentic_trace_dashboard_data, limit=12),
         15,
     )
     return Response(data)

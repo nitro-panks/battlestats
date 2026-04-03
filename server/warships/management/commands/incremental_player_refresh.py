@@ -16,6 +16,7 @@ from warships.data import (
     player_achievements_need_refresh,
     player_efficiency_needs_refresh,
     refresh_player_explorer_summary,
+    refresh_player_detail_payloads,
     update_achievements_data,
     update_player_efficiency_data,
 )
@@ -111,7 +112,8 @@ def _build_candidate_queue(
     now = timezone.now()
     today = now.date()
 
-    base_qs = Player.objects.exclude(player_id__isnull=True).filter(realm=realm)
+    base_qs = Player.objects.exclude(
+        player_id__isnull=True).filter(realm=realm)
 
     # -- Hot tier: site visitors within lookback, stale > hot_stale_hours --
     hot_stale_cutoff = now - timedelta(hours=hot_stale_hours)
@@ -169,8 +171,7 @@ def _build_candidate_queue(
 
 
 def _refresh_player(player_id: int, realm: str = DEFAULT_REALM) -> None:
-    """Refresh a single player: core stats via WG API, plus conditional
-    achievements and efficiency updates."""
+    """Refresh a single player through the durable crawler pipeline."""
     player = Player.objects.filter(id=player_id).select_related('clan').first()
     if player is None:
         return
@@ -196,13 +197,19 @@ def _refresh_player(player_id: int, realm: str = DEFAULT_REALM) -> None:
             update_player_efficiency_data(player, realm=realm)
         if player_achievements_need_refresh(player):
             update_achievements_data(player.player_id, realm=realm)
+        refresh_player_detail_payloads(
+            player,
+            force_refresh=False,
+            refresh_core=False,
+        )
+        player.refresh_from_db()
         if clan_battle_summary_is_stale(player):
             fetch_player_clan_battle_seasons(player.player_id, realm=realm)
 
 
 class Command(BaseCommand):
     help = (
-        'Incrementally refresh player data (core stats, efficiency, achievements) '
+        'Incrementally refresh player data (core stats, derived detail payloads, efficiency, achievements) '
         'for active players using a tiered priority queue with durable checkpoints.'
     )
 

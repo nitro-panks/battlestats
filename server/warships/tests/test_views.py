@@ -663,7 +663,9 @@ class LandingWarmupViewTests(TestCase):
         self.assertIsNone(response.json()["kill_ratio"])
         mock_update_battle_data.assert_not_called()
         mock_update_battle_data_task.assert_called_once_with(
-            player_id=player.player_id)
+            player_id=player.player_id,
+            realm='na',
+        )
         player.refresh_from_db()
         self.assertIsNotNone(player.last_lookup)
         self.assertGreaterEqual(player.last_lookup, request_started_at)
@@ -684,7 +686,7 @@ class LandingWarmupViewTests(TestCase):
     ):
         mock_fetch_player_id.return_value = "777"
 
-        def hydrate_player(player, force_refresh=False):
+        def hydrate_player(player, force_refresh=False, realm=None):
             player.name = "RemotePlayer"
             player.pvp_battles = 10
             player.pvp_wins = 5
@@ -703,6 +705,7 @@ class LandingWarmupViewTests(TestCase):
         mock_update_player_task.assert_called_once_with(
             player_id=777,
             force_refresh=True,
+            realm='na',
         )
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
@@ -739,9 +742,33 @@ class LandingWarmupViewTests(TestCase):
         mock_update_player_task.assert_called_once_with(
             player_id=player.player_id,
             force_refresh=True,
+            realm='na',
         )
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.data.update_ranked_data")
+    def test_ranked_endpoint_sync_hydration_uses_request_realm(
+        self,
+        mock_update_ranked_data,
+    ):
+        player = Player.objects.create(
+            name="ColdRankedEU",
+            player_id=7002,
+            realm="eu",
+            last_fetch=timezone.now(),
+            ranked_json=None,
+        )
+
+        response = self.client.get(
+            f"/api/fetch/ranked_data/{player.player_id}/?realm=eu")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+        mock_update_ranked_data.assert_called_once_with(
+            str(player.player_id),
+            realm='eu',
+        )
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
@@ -814,6 +841,7 @@ class LandingWarmupViewTests(TestCase):
         mock_update_player_task.assert_called_once_with(
             player_id=player.player_id,
             force_refresh=True,
+            realm='na',
         )
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
@@ -856,6 +884,7 @@ class LandingWarmupViewTests(TestCase):
         mock_update_player_task.assert_called_once_with(
             player_id=9005,
             force_refresh=True,
+            realm='na',
         )
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
@@ -928,7 +957,10 @@ class LandingWarmupViewTests(TestCase):
         response = self.client.get("/api/player/StalePlayer/")
 
         self.assertEqual(response.status_code, 200)
-        mock_update_player_task.assert_called_once_with(player_id=9002)
+        mock_update_player_task.assert_called_once_with(
+            player_id=9002,
+            realm='na',
+        )
         mock_update_clan_task.assert_called_once_with(clan_id=901, realm='na')
         mock_update_clan_members_task.assert_called_once_with(
             clan_id=901, realm='na')
@@ -2971,6 +3003,7 @@ class ApiContractTests(TestCase):
         mock_update_player_data_task.assert_called_once_with(
             player_id=player.player_id,
             force_refresh=True,
+            realm='na',
         )
 
     def test_player_distribution_returns_survival_payload(self):
@@ -3060,6 +3093,7 @@ class ApiContractTests(TestCase):
         Player.objects.create(
             name="CorrelationOne",
             player_id=8821,
+            realm='na',
             is_hidden=False,
             pvp_battles=1000,
             pvp_ratio=52.0,
@@ -3880,8 +3914,8 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
 
-    @override_settings(SECRET_KEY="test-secret")
-    @patch("warships.views.get_agentic_trace_dashboard")
+    @override_settings(SECRET_KEY="test-secret", ENABLE_AGENTIC_RUNTIME=True)
+    @patch("warships.views._get_agentic_trace_dashboard_data")
     def test_agentic_trace_dashboard_endpoint_returns_summary(self, mock_get_agentic_trace_dashboard):
         cache.delete('agentic:trace_dashboard:v2')
         mock_get_agentic_trace_dashboard.return_value = {
@@ -3938,6 +3972,17 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.json()[
                          "learning"]["chart_tuning_notes"][0]["slug"], "ranked_wr_battles_heatmap")
         mock_get_agentic_trace_dashboard.assert_called_once_with(limit=12)
+
+    def test_agentic_trace_dashboard_endpoint_returns_404_when_disabled(self):
+        cache.delete('agentic:trace_dashboard:v2')
+
+        response = self.client.get("/api/agentic/traces/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.json()["detail"],
+            "Agentic runtime is not enabled.",
+        )
 
     def test_activity_data_returns_activity_rows(self):
         now = timezone.now()

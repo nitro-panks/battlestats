@@ -1,10 +1,13 @@
 from io import StringIO
+from pathlib import Path
+import tempfile
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
+from warships.data import warm_player_entity_caches
 from warships.models import Player, PlayerExplorerSummary
 
 
@@ -187,3 +190,128 @@ class BackfillBattleDataCommandTests(TestCase):
         self.assertEqual(mock_delay.call_count, 2)
         mock_delay.assert_any_call(4011, realm="eu")
         mock_delay.assert_any_call(4012, realm="eu")
+
+
+class IncrementalPlayerRefreshCommandTests(TestCase):
+    @patch("warships.management.commands.incremental_player_refresh.refresh_player_detail_payloads")
+    @patch("warships.management.commands.incremental_player_refresh.clan_battle_summary_is_stale", return_value=False)
+    @patch("warships.management.commands.incremental_player_refresh.player_achievements_need_refresh", return_value=False)
+    @patch("warships.management.commands.incremental_player_refresh.player_efficiency_needs_refresh", return_value=False)
+    @patch("warships.management.commands.incremental_player_refresh.save_player")
+    @patch("warships.management.commands.incremental_player_refresh.fetch_players_bulk")
+    @patch("warships.management.commands.incremental_player_refresh._build_candidate_queue")
+    def test_incremental_player_refresh_owns_detail_lanes_for_realm(
+        self,
+        mock_build_candidate_queue,
+        mock_fetch_players_bulk,
+        mock_save_player,
+        _mock_efficiency_needs_refresh,
+        _mock_achievements_need_refresh,
+        _mock_clan_battle_summary_is_stale,
+        mock_refresh_player_detail_payloads,
+    ):
+        player = Player.objects.create(
+            name="DurableEU",
+            player_id=5001,
+            realm="eu",
+            is_hidden=False,
+        )
+        mock_build_candidate_queue.return_value = ([player.id], {
+            "hot": 0,
+            "active": 1,
+            "warm": 0,
+        })
+        mock_fetch_players_bulk.return_value = {
+            str(player.player_id): {
+                "account_id": player.player_id,
+                "nickname": player.name,
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = Path(tmpdir) / "incremental-player-refresh-state.json"
+            call_command(
+                "incremental_player_refresh",
+                realm="eu",
+                limit=1,
+                batch_size=1,
+                state_file=str(state_file),
+                stdout=StringIO(),
+            )
+
+        mock_fetch_players_bulk.assert_called_once_with(
+            [player.player_id], realm="eu")
+        mock_save_player.assert_called_once_with(
+            mock_fetch_players_bulk.return_value[str(player.player_id)],
+            clan=player.clan,
+            realm="eu",
+        )
+        mock_refresh_player_detail_payloads.assert_called_once()
+        refreshed_player = mock_refresh_player_detail_payloads.call_args.args[0]
+        self.assertEqual(refreshed_player.player_id, player.player_id)
+        self.assertEqual(refreshed_player.realm, "eu")
+        self.assertEqual(
+            mock_refresh_player_detail_payloads.call_args.kwargs,
+            {"force_refresh": False, "refresh_core": False},
+        )
+
+
+class WarmPlayerEntityCachesTests(TestCase):
+    @patch("warships.data.fetch_player_clan_battle_seasons")
+    @patch("warships.data.refresh_player_explorer_summary")
+    @patch("warships.data.update_ranked_data")
+    @patch("warships.data.update_randoms_data")
+    @patch("warships.data.update_type_data")
+    @patch("warships.data.update_tiers_data")
+    @patch("warships.data.update_snapshot_data")
+    @patch("warships.data.update_battle_data")
+    @patch("warships.data.update_player_data")
+    def test_warm_player_entity_caches_propagates_realm_to_detail_lanes(
+        self,
+        mock_update_player_data,
+        mock_update_battle_data,
+        mock_update_snapshot_data,
+        mock_update_tiers_data,
+        mock_update_type_data,
+        mock_update_randoms_data,
+        mock_update_ranked_data,
+        mock_refresh_player_explorer_summary,
+        mock_fetch_player_clan_battle_seasons,
+    ):
+        player = Player.objects.create(
+            name="WarmEU",
+            player_id=6001,
+            realm="eu",
+            is_hidden=False,
+            pvp_battles=250,
+        )
+
+        warmed = warm_player_entity_caches(
+            [player.player_id],
+            force_refresh=True,
+            realm="eu",
+        )
+
+        self.assertEqual(warmed, 1)
+        mock_update_player_data.assert_called_once_with(
+            player, force_refresh=True)
+        mock_update_battle_data.assert_called_once_with(
+            player.player_id, realm="eu")
+        mock_update_snapshot_data.assert_called_once_with(
+            player.player_id,
+            realm="eu",
+            refresh_player=False,
+        )
+        mock_update_tiers_data.assert_called_once_with(
+            player.player_id, realm="eu")
+        mock_update_type_data.assert_called_once_with(
+            player.player_id, realm="eu")
+        mock_update_randoms_data.assert_called_once_with(
+            player.player_id, realm="eu")
+        mock_update_ranked_data.assert_called_once_with(
+            player.player_id, realm="eu")
+        mock_refresh_player_explorer_summary.assert_called_once()
+        mock_fetch_player_clan_battle_seasons.assert_called_once_with(
+            player.player_id,
+            realm="eu",
+        )
