@@ -2699,7 +2699,10 @@ PLAYER_TIER_TYPE_ORDER = {
     'Aircraft Carrier': 3,
     'Submarine': 4,
 }
-PLAYER_TIER_TYPE_CACHE_VERSION = 'tier_type_population:v2'
+_SHIP_TYPE_ALIASES: dict[str, str] = {
+    'AirCarrier': 'Aircraft Carrier',
+}
+PLAYER_TIER_TYPE_CACHE_VERSION = 'tier_type_population:v3'
 LANDING_ACTIVITY_ATTRITION_CACHE_TTL = 900
 LANDING_ACTIVITY_ATTRITION_MONTHS = 18
 LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW = 6
@@ -3148,7 +3151,7 @@ def _extract_tier_type_battle_rows(battles_json: Any) -> list[dict[str, int | fl
             continue
 
         normalized_rows.append({
-            'ship_type': ship_type.strip(),
+            'ship_type': _SHIP_TYPE_ALIASES.get(ship_type.strip(), ship_type.strip()),
             'ship_tier': ship_tier,
             'pvp_battles': pvp_battles,
             'wins': max(wins, 0),
