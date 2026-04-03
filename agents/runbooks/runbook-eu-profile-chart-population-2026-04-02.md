@@ -2,7 +2,7 @@
 
 **Created**: 2026-04-02
 **Status**: Planned
-**Depends on**: `spec-multi-realm-eu-support.md`, `runbook-eu-heatmap-rollout-2026-04-02.md`, `runbook-cache-audit.md`
+**Depends on**: `spec-multi-realm-eu-support.md`, `archive/runbook-eu-heatmap-rollout-2026-04-02.md`, `runbook-cache-audit.md`
 
 ## Goal
 

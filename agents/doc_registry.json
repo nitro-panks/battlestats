@@ -1,0 +1,1345 @@
+{
+    "version": 1,
+    "lifecycle_definitions": {
+        "evergreen": "Current operational or architectural source of truth with no date-bound rollout dependency.",
+        "dated-active": "Still-active feature, recovery, rollout, or follow-up doc that should move to archive when the tranche closes.",
+        "active-spec": "Open design or policy spec that remains relevant to current implementation work.",
+        "support-index": "Index or routing doc that helps agents find the canonical source material."
+    },
+    "docs": {
+        "agents/knowledge/README.md": {
+            "kind": "index",
+            "status": "active",
+            "lifecycle": "support-index",
+            "section": "knowledge",
+            "owner": "platform",
+            "aliases": [
+                "knowledge base",
+                "durable findings",
+                "research notes"
+            ],
+            "tags": [
+                "knowledge",
+                "verified findings",
+                "rediscovery",
+                "research"
+            ],
+            "archive_on": [
+                "directory-retired"
+            ]
+        },
+        "agents/knowledge/battleships-overview.md": {
+            "kind": "knowledge",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "knowledge",
+            "owner": "product",
+            "aliases": [
+                "battlestats overview",
+                "project overview"
+            ],
+            "tags": [
+                "overview",
+                "product",
+                "architecture",
+                "orientation"
+            ],
+            "archive_on": [
+                "overview-replaced"
+            ]
+        },
+        "agents/knowledge/wows-account-hydration-notes.md": {
+            "kind": "knowledge",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "knowledge",
+            "owner": "backend",
+            "aliases": [
+                "account hydration",
+                "player hydration notes"
+            ],
+            "tags": [
+                "hydration",
+                "player data",
+                "upstream",
+                "wg api",
+                "refresh"
+            ],
+            "archive_on": [
+                "hydration-model-replaced"
+            ]
+        },
+        "agents/knowledge/wows-api-contract-strategy.md": {
+            "kind": "knowledge",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "platform",
+            "aliases": [
+                "api contract strategy",
+                "upstream contract strategy"
+            ],
+            "tags": [
+                "contracts",
+                "upstream",
+                "wargaming",
+                "documentation",
+                "api"
+            ],
+            "archive_on": [
+                "contract-strategy-replaced"
+            ]
+        },
+        "agents/knowledge/wows-encyclopedia-surface.md": {
+            "kind": "knowledge",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "knowledge",
+            "owner": "backend",
+            "aliases": [
+                "encyclopedia surface",
+                "wows encyclopedia endpoints"
+            ],
+            "tags": [
+                "encyclopedia",
+                "ships",
+                "modules",
+                "upstream",
+                "wg api"
+            ],
+            "archive_on": [
+                "encyclopedia-surface-replaced"
+            ]
+        },
+        "agents/knowledge/wows-statsbydate-status.md": {
+            "kind": "knowledge",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "knowledge",
+            "owner": "backend",
+            "aliases": [
+                "statsbydate status",
+                "player battles by date",
+                "daily player activity endpoint"
+            ],
+            "tags": [
+                "statsbydate",
+                "player activity",
+                "wargaming",
+                "upstream outage",
+                "api behavior"
+            ],
+            "archive_on": [
+                "endpoint-behavior-changes"
+            ]
+        },
+        "agents/runbooks/README.md": {
+            "kind": "index",
+            "status": "active",
+            "lifecycle": "support-index",
+            "section": "index",
+            "owner": "platform",
+            "aliases": [
+                "active runbooks",
+                "runbook index",
+                "runbook map"
+            ],
+            "tags": [
+                "index",
+                "runbooks",
+                "routing",
+                "documentation"
+            ],
+            "archive_on": [
+                "doc-system-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-api-surface.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "api surface",
+                "endpoint registry",
+                "smoke coverage"
+            ],
+            "tags": [
+                "api",
+                "smoke",
+                "contracts",
+                "endpoints",
+                "qa"
+            ],
+            "archive_on": [
+                "api-surface-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-backend-droplet-deploy.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "backend deploy",
+                "droplet deploy",
+                "server deploy"
+            ],
+            "tags": [
+                "deploy",
+                "droplet",
+                "django",
+                "systemd",
+                "agentic runtime"
+            ],
+            "archive_on": [
+                "deploy-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-client-droplet-deploy.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "frontend",
+            "aliases": [
+                "client deploy",
+                "frontend deploy"
+            ],
+            "tags": [
+                "deploy",
+                "client",
+                "nextjs",
+                "droplet",
+                "frontend"
+            ],
+            "archive_on": [
+                "client-deploy-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-db-target-switching.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "db target switching",
+                "cloud db toggle",
+                "local db toggle"
+            ],
+            "tags": [
+                "database",
+                "local",
+                "cloud",
+                "postgres",
+                "switching"
+            ],
+            "archive_on": [
+                "db-target-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-cache-audit.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "platform",
+            "owner": "platform",
+            "aliases": [
+                "cache audit",
+                "cache guide"
+            ],
+            "tags": [
+                "cache",
+                "ttl",
+                "warming",
+                "redis",
+                "published payloads"
+            ],
+            "archive_on": [
+                "cache-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-contract-strategy-implementation.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "platform",
+            "aliases": [
+                "contract strategy",
+                "payload contract maintenance"
+            ],
+            "tags": [
+                "contracts",
+                "payloads",
+                "api",
+                "testing",
+                "documentation"
+            ],
+            "archive_on": [
+                "contract-process-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-dependency-audit.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "platform",
+            "owner": "platform",
+            "aliases": [
+                "dependency audit",
+                "dependency hygiene"
+            ],
+            "tags": [
+                "dependencies",
+                "audit",
+                "security",
+                "upgrade",
+                "packages"
+            ],
+            "archive_on": [
+                "dependency-policy-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-deploy-oom-startup-warmers.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "startup warmers",
+                "deploy oom warmers"
+            ],
+            "tags": [
+                "deploy",
+                "warmers",
+                "oom",
+                "startup",
+                "celery"
+            ],
+            "archive_on": [
+                "startup-warmer-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-best-clan-eligibility.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "architecture",
+            "owner": "data",
+            "aliases": [
+                "best clan ranking",
+                "best clan eligibility"
+            ],
+            "tags": [
+                "best clan",
+                "ranking",
+                "landing",
+                "eligibility",
+                "scoring"
+            ],
+            "archive_on": [
+                "ranking-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-deleted-account-purge.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "deleted account purge",
+                "account purge"
+            ],
+            "tags": [
+                "purge",
+                "deleted accounts",
+                "cleanup",
+                "operations",
+                "safety"
+            ],
+            "archive_on": [
+                "purge-flow-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-recently-viewed-player-warming.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "recently viewed warming",
+                "recent player warmup"
+            ],
+            "tags": [
+                "warming",
+                "recently viewed",
+                "cache",
+                "players",
+                "hot entities"
+            ],
+            "archive_on": [
+                "warming-strategy-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-seo.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "architecture",
+            "owner": "frontend",
+            "aliases": [
+                "seo guide",
+                "metadata guide"
+            ],
+            "tags": [
+                "seo",
+                "metadata",
+                "sitemap",
+                "json-ld",
+                "analytics"
+            ],
+            "archive_on": [
+                "seo-system-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-codebase-improvement.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "quality",
+            "owner": "platform",
+            "aliases": [
+                "codebase improvement",
+                "maintenance heuristics"
+            ],
+            "tags": [
+                "maintenance",
+                "quality",
+                "refactor",
+                "cleanup",
+                "heuristics"
+            ],
+            "archive_on": [
+                "maintenance-policy-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-client-test-hardening.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "quality",
+            "owner": "frontend",
+            "aliases": [
+                "client test hardening",
+                "frontend test guide"
+            ],
+            "tags": [
+                "frontend",
+                "tests",
+                "jest",
+                "regression",
+                "quality"
+            ],
+            "archive_on": [
+                "test-harness-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-agent-orchestrator-selection.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "agentic",
+            "owner": "agentic",
+            "aliases": [
+                "orchestrator selection",
+                "langgraph vs crewai",
+                "agent router"
+            ],
+            "tags": [
+                "agentic",
+                "langgraph",
+                "crewai",
+                "hybrid",
+                "routing"
+            ],
+            "archive_on": [
+                "agent-router-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-agentic-memory-review.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "agentic",
+            "owner": "agentic",
+            "aliases": [
+                "memory review",
+                "agentic memory review"
+            ],
+            "tags": [
+                "agentic",
+                "memory",
+                "review",
+                "langmem",
+                "durable context"
+            ],
+            "archive_on": [
+                "memory-review-process-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-crewai-integration.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "agentic",
+            "owner": "agentic",
+            "aliases": [
+                "crewai integration",
+                "crewai runtime"
+            ],
+            "tags": [
+                "agentic",
+                "crewai",
+                "integration",
+                "personas",
+                "workflow"
+            ],
+            "archive_on": [
+                "crewai-runtime-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-langgraph-opinionated-workflow.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "agentic",
+            "owner": "agentic",
+            "aliases": [
+                "langgraph workflow",
+                "guarded graph workflow"
+            ],
+            "tags": [
+                "agentic",
+                "langgraph",
+                "doctrine",
+                "review gates",
+                "workflow"
+            ],
+            "archive_on": [
+                "graph-workflow-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-langsmith-trace-dashboard.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "agentic",
+            "owner": "agentic",
+            "aliases": [
+                "trace dashboard",
+                "langsmith dashboard",
+                "trace ui"
+            ],
+            "tags": [
+                "agentic",
+                "langsmith",
+                "trace",
+                "dashboard",
+                "observability"
+            ],
+            "archive_on": [
+                "trace-dashboard-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-agentic-next-steps-2026-04-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "agentic",
+            "aliases": [
+                "agentic next steps",
+                "agentic follow-up plan"
+            ],
+            "tags": [
+                "agentic",
+                "follow-up",
+                "routing",
+                "retrieval",
+                "memory"
+            ],
+            "archive_on": [
+                "next-tranche-landed",
+                "plan-superseded"
+            ]
+        },
+        "agents/runbooks/runbook-clan-tier-distribution-recovery-2026-04-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "frontend",
+            "aliases": [
+                "tier distribution recovery",
+                "clan tier histogram recovery"
+            ],
+            "tags": [
+                "clan",
+                "tier distribution",
+                "recovery",
+                "histogram",
+                "data readiness"
+            ],
+            "archive_on": [
+                "histogram-restored",
+                "recovery-plan-superseded"
+            ]
+        },
+        "agents/runbooks/runbook-droplet-memory-tuning-2026-04-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "backend",
+            "aliases": [
+                "droplet memory tuning",
+                "celery memory tuning"
+            ],
+            "tags": [
+                "memory",
+                "droplet",
+                "celery",
+                "systemd",
+                "tuning"
+            ],
+            "archive_on": [
+                "tuning-stabilized",
+                "droplet-profile-changed"
+            ]
+        },
+        "agents/runbooks/runbook-efficiency-rank-qa-2026-04-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "qa",
+            "aliases": [
+                "efficiency rank qa",
+                "efficiency rank validation"
+            ],
+            "tags": [
+                "efficiency rank",
+                "qa",
+                "validation",
+                "player detail",
+                "landing"
+            ],
+            "archive_on": [
+                "qa-closed",
+                "feature-stable"
+            ]
+        },
+        "agents/runbooks/runbook-enrichment-crawler-2026-04-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "enrichment crawler",
+                "battles json enrichment"
+            ],
+            "tags": [
+                "crawler",
+                "enrichment",
+                "battles_json",
+                "roadmap",
+                "backfill"
+            ],
+            "archive_on": [
+                "crawler-stable",
+                "crawler-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-eu-best-player-population-2026-04-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "eu best player population",
+                "eu best players"
+            ],
+            "tags": [
+                "eu",
+                "best players",
+                "population",
+                "landing",
+                "backfill"
+            ],
+            "archive_on": [
+                "population-fixed",
+                "population-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-eu-profile-chart-population-2026-04-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "eu profile chart population",
+                "eu chart population"
+            ],
+            "tags": [
+                "eu",
+                "charts",
+                "population",
+                "profile",
+                "backfill"
+            ],
+            "archive_on": [
+                "population-fixed",
+                "chart-population-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-flower-observability-2026-04-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "backend",
+            "aliases": [
+                "flower observability",
+                "celery flower"
+            ],
+            "tags": [
+                "flower",
+                "celery",
+                "observability",
+                "queues",
+                "operations"
+            ],
+            "archive_on": [
+                "flower-live",
+                "observability-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-icon-analysis.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "frontend",
+            "aliases": [
+                "icon analysis",
+                "player icon analysis"
+            ],
+            "tags": [
+                "icons",
+                "ui",
+                "player badges",
+                "analysis",
+                "frontend"
+            ],
+            "archive_on": [
+                "icon-system-stable",
+                "analysis-superseded"
+            ]
+        },
+        "agents/runbooks/runbook-kdr-backfill.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "kdr backfill",
+                "kill ratio backfill"
+            ],
+            "tags": [
+                "kdr",
+                "kill ratio",
+                "backfill",
+                "explorer",
+                "data repair"
+            ],
+            "archive_on": [
+                "backfill-complete",
+                "metric-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-mobile-player-detail-charts.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "frontend",
+            "aliases": [
+                "mobile player detail charts",
+                "mobile charts"
+            ],
+            "tags": [
+                "mobile",
+                "player detail",
+                "charts",
+                "frontend",
+                "responsive"
+            ],
+            "archive_on": [
+                "mobile-chart-work-stable"
+            ]
+        },
+        "agents/runbooks/runbook-mobile-routing-bugs.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "frontend",
+            "aliases": [
+                "mobile routing bugs",
+                "mobile route bugs"
+            ],
+            "tags": [
+                "mobile",
+                "routing",
+                "bugs",
+                "nextjs",
+                "frontend"
+            ],
+            "archive_on": [
+                "routing-bugs-closed"
+            ]
+        },
+        "agents/runbooks/runbook-multi-realm-hardening.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "platform",
+            "aliases": [
+                "multi realm hardening",
+                "realm hardening"
+            ],
+            "tags": [
+                "realms",
+                "na",
+                "eu",
+                "hardening",
+                "routing"
+            ],
+            "archive_on": [
+                "realm-hardening-closed",
+                "realm-architecture-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-player-achievements-data-lane.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "backend",
+            "aliases": [
+                "player achievements lane",
+                "achievements data lane"
+            ],
+            "tags": [
+                "achievements",
+                "player data",
+                "feature lane",
+                "upstream",
+                "api"
+            ],
+            "archive_on": [
+                "lane-stable",
+                "feature-replaced"
+            ]
+        },
+        "agents/runbooks/spec-cache-first-lazy-refresh-policy-2026-03-19.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "architecture",
+            "owner": "platform",
+            "aliases": [
+                "cache first policy",
+                "lazy refresh policy"
+            ],
+            "tags": [
+                "cache",
+                "policy",
+                "lazy refresh",
+                "stale while revalidate",
+                "architecture"
+            ],
+            "archive_on": [
+                "cache-policy-replaced"
+            ]
+        },
+        "agents/runbooks/spec-clan-battle-seasons-chart.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "frontend",
+            "aliases": [
+                "clan battle seasons chart",
+                "cb seasons chart"
+            ],
+            "tags": [
+                "clan battles",
+                "chart",
+                "d3",
+                "frontend",
+                "season averages"
+            ],
+            "archive_on": [
+                "phase-2-complete",
+                "chart-design-replaced"
+            ]
+        },
+        "agents/runbooks/spec-clan-battles-by-tier.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "data",
+            "aliases": [
+                "clan battles by tier",
+                "cb by tier"
+            ],
+            "tags": [
+                "clan battles",
+                "tier",
+                "spec",
+                "chart",
+                "analytics"
+            ],
+            "archive_on": [
+                "feature-shipped",
+                "spec-superseded"
+            ]
+        },
+        "agents/runbooks/spec-github-build-status-badge.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "platform",
+            "aliases": [
+                "github build status badge",
+                "ci badge"
+            ],
+            "tags": [
+                "github",
+                "ci",
+                "badge",
+                "readme",
+                "spec"
+            ],
+            "archive_on": [
+                "badge-shipped"
+            ]
+        },
+        "agents/runbooks/spec-landing-best-by-class.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "data",
+            "aliases": [
+                "landing best by class",
+                "best by ship class"
+            ],
+            "tags": [
+                "landing",
+                "best players",
+                "class",
+                "ranking",
+                "spec"
+            ],
+            "archive_on": [
+                "feature-shipped",
+                "spec-superseded"
+            ]
+        },
+        "agents/runbooks/spec-langmem-agentic-memory-pilot-2026-03-26.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "agentic",
+            "owner": "agentic",
+            "aliases": [
+                "langmem memory pilot",
+                "agentic memory pilot"
+            ],
+            "tags": [
+                "agentic",
+                "langmem",
+                "memory",
+                "pilot",
+                "spec"
+            ],
+            "archive_on": [
+                "pilot-complete",
+                "memory-system-replaced"
+            ]
+        },
+        "agents/runbooks/spec-mobile-player-detail-ux-2026-03-28.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "frontend",
+            "aliases": [
+                "mobile player detail ux",
+                "mobile player detail spec"
+            ],
+            "tags": [
+                "mobile",
+                "player detail",
+                "ux",
+                "frontend",
+                "spec"
+            ],
+            "archive_on": [
+                "ux-shipped",
+                "spec-superseded"
+            ]
+        },
+        "agents/runbooks/spec-multi-realm-eu-support.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "architecture",
+            "owner": "platform",
+            "aliases": [
+                "multi realm support",
+                "eu support spec"
+            ],
+            "tags": [
+                "realms",
+                "eu",
+                "na",
+                "routing",
+                "architecture"
+            ],
+            "archive_on": [
+                "realm-architecture-replaced"
+            ]
+        },
+        "agents/runbooks/spec-player-route-follow-up-improvements-2026-03-19.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "frontend",
+            "aliases": [
+                "player route follow up",
+                "player route improvements"
+            ],
+            "tags": [
+                "player route",
+                "frontend",
+                "navigation",
+                "spec",
+                "follow-up"
+            ],
+            "archive_on": [
+                "follow-up-complete",
+                "spec-superseded"
+            ]
+        },
+        "agents/runbooks/spec-production-data-refresh-strategy.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "architecture",
+            "owner": "data",
+            "aliases": [
+                "production refresh strategy",
+                "data refresh strategy"
+            ],
+            "tags": [
+                "refresh",
+                "crawler",
+                "strategy",
+                "production",
+                "maintenance"
+            ],
+            "archive_on": [
+                "refresh-strategy-replaced"
+            ]
+        },
+        "agents/contracts/data-products/player-daily-snapshots.odcs.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "data",
+            "aliases": [
+                "player daily snapshots",
+                "daily snapshot contract"
+            ],
+            "tags": [
+                "contract",
+                "data product",
+                "daily snapshots",
+                "activity",
+                "player"
+            ],
+            "archive_on": [
+                "data-product-replaced"
+            ]
+        },
+        "agents/contracts/data-products/player-explorer-rows.odcs.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "data",
+            "aliases": [
+                "player explorer rows",
+                "explorer row contract"
+            ],
+            "tags": [
+                "contract",
+                "data product",
+                "explorer",
+                "player summary",
+                "rows"
+            ],
+            "archive_on": [
+                "data-product-replaced"
+            ]
+        },
+        "agents/contracts/data-products/player-summary.odcs.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "platform",
+            "aliases": [
+                "player summary contract",
+                "player detail contract"
+            ],
+            "tags": [
+                "contract",
+                "data product",
+                "player summary",
+                "player detail",
+                "payload"
+            ],
+            "archive_on": [
+                "data-product-replaced"
+            ]
+        },
+        "agents/contracts/upstream/wows-account-achievements.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "wg account achievements",
+                "player achievements endpoint"
+            ],
+            "tags": [
+                "contract",
+                "upstream",
+                "account achievements",
+                "wargaming",
+                "api"
+            ],
+            "archive_on": [
+                "endpoint-retired",
+                "contract-replaced"
+            ]
+        },
+        "agents/contracts/upstream/wows-account-info.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "wg account info",
+                "player personal data"
+            ],
+            "tags": [
+                "contract",
+                "upstream",
+                "account info",
+                "wargaming",
+                "api"
+            ],
+            "archive_on": [
+                "endpoint-retired",
+                "contract-replaced"
+            ]
+        },
+        "agents/contracts/upstream/wows-account-list.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "wg account list",
+                "player search endpoint"
+            ],
+            "tags": [
+                "contract",
+                "upstream",
+                "account list",
+                "search",
+                "wargaming"
+            ],
+            "archive_on": [
+                "endpoint-retired",
+                "contract-replaced"
+            ]
+        },
+        "agents/contracts/upstream/wows-account-statsbydate.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "wg statsbydate",
+                "player statistics by date"
+            ],
+            "tags": [
+                "contract",
+                "upstream",
+                "statsbydate",
+                "player activity",
+                "wargaming"
+            ],
+            "archive_on": [
+                "endpoint-retired",
+                "contract-replaced"
+            ]
+        },
+        "agents/contracts/upstream/wows-clans-accountinfo.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "wg clans accountinfo",
+                "clan membership endpoint"
+            ],
+            "tags": [
+                "contract",
+                "upstream",
+                "clans",
+                "accountinfo",
+                "wargaming"
+            ],
+            "archive_on": [
+                "endpoint-retired",
+                "contract-replaced"
+            ]
+        },
+        "agents/contracts/upstream/wows-encyclopedia-info.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "wg encyclopedia info",
+                "encyclopedia info endpoint"
+            ],
+            "tags": [
+                "contract",
+                "upstream",
+                "encyclopedia",
+                "info",
+                "wargaming"
+            ],
+            "archive_on": [
+                "endpoint-retired",
+                "contract-replaced"
+            ]
+        },
+        "agents/contracts/upstream/wows-encyclopedia-modules.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "wg encyclopedia modules",
+                "modules endpoint"
+            ],
+            "tags": [
+                "contract",
+                "upstream",
+                "encyclopedia",
+                "modules",
+                "wargaming"
+            ],
+            "archive_on": [
+                "endpoint-retired",
+                "contract-replaced"
+            ]
+        },
+        "agents/contracts/upstream/wows-encyclopedia-ships.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "wg encyclopedia ships",
+                "ships endpoint"
+            ],
+            "tags": [
+                "contract",
+                "upstream",
+                "encyclopedia",
+                "ships",
+                "wargaming"
+            ],
+            "archive_on": [
+                "endpoint-retired",
+                "contract-replaced"
+            ]
+        },
+        "agents/contracts/upstream/wows-ships-badges.yaml": {
+            "kind": "contract",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "wg ships badges",
+                "efficiency badges endpoint"
+            ],
+            "tags": [
+                "contract",
+                "upstream",
+                "ships badges",
+                "efficiency badges",
+                "wargaming"
+            ],
+            "archive_on": [
+                "endpoint-retired",
+                "contract-replaced"
+            ]
+        }
+    }
+}

@@ -13,3 +13,5 @@ Do not treat this directory as the current source of truth after a feature ships
 - `../runbooks/` for active operational or implementation guidance,
 - `../knowledge/` for durable verified findings,
 - `../contracts/` for machine-readable payload or schema definitions.
+
+These files normally should not carry active entries in `../doc_registry.json` unless a spec is still actively steering implementation.

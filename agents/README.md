@@ -12,6 +12,8 @@ This directory is the shortest useful path for agents that are told to review pr
    This is the active runbook index. Use it to select the few runbooks relevant to the task instead of scanning the whole directory.
 4. `knowledge/README.md` or `contracts/README.md`
    Open only if the task depends on upstream behavior, durable research, or payload contracts.
+5. `doc_registry.json`
+  Use this when you need machine-readable tags, aliases, owners, lifecycle, and section metadata for active docs.
 
 ## Default Mental Model
 
@@ -56,6 +58,7 @@ Only open those directories when an active runbook or current debugging task poi
 - Keep durable facts in `knowledge/`.
 - Keep current operational or implementation guides in `runbooks/`.
 - Keep structured schemas and endpoint contracts in `contracts/`.
+- Keep machine-readable doc metadata in `doc_registry.json` for active docs that retrieval should rank well.
 - Move completed, historical, incident-specific, or superseded runbooks to `runbooks/archive/`.
 - Prefer a small number of maintained entry docs over large narrative duplicates.
 

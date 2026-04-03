@@ -10,6 +10,8 @@ Use it only when:
 
 Do not scan this directory by default when gathering task context. Reviews are supporting material, not the canonical source of current repo behavior.
 
+These files normally should not have active entries in `../doc_registry.json`. If a review must influence retrieval, the active runbook should point to it explicitly.
+
 Current source-of-truth order:
 
 1. `../README.md`
