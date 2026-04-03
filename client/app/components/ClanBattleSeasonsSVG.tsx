@@ -23,6 +23,7 @@ interface SeasonRow {
     index: number;
     wr: number;
     activity: number;
+    hasData: boolean;
     season: ClanBattleSeasonPoint;
 }
 
@@ -42,12 +43,9 @@ const drawChart = (
     if (sorted.length === 0) return;
 
     // --- Build complete season timeline with gaps filled ---
-    // Season IDs use distinct numbering ranges (1-99, 100-199, 200-299, 300+).
-    // Fill gaps within each range so skipped seasons appear as empty slots.
     const byId = new Map(sorted.map(s => [s.season_id, s]));
     const rangeOf = (id: number) => Math.floor(id / 100);
 
-    // Group season IDs by range
     const rangeGroups = new Map<number, number[]>();
     for (const s of sorted) {
         const r = rangeOf(s.season_id);
@@ -55,7 +53,6 @@ const drawChart = (
         rangeGroups.get(r)!.push(s.season_id);
     }
 
-    // Build complete ID list filling gaps within each range
     const allIds: number[] = [];
     for (const [, ids] of [...rangeGroups.entries()].sort((a, b) => a[0] - b[0])) {
         const min = Math.min(...ids);
@@ -65,7 +62,6 @@ const drawChart = (
         }
     }
 
-    // Build the full timeline — real data or empty placeholder
     const fullTimeline: ClanBattleSeasonPoint[] = allIds.map(id => {
         const existing = byId.get(id);
         if (existing) return existing;
@@ -79,10 +75,10 @@ const drawChart = (
     });
 
     const totalSvgWidth = containerWidth;
-    const totalSvgHeight = compact ? Math.min(svgHeight, 240) : svgHeight;
+    const totalSvgHeight = compact ? Math.min(svgHeight, 260) : svgHeight;
     const margin = compact
         ? { top: 16, right: 14, bottom: 46, left: 42 }
-        : { top: 20, right: 20, bottom: 52, left: 52 };
+        : { top: 20, right: 20, bottom: 52, left: 48 };
 
     const width = totalSvgWidth - margin.left - margin.right;
     const height = totalSvgHeight - margin.top - margin.bottom;
@@ -101,63 +97,115 @@ const drawChart = (
         .append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
-    // --- Build per-season rows from full timeline ---
+    // --- Per-season rows ---
     const rows: SeasonRow[] = fullTimeline.map((d, i) => ({
         index: i,
         wr: d.roster_win_rate,
         activity: memberCount > 0 ? (d.participants / memberCount) * 100 : 0,
+        hasData: byId.has(d.season_id),
         season: d,
     }));
 
     // --- Scales ---
+    // Band-like positioning via linear scale for even spacing
+    const n = fullTimeline.length;
+    const bandPadding = 0.2;
+    const totalBandWidth = width / n;
+    const groupWidth = totalBandWidth * (1 - bandPadding);
+    const barWidth = Math.max(1, (groupWidth - 1) / 2); // two bars per group, 1px gap
     const xScale = d3.scaleLinear()
-        .domain([0, fullTimeline.length - 1])
-        .range([0, width]);
+        .domain([0, n - 1])
+        .range([totalBandWidth / 2 - groupWidth / 2, width - totalBandWidth / 2 + groupWidth / 2 - barWidth * 2 - 1]);
 
-    // Stack the two series so they flow together as a streamgraph.
-    // d3.stack + stackOffsetWiggle centers the stream around the midline.
-    const keys = ['wr', 'activity'];
-    const stackData = rows.map(r => ({ index: r.index, wr: r.wr, activity: r.activity }));
-    const stack = d3.stack()
-        .keys(keys)
-        .offset(d3.stackOffsetWiggle)
-        .order(d3.stackOrderNone);
-    const series = stack(stackData as Iterable<{ [key: string]: number }>);
+    // Left offset for each bar within a group
+    const barOffset = (barIndex: number) => barIndex * (barWidth + 1);
 
-    // Y domain from stacked extents
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const yMin = d3.min(series, (s: any) => d3.min(s, (d: any) => d[0] as number)) || 0;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const yMax = d3.max(series, (s: any) => d3.max(s, (d: any) => d[1] as number)) || 100;
+    // Y scale — percentage 0-100
+    const maxPct = Math.max(
+        d3.max(rows, (d: SeasonRow) => d.wr) || 60,
+        d3.max(rows, (d: SeasonRow) => d.activity) || 60,
+    );
+    const yDomainMax = Math.min(Math.ceil(maxPct / 10) * 10 + 10, 100);
     const yScale = d3.scaleLinear()
-        .domain([yMin, yMax])
+        .domain([0, yDomainMax])
         .range([height, 0]);
 
-    // --- Area generator ---
-    const area = d3.area()
-        .x((_d: [number, number], i: number) => xScale(i))
-        .y0((d: [number, number]) => yScale(d[0]))
-        .y1((d: [number, number]) => yScale(d[1]))
-        .curve(d3.curveBasis);
+    // --- Grid lines ---
+    svg.append('g')
+        .attr('class', 'cb-grid')
+        .call(d3.axisLeft(yScale).ticks(5).tickSize(-width).tickFormat(() => ''))
+        .select('.domain').remove();
+    svg.selectAll('.cb-grid line')
+        .style('stroke', colors.gridLine)
+        .style('stroke-width', 1)
+        .attr('stroke-dasharray', '2,2');
 
+    // --- Y axis ---
+    const yAxis = svg.append('g')
+        .call(d3.axisLeft(yScale).ticks(5).tickFormat((value: number) => `${value}%`).tickSize(0).tickPadding(6));
+    yAxis.selectAll('text')
+        .style('font-size', axisFontSize)
+        .style('fill', colors.axisText);
+    yAxis.select('.domain').remove();
+
+    // --- Colors ---
     const wrColor = colors.metricWR;
     const activityColor = colors.activityActive;
-    const seriesColors = [wrColor, activityColor];
 
-    // --- Draw streams ---
-    svg.selectAll('.stream')
-        .data(series)
+    // --- Draw bars ---
+    const cornerR = Math.min(3, barWidth / 2);
+
+    // Rounded top-corner bar path
+    const roundedTopBar = (bx: number, by: number, bw: number, bh: number, r: number): string => {
+        if (bh <= 0) return '';
+        const cr = Math.min(r, bh / 2, bw / 2);
+        return `M${bx},${by + bh}V${by + cr}Q${bx},${by} ${bx + cr},${by}H${bx + bw - cr}Q${bx + bw},${by} ${bx + bw},${by + cr}V${by + bh}Z`;
+    };
+
+    const activeRows = rows.filter(d => d.hasData);
+
+    // Bar groups — one <g> per season, for coordinated hover
+    const barGroups = svg.selectAll('.bar-group')
+        .data(activeRows)
         .enter()
-        .append('path')
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .attr('d', (d: any) => area(d as [number, number][]))
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .attr('fill', (_d: any, i: number) => seriesColors[i])
-        .attr('fill-opacity', 0.55)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .attr('stroke', (_d: any, i: number) => seriesColors[i])
-        .attr('stroke-width', 1.5)
-        .attr('stroke-opacity', 0.8);
+        .append('g')
+        .attr('class', 'bar-group')
+        .style('cursor', 'crosshair');
+
+    // WR bar in each group
+    barGroups.append('path')
+        .attr('d', (d: SeasonRow) => {
+            const bx = xScale(d.index) + barOffset(0);
+            const by = yScale(d.wr);
+            return roundedTopBar(bx, by, barWidth, height - by, cornerR);
+        })
+        .attr('fill', wrColor)
+        .attr('fill-opacity', 0.75)
+        .attr('stroke', wrColor)
+        .attr('stroke-width', 0.5)
+        .attr('stroke-opacity', 0.9);
+
+    // Activity bar in each group
+    barGroups.append('path')
+        .attr('d', (d: SeasonRow) => {
+            const bx = xScale(d.index) + barOffset(1);
+            const by = yScale(d.activity);
+            return roundedTopBar(bx, by, barWidth, height - by, cornerR);
+        })
+        .attr('fill', activityColor)
+        .attr('fill-opacity', 0.75)
+        .attr('stroke', activityColor)
+        .attr('stroke-width', 0.5)
+        .attr('stroke-opacity', 0.9);
+
+    // Hover: brighten both bars in the group
+    barGroups
+        .on('mouseover', (event: MouseEvent) => {
+            d3.select(event.currentTarget as SVGGElement).selectAll('path').attr('fill-opacity', 0.95);
+        })
+        .on('mouseout', (event: MouseEvent) => {
+            d3.select(event.currentTarget as SVGGElement).selectAll('path').attr('fill-opacity', 0.75);
+        });
 
     // --- X axis ---
     const xAxisG = svg.append('g')
@@ -168,7 +216,7 @@ const drawChart = (
 
     fullTimeline.forEach((d, i) => {
         if (i % tickStep !== 0 && i !== fullTimeline.length - 1) return;
-        const tx = xScale(i);
+        const tx = xScale(i) + barOffset(0) + barWidth; // center of the two-bar group
         const rotate = compact && fullTimeline.length > 12;
         xAxisG.append('text')
             .attr('x', tx)
@@ -176,52 +224,59 @@ const drawChart = (
             .attr('text-anchor', rotate ? 'end' : 'middle')
             .attr('transform', rotate ? `rotate(-45, ${tx}, 12)` : '')
             .style('font-size', axisFontSize)
-            .style('fill', colors.axisText)
+            .style('fill', byId.has(d.season_id) ? colors.axisText : colors.labelMuted)
             .text(d.season_label);
     });
 
-    // --- Tooltip overlay ---
+    // --- Tooltip ---
     const tooltip = d3.select(container)
         .append('div')
         .style('position', 'absolute')
         .style('pointer-events', 'none')
         .style('background', colors.surface)
         .style('border', `1px solid ${colors.axisLine}`)
-        .style('border-radius', '4px')
-        .style('padding', '6px 10px')
+        .style('border-radius', '6px')
+        .style('padding', '8px 12px')
         .style('font-size', '11px')
         .style('color', colors.labelStrong)
-        .style('line-height', '1.4')
+        .style('line-height', '1.5')
         .style('white-space', 'nowrap')
         .style('opacity', 0)
-        .style('z-index', '10');
+        .style('z-index', '10')
+        .style('box-shadow', '0 2px 8px rgba(0,0,0,0.12)');
 
     const hitWidth = fullTimeline.length > 1
-        ? Math.abs(xScale(1) - xScale(0))
+        ? Math.abs(width / fullTimeline.length)
         : width;
 
     svg.selectAll('.hit-area')
         .data(rows)
         .enter()
         .append('rect')
-        .attr('x', (d: SeasonRow) => xScale(d.index) - hitWidth / 2)
+        .attr('x', (d: SeasonRow) => xScale(d.index) - hitWidth * 0.1)
         .attr('y', 0)
         .attr('width', hitWidth)
         .attr('height', height)
         .attr('fill', 'transparent')
         .style('cursor', 'crosshair')
         .on('mousemove', function (_event: MouseEvent, d: SeasonRow) {
-            tooltip
-                .html(
-                    `<strong>${d.season.season_name}</strong><br/>` +
-                    `<span style="color:${wrColor}">WR: ${d.wr.toFixed(1)}%</span><br/>` +
-                    `<span style="color:${activityColor}">Activity: ${d.activity.toFixed(0)}%</span>`
-                )
-                .style('opacity', 1);
+            if (!d.hasData) {
+                tooltip
+                    .html(`<strong>${d.season.season_name}</strong><br/><span style="color:${colors.labelMuted}">Did not participate</span>`)
+                    .style('opacity', 1);
+            } else {
+                tooltip
+                    .html(
+                        `<strong>${d.season.season_name}</strong><br/>` +
+                        `<span style="color:${wrColor}">WR: ${d.wr.toFixed(1)}%</span><br/>` +
+                        `<span style="color:${activityColor}">Activity: ${d.activity.toFixed(0)}%</span>`
+                    )
+                    .style('opacity', 1);
+            }
 
             const tooltipNode = tooltip.node() as HTMLDivElement;
             const tooltipWidth = tooltipNode.offsetWidth;
-            const px = xScale(d.index) + margin.left;
+            const px = xScale(d.index) + margin.left + barWidth;
             const left = px + tooltipWidth + 12 > containerWidth
                 ? px - tooltipWidth - 8
                 : px + 12;
@@ -250,11 +305,11 @@ const drawChart = (
             .attr('y', -5)
             .attr('width', 12)
             .attr('height', 10)
-            .attr('rx', 2)
+            .attr('rx', 3)
             .attr('fill', item.color)
-            .attr('fill-opacity', 0.55)
+            .attr('fill-opacity', 0.75)
             .attr('stroke', item.color)
-            .attr('stroke-width', 1);
+            .attr('stroke-width', 0.5);
 
         legendG.append('text')
             .attr('x', legendX + 16)
@@ -271,7 +326,7 @@ const drawChart = (
 const ClanBattleSeasonsSVG: React.FC<ClanBattleSeasonsSVGProps> = ({
     seasons,
     memberCount,
-    svgHeight = 280,
+    svgHeight = 300,
     theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
