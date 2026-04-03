@@ -6,28 +6,29 @@ Live site: [battlestats.online](https://battlestats.online)
 
 Battlestats is a World of Warships player and clan statistics platform.
 
-- Frontend: Next.js App Router + React + D3 charts in `client/`
-- Backend: Django + DRF + Celery + PostgreSQL in `server/`
-- Realms: `na` and `eu`
-- Agentic runtime: LangGraph + CrewAI in `server/warships/agentic/`
+- Frontend: Next.js 16 App Router + React 18 + D3 charts in `client/`
+- Backend: Django 5 + DRF + Celery + PostgreSQL in `server/`
+- Product realms: `na` and `eu`
+- Agentic runtime: optional on the droplet, implemented in `server/warships/agentic/`
 
-## Agent Start Here
+## Documentation Start Here
 
-When an agent is asked to review project documentation, the fastest useful read order is:
+When a task says "review the docs first", use this read order:
 
 1. `CLAUDE.md` for the current architecture, runtime, deployment, and repo operating rules.
 2. `agents/knowledge/agentic-team-doctrine.json` for battlestats decision rules and pre-commit expectations.
 3. `agents/README.md` for the task-oriented documentation map.
 4. `agents/runbooks/README.md` for the active runbook index.
 
-Do not scan every runbook by default. Start from the active index and open only the docs relevant to the task.
+Do not scan every markdown file by default. Open `agents/reviews/`, `agents/work-items/`, or `agents/runbooks/archive/` only when an active doc points there.
 
-## System Summary
+## Current System
 
 - The browser never calls the Wargaming API directly. The frontend only talks to `/api/*`, which Next.js rewrites to Django.
 - The product is cache-first with background hydration. Reads should prefer cached or published payloads and queue refresh work rather than blocking on upstream fetches.
 - Realm-aware behavior is part of the current architecture. Player and clan pages, landing endpoints, and crawl/warming flows must remain correct for both `na` and `eu`.
 - Production background work is split across three Celery lanes: `default`, `hydration`, and `background`.
+- The production droplet defaults to the non-agentic backend path. Base backend deps live in `server/requirements.txt`; optional LangGraph and CrewAI deps live in `server/requirements-agentic.txt` and are deployed only when `DEPLOY_AGENTIC_RUNTIME=1`.
 - Homepage, hot entity, and distribution behavior relies on scheduled warming. Cold-path regressions usually show up as cache misses, stale locks, or queue pressure rather than missing UI wiring alone.
 
 ## Common Commands
@@ -36,13 +37,14 @@ Do not scan every runbook by default. Start from the active index and open only 
 
 ```bash
 docker compose up -d
+./run_test_suite.sh
 ```
 
 ### Backend
 
 ```bash
 cd server
-python -m pytest warships/tests/ -x --tb=short
+python -m pytest warships/tests/test_views.py warships/tests/test_landing.py warships/tests/test_realm_isolation.py warships/tests/test_data_product_contracts.py -x --tb=short
 python manage.py makemigrations && python manage.py migrate
 ```
 
@@ -59,6 +61,7 @@ npm test -- --runInBand
 ```bash
 ./client/deploy/deploy_to_droplet.sh battlestats.online
 ./server/deploy/deploy_to_droplet.sh battlestats.online
+DEPLOY_AGENTIC_RUNTIME=1 ./server/deploy/deploy_to_droplet.sh battlestats.online
 ```
 
 ## Documentation Map
@@ -66,6 +69,10 @@ npm test -- --runInBand
 - `CLAUDE.md`: authoritative repo working context for architecture, runtime, and deployment.
 - `agents/README.md`: concise task-oriented docs map for coding agents.
 - `agents/runbooks/README.md`: active runbooks only.
+- `agents/knowledge/README.md`: durable verified findings that should survive beyond one task.
+- `agents/contracts/README.md`: machine-readable upstream and internal data contracts.
+- `agents/reviews/README.md`: historical review material, not default task-start context.
+- `agents/work-items/README.md`: planning specs and tranche scaffolds, not current source of truth after a feature ships.
 - `agents/runbooks/archive/README.md`: historical or superseded runbooks.
 - `client/README.md`: client-specific commands and frontend testing notes.
 

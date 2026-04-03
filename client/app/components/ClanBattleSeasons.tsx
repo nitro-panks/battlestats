@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useRealm } from '../context/RealmContext';
+import { useTheme } from '../context/ThemeContext';
 import { withRealm } from '../lib/realmParams';
 import { getChartFetchesInFlight } from '../lib/sharedJsonFetch';
+import ClanBattleSeasonsSVG from './ClanBattleSeasonsSVG';
 
 interface ClanBattleSeason {
     season_id: number;
@@ -47,6 +49,7 @@ const selectColorByWR = (winRatio: number): string => {
 
 const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCount }) => {
     const { realm } = useRealm();
+    const { theme } = useTheme();
     const [seasons, setSeasons] = useState<ClanBattleSeason[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -177,6 +180,16 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
             {!loading && error && <p className="text-sm text-[var(--text-secondary)]">{error}</p>}
             {!loading && !error && seasons.length === 0 && (
                 <p className="text-sm text-[var(--text-secondary)]">No clan battles season data available.</p>
+            )}
+
+            {!loading && !error && seasons.length > 0 && (
+                <div className="mb-4">
+                    <ClanBattleSeasonsSVG
+                        seasons={seasons}
+                        memberCount={memberCount}
+                        theme={theme}
+                    />
+                </div>
             )}
 
             {!loading && !error && seasons.length > 0 && (

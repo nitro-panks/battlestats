@@ -1,6 +1,6 @@
 # WoWS `account/statsbydate` Status
 
-Last verified: 2026-03-09
+Last verified: 2026-04-02
 
 ## Why This Matters
 
@@ -11,7 +11,8 @@ This repo originally explored the World of Warships `account/statsbydate` endpoi
 - The endpoint is still documented in the Wargaming Developer Room.
 - The documentation UI is brittle when the docs path is loaded with query parameters.
 - The live API endpoint is reachable and returns JSON.
-- For tested active, public NA accounts, `account/statsbydate` returned `status: ok` but `pvp: null`.
+- For tested public accounts on NA, EU, and Asia, `account/statsbydate` returned `status: ok` but `pvp: null`.
+- Adding `extra=pve` still returned `pve: null` in live checks.
 - Current working assumption: the endpoint is not reliable for product use, even though it has not been formally removed from the reference docs.
 
 ## Evidence
@@ -22,7 +23,7 @@ Base reference page:
 
 `https://developers.wargaming.net/reference/all/wows/account/statsbydate/`
 
-Observed on 2026-03-09:
+Observed on 2026-04-02:
 
 - Page title is `PLAYER STATISTICS BY DATE`.
 - Documented purpose: `Method returns statistics slices by dates in specified time span.`
@@ -30,18 +31,18 @@ Observed on 2026-03-09:
 - Documented params include `application_id`, `account_id`, `dates`, `extra`, `fields`, `language`.
 - `dates` limitation shown in docs: max 10 dates, within a 28-day range from current date.
 
-### 2. Docs URL breaks when loaded with query string
+### 2. Docs path with query string is still not trustworthy
 
 Tested URL:
 
 `https://developers.wargaming.net/reference/all/wows/account/statsbydate/?application_id=1a167f0d986f26f3fa7f792857b40151&r_realm=eu`
 
-Observed on 2026-03-09:
+Observed on 2026-04-02:
 
-- The Developer Room rendered `METHOD NOT FOUND`.
-- This appears to be a docs-site routing problem, not proof that the API method is removed.
+- The base docs page still exists, but the docs site remains a poor source of truth when query parameters are mixed into the documentation path.
+- Treat the real API host responses as authoritative for endpoint verification.
 
-### 3. Live `account/info` works for active public accounts
+### 3. Live `account/info` still works for public accounts
 
 Tested real regional hosts:
 
@@ -49,18 +50,18 @@ Tested real regional hosts:
 - `com` for NA
 - `asia`
 
-Sample active public NA accounts taken from the local `warships_player` table:
+Sample public accounts tested on 2026-04-02:
 
-- `1001162884` (`deathdemon67`)
-- `1012704239` (`Hans_CC`)
-- `1007700175` (`Menzoran`)
+- NA: `1001162884` (`deathdemon67`)
+- EU: `501279789` (`commandernicson`)
+- Asia: `2000257632` (`test00110`)
 
-Observed on `https://api.worldofwarships.com/wows/account/info/`:
+Observed on the live regional `account/info` hosts:
 
 - Valid public data returned.
 - `hidden_profile` was `false`.
 - `statistics.pvp.battles` was nonzero.
-- `last_battle_time` indicated recent activity.
+- This remained true across NA, EU, and Asia sample accounts.
 
 Representative response for `1001162884`:
 
@@ -71,21 +72,38 @@ Representative response for `1001162884`:
   "data": {
     "1001162884": {
       "hidden_profile": false,
-      "statistics": { "pvp": { "battles": 38927 } },
+      "statistics": { "pvp": { "battles": 39043 } },
       "nickname": "deathdemon67",
-      "last_battle_time": 1773014396
+      "last_battle_time": 1775174488
     }
   }
 }
 ```
 
-### 4. Live `account/statsbydate` did not return usable PvP slices
+Representative EU response for `501279789`:
 
-Observed on `https://api.worldofwarships.com/wows/account/statsbydate/` for the same active accounts:
+```json
+{
+  "status": "ok",
+  "meta": { "count": 1, "hidden": null },
+  "data": {
+    "501279789": {
+      "hidden_profile": false,
+      "statistics": { "pvp": { "battles": 9764 } },
+      "nickname": "commandernicson",
+      "last_battle_time": 1775084480
+    }
+  }
+}
+```
+
+### 4. Live `account/statsbydate` still did not return usable PvP slices
+
+Observed on the live regional `account/statsbydate` hosts for the same public accounts:
 
 - Response status was `ok`.
 - `data[account_id].pvp` was `null`.
-- This remained true with no explicit date list and with explicit recent dates.
+- This remained true with explicit recent dates on NA, EU, and Asia.
 
 Representative response:
 
@@ -100,7 +118,7 @@ Representative response:
 Explicit recent-date test also returned null:
 
 ```text
-https://api.worldofwarships.com/wows/account/statsbydate/?application_id=APP_ID&account_id=1001162884&dates=20260308,20260307,20260306
+https://api.worldofwarships.com/wows/account/statsbydate/?application_id=APP_ID&account_id=1001162884&dates=20260401,20260331,20260330
 ```
 
 Observed response shape:
@@ -110,6 +128,43 @@ Observed response shape:
   "status": "ok",
   "meta": { "count": 1, "hidden": null },
   "data": { "1001162884": { "pvp": null } }
+}
+```
+
+Representative EU response shape:
+
+```json
+{
+  "status": "ok",
+  "meta": { "count": 1, "hidden": null },
+  "data": { "501279789": { "pvp": null } }
+}
+```
+
+Representative Asia response shape:
+
+```json
+{
+  "status": "ok",
+  "meta": { "count": 1, "hidden": null },
+  "data": { "2000257632": { "pvp": null } }
+}
+```
+
+### 5. `extra=pve` still did not return usable slices
+
+Observed on 2026-04-02:
+
+- Adding `extra=pve` did not restore the endpoint.
+- The response returned both `pvp: null` and `pve: null`.
+
+Representative response:
+
+```json
+{
+  "status": "ok",
+  "meta": { "count": 1, "hidden": null },
+  "data": { "1001162884": { "pvp": null, "pve": null } }
 }
 ```
 
@@ -135,7 +190,14 @@ Then test explicit recent dates:
 
 ```bash
 APP_ID=1a167f0d986f26f3fa7f792857b40151
-curl -s "https://api.worldofwarships.com/wows/account/statsbydate/?application_id=$APP_ID&account_id=1001162884&dates=20260308,20260307,20260306"
+curl -s "https://api.worldofwarships.com/wows/account/statsbydate/?application_id=$APP_ID&account_id=1001162884&dates=20260401,20260331,20260330"
+```
+
+Then test the documented extra field:
+
+```bash
+APP_ID=1a167f0d986f26f3fa7f792857b40151
+curl -s "https://api.worldofwarships.com/wows/account/statsbydate/?application_id=$APP_ID&account_id=1001162884&extra=pve&dates=20260401,20260331,20260330"
 ```
 
 ## Implications For This Repo
@@ -146,7 +208,6 @@ curl -s "https://api.worldofwarships.com/wows/account/statsbydate/?application_i
 
 ## Open Questions / Next Checks
 
-- Test whether `extra=pve` returns non-null slices when `pvp` does not.
-- Test with accounts discovered live from `account/list` instead of only local DB samples.
 - Check for any official Wargaming forum or devblog statement that explicitly explains the null payload behavior.
+- Test whether authenticated or private-account flows change the payload shape.
 - Re-verify periodically before making any product decision that depends on historical daily slices.

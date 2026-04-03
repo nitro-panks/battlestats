@@ -1,13 +1,17 @@
 # Knowledge Base
 
-This directory is the durable markdown layer for project knowledge that should survive beyond a single task or chat.
+This directory is the durable markdown layer for verified findings that should survive beyond a single task or chat.
 
-Use it for:
+Use it when a future task would otherwise have to rediscover the same facts from scratch.
+
+Store only:
 
 - Upstream API investigations and current behavior notes.
 - Verified system behavior that is expensive to rediscover.
 - Architecture or operational constraints that affect future implementation choices.
 - Research handoff notes where the next query should resume from a known state.
+
+Do not use this directory for speculative plans, implementation to-do lists, or machine-readable schemas.
 
 Preferred file shape:
 

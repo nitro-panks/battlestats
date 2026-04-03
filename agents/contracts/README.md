@@ -2,7 +2,9 @@
 
 This directory holds machine-readable or semi-structured contracts for data surfaces the repo depends on.
 
-Use this directory for:
+Use this directory when a structured artifact is more useful than narrative prose.
+
+Good fits:
 
 - internal normalized data products,
 - stable field semantics shared across backend and frontend,
@@ -23,6 +25,7 @@ Use `agents/knowledge/` instead when the main value is narrative investigation, 
 - Do not force flaky third-party HTTP endpoints into ODCS unless there is a clear benefit over an endpoint-focused format.
 - Use plain `.yaml` profiles under `upstream/` for raw WoWS endpoint contracts.
 - Prefer one contract per conceptual surface.
+- Keep links back to the supporting note in `agents/knowledge/` when live behavior diverges from vendor docs.
 
 ## Current Starting Point
 

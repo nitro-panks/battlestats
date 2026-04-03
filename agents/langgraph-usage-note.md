@@ -1,6 +1,6 @@
 # LangGraph Usage Note
 
-This repo's LangGraph workflow is useful when a request needs more than a direct code edit.
+This file is only a quick pointer. The canonical operator guide is `agents/runbooks/runbook-langgraph-opinionated-workflow.md`.
 
 ## Use LangGraph When
 
@@ -16,70 +16,10 @@ This repo's LangGraph workflow is useful when a request needs more than a direct
 - The request is a one-file edit with obvious acceptance criteria.
 - You already know the exact change and only want it implemented quickly.
 
-## Good Fits In This Repo
+Use this note only as the short answer to "should I use the graph for this task?".
 
-- Bug investigations such as stale hydration or async update failures.
-- Feature slices that need backend contract review plus frontend rendering.
-- Runbook or process revisions that need cross-functional framing.
-- Changes that should end with targeted tests and a short implementation summary.
+Default prompt pattern:
 
-## Prompt Pattern
+"Investigate [problem], produce a plan, implement the smallest safe change, run focused validation, and return a short summary."
 
-Use this shape when you want the workflow to be explicit:
-
-"Investigate [problem], produce a plan, modify code, run targeted tests or verification, and return a summary."
-
-## Strong Example Prompts
-
-- "Use the agent graph to investigate why clan data does not hydrate on first player-page load, produce a plan, implement the smallest safe fix, run focused tests, and summarize residual risks."
-- "Inspect existing ranked battles support, produce a plan, implement the missing player-detail integration, run targeted validation, and return a summary."
-- "Review the player activity runbook now that ranked is live, propose the revised framework, update the runbook, and summarize the decision changes."
-
-## Current Repo Reality
-
-LangGraph is not automatically triggered by normal user-facing app flows today.
-
-## Current Enrichments
-
-The battlestats graph is no longer only a plan-then-verify shell.
-
-It now enriches runs with:
-
-- repo-backed doctrine loading from `agents/knowledge/agentic-team-doctrine.json`
-- runtime doctrine overrides via workflow context
-- curated guidance retrieval from battlestats runbooks and QA reviews
-- a `design_pattern_review` gate
-- an `api_contract_review` gate
-
-The important architectural point is that these are graph behaviors, not just prompt flourishes. Plans can now be revised before implementation when they miss rollback, contract, documentation, or regression expectations.
-
-See `agents/runbooks/runbook-langgraph-opinionated-workflow.md` for the operator details.
-
-## Useful Context Keys
-
-When you want to shape the graph more explicitly, pass context such as:
-
-- `team_doctrine`
-- `team_style_snippets`
-- `verification_commands`
-- `max_design_review_retries`
-- `max_api_review_retries`
-
-These keys let you test stronger team opinions without rewriting the repo-default doctrine.
-
-## Optional LangSmith Tracing
-
-If you want trace visibility for the agent workflows, set:
-
-- `LANGSMITH_TRACING_V2=true`
-- `LANGSMITH_API_KEY=...`
-- optionally `BATTLESTATS_LANGSMITH_PROJECT=...` or `LANGSMITH_PROJECT=...`
-
-When tracing is enabled, the workflow result payload now includes `langsmith_trace_url`.
-
-It is currently invoked through explicit entrypoints:
-
-- `server/scripts/run_agent_graph.py`
-- `server/warships/management/commands/run_agent_graph.py`
-
-That means you should ask for it when you want the workflow, or wire it into an app path if you want it to run as part of the product.
+See `agents/runbooks/runbook-langgraph-opinionated-workflow.md` for gates, context keys, tests, and rollback behavior.

@@ -22,7 +22,7 @@ Battlestats is a World of Warships player and clan statistics platform. Live at 
 
 - **Frontend**: Next.js 16 (App Router) + React 18 + Tailwind CSS + D3 charts — in `client/`
 - **Backend**: Django 5 + DRF + Celery (RabbitMQ + Redis) + PostgreSQL — in `server/`
-- **Agentic system**: LangGraph + CrewAI workflows with durable Postgres checkpoints — in `server/warships/agentic/`
+- **Agentic system**: LangGraph + CrewAI workflows live in `server/warships/agentic/`, but the production droplet keeps this runtime opt-in via `DEPLOY_AGENTIC_RUNTIME=1` and `ENABLE_AGENTIC_RUNTIME=1`
 - **Agent personas & runbooks**: Role definitions, knowledge base, and operational runbooks — in `agents/`
 
 ## Common Commands
@@ -68,8 +68,11 @@ npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single release-gat
 ```bash
 ./client/deploy/deploy_to_droplet.sh battlestats.online   # Deploy frontend
 ./server/deploy/deploy_to_droplet.sh battlestats.online   # Deploy backend
+DEPLOY_AGENTIC_RUNTIME=1 ./server/deploy/deploy_to_droplet.sh battlestats.online  # Deploy backend with LangGraph/CrewAI extras
 ./umami/deploy/bootstrap_umami.sh battlestats.online       # Bootstrap/update Umami analytics
 ```
+
+Backend deploy defaults to the core site runtime only. Base dependencies install from `server/requirements.txt`; agentic extras install from `server/requirements-agentic.txt` only when `DEPLOY_AGENTIC_RUNTIME=1`.
 
 ### Releases
 
@@ -86,7 +89,7 @@ npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single release-gat
 - `/` — Landing page with search, featured players/clans, discovery charts
 - `/player/[playerName]` — Player detail (URL-encoded name, reload-safe)
 - `/clan/[clanSlug]` — Clan detail (`<clan_id>-<optional-slug>`, reload-safe)
-- `/trace` — Agentic workflow trace dashboard
+- `/trace` — Agentic workflow trace dashboard when `ENABLE_AGENTIC_RUNTIME=1`
 - `/umami` — Umami analytics dashboard (admin login required)
 
 ### API proxy
@@ -230,6 +233,7 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `BEST_CLAN_EXCLUDED_IDS` — Comma-separated clan IDs excluded from Best clan ranking
 - `HOT_ENTITY_PLAYER_LIMIT` / `HOT_ENTITY_CLAN_LIMIT` — Hot entity cache size (defaults: 20/10)
 - `ENABLE_CRAWLER_SCHEDULES` — Enable daily clan crawl (set `1` in production)
+- `ENABLE_AGENTIC_RUNTIME` — Enable `/trace` and optional agentic runtime paths (default: `0` on the droplet)
 - `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
 - `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)

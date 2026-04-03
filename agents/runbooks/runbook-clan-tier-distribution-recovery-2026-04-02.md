@@ -61,7 +61,7 @@ The histogram should be restored when:
 
 ### Phase 3: Cleanup
 
-1. Archive `runbook-3d-clan-scatter-chart.md` to `agents/runbooks/archive/` — it is fully superseded.
+1. `runbook-3d-clan-scatter-chart.md` is archived under `agents/runbooks/archive/` — no further action needed unless the earlier design needs historical review.
 2. Clean up `client/test-results/clan-tier-diagnostic-results.json` and any stale test fixtures.
 3. Reconcile `clan-loading-precedence.spec.ts` — remove `clan_tiers` request ordering assertions.
 
