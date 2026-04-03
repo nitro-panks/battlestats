@@ -1160,9 +1160,25 @@ def enrich_player_data_task(self):
     itself for the next batch.  Runs until no candidates remain, then stops.
     The Beat schedule or a deploy restart kicks it off again.
 
-    Runs on the dedicated background worker so it never competes with
-    user-facing tasks on the default/hydration queues.
+    Defers while a clan crawl is active to avoid competing for WG API rate
+    limits.  Runs on the dedicated background worker so it never competes
+    with user-facing tasks on the default/hydration queues.
     """
+    # Defer if any clan crawl is running — they share the WG API rate limit.
+    from warships.models import VALID_REALMS as _realms
+    active_crawls = [
+        r for r in sorted(_realms)
+        if cache.get(_clan_crawl_lock_key(r)) is not None
+    ]
+    if active_crawls:
+        retry_delay = 300  # check again in 5 minutes
+        logger.info(
+            "Deferring enrichment — clan crawl active for %s, retrying in %ds",
+            active_crawls, retry_delay,
+        )
+        enrich_player_data_task.apply_async(countdown=retry_delay)
+        return {"status": "deferred", "reason": "crawl-running", "active_crawls": active_crawls}
+
     lock_key = _enrich_player_data_lock_key()
     if not cache.add(lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT):
         logger.info("Skipping enrich_player_data_task — another enrichment is already running")
