@@ -2702,6 +2702,7 @@ PLAYER_TIER_TYPE_ORDER = {
 _SHIP_TYPE_ALIASES: dict[str, str] = {
     'AirCarrier': 'Aircraft Carrier',
 }
+_SHIP_TYPE_EXCLUDED_FROM_HEATMAP: set[str] = {'Unknown'}
 PLAYER_TIER_TYPE_CACHE_VERSION = 'tier_type_population:v3'
 LANDING_ACTIVITY_ATTRITION_CACHE_TTL = 900
 LANDING_ACTIVITY_ATTRITION_MONTHS = 18
@@ -3150,8 +3151,12 @@ def _extract_tier_type_battle_rows(battles_json: Any) -> list[dict[str, int | fl
         if ship_tier <= 0 or pvp_battles <= 0:
             continue
 
+        resolved_type = _SHIP_TYPE_ALIASES.get(ship_type.strip(), ship_type.strip())
+        if resolved_type in _SHIP_TYPE_EXCLUDED_FROM_HEATMAP:
+            continue
+
         normalized_rows.append({
-            'ship_type': _SHIP_TYPE_ALIASES.get(ship_type.strip(), ship_type.strip()),
+            'ship_type': resolved_type,
             'ship_tier': ship_tier,
             'pvp_battles': pvp_battles,
             'wins': max(wins, 0),
