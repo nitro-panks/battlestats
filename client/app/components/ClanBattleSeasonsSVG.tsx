@@ -41,6 +41,43 @@ const drawChart = (
     const sorted = [...seasons].sort((a, b) => a.season_id - b.season_id);
     if (sorted.length === 0) return;
 
+    // --- Build complete season timeline with gaps filled ---
+    // Season IDs use distinct numbering ranges (1-99, 100-199, 200-299, 300+).
+    // Fill gaps within each range so skipped seasons appear as empty slots.
+    const byId = new Map(sorted.map(s => [s.season_id, s]));
+    const rangeOf = (id: number) => Math.floor(id / 100);
+
+    // Group season IDs by range
+    const rangeGroups = new Map<number, number[]>();
+    for (const s of sorted) {
+        const r = rangeOf(s.season_id);
+        if (!rangeGroups.has(r)) rangeGroups.set(r, []);
+        rangeGroups.get(r)!.push(s.season_id);
+    }
+
+    // Build complete ID list filling gaps within each range
+    const allIds: number[] = [];
+    for (const [, ids] of [...rangeGroups.entries()].sort((a, b) => a[0] - b[0])) {
+        const min = Math.min(...ids);
+        const max = Math.max(...ids);
+        for (let id = min; id <= max; id++) {
+            allIds.push(id);
+        }
+    }
+
+    // Build the full timeline — real data or empty placeholder
+    const fullTimeline: ClanBattleSeasonPoint[] = allIds.map(id => {
+        const existing = byId.get(id);
+        if (existing) return existing;
+        return {
+            season_id: id,
+            season_name: `Season ${id}`,
+            season_label: `S${id}`,
+            participants: 0,
+            roster_win_rate: 0,
+        };
+    });
+
     const totalSvgWidth = containerWidth;
     const totalSvgHeight = compact ? Math.min(svgHeight, 240) : svgHeight;
     const margin = compact
@@ -64,8 +101,8 @@ const drawChart = (
         .append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
-    // --- Build per-season rows ---
-    const rows: SeasonRow[] = sorted.map((d, i) => ({
+    // --- Build per-season rows from full timeline ---
+    const rows: SeasonRow[] = fullTimeline.map((d, i) => ({
         index: i,
         wr: d.roster_win_rate,
         activity: memberCount > 0 ? (d.participants / memberCount) * 100 : 0,
@@ -74,7 +111,7 @@ const drawChart = (
 
     // --- Scales ---
     const xScale = d3.scaleLinear()
-        .domain([0, sorted.length - 1])
+        .domain([0, fullTimeline.length - 1])
         .range([0, width]);
 
     // Stack the two series so they flow together as a streamgraph.
@@ -127,12 +164,12 @@ const drawChart = (
         .attr('transform', `translate(0, ${height})`);
 
     const maxTicks = 20;
-    const tickStep = sorted.length > maxTicks ? Math.ceil(sorted.length / maxTicks) : 1;
+    const tickStep = fullTimeline.length > maxTicks ? Math.ceil(fullTimeline.length / maxTicks) : 1;
 
-    sorted.forEach((d, i) => {
-        if (i % tickStep !== 0 && i !== sorted.length - 1) return;
+    fullTimeline.forEach((d, i) => {
+        if (i % tickStep !== 0 && i !== fullTimeline.length - 1) return;
         const tx = xScale(i);
-        const rotate = compact && sorted.length > 12;
+        const rotate = compact && fullTimeline.length > 12;
         xAxisG.append('text')
             .attr('x', tx)
             .attr('y', rotate ? 12 : 14)
@@ -159,7 +196,7 @@ const drawChart = (
         .style('opacity', 0)
         .style('z-index', '10');
 
-    const hitWidth = sorted.length > 1
+    const hitWidth = fullTimeline.length > 1
         ? Math.abs(xScale(1) - xScale(0))
         : width;
 
