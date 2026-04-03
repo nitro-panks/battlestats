@@ -269,6 +269,7 @@ CELERY_WORKER_MAX_TASKS_PER_CHILD = int(
 CELERY_TASK_DEFAULT_QUEUE = 'default'
 CELERY_TASK_ROUTES = {
     'warships.tasks.crawl_all_clans_task': {'queue': 'background'},
+    'warships.tasks.ensure_crawl_all_clans_running_task': {'queue': 'background'},
     'warships.tasks.incremental_player_refresh_task': {'queue': 'background'},
     'warships.tasks.incremental_ranked_data_task': {'queue': 'background'},
     'warships.tasks.refresh_efficiency_rank_snapshot_task': {'queue': 'background'},
@@ -276,13 +277,18 @@ CELERY_TASK_ROUTES = {
     'warships.tasks.warm_landing_best_entity_caches_task': {'queue': 'background'},
     'warships.tasks.warm_landing_page_content_task': {'queue': 'background'},
     'warships.tasks.warm_clan_battle_summaries_task': {'queue': 'background'},
+    'warships.tasks.warm_all_clan_tier_distributions_task': {'queue': 'background'},
     'warships.tasks.warm_player_ranked_wr_battles_correlation_task': {'queue': 'background'},
     'warships.tasks.refill_landing_random_players_queue_task': {'queue': 'background'},
     'warships.tasks.refill_landing_random_clans_queue_task': {'queue': 'background'},
     'warships.tasks.bulk_load_entity_caches_task': {'queue': 'background'},
     'warships.tasks.enrich_player_data_task': {'queue': 'background'},
+    'warships.tasks.update_battle_data_task': {'queue': 'hydration'},
+    'warships.tasks.update_clan_members_task': {'queue': 'hydration'},
     'warships.tasks.update_ranked_data_task': {'queue': 'hydration'},
+    'warships.tasks.update_player_clan_battle_data_task': {'queue': 'hydration'},
     'warships.tasks.update_player_efficiency_data_task': {'queue': 'hydration'},
+    'warships.tasks.update_clan_battle_summary_task': {'queue': 'hydration'},
 }
 
 REST_FRAMEWORK = {

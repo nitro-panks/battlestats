@@ -31,12 +31,7 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 
 ## Evergreen Operational Guides
 
-- `runbook-api-surface.md`: public endpoints, smoke coverage, and response-shape notes.
-- `runbook-backend-droplet-deploy.md`: backend deployment, runtime env, and service behavior on the droplet.
-- `runbook-client-droplet-deploy.md`: client deployment and frontend runtime notes.
-- `runbook-db-target-switching.md`: local vs cloud database target switching.
-- `runbook-cache-audit.md`: cache design and current operational expectations.
-- `runbook-deploy-oom-startup-warmers.md`: startup warmers, OOM tradeoffs, and warm-cache deploy expectations.
+- `runbook-celery-queue-strategy.md`: current queue assessment for crawlers, warmers, and request-driven refresh tasks.
 - `runbook-droplet-memory-tuning-2026-04-02.md`: current droplet memory sizing and worker tuning snapshot.
 - `runbook-flower-observability-2026-04-02.md`: production Flower plan for Celery queue visibility on the droplet.
 - `runbook-enrichment-crawler-2026-04-02.md`: enrichment crawler architecture, operations, battles_json usage, and product roadmap.

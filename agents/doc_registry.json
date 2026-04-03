@@ -346,6 +346,29 @@
                 "ranking-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-celery-queue-strategy.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "celery queue strategy",
+                "task queue strategy",
+                "queue priority strategy"
+            ],
+            "tags": [
+                "celery",
+                "queues",
+                "workers",
+                "priority",
+                "crawlers",
+                "hydration"
+            ],
+            "archive_on": [
+                "queue-model-replaced"
+            ]
+        },
         "agents/runbooks/runbook-deleted-account-purge.md": {
             "kind": "runbook",
             "status": "active",

@@ -134,9 +134,9 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 
 Three queues with dedicated workers:
 
-- **default** (`-c 2`) — API-triggered tasks, general work
-- **hydration** (`-c 2`) — Player ranked/efficiency data hydration (capped to prevent flooding). Tasks: `update_ranked_data_task`, `update_player_efficiency_data_task`
-- **background** — Long-running crawls, warmers, incremental refreshes (all periodic tasks)
+- **default** (`-c 3`) — lightweight API-triggered entity refreshes and general work
+- **hydration** (`-c 3`) — heavier request-driven upstream/data refreshes. Tasks include ranked, efficiency, battle-data, clan-members, clan-battle, and clan-battle-summary refreshes
+- **background** (`-c 2`) — long-running crawls, warmers, incremental refreshes, startup warmers, and enrichment
 
 ### Nginx / HTTP
 
