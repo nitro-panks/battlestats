@@ -20,6 +20,7 @@ When an agent is told to review project docs, the default runbook read order is:
 - `runbook-db-target-switching.md`: local vs cloud database target switching.
 - `runbook-cache-audit.md`: cache design and current operational expectations.
 - `runbook-flower-observability-2026-04-02.md`: production Flower plan for Celery queue visibility on the droplet.
+- `runbook-enrichment-crawler-2026-04-02.md`: enrichment crawler architecture, operations, battles_json usage, and product roadmap.
 
 ## Architecture And Product Policy
 
