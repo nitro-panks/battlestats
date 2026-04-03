@@ -9,6 +9,9 @@ export interface LandingClan {
     clan_wr: number | null;
     total_battles: number | null;
     active_members?: number | null;
+    avg_cb_battles?: number | null;
+    avg_cb_wr?: number | null;
+    cb_recency_days?: number | null;
 }
 
 

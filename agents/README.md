@@ -13,7 +13,7 @@ This directory is the shortest useful path for agents that are told to review pr
 4. `knowledge/README.md` or `contracts/README.md`
    Open only if the task depends on upstream behavior, durable research, or payload contracts.
 5. `doc_registry.json`
-  Use this when you need machine-readable tags, aliases, owners, lifecycle, and section metadata for active docs.
+   Use this when you need machine-readable tags, aliases, owners, lifecycle, and section metadata for active docs.
 
 ## Default Mental Model
 

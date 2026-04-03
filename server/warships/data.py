@@ -5134,12 +5134,13 @@ def _minmax_normalize(values: list[float]) -> list[float]:
     return [(v - lo) / span for v in values]
 
 
-def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEFAULT_REALM) -> list[int]:
+def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEFAULT_REALM) -> tuple[list[int], dict[int, dict]]:
     """Score and rank clans using the composite Best Clan eligibility criteria.
 
-    Returns a list of clan_id values for the top `limit` clans, sorted by
-    composite score descending. Used by both the bulk cache loader and the
-    landing best-clans surface.
+    Returns a tuple of (clan_ids, cb_metrics_by_clan) where clan_ids is a list
+    of the top `limit` clan IDs sorted by composite score descending, and
+    cb_metrics_by_clan maps each clan ID to its CB sub-sort fields
+    (avg_cb_battles, avg_cb_wr, cb_recency_days).
     """
     now = django_timezone.now()
 
@@ -5174,7 +5175,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
 
     if not candidates:
         logging.warning("score_best_clans: no clans passed hard filters")
-        return []
+        return [], {}
 
     clan_ids = [row[0] for row in candidates]
 
@@ -5245,8 +5246,11 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     n_cb = _minmax_normalize(raw_cb)
     n_volume = _minmax_normalize(raw_volume)
 
+    # Collect per-clan CB metrics for sub-sort support
+    cb_metrics_by_clan: dict[int, dict] = {}
     scored: list[tuple[float, int]] = []
     for i, row in enumerate(candidates):
+        clan_id = row[0]
         score = (
             BEST_CLAN_W_WR * n_wr[i]
             + BEST_CLAN_W_ACTIVITY * n_activity[i]
@@ -5254,7 +5258,17 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
             + BEST_CLAN_W_CB_RECENCY * n_cb[i]
             + BEST_CLAN_W_VOLUME * n_volume[i]
         )
-        scored.append((score, row[0]))
+        scored.append((score, clan_id))
+
+        stats = member_stats_by_clan.get(clan_id, {})
+        avg_cb_b = stats.get('avg_cb_battles') or 0
+        avg_cb_w = stats.get('avg_cb_wr') or 0.0
+        latest = cb_recency.get(clan_id)
+        cb_metrics_by_clan[clan_id] = {
+            'avg_cb_battles': round(avg_cb_b, 1) if avg_cb_b else None,
+            'avg_cb_wr': round(avg_cb_w, 1) if avg_cb_w else None,
+            'cb_recency_days': max((now - latest).days, 0) if latest else None,
+        }
 
     scored.sort(key=lambda x: -x[0])
     top = scored[:limit]
@@ -5265,7 +5279,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
             len(top), top[0][0], top[-1][0], len(candidates),
         )
 
-    return [clan_id for _, clan_id in top]
+    return [clan_id for _, clan_id in top], cb_metrics_by_clan
 
 
 def bulk_load_player_cache(
@@ -5299,7 +5313,7 @@ def bulk_load_player_cache(
     seen_ids = {p.player_id for p in top_players}
 
     # Cohort 2: members of the best clans (composite scoring)
-    best_clan_ids = score_best_clans(limit=clan_member_clans, realm=realm)
+    best_clan_ids, _ = score_best_clans(limit=clan_member_clans, realm=realm)
     clan_members = list(
         Player.objects
         .filter(realm=realm, clan_id__in=best_clan_ids)
@@ -5366,7 +5380,7 @@ def bulk_load_clan_cache(limit: int = BULK_CACHE_CLAN_LIMIT, realm: str = DEFAUL
     """Bulk-load top clan detail payloads into Redis from DB."""
     from warships.serializers import ClanSerializer
 
-    best_clan_ids = score_best_clans(limit=limit, realm=realm)
+    best_clan_ids, _ = score_best_clans(limit=limit, realm=realm)
     clans = (
         Clan.objects
         .filter(clan_id__in=best_clan_ids, realm=realm)

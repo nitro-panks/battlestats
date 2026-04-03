@@ -165,8 +165,6 @@ const PlayerExplorer = dynamic(() => resilientDynamicImport(() => import('./Play
 
 const LANDING_CLAN_LIMIT = 30;
 const LANDING_PLAYER_LIMIT = 25;
-const BEST_CLAN_MIN_TOTAL_BATTLES = 50000;
-const BEST_CLAN_MIN_ACTIVE_SHARE = 0.4;
 const RANDOM_PLAYER_MIN_PVP_BATTLES = 500;
 const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
@@ -175,6 +173,7 @@ const SHOW_PLAYER_EXPLORER = false;
 const LANDING_FETCH_TTL_MS = 1500;
 
 type LandingClanMode = 'random' | 'best' | 'recent';
+type ClanBestSort = 'overall' | 'wr' | 'cb';
 type LandingPlayerMode = 'random' | 'best' | 'sigma' | 'recent';
 
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
@@ -192,7 +191,8 @@ const PlayerSearch: React.FC = () => {
     const [error, setError] = useState('');
     const [isLoadingPlayer, setIsLoadingPlayer] = useState(false);
     const [clans, setClans] = useState<LandingClan[]>([]);
-    const [clanMode, setClanMode] = useState<LandingClanMode>('random');
+    const [clanMode, setClanMode] = useState<LandingClanMode>('best');
+    const [clanBestSort, setClanBestSort] = useState<ClanBestSort>('overall');
     const [recentClans, setRecentClans] = useState<LandingClan[]>([]);
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
     const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('random');
@@ -357,42 +357,35 @@ const PlayerSearch: React.FC = () => {
             return recentClans.slice(0, LANDING_CLAN_LIMIT);
         }
 
-        if (clanMode === 'best') {
-            const bestClans = [...clans]
-                .filter((clan) => {
-                    if ((clan.total_battles ?? 0) < BEST_CLAN_MIN_TOTAL_BATTLES) {
-                        return false;
-                    }
-
-                    const activeMembers = clan.active_members ?? 0;
-                    return (activeMembers / Math.max(clan.members_count, 1)) >= BEST_CLAN_MIN_ACTIVE_SHARE;
-                })
-                .sort((left, right) => {
-                    const leftWr = left.clan_wr ?? Number.NEGATIVE_INFINITY;
-                    const rightWr = right.clan_wr ?? Number.NEGATIVE_INFINITY;
-                    if (rightWr !== leftWr) {
-                        return rightWr - leftWr;
-                    }
-
-                    const leftBattles = left.total_battles ?? Number.NEGATIVE_INFINITY;
-                    const rightBattles = right.total_battles ?? Number.NEGATIVE_INFINITY;
-                    if (rightBattles !== leftBattles) {
-                        return rightBattles - leftBattles;
-                    }
-
-                    return left.name.localeCompare(right.name);
-                })
-                .slice(0, LANDING_CLAN_LIMIT);
-
-            if (bestClans.length > 0) {
-                return bestClans;
-            }
-
+        if (clanMode === 'best' && clans.length === 0) {
             return recentClans.slice(0, LANDING_CLAN_LIMIT);
         }
 
-        return clans.slice(0, LANDING_CLAN_LIMIT);
-    }, [clanMode, clans, recentClans]);
+        const base = clans.slice(0, LANDING_CLAN_LIMIT);
+        if (clanMode !== 'best' || clanBestSort === 'overall') return base;
+
+        if (clanBestSort === 'wr') {
+            return [...base].sort((a, b) => {
+                const aWr = a.avg_cb_wr != null
+                    ? (a.clan_wr ?? 0) * 0.6 + a.avg_cb_wr * 0.4
+                    : (a.clan_wr ?? 0);
+                const bWr = b.avg_cb_wr != null
+                    ? (b.clan_wr ?? 0) * 0.6 + b.avg_cb_wr * 0.4
+                    : (b.clan_wr ?? 0);
+                return bWr - aWr;
+            });
+        }
+
+        if (clanBestSort === 'cb') {
+            return [...base].sort((a, b) => {
+                const aScore = (a.avg_cb_battles ?? 0) * (a.avg_cb_wr ?? 0);
+                const bScore = (b.avg_cb_battles ?? 0) * (b.avg_cb_wr ?? 0);
+                return bScore - aScore;
+            });
+        }
+
+        return base;
+    }, [clanMode, clanBestSort, clans, recentClans]);
 
     const isBestClanFallbackActive = clanMode === 'best' && clans.length === 0 && recentClans.length > 0;
 
@@ -474,14 +467,6 @@ const PlayerSearch: React.FC = () => {
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Clans</h3>
                                 <button
                                     type="button"
-                                    onClick={() => setClanMode('random')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={clanMode === 'random'}
-                                >
-                                    Random
-                                </button>
-                                <button
-                                    type="button"
                                     onClick={() => setClanMode('best')}
                                     className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={clanMode === 'best'}
@@ -490,7 +475,15 @@ const PlayerSearch: React.FC = () => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setClanMode('recent')}
+                                    onClick={() => { setClanMode('random'); setClanBestSort('overall'); }}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
+                                    aria-pressed={clanMode === 'random'}
+                                >
+                                    Random
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setClanMode('recent'); setClanBestSort('overall'); }}
                                     className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={clanMode === 'recent'}
                                 >
@@ -513,6 +506,22 @@ const PlayerSearch: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
+                            {clanMode === 'best' && (
+                                <div className="mt-1.5 flex items-center gap-1.5 pl-1">
+                                    {(['overall', 'wr', 'cb'] as const).map((sort, i) => (
+                                        <React.Fragment key={sort}>
+                                            {i > 0 && <span className="text-xs text-[var(--text-secondary)]">&middot;</span>}
+                                            <button
+                                                type="button"
+                                                onClick={() => setClanBestSort(sort)}
+                                                className={`text-sm font-medium transition-colors ${clanBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
+                                            >
+                                                {sort === 'overall' ? 'Overall' : sort === 'wr' ? 'WR' : 'CB'}
+                                            </button>
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            )}
                             <div className="mt-3">
                                 {isBestClanFallbackActive ? (
                                     <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">

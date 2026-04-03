@@ -772,7 +772,7 @@ def resolve_landing_clans_by_id_order(clan_ids: list[int], realm: str = DEFAULT_
 
 
 def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: str = DEFAULT_REALM) -> list[dict]:
-    best_clan_ids = score_best_clans(limit=limit, realm=realm)
+    best_clan_ids, cb_metrics = score_best_clans(limit=limit, realm=realm)
     if not best_clan_ids:
         return []
 
@@ -785,6 +785,13 @@ def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: s
             'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles', 'active_members'
         )
     )
+
+    # Merge CB metrics for sub-sort support
+    for row in rows:
+        metrics = cb_metrics.get(row['clan_id'], {})
+        row['avg_cb_battles'] = metrics.get('avg_cb_battles')
+        row['avg_cb_wr'] = metrics.get('avg_cb_wr')
+        row['cb_recency_days'] = metrics.get('cb_recency_days')
 
     # Preserve the score_best_clans ordering
     id_order = {cid: i for i, cid in enumerate(best_clan_ids)}

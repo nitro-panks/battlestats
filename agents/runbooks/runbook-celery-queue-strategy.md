@@ -187,8 +187,8 @@ That gap is now reduced. The following task classes were moved into `hydration` 
 
 1. `update_battle_data_task`
 2. `update_clan_members_task`
-2. `update_player_clan_battle_data_task`
-3. `update_clan_battle_summary_task`
+3. `update_player_clan_battle_data_task`
+4. `update_clan_battle_summary_task`
 
 The remaining question is whether any additional request-driven tasks should leave `default`, not whether `hydration` should stay as narrowly scoped as before.
 

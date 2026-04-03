@@ -318,6 +318,81 @@ describe('PlayerSearch landing efficiency icon', () => {
         expect(screen.getByRole('button', { name: 'Sigma' })).toHaveAttribute('aria-pressed', 'true');
     });
 
+    it('preserves backend best player ordering on the landing page', async () => {
+        installFetchMock({
+            playersByMode: {
+                ...defaultPlayersByMode,
+                best: [
+                    {
+                        name: 'ZedTop',
+                        pvp_ratio: 51.0,
+                        is_hidden: false,
+                        is_ranked_player: false,
+                        is_pve_player: false,
+                        is_sleepy_player: false,
+                        is_clan_battle_player: false,
+                        clan_battle_win_rate: null,
+                        highest_ranked_league: null,
+                        efficiency_rank_percentile: 0.72,
+                        efficiency_rank_tier: 'II',
+                        has_efficiency_rank_icon: true,
+                        efficiency_rank_population_size: 367,
+                        efficiency_rank_updated_at: '2026-03-17T00:00:00Z',
+                    },
+                    {
+                        name: 'AlphaSecond',
+                        pvp_ratio: 66.0,
+                        is_hidden: false,
+                        is_ranked_player: true,
+                        is_pve_player: false,
+                        is_sleepy_player: false,
+                        is_clan_battle_player: true,
+                        clan_battle_win_rate: 61.2,
+                        highest_ranked_league: 'Gold',
+                        efficiency_rank_percentile: 0.99,
+                        efficiency_rank_tier: 'E',
+                        has_efficiency_rank_icon: true,
+                        efficiency_rank_population_size: 367,
+                        efficiency_rank_updated_at: '2026-03-17T00:00:00Z',
+                    },
+                    {
+                        name: 'MiddleThird',
+                        pvp_ratio: 58.0,
+                        is_hidden: false,
+                        is_ranked_player: false,
+                        is_pve_player: false,
+                        is_sleepy_player: false,
+                        is_clan_battle_player: false,
+                        clan_battle_win_rate: null,
+                        highest_ranked_league: null,
+                        efficiency_rank_percentile: 0.83,
+                        efficiency_rank_tier: 'I',
+                        has_efficiency_rank_icon: true,
+                        efficiency_rank_population_size: 367,
+                        efficiency_rank_updated_at: '2026-03-17T00:00:00Z',
+                    },
+                ],
+            },
+        });
+
+        render(<PlayerSearch />);
+
+        fireEvent.click((await screen.findAllByRole('button', { name: 'Best' }))[1]);
+
+        await waitFor(() => {
+            const playerButtons = screen.getAllByRole('button', { name: /Show player /i });
+            expect(playerButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
+                'Show player ZedTop',
+                'Show player AlphaSecond',
+                'Show player MiddleThird',
+            ]);
+        });
+
+        expect((global.fetch as jest.Mock).mock.calls.some(
+            ([url]) => url === '/api/landing/players?mode=best&limit=25&realm=na',
+        )).toBe(true);
+    });
+
     it('folds recent players into the player mode switch after Sigma', async () => {
         installFetchMock({
             recentPlayers: [
@@ -347,7 +422,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/clans?mode=random&limit=30&realm=na',
+                ([url]) => url === '/api/landing/clans?mode=best&limit=30&realm=na',
             )).toBe(true);
         });
 
@@ -455,16 +530,16 @@ describe('PlayerSearch landing efficiency icon', () => {
         expect(screen.queryByRole('button', { name: /Show player HiddenSkipper/i })).not.toBeInTheDocument();
     });
 
-    it('filters clan best mode by thresholds and tie-breaks by total battles', async () => {
+    it('preserves backend best clan ordering without client-side filtering', async () => {
         installFetchMock({
             clans: [
                 {
-                    clan_id: 900,
-                    name: 'Great Clan',
-                    tag: 'GREAT',
+                    clan_id: 903,
+                    name: 'Low Volume Clan',
+                    tag: 'LOW',
                     members_count: 40,
-                    clan_wr: 58.1,
-                    total_battles: 120000,
+                    clan_wr: 61.0,
+                    total_battles: 40000,
                     active_members: 20,
                 },
                 {
@@ -475,24 +550,6 @@ describe('PlayerSearch landing efficiency icon', () => {
                     clan_wr: 57.4,
                     total_battles: 180000,
                     active_members: 18,
-                },
-                {
-                    clan_id: 902,
-                    name: 'Beta Clan',
-                    tag: 'BETA',
-                    members_count: 40,
-                    clan_wr: 57.4,
-                    total_battles: 220000,
-                    active_members: 17,
-                },
-                {
-                    clan_id: 903,
-                    name: 'Low Volume Clan',
-                    tag: 'LOW',
-                    members_count: 40,
-                    clan_wr: 61.0,
-                    total_battles: 40000,
-                    active_members: 20,
                 },
                 {
                     clan_id: 904,
@@ -512,11 +569,13 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await waitFor(() => {
             const clanButtons = screen.getAllByRole('button', { name: /Show clan /i });
-            expect(clanButtons.map((button) => button.getAttribute('title'))).toEqual(['GREAT', 'BETA', 'ALPHA']);
+            expect(clanButtons.map((button) => button.getAttribute('title'))).toEqual(['LOW', 'ALPHA', 'SLEEP']);
         });
 
-        expect(screen.queryByRole('button', { name: /Show clan Low Volume Clan/i })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /Show clan Inactive Clan/i })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Show clan Low Volume Clan/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Show clan Alpha Clan/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Show clan Inactive Clan/i })).toBeInTheDocument();
+        expect(screen.getByTestId('landing-clan-svg')).toHaveAttribute('data-clan-count', '3');
     });
 
     it('folds recent clans into the clan mode switch with a Recent button', async () => {

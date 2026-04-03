@@ -91,6 +91,7 @@ These stay active only while they still shape implementation or operations:
 
 - `spec-landing-best-by-class.md`
 - `spec-clan-battle-seasons-chart.md`: D3 multi-series chart for clan CB performance vs realm averages
+- `spec-best-clan-subfilters.md`: Best clan sub-filters (Overall, CB, WR) on the landing page
 - `spec-clan-battles-by-tier.md`
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`
 - `spec-github-build-status-badge.md`
