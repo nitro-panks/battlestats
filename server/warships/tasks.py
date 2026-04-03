@@ -1116,6 +1116,42 @@ def incremental_ranked_data_task(self, realm=DEFAULT_REALM):
         cache.delete(lock_key)
 
 
+def _maybe_redispatch_enrichment():
+    """Check for remaining candidates and re-dispatch the enrichment task.
+
+    Retries the broker dispatch up to 3 times with backoff to survive
+    transient RabbitMQ blips after worker restarts.
+    """
+    try:
+        from warships.management.commands.enrich_player_data import _candidates
+        from warships.models import VALID_REALMS as _realms
+        remaining = sum(
+            len(_candidates(r, int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500")),
+                            float(os.getenv("ENRICH_MIN_WR", "48.0")), 1))
+            for r in sorted(_realms)
+        )
+        if remaining == 0:
+            logger.info("Enrichment complete — no more candidates")
+            return
+
+        pause = float(os.getenv("ENRICH_PAUSE_BETWEEN_BATCHES", "10"))
+        for attempt in range(3):
+            try:
+                enrich_player_data_task.apply_async(countdown=pause)
+                logger.info("Enrichment re-dispatched (%.0fs countdown)", pause)
+                return
+            except Exception:
+                wait = 5 * (attempt + 1)
+                logger.warning(
+                    "Broker dispatch failed (attempt %d/3), retrying in %ds",
+                    attempt + 1, wait,
+                )
+                time.sleep(wait)
+        logger.error("Enrichment re-dispatch failed after 3 attempts — Beat kickstart will recover")
+    except Exception:
+        logger.exception("Failed to check for remaining enrichment candidates")
+
+
 @app.task(bind=True, **CRAWL_TASK_OPTS)
 def enrich_player_data_task(self):
     """Continuous background enrichment of players missing battle/ranked/snapshot data.
@@ -1152,24 +1188,7 @@ def enrich_player_data_task(self):
 
         # Re-dispatch if there's more work to do.  The lock is released
         # above so the next invocation can acquire it cleanly.
-        try:
-            from warships.management.commands.enrich_player_data import _candidates
-            from warships.models import VALID_REALMS as _realms
-            remaining = sum(
-                len(_candidates(r, int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500")),
-                                float(os.getenv("ENRICH_MIN_WR", "48.0")), 1))
-                for r in sorted(_realms)
-            )
-            if remaining > 0:
-                pause = float(os.getenv("ENRICH_PAUSE_BETWEEN_BATCHES", "10"))
-                logger.info(
-                    "Enrichment has more candidates — re-dispatching in %.0fs", pause,
-                )
-                enrich_player_data_task.apply_async(countdown=pause)
-            else:
-                logger.info("Enrichment complete — no more candidates")
-        except Exception:
-            logger.exception("Failed to check for remaining enrichment candidates")
+        _maybe_redispatch_enrichment()
 
 
 @app.task(
@@ -1185,3 +1204,11 @@ def startup_warm_caches_task():
     background worker rather than spawning a new Python process (~170-500 MB).
     """
     call_command('startup_warm_all_caches', '--delay', '0')
+
+    # Kick off the continuous enrichment chain after startup warmers finish.
+    # The task's own lock prevents duplicates if it's already running.
+    try:
+        enrich_player_data_task.apply_async(countdown=30)
+        logger.info("Dispatched enrichment kickstart after startup warm")
+    except Exception:
+        logger.exception("Failed to dispatch enrichment kickstart")
