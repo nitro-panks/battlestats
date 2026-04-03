@@ -300,29 +300,27 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
             },
         )
 
-    # -- Player Enrichment Crawler (runs twice daily) --
-    # Fills battles_json, ranked_json, snapshot/activity for players missing
-    # this data.  Two runs per day to chew through the ~211K backlog faster.
-    enrich_hours = os.getenv("ENRICH_PLAYER_DATA_HOURS", "9,21")
-    enrich_minute = os.getenv("ENRICH_PLAYER_DATA_MINUTE", "0")
-    enrich_schedule, _ = CrontabSchedule.objects.get_or_create(
-        minute=enrich_minute,
-        hour=enrich_hours,
-        day_of_week="*",
-        day_of_month="*",
-        month_of_year="*",
-        timezone="UTC",
+    # -- Continuous Player Enrichment Crawler --
+    # The task self-chains (re-dispatches after each batch), so this schedule
+    # is just a safety net that re-kicks the chain every 2 hours in case it
+    # stopped (deploy, worker restart, transient failure).  The task's own
+    # lock prevents duplicate runs.
+    enrich_kickstart_minutes = int(os.getenv("ENRICH_KICKSTART_MINUTES", "120"))
+    enrich_kickstart_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=enrich_kickstart_minutes,
+        period=IntervalSchedule.MINUTES,
     )
     PeriodicTask.objects.update_or_create(
-        name="player-enrichment",
+        name="player-enrichment-kickstart",
         defaults={
             "task": "warships.tasks.enrich_player_data_task",
-            "crontab": enrich_schedule,
+            "interval": enrich_kickstart_schedule,
             "enabled": crawler_schedules_enabled,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
-            "description": "Enrichment of players missing battle/ranked/activity data, ordered by WR desc (twice daily).",
+            "description": "Safety-net kickstart for continuous player enrichment (self-chains; lock prevents duplicates).",
         },
     )
-    # Clean up old single-run schedule
+    # Clean up old schedule names
     PeriodicTask.objects.filter(name="daily-player-enrichment").delete()
+    PeriodicTask.objects.filter(name="player-enrichment").delete()

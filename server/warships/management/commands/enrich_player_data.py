@@ -35,7 +35,7 @@ from warships.models import DEFAULT_REALM, Player, Ship, VALID_REALMS
 
 log = logging.getLogger("enrich")
 
-DEFAULT_BATCH = 2000
+DEFAULT_BATCH = 500
 DEFAULT_MIN_PVP_BATTLES = 500
 DEFAULT_MIN_WR = 48.0
 DEFAULT_DELAY = 0.2  # seconds between players (not per API call)

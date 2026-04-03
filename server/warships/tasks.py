@@ -1118,16 +1118,14 @@ def incremental_ranked_data_task(self, realm=DEFAULT_REALM):
 
 @app.task(bind=True, **CRAWL_TASK_OPTS)
 def enrich_player_data_task(self):
-    """Background enrichment of players missing battles/ranked/snapshot data.
+    """Continuous background enrichment of players missing battle/ranked/snapshot data.
 
-    Fills battles_json, tiers_json, type_json, randoms_json, ranked_json,
-    and snapshot/activity data for the highest-WR players first.
-    Alternates NA and EU to give both realms steady progress.
+    Processes a batch of players (default 500), then immediately re-dispatches
+    itself for the next batch.  Runs until no candidates remain, then stops.
+    The Beat schedule or a deploy restart kicks it off again.
 
-    Uses batch API optimisations:
-    - Ship cache pre-warm (all Ship records loaded to Redis before loop)
-    - refresh_player=False on snapshot (skips 2 redundant API calls/player)
-    - No separate update_activity_data call (snapshot already cascades)
+    Runs on the dedicated background worker so it never competes with
+    user-facing tasks on the default/hydration queues.
     """
     lock_key = _enrich_player_data_lock_key()
     if not cache.add(lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT):
@@ -1137,19 +1135,41 @@ def enrich_player_data_task(self):
     try:
         from warships.management.commands.enrich_player_data import enrich_players
 
+        batch_size = int(os.getenv("ENRICH_BATCH_SIZE", "500"))
         summary = enrich_players(
-            batch=int(os.getenv("ENRICH_BATCH_SIZE", "200")),
+            batch=batch_size,
             min_pvp_battles=int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500")),
             min_wr=float(os.getenv("ENRICH_MIN_WR", "48.0")),
-            delay=float(os.getenv("ENRICH_DELAY", "0.5")),
+            delay=float(os.getenv("ENRICH_DELAY", "0.2")),
             heartbeat_callback=lambda: cache.set(
                 lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT,
             ),
         )
-        logger.info("enrich_player_data_task completed: %s", summary)
+        logger.info("enrich_player_data_task batch completed: %s", summary)
         return summary
     finally:
         cache.delete(lock_key)
+
+        # Re-dispatch if there's more work to do.  The lock is released
+        # above so the next invocation can acquire it cleanly.
+        try:
+            from warships.management.commands.enrich_player_data import _candidates
+            from warships.models import VALID_REALMS as _realms
+            remaining = sum(
+                len(_candidates(r, int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500")),
+                                float(os.getenv("ENRICH_MIN_WR", "48.0")), 1))
+                for r in sorted(_realms)
+            )
+            if remaining > 0:
+                pause = float(os.getenv("ENRICH_PAUSE_BETWEEN_BATCHES", "10"))
+                logger.info(
+                    "Enrichment has more candidates — re-dispatching in %.0fs", pause,
+                )
+                enrich_player_data_task.apply_async(countdown=pause)
+            else:
+                logger.info("Enrichment complete — no more candidates")
+        except Exception:
+            logger.exception("Failed to check for remaining enrichment candidates")
 
 
 @app.task(
