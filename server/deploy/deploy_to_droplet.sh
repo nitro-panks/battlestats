@@ -14,6 +14,7 @@ DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"
 APP_USER="${APP_USER:-battlestats}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
+DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME:-0}"
 RELEASE_ID="$(date +%Y%m%d%H%M%S)"
 REMOTE_RELEASE="${APP_ROOT}/releases/${RELEASE_ID}"
 REMOTE_TMP_ENV="/tmp/battlestats-server.env.${RELEASE_ID}"
@@ -21,6 +22,15 @@ REMOTE_TMP_SECRETS="/tmp/battlestats-server.secrets.env.${RELEASE_ID}"
 REMOTE_TMP_CERT="/tmp/battlestats-do-ca.${RELEASE_ID}.crt"
 EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:-}"
 DEFAULT_PUBLIC_ALLOWED_HOSTS="${DEFAULT_PUBLIC_ALLOWED_HOSTS:-battlestats.online,www.battlestats.online}"
+
+case "${DEPLOY_AGENTIC_RUNTIME,,}" in
+  1|true|yes|on)
+    DEPLOY_AGENTIC_RUNTIME=1
+    ;;
+  *)
+    DEPLOY_AGENTIC_RUNTIME=0
+    ;;
+esac
 
 DJANGO_ALLOWED_HOSTS="$({
   printf '%s\n' localhost 127.0.0.1 "${HOST}"
@@ -35,6 +45,7 @@ fi
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \
   APP_USER="${APP_USER}" \
+  DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME}" \
   REMOTE_RELEASE="${REMOTE_RELEASE}" \
   'bash -s' <<'REMOTE'
 set -euo pipefail
@@ -42,7 +53,9 @@ set -euo pipefail
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/releases"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/server"
-install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/agents"
+if [[ "${DEPLOY_AGENTIC_RUNTIME}" == "1" ]]; then
+  install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/agents"
+fi
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/logs"
 REMOTE
 
@@ -64,16 +77,19 @@ rsync -az --delete \
   --exclude 'deploy' \
   "${SERVER_DIR}/" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/server/"
 
-rsync -az --delete \
-  --exclude '.git' \
-  --exclude '.DS_Store' \
-  "${REPO_ROOT}/agents/" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/agents/"
+if [[ "${DEPLOY_AGENTIC_RUNTIME}" == "1" ]]; then
+  rsync -az --delete \
+    --exclude '.git' \
+    --exclude '.DS_Store' \
+    "${REPO_ROOT}/agents/" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/agents/"
+fi
 
 scp "${REPO_ROOT}/docker-compose.yml" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/docker-compose.yml"
 
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \
   APP_USER="${APP_USER}" \
+  DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME}" \
   REMOTE_RELEASE="${REMOTE_RELEASE}" \
   REMOTE_TMP_ENV="${REMOTE_TMP_ENV}" \
   REMOTE_TMP_SECRETS="${REMOTE_TMP_SECRETS}" \
@@ -169,17 +185,21 @@ set_env_value CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB 786432
 set_env_value BEST_CLAN_EXCLUDED_IDS 1000068602
 set_env_value PLAYER_REFRESH_STATE_FILE "${APP_ROOT}/shared/logs/incremental_player_refresh_state.json"
 set_env_value RANKED_INCREMENTAL_STATE_FILE "${APP_ROOT}/shared/logs/incremental_ranked_data_state.json"
-set_env_value ENRICH_BATCH_SIZE 200
+set_env_value ENRICH_BATCH_SIZE 2000
 set_env_value ENRICH_MIN_PVP_BATTLES 500
 set_env_value ENRICH_MIN_WR 48.0
-set_env_value ENRICH_DELAY 0.5
-set_env_value ENRICH_PLAYER_DATA_HOUR 14
+set_env_value ENRICH_DELAY 0.2
+set_env_value ENRICH_PLAYER_DATA_HOURS "9,21"
+set_env_value ENABLE_AGENTIC_RUNTIME "${DEPLOY_AGENTIC_RUNTIME}"
 
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"
 
 "${APP_ROOT}/venv/bin/python" -m pip install --upgrade pip
 "${APP_ROOT}/venv/bin/pip" install --no-cache-dir -r "${REMOTE_RELEASE}/server/requirements.txt"
+if [[ "${DEPLOY_AGENTIC_RUNTIME}" == "1" ]]; then
+  "${APP_ROOT}/venv/bin/pip" install --no-cache-dir -r "${REMOTE_RELEASE}/server/requirements-agentic.txt"
+fi
 
 cd "${REMOTE_RELEASE}/server"
 "${APP_ROOT}/venv/bin/python" manage.py migrate
