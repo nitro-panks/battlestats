@@ -53,10 +53,10 @@ LANDING_CLANS_CACHE_KEY = 'landing:clans:v4'
 LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v4:meta'
 LANDING_CLANS_PUBLISHED_CACHE_KEY = 'landing:clans:v4:published'
 LANDING_CLANS_PUBLISHED_METADATA_KEY = 'landing:clans:v4:published:meta'
-LANDING_CLANS_BEST_CACHE_KEY = 'landing:clans:best:v1'
-LANDING_CLANS_BEST_CACHE_METADATA_KEY = 'landing:clans:best:v1:meta'
-LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY = 'landing:clans:best:v1:published'
-LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY = 'landing:clans:best:v1:published:meta'
+LANDING_CLANS_BEST_CACHE_KEY = 'landing:clans:best:v2:overall'
+LANDING_CLANS_BEST_CACHE_METADATA_KEY = 'landing:clans:best:v2:overall:meta'
+LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY = 'landing:clans:best:v2:overall:published'
+LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY = 'landing:clans:best:v2:overall:published:meta'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
 LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v6'
 LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v12:namespace'
@@ -67,6 +67,7 @@ LANDING_RECENT_PLAYERS_DIRTY_KEY = 'landing:recent_players:dirty:v1'
 LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_CLAN_MODES = ('random', 'best')
+LANDING_CLAN_BEST_SORTS = ('overall', 'wr', 'cb')
 LANDING_PLAYER_LIMIT = 25
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
@@ -427,6 +428,33 @@ def normalize_landing_clan_mode(mode: str | None) -> str:
     return normalized_mode
 
 
+def normalize_landing_clan_best_sort(sort: str | None) -> str:
+    normalized_sort = (sort or 'overall').strip().lower()
+    if normalized_sort not in LANDING_CLAN_BEST_SORTS:
+        raise ValueError('sort must be one of: overall, wr, cb')
+    return normalized_sort
+
+
+def landing_best_clan_cache_key(sort: str, realm: str = DEFAULT_REALM) -> str:
+    normalized_sort = normalize_landing_clan_best_sort(sort)
+    return realm_cache_key(realm, f'landing:clans:best:v2:{normalized_sort}')
+
+
+def landing_best_clan_cache_metadata_key(sort: str, realm: str = DEFAULT_REALM) -> str:
+    normalized_sort = normalize_landing_clan_best_sort(sort)
+    return realm_cache_key(realm, f'landing:clans:best:v2:{normalized_sort}:meta')
+
+
+def landing_best_clan_published_cache_key(sort: str, realm: str = DEFAULT_REALM) -> str:
+    normalized_sort = normalize_landing_clan_best_sort(sort)
+    return realm_cache_key(realm, f'landing:clans:best:v2:{normalized_sort}:published')
+
+
+def landing_best_clan_published_metadata_key(sort: str, realm: str = DEFAULT_REALM) -> str:
+    normalized_sort = normalize_landing_clan_best_sort(sort)
+    return realm_cache_key(realm, f'landing:clans:best:v2:{normalized_sort}:published:meta')
+
+
 def normalize_landing_player_limit(requested_limit: int | None) -> int:
     try:
         parsed_limit = int(requested_limit or LANDING_PLAYER_LIMIT)
@@ -771,8 +799,10 @@ def resolve_landing_clans_by_id_order(clan_ids: list[int], realm: str = DEFAULT_
     return rows
 
 
-def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: str = DEFAULT_REALM) -> list[dict]:
-    best_clan_ids, cb_metrics = score_best_clans(limit=limit, realm=realm)
+def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
+    normalized_sort = normalize_landing_clan_best_sort(sort)
+    best_clan_ids, cb_metrics = score_best_clans(
+        limit=limit, realm=realm, sort=normalized_sort)
     if not best_clan_ids:
         return []
 
@@ -799,15 +829,16 @@ def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: s
     return rows
 
 
-def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> tuple[list[dict], dict[str, str | int]]:
+def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str = 'overall') -> tuple[list[dict], dict[str, str | int]]:
+    normalized_sort = normalize_landing_clan_best_sort(sort)
     ttl_seconds = LANDING_CLAN_CACHE_TTL
-    cache_key = realm_cache_key(realm, LANDING_CLANS_BEST_CACHE_KEY)
-    metadata_key = realm_cache_key(
-        realm, LANDING_CLANS_BEST_CACHE_METADATA_KEY)
-    published_cache_key = realm_cache_key(
-        realm, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY)
-    published_metadata_key = realm_cache_key(
-        realm, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY)
+    cache_key = landing_best_clan_cache_key(normalized_sort, realm=realm)
+    metadata_key = landing_best_clan_cache_metadata_key(
+        normalized_sort, realm=realm)
+    published_cache_key = landing_best_clan_published_cache_key(
+        normalized_sort, realm=realm)
+    published_metadata_key = landing_best_clan_published_metadata_key(
+        normalized_sort, realm=realm)
 
     payload, metadata = _get_cached_landing_payload_with_fallback(
         cache_key,
@@ -821,7 +852,7 @@ def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = Fal
 
     if payload is None:
         payload = _build_best_landing_clans(
-            LANDING_CLAN_FEATURED_COUNT, realm=realm)
+            LANDING_CLAN_FEATURED_COUNT, realm=realm, sort=normalized_sort)
         metadata = _build_landing_player_cache_metadata(ttl_seconds)
         _publish_landing_payload(
             cache_key,
@@ -1198,9 +1229,9 @@ def get_landing_clans_payload(force_refresh: bool = False, realm: str = DEFAULT_
     return payload
 
 
-def get_landing_best_clans_payload(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict]:
+def get_landing_best_clans_payload(force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
     payload, _ = get_landing_best_clans_payload_with_cache_metadata(
-        force_refresh=force_refresh, realm=realm)
+        force_refresh=force_refresh, realm=realm, sort=sort)
     return payload
 
 
@@ -1592,7 +1623,9 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
         'players_sigma': lambda: len(get_landing_players_payload('sigma', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
         'players_popular': lambda: len(get_landing_players_payload('popular', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
         'clans': lambda: len(get_landing_clans_payload(force_refresh=force_refresh, realm=realm)),
-        'clans_best': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm)),
+        'clans_best_overall': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='overall')),
+        'clans_best_wr': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='wr')),
+        'clans_best_cb': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='cb')),
         'recent_clans': lambda: len(get_landing_recent_clans_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
         'recent_players': lambda: len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
     }

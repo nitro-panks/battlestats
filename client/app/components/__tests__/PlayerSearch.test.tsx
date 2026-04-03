@@ -158,6 +158,7 @@ const defaultPlayersByMode = {
 
 const installFetchMock = ({
     clans = defaultClans,
+    clansByBestSort,
     recentClans = [],
     recentPlayers = [],
     recentPlayersResponses,
@@ -166,6 +167,7 @@ const installFetchMock = ({
     playerResponses = {},
 }: {
     clans?: unknown[];
+    clansByBestSort?: Record<string, unknown[]>;
     recentClans?: unknown[];
     recentPlayers?: unknown[];
     recentPlayersResponses?: unknown[][];
@@ -182,7 +184,11 @@ const installFetchMock = ({
         const url = input.toString();
 
         if (url.startsWith('/api/landing/clans/') || url.startsWith('/api/landing/clans?')) {
-            return Promise.resolve(buildJsonResponse(clans));
+            const params = new URL(url, 'http://localhost').searchParams;
+            const mode = params.get('mode') || 'random';
+            const sort = params.get('sort') || 'overall';
+            const payload = mode === 'best' && clansByBestSort ? (clansByBestSort[sort] ?? []) : clans;
+            return Promise.resolve(buildJsonResponse(payload));
         }
 
         if (url.startsWith('/api/landing/recent-clans')) {
@@ -422,7 +428,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/clans?mode=best&limit=30&realm=na',
+                ([url]) => url === '/api/landing/clans?mode=best&limit=30&sort=overall&realm=na',
             )).toBe(true);
         });
 
@@ -532,35 +538,37 @@ describe('PlayerSearch landing efficiency icon', () => {
 
     it('preserves backend best clan ordering without client-side filtering', async () => {
         installFetchMock({
-            clans: [
-                {
-                    clan_id: 903,
-                    name: 'Low Volume Clan',
-                    tag: 'LOW',
-                    members_count: 40,
-                    clan_wr: 61.0,
-                    total_battles: 40000,
-                    active_members: 20,
-                },
-                {
-                    clan_id: 901,
-                    name: 'Alpha Clan',
-                    tag: 'ALPHA',
-                    members_count: 40,
-                    clan_wr: 57.4,
-                    total_battles: 180000,
-                    active_members: 18,
-                },
-                {
-                    clan_id: 904,
-                    name: 'Inactive Clan',
-                    tag: 'SLEEP',
-                    members_count: 40,
-                    clan_wr: 60.0,
-                    total_battles: 180000,
-                    active_members: 10,
-                },
-            ],
+            clansByBestSort: {
+                overall: [
+                    {
+                        clan_id: 903,
+                        name: 'Low Volume Clan',
+                        tag: 'LOW',
+                        members_count: 40,
+                        clan_wr: 61.0,
+                        total_battles: 40000,
+                        active_members: 20,
+                    },
+                    {
+                        clan_id: 901,
+                        name: 'Alpha Clan',
+                        tag: 'ALPHA',
+                        members_count: 40,
+                        clan_wr: 57.4,
+                        total_battles: 180000,
+                        active_members: 18,
+                    },
+                    {
+                        clan_id: 904,
+                        name: 'Inactive Clan',
+                        tag: 'SLEEP',
+                        members_count: 40,
+                        clan_wr: 60.0,
+                        total_battles: 180000,
+                        active_members: 10,
+                    },
+                ],
+            },
         });
 
         render(<PlayerSearch />);
@@ -576,6 +584,50 @@ describe('PlayerSearch landing efficiency icon', () => {
         expect(screen.getByRole('button', { name: /Show clan Alpha Clan/i })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Show clan Inactive Clan/i })).toBeInTheDocument();
         expect(screen.getByTestId('landing-clan-svg')).toHaveAttribute('data-clan-count', '3');
+    });
+
+    it('requests backend-owned clan best sub-sorts and renders returned order directly', async () => {
+        installFetchMock({
+            clansByBestSort: {
+                overall: [
+                    { clan_id: 801, name: 'Overall One', tag: 'OV1', members_count: 40, clan_wr: 56.2, total_battles: 180000, active_members: 17 },
+                    { clan_id: 802, name: 'Overall Two', tag: 'OV2', members_count: 40, clan_wr: 55.1, total_battles: 170000, active_members: 16 },
+                ],
+                wr: [
+                    { clan_id: 811, name: 'WR First', tag: 'WR1', members_count: 40, clan_wr: 63.0, total_battles: 165000, active_members: 14, avg_cb_wr: 70.0 },
+                    { clan_id: 812, name: 'WR Second', tag: 'WR2', members_count: 40, clan_wr: 61.0, total_battles: 150000, active_members: 13, avg_cb_wr: 66.0 },
+                ],
+                cb: [
+                    { clan_id: 821, name: 'CB First', tag: 'CB1', members_count: 40, clan_wr: 54.0, total_battles: 160000, active_members: 18, avg_cb_battles: 80, avg_cb_wr: 65.0 },
+                    { clan_id: 822, name: 'CB Second', tag: 'CB2', members_count: 40, clan_wr: 53.0, total_battles: 155000, active_members: 17, avg_cb_battles: 72, avg_cb_wr: 62.0 },
+                ],
+            },
+        });
+
+        render(<PlayerSearch />);
+
+        await screen.findByRole('button', { name: /Show clan Overall One/i });
+
+        fireEvent.click(screen.getByRole('button', { name: 'WR' }));
+
+        await waitFor(() => {
+            const clanButtons = screen.getAllByRole('button', { name: /Show clan /i });
+            expect(clanButtons.map((button) => button.getAttribute('title'))).toEqual(['WR1', 'WR2']);
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'CB' }));
+
+        await waitFor(() => {
+            const clanButtons = screen.getAllByRole('button', { name: /Show clan /i });
+            expect(clanButtons.map((button) => button.getAttribute('title'))).toEqual(['CB1', 'CB2']);
+        });
+
+        expect((global.fetch as jest.Mock).mock.calls.some(
+            ([url]) => url === '/api/landing/clans?mode=best&limit=30&sort=wr&realm=na',
+        )).toBe(true);
+        expect((global.fetch as jest.Mock).mock.calls.some(
+            ([url]) => url === '/api/landing/clans?mode=best&limit=30&sort=cb&realm=na',
+        )).toBe(true);
     });
 
     it('folds recent clans into the clan mode switch with a Recent button', async () => {
@@ -601,6 +653,18 @@ describe('PlayerSearch landing efficiency icon', () => {
         expect(await screen.findByRole('button', { name: /Show clan RecentClan/i })).toBeInTheDocument();
         expect(screen.queryByText('Recently Viewed Clans')).not.toBeInTheDocument();
         expect(await getClanRecentButton()).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('keeps the clan best sub-sort bar mounted to avoid header layout jumps', async () => {
+        render(<PlayerSearch />);
+
+        const sortBar = await screen.findByTestId('clan-best-sort-bar');
+        expect(sortBar).toHaveAttribute('aria-hidden', 'false');
+
+        fireEvent.click(await getClanRecentButton());
+
+        expect(screen.getByTestId('clan-best-sort-bar-shell')).toBeInTheDocument();
+        expect(screen.getByTestId('clan-best-sort-bar')).toHaveAttribute('aria-hidden', 'true');
     });
 
     it('shows the recent clan empty state inside the shared clan surface', async () => {

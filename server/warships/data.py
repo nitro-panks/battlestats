@@ -2799,8 +2799,7 @@ def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
-                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)                          :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -3151,7 +3150,8 @@ def _extract_tier_type_battle_rows(battles_json: Any) -> list[dict[str, int | fl
         if ship_tier <= 0 or pvp_battles <= 0:
             continue
 
-        resolved_type = _SHIP_TYPE_ALIASES.get(ship_type.strip(), ship_type.strip())
+        resolved_type = _SHIP_TYPE_ALIASES.get(
+            ship_type.strip(), ship_type.strip())
         if resolved_type in _SHIP_TYPE_EXCLUDED_FROM_HEATMAP:
             continue
 
@@ -5121,6 +5121,7 @@ BEST_CLAN_W_ACTIVITY = 0.25
 BEST_CLAN_W_MEMBER_SCORE = 0.20
 BEST_CLAN_W_CB_RECENCY = 0.15
 BEST_CLAN_W_VOLUME = 0.10
+BEST_CLAN_SORTS = ('overall', 'wr', 'cb')
 
 
 def _minmax_normalize(values: list[float]) -> list[float]:
@@ -5134,7 +5135,7 @@ def _minmax_normalize(values: list[float]) -> list[float]:
     return [(v - lo) / span for v in values]
 
 
-def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEFAULT_REALM) -> tuple[list[int], dict[int, dict]]:
+def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEFAULT_REALM, sort: str = 'overall') -> tuple[list[int], dict[int, dict]]:
     """Score and rank clans using the composite Best Clan eligibility criteria.
 
     Returns a tuple of (clan_ids, cb_metrics_by_clan) where clan_ids is a list
@@ -5142,6 +5143,10 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     cb_metrics_by_clan maps each clan ID to its CB sub-sort fields
     (avg_cb_battles, avg_cb_wr, cb_recency_days).
     """
+    normalized_sort = (sort or 'overall').strip().lower()
+    if normalized_sort not in BEST_CLAN_SORTS:
+        raise ValueError(f"sort must be one of: {', '.join(BEST_CLAN_SORTS)}")
+
     now = django_timezone.now()
 
     # Hard filters via ORM annotation
@@ -5161,8 +5166,8 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
             ),
         )
         .filter(tracked_count__gte=BEST_CLAN_MIN_TRACKED)
-        .values_list(
-            'clan_id', 'cached_clan_wr', 'cached_active_member_count',
+        .values(
+            'clan_id', 'name', 'cached_clan_wr', 'cached_active_member_count',
             'members_count', 'cached_total_battles', 'tracked_count',
         )
     )
@@ -5170,21 +5175,22 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     # Activity ratio hard filter (Python-side — ratio not annotatable cleanly)
     candidates = [
         row for row in candidates
-        if (row[2] / max(row[3], 1)) >= BEST_CLAN_MIN_ACTIVE_SHARE
+        if ((row['cached_active_member_count'] or 0) / max(row['members_count'] or 0, 1)) >= BEST_CLAN_MIN_ACTIVE_SHARE
     ]
 
     if not candidates:
-        logging.warning("score_best_clans: no clans passed hard filters")
+        logging.warning(
+            "score_best_clans: no clans passed hard filters for sort=%s", normalized_sort)
         return [], {}
 
-    clan_ids = [row[0] for row in candidates]
+    clan_ids = [int(row['clan_id']) for row in candidates]
 
     # Gather per-clan average member score and CB recency via a single query
     member_stats = list(
         PlayerExplorerSummary.objects
-        .filter(player__clan_id__in=clan_ids)
+        .filter(player__clan__clan_id__in=clan_ids)
         .exclude(player__name='')
-        .values('player__clan_id')
+        .values('player__clan__clan_id')
         .annotate(
             avg_score=Avg('player_score'),
             avg_cb_battles=Avg('clan_battle_total_battles'),
@@ -5192,7 +5198,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
         )
     )
     member_stats_by_clan: dict[int, dict] = {
-        row['player__clan_id']: row for row in member_stats
+        row['player__clan__clan_id']: row for row in member_stats
     }
 
     # CB recency: average clan_battle_summary_updated_at per clan
@@ -5201,13 +5207,13 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     cb_recency = dict(
         PlayerExplorerSummary.objects
         .filter(
-            player__clan_id__in=clan_ids,
+            player__clan__clan_id__in=clan_ids,
             clan_battle_summary_updated_at__isnull=False,
         )
         .exclude(player__name='')
-        .values_list('player__clan_id')
+        .values_list('player__clan__clan_id')
         .annotate(latest_cb=Max('clan_battle_summary_updated_at'))
-        .values_list('player__clan_id', 'latest_cb')
+        .values_list('player__clan__clan_id', 'latest_cb')
     )
 
     # Build raw component arrays
@@ -5216,28 +5222,52 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     raw_member_score = []
     raw_cb = []
     raw_volume = []
+    candidate_rows: list[dict[str, Any]] = []
 
     for row in candidates:
-        clan_id, clan_wr, active_count, total_members, total_battles, tracked = row
+        clan_id = int(row['clan_id'])
+        clan_name = row.get('name') or ''
+        clan_wr = row.get('cached_clan_wr') or 0.0
+        active_count = row.get('cached_active_member_count') or 0
+        total_members = row.get('members_count') or 0
+        total_battles = row.get('cached_total_battles') or 0
 
-        raw_wr.append(clan_wr or 0.0)
+        raw_wr.append(clan_wr)
         raw_activity.append(active_count / max(total_members, 1))
 
         stats = member_stats_by_clan.get(clan_id, {})
-        raw_member_score.append(stats.get('avg_score') or 0.0)
+        avg_member_score = stats.get('avg_score') or 0.0
+        raw_member_score.append(avg_member_score)
 
         # CB recency-weighted score
-        avg_cb_battles = stats.get('avg_cb_battles') or 0
+        avg_cb_battles = stats.get('avg_cb_battles') or 0.0
         avg_cb_wr = stats.get('avg_cb_wr') or 0.0
         latest_cb = cb_recency.get(clan_id)
         if latest_cb and avg_cb_battles:
             years_since = max((now - latest_cb).days, 0) / 365.25
             recency_factor = 1.0 / (1.0 + years_since)
-            raw_cb.append(avg_cb_battles * avg_cb_wr * recency_factor)
+            cb_sort_score = avg_cb_battles * avg_cb_wr * recency_factor
         else:
-            raw_cb.append(0.0)
+            recency_factor = 0.0
+            cb_sort_score = 0.0
+
+        raw_cb.append(cb_sort_score)
 
         raw_volume.append(math.log(max(total_battles, 1)))
+
+        candidate_rows.append({
+            'clan_id': clan_id,
+            'clan_name': str(clan_name).lower(),
+            'clan_wr': float(clan_wr),
+            'activity_ratio': active_count / max(total_members, 1),
+            'avg_member_score': float(avg_member_score),
+            'avg_cb_battles': float(avg_cb_battles),
+            'avg_cb_wr': float(avg_cb_wr),
+            'cb_sort_score': float(cb_sort_score),
+            'total_battles': int(total_battles),
+            'recency_factor': float(recency_factor),
+            'cb_recency_days': max((now - latest_cb).days, 0) if latest_cb else None,
+        })
 
     # Normalize and score
     n_wr = _minmax_normalize(raw_wr)
@@ -5248,38 +5278,76 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
 
     # Collect per-clan CB metrics for sub-sort support
     cb_metrics_by_clan: dict[int, dict] = {}
-    scored: list[tuple[float, int]] = []
-    for i, row in enumerate(candidates):
-        clan_id = row[0]
-        score = (
+    ranked_rows: list[dict[str, Any]] = []
+    for i, candidate in enumerate(candidate_rows):
+        clan_id = candidate['clan_id']
+        overall_score = (
             BEST_CLAN_W_WR * n_wr[i]
             + BEST_CLAN_W_ACTIVITY * n_activity[i]
             + BEST_CLAN_W_MEMBER_SCORE * n_member_score[i]
             + BEST_CLAN_W_CB_RECENCY * n_cb[i]
             + BEST_CLAN_W_VOLUME * n_volume[i]
         )
-        scored.append((score, clan_id))
+        composite_wr = (
+            candidate['clan_wr'] * 0.6 + candidate['avg_cb_wr'] * 0.4
+            if candidate['avg_cb_wr'] > 0
+            else candidate['clan_wr']
+        )
 
-        stats = member_stats_by_clan.get(clan_id, {})
-        avg_cb_b = stats.get('avg_cb_battles') or 0
-        avg_cb_w = stats.get('avg_cb_wr') or 0.0
-        latest = cb_recency.get(clan_id)
+        avg_cb_b = candidate['avg_cb_battles']
+        avg_cb_w = candidate['avg_cb_wr']
         cb_metrics_by_clan[clan_id] = {
             'avg_cb_battles': round(avg_cb_b, 1) if avg_cb_b else None,
             'avg_cb_wr': round(avg_cb_w, 1) if avg_cb_w else None,
-            'cb_recency_days': max((now - latest).days, 0) if latest else None,
+            'cb_recency_days': candidate['cb_recency_days'],
         }
 
-    scored.sort(key=lambda x: -x[0])
-    top = scored[:limit]
+        ranked_rows.append({
+            **candidate,
+            'overall_score': float(overall_score),
+            'composite_wr': float(composite_wr),
+        })
+
+    if normalized_sort == 'overall':
+        ranked_rows.sort(key=lambda row: (
+            -row['overall_score'],
+            -row['composite_wr'],
+            -row['clan_wr'],
+            -row['cb_sort_score'],
+            -row['total_battles'],
+            row['clan_name'],
+            row['clan_id'],
+        ))
+    elif normalized_sort == 'wr':
+        ranked_rows.sort(key=lambda row: (
+            -row['composite_wr'],
+            -row['clan_wr'],
+            -row['avg_cb_wr'],
+            -row['overall_score'],
+            -row['total_battles'],
+            row['clan_name'],
+            row['clan_id'],
+        ))
+    else:
+        ranked_rows.sort(key=lambda row: (
+            -row['cb_sort_score'],
+            -row['avg_cb_battles'],
+            -row['avg_cb_wr'],
+            -row['clan_wr'],
+            -row['overall_score'],
+            row['clan_name'],
+            row['clan_id'],
+        ))
+
+    top = ranked_rows[:limit]
 
     if top:
         logging.info(
-            "score_best_clans: top %d clans (scores %.3f–%.3f) from %d candidates",
-            len(top), top[0][0], top[-1][0], len(candidates),
+            "score_best_clans: top %d clans for sort=%s from %d candidates",
+            len(top), normalized_sort, len(candidates),
         )
 
-    return [clan_id for _, clan_id in top], cb_metrics_by_clan
+    return [int(row['clan_id']) for row in top], cb_metrics_by_clan
 
 
 def bulk_load_player_cache(

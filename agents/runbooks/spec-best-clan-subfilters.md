@@ -1,36 +1,40 @@
 # Spec: Best Clan Sub-Filters (Overall, WR, CB)
 
 Created: 2026-04-03
-Status: **Implemented** — deployed 2026-04-03 in v1.6.3 (commit d9b70d5)
+Status: **Implemented** — backend-owned top-25 sub-sorts validated locally 2026-04-03
 
 ## Goal
 
-Add three sub-filter options under the "Best" clan mode on the landing page: **Overall**, **WR** (Win Rate), and **CB** (Clan Battles). These provide different lenses on the same Best-eligible clan pool without changing the hard filters or requiring new API calls.
+Add three sub-filter options under the "Best" clan mode on the landing page: **Overall**, **WR** (Win Rate), and **CB** (Clan Battles). These should provide three backend-ranked views, each with its own top 25 clans, rather than client-side re-sorting of one shared top-25 payload.
 
 Additionally, reorder the clan mode tabs to put **Best first** and make it the **default mode** on page load, with the sub-filter row visible immediately.
+
+The earlier v1.6.3 implementation proved the UI shape, but it used client-side re-sorting over a single Best payload. That is no longer the desired contract.
 
 ## What It Shows
 
 The Best mode is the default. A row of subtle sub-filter links is visible below the mode buttons on load:
 
-| Sub-filter | Sort logic | What it answers |
-|---|---|---|
-| **Overall** (default) | Existing composite score from `score_best_clans()` | "Which clans are the best all-around?" |
-| **WR** | Composite of clan overall WR + CB WR, descending | "Which clans have the highest win rates across all modes?" |
-| **CB** | Most CB games, most recently, with highest win rate | "Which clans are the most active and successful in clan battles?" |
+| Sub-filter            | Sort logic                                                    | What it answers                                                   |
+| --------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Overall** (default) | Existing composite score from `score_best_clans()`            | "Which clans are the best all-around?"                            |
+| **WR**                | Backend-ranked top 25 by composite of clan overall WR + CB WR | "Which clans have the highest win rates across all modes?"        |
+| **CB**                | Backend-ranked top 25 by CB volume, recency, and win rate     | "Which clans are the most active and successful in clan battles?" |
 
 Clicking away from Best (to Random or Recent) hides the sub-filter row.
+
+Each sub-filter owns its own top-25 result set. The WR and CB views must not be derived by reordering the same 25 clans returned for Overall.
 
 ## WG API: Clan Battle League Data
 
 **Checked:** The Wargaming API does **not** expose clan-level league placement (Hurricane, Typhoon, Storm, Squall, Gale) per season. The available endpoints are:
 
-| Endpoint | Returns | Clan league? |
-|---|---|---|
-| `clans/info/` | Basic clan metadata (name, tag, members) | No |
-| `clans/season/` | Season metadata (dates, tier brackets) | No |
-| `clans/seasonstats/` | **Per-player** season stats (battles, wins, losses) | No |
-| `clans/accountinfo/` | Player clan membership | No |
+| Endpoint             | Returns                                             | Clan league? |
+| -------------------- | --------------------------------------------------- | ------------ |
+| `clans/info/`        | Basic clan metadata (name, tag, members)            | No           |
+| `clans/season/`      | Season metadata (dates, tier brackets)              | No           |
+| `clans/seasonstats/` | **Per-player** season stats (battles, wins, losses) | No           |
+| `clans/accountinfo/` | Player clan membership                              | No           |
 
 The `clans/seasonstats/` endpoint returns individual player stats, not clan-level ratings. There is no `clans/ratings/` or equivalent endpoint. League placement data (Hurricane, Typhoon, etc.) is only visible in the WoWS game client and web portal, not through the public API.
 
@@ -44,30 +48,30 @@ The Best clan payload is pre-computed and cached. The current response per clan:
 
 ```typescript
 interface LandingClan {
-    clan_id: number;
-    name: string;
-    tag: string;
-    members_count: number;
-    clan_wr: number;        // overall clan win rate (0-100)
-    total_battles: number;  // total PvP battles across members
-    active_members: number; // members active in last 30 days
+  clan_id: number;
+  name: string;
+  tag: string;
+  members_count: number;
+  clan_wr: number; // overall clan win rate (0-100)
+  total_battles: number; // total PvP battles across members
+  active_members: number; // members active in last 30 days
 }
 ```
 
 ### What needs to be added
 
-The current payload does not include CB-specific fields. To support WR and CB sub-sorts on the client, the backend needs to include additional metrics in the Best clan response:
+The backend needs enough clan-level fields to rank the full eligible population for each sub-filter, not just to decorate an already chosen Overall payload:
 
 ```typescript
 // Additional fields for Best clan payload
 interface LandingClanBestExtended extends LandingClan {
-    avg_cb_battles: number | null;     // avg CB battles per member
-    avg_cb_wr: number | null;          // avg CB win rate across members (0-100)
-    cb_recency_days: number | null;    // days since most recent CB data update
+  avg_cb_battles: number | null; // avg CB battles per member
+  avg_cb_wr: number | null; // avg CB win rate across members (0-100)
+  cb_recency_days: number | null; // days since most recent CB data update
 }
 ```
 
-These values are already computed inside `score_best_clans()` but discarded after scoring. The cheapest approach is to return them alongside the clan IDs.
+These values are already computed or can be derived from the same data sources used by `score_best_clans()`. They should be available to backend ranking helpers for all sub-filter modes.
 
 ### WR sub-sort formula
 
@@ -113,23 +117,25 @@ The sub-filters appear as a secondary row of understated text links below the ma
 **Sub-filter order:** Overall, WR, CB.
 
 **Behavior:**
+
 - Sub-filters visible when `clanMode === 'best'` (visible on initial load since Best is default)
 - Default sub-filter is `Overall`
-- Clicking a sub-filter re-sorts the existing Best clans list (no new API call)
+- Clicking a sub-filter switches to that backend-ranked top-25 Best list
 - Clicking Random or Recent hides the sub-filter row and resets to Overall
 - Sub-filter state resets when switching realms
+- The content below the sub-filter row should not jump vertically when the row is shown or hidden; reserve stable layout space for the control bar in all clan modes
 
 **Suggested CSS classes (Tailwind):**
 
 ```tsx
 // Active sub-filter
-"text-sm font-medium text-[var(--accent-mid)] underline underline-offset-4 decoration-[var(--accent-mid)]"
+"text-sm font-medium text-[var(--accent-mid)] underline underline-offset-4 decoration-[var(--accent-mid)]";
 
 // Inactive sub-filter
-"text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4 cursor-pointer"
+"text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4 cursor-pointer";
 
 // Separator dot
-"text-[var(--text-secondary)] text-xs mx-1.5"
+"text-[var(--text-secondary)] text-xs mx-1.5";
 ```
 
 ### Sub-filter row placement
@@ -146,84 +152,93 @@ The sub-filters appear as a secondary row of understated text links below the ma
 )}
 ```
 
-### Client-side sorting
+### Layout stability requirement
 
-All three sub-sorts are done client-side from the extended Best payload. No additional API calls.
+The sub-filter bar should not cause the heatmap or clan list below it to move up and down when the user switches between `Best`, `Random`, and `Recent`.
 
-```typescript
-type ClanBestSort = 'overall' | 'wr' | 'cb';
+Required behavior:
 
-function sortBestClans(clans: LandingClanBestExtended[], sort: ClanBestSort): LandingClanBestExtended[] {
-    if (sort === 'overall') return clans; // preserve server composite order
+1. Reserve a stable vertical slot for the sub-filter row in the clan surface header.
+2. When `clanMode !== 'best'`, keep that slot occupied with an invisible placeholder rather than removing the row from layout entirely.
+3. Hide non-active controls visually and from interaction, but do not collapse the reserved space.
+4. Keep the tooltip and mode-button row anchored consistently so the header block height is stable across mode changes.
 
-    if (sort === 'wr') {
-        return [...clans].sort((a, b) => {
-            const aWr = a.avg_cb_wr != null
-                ? (a.clan_wr ?? 0) * 0.6 + a.avg_cb_wr * 0.4
-                : (a.clan_wr ?? 0);
-            const bWr = b.avg_cb_wr != null
-                ? (b.clan_wr ?? 0) * 0.6 + b.avg_cb_wr * 0.4
-                : (b.clan_wr ?? 0);
-            return bWr - aWr;
-        });
-    }
+Acceptable implementation patterns:
 
-    if (sort === 'cb') {
-        return [...clans].sort((a, b) => {
-            const aScore = (a.avg_cb_battles ?? 0) * (a.avg_cb_wr ?? 0);
-            const bScore = (b.avg_cb_battles ?? 0) * (b.avg_cb_wr ?? 0);
-            return bScore - aScore;
-        });
-    }
+1. render a fixed-height wrapper for the sub-filter row and toggle `visibility: hidden` plus `pointer-events: none`
+2. render a placeholder container with the same min-height as the active sub-filter row
+3. use opacity transitions only if layout height remains constant during the transition
 
-    return clans;
-}
-```
+Avoid:
+
+1. conditionally mounting/unmounting the row in a way that changes document flow height
+2. animating height from `0` to content height for normal mode switches
+
+### Backend-owned sorting
+
+All three sub-sorts should be produced by the backend. The client should render the returned order directly.
+
+Why this is the required contract:
+
+1. `Overall`, `WR`, and `CB` are meaningfully different ranking questions.
+2. A client-side re-sort of one shared 25-clan pool can only produce alternate orderings of the same clans, not the actual top 25 for each criterion.
+3. The user requirement is the top 25 per sub-filter, not a cosmetic reordering of the Overall list.
+4. This keeps ranking logic in one place and avoids another drift vector between tooltip text, backend rules, and UI behavior.
+
+The client can still keep the sub-filter controls and selected-state UI, but it should not compute ranking locally.
 
 ## Backend Changes
 
-### Option A: Extend Best clan payload (recommended)
+### Required approach: backend sort parameter with independent rankings
 
-Modify `_build_best_landing_clans()` and `score_best_clans()` to return CB metrics alongside clan IDs. This avoids a separate API call.
+Add a `sort` query parameter to the landing clans endpoint, for example:
 
-**Approach:** Have `score_best_clans()` return a richer structure (or a parallel lookup dict) with the CB component values it already computes. Then `_build_best_landing_clans()` merges them into the response.
+`/api/landing/clans/?mode=best&sort=overall`
 
-### Option B: Separate sub-mode API parameter
+`/api/landing/clans/?mode=best&sort=wr`
 
-Add a `sort` query parameter to the landing clans endpoint: `/api/landing/clans/?mode=best&sort=cb`. The backend re-sorts the Best clan pool by the requested criterion before returning.
+`/api/landing/clans/?mode=best&sort=cb`
 
-**Pro:** No client-side sorting logic needed.
-**Con:** Three separate cached payloads per realm instead of one, or uncached re-sorting on each request.
+The backend should compute and return the top 25 clans for the requested sort, not reuse the Overall top 25 as an input set.
 
-### Recommended: Option A
+Expected properties:
 
-The Best clan pool is small (30 clans). Client-side re-sorting is trivial and instant. The backend change is limited to including 3 extra fields in the response that are already computed during scoring.
+1. `sort=overall` preserves the existing composite Best logic.
+2. `sort=wr` ranks the eligible population by the WR formula and returns that mode's top 25.
+3. `sort=cb` ranks the eligible population by the CB formula and returns that mode's top 25.
+4. Each sort can have its own cache entry per realm.
+
+This is more correct than the v1.6.3 client-side approach because it changes the candidate set, not just the visible ordering.
 
 ## Implementation Order
 
-### Phase 1: Backend — extend Best payload with CB fields
+### Phase 1: Backend — add backend sort modes
 
-1. Modify `score_best_clans()` to return CB metrics (avg_cb_battles, avg_cb_wr, cb_recency_days) per clan alongside the IDs
-2. Modify `_build_best_landing_clans()` to merge CB metrics into the clan response dicts
-3. No new endpoint, no new cache key — same payload, 3 extra nullable fields
-4. Bump cache version or clear cache so stale responses without the new fields don't persist
+1. Add a `sort` parameter to the landing best-clans path
+2. Build dedicated ranking helpers for `overall`, `wr`, and `cb`
+3. Rank against the full Best-eligible population for each helper
+4. Return the top 25 rows for the selected sort
+5. Version or invalidate cache keys so each sort gets its own cached payload per realm
 
 **Files modified:**
-- `server/warships/data.py` — `score_best_clans()` return type
-- `server/warships/landing.py` — `_build_best_landing_clans()` merge logic
 
-### Phase 2: Frontend — reorder tabs, default to Best, add sub-filter UI
+- `server/warships/data.py` — shared clan ranking helpers and sort-specific ranking formulas
+- `server/warships/landing.py` — `sort` handling, builder dispatch, and cache keys
+
+### Phase 2: Frontend — keep UI, remove ranking logic
 
 1. Reorder clan mode buttons: Best, Random, Recent (Best first)
 2. Change `clanMode` initial state from `'random'` to `'best'`
 3. Add `clanBestSort` state (`'overall' | 'wr' | 'cb'`, default `'overall'`)
 4. Render sub-filter link row when `clanMode === 'best'` (visible on load)
-5. Apply client-side sort to `visibleLandingClans` based on active sub-filter
+5. Request the selected backend sort and render the payload in returned order
 6. Reset sub-filter to `'overall'` when mode changes or realm changes
-7. Update `LandingClan` TypeScript type with new optional CB fields
+7. Keep the client as a thin renderer; do not compute WR or CB ranking locally
+8. Reserve fixed vertical space for the sub-filter row so the clan surface below does not shift during mode switches
 
 **Files modified:**
-- `client/app/components/PlayerSearch.tsx` — state, tab order, default mode, sub-filter UI, sort logic
+
+- `client/app/components/PlayerSearch.tsx` — state, tab order, default mode, sub-filter UI, request wiring
 - `client/app/components/ClanTagGrid.tsx` — may need minor adjustment if CB badge or indicator is desired per row
 
 ### Phase 3: Visual polish
@@ -236,16 +251,25 @@ The Best clan pool is small (30 clans). Client-side re-sorting is trivial and in
 ## Testing
 
 - **Frontend:** Playwright test for sub-filter visibility toggle (visible on Best/load, hides on Random/Recent)
-- **Frontend:** Playwright test for sort behavior (WR sort uses composite WR, CB sort puts highest CB score first)
+- **Frontend:** Playwright test that WR and CB sub-filters issue distinct backend requests and render returned order directly
 - **Frontend:** Playwright test that Best is the default mode and sub-filters are visible on initial load
-- **Backend:** Contract test that Best payload includes `avg_cb_battles`, `avg_cb_wr`, `cb_recency_days` fields
-- **Edge cases:** Clans with no CB data (null fields — WR falls back to clan_wr only, CB sorts to bottom), single-clan Best list, realm switch resets sub-filter
+- **Frontend:** Visual/layout test that switching between Best, Random, and Recent does not move the clan content block vertically
+- **Backend:** Tests that `overall`, `wr`, and `cb` each produce their own top-25 ranking from the full eligible pool
+- **Backend:** Contract test that the endpoint accepts `sort` and preserves returned order
+- **Edge cases:** Clans with no CB data, single-clan Best list, realm switch resets sub-filter, and cases where WR/CB top 25 diverge materially from Overall
+
+## Validation Results
+
+- Focused backend validation passed: `python -m pytest warships/tests/test_landing.py warships/tests/test_views.py -k 'best_clan or landing_clans_expose_cache_expiry_headers or landing_best_clans_passes_sort or landing_best_clans_reject_invalid_sort or warm_landing_page_content_populates_current_landing_cache_keys' -x --tb=short`
+- Focused frontend validation passed: `npm test -- app/components/__tests__/PlayerSearch.test.tsx --runInBand`
+- Client production build passed: `npm run build`
+- Implementation note: the backend fix also corrected clan-metric aggregation to join `PlayerExplorerSummary` through `Clan.clan_id` instead of the clan table primary key, which was required for the WR and CB rankings to operate on the intended clans.
 
 ## Files Modified
 
-| Phase | File | Change |
-|---|---|---|
-| 1 | `server/warships/data.py` | `score_best_clans()` returns CB metrics per clan |
-| 1 | `server/warships/landing.py` | `_build_best_landing_clans()` merges CB metrics into response |
-| 2 | `client/app/components/PlayerSearch.tsx` | Tab reorder, default to Best, sub-filter state + UI + sort logic |
-| 2 | `client/app/components/ClanTagGrid.tsx` | Optional CB indicator per row |
+| Phase | File                                     | Change                                                                        |
+| ----- | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| 1     | `server/warships/data.py`                | Add sort-specific best-clan ranking helpers over the full eligible population |
+| 1     | `server/warships/landing.py`             | Add backend `sort` handling and per-sort best-clan cache/build paths          |
+| 2     | `client/app/components/PlayerSearch.tsx` | Tab reorder, default to Best, sub-filter state + backend sort request wiring  |
+| 2     | `client/app/components/ClanTagGrid.tsx`  | Optional CB indicator per row                                                 |

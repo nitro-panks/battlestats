@@ -27,7 +27,7 @@ from warships.data import clan_detail_needs_refresh, clan_members_missing_or_inc
     fetch_player_explorer_page, fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, player_battle_data_needs_refresh, player_detail_needs_refresh, \
     fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, _get_published_efficiency_rank_payload, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
     is_sleepy_player, get_highest_ranked_league_name
-from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
 from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, queue_landing_best_entity_warm, update_clan_data_task, update_player_data_task, update_clan_members_task
 
@@ -911,6 +911,12 @@ def landing_clans(request) -> Response:
     except ValueError:
         return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
 
+    try:
+        best_sort = normalize_landing_clan_best_sort(
+            request.query_params.get('sort'))
+    except ValueError:
+        return Response({'detail': 'sort must be one of: overall, wr, cb'}, status=status.HTTP_400_BAD_REQUEST)
+
     realm = _get_realm(request)
     limit = normalize_landing_clan_limit(request.query_params.get('limit'))
     if mode == 'random':
@@ -918,12 +924,16 @@ def landing_clans(request) -> Response:
             realm=realm)
     else:
         payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata(
-            realm=realm)
+            realm=realm,
+            sort=best_sort,
+        )
 
     payload = payload[:limit]
 
     response = Response(payload)
     response['X-Landing-Clans-Cache-Mode'] = mode
+    if mode == 'best':
+        response['X-Landing-Clans-Cache-Sort'] = best_sort
     response['X-Landing-Clans-Cache-TTL-Seconds'] = str(
         cache_metadata['ttl_seconds'])
     response['X-Landing-Clans-Cache-Cached-At'] = str(

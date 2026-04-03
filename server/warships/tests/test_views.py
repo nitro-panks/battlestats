@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
+from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
 from warships.models import Player, Clan, PlayerExplorerSummary, realm_cache_key
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
@@ -2166,12 +2166,39 @@ class ApiContractTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["X-Landing-Clans-Cache-Mode"], "best")
+        self.assertEqual(response["X-Landing-Clans-Cache-Sort"], "overall")
         self.assertEqual(
             response["X-Landing-Clans-Cache-TTL-Seconds"],
             "43200",
         )
         self.assertTrue(response["X-Landing-Clans-Cache-Cached-At"])
         self.assertTrue(response["X-Landing-Clans-Cache-Expires-At"])
+
+    @patch("warships.views.get_landing_best_clans_payload_with_cache_metadata")
+    def test_landing_best_clans_passes_sort_through_to_backend(self, mock_cached_payload):
+        mock_cached_payload.return_value = (
+            [{"name": "SortedClan"}],
+            {
+                "ttl_seconds": 43200,
+                "cached_at": "now",
+                "expires_at": "later",
+            },
+        )
+
+        response = self.client.get(
+            "/api/landing/clans/?mode=best&sort=wr&limit=25")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Landing-Clans-Cache-Sort"], "wr")
+        mock_cached_payload.assert_called_once_with(realm='na', sort='wr')
+
+    def test_landing_best_clans_reject_invalid_sort(self):
+        response = self.client.get(
+            "/api/landing/clans/?mode=best&sort=invalid")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {
+                         'detail': 'sort must be one of: overall, wr, cb'})
 
     @patch("warships.views.get_landing_clans_payload_with_cache_metadata")
     def test_landing_random_clans_use_cached_headers(self, mock_cached_payload):
@@ -2779,9 +2806,15 @@ class ApiContractTests(TestCase):
         self.assertIsNotNone(cache.get(realm_cache_key(
             'na', LANDING_CLANS_PUBLISHED_CACHE_KEY)))
         self.assertIsNotNone(
-            cache.get(realm_cache_key('na', LANDING_CLANS_BEST_CACHE_KEY)))
+            cache.get(landing_best_clan_cache_key('overall')))
         self.assertIsNotNone(cache.get(realm_cache_key(
             'na', LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY)))
+        self.assertIsNotNone(cache.get(landing_best_clan_cache_key('wr')))
+        self.assertIsNotNone(cache.get(landing_best_clan_cache_key('cb')))
+        self.assertIsNotNone(
+            cache.get(landing_best_clan_published_cache_key('wr')))
+        self.assertIsNotNone(
+            cache.get(landing_best_clan_published_cache_key('cb')))
         self.assertIsNotNone(cache.get(realm_cache_key(
             'na', LANDING_RECENT_CLANS_CACHE_KEY)))
         self.assertIsNotNone(
