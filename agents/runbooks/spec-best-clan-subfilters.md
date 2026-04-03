@@ -1,6 +1,7 @@
 # Spec: Best Clan Sub-Filters (Overall, WR, CB)
 
 Created: 2026-04-03
+Status: **Implemented** — deployed 2026-04-03 in v1.6.3 (commit d9b70d5)
 
 ## Goal
 
