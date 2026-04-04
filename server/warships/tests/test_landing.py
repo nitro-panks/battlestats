@@ -5,7 +5,7 @@ from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
-from warships.data import warm_landing_best_entity_caches
+from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, warm_landing_best_entity_caches
 from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, landing_player_published_metadata_key, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
 from warships.models import Clan, Player, PlayerExplorerSummary, realm_cache_key
 
@@ -190,18 +190,240 @@ class LandingHelperTests(TestCase):
         create_candidate(7102, 'WRLeader', 62.0, 7, 150000, 4.0, 24, 70.0, 30)
         create_candidate(7103, 'CBLeader', 53.0, 9, 120000, 5.0, 300, 68.0, 10)
 
+        today = timezone.now().date()
+
+        def season_date(offset_days: int) -> str:
+            return (today - timedelta(days=offset_days)).strftime('%Y-%m-%d')
+
+        season_meta = {
+            season_id: {
+                'name': f'Season {season_id}',
+                'label': f'S{season_id}',
+                'start_date': season_date((12 - season_id) * 14 + 7),
+                'end_date': season_date((12 - season_id) * 14),
+            }
+            for season_id in range(1, 13)
+        }
+        season_meta[12]['start_date'] = today.strftime('%Y-%m-%d')
+        season_meta[12]['end_date'] = (today + timedelta(days=7)).strftime('%Y-%m-%d')
+
+        season_rows_by_clan = {
+            '7101': [
+                {'season_id': season_id, 'roster_battles': 120, 'roster_win_rate': 51.0}
+                for season_id in range(2, 12)
+            ],
+            '7102': [
+                {'season_id': season_id, 'roster_battles': 80, 'roster_win_rate': 57.0}
+                for season_id in range(2, 12)
+            ],
+            '7103': [
+                {'season_id': season_id, 'roster_battles': 160, 'roster_win_rate': 64.0}
+                for season_id in range(2, 12)
+            ],
+        }
+
         overall_payload, _ = get_landing_best_clans_payload_with_cache_metadata(
             force_refresh=True, sort='overall')
         wr_payload, _ = get_landing_best_clans_payload_with_cache_metadata(
             force_refresh=True, sort='wr')
-        cb_payload, _ = get_landing_best_clans_payload_with_cache_metadata(
-            force_refresh=True, sort='cb')
+        with patch('warships.data._get_clan_battle_seasons_metadata', return_value=season_meta), \
+                patch('warships.data.refresh_clan_battle_seasons_cache', side_effect=lambda clan_id, realm='na': season_rows_by_clan.get(str(clan_id), [])):
+            cb_payload, _ = get_landing_best_clans_payload_with_cache_metadata(
+                force_refresh=True, sort='cb')
 
         self.assertEqual(overall_payload[0]['name'], 'OverallLeader')
         self.assertEqual(wr_payload[0]['name'], 'WRLeader')
         self.assertEqual(cb_payload[0]['name'], 'CBLeader')
         self.assertIn('avg_cb_battles', wr_payload[0])
         self.assertIn('avg_cb_wr', cb_payload[0])
+
+    def test_best_clan_wr_sort_ignores_tiny_cb_samples(self):
+        now = timezone.now()
+
+        def create_candidate(clan_id: int, name: str, clan_wr: float, member_score: float, cb_battles: float, cb_wr: float):
+            clan = Clan.objects.create(
+                clan_id=clan_id,
+                name=name,
+                tag=name[:5].upper(),
+                members_count=12,
+                cached_clan_wr=clan_wr,
+                cached_total_battles=180000,
+                cached_active_member_count=9,
+            )
+            for index in range(5):
+                player = Player.objects.create(
+                    name=f'{name}Player{index}',
+                    player_id=clan_id * 100 + index,
+                    clan=clan,
+                    pvp_battles=5000,
+                    pvp_wins=2600,
+                    days_since_last_battle=3,
+                )
+                PlayerExplorerSummary.objects.create(
+                    player=player,
+                    player_score=member_score,
+                    clan_battle_total_battles=cb_battles,
+                    clan_battle_overall_win_rate=cb_wr,
+                    clan_battle_summary_updated_at=now - timedelta(days=2),
+                )
+
+        create_candidate(7201, 'TinySampleTrap', 49.0, 6.0, 1.0, 100.0)
+        create_candidate(7202, 'QualifiedBlendLeader', 58.0,
+                         6.0, BEST_CLAN_WR_MIN_CB_BATTLES, 80.0)
+        create_candidate(7203, 'PureWRLeader', 63.0, 6.0, 0.0, 0.0)
+
+        wr_payload, _ = get_landing_best_clans_payload_with_cache_metadata(
+            force_refresh=True, sort='wr')
+        wr_names = [row['name'] for row in wr_payload[:3]]
+
+        self.assertEqual(wr_names[0], 'PureWRLeader')
+        self.assertEqual(wr_names[1], 'QualifiedBlendLeader')
+        self.assertEqual(wr_names[2], 'TinySampleTrap')
+
+    def test_best_clan_wr_sort_rewards_depth_backing_cb_results(self):
+        now = timezone.now()
+
+        def create_candidate(
+            clan_id: int,
+            name: str,
+            clan_wr: float,
+            members_count: int,
+            active_members: int,
+            member_score: float,
+            cb_battles: float,
+            cb_wr: float,
+        ):
+            clan = Clan.objects.create(
+                clan_id=clan_id,
+                name=name,
+                tag=name[:5].upper(),
+                members_count=members_count,
+                cached_clan_wr=clan_wr,
+                cached_total_battles=280000,
+                cached_active_member_count=active_members,
+            )
+            for index in range(5):
+                player = Player.objects.create(
+                    name=f'{name}Player{index}',
+                    player_id=clan_id * 100 + index,
+                    clan=clan,
+                    pvp_battles=6000,
+                    pvp_wins=3200,
+                    days_since_last_battle=3,
+                )
+                PlayerExplorerSummary.objects.create(
+                    player=player,
+                    player_score=member_score,
+                    clan_battle_total_battles=cb_battles,
+                    clan_battle_overall_win_rate=cb_wr,
+                    clan_battle_summary_updated_at=now - timedelta(days=1),
+                )
+
+        create_candidate(7301, 'ShallowSpike', 58.0, 27, 14, 3.8, 450.0, 79.0)
+        create_candidate(7302, 'DeepRoster', 63.2, 34, 30, 6.0, 1850.0, 56.8)
+        create_candidate(7303, 'BalancedRunnerUp',
+                         64.0, 44, 29, 5.8, 825.0, 60.9)
+
+        wr_payload, _ = get_landing_best_clans_payload_with_cache_metadata(
+            force_refresh=True, sort='wr')
+        wr_names = [row['name'] for row in wr_payload[:3]]
+
+        self.assertEqual(wr_names[0], 'BalancedRunnerUp')
+        self.assertEqual(wr_names[1], 'DeepRoster')
+        self.assertEqual(wr_names[2], 'ShallowSpike')
+
+    def test_best_clan_cb_sort_requires_successful_cb_results(self):
+        now = timezone.now()
+
+        def create_candidate(
+            clan_id: int,
+            name: str,
+            clan_wr: float,
+            members_count: int,
+            active_members: int,
+            member_score: float,
+            cb_battles: float,
+            cb_wr: float,
+        ):
+            clan = Clan.objects.create(
+                clan_id=clan_id,
+                name=name,
+                tag=name[:5].upper(),
+                members_count=members_count,
+                cached_clan_wr=clan_wr,
+                cached_total_battles=320000,
+                cached_active_member_count=active_members,
+            )
+            for index in range(5):
+                player = Player.objects.create(
+                    name=f'{name}Player{index}',
+                    player_id=clan_id * 100 + index,
+                    clan=clan,
+                    pvp_battles=7000,
+                    pvp_wins=3900,
+                    days_since_last_battle=3,
+                )
+                PlayerExplorerSummary.objects.create(
+                    player=player,
+                    player_score=member_score,
+                    clan_battle_total_battles=cb_battles,
+                    clan_battle_overall_win_rate=cb_wr,
+                    clan_battle_summary_updated_at=now - timedelta(days=1),
+                )
+
+        create_candidate(7401, 'FullWindowLeader', 62.5,
+                         42, 30, 5.4, 2600.0, 60.5)
+        create_candidate(7402, 'HalfWindowSpike', 60.8,
+                         46, 29, 5.1, 1900.0, 58.0)
+        create_candidate(7403, 'CurrentSeasonTrap', 61.0,
+                         44, 28, 5.0, 2100.0, 59.0)
+
+        today = timezone.now().date()
+        season_ids = list(range(1, 13))
+
+        def season_date(offset_days: int) -> str:
+            return (today - timedelta(days=offset_days)).strftime('%Y-%m-%d')
+
+        season_meta = {
+            season_id: {
+                'name': f'Season {season_id}',
+                'label': f'S{season_id}',
+                'start_date': season_date((12 - season_id) * 14 + 7),
+                'end_date': season_date((12 - season_id) * 14),
+            }
+            for season_id in season_ids
+        }
+        season_meta[12]['start_date'] = today.strftime('%Y-%m-%d')
+        season_meta[12]['end_date'] = (today + timedelta(days=7)).strftime('%Y-%m-%d')
+
+        season_rows_by_clan = {
+            '7401': [
+                {'season_id': season_id, 'roster_battles': 120, 'roster_win_rate': 60.0}
+                for season_id in range(2, 12)
+            ],
+            '7402': [
+                {'season_id': season_id, 'roster_battles': 80, 'roster_win_rate': 100.0}
+                for season_id in range(7, 12)
+            ],
+            '7403': [
+                {'season_id': season_id, 'roster_battles': 90, 'roster_win_rate': 49.0}
+                for season_id in range(2, 12)
+            ] + [
+                {'season_id': 1, 'roster_battles': 90, 'roster_win_rate': 100.0},
+                {'season_id': 12, 'roster_battles': 90, 'roster_win_rate': 100.0},
+            ],
+        }
+
+        with patch('warships.data._get_clan_battle_seasons_metadata', return_value=season_meta), \
+                patch('warships.data.refresh_clan_battle_seasons_cache', side_effect=lambda clan_id, realm='na': season_rows_by_clan.get(str(clan_id), [])):
+            cb_payload, _ = get_landing_best_clans_payload_with_cache_metadata(
+                force_refresh=True, sort='cb')
+
+        cb_names = [row['name'] for row in cb_payload[:3]]
+
+        self.assertEqual(cb_names[0], 'FullWindowLeader')
+        self.assertEqual(cb_names[1], 'HalfWindowSpike')
+        self.assertEqual(cb_names[2], 'CurrentSeasonTrap')
 
     def test_all_landing_player_modes_use_twelve_hour_cache_ttl(self):
         _, best_meta = get_landing_players_payload_with_cache_metadata(

@@ -179,7 +179,9 @@ type LandingPlayerMode = 'random' | 'best' | 'sigma' | 'recent';
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 
 const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18·Eff + 0.10·Vol_5-10 + 0.06·Ranked + 0.04·Clan) × M_share';
-const CLAN_BEST_FORMULA_APPROXIMATION = 'Best_clan ≈ 0.30·WR + 0.25·Activity + 0.20·MemberScore + 0.15·CB_recency + 0.10·log(Battles)';
+const CLAN_BEST_OVERALL_FORMULA_APPROXIMATION = 'Overall ≈ 0.30·WR + 0.25·Activity + 0.20·MemberScore + 0.15·CB + 0.10·log(Battles)';
+const CLAN_BEST_WR_FORMULA_APPROXIMATION = 'WR ≈ WR + 0.40·max(CB_WR - WR, 0)·min(CB_battles/200, 1)·min(Active/25, 1)·min(MemberScore/6, 1)';
+const CLAN_BEST_CB_FORMULA_APPROXIMATION = 'CB ≈ average(last 10 completed CB season WRs; skipped seasons = 0)';
 const BEST_CLAN_FALLBACK_NOTICE = 'Best clan rankings are still warming up for this realm. Showing recent clans until enough tracked data is available.';
 
 const PlayerSearch: React.FC = () => {
@@ -482,6 +484,8 @@ const PlayerSearch: React.FC = () => {
                                 >
                                     Recent
                                 </button>
+                            </div>
+                            <div className="mt-2 pl-1">
                                 <div className="group relative inline-flex items-center">
                                     <button
                                         type="button"
@@ -490,12 +494,25 @@ const PlayerSearch: React.FC = () => {
                                     >
                                         <FontAwesomeIcon icon={faCircleInfo} className="text-sm" aria-hidden="true" />
                                     </button>
-                                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
-                                        <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Best approximation</p>
-                                        <p className="mt-2 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_FORMULA_APPROXIMATION}</p>
+                                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
+                                        <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Clan ranking approximations</p>
                                         <p className="mt-2 leading-5 text-[var(--text-secondary)]">
-                                            Clan Best uses a composite score: clan win rate, member activity ratio, average member skill score, recency-weighted clan battle participation, and battle volume. Hard filters require &gt;10 members, &ge;40% active, and &ge;50k total battles.
+                                            Hard filters require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. Backend ranking owns all three Best sub-sorts.
                                         </p>
+                                        <div className="mt-3 space-y-3">
+                                            <div>
+                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Overall</p>
+                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_OVERALL_FORMULA_APPROXIMATION}</p>
+                                            </div>
+                                            <div>
+                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">WR</p>
+                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_WR_FORMULA_APPROXIMATION}</p>
+                                            </div>
+                                            <div>
+                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">CB</p>
+                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_CB_FORMULA_APPROXIMATION}</p>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

@@ -346,6 +346,30 @@
                 "ranking-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-best-clan-cb-window-2026-04-04.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "architecture",
+            "owner": "data",
+            "aliases": [
+                "best clan cb window",
+                "cb season window",
+                "best cb clan proposal"
+            ],
+            "tags": [
+                "best clan",
+                "clan battles",
+                "cb",
+                "season window",
+                "ranking",
+                "landing"
+            ],
+            "archive_on": [
+                "cb-window-model-implemented",
+                "proposal-replaced"
+            ]
+        },
         "agents/runbooks/runbook-celery-queue-strategy.md": {
             "kind": "runbook",
             "status": "active",

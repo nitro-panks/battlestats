@@ -75,9 +75,11 @@ Open these only when the task matches them directly:
 - `runbook-droplet-memory-tuning-2026-04-02.md`
 - `runbook-efficiency-rank-qa-2026-04-02.md`
 - `runbook-enrichment-crawler-2026-04-02.md`
+- `runbook-enrichment-crawler-2026-04-03.md`: progress log for the active enrichment crawl pass (batches, disruptions, check-ins)
 - `runbook-eu-best-player-population-2026-04-02.md`
 - `runbook-eu-profile-chart-population-2026-04-02.md`
 - `runbook-flower-observability-2026-04-02.md`
+- `runbook-best-clan-cb-window-2026-04-04.md`: current Best -> CB 10-completed-season window model and implementation notes
 - `runbook-icon-analysis.md`
 - `runbook-player-achievements-data-lane.md`
 - `runbook-kdr-backfill.md`

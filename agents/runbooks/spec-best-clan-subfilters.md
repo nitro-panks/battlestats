@@ -1,7 +1,7 @@
 # Spec: Best Clan Sub-Filters (Overall, WR, CB)
 
 Created: 2026-04-03
-Status: **Implemented** — backend-owned top-25 sub-sorts validated locally 2026-04-03
+Status: **Implemented** — backend-owned top-25 sub-sorts validated locally 2026-04-04
 
 ## Goal
 
@@ -19,7 +19,7 @@ The Best mode is the default. A row of subtle sub-filter links is visible below 
 | --------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------- |
 | **Overall** (default) | Existing composite score from `score_best_clans()`            | "Which clans are the best all-around?"                            |
 | **WR**                | Backend-ranked top 25 by composite of clan overall WR + CB WR | "Which clans have the highest win rates across all modes?"        |
-| **CB**                | Backend-ranked top 25 by CB volume, recency, and win rate     | "Which clans are the most active and successful in clan battles?" |
+| **CB**                | Backend-ranked top 25 by recent completed-season CB strength   | "Which clans have sustained the best recent clan-battle results?" |
 
 Clicking away from Best (to Random or Recent) hides the sub-filter row.
 
@@ -38,7 +38,7 @@ Each sub-filter owns its own top-25 result set. The WR and CB views must not be 
 
 The `clans/seasonstats/` endpoint returns individual player stats, not clan-level ratings. There is no `clans/ratings/` or equivalent endpoint. League placement data (Hurricane, Typhoon, etc.) is only visible in the WoWS game client and web portal, not through the public API.
 
-**Implication:** The CB sub-filter cannot rank by league tier. Instead, it ranks by the best available proxy: CB volume, recency, and win rate aggregated from member-level data already in the database.
+**Implication:** The CB sub-filter cannot rank by league tier directly. Instead, it derives clan-season win rates from member-level season data and ranks by a recent completed-season window.
 
 ## Data Shape
 
@@ -75,25 +75,40 @@ These values are already computed or can be derived from the same data sources u
 
 ### WR sub-sort formula
 
-The WR sub-sort is a **composite** of the clan's overall win rate and their clan battle win rate, not just one or the other. This gives a fuller picture of competitive strength.
+The WR sub-sort now anchors on a clan's overall win rate and only applies a **qualified CB lift** when clan-battle success is backed by enough roster depth and quality.
 
 ```
-composite_wr = clan_wr * 0.6 + avg_cb_wr * 0.4
+wr_support_factor = cb_battle_factor * active_member_factor * member_score_factor
+qualified_cb_lift = max(avg_cb_wr - clan_wr, 0) * 0.4 * wr_support_factor
+composite_wr = clan_wr + qualified_cb_lift
 ```
 
-Where `avg_cb_wr` is the average CB win rate across members (from `PlayerExplorerSummary.clan_battle_overall_win_rate`). If `avg_cb_wr` is null (no CB data), fall back to `clan_wr` alone.
+Where:
 
-Clans with CB data get a blended score reflecting both random and competitive performance. Clans without CB data are ranked purely by their overall WR but are not penalized — they just don't get the CB boost.
+- `cb_battle_factor = min(avg_cb_battles / 200, 1)`
+- `active_member_factor = min(active_members / 25, 1)`
+- `member_score_factor = min(avg_member_score / 6, 1)`
+
+`avg_cb_wr` only contributes when `avg_cb_battles >= 10.0`. Below that floor, WR sorting falls back to `clan_wr` alone so tiny-sample perfect CB records do not jump weak clans to the top.
+
+This change was made after live ranking review showed that a clan with a few elite CB players and a weak overall roster could outrank deeper, more consistently strong clans. The WR view should still surface high win-rate clans, but it now requires CB results to be backed by active, high-performing membership before they materially lift a clan above stronger all-around rosters.
 
 ### CB sub-sort formula
 
 ```
-cb_sort_score = avg_cb_battles * avg_cb_wr * recency_factor
+cb_window_score = (season_wr_1 + season_wr_2 + ... + season_wr_10) / 10
 ```
 
-Where `recency_factor = 1 / (1 + years_since_last_cb)`. This is the same formula already used as the CB component in the composite score, just used standalone for sorting.
+Where:
 
-Clans with no CB data (`avg_cb_battles` is null or 0) sort to the bottom.
+- the window is the **most recent 10 completed clan-battle seasons**
+- `season_wr_n` is the clan's derived roster win rate for that season
+- skipped seasons count as `0`
+- the current in-progress season is excluded
+
+This change was made after live ranking review showed the aggregate formula still answered the wrong product question. The CB view now asks: which clans have shown the strongest sustained results across the most recent completed clan-battle seasons, not which clans accumulated the biggest blended lifetime CB volume.
+
+Implementation note: the full Best-eligible pool is too large for an all-clans season refresh on every landing build, so the backend first narrows to a bounded shortlist with the existing aggregate CB proxy, then applies the 10-season window score on that shortlist. The public ranking contract is still the 10-season average on the returned Best -> CB list.
 
 ## Frontend UX
 
@@ -205,7 +220,7 @@ Expected properties:
 
 1. `sort=overall` preserves the existing composite Best logic.
 2. `sort=wr` ranks the eligible population by the WR formula and returns that mode's top 25.
-3. `sort=cb` ranks the eligible population by the CB formula and returns that mode's top 25.
+3. `sort=cb` ranks a bounded competitive shortlist by the completed-season CB window formula and returns that mode's top 25.
 4. Each sort can have its own cache entry per realm.
 
 This is more correct than the v1.6.3 client-side approach because it changes the candidate set, not just the visible ordering.
