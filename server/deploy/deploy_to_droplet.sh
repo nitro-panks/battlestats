@@ -142,11 +142,10 @@ else
   echo 'REDIS_URL=redis://127.0.0.1:6379/0' >> /etc/battlestats-server.env
 fi
 
-if grep -q '^CELERY_BROKER_URL=' /etc/battlestats-server.env; then
-  sed -i 's|^CELERY_BROKER_URL=.*|CELERY_BROKER_URL=amqp://guest:guest@127.0.0.1:5672//|' /etc/battlestats-server.env
-else
-  echo 'CELERY_BROKER_URL=amqp://guest:guest@127.0.0.1:5672//' >> /etc/battlestats-server.env
-fi
+get_env_value() {
+  local key="$1"
+  grep -E "^${key}=" /etc/battlestats-server.env | tail -n1 | cut -d= -f2-
+}
 
 if grep -q '^CELERY_RESULT_BACKEND=' /etc/battlestats-server.env; then
   sed -i 's|^CELERY_RESULT_BACKEND=.*|CELERY_RESULT_BACKEND=rpc://|' /etc/battlestats-server.env
@@ -154,11 +153,7 @@ else
   echo 'CELERY_RESULT_BACKEND=rpc://' >> /etc/battlestats-server.env
 fi
 
-if grep -q '^ENABLE_CRAWLER_SCHEDULES=' /etc/battlestats-server.env; then
-  sed -i 's|^ENABLE_CRAWLER_SCHEDULES=.*|ENABLE_CRAWLER_SCHEDULES=1|' /etc/battlestats-server.env
-else
-  echo 'ENABLE_CRAWLER_SCHEDULES=1' >> /etc/battlestats-server.env
-fi
+# ENABLE_CRAWLER_SCHEDULES removed — crawlers migrated to DO Functions
 
 set_env_value() {
   local key="$1"
@@ -169,6 +164,110 @@ set_env_value() {
     echo "${key}=${value}" >> /etc/battlestats-server.env
   fi
 }
+
+migrate_env_value() {
+  local key="$1"
+  local legacy_key="$2"
+  local default_value="$3"
+  local value
+
+  value="$(get_env_value "${key}" || true)"
+  if [[ -z "${value}" && -n "${legacy_key}" ]]; then
+    value="$(get_env_value "${legacy_key}" || true)"
+  fi
+  if [[ -z "${value}" ]]; then
+    value="${default_value}"
+  fi
+
+  set_env_value "${key}" "${value}"
+  sed -i "/^${legacy_key}=.*/d" /etc/battlestats-server.env 2>/dev/null || true
+}
+
+extract_existing_broker_password() {
+  local broker_url="${1:-}"
+  python3 - "${broker_url}" <<'PY'
+import sys
+from urllib.parse import unquote, urlparse
+
+url = urlparse(sys.argv[1])
+username = unquote(url.username or "")
+password = unquote(url.password or "")
+host = (url.hostname or "").lower()
+
+if url.scheme not in {"amqp", "pyamqp"}:
+    raise SystemExit(1)
+if username != "battlestats" or not password:
+    raise SystemExit(1)
+if password in {"guest", "changeme"}:
+    raise SystemExit(1)
+if host not in {"127.0.0.1", "localhost"}:
+    raise SystemExit(1)
+
+print(password)
+PY
+}
+
+configure_local_rabbitmq() {
+  local broker_password=""
+  local current_broker_url=""
+
+  install -d /etc/rabbitmq
+  cat > /etc/rabbitmq/rabbitmq.conf <<'EOF'
+listeners.tcp.default = 127.0.0.1:5672
+EOF
+
+  systemctl enable rabbitmq-server >/dev/null 2>&1 || true
+  systemctl restart rabbitmq-server
+  rabbitmqctl await_startup
+
+  current_broker_url="$(get_env_value CELERY_BROKER_URL || true)"
+  if [[ -n "${current_broker_url}" ]]; then
+    broker_password="$(extract_existing_broker_password "${current_broker_url}" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "${broker_password}" ]]; then
+    broker_password="$(python3 - <<'PY'
+import secrets
+print(secrets.token_hex(24))
+PY
+)"
+  fi
+
+  set_env_value CELERY_BROKER_URL "amqp://battlestats:${broker_password}@127.0.0.1:5672//"
+
+  if rabbitmqctl list_users | awk 'NR>1 {print $1}' | grep -qx 'battlestats'; then
+    rabbitmqctl change_password battlestats "${broker_password}"
+  else
+    rabbitmqctl add_user battlestats "${broker_password}"
+  fi
+  rabbitmqctl set_user_tags battlestats administrator
+  rabbitmqctl set_permissions -p / battlestats '.*' '.*' '.*'
+
+  if rabbitmqctl list_users | awk 'NR>1 {print $1}' | grep -qx 'guest'; then
+    rabbitmqctl delete_user guest || true
+  fi
+}
+
+verify_broker_connection() {
+  cd "${APP_ROOT}/current/server"
+  set -a
+  source /etc/battlestats-server.env
+  source /etc/battlestats-server.secrets.env
+  set +a
+  "${APP_ROOT}/venv/bin/python" - <<'PY'
+import os
+from kombu import Connection
+
+with Connection(os.environ["CELERY_BROKER_URL"], connect_timeout=10) as connection:
+    connection.connect()
+
+print("RabbitMQ broker authentication OK")
+PY
+}
+
+migrate_env_value WARM_CACHES_ON_STARTUP WARM_LANDING_PAGE_ON_STARTUP 0
+migrate_env_value CACHE_WARMUP_START_DELAY_SECONDS LANDING_WARMUP_START_DELAY_SECONDS 5
+configure_local_rabbitmq
 
 set_env_value CELERY_DEFAULT_CONCURRENCY 3
 set_env_value CELERY_HYDRATION_CONCURRENCY 3
@@ -279,6 +378,7 @@ systemctl daemon-reload
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
 redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
 systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
+verify_broker_connection
 systemctl --no-pager --full status battlestats-gunicorn | sed -n '1,25p'
 
 find "${APP_ROOT}/releases" -mindepth 1 -maxdepth 1 -type d | sort | head -n -"${KEEP_RELEASES}" | xargs -r rm -rf

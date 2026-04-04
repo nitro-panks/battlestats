@@ -24,5 +24,9 @@ def when_ready(server):
     delay = int(os.getenv("CACHE_WARMUP_START_DELAY_SECONDS", "5"))
 
     server.log.info("Dispatching startup cache warmers to Celery (countdown=%ds)...", delay)
-    from warships.tasks import startup_warm_caches_task
-    startup_warm_caches_task.apply_async(countdown=delay)
+    try:
+        from warships.tasks import startup_warm_caches_task
+        startup_warm_caches_task.apply_async(countdown=delay)
+    except Exception:
+        server.log.exception(
+            "Startup cache warm dispatch failed; continuing without startup warmers.")

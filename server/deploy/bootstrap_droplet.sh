@@ -28,6 +28,104 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" /etc/battlestats-server.env; then
+    sed -i "s|^${key}=.*|${key}=${value}|" /etc/battlestats-server.env
+  else
+    echo "${key}=${value}" >> /etc/battlestats-server.env
+  fi
+}
+
+get_env_value() {
+  local key="$1"
+  grep -E "^${key}=" /etc/battlestats-server.env | tail -n1 | cut -d= -f2-
+}
+
+migrate_env_value() {
+  local key="$1"
+  local legacy_key="$2"
+  local default_value="$3"
+  local value
+
+  value="$(get_env_value "${key}" || true)"
+  if [[ -z "${value}" && -n "${legacy_key}" ]]; then
+    value="$(get_env_value "${legacy_key}" || true)"
+  fi
+  if [[ -z "${value}" ]]; then
+    value="${default_value}"
+  fi
+
+  set_env_value "${key}" "${value}"
+  sed -i "/^${legacy_key}=.*/d" /etc/battlestats-server.env 2>/dev/null || true
+}
+
+extract_existing_broker_password() {
+  local broker_url="${1:-}"
+  python3 - "${broker_url}" <<'PY'
+import sys
+from urllib.parse import unquote, urlparse
+
+url = urlparse(sys.argv[1])
+username = unquote(url.username or "")
+password = unquote(url.password or "")
+host = (url.hostname or "").lower()
+
+if url.scheme not in {"amqp", "pyamqp"}:
+    raise SystemExit(1)
+if username != "battlestats" or not password:
+    raise SystemExit(1)
+if password in {"guest", "changeme"}:
+    raise SystemExit(1)
+if host not in {"127.0.0.1", "localhost"}:
+    raise SystemExit(1)
+
+print(password)
+PY
+}
+
+configure_local_rabbitmq() {
+  local broker_password=""
+  local current_broker_url=""
+
+  install -d /etc/rabbitmq
+  cat > /etc/rabbitmq/rabbitmq.conf <<'EOF'
+listeners.tcp.default = 127.0.0.1:5672
+EOF
+
+  systemctl enable rabbitmq-server >/dev/null 2>&1 || true
+  systemctl restart rabbitmq-server
+  rabbitmqctl await_startup
+
+  current_broker_url="$(get_env_value CELERY_BROKER_URL || true)"
+  if [[ -n "${current_broker_url}" ]]; then
+    broker_password="$(extract_existing_broker_password "${current_broker_url}" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "${broker_password}" ]]; then
+    broker_password="$(python3 - <<'PY'
+import secrets
+print(secrets.token_hex(24))
+PY
+)"
+  fi
+
+  set_env_value CELERY_BROKER_URL "amqp://battlestats:${broker_password}@127.0.0.1:5672//"
+
+  if rabbitmqctl list_users | awk 'NR>1 {print $1}' | grep -qx 'battlestats'; then
+    rabbitmqctl change_password battlestats "${broker_password}"
+  else
+    rabbitmqctl add_user battlestats "${broker_password}"
+  fi
+  rabbitmqctl set_user_tags battlestats administrator
+  rabbitmqctl set_permissions -p / battlestats '.*' '.*' '.*'
+
+  if rabbitmqctl list_users | awk 'NR>1 {print $1}' | grep -qx 'guest'; then
+    rabbitmqctl delete_user guest || true
+  fi
+}
+
 apt-get update
 apt-get install -y python3 python3-venv python3-pip redis-server rabbitmq-server rsync
 
@@ -82,11 +180,10 @@ DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS}
 DJANGO_DEBUG=False
 DJANGO_LOGLEVEL=INFO
 REDIS_URL=redis://127.0.0.1:6379/0
-CELERY_BROKER_URL=amqp://guest:guest@127.0.0.1:5672//
 CELERY_RESULT_BACKEND=rpc://
 ENABLE_CRAWLER_SCHEDULES=1
-WARM_LANDING_PAGE_ON_STARTUP=1
-LANDING_WARMUP_START_DELAY_SECONDS=5
+WARM_CACHES_ON_STARTUP=0
+CACHE_WARMUP_START_DELAY_SECONDS=5
 HOT_ENTITY_PINNED_PLAYER_NAMES=lil_boots
 BEST_CLAN_EXCLUDED_IDS=1000068602
 MAX_CONCURRENT_REALM_CRAWLS=1
@@ -114,6 +211,10 @@ fi
 
 chgrp "${APP_USER}" /etc/battlestats-server.secrets.env
 chmod 640 /etc/battlestats-server.secrets.env
+
+migrate_env_value WARM_CACHES_ON_STARTUP WARM_LANDING_PAGE_ON_STARTUP 0
+migrate_env_value CACHE_WARMUP_START_DELAY_SECONDS LANDING_WARMUP_START_DELAY_SECONDS 5
+configure_local_rabbitmq
 
 cat > /etc/systemd/system/battlestats-gunicorn.service <<EOF
 [Unit]
