@@ -5131,6 +5131,7 @@ BEST_CLAN_CB_SUCCESS_BASELINE = 50.0
 BEST_CLAN_CB_ACTIVE_MEMBERS_TARGET = 25.0
 BEST_CLAN_CB_MEMBER_SCORE_TARGET = 5.0
 BEST_CLAN_CB_WINDOW_COMPLETED_SEASONS = 10
+BEST_CLAN_CB_WINDOW_SEASON_BATTLES_TARGET = 30
 BEST_CLAN_CB_WINDOW_SHORTLIST_MULTIPLIER = 4
 BEST_CLAN_CB_WINDOW_SHORTLIST_MAX = 120
 BEST_CLAN_SORTS = ('overall', 'wr', 'cb')
@@ -5215,10 +5216,15 @@ def _summarize_best_clan_cb_window(season_rows: Any, season_ids: list[int]) -> d
     total_battles = 0
     for season_id in season_ids:
         season_score = season_wr_by_id.get(season_id, 0.0)
-        total_score += season_score
-        if season_id in season_wr_by_id:
+        season_battles = season_battles_by_id.get(season_id, 0)
+        if season_battles > 0:
+            battle_weight = min(
+                season_battles / BEST_CLAN_CB_WINDOW_SEASON_BATTLES_TARGET,
+                1.0,
+            )
+            total_score += season_score * battle_weight
             participated_seasons += 1
-            total_battles += season_battles_by_id.get(season_id, 0)
+            total_battles += season_battles
 
     return {
         'cb_window_score': round(total_score / len(season_ids), 4),

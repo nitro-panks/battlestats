@@ -19,7 +19,7 @@ The Best mode is the default. A row of subtle sub-filter links is visible below 
 | --------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------- |
 | **Overall** (default) | Existing composite score from `score_best_clans()`            | "Which clans are the best all-around?"                            |
 | **WR**                | Backend-ranked top 25 by composite of clan overall WR + CB WR | "Which clans have the highest win rates across all modes?"        |
-| **CB**                | Backend-ranked top 25 by recent completed-season CB strength   | "Which clans have sustained the best recent clan-battle results?" |
+| **CB**                | Backend-ranked top 25 by recent completed-season CB strength  | "Which clans have sustained the best recent clan-battle results?" |
 
 Clicking away from Best (to Random or Recent) hides the sub-filter row.
 
@@ -96,19 +96,25 @@ This change was made after live ranking review showed that a clan with a few eli
 ### CB sub-sort formula
 
 ```
-cb_window_score = (season_wr_1 + season_wr_2 + ... + season_wr_10) / 10
+cb_window_score = (
+  season_wr_1 * min(season_battles_1 / 30, 1)
+  + ...
+  + season_wr_10 * min(season_battles_10 / 30, 1)
+) / 10
 ```
 
 Where:
 
 - the window is the **most recent 10 completed clan-battle seasons**
 - `season_wr_n` is the clan's derived roster win rate for that season
+- `season_battles_n` is the clan's derived roster clan-battle count for that season
 - skipped seasons count as `0`
 - the current in-progress season is excluded
+- each season saturates at full weight once it reaches `30` battles, so a `60%` season over `30` battles scores much higher than a `60%` season over `2` battles
 
 This change was made after live ranking review showed the aggregate formula still answered the wrong product question. The CB view now asks: which clans have shown the strongest sustained results across the most recent completed clan-battle seasons, not which clans accumulated the biggest blended lifetime CB volume.
 
-Implementation note: the full Best-eligible pool is too large for an all-clans season refresh on every landing build, so the backend first narrows to a bounded shortlist with the existing aggregate CB proxy, then applies the 10-season window score on that shortlist. The public ranking contract is still the 10-season average on the returned Best -> CB list.
+Implementation note: the full Best-eligible pool is too large for an all-clans season refresh on every landing build, so the backend first narrows to a bounded shortlist with the existing aggregate CB proxy, then applies the battle-weighted 10-season window score on that shortlist. The public ranking contract is still the returned Best -> CB ordering.
 
 ## Frontend UX
 

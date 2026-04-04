@@ -8,7 +8,7 @@ Status: Implemented - validated against current code, live production, and WG se
 Capture two things in one place:
 
 1. how the landing page Best -> CB sub-sort is derived today
-2. the shipped replacement model: rank clans on the most recent 10 completed clan-battle seasons and score each clan by the average of its seasonal win rates, with skipped seasons counted as `0`
+2. the shipped replacement model: rank clans on the most recent 10 completed clan-battle seasons and score each clan by the average of its battle-weighted seasonal win rates, with skipped seasons counted as `0`
 
 This runbook reflects the current implementation, including the bounded-shortlist operational guardrail used during landing cache builds.
 
@@ -36,19 +36,19 @@ The original "roughly 5 per year" / "about 10 seasons in 2 years" framing was di
 
 Using WG `clans/season/` metadata as of 2026-04-04, the most recent seasons are:
 
-| Season ID | Name | Start | End |
-| --- | --- | --- | --- |
-| 33 | Blue Marlin | 2026-03-16 | 2026-05-18 |
-| 32 | Pelican | 2025-12-01 | 2026-02-09 |
-| 31 | Mahi-Mahi | 2025-09-08 | 2025-10-27 |
-| 30 | Man o' War | 2025-06-16 | 2025-08-04 |
-| 29 | Sea Lion | 2025-03-10 | 2025-05-12 |
-| 28 | Orca | 2024-12-02 | 2025-02-03 |
-| 27 | Asp | 2024-09-09 | 2024-10-28 |
-| 26 | King Vulture | 2024-06-25 | 2024-08-05 |
-| 25 | Polar Bear | 2024-05-24 | 2024-06-10 |
-| 24 | Sea Dragon | 2024-02-12 | 2024-04-08 |
-| 23 | Triton | 2023-11-13 | 2024-01-08 |
+| Season ID | Name         | Start      | End        |
+| --------- | ------------ | ---------- | ---------- |
+| 33        | Blue Marlin  | 2026-03-16 | 2026-05-18 |
+| 32        | Pelican      | 2025-12-01 | 2026-02-09 |
+| 31        | Mahi-Mahi    | 2025-09-08 | 2025-10-27 |
+| 30        | Man o' War   | 2025-06-16 | 2025-08-04 |
+| 29        | Sea Lion     | 2025-03-10 | 2025-05-12 |
+| 28        | Orca         | 2024-12-02 | 2025-02-03 |
+| 27        | Asp          | 2024-09-09 | 2024-10-28 |
+| 26        | King Vulture | 2024-06-25 | 2024-08-05 |
+| 25        | Polar Bear   | 2024-05-24 | 2024-06-10 |
+| 24        | Sea Dragon   | 2024-02-12 | 2024-04-08 |
+| 23        | Triton       | 2023-11-13 | 2024-01-08 |
 
 Two-year cutoff used for validation: `2024-04-04`.
 
@@ -167,18 +167,25 @@ For each clan:
 1. identify the most recent 10 completed clan-battle seasons
 2. compute a clan WR for each season in the window
 3. if a clan skipped a season, record that season as `0`
-4. score the clan by the simple average of those seasonal WR values
+4. weight each season's WR by how many clan-battle games the clan played that season
+5. score the clan by the average of those battle-weighted seasonal values
 
 Approximate formula:
 
 ```text
-cb_window_score = (season_wr_1 + season_wr_2 + ... + season_wr_n) / n
+cb_window_score = (
+	season_wr_1 * min(season_battles_1 / 30, 1)
+	+ ...
+	+ season_wr_n * min(season_battles_n / 30, 1)
+) / n
 ```
 
 Where:
 
 - `season_wr_n` is the clan's WR for that season if present
+- `season_battles_n` is the clan's derived roster clan-battle count for that season
 - `season_wr_n = 0` if the clan did not participate in that season
+- each season reaches full weight at `30` battles, so tiny same-WR samples do not score like full seasons
 - `n` must be defined explicitly by product rule, not inferred loosely from the phrase "last 2 years"
 
 ### Window rule
@@ -230,7 +237,7 @@ Instead, the recency boundary is handled structurally by the season window.
 
 The score becomes easier to explain:
 
-"Best CB clan = average seasonal CB win rate over the chosen recent season window, counting skipped seasons as zero."
+"Best CB clan = average recent seasonal CB win rate, with each season weighted by how many CB games the clan actually played and skipped seasons counted as zero."
 
 That is a much more legible product story than the current aggregate proxy.
 
@@ -272,7 +279,7 @@ The backend now:
 1. selects the most recent 10 completed seasons from WG `clans/season/` metadata
 2. builds a bounded shortlist from the old aggregate CB proxy so landing cache builds stay operationally bounded
 3. refreshes or reuses clan season summaries for that shortlist
-4. computes `cb_window_score = average(season WR across the 10-slot window, missing seasons = 0)`
+4. computes `cb_window_score = average(season WR × min(season battles / 30, 1) across the 10-slot window, missing seasons = 0)`
 5. sorts Best -> CB by that score, then breaks ties with participation depth, battles in the window, member quality, clan WR, and overall score
 
 ### Operational guardrail
