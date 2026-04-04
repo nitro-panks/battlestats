@@ -33,6 +33,10 @@ ANALYTICAL_WORK_MEM = os.getenv('ANALYTICAL_WORK_MEM', '8MB')
 @contextmanager
 def _elevated_work_mem():
     """Temporarily raise work_mem for heavy analytical queries (distribution, correlation)."""
+    if connection.vendor != 'postgresql':
+        yield
+        return
+
     with connection.cursor() as cursor:
         cursor.execute("SET LOCAL work_mem = %s", [ANALYTICAL_WORK_MEM])
     try:
@@ -132,6 +136,11 @@ def _dispatch_async_refresh(task, *args, **kwargs) -> None:
             getattr(task, 'name', repr(task)),
             error,
         )
+
+
+def _dispatch_async_correlation_warm(realm: str = DEFAULT_REALM) -> None:
+    from warships.tasks import warm_player_correlations_task
+    _dispatch_async_refresh(warm_player_correlations_task, realm=realm)
 
 
 def player_detail_needs_refresh(
@@ -2799,7 +2808,8 @@ def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
+                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -2957,7 +2967,8 @@ def fetch_player_population_distribution(metric: str, realm: str = DEFAULT_REALM
         raise ValueError(f'Unsupported player distribution metric: {metric}')
 
     cache_key = _player_distribution_cache_key(metric, realm=realm)
-    published_cache_key = _player_distribution_published_cache_key(metric, realm=realm)
+    published_cache_key = _player_distribution_published_cache_key(
+        metric, realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -3206,7 +3217,7 @@ def _build_tier_type_player_cells(battles_json: Any) -> list[dict]:
     return player_cells
 
 
-def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -> dict:
+def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM, *, allow_rebuild: bool = True) -> dict:
     cache_key = _player_correlation_cache_key(
         PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
     published_cache_key = _player_correlation_published_cache_key(
@@ -3219,6 +3230,9 @@ def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -
     published = cache.get(published_cache_key)
     if published is not None:
         return published
+
+    if not allow_rebuild:
+        return None
 
     config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
     tile_counts: dict[tuple[str, int], int] = {}
@@ -3305,20 +3319,14 @@ def warm_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -> 
     """Force-rebuild the tier-type population correlation cache."""
     cache_key = _player_correlation_cache_key(
         PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
-    published_cache_key = _player_correlation_published_cache_key(
-        PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
     cache.delete(cache_key)
-    cache.delete(published_cache_key)
     return _fetch_player_tier_type_population_correlation(realm=realm)
 
 
 def warm_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
     """Force-rebuild the win-rate vs survival correlation cache."""
     cache_key = _player_correlation_cache_key('win_rate_survival', realm=realm)
-    published_cache_key = _player_correlation_published_cache_key(
-        'win_rate_survival', realm=realm)
     cache.delete(cache_key)
-    cache.delete(published_cache_key)
     return fetch_player_wr_survival_correlation(realm=realm)
 
 
@@ -3344,7 +3352,25 @@ def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
 def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None, realm: str = DEFAULT_REALM) -> dict:
     player = player or Player.objects.get(player_id=player_id, realm=realm)
     population_payload = _fetch_player_tier_type_population_correlation(
-        realm=realm)
+        realm=realm, allow_rebuild=False)
+
+    if population_payload is None:
+        _dispatch_async_correlation_warm(realm=realm)
+        config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
+        return {
+            'metric': 'tier_type',
+            'label': config['label'],
+            'x_label': config['x_label'],
+            'y_label': config['y_label'],
+            'tracked_population': 0,
+            'x_labels': [],
+            'y_values': _build_tier_type_y_values(),
+            'tiles': [],
+            'trend': [],
+            'player_cells': [],
+            '_population_pending': True,
+        }
+
     if not player.battles_json:
         _dispatch_async_refresh(update_battle_data_task,
                                 player_id=player_id, realm=realm)
@@ -4963,21 +4989,31 @@ def warm_landing_best_entity_caches(
     force_refresh: bool = False,
     realm: str = DEFAULT_REALM,
 ) -> dict[str, Any]:
-    from warships.landing import get_landing_best_clans_payload, get_landing_players_payload, normalize_landing_clan_limit, normalize_landing_player_limit
+    from warships.landing import get_landing_best_clans_payload, get_landing_players_payload, normalize_landing_clan_limit, normalize_landing_player_best_sort, normalize_landing_player_limit
 
     normalized_player_limit = normalize_landing_player_limit(player_limit)
     normalized_clan_limit = min(normalize_landing_clan_limit(clan_limit), 25)
-    best_player_rows = get_landing_players_payload(
-        'best',
-        normalized_player_limit,
-    )
+    best_player_ids: list[int] = []
+    seen_player_ids: set[int] = set()
+    for player_sort in ('overall', 'ranked', 'efficiency', 'wr', 'cb'):
+        normalized_sort = normalize_landing_player_best_sort(player_sort)
+        best_player_rows = get_landing_players_payload(
+            'best',
+            normalized_player_limit,
+            sort=normalized_sort,
+            realm=realm,
+        )
+        for row in best_player_rows:
+            try:
+                player_id = int(row.get('player_id') or 0)
+            except (TypeError, ValueError):
+                continue
+            if player_id <= 0 or player_id in seen_player_ids:
+                continue
+            seen_player_ids.add(player_id)
+            best_player_ids.append(player_id)
     best_clan_rows = get_landing_best_clans_payload()[:normalized_clan_limit]
 
-    player_ids = [
-        int(row.get('player_id') or 0)
-        for row in best_player_rows
-        if row.get('player_id') is not None
-    ]
     clan_ids = [
         int(row.get('clan_id') or 0)
         for row in best_clan_rows
@@ -4985,7 +5021,7 @@ def warm_landing_best_entity_caches(
     ]
 
     warmed_players = warm_player_entity_caches(
-        player_ids,
+        best_player_ids,
         force_refresh=force_refresh,
     )
     warmed_clans = warm_clan_entity_caches(
@@ -5000,7 +5036,7 @@ def warm_landing_best_entity_caches(
             'clans': warmed_clans,
         },
         'candidate_counts': {
-            'players': len(player_ids),
+            'players': len(best_player_ids),
             'clans': len(clan_ids),
         },
     }
@@ -5732,17 +5768,38 @@ def bulk_load_player_cache(
     """
     from warships.serializers import PlayerSerializer
 
-    # Cohort 1: top players by score
+    from warships.landing import get_landing_players_payload, normalize_landing_player_best_sort
+
+    # Cohort 1: union of shipped Best-player sub-sort cohorts
+    best_player_ids: list[int] = []
+    seen_best_ids: set[int] = set()
+    for player_sort in ('overall', 'ranked', 'efficiency', 'wr', 'cb'):
+        normalized_sort = normalize_landing_player_best_sort(player_sort)
+        for row in get_landing_players_payload(
+            'best',
+            top_player_limit,
+            sort=normalized_sort,
+            realm=realm,
+        ):
+            try:
+                player_id = int(row.get('player_id') or 0)
+            except (TypeError, ValueError):
+                continue
+            if player_id <= 0 or player_id in seen_best_ids:
+                continue
+            seen_best_ids.add(player_id)
+            best_player_ids.append(player_id)
+
     top_players = list(
         Player.objects
-        .filter(realm=realm)
+        .filter(realm=realm, player_id__in=best_player_ids)
         .exclude(name='')
         .filter(is_hidden=False)
         .select_related('clan', 'explorer_summary')
-        .order_by(
-            F('explorer_summary__player_score').desc(nulls_last=True),
-            F('pvp_ratio').desc(nulls_last=True),
-        )[:top_player_limit]
+    )
+    top_players.sort(
+        key=lambda player: best_player_ids.index(player.player_id)
+        if player.player_id in seen_best_ids else len(best_player_ids)
     )
     seen_ids = {p.player_id for p in top_players}
 
@@ -5796,14 +5853,14 @@ def bulk_load_player_cache(
         cache.set_many(payloads, timeout=BULK_CACHE_PLAYER_TTL)
 
     logging.info(
-        "bulk_load_player_cache: loaded %d player payloads (top=%d, clan_members=%d, clans=%d, recently_viewed=%d)",
-        len(payloads), top_player_limit, len(
+        "bulk_load_player_cache: loaded %d player payloads (best_union=%d, clan_members=%d, clans=%d, recently_viewed=%d)",
+        len(payloads), len(best_player_ids), len(
             clan_members), len(best_clan_ids), len(missing_rv),
     )
     return {
         'status': 'completed',
         'loaded': len(payloads),
-        'top_players': top_player_limit,
+        'top_players': len(best_player_ids),
         'clan_member_clans': len(best_clan_ids),
         'clan_members_added': len(clan_members),
         'recently_viewed_added': len(missing_rv),

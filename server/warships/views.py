@@ -27,7 +27,7 @@ from warships.data import clan_detail_needs_refresh, clan_members_missing_or_inc
     fetch_player_explorer_page, fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, player_battle_data_needs_refresh, player_detail_needs_refresh, \
     fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, _get_published_efficiency_rank_payload, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
     is_sleepy_player, get_highest_ranked_league_name
-from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
 from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, queue_landing_best_entity_warm, update_clan_data_task, update_player_data_task, update_clan_members_task
 
@@ -543,9 +543,10 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
         except Player.DoesNotExist:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        is_population_pending = data.pop('_population_pending', False)
         response = _validated_single_response(
             data, PlayerTierTypeCorrelationSerializer)
-        if not player.battles_json and not data.get('player_cells'):
+        if is_population_pending or (not player.battles_json and not data.get('player_cells')):
             response['X-Tier-Type-Pending'] = 'true'
         return response
 
@@ -956,16 +957,28 @@ def landing_players(request) -> Response:
     try:
         mode = normalize_landing_player_mode(request.query_params.get('mode'))
     except ValueError:
-        return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'mode must be one of: random, best, sigma, popular'}, status=status.HTTP_400_BAD_REQUEST)
+    best_sort = 'overall'
+    payload_kwargs = {}
+    if mode == 'best':
+        try:
+            best_sort = normalize_landing_player_best_sort(
+                request.query_params.get('sort'))
+        except ValueError as error:
+            return Response({'detail': str(error)}, status=status.HTTP_400_BAD_REQUEST)
+        payload_kwargs['sort'] = best_sort
     realm = _get_realm(request)
     limit = normalize_landing_player_limit(request.query_params.get('limit'))
     payload, cache_metadata = get_landing_players_payload_with_cache_metadata(
         mode=mode,
         limit=limit,
         realm=realm,
+        **payload_kwargs,
     )
     response = Response(payload)
     response['X-Landing-Players-Cache-Mode'] = mode
+    if mode == 'best':
+        response['X-Landing-Players-Cache-Sort'] = best_sort
     response['X-Landing-Players-Cache-TTL-Seconds'] = str(
         cache_metadata['ttl_seconds'])
     response['X-Landing-Players-Cache-Cached-At'] = str(
@@ -1044,25 +1057,44 @@ def player_name_suggestions(request) -> Response:
     if cached is not None:
         return Response(cached)
 
-    # Raw SQL with ILIKE so the pg_trgm GIN index (player_name_trgm_idx) is used.
-    # Django's icontains generates UPPER(col) LIKE UPPER(pat) which bypasses trigram indexes.
     from django.db import connection
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT name, pvp_ratio, is_hidden
-            FROM warships_player
-            WHERE name != '' AND realm = %s AND name ILIKE %s
-            ORDER BY
-                CASE WHEN name ILIKE %s THEN 0 ELSE 1 END,
-                last_battle_date DESC NULLS LAST,
-                name
-            LIMIT 8
-            """,
-            [realm, f'%{query}%', f'{query}%'],
+    if connection.vendor == 'postgresql':
+        # Raw SQL with ILIKE so the pg_trgm GIN index (player_name_trgm_idx) is used.
+        # Django's icontains generates UPPER(col) LIKE UPPER(pat) which bypasses trigram indexes.
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT name, pvp_ratio, is_hidden
+                FROM warships_player
+                WHERE name != '' AND realm = %s AND name ILIKE %s
+                ORDER BY
+                    CASE WHEN name ILIKE %s THEN 0 ELSE 1 END,
+                    last_battle_date DESC NULLS LAST,
+                    name
+                LIMIT 8
+                """,
+                [realm, f'%{query}%', f'{query}%'],
+            )
+            columns = [col[0] for col in cursor.description]
+            suggestions = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    else:
+        prefix_lower = query.lower()
+        suggestions = list(
+            Player.objects.exclude(name='').filter(
+                realm=realm,
+                name__icontains=query,
+            ).annotate(
+                prefix_match=Case(
+                    When(name__istartswith=query, then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField(),
+                ),
+            ).order_by(
+                'prefix_match',
+                F('last_battle_date').desc(nulls_last=True),
+                'name',
+            ).values('name', 'pvp_ratio', 'is_hidden')[:8]
         )
-        columns = [col[0] for col in cursor.description]
-        suggestions = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     cache.set(cache_key, suggestions, timeout=600)
     return Response(suggestions)

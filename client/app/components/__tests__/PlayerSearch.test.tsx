@@ -102,25 +102,44 @@ const defaultPlayersByMode = {
             efficiency_rank_updated_at: '2026-03-17T00:00:00Z',
         },
     ],
-    best: [
+};
+
+const defaultPlayersByBestSort = {
+    overall: [
         {
             name: 'BestPlayer',
             pvp_ratio: 64.1,
             is_hidden: false,
             is_ranked_player: true,
-            is_pve_player: false,
+            is_pve_player: true,
             is_sleepy_player: false,
             is_clan_battle_player: true,
-            clan_battle_win_rate: 60.2,
-            highest_ranked_league: 'Typhoon',
+            clan_battle_win_rate: 58.4,
+            highest_ranked_league: 'Gold',
             efficiency_rank_percentile: 0.99,
             efficiency_rank_tier: 'E',
             has_efficiency_rank_icon: true,
             efficiency_rank_population_size: 367,
             efficiency_rank_updated_at: '2026-03-17T00:00:00Z',
         },
+        {
+            name: 'BestRunnerUp',
+            pvp_ratio: 57.2,
+            is_hidden: false,
+            is_ranked_player: false,
+            is_pve_player: false,
+            is_sleepy_player: false,
+            is_clan_battle_player: false,
+            clan_battle_win_rate: null,
+            highest_ranked_league: null,
+            efficiency_rank_percentile: 0.91,
+            efficiency_rank_tier: 'I',
+            has_efficiency_rank_icon: true,
+            efficiency_rank_population_size: 367,
+            efficiency_rank_updated_at: '2026-03-17T00:00:00Z',
+        },
     ],
-    sigma: [
+    efficiency: [
         {
             name: 'SigmaLeader',
             pvp_ratio: 59.8,
@@ -154,6 +173,9 @@ const defaultPlayersByMode = {
             efficiency_rank_updated_at: '2026-03-17T00:00:00Z',
         },
     ],
+    ranked: [],
+    wr: [],
+    cb: [],
 };
 
 const installFetchMock = ({
@@ -164,6 +186,7 @@ const installFetchMock = ({
     recentPlayersResponses,
     recentClansResponse,
     playersByMode = defaultPlayersByMode,
+    playersByBestSort = defaultPlayersByBestSort,
     playerResponses = {},
 }: {
     clans?: unknown[];
@@ -173,6 +196,7 @@ const installFetchMock = ({
     recentPlayersResponses?: unknown[][];
     recentClansResponse?: ReturnType<typeof buildJsonResponse> | ReturnType<typeof buildErrorResponse>;
     playersByMode?: Record<string, unknown[]>;
+    playersByBestSort?: Record<string, unknown[]>;
     playerResponses?: Record<string, Array<ReturnType<typeof buildJsonResponse> | ReturnType<typeof buildErrorResponse>>>;
 } = {}) => {
     const responseQueues = new Map(
@@ -210,7 +234,12 @@ const installFetchMock = ({
         }
 
         if (url.startsWith('/api/landing/players/') || url.startsWith('/api/landing/players?')) {
-            const mode = new URL(url, 'http://localhost').searchParams.get('mode') || 'random';
+            const params = new URL(url, 'http://localhost').searchParams;
+            const mode = params.get('mode') || 'random';
+            const sort = params.get('sort') || 'overall';
+            if (mode === 'best') {
+                return Promise.resolve(buildJsonResponse((playersByBestSort ?? defaultPlayersByBestSort)[sort] ?? []));
+            }
             return Promise.resolve(buildJsonResponse(playersByMode[mode] ?? []));
         }
 
@@ -281,6 +310,7 @@ describe('PlayerSearch landing efficiency icon', () => {
     });
 
     const getClanRecentButton = async () => (await screen.findAllByRole('button', { name: 'Recent' }))[0];
+    const getPlayerRandomButton = async () => (await screen.findAllByRole('button', { name: 'Random' }))[1];
     const getPlayerRecentButton = async () => (await screen.findAllByRole('button', { name: 'Recent' }))[1];
 
     it('renders the sigma only for Expert landing rows while preserving existing landing icons', async () => {
@@ -290,29 +320,45 @@ describe('PlayerSearch landing efficiency icon', () => {
             expect(screen.getByRole('heading', { name: 'Active Players' })).toBeInTheDocument();
         });
 
-        const expertRow = screen.getByRole('button', { name: /Show player AcePlayer/i });
-        const nonExpertRow = screen.getByRole('button', { name: /Show player SolidPlayer/i });
+        const expertRow = screen.getByRole('button', { name: /Show player BestPlayer/i });
+        const nonExpertRow = screen.getByRole('button', { name: /Show player BestRunnerUp/i });
 
         expect(within(expertRow).getByText('Σ')).toBeInTheDocument();
-        expect(within(expertRow).getByLabelText(/Battlestats efficiency rank Expert: 97th percentile among eligible tracked players\. Based on stored WG badge profile for 367 tracked players\./i)).toBeInTheDocument();
+        expect(within(expertRow).getByLabelText(/Battlestats efficiency rank Expert: 99th percentile among eligible tracked players\. Based on stored WG badge profile for 367 tracked players\./i)).toBeInTheDocument();
         expect(within(expertRow).getByLabelText(/ranked enjoyer \(Gold\)/i)).toBeInTheDocument();
         expect(within(expertRow).getByLabelText(/pve enjoyer/i)).toBeInTheDocument();
         expect(within(expertRow).getByLabelText(/clan battle enjoyer 58\.4 percent WR/i)).toBeInTheDocument();
         expect(within(nonExpertRow).queryByText('Σ')).not.toBeInTheDocument();
     });
 
-    it('adds a Sigma filter button and switches the landing request to sigma mode', async () => {
+    it('shows Best first by default and requests the backend overall sub-sort', async () => {
         render(<PlayerSearch />);
 
         await waitFor(() => {
-            expect(screen.getByRole('button', { name: 'Sigma' })).toBeInTheDocument();
+            expect(screen.getAllByRole('button', { name: 'Best' })[1]).toHaveAttribute('aria-pressed', 'true');
         });
-
-        fireEvent.click(screen.getByRole('button', { name: 'Sigma' }));
 
         await waitFor(() => {
             expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/players?mode=sigma&limit=25&realm=na',
+                ([url]) => url === '/api/landing/players?mode=best&limit=25&sort=overall&realm=na',
+            )).toBe(true);
+        });
+
+        expect(screen.getByTestId('player-best-sort-bar')).toHaveAttribute('aria-hidden', 'false');
+    });
+
+    it('moves Efficiency under Best and switches the landing request to the efficiency sub-sort', async () => {
+        render(<PlayerSearch />);
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Efficiency' })).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Efficiency' }));
+
+        await waitFor(() => {
+            expect((global.fetch as jest.Mock).mock.calls.some(
+                ([url]) => url === '/api/landing/players?mode=best&limit=25&sort=efficiency&realm=na',
             )).toBe(true);
         });
 
@@ -321,14 +367,14 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         expect(within(sigmaLeaderRow).getByText('Σ')).toBeInTheDocument();
         expect(within(sigmaRunnerUpRow).queryByText('Σ')).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Sigma' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Efficiency' })).toHaveClass('text-[var(--accent-mid)]');
     });
 
     it('preserves backend best player ordering on the landing page', async () => {
         installFetchMock({
-            playersByMode: {
-                ...defaultPlayersByMode,
-                best: [
+            playersByBestSort: {
+                ...defaultPlayersByBestSort,
+                overall: [
                     {
                         name: 'ZedTop',
                         pvp_ratio: 51.0,
@@ -383,8 +429,6 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         render(<PlayerSearch />);
 
-        fireEvent.click((await screen.findAllByRole('button', { name: 'Best' }))[1]);
-
         await waitFor(() => {
             const playerButtons = screen.getAllByRole('button', { name: /Show player /i });
             expect(playerButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
@@ -395,11 +439,11 @@ describe('PlayerSearch landing efficiency icon', () => {
         });
 
         expect((global.fetch as jest.Mock).mock.calls.some(
-            ([url]) => url === '/api/landing/players?mode=best&limit=25&realm=na',
+            ([url]) => url === '/api/landing/players?mode=best&limit=25&sort=overall&realm=na',
         )).toBe(true);
     });
 
-    it('folds recent players into the player mode switch after Sigma', async () => {
+    it('orders the player mode switch as Best, Random, Recent', async () => {
         installFetchMock({
             recentPlayers: [
                 { name: 'RecentCaptain', pvp_ratio: 58.1, is_hidden: false },
@@ -408,9 +452,11 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         render(<PlayerSearch />);
 
-        const sigmaButton = await screen.findByRole('button', { name: 'Sigma' });
+        const playerBestButton = (await screen.findAllByRole('button', { name: 'Best' }))[1];
+        const playerRandomButton = (await screen.findAllByRole('button', { name: 'Random' }))[1];
         const recentButton = await getPlayerRecentButton();
-        expect(sigmaButton.compareDocumentPosition(recentButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(playerBestButton.compareDocumentPosition(playerRandomButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(playerRandomButton.compareDocumentPosition(recentButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
         fireEvent.click(recentButton);
 
@@ -433,8 +479,22 @@ describe('PlayerSearch landing efficiency icon', () => {
         });
 
         expect((global.fetch as jest.Mock).mock.calls.some(
-            ([url]) => url === '/api/landing/players?mode=random&limit=25&realm=na',
+            ([url]) => url === '/api/landing/players?mode=best&limit=25&sort=overall&realm=na',
         )).toBe(true);
+    });
+
+    it('keeps the player best sub-sort bar mounted to avoid header layout jumps', async () => {
+        render(<PlayerSearch />);
+
+        const sortBar = await screen.findByTestId('player-best-sort-bar');
+        expect(sortBar).toHaveAttribute('aria-hidden', 'false');
+
+        const recentButton = await getPlayerRecentButton();
+
+        fireEvent.click(recentButton);
+
+        expect(screen.getByTestId('player-best-sort-bar-shell')).toBeInTheDocument();
+        expect(screen.getByTestId('player-best-sort-bar')).toHaveAttribute('aria-hidden', 'true');
     });
 
     it('falls back to recent clans when best clan results are empty', async () => {
@@ -525,6 +585,8 @@ describe('PlayerSearch landing efficiency icon', () => {
         });
 
         render(<PlayerSearch />);
+
+        fireEvent.click(await getPlayerRandomButton());
 
         const playerButton = await screen.findByRole('button', { name: /Show player AcePlayer/i });
         fireEvent.click(playerButton);
@@ -645,7 +707,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         await screen.findByRole('button', { name: /Show clan Overall One/i });
 
-        fireEvent.click(screen.getByRole('button', { name: 'WR' }));
+        fireEvent.click(within(screen.getByTestId('clan-best-sort-bar')).getByRole('button', { name: 'WR' }));
 
         await waitFor(() => {
             const clanButtons = screen.getAllByRole('button', { name: /Show clan /i });
@@ -843,11 +905,10 @@ describe('PlayerSearch landing efficiency icon', () => {
         render(<PlayerSearch />);
 
         const infoButton = await screen.findByRole('button', {
-            name: 'Best ranking formula details',
+            name: 'Best player ranking formula details',
         });
 
         expect(screen.getByText(/Best ≈ \(0\.40·WR_5-10 \+ 0\.22·Score \+ 0\.18·Eff \+ 0\.10·Vol_5-10 \+ 0\.06·Ranked \+ 0\.04·Clan\) × M_share/i)).toBeInTheDocument();
-        expect(screen.getByText(/Player detail now shows literal KDR separately, but Best still uses the composite score rather than overall KDR directly/i)).toBeInTheDocument();
         expect(screen.queryByText(/Current random cache refreshes in about/i)).not.toBeInTheDocument();
         expect(infoButton).toBeInTheDocument();
     });

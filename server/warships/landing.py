@@ -5,6 +5,7 @@ from datetime import timedelta
 import math
 
 from django.core.cache import cache
+from django.db import connection
 from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce
 from django.utils import timezone
@@ -63,9 +64,9 @@ def _attach_clan_battle_activity_badges(rows: list[dict], realm: str = DEFAULT_R
     return rows
 
 
-LANDING_CACHE_TTL = 60 * 60 * 12
-LANDING_CLAN_CACHE_TTL = 60 * 60 * 12
-LANDING_PLAYER_CACHE_TTL = 60 * 60 * 12
+LANDING_CACHE_TTL = 60 * 60 * 6
+LANDING_CLAN_CACHE_TTL = 60 * 60 * 6
+LANDING_PLAYER_CACHE_TTL = 60 * 60 * 6
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v4'
 LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v4:meta'
 LANDING_CLANS_PUBLISHED_CACHE_KEY = 'landing:clans:v4:published'
@@ -76,7 +77,7 @@ LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY = 'landing:clans:best:v2:overall:publishe
 LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY = 'landing:clans:best:v2:overall:published:meta'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
 LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v6'
-LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v12:namespace'
+LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v13:namespace'
 LANDING_CLANS_DIRTY_KEY = 'landing:clans:dirty:v1'
 LANDING_PLAYERS_DIRTY_KEY = 'landing:players:dirty:v1'
 LANDING_RECENT_CLANS_DIRTY_KEY = 'landing:recent_clans:dirty:v1'
@@ -86,6 +87,7 @@ LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_CLAN_MODES = ('random', 'best')
 LANDING_CLAN_BEST_SORTS = ('overall', 'wr', 'cb')
 LANDING_PLAYER_LIMIT = 25
+LANDING_PLAYER_BEST_SORTS = ('overall', 'ranked', 'efficiency', 'wr', 'cb')
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 LANDING_PLAYER_BEST_MIN_HIGH_TIER_PVP_BATTLES = 500
@@ -101,6 +103,10 @@ LANDING_PLAYER_BEST_RANKED_WEIGHT = 0.06
 LANDING_PLAYER_BEST_CLAN_WEIGHT = 0.04
 LANDING_PLAYER_BEST_EFFICIENCY_NEUTRAL = 0.35
 LANDING_PLAYER_BEST_COMPETITIVE_SHARE_FLOOR = 0.55
+LANDING_PLAYER_RANKED_SORT_PLAYER_SCORE_WEIGHT = 0.20
+LANDING_PLAYER_RANKED_SORT_WR_WEIGHT = 0.10
+LANDING_PLAYER_CB_SORT_MAX_BATTLES = 400
+LANDING_PLAYER_CB_SORT_MAX_SEASONS = 10
 LANDING_RANDOM_PLAYER_QUEUE_KEY = 'landing:queue:players:random:v1'
 LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_KEY = 'landing:queue:players:random:eligible:v1'
 LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY = 'landing:queue:players:random:lock:v1'
@@ -234,6 +240,43 @@ def _calculate_landing_best_score(row: dict) -> float:
     )
 
 
+def _calculate_landing_ranked_sort_score(row: dict) -> float:
+    ranked_score = _normalize_best_ranked_score(
+        row.get('latest_ranked_battles'),
+        row.get('highest_ranked_league_recent'),
+    )
+    player_score = _normalize_best_player_score(row.get('player_score'))
+    wr_score = _normalize_best_wr_score(row.get('high_tier_pvp_ratio'))
+    return round(
+        (0.70 * ranked_score) +
+        (LANDING_PLAYER_RANKED_SORT_PLAYER_SCORE_WEIGHT * player_score) +
+        (LANDING_PLAYER_RANKED_SORT_WR_WEIGHT * wr_score),
+        6,
+    )
+
+
+def _calculate_landing_cb_sort_score(row: dict) -> float:
+    win_rate_score = _normalize_best_wr_score(row.get('clan_battle_win_rate'))
+    volume_score = _clamp(
+        max(int(row.get('clan_battle_total_battles') or 0), 0) /
+        LANDING_PLAYER_CB_SORT_MAX_BATTLES,
+        0.0,
+        1.0,
+    )
+    season_depth_score = _clamp(
+        max(int(row.get('clan_battle_seasons_participated') or 0), 0) /
+        LANDING_PLAYER_CB_SORT_MAX_SEASONS,
+        0.0,
+        1.0,
+    )
+    return round(
+        (0.55 * win_rate_score) +
+        (0.25 * volume_score) +
+        (0.20 * season_depth_score),
+        6,
+    )
+
+
 def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COUNT, min_total_battles: int = LANDING_CLAN_MIN_TOTAL_BATTLES):
     eligible = [
         row for row in rows
@@ -277,22 +320,47 @@ def _bump_landing_players_cache_namespace(realm: str = DEFAULT_REALM) -> int:
         return next_namespace
 
 
-def landing_player_cache_key(mode: str, limit: int, realm: str = DEFAULT_REALM) -> str:
+def _canonical_landing_player_mode_and_sort(mode: str | None, sort: str | None) -> tuple[str, str | None]:
+    normalized_mode = normalize_landing_player_mode(mode)
+    if normalized_mode == 'sigma':
+        return 'best', 'efficiency'
+    if normalized_mode == 'best':
+        return 'best', normalize_landing_player_best_sort(sort)
+    return normalized_mode, None
+
+
+def landing_player_cache_key(mode: str, limit: int, realm: str = DEFAULT_REALM, sort: str | None = None) -> str:
     namespace = _get_landing_players_cache_namespace(realm=realm)
-    return realm_cache_key(realm, f'landing:players:v12:n{namespace}:{mode}:{limit}')
+    canonical_mode, canonical_sort = _canonical_landing_player_mode_and_sort(
+        mode, sort)
+    if canonical_mode == 'best' and canonical_sort is not None:
+        return realm_cache_key(realm, f'landing:players:v13:n{namespace}:best:{canonical_sort}:{limit}')
+    return realm_cache_key(realm, f'landing:players:v13:n{namespace}:{canonical_mode}:{limit}')
 
 
-def landing_player_cache_metadata_key(mode: str, limit: int, realm: str = DEFAULT_REALM) -> str:
+def landing_player_cache_metadata_key(mode: str, limit: int, realm: str = DEFAULT_REALM, sort: str | None = None) -> str:
     namespace = _get_landing_players_cache_namespace(realm=realm)
-    return realm_cache_key(realm, f'landing:players:v12:n{namespace}:{mode}:{limit}:meta')
+    canonical_mode, canonical_sort = _canonical_landing_player_mode_and_sort(
+        mode, sort)
+    if canonical_mode == 'best' and canonical_sort is not None:
+        return realm_cache_key(realm, f'landing:players:v13:n{namespace}:best:{canonical_sort}:{limit}:meta')
+    return realm_cache_key(realm, f'landing:players:v13:n{namespace}:{canonical_mode}:{limit}:meta')
 
 
-def landing_player_published_cache_key(mode: str, limit: int, realm: str = DEFAULT_REALM) -> str:
-    return realm_cache_key(realm, f'landing:players:v12:published:{mode}:{limit}')
+def landing_player_published_cache_key(mode: str, limit: int, realm: str = DEFAULT_REALM, sort: str | None = None) -> str:
+    canonical_mode, canonical_sort = _canonical_landing_player_mode_and_sort(
+        mode, sort)
+    if canonical_mode == 'best' and canonical_sort is not None:
+        return realm_cache_key(realm, f'landing:players:v13:published:best:{canonical_sort}:{limit}')
+    return realm_cache_key(realm, f'landing:players:v13:published:{canonical_mode}:{limit}')
 
 
-def landing_player_published_metadata_key(mode: str, limit: int, realm: str = DEFAULT_REALM) -> str:
-    return realm_cache_key(realm, f'landing:players:v12:published:{mode}:{limit}:meta')
+def landing_player_published_metadata_key(mode: str, limit: int, realm: str = DEFAULT_REALM, sort: str | None = None) -> str:
+    canonical_mode, canonical_sort = _canonical_landing_player_mode_and_sort(
+        mode, sort)
+    if canonical_mode == 'best' and canonical_sort is not None:
+        return realm_cache_key(realm, f'landing:players:v13:published:best:{canonical_sort}:{limit}:meta')
+    return realm_cache_key(realm, f'landing:players:v13:published:{canonical_mode}:{limit}:meta')
 
 
 def landing_player_cache_ttl(mode: str) -> int:
@@ -436,6 +504,14 @@ def normalize_landing_player_mode(mode: str | None) -> str:
     if normalized_mode not in LANDING_PLAYER_MODES:
         raise ValueError('mode must be one of: random, best, sigma, popular')
     return normalized_mode
+
+
+def normalize_landing_player_best_sort(sort: str | None) -> str:
+    normalized_sort = (sort or 'overall').strip().lower()
+    if normalized_sort not in LANDING_PLAYER_BEST_SORTS:
+        raise ValueError(
+            'sort must be one of: overall, ranked, efficiency, wr, cb')
+    return normalized_sort
 
 
 def normalize_landing_clan_mode(mode: str | None) -> str:
@@ -1193,25 +1269,33 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
         player_obj = players_by_id.get(player_id)
         es = getattr(player_obj, 'explorer_summary',
                      None) if player_obj else None
+        latest_ranked_battles = max(
+            int(row.get('latest_ranked_battles') or 0), 0)
+        highest_ranked_league_recent = row.get('highest_ranked_league_recent')
         row['high_tier_pvp_battles'] = high_tier_battles
         row['high_tier_pvp_ratio'] = high_tier_ratio
         row['is_pve_player'] = is_pve_player(
             row.get('total_battles'), row.get('pvp_battles'))
         row['is_sleepy_player'] = is_sleepy_player(
             row.get('days_since_last_battle'))
-        row['is_ranked_player'] = is_ranked_player(ranked_rows)
+        row['is_ranked_player'] = is_ranked_player(
+            ranked_rows) or latest_ranked_battles > 0 or bool(highest_ranked_league_recent)
         row['is_clan_battle_player'] = is_clan_battle_enjoyer(
             getattr(es, 'clan_battle_total_battles', None),
             getattr(es, 'clan_battle_seasons_participated', None),
         )
+        row['clan_battle_total_battles'] = getattr(
+            es, 'clan_battle_total_battles', None)
+        row['clan_battle_seasons_participated'] = getattr(
+            es, 'clan_battle_seasons_participated', None)
         row['clan_battle_win_rate'] = getattr(
             es, 'clan_battle_overall_win_rate', None)
         row['highest_ranked_league'] = get_highest_ranked_league_name(
-            ranked_rows)
+            ranked_rows) or highest_ranked_league_recent
         # Use stored percentile directly — landing surfaces tolerate minor
         # input-data drift (unlike player detail, which uses the stricter
         # _get_published_efficiency_rank_payload freshness gate).
-        if not player_obj.is_hidden and es and es.efficiency_rank_percentile is not None:
+        if player_obj and not player_obj.is_hidden and es and es.efficiency_rank_percentile is not None:
             row['efficiency_rank_percentile'] = es.efficiency_rank_percentile
             row['efficiency_rank_tier'] = es.efficiency_rank_tier
             row['has_efficiency_rank_icon'] = bool(es.has_efficiency_rank_icon)
@@ -1223,7 +1307,6 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             row['has_efficiency_rank_icon'] = False
             row['efficiency_rank_population_size'] = None
             row['efficiency_rank_updated_at'] = None
-        row.pop('player_id', None)
         row.pop('days_since_last_battle', None)
 
     return rows
@@ -1312,25 +1395,41 @@ def _build_random_landing_players(limit: int, realm: str = DEFAULT_REALM) -> lis
     return _serialize_landing_player_rows(rows)
 
 
-def _build_best_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
-    candidate_rows = list(
-        Player.objects.exclude(name='').filter(
-            realm=realm,
-            is_hidden=False,
-            days_since_last_battle__lte=180,
-            pvp_battles__gt=LANDING_PLAYER_BEST_MIN_PVP_BATTLES,
-        ).exclude(
-            last_battle_date__isnull=True
-        ).annotate(
-            player_score=F('explorer_summary__player_score'),
-            efficiency_rank_percentile=F(
-                'explorer_summary__efficiency_rank_percentile'),
-            shrunken_efficiency_strength=F(
-                'explorer_summary__shrunken_efficiency_strength'),
-            latest_ranked_battles=F('explorer_summary__latest_ranked_battles'),
-            highest_ranked_league_recent=F(
-                'explorer_summary__highest_ranked_league_recent'),
-        ).values(
+def _best_landing_player_candidate_rows(
+    *,
+    realm: str,
+    min_pvp_battles: int,
+    order_by: tuple,
+    limit: int = LANDING_PLAYER_BEST_CANDIDATE_LIMIT,
+    extra_filters: dict | None = None,
+) -> list[dict]:
+    qs = Player.objects.exclude(name='').filter(
+        realm=realm,
+        is_hidden=False,
+        days_since_last_battle__lte=180,
+        pvp_battles__gt=min_pvp_battles,
+    ).exclude(
+        last_battle_date__isnull=True,
+    ).annotate(
+        player_score=F('explorer_summary__player_score'),
+        efficiency_rank_percentile=F(
+            'explorer_summary__efficiency_rank_percentile'),
+        shrunken_efficiency_strength=F(
+            'explorer_summary__shrunken_efficiency_strength'),
+        latest_ranked_battles=F('explorer_summary__latest_ranked_battles'),
+        highest_ranked_league_recent=F(
+            'explorer_summary__highest_ranked_league_recent'),
+        clan_battle_total_battles=F(
+            'explorer_summary__clan_battle_total_battles'),
+        clan_battle_seasons_participated=F(
+            'explorer_summary__clan_battle_seasons_participated'),
+        clan_battle_overall_win_rate=F(
+            'explorer_summary__clan_battle_overall_win_rate'),
+    )
+    if extra_filters:
+        qs = qs.filter(**extra_filters)
+    return list(
+        qs.values(
             'name',
             'player_id',
             'pvp_ratio',
@@ -1345,12 +1444,34 @@ def _build_best_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[
             'shrunken_efficiency_strength',
             'latest_ranked_battles',
             'highest_ranked_league_recent',
-        ).order_by(
+            'clan_battle_total_battles',
+            'clan_battle_seasons_participated',
+            'clan_battle_overall_win_rate',
+        ).order_by(*order_by)[:limit]
+    )
+
+
+def _finalize_best_player_payload(rows: list[dict], limit: int) -> list[dict]:
+    for row in rows:
+        row.pop('player_score', None)
+        row.pop('shrunken_efficiency_strength', None)
+        row.pop('latest_ranked_battles', None)
+        row.pop('highest_ranked_league_recent', None)
+        row.pop('clan_battle_total_battles', None)
+        row.pop('clan_battle_seasons_participated', None)
+    return rows[:limit]
+
+
+def _build_best_overall_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
+    candidate_rows = _best_landing_player_candidate_rows(
+        realm=realm,
+        min_pvp_battles=LANDING_PLAYER_BEST_MIN_PVP_BATTLES,
+        order_by=(
             F('explorer_summary__player_score').desc(nulls_last=True),
             F('pvp_ratio').desc(nulls_last=True),
             F('last_battle_date').desc(nulls_last=True),
             'name',
-        )[:LANDING_PLAYER_BEST_CANDIDATE_LIMIT]
+        ),
     )
     serialized_rows = _serialize_landing_player_rows(candidate_rows)
     rows = []
@@ -1381,15 +1502,47 @@ def _build_best_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[
 
     for row in rows:
         row.pop('best_competitive_score', None)
-        row.pop('player_score', None)
-        row.pop('shrunken_efficiency_strength', None)
-        row.pop('latest_ranked_battles', None)
-        row.pop('highest_ranked_league_recent', None)
 
-    return rows[:limit]
+    return _finalize_best_player_payload(rows, limit)
 
 
-def _build_sigma_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
+def _build_best_ranked_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
+    candidate_rows = _best_landing_player_candidate_rows(
+        realm=realm,
+        min_pvp_battles=LANDING_PLAYER_BEST_MIN_PVP_BATTLES,
+        order_by=(
+            F('explorer_summary__latest_ranked_battles').desc(nulls_last=True),
+            F('explorer_summary__player_score').desc(nulls_last=True),
+            F('pvp_ratio').desc(nulls_last=True),
+            'name',
+        ),
+        extra_filters={'explorer_summary__latest_ranked_battles__gt': 0},
+    )
+    rows = _serialize_landing_player_rows(candidate_rows)
+    ranked_rows = []
+    for row in rows:
+        if not row.get('is_ranked_player'):
+            continue
+        row['ranked_sort_score'] = _calculate_landing_ranked_sort_score(row)
+        ranked_rows.append(row)
+
+    ranked_rows.sort(key=lambda row: (
+        -(row.get('ranked_sort_score') if row.get('ranked_sort_score')
+          is not None else float('-inf')),
+        -(row.get('latest_ranked_battles')
+          if row.get('latest_ranked_battles') is not None else float('-inf')),
+        -(row.get('player_score') if row.get('player_score')
+          is not None else float('-inf')),
+        row.get('name') or '',
+    ))
+
+    for row in ranked_rows:
+        row.pop('ranked_sort_score', None)
+
+    return _finalize_best_player_payload(ranked_rows, limit)
+
+
+def _build_best_efficiency_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
     players = list(
         Player.objects.exclude(name='').filter(
             realm=realm,
@@ -1413,15 +1566,11 @@ def _build_sigma_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list
             'explorer_summary__has_efficiency_rank_icon',
             'explorer_summary__efficiency_rank_population_size',
             'explorer_summary__efficiency_rank_updated_at',
-            'explorer_summary__eligible_ship_count',
-            'explorer_summary__efficiency_badge_rows_total',
-            'explorer_summary__badge_rows_unmapped',
             'explorer_summary__latest_ranked_battles',
             'explorer_summary__highest_ranked_league_recent',
             'explorer_summary__clan_battle_seasons_participated',
             'explorer_summary__clan_battle_total_battles',
             'explorer_summary__clan_battle_overall_win_rate',
-            'explorer_summary__clan_battle_summary_updated_at',
         ).order_by(
             F('explorer_summary__efficiency_rank_percentile').desc(nulls_last=True),
             F('explorer_summary__player_score').desc(nulls_last=True),
@@ -1433,23 +1582,16 @@ def _build_sigma_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list
     rows = []
     for player in players:
         explorer_summary = getattr(player, 'explorer_summary', None)
-        if explorer_summary is None:
-            continue
-
-        # Use stored percentile directly — the landing surface tolerates
-        # minor input-data drift (unlike individual player pages, which
-        # use the stricter _get_published_efficiency_rank_payload check).
-        percentile = explorer_summary.efficiency_rank_percentile
-        if percentile is None:
+        if explorer_summary is None or explorer_summary.efficiency_rank_percentile is None:
             continue
 
         rows.append({
+            'player_id': player.player_id,
             'name': player.name,
             'pvp_ratio': player.pvp_ratio,
             'is_hidden': player.is_hidden,
             'pvp_battles': player.pvp_battles,
             'total_battles': player.total_battles,
-            'days_since_last_battle': player.days_since_last_battle,
             'is_pve_player': is_pve_player(player.total_battles, player.pvp_battles),
             'is_sleepy_player': is_sleepy_player(player.days_since_last_battle),
             'is_ranked_player': max(int(getattr(explorer_summary, 'latest_ranked_battles', 0) or 0), 0) > 0,
@@ -1459,15 +1601,108 @@ def _build_sigma_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list
                 getattr(explorer_summary,
                         'clan_battle_seasons_participated', None),
             ),
+            'clan_battle_total_battles': getattr(explorer_summary, 'clan_battle_total_battles', None),
+            'clan_battle_seasons_participated': getattr(explorer_summary, 'clan_battle_seasons_participated', None),
             'clan_battle_win_rate': getattr(explorer_summary, 'clan_battle_overall_win_rate', None),
-            'efficiency_rank_percentile': percentile,
+            'efficiency_rank_percentile': explorer_summary.efficiency_rank_percentile,
             'efficiency_rank_tier': explorer_summary.efficiency_rank_tier,
             'has_efficiency_rank_icon': bool(explorer_summary.has_efficiency_rank_icon),
             'efficiency_rank_population_size': explorer_summary.efficiency_rank_population_size,
             'efficiency_rank_updated_at': explorer_summary.efficiency_rank_updated_at,
         })
 
-    return rows
+    return rows[:limit]
+
+
+def _build_best_wr_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
+    candidate_rows = _best_landing_player_candidate_rows(
+        realm=realm,
+        min_pvp_battles=LANDING_PLAYER_BEST_MIN_PVP_BATTLES,
+        order_by=(
+            F('pvp_ratio').desc(nulls_last=True),
+            F('explorer_summary__player_score').desc(nulls_last=True),
+            'name',
+        ),
+    )
+    rows = _serialize_landing_player_rows(candidate_rows)
+    wr_rows = []
+    for row in rows:
+        high_tier_battles = int(row.get('high_tier_pvp_battles') or 0)
+        if high_tier_battles < LANDING_PLAYER_BEST_MIN_HIGH_TIER_PVP_BATTLES:
+            continue
+        row['pvp_ratio'] = (
+            row.get('high_tier_pvp_ratio')
+            if row.get('high_tier_pvp_ratio') is not None
+            else row.get('pvp_ratio')
+        )
+        wr_rows.append(row)
+
+    wr_rows.sort(key=lambda row: (
+        -(row.get('high_tier_pvp_ratio') if row.get('high_tier_pvp_ratio')
+          is not None else float('-inf')),
+        -(row.get('high_tier_pvp_battles')
+          if row.get('high_tier_pvp_battles') is not None else float('-inf')),
+        -(row.get('player_score') if row.get('player_score')
+          is not None else float('-inf')),
+        -(row.get('efficiency_rank_percentile')
+          if row.get('efficiency_rank_percentile') is not None else float('-inf')),
+        row.get('name') or '',
+    ))
+
+    return _finalize_best_player_payload(wr_rows, limit)
+
+
+def _build_best_cb_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
+    candidate_rows = _best_landing_player_candidate_rows(
+        realm=realm,
+        min_pvp_battles=LANDING_PLAYER_BEST_MIN_PVP_BATTLES,
+        order_by=(
+            F('explorer_summary__clan_battle_total_battles').desc(nulls_last=True),
+            F('explorer_summary__clan_battle_overall_win_rate').desc(nulls_last=True),
+            F('explorer_summary__player_score').desc(nulls_last=True),
+            'name',
+        ),
+        extra_filters={'explorer_summary__clan_battle_total_battles__gt': 0},
+    )
+    rows = _serialize_landing_player_rows(candidate_rows)
+    cb_rows = []
+    for row in rows:
+        if not row.get('is_clan_battle_player'):
+            continue
+        row['cb_sort_score'] = _calculate_landing_cb_sort_score(row)
+        cb_rows.append(row)
+
+    cb_rows.sort(key=lambda row: (
+        -(row.get('cb_sort_score') if row.get('cb_sort_score')
+          is not None else float('-inf')),
+        -(row.get('clan_battle_win_rate') if row.get('clan_battle_win_rate')
+          is not None else float('-inf')),
+        -(row.get('clan_battle_total_battles')
+          if row.get('clan_battle_total_battles') is not None else float('-inf')),
+        row.get('name') or '',
+    ))
+
+    for row in cb_rows:
+        row.pop('cb_sort_score', None)
+
+    return _finalize_best_player_payload(cb_rows, limit)
+
+
+def _build_best_landing_players(limit: int, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
+    normalized_sort = normalize_landing_player_best_sort(sort)
+    if normalized_sort == 'ranked':
+        return _build_best_ranked_landing_players(limit, realm=realm)
+    if normalized_sort == 'efficiency':
+        return _build_best_efficiency_landing_players(limit, realm=realm)
+    if normalized_sort == 'wr':
+        return _build_best_wr_landing_players(limit, realm=realm)
+    if normalized_sort == 'cb':
+        return _build_best_cb_landing_players(limit, realm=realm)
+    return _build_best_overall_landing_players(limit, realm=realm)
+
+
+def _build_sigma_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
+    return _build_best_efficiency_landing_players(limit, realm=realm)
 
 
 def _build_popular_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
@@ -1496,24 +1731,27 @@ def _build_popular_landing_players(limit: int, realm: str = DEFAULT_REALM) -> li
     return resolve_landing_players_by_id_order(ordered_player_ids, realm=realm)[:limit]
 
 
-def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False, realm: str = DEFAULT_REALM) -> tuple[list[dict], dict[str, str | int]]:
+def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str | None = None) -> tuple[list[dict], dict[str, str | int]]:
     normalized_mode = normalize_landing_player_mode(mode)
     normalized_limit = normalize_landing_player_limit(limit)
+    canonical_mode, canonical_sort = _canonical_landing_player_mode_and_sort(
+        normalized_mode,
+        sort,
+    )
     cache_key = landing_player_cache_key(
-        normalized_mode, normalized_limit, realm=realm)
+        normalized_mode, normalized_limit, realm=realm, sort=sort)
     metadata_key = landing_player_cache_metadata_key(
-        normalized_mode, normalized_limit, realm=realm)
+        normalized_mode, normalized_limit, realm=realm, sort=sort)
     published_cache_key = landing_player_published_cache_key(
-        normalized_mode, normalized_limit, realm=realm)
+        normalized_mode, normalized_limit, realm=realm, sort=sort)
     published_metadata_key = landing_player_published_metadata_key(
-        normalized_mode, normalized_limit, realm=realm)
-    ttl_seconds = landing_player_cache_ttl(normalized_mode)
+        normalized_mode, normalized_limit, realm=realm, sort=sort)
+    ttl_seconds = landing_player_cache_ttl(canonical_mode)
 
-    if normalized_mode == 'best':
-        def builder(lim): return _build_best_landing_players(lim, realm=realm)
-    elif normalized_mode == 'sigma':
-        def builder(lim): return _build_sigma_landing_players(lim, realm=realm)
-    elif normalized_mode == 'popular':
+    if canonical_mode == 'best':
+        def builder(lim): return _build_best_landing_players(
+            lim, realm=realm, sort=canonical_sort or 'overall')
+    elif canonical_mode == 'popular':
         def builder(lim): return _build_popular_landing_players(
             lim, realm=realm)
     else:
@@ -1546,12 +1784,13 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
     return payload, metadata
 
 
-def get_landing_players_payload(mode: str = 'random', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict]:
+def get_landing_players_payload(mode: str = 'random', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str | None = None) -> list[dict]:
     payload, _ = get_landing_players_payload_with_cache_metadata(
         mode=mode,
         limit=limit,
         force_refresh=force_refresh,
         realm=realm,
+        sort=sort,
     )
     return payload
 
@@ -1636,8 +1875,11 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
 
     surfaces = {
         'players_random': lambda: len(get_landing_players_payload('random', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
-        'players_best': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
-        'players_sigma': lambda: len(get_landing_players_payload('sigma', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
+        'players_best_overall': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='overall')),
+        'players_best_ranked': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='ranked')),
+        'players_best_efficiency': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='efficiency')),
+        'players_best_wr': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='wr')),
+        'players_best_cb': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='cb')),
         'players_popular': lambda: len(get_landing_players_payload('popular', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
         'clans': lambda: len(get_landing_clans_payload(force_refresh=force_refresh, realm=realm)),
         'clans_best_overall': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='overall')),
@@ -1658,6 +1900,8 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
     warmed = {}
     from django.conf import settings
     parallel = getattr(settings, 'LANDING_WARM_PARALLEL', True)
+    if connection.vendor == 'sqlite':
+        parallel = False
     if parallel:
         with ThreadPoolExecutor(max_workers=4) as pool:
             future_to_name = {pool.submit(

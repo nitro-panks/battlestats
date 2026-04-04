@@ -17,6 +17,7 @@ export interface LandingClan {
 
 
 export interface LandingPlayer {
+    player_id?: number;
     name: string;
     pvp_ratio: number | null;
     is_hidden?: boolean;

@@ -183,11 +183,16 @@ const LANDING_FETCH_TTL_MS = 1500;
 
 type LandingClanMode = 'random' | 'best' | 'recent';
 type ClanBestSort = 'overall' | 'wr' | 'cb';
-type LandingPlayerMode = 'random' | 'best' | 'sigma' | 'recent';
+type LandingPlayerMode = 'best' | 'random' | 'recent';
+type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
 
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 
 const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18·Eff + 0.10·Vol_5-10 + 0.06·Ranked + 0.04·Clan) × M_share';
+const PLAYER_BEST_RANKED_FORMULA_APPROXIMATION = 'Ranked ≈ 0.70·Ranked + 0.20·Score + 0.10·WR_5-10';
+const PLAYER_BEST_EFFICIENCY_FORMULA_APPROXIMATION = 'Efficiency ≈ published efficiency percentile, then Score, then WR';
+const PLAYER_BEST_WR_FORMULA_APPROXIMATION = 'WR ≈ WR_5-10, then Battles_5-10, then Score, then Eff';
+const PLAYER_BEST_CB_FORMULA_APPROXIMATION = 'CB ≈ 0.55·CB_WR + 0.25·CB_Volume + 0.20·CB_Seasons';
 const CLAN_BEST_OVERALL_FORMULA_APPROXIMATION = 'Overall ≈ 0.30·WR + 0.25·Activity + 0.20·MemberScore + 0.15·CB + 0.10·log(Battles)';
 const CLAN_BEST_WR_FORMULA_APPROXIMATION = 'WR ≈ WR + 0.40·max(CB_WR - WR, 0)·min(CB_battles/200, 1)·min(Active/25, 1)·min(MemberScore/6, 1)';
 const CLAN_BEST_CB_FORMULA_APPROXIMATION = 'CB ≈ average(last 10 completed season WR × min(season battles/30, 1) × min(season participants/clan members, 1); skipped seasons = 0)';
@@ -206,7 +211,8 @@ const PlayerSearch: React.FC = () => {
     const [clanBestSort, setClanBestSort] = useState<ClanBestSort>('overall');
     const [recentClans, setRecentClans] = useState<LandingClan[]>([]);
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
-    const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('random');
+    const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('best');
+    const [playerBestSort, setPlayerBestSort] = useState<PlayerBestSort>('overall');
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
     const lastSubmittedSearchRef = useRef<string>('');
     const bestLandingWarmupRequestedRef = useRef(false);
@@ -265,12 +271,19 @@ const PlayerSearch: React.FC = () => {
         }
     }, [realm, triggerBestLandingWarmup]);
 
-    const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode) => {
+    const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode, sort: PlayerBestSort = 'overall') => {
         try {
+            const params = new URLSearchParams({
+                mode,
+                limit: String(LANDING_PLAYER_LIMIT),
+            });
+            if (mode === 'best') {
+                params.set('sort', sort);
+            }
             const { data: payload } = await fetchSharedJson<LandingPlayer[]>(
-                withRealm(`/api/landing/players/?mode=${mode}&limit=${LANDING_PLAYER_LIMIT}`, realm),
+                withRealm(`/api/landing/players/?${params.toString()}`, realm),
                 {
-                    label: `Landing players (${mode})`,
+                    label: `Landing players (${mode}${mode === 'best' ? `:${sort}` : ''})`,
                     ttlMs: LANDING_FETCH_TTL_MS,
                 },
             );
@@ -326,8 +339,12 @@ const PlayerSearch: React.FC = () => {
 
     useEffect(() => {
         if (playerMode === 'recent') return;
-        void fetchLandingPlayers(playerMode);
-    }, [fetchLandingPlayers, playerMode]);
+        void fetchLandingPlayers(playerMode, playerMode === 'best' ? playerBestSort : 'overall');
+    }, [fetchLandingPlayers, playerBestSort, playerMode]);
+
+    useEffect(() => {
+        setPlayerBestSort('overall');
+    }, [realm]);
 
     useIntervalRefresh(() => {
         if (clanMode !== 'recent') {
@@ -336,7 +353,9 @@ const PlayerSearch: React.FC = () => {
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
     useIntervalRefresh(() => {
-        if (playerMode !== 'recent') void fetchLandingPlayers(playerMode);
+        if (playerMode !== 'recent') {
+            void fetchLandingPlayers(playerMode, playerMode === 'best' ? playerBestSort : 'overall');
+        }
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
     const fetchPlayerByName = useCallback(async (playerName: string): Promise<PlayerData | null> => {
@@ -400,6 +419,7 @@ const PlayerSearch: React.FC = () => {
 
         return players;
     }, [playerMode, players, recentPlayers]);
+    const showPlayerBestSortBar = playerMode === 'best';
 
     const handleSelectMember = useCallback(async (memberName: string) => {
         router.push(buildPlayerPath(memberName, realm));
@@ -570,14 +590,6 @@ const PlayerSearch: React.FC = () => {
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Players</h3>
                                 <button
                                     type="button"
-                                    onClick={() => setPlayerMode('random')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={playerMode === 'random'}
-                                >
-                                    Random
-                                </button>
-                                <button
-                                    type="button"
                                     onClick={() => setPlayerMode('best')}
                                     className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={playerMode === 'best'}
@@ -586,34 +598,74 @@ const PlayerSearch: React.FC = () => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setPlayerMode('sigma')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'sigma' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={playerMode === 'sigma'}
+                                    onClick={() => { setPlayerMode('random'); setPlayerBestSort('overall'); }}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
+                                    aria-pressed={playerMode === 'random'}
                                 >
-                                    Sigma
+                                    Random
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setPlayerMode('recent')}
+                                    onClick={() => { setPlayerMode('recent'); setPlayerBestSort('overall'); }}
                                     className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={playerMode === 'recent'}
                                 >
                                     Recent
                                 </button>
-                                <div className="group relative inline-flex items-center">
-                                    <button
-                                        type="button"
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-light)] transition-colors hover:bg-[var(--accent-faint)] hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
-                                        aria-label="Best ranking formula details"
-                                    >
-                                        <FontAwesomeIcon icon={faCircleInfo} className="text-sm" aria-hidden="true" />
-                                    </button>
-                                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
-                                        <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Best approximation</p>
-                                        <p className="mt-2 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{BEST_FORMULA_APPROXIMATION}</p>
-                                        <p className="mt-2 leading-5 text-[var(--text-secondary)]">
-                                            Uses tier 5-10 win rate as the anchor, then blends Battlestats score, published efficiency, competitive volume, ranked, and clan battles. Player detail now shows literal KDR separately, but Best still uses the composite score rather than overall KDR directly. Low-tier-heavy profiles are discounted by a competitive-share multiplier.
-                                        </p>
+                            </div>
+                            <div className="mt-1.5 min-h-7 pl-1" data-testid="player-best-sort-bar-shell">
+                                <div
+                                    className={`flex items-center gap-1.5 transition-opacity ${showPlayerBestSortBar ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'}`}
+                                    aria-hidden={!showPlayerBestSortBar}
+                                    data-testid="player-best-sort-bar"
+                                >
+                                    {(['overall', 'ranked', 'efficiency', 'wr', 'cb'] as const).map((sort, i) => (
+                                        <React.Fragment key={sort}>
+                                            {i > 0 && <span className="text-xs text-[var(--text-secondary)]">&middot;</span>}
+                                            <button
+                                                type="button"
+                                                onClick={() => setPlayerBestSort(sort)}
+                                                disabled={!showPlayerBestSortBar}
+                                                tabIndex={showPlayerBestSortBar ? 0 : -1}
+                                                className={`text-sm font-medium transition-colors disabled:cursor-default ${playerBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
+                                            >
+                                                {sort === 'overall' ? 'Overall' : sort === 'ranked' ? 'Ranked' : sort === 'efficiency' ? 'Efficiency' : sort === 'wr' ? 'WR' : 'CB'}
+                                            </button>
+                                        </React.Fragment>
+                                    ))}
+                                    <div className="group relative inline-flex items-center">
+                                        <button
+                                            type="button"
+                                            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-[var(--accent-light)] transition-colors hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
+                                            aria-label="Best player ranking formula details"
+                                        >
+                                            <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
+                                        </button>
+                                        <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
+                                            <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Player ranking approximations</p>
+                                            <div className="mt-3 space-y-3">
+                                                <div>
+                                                    <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Overall</p>
+                                                    <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{BEST_FORMULA_APPROXIMATION}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Ranked</p>
+                                                    <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{PLAYER_BEST_RANKED_FORMULA_APPROXIMATION}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Efficiency</p>
+                                                    <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{PLAYER_BEST_EFFICIENCY_FORMULA_APPROXIMATION}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">WR</p>
+                                                    <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{PLAYER_BEST_WR_FORMULA_APPROXIMATION}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">CB</p>
+                                                    <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{PLAYER_BEST_CB_FORMULA_APPROXIMATION}</p>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

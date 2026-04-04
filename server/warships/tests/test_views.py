@@ -2139,10 +2139,192 @@ class ApiContractTests(TestCase):
         self.assertEqual(response["X-Landing-Players-Cache-Mode"], "best")
         self.assertEqual(
             response["X-Landing-Players-Cache-TTL-Seconds"],
-            "43200",
+            "21600",
         )
         self.assertTrue(response["X-Landing-Players-Cache-Cached-At"])
         self.assertTrue(response["X-Landing-Players-Cache-Expires-At"])
+
+    @patch("warships.views.get_landing_players_payload_with_cache_metadata")
+    def test_landing_best_players_passes_sort_through_to_backend(self, mock_cached_payload):
+        mock_cached_payload.return_value = (
+            [{"name": "SortedPlayer"}],
+            {
+                "ttl_seconds": 21600,
+                "cached_at": "now",
+                "expires_at": "later",
+            },
+        )
+
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=wr&limit=25")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Landing-Players-Cache-Sort"], "wr")
+        mock_cached_payload.assert_called_once_with(
+            mode='best',
+            limit=25,
+            realm='na',
+            sort='wr',
+        )
+
+    def test_landing_best_players_reject_invalid_sort(self):
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=invalid")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {
+            'detail': 'sort must be one of: overall, ranked, efficiency, wr, cb'})
+
+    def test_landing_players_best_ranked_sort_orders_by_ranked_strength(self):
+        cache.clear()
+        today = timezone.now().date()
+        volume_leader = Player.objects.create(
+            name="LandingRankedVolumeLeader",
+            player_id=4391,
+            is_hidden=False,
+            pvp_ratio=55.0,
+            pvp_battles=4200,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 4200, "wins": 2310},
+            ],
+            ranked_json=[
+                {"season_id": 1, "total_battles": 38, "total_wins": 21,
+                    "win_rate": 55.26, "highest_league": 1, "highest_league_name": "Gold"},
+            ],
+        )
+        balanced_runner = Player.objects.create(
+            name="LandingRankedRunnerUp",
+            player_id=4392,
+            is_hidden=False,
+            pvp_ratio=58.0,
+            pvp_battles=4100,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 9, "pvp_battles": 4100, "wins": 2419},
+            ],
+            ranked_json=[
+                {"season_id": 1, "total_battles": 14, "total_wins": 8, "win_rate": 57.14,
+                    "highest_league": 2, "highest_league_name": "Silver"},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=volume_leader,
+            player_score=6.0,
+            latest_ranked_battles=38,
+            highest_ranked_league_recent="Gold",
+        )
+        PlayerExplorerSummary.objects.create(
+            player=balanced_runner,
+            player_score=5.0,
+            latest_ranked_battles=14,
+            highest_ranked_league_recent="Silver",
+        )
+
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=ranked&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:2]],
+            ["LandingRankedVolumeLeader", "LandingRankedRunnerUp"],
+        )
+
+    def test_landing_players_best_wr_sort_orders_by_high_tier_wr(self):
+        cache.clear()
+        today = timezone.now().date()
+        wr_leader = Player.objects.create(
+            name="LandingWrLeader",
+            player_id=4393,
+            is_hidden=False,
+            pvp_ratio=58.0,
+            pvp_battles=4300,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 3000, "wins": 1980},
+                {"ship_tier": 4, "pvp_battles": 1300, "wins": 845},
+            ],
+        )
+        wr_runner = Player.objects.create(
+            name="LandingWrRunner",
+            player_id=4394,
+            is_hidden=False,
+            pvp_ratio=61.0,
+            pvp_battles=4300,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 9, "pvp_battles": 3000, "wins": 1890},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=wr_leader, player_score=5.5)
+        PlayerExplorerSummary.objects.create(
+            player=wr_runner, player_score=8.2)
+
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=wr&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:2]],
+            ["LandingWrLeader", "LandingWrRunner"],
+        )
+        self.assertEqual(response.json()[0]["pvp_ratio"], 66.0)
+
+    def test_landing_players_best_cb_sort_orders_by_cb_profile(self):
+        cache.clear()
+        today = timezone.now().date()
+        cb_leader = Player.objects.create(
+            name="LandingCbLeader",
+            player_id=4395,
+            is_hidden=False,
+            pvp_ratio=57.0,
+            pvp_battles=5000,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 5000, "wins": 2850},
+            ],
+        )
+        cb_runner = Player.objects.create(
+            name="LandingCbRunner",
+            player_id=4396,
+            is_hidden=False,
+            pvp_ratio=60.0,
+            pvp_battles=5000,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 5000, "wins": 2900},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=cb_leader,
+            player_score=4.5,
+            clan_battle_total_battles=180,
+            clan_battle_seasons_participated=6,
+            clan_battle_overall_win_rate=64.0,
+        )
+        PlayerExplorerSummary.objects.create(
+            player=cb_runner,
+            player_score=8.0,
+            clan_battle_total_battles=80,
+            clan_battle_seasons_participated=2,
+            clan_battle_overall_win_rate=58.0,
+        )
+
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=cb&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:2]],
+            ["LandingCbLeader", "LandingCbRunner"],
+        )
 
     def test_landing_clans_expose_cache_expiry_headers(self):
         cache.clear()
@@ -2169,7 +2351,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(response["X-Landing-Clans-Cache-Sort"], "overall")
         self.assertEqual(
             response["X-Landing-Clans-Cache-TTL-Seconds"],
-            "43200",
+            "21600",
         )
         self.assertTrue(response["X-Landing-Clans-Cache-Cached-At"])
         self.assertTrue(response["X-Landing-Clans-Cache-Expires-At"])
@@ -2179,7 +2361,7 @@ class ApiContractTests(TestCase):
         mock_cached_payload.return_value = (
             [{"name": "SortedClan"}],
             {
-                "ttl_seconds": 43200,
+                "ttl_seconds": 21600,
                 "cached_at": "now",
                 "expires_at": "later",
             },
@@ -2205,7 +2387,7 @@ class ApiContractTests(TestCase):
         mock_cached_payload.return_value = (
             [{"name": "CachedClan"}],
             {
-                "ttl_seconds": 43200,
+                "ttl_seconds": 21600,
                 "cached_at": "now",
                 "expires_at": "later",
             },
@@ -2216,7 +2398,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["X-Landing-Clans-Cache-Mode"], "random")
         self.assertEqual(
-            response["X-Landing-Clans-Cache-TTL-Seconds"], "43200")
+            response["X-Landing-Clans-Cache-TTL-Seconds"], "21600")
         self.assertEqual(response["X-Landing-Clans-Cache-Cached-At"], "now")
         self.assertEqual(response["X-Landing-Clans-Cache-Expires-At"], "later")
         self.assertNotIn("X-Landing-Queue-Type", response)
@@ -2251,7 +2433,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get("Content-Encoding"), "gzip")
 
-    def test_landing_players_sigma_mode_orders_by_efficiency_percentile(self):
+    def test_landing_players_best_efficiency_sort_orders_by_efficiency_percentile(self):
         cache.clear()
         now = timezone.now()
         today = now.date()
@@ -2316,7 +2498,8 @@ class ApiContractTests(TestCase):
             efficiency_rank_updated_at=now - timedelta(hours=1),
         )
 
-        response = self.client.get("/api/landing/players/?mode=sigma&limit=40")
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=efficiency&limit=40")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -2324,7 +2507,7 @@ class ApiContractTests(TestCase):
             ["LandingSigmaLeader", "LandingSigmaTieHigh", "LandingSigmaTieLow"],
         )
 
-    def test_landing_players_sigma_mode_excludes_hidden_and_unpublished_players(self):
+    def test_landing_players_best_efficiency_sort_excludes_hidden_and_unpublished_players(self):
         cache.clear()
         now = timezone.now()
         today = now.date()
@@ -2407,7 +2590,8 @@ class ApiContractTests(TestCase):
             efficiency_rank_updated_at=None,
         )
 
-        response = self.client.get("/api/landing/players/?mode=sigma&limit=40")
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=efficiency&limit=40")
 
         self.assertEqual(response.status_code, 200)
         names = [row["name"] for row in response.json()]
@@ -2418,7 +2602,7 @@ class ApiContractTests(TestCase):
         self.assertNotIn("LandingSigmaHidden", names)
         self.assertNotIn("LandingSigmaUnpublished", names)
 
-    def test_landing_players_sigma_mode_caps_results_to_requested_limit(self):
+    def test_landing_players_best_efficiency_sort_caps_results_to_requested_limit(self):
         cache.clear()
         now = timezone.now()
         today = now.date()
@@ -2445,7 +2629,8 @@ class ApiContractTests(TestCase):
                 efficiency_rank_updated_at=now - timedelta(hours=1),
             )
 
-        response = self.client.get("/api/landing/players/?mode=sigma&limit=40")
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=efficiency&limit=40")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()), LANDING_PLAYER_LIMIT)
@@ -2822,13 +3007,25 @@ class ApiContractTests(TestCase):
         self.assertIsNotNone(
             cache.get(landing_player_published_cache_key('random', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
-            cache.get(landing_player_cache_key('best', LANDING_PLAYER_LIMIT)))
+            cache.get(landing_player_cache_key('best', LANDING_PLAYER_LIMIT, sort='overall')))
         self.assertIsNotNone(
-            cache.get(landing_player_published_cache_key('best', LANDING_PLAYER_LIMIT)))
+            cache.get(landing_player_published_cache_key('best', LANDING_PLAYER_LIMIT, sort='overall')))
         self.assertIsNotNone(
-            cache.get(landing_player_cache_key('sigma', LANDING_PLAYER_LIMIT)))
+            cache.get(landing_player_cache_key('best', LANDING_PLAYER_LIMIT, sort='ranked')))
         self.assertIsNotNone(
-            cache.get(landing_player_published_cache_key('sigma', LANDING_PLAYER_LIMIT)))
+            cache.get(landing_player_published_cache_key('best', LANDING_PLAYER_LIMIT, sort='ranked')))
+        self.assertIsNotNone(
+            cache.get(landing_player_cache_key('best', LANDING_PLAYER_LIMIT, sort='efficiency')))
+        self.assertIsNotNone(
+            cache.get(landing_player_published_cache_key('best', LANDING_PLAYER_LIMIT, sort='efficiency')))
+        self.assertIsNotNone(
+            cache.get(landing_player_cache_key('best', LANDING_PLAYER_LIMIT, sort='wr')))
+        self.assertIsNotNone(
+            cache.get(landing_player_published_cache_key('best', LANDING_PLAYER_LIMIT, sort='wr')))
+        self.assertIsNotNone(
+            cache.get(landing_player_cache_key('best', LANDING_PLAYER_LIMIT, sort='cb')))
+        self.assertIsNotNone(
+            cache.get(landing_player_published_cache_key('best', LANDING_PLAYER_LIMIT, sort='cb')))
         self.assertIsNotNone(cache.get(realm_cache_key(
             'na', LANDING_RECENT_PLAYERS_CACHE_KEY)))
 
