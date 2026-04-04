@@ -500,7 +500,7 @@ const PlayerSearch: React.FC = () => {
                                     aria-hidden={!showClanBestSortBar}
                                     data-testid="clan-best-sort-bar"
                                 >
-                                    {(['overall', 'wr', 'cb'] as const).map((sort, i) => (
+                                    {(['overall', 'wr'] as const).map((sort, i) => (
                                         <React.Fragment key={sort}>
                                             {i > 0 && <span className="text-xs text-[var(--text-secondary)]">&middot;</span>}
                                             <button
@@ -510,9 +510,9 @@ const PlayerSearch: React.FC = () => {
                                                 tabIndex={showClanBestSortBar ? 0 : -1}
                                                 className={`text-sm font-medium transition-colors disabled:cursor-default ${clanBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
                                             >
-                                                {sort === 'overall' ? 'Overall' : sort === 'wr' ? 'WR' : 'CB'}
+                                                {sort === 'overall' ? 'Overall' : 'WR'}
                                             </button>
-                                            {sort === 'cb' ? (
+                                            {sort === 'wr' ? (
                                                 <div className="group relative inline-flex items-center">
                                                     <button
                                                         type="button"
@@ -524,7 +524,7 @@ const PlayerSearch: React.FC = () => {
                                                     <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
                                                         <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Clan ranking approximations</p>
                                                         <p className="mt-2 leading-5 text-[var(--text-secondary)]">
-                                                            Hard filters require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. Backend ranking owns all three Best sub-sorts.
+                                                            Hard filters require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. Backend ranking owns both Best sub-sorts.
                                                         </p>
                                                         <div className="mt-3 space-y-3">
                                                             <div>
@@ -534,10 +534,6 @@ const PlayerSearch: React.FC = () => {
                                                             <div>
                                                                 <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">WR</p>
                                                                 <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_WR_FORMULA_APPROXIMATION}</p>
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">CB</p>
-                                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_CB_FORMULA_APPROXIMATION}</p>
                                                             </div>
                                                         </div>
                                                     </div>

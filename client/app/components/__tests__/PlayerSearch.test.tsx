@@ -652,18 +652,8 @@ describe('PlayerSearch landing efficiency icon', () => {
             expect(clanButtons.map((button) => button.getAttribute('title'))).toEqual(['WR1', 'WR2']);
         });
 
-        fireEvent.click(screen.getByRole('button', { name: 'CB' }));
-
-        await waitFor(() => {
-            const clanButtons = screen.getAllByRole('button', { name: /Show clan /i });
-            expect(clanButtons.map((button) => button.getAttribute('title'))).toEqual(['CB1', 'CB2']);
-        });
-
         expect((global.fetch as jest.Mock).mock.calls.some(
             ([url]) => url === '/api/landing/clans?mode=best&limit=30&sort=wr&realm=na',
-        )).toBe(true);
-        expect((global.fetch as jest.Mock).mock.calls.some(
-            ([url]) => url === '/api/landing/clans?mode=best&limit=30&sort=cb&realm=na',
         )).toBe(true);
     });
 
