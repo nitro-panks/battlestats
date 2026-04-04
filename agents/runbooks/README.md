@@ -102,6 +102,7 @@ These stay active only while they still shape implementation or operations:
 - `spec-multi-realm-eu-support.md`
 - `spec-player-route-follow-up-improvements-2026-03-19.md`
 - `spec-production-data-refresh-strategy.md`
+- `spec-serverless-background-workers-2026-04-04.md`: DO Functions architecture for offloading background work (enrichment, crawlers, warmers) from the droplet
 
 ## Archive Rule
 

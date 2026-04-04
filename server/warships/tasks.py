@@ -1188,11 +1188,14 @@ def enrich_player_data_task(self):
         from warships.management.commands.enrich_player_data import enrich_players
 
         batch_size = int(os.getenv("ENRICH_BATCH_SIZE", "500"))
+        realms_env = os.getenv("ENRICH_REALMS", "").strip()
+        realms = tuple(r.strip() for r in realms_env.split(",") if r.strip()) or None
         summary = enrich_players(
             batch=batch_size,
             min_pvp_battles=int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500")),
             min_wr=float(os.getenv("ENRICH_MIN_WR", "48.0")),
             delay=float(os.getenv("ENRICH_DELAY", "0.2")),
+            realms=realms,
             heartbeat_callback=lambda: cache.set(
                 lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT,
             ),

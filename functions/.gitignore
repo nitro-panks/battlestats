@@ -1,0 +1,12 @@
+.nimbella
+.deployed
+__deployer__.zip
+__pycache__/
+node_modules
+package-lock.json
+.DS_Store
+.env
+*.pem
+*.crt
+# Server code is copied at deploy time by deploy.sh
+packages/*/*/server/

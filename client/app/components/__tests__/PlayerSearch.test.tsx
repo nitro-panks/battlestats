@@ -832,7 +832,7 @@ describe('PlayerSearch landing efficiency icon', () => {
             name: 'Clan ranking formula details',
         });
 
-        expect(screen.getByText(/Best_clan ≈ 0\.30·WR \+ 0\.25·Activity \+ 0\.20·MemberScore \+ 0\.15·CB_recency \+ 0\.10·log\(Battles\)/i)).toBeInTheDocument();
+        expect(screen.getByText(/Overall ≈ 0\.30·WR \+ 0\.25·Activity \+ 0\.20·MemberScore \+ 0\.15·CB \+ 0\.10·log\(Battles\)/i)).toBeInTheDocument();
         expect(screen.queryByText(/Current clan cache refreshes in about/i)).not.toBeInTheDocument();
         expect(infoButton).toBeInTheDocument();
     });

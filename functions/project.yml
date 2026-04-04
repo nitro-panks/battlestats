@@ -1,0 +1,37 @@
+packages:
+  - name: battlestats
+    environment:
+      DB_HOST: "${DB_HOST}"
+      DB_PORT: "${DB_PORT}"
+      DB_NAME: "${DB_NAME}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      DB_CA_CERT_B64: "${DB_CA_CERT_B64}"
+    functions:
+      - name: db-test
+        runtime: python:3.12
+        web: true
+        limits:
+          timeout: 30000
+          memory: 256
+
+  - name: enrichment
+    environment:
+      DB_HOST: "${DB_HOST}"
+      DB_PORT: "${DB_PORT}"
+      DB_NAME: "${DB_NAME}"
+      DB_USER: "${DB_USER}"
+      DB_PASSWORD: "${DB_PASSWORD}"
+      DB_CA_CERT_B64: "${DB_CA_CERT_B64}"
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY}"
+      WG_APP_ID: "${WG_APP_ID}"
+      ENRICH_REALMS: "${ENRICH_REALMS}"
+      ENRICH_BATCH_SIZE: "${ENRICH_BATCH_SIZE}"
+      ENRICH_TIMEOUT_S: "${ENRICH_TIMEOUT_S}"
+    functions:
+      - name: enrich-batch
+        runtime: python:3.12
+        web: true
+        limits:
+          timeout: 900000
+          memory: 1024

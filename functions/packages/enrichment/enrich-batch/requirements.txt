@@ -1,0 +1,14 @@
+django==5.1.15
+djangorestframework==3.16.1
+django-cors-headers==4.9.0
+django-celery-beat==2.9.0
+django-dotenv==1.4.2
+django-timezone-field==7.2.1
+celery==5.4.0
+psycopg2-binary==2.9.9
+requests==2.33.0
+redis==5.0.8
+python-crontab==3.2.0
+pytz==2024.1
+tzdata==2024.1
+sqlparse==0.5.4

@@ -976,6 +976,33 @@
                 "spec-superseded"
             ]
         },
+        "agents/runbooks/spec-serverless-background-workers-2026-04-04.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "architecture",
+            "owner": "platform",
+            "aliases": [
+                "serverless functions",
+                "DO functions",
+                "background worker offload",
+                "lambda pattern"
+            ],
+            "tags": [
+                "serverless",
+                "digitalocean functions",
+                "architecture",
+                "enrichment",
+                "warmers",
+                "crawlers",
+                "celery",
+                "background queue"
+            ],
+            "archive_on": [
+                "architecture-superseded",
+                "migration-complete"
+            ]
+        },
         "agents/runbooks/spec-github-build-status-badge.md": {
             "kind": "spec",
             "status": "active",

@@ -74,6 +74,27 @@ DEPLOY_AGENTIC_RUNTIME=1 ./server/deploy/deploy_to_droplet.sh battlestats.online
 
 Backend deploy defaults to the core site runtime only. Base dependencies install from `server/requirements.txt`; agentic extras install from `server/requirements-agentic.txt` only when `DEPLOY_AGENTIC_RUNTIME=1`.
 
+### Operations
+
+```bash
+./server/scripts/check_enrichment_crawler.sh [host]  # Enrichment crawler status (default: battlestats.online)
+```
+
+Single SSH call to the droplet. Reports worker health (memory/swap/CPU/uptime/OOM risk), Redis lock state, batch history + throughput + ETA, errors (enrichment/WorkerLost/SIGTERM/SIGKILL), live progress, clan crawl interference, and periodic task state. See `agents/runbooks/runbook-enrichment-crawler-2026-04-03.md` for the progress log.
+
+### DigitalOcean Functions (serverless background workers)
+
+```bash
+bash functions/deploy.sh                              # Deploy all functions (copies server code, builds, deploys)
+bash functions/deploy.sh --include enrichment/enrich-batch  # Deploy specific function
+./functions/invoke-enrichment.sh                       # Trigger enrichment (async)
+./functions/invoke-enrichment.sh --wait                # Trigger enrichment (wait for result)
+doctl serverless functions invoke battlestats/db-test  # DB connectivity test
+doctl serverless activations result <activation-id>    # Check invocation result
+```
+
+Background enrichment runs as a DO Function (`enrichment/enrich-batch`) instead of a Celery background task. Each invocation boots Django, loops through multiple 500-player batches for up to ~14 minutes, then exits. Namespace: `fn-8a3da3a9-0287-49e0-ab78-1bec319a6de7` in `nyc1`. See `agents/runbooks/spec-serverless-background-workers-2026-04-04.md` for architecture and migration plan.
+
 ### Releases
 
 ```bash
@@ -237,6 +258,7 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
 - `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)
+- `ENRICH_REALMS` — Comma-separated realm list for enrichment crawler (e.g. `na`, `na,eu`). Empty or unset means all realms
 
 ### Client env
 
