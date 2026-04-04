@@ -2621,8 +2621,8 @@ def update_activity_data(player_id: int, realm: str = DEFAULT_REALM) -> None:
 
 LEAGUE_NAMES = {1: 'Gold', 2: 'Silver', 3: 'Bronze'}
 
-PLAYER_DISTRIBUTION_CACHE_TTL = 7200  # 2 hours
-PLAYER_CORRELATION_CACHE_TTL = 7200  # 2 hours
+PLAYER_DISTRIBUTION_CACHE_TTL = 43200  # 12 hours
+PLAYER_CORRELATION_CACHE_TTL = 43200  # 12 hours
 PLAYER_DISTRIBUTION_CONFIGS = {
     'win_rate': {
         'label': 'Win Rate',
@@ -2839,6 +2839,10 @@ def _player_distribution_cache_key(metric: str, realm: str = DEFAULT_REALM) -> s
     return realm_cache_key(realm, f'players:distribution:v2:{metric}')
 
 
+def _player_distribution_published_cache_key(metric: str, realm: str = DEFAULT_REALM) -> str:
+    return f'{_player_distribution_cache_key(metric, realm=realm)}:published'
+
+
 def _player_correlation_cache_key(metric: str, realm: str = DEFAULT_REALM) -> str:
     return realm_cache_key(realm, f'players:correlation:v2:{metric}')
 
@@ -2953,9 +2957,16 @@ def fetch_player_population_distribution(metric: str, realm: str = DEFAULT_REALM
         raise ValueError(f'Unsupported player distribution metric: {metric}')
 
     cache_key = _player_distribution_cache_key(metric, realm=realm)
+    published_cache_key = _player_distribution_published_cache_key(metric, realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
+
+    # Fall back to durable published copy to avoid expensive table scans
+    # in gunicorn workers when the primary cache expires between warmer runs.
+    published = cache.get(published_cache_key)
+    if published is not None:
+        return published
 
     field_name = config['field_name']
     try:
@@ -2998,6 +3009,7 @@ def fetch_player_population_distribution(metric: str, realm: str = DEFAULT_REALM
     }
 
     cache.set(cache_key, payload, PLAYER_DISTRIBUTION_CACHE_TTL)
+    cache.set(published_cache_key, payload, timeout=None)
     return payload
 
 

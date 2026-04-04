@@ -38,6 +38,8 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 LANDING_PAGE_WARM_LOCK_TIMEOUT = 20 * 60
 LANDING_PAGE_WARM_DISPATCH_TIMEOUT = 5 * 60
+DISTRIBUTION_WARM_LOCK_TIMEOUT = 15 * 60
+CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60
 HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_DISPATCH_TIMEOUT = 5 * 60
@@ -80,6 +82,14 @@ def _landing_page_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
 
 def _landing_page_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_landing_page_content:{realm}:dispatch"
+
+
+def _distribution_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_player_distributions:{realm}:lock"
+
+
+def _correlation_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_player_correlations:{realm}:lock"
 
 
 def _hot_entity_cache_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -758,22 +768,52 @@ def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REAL
             realm=realm,
         )
         logger.info("Finished warm_landing_page_content_task: %s", result)
-
-        from warships.data import warm_player_correlations, warm_player_distributions
-        logger.info("Warming player distribution caches...")
-        dist_result = warm_player_distributions(realm=realm)
-        logger.info("Player distribution warm complete: %s", dist_result)
-        result['distributions'] = dist_result
-
-        logger.info("Warming player correlation caches...")
-        corr_result = warm_player_correlations(realm=realm)
-        logger.info("Player correlation warm complete: %s", corr_result)
-        result['correlations'] = corr_result
-
         return result
     finally:
         cache.delete(lock_key)
         cache.delete(_landing_page_warm_dispatch_key(realm))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_player_distributions_task(self, realm=DEFAULT_REALM):
+    from warships.data import warm_player_distributions
+
+    logger.info("Starting warm_player_distributions_task realm=%s", realm)
+
+    lock_key = _distribution_warm_lock_key(realm)
+    if not cache.add(lock_key, self.request.id, timeout=DISTRIBUTION_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_player_distributions_task because another distribution warm is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        result = warm_player_distributions(realm=realm)
+        logger.info("Finished warm_player_distributions_task: %s", result)
+        return result
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_player_correlations_task(self, realm=DEFAULT_REALM):
+    from warships.data import warm_player_correlations
+
+    logger.info("Starting warm_player_correlations_task realm=%s", realm)
+
+    lock_key = _correlation_warm_lock_key(realm)
+    if not cache.add(lock_key, self.request.id, timeout=CORRELATION_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_player_correlations_task because another correlation warm is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        result = warm_player_correlations(realm=realm)
+        logger.info("Finished warm_player_correlations_task: %s", result)
+        return result
+    finally:
+        cache.delete(lock_key)
 
 
 @app.task(bind=True, **TASK_OPTS)

@@ -279,6 +279,8 @@ CELERY_TASK_ROUTES = {
     'warships.tasks.warm_clan_battle_summaries_task': {'queue': 'background'},
     'warships.tasks.warm_all_clan_tier_distributions_task': {'queue': 'background'},
     'warships.tasks.warm_player_ranked_wr_battles_correlation_task': {'queue': 'background'},
+    'warships.tasks.warm_player_distributions_task': {'queue': 'background'},
+    'warships.tasks.warm_player_correlations_task': {'queue': 'background'},
     'warships.tasks.refill_landing_random_players_queue_task': {'queue': 'background'},
     'warships.tasks.refill_landing_random_clans_queue_task': {'queue': 'background'},
     'warships.tasks.bulk_load_entity_caches_task': {'queue': 'background'},
