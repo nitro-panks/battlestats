@@ -9,18 +9,7 @@ from django.dispatch import receiver
 from warships.models import VALID_REALMS
 
 # Per-realm cron hour offsets for staggering heavy tasks.
-# Prevents concurrent full crawls from competing for worker memory.
 REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}
-REALM_REFRESH_AM_OFFSETS = {'eu': 0, 'na': 2, 'asia': 4}
-REALM_REFRESH_PM_OFFSETS = {'eu': 0, 'na': 2, 'asia': 4}
-REALM_RANKED_OFFSETS = {'eu': 0, 'na': 1, 'asia': 2}
-
-
-def _env_flag(name: str, default: bool) -> bool:
-    raw_value = os.getenv(name)
-    if raw_value is None:
-        return default
-    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _configured_clan_battle_warm_ids():
@@ -28,142 +17,43 @@ def _configured_clan_battle_warm_ids():
     return [clan_id.strip() for clan_id in raw_value.split(",") if clan_id.strip()]
 
 
+# Tasks migrated to DO Functions (no longer registered as Celery Beat schedules):
+#   - daily-clan-crawl-{realm}        → Functions Phase 2
+#   - clan-crawl-watchdog-{realm}     → Functions Phase 2
+#   - player-enrichment-kickstart     → Functions enrichment/enrich-batch
+#   - incremental-player-refresh-*    → Functions Phase 2
+#   - daily-ranked-incrementals-*     → Functions Phase 2
+_RETIRED_SCHEDULE_NAMES = [
+    "daily-clan-crawl",
+    "daily-clan-crawl-eu",
+    "daily-clan-crawl-na",
+    "clan-crawl-watchdog",
+    "clan-crawl-watchdog-eu",
+    "clan-crawl-watchdog-na",
+    "player-enrichment-kickstart",
+    "daily-player-enrichment",
+    "player-enrichment",
+    "incremental-player-refresh-am",
+    "incremental-player-refresh-am-eu",
+    "incremental-player-refresh-am-na",
+    "incremental-player-refresh-pm",
+    "incremental-player-refresh-pm-eu",
+    "incremental-player-refresh-pm-na",
+    "daily-ranked-incrementals",
+    "daily-ranked-incrementals-eu",
+    "daily-ranked-incrementals-na",
+]
+
+
 @receiver(post_migrate)
-def ensure_daily_clan_crawl_schedule(sender, **kwargs):
+def register_periodic_schedules(sender, **kwargs):
     if getattr(sender, "name", None) != "warships":
         return
 
     from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
-    crawler_schedules_enabled = _env_flag("ENABLE_CRAWLER_SCHEDULES", False)
-
-    base_hour = int(os.getenv("CLAN_CRAWL_SCHEDULE_HOUR", "3"))
-    minute = os.getenv("CLAN_CRAWL_SCHEDULE_MINUTE", "0")
-
-    for realm in sorted(VALID_REALMS):
-        realm_hour = (base_hour + REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
-        schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute=minute,
-            hour=str(realm_hour),
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"daily-clan-crawl-{realm}",
-            defaults={
-                "task": "warships.tasks.crawl_all_clans_task",
-                "crontab": schedule,
-                "enabled": crawler_schedules_enabled,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"resume": False, "realm": realm}),
-                "description": f"Daily full crawl of clans and players from the Wargaming API ({realm.upper()}).",
-            },
-        )
-
-    # Clean up legacy non-realm schedule
-    PeriodicTask.objects.filter(name="daily-clan-crawl").delete()
-
-    # -- Incremental Player Refresh (AM + PM) --
-    base_am_hour = int(os.getenv("PLAYER_REFRESH_SCHEDULE_HOUR_AM", "5"))
-    base_pm_hour = int(os.getenv("PLAYER_REFRESH_SCHEDULE_HOUR_PM", "15"))
-
-    for realm in sorted(VALID_REALMS):
-        am_hour = (base_am_hour + REALM_REFRESH_AM_OFFSETS.get(realm, 0)) % 24
-        player_am_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute="0",
-            hour=str(am_hour),
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"incremental-player-refresh-am-{realm}",
-            defaults={
-                "task": "warships.tasks.incremental_player_refresh_task",
-                "crontab": player_am_schedule,
-                "enabled": crawler_schedules_enabled,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Morning incremental refresh of active player data ({realm.upper()}).",
-            },
-        )
-
-    PeriodicTask.objects.filter(name="incremental-player-refresh-am").delete()
-
-    for realm in sorted(VALID_REALMS):
-        pm_hour = (base_pm_hour + REALM_REFRESH_PM_OFFSETS.get(realm, 0)) % 24
-        player_pm_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute="0",
-            hour=str(pm_hour),
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"incremental-player-refresh-pm-{realm}",
-            defaults={
-                "task": "warships.tasks.incremental_player_refresh_task",
-                "crontab": player_pm_schedule,
-                "enabled": crawler_schedules_enabled,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Afternoon incremental refresh of active player data ({realm.upper()}).",
-            },
-        )
-
-    PeriodicTask.objects.filter(name="incremental-player-refresh-pm").delete()
-
-    base_ranked_hour = int(os.getenv("RANKED_INCREMENTAL_SCHEDULE_HOUR", "10"))
-    ranked_minute = os.getenv("RANKED_INCREMENTAL_SCHEDULE_MINUTE", "30")
-
-    for realm in sorted(VALID_REALMS):
-        ranked_hour = (base_ranked_hour + REALM_RANKED_OFFSETS.get(realm, 0)) % 24
-        ranked_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute=ranked_minute,
-            hour=str(ranked_hour),
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"daily-ranked-incrementals-{realm}",
-            defaults={
-                "task": "warships.tasks.incremental_ranked_data_task",
-                "crontab": ranked_schedule,
-                "enabled": crawler_schedules_enabled,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Daily incremental refresh of ranked history ({realm.upper()}).",
-            },
-        )
-
-    PeriodicTask.objects.filter(name="daily-ranked-incrementals").delete()
-
-    watchdog_minutes = int(os.getenv("CLAN_CRAWL_WATCHDOG_MINUTES", "5"))
-    watchdog_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=watchdog_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
-
-    for realm in sorted(VALID_REALMS):
-        PeriodicTask.objects.update_or_create(
-            name=f"clan-crawl-watchdog-{realm}",
-            defaults={
-                "task": "warships.tasks.ensure_crawl_all_clans_running_task",
-                "interval": watchdog_schedule,
-                "enabled": crawler_schedules_enabled,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Checks for stale clan-crawl lock and resumes interrupted crawls ({realm.upper()}).",
-            },
-        )
-
-    PeriodicTask.objects.filter(name="clan-crawl-watchdog").delete()
+    # Remove retired schedules (migrated to DO Functions)
+    PeriodicTask.objects.filter(name__in=_RETIRED_SCHEDULE_NAMES).delete()
 
     warm_clan_ids = _configured_clan_battle_warm_ids()
     if warm_clan_ids:
@@ -188,7 +78,7 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         PeriodicTask.objects.filter(
             name="clan-battle-summary-warmer").update(enabled=False)
 
-    landing_warm_minutes = int(os.getenv("LANDING_PAGE_WARM_MINUTES", "55"))
+    landing_warm_minutes = int(os.getenv("LANDING_PAGE_WARM_MINUTES", "120"))
     landing_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
         every=landing_warm_minutes,
         period=IntervalSchedule.MINUTES,
@@ -208,6 +98,46 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         )
 
     PeriodicTask.objects.filter(name="landing-page-warmer").delete()
+
+    # -- Player Distribution Warmer (split from landing warmer) --
+    dist_warm_minutes = int(os.getenv("DISTRIBUTION_WARM_MINUTES", "360"))
+    dist_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=dist_warm_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"player-distribution-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_player_distributions_task",
+                "interval": dist_warm_schedule,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Refreshes player distribution caches — MV refresh + WR/battles/survival bins ({realm.upper()}).",
+            },
+        )
+
+    # -- Player Correlation Warmer (split from landing warmer) --
+    corr_warm_minutes = int(os.getenv("CORRELATION_WARM_MINUTES", "360"))
+    corr_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=corr_warm_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"player-correlation-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_player_correlations_task",
+                "interval": corr_warm_schedule,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Refreshes player population correlations — tier-type, WR-survival, ranked WR-battles ({realm.upper()}).",
+            },
+        )
 
     hot_entity_warm_minutes = int(
         os.getenv("HOT_ENTITY_CACHE_WARM_MINUTES", "30"))
@@ -300,27 +230,3 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
             },
         )
 
-    # -- Continuous Player Enrichment Crawler --
-    # The task self-chains (re-dispatches after each batch), so this schedule
-    # is just a safety net that re-kicks the chain every 2 hours in case it
-    # stopped (deploy, worker restart, transient failure).  The task's own
-    # lock prevents duplicate runs.
-    enrich_kickstart_minutes = int(os.getenv("ENRICH_KICKSTART_MINUTES", "120"))
-    enrich_kickstart_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=enrich_kickstart_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
-    PeriodicTask.objects.update_or_create(
-        name="player-enrichment-kickstart",
-        defaults={
-            "task": "warships.tasks.enrich_player_data_task",
-            "interval": enrich_kickstart_schedule,
-            "enabled": crawler_schedules_enabled,
-            "args": json.dumps([]),
-            "kwargs": json.dumps({}),
-            "description": "Safety-net kickstart for continuous player enrichment (self-chains; lock prevents duplicates).",
-        },
-    )
-    # Clean up old schedule names
-    PeriodicTask.objects.filter(name="daily-player-enrichment").delete()
-    PeriodicTask.objects.filter(name="player-enrichment").delete()

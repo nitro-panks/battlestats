@@ -1,7 +1,7 @@
 # Spec: Serverless Background Workers via DigitalOcean Functions
 
 Created: 2026-04-04
-Status: **Phase 1 Complete** — enrichment function deployed and validated
+Status: **Phase 1 Running** — enrichment function deployed, validated, and running autonomously via cron
 
 ## Problem
 
@@ -217,6 +217,59 @@ Warmers currently write directly to Redis cache keys. Options:
 | Projected full NA pass (54,508 remaining) | ~22 invocations = ~5.5h |
 | Projected monthly cost | ~$5-8 (with warmers in Phase 2) |
 
+## Current Operational State (as of 2026-04-04 ~20:00 UTC)
+
+### Enrichment cron
+
+| Parameter | Value |
+|---|---|
+| Schedule | `*/15 * * * *` (droplet crontab) |
+| Invoke method | `doctl serverless functions invoke enrichment/enrich-batch --no-wait` |
+| Concurrency guard | Lock file `/tmp/enrichment-invoke.lock` (780s TTL) |
+| Cron log | `/var/log/enrichment-cron.log` on droplet (auto-trimmed to 500 lines) |
+| Script | `/usr/local/bin/invoke-enrichment.sh` on droplet |
+
+### doctl on the droplet
+
+`doctl` v1.154.0 installed via snap on the droplet. Authenticated with the DO API token and connected to the `battlestats` Functions namespace. Required for cron-based invocation (HTTP endpoint does not support fire-and-forget for long-running functions).
+
+### NA enrichment progress
+
+| Metric | Value |
+|---|---|
+| NA eligible players | 74,490 |
+| NA enriched (battles_json) | 21,203 |
+| NA remaining | 53,287 |
+| Progress | 28.5% |
+| Cron invocations dispatched | 10 (since 18:10 UTC) |
+| All invocations | status=ok, ~724-895s each |
+| Projected completion | ~2026-04-05 01:15 UTC (~5.3h from 20:00 UTC) |
+
+### Celery state on droplet
+
+All 23 periodic tasks remain suspended in django-celery-beat. The background Celery worker is running but idle (no tasks dispatched to it). The enrichment Celery task (`enrich_player_data_task`) is not running — the Function has fully replaced it for the NA pass.
+
+`ENRICH_REALMS=na` is still set in `/etc/battlestats-server.env` but is now irrelevant since the Function reads its own `.env`.
+
+### What to do after NA completes
+
+1. **Switch to EU enrichment:**
+   - Edit `functions/.env`: change `ENRICH_REALMS=na` to `ENRICH_REALMS=eu`
+   - Redeploy: `bash functions/deploy.sh --include enrichment/enrich-batch`
+   - The cron continues as-is — it will now enrich EU players
+   - Monitor via `doctl serverless functions invoke battlestats/db-test` (update the query to check EU)
+
+2. **After EU completes — re-enable periodic tasks:**
+   - Remove `ENRICH_REALMS` from `functions/.env` (or set to empty for all realms)
+   - Re-enable the 23 suspended periodic tasks (see suspended task list in `runbook-enrichment-crawler-2026-04-03.md`)
+   - OR proceed to Phase 2 (migrate warmers to Functions) before re-enabling
+   - Restart the background Celery worker
+
+3. **Optional — disable Celery enrichment permanently:**
+   - Remove the `player-enrichment-kickstart` periodic task
+   - The Function + cron replaces it entirely
+   - Keep the Celery task code for fallback but don't schedule it
+
 ### Phase 2: Remove background Celery worker
 
 - [ ] Migrate remaining background tasks to Functions (warmers, crawlers)
@@ -273,6 +326,53 @@ doctl serverless functions list
 # Get function URL
 doctl serverless functions get enrichment/enrich-batch --url
 
-# Check DB connectivity
+# Check DB connectivity and enrichment progress
 doctl serverless functions invoke battlestats/db-test
+
+# Check cron log on droplet
+ssh root@battlestats.online "cat /var/log/enrichment-cron.log"
+
+# List completed activations
+doctl serverless activations list enrichment/enrich-batch --limit 10
+
+# Switch enrichment to EU after NA completes
+# 1. Edit functions/.env: ENRICH_REALMS=eu
+# 2. bash functions/deploy.sh --include enrichment/enrich-batch
 ```
+
+## Next Steps (prioritized)
+
+### Immediate (while NA enrichment runs autonomously)
+
+1. **Monitor cron health** — check `/var/log/enrichment-cron.log` periodically; verify activations complete with status=ok
+2. **Track NA completion** — when `db-test` shows `na_remaining = 0`, switch to EU
+
+### After NA enrichment completes (~2026-04-05 01:15 UTC)
+
+3. **Switch to EU** — update `.env`, redeploy, update `db-test` to query EU progress
+4. **Update `db-test` function** — add EU eligible/enriched counts alongside NA for monitoring both realms
+
+### After all enrichment completes
+
+5. **Decide on warmers** — either:
+   - (a) Re-enable periodic tasks on Celery and accept the memory pressure, OR
+   - (b) Proceed to Phase 2: migrate warmers to Functions (recommended)
+6. **If Phase 2:** start with `warm-landing` function (highest memory consumer, biggest benefit from offloading)
+7. **DB firewall** — add trusted sources to managed Postgres (currently open to all; should restrict to droplet IP + Functions egress IPs)
+8. **Evaluate `doctl` deprecation warning** — the `doctl serverless connect` command shows a deprecation notice for API-based namespace connection; migrate to access-key-based auth before it's removed
+
+### Phase 2 candidates (by impact)
+
+| Function | Memory Impact | Frequency | Migration Complexity |
+|---|---|---|---|
+| `warm-landing` | 1G+ peak, triggers OOM | Every 55 min | Medium — needs Redis write access |
+| `warm-hot-entities` | 512MB peak | Every 30 min | Medium — needs Redis write access |
+| `warm-distributions` | 1G peak | Every 2h | Medium — needs Redis write access |
+| `clan-crawl-eu/na` | 512MB-1G | Daily | Low — only writes to Postgres |
+| `bulk-entity-loader` | 512MB | Every 12h | Medium — needs Redis write access |
+| `ranked-incrementals` | 256MB | Daily | Low — only writes to Postgres |
+| `player-refresh` | 256MB | Daily (AM+PM) | Low — only writes to Postgres |
+
+**Redis blocker for warmers:** warmers write directly to Redis cache keys. Moving them to Functions requires either (a) managed Redis with public endpoint (~$15/month), (b) write-to-Postgres pattern with lazy Redis fill on the serving side, or (c) tunneled Redis access. Decision deferred until enrichment is complete.
+
+**No-Redis candidates** (clan-crawl, ranked-incrementals, player-refresh) could be migrated immediately after enrichment, further reducing droplet background load without solving the Redis question.
