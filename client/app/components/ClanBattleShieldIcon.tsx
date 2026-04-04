@@ -8,18 +8,27 @@ const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]', search: 'text-xs'
 interface ClanBattleShieldIconProps {
     winRate: number | null;
     size?: keyof typeof SIZE_CLASS;
+    titleText?: string;
+    ariaLabel?: string;
+    color?: string;
 }
 
-const ClanBattleShieldIcon: React.FC<ClanBattleShieldIconProps> = ({ winRate, size = 'header' }) => (
+const ClanBattleShieldIcon: React.FC<ClanBattleShieldIconProps> = ({
+    winRate,
+    size = 'header',
+    titleText,
+    ariaLabel,
+    color,
+}) => (
     <span
-        title={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer · ${winRate.toFixed(1)}% WR`}
-        aria-label={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer ${winRate.toFixed(1)} percent WR`}
+        title={titleText ?? (winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer · ${winRate.toFixed(1)}% WR`)}
+        aria-label={ariaLabel ?? (winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer ${winRate.toFixed(1)} percent WR`)}
         className="inline-flex items-center cursor-help"
     >
         <FontAwesomeIcon
             icon={faShieldHalved}
             className={SIZE_CLASS[size]}
-            style={{ color: wrColor(winRate) }}
+            style={{ color: color ?? wrColor(winRate) }}
             aria-hidden="true"
         />
     </span>

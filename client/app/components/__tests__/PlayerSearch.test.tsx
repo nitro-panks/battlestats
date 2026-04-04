@@ -586,6 +586,43 @@ describe('PlayerSearch landing efficiency icon', () => {
         expect(screen.getByTestId('landing-clan-svg')).toHaveAttribute('data-clan-count', '3');
     });
 
+    it('renders the clan battle enjoyers badge from the backend-owned clan payload flag', async () => {
+        installFetchMock({
+            clansByBestSort: {
+                overall: [
+                    {
+                        clan_id: 905,
+                        name: 'CB Active Clan',
+                        tag: 'CBAC',
+                        members_count: 40,
+                        clan_wr: 56.0,
+                        total_battles: 180000,
+                        active_members: 18,
+                        is_clan_battle_active: true,
+                    },
+                    {
+                        clan_id: 906,
+                        name: 'Quiet Clan',
+                        tag: 'QUIET',
+                        members_count: 40,
+                        clan_wr: 54.0,
+                        total_battles: 175000,
+                        active_members: 17,
+                        is_clan_battle_active: false,
+                    },
+                ],
+            },
+        });
+
+        render(<PlayerSearch />);
+
+        const activeClanButton = await screen.findByRole('button', { name: /Show clan CB Active Clan/i });
+        const quietClanButton = screen.getByRole('button', { name: /Show clan Quiet Clan/i });
+
+        expect(within(activeClanButton).getByLabelText(/clan battle enjoyers/i)).toBeInTheDocument();
+        expect(within(quietClanButton).queryByLabelText(/clan battle enjoyers/i)).not.toBeInTheDocument();
+    });
+
     it('requests backend-owned clan best sub-sorts and renders returned order directly', async () => {
         installFetchMock({
             clansByBestSort: {

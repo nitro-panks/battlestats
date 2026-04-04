@@ -2799,8 +2799,7 @@ def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
-                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -3205,6 +3204,10 @@ def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -
         cache.set(published_cache_key, cached, timeout=None)
         return cached
 
+    published = cache.get(published_cache_key)
+    if published is not None:
+        return published
+
     config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
     tile_counts: dict[tuple[str, int], int] = {}
     trend_tier_weighted_sum: dict[str, float] = {}
@@ -3356,6 +3359,10 @@ def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
         cache.set(published_cache_key, cached, timeout=None)
         return cached
 
+    published = cache.get(published_cache_key)
+    if published is not None:
+        return published
+
     config = PLAYER_WR_SURVIVAL_CORRELATION_CONFIG
     x_min = config['x_min']
     x_max = config['x_max']
@@ -3478,6 +3485,10 @@ def _fetch_player_ranked_wr_battles_population_correlation(realm: str = DEFAULT_
     if cached is not None:
         cache.set(published_cache_key, cached, timeout=None)
         return cached
+
+    published = cache.get(published_cache_key)
+    if published is not None:
+        return published
 
     payload = _build_player_ranked_wr_battles_population_correlation_payload(
         realm=realm)
@@ -5134,6 +5145,17 @@ BEST_CLAN_CB_WINDOW_COMPLETED_SEASONS = 10
 BEST_CLAN_CB_WINDOW_SEASON_BATTLES_TARGET = 30
 BEST_CLAN_CB_WINDOW_SHORTLIST_MULTIPLIER = 4
 BEST_CLAN_CB_WINDOW_SHORTLIST_MAX = 120
+CLAN_BATTLE_ACTIVITY_BADGE_WINDOW_DAYS = 365 * 3
+CLAN_BATTLE_ACTIVITY_BADGE_MIN_SEASON_BATTLES = 20
+CLAN_BATTLE_ACTIVITY_BADGE_MIN_PARTICIPANTS = 4
+CLAN_BATTLE_ACTIVITY_BADGE_MIN_SEASON_PARTICIPATION_SHARE = 0.12
+CLAN_BATTLE_ACTIVITY_BADGE_MIN_WEIGHTED_ACTIVE_SHARE = 0.25
+CLAN_BATTLE_ACTIVITY_BADGE_MIN_WEIGHTED_PARTICIPATION_SHARE = 0.05
+CLAN_BATTLE_ACTIVITY_BADGE_RECENCY_WEIGHTS = (
+    (365, 1.0),
+    (365 * 2, 0.6),
+    (365 * 3, 0.35),
+)
 BEST_CLAN_SORTS = ('overall', 'wr', 'cb')
 
 
@@ -5176,6 +5198,149 @@ def _get_best_clan_cb_window_season_ids(reference_date: Optional[date] = None) -
         season_id
         for _end_date, _start_date, season_id in completed_seasons[:BEST_CLAN_CB_WINDOW_COMPLETED_SEASONS]
     ]
+
+
+def _clan_battle_activity_badge_weight(age_days: int) -> float:
+    for max_age_days, weight in CLAN_BATTLE_ACTIVITY_BADGE_RECENCY_WEIGHTS:
+        if age_days <= max_age_days:
+            return weight
+    return 0.0
+
+
+def _get_clan_battle_activity_badge_window(reference_date: Optional[date] = None) -> list[tuple[int, float, int]]:
+    target_date = reference_date or django_timezone.now().date()
+    season_window: list[tuple[int, float, int]] = []
+
+    for season_id, meta in _get_clan_battle_seasons_metadata().items():
+        end_date = _parse_clan_battle_meta_date(meta.get('end_date'))
+        if end_date is None or end_date > target_date:
+            continue
+
+        age_days = max((target_date - end_date).days, 0)
+        if age_days > CLAN_BATTLE_ACTIVITY_BADGE_WINDOW_DAYS:
+            continue
+
+        weight = _clan_battle_activity_badge_weight(age_days)
+        if weight <= 0:
+            continue
+
+        season_window.append((int(season_id), weight, age_days))
+
+    season_window.sort(key=lambda item: item[2])
+    return season_window
+
+
+def summarize_clan_battle_activity_badge(
+    season_rows: Any,
+    total_members: int = 0,
+    reference_date: Optional[date] = None,
+) -> dict[str, float | int | bool]:
+    season_window = _get_clan_battle_activity_badge_window(reference_date)
+    if not season_window:
+        return {
+            'is_clan_battle_active': False,
+            'cb_activity_recent_active_seasons': 0,
+            'cb_activity_total_active_seasons': 0,
+            'cb_activity_weighted_active_share': 0.0,
+            'cb_activity_weighted_participation_share': 0.0,
+        }
+
+    targeted_ids = {season_id for season_id,
+                    _weight, _age_days in season_window}
+    season_battles_by_id: dict[int, int] = {}
+    season_participants_by_id: dict[int, int] = {}
+
+    for row in season_rows or []:
+        try:
+            season_id = int(row.get('season_id') or 0)
+        except (TypeError, ValueError):
+            continue
+
+        if season_id not in targeted_ids:
+            continue
+
+        battles = int(row.get('roster_battles', row.get('battles', 0)) or 0)
+        participants = int(row.get('participants', 0) or 0)
+        if battles <= 0 or participants <= 0:
+            continue
+
+        season_battles_by_id[season_id] = battles
+        season_participants_by_id[season_id] = participants
+
+    total_window_weight = sum(weight for _season_id,
+                              weight, _age_days in season_window)
+    if total_window_weight <= 0:
+        return {
+            'is_clan_battle_active': False,
+            'cb_activity_recent_active_seasons': 0,
+            'cb_activity_total_active_seasons': 0,
+            'cb_activity_weighted_active_share': 0.0,
+            'cb_activity_weighted_participation_share': 0.0,
+        }
+
+    weighted_active = 0.0
+    weighted_participation = 0.0
+    recent_active_seasons = 0
+    total_active_seasons = 0
+    member_floor = max(int(total_members or 0), 1)
+
+    for season_id, weight, age_days in season_window:
+        battles = season_battles_by_id.get(season_id, 0)
+        participants = season_participants_by_id.get(season_id, 0)
+        denominator = max(member_floor, participants, 1)
+        participation_share = min(participants / denominator, 1.0)
+        season_is_active = (
+            battles >= CLAN_BATTLE_ACTIVITY_BADGE_MIN_SEASON_BATTLES
+            and participants >= CLAN_BATTLE_ACTIVITY_BADGE_MIN_PARTICIPANTS
+            and participation_share >= CLAN_BATTLE_ACTIVITY_BADGE_MIN_SEASON_PARTICIPATION_SHARE
+        )
+
+        weighted_participation += participation_share * weight
+        if season_is_active:
+            weighted_active += weight
+            total_active_seasons += 1
+            if age_days <= 365:
+                recent_active_seasons += 1
+
+    weighted_active_share = weighted_active / total_window_weight
+    weighted_participation_share = weighted_participation / total_window_weight
+    is_clan_battle_active = (
+        recent_active_seasons > 0
+        and weighted_active_share >= CLAN_BATTLE_ACTIVITY_BADGE_MIN_WEIGHTED_ACTIVE_SHARE
+        and weighted_participation_share >= CLAN_BATTLE_ACTIVITY_BADGE_MIN_WEIGHTED_PARTICIPATION_SHARE
+    )
+
+    return {
+        'is_clan_battle_active': is_clan_battle_active,
+        'cb_activity_recent_active_seasons': recent_active_seasons,
+        'cb_activity_total_active_seasons': total_active_seasons,
+        'cb_activity_weighted_active_share': round(weighted_active_share, 4),
+        'cb_activity_weighted_participation_share': round(weighted_participation_share, 4),
+    }
+
+
+def get_clan_battle_activity_badge(
+    clan_id: int | str,
+    total_members: int = 0,
+    realm: str = DEFAULT_REALM,
+    reference_date: Optional[date] = None,
+) -> dict[str, float | int | bool]:
+    normalized_clan_id = str(clan_id or '').strip()
+    if not normalized_clan_id:
+        return summarize_clan_battle_activity_badge([], total_members=total_members, reference_date=reference_date)
+
+    cache_key = _get_clan_battle_summary_cache_key(
+        normalized_clan_id, realm=realm)
+    season_rows = cache.get(cache_key)
+    if season_rows is None:
+        season_rows = refresh_clan_battle_seasons_cache(
+            normalized_clan_id, realm=realm)
+
+    return summarize_clan_battle_activity_badge(
+        season_rows,
+        total_members=total_members,
+        reference_date=reference_date,
+    )
 
 
 def _summarize_best_clan_cb_window(

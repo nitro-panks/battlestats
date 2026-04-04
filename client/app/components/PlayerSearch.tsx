@@ -58,6 +58,15 @@ const ClanTagGrid: React.FC<{
                 >
                     {clan.tag || '---'}
                 </span>
+                {clan.is_clan_battle_active ? (
+                    <ClanBattleShieldIcon
+                        winRate={null}
+                        size="search"
+                        titleText="clan battle enjoyers"
+                        ariaLabel="clan battle enjoyers"
+                        color="var(--accent-mid)"
+                    />
+                ) : null}
             </button>
         ))}
     </div>

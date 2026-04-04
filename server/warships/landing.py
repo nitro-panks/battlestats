@@ -9,7 +9,7 @@ from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce
 from django.utils import timezone
 
-from warships.data import _calculate_tier_filtered_pvp_record, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
+from warships.data import _calculate_tier_filtered_pvp_record, get_clan_battle_activity_badge, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
 from warships.models import Clan, DEFAULT_REALM, Player, realm_cache_key
 from warships.visit_analytics import get_top_entities
 
@@ -44,6 +44,23 @@ def _clan_wr_annotation():
             output_field=FloatField(),
         ),
     )
+
+
+def _attach_clan_battle_activity_badges(rows: list[dict], realm: str = DEFAULT_REALM) -> list[dict]:
+    for row in rows:
+        clan_id = row.get('clan_id')
+        if clan_id is None:
+            row['is_clan_battle_active'] = False
+            continue
+
+        badge = get_clan_battle_activity_badge(
+            clan_id,
+            total_members=int(row.get('members_count') or 0),
+            realm=realm,
+        )
+        row['is_clan_battle_active'] = bool(badge.get('is_clan_battle_active'))
+
+    return rows
 
 
 LANDING_CACHE_TTL = 60 * 60 * 12
@@ -796,7 +813,7 @@ def resolve_landing_clans_by_id_order(clan_ids: list[int], realm: str = DEFAULT_
     )
     rows.sort(key=lambda row: selected_order.get(
         int(row.get('clan_id') or 0), len(selected_order)))
-    return rows
+    return _attach_clan_battle_activity_badges(rows, realm=realm)
 
 
 def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
@@ -826,7 +843,7 @@ def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: s
     # Preserve the score_best_clans ordering
     id_order = {cid: i for i, cid in enumerate(best_clan_ids)}
     rows.sort(key=lambda row: id_order.get(row['clan_id'], len(best_clan_ids)))
-    return rows
+    return _attach_clan_battle_activity_badges(rows, realm=realm)
 
 
 def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str = 'overall') -> tuple[list[dict], dict[str, str | int]]:
@@ -1220,7 +1237,7 @@ def _build_landing_clans(realm: str = DEFAULT_REALM) -> list[dict]:
     ).values(
         'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles', 'active_members'
     ).order_by(F('last_lookup').desc(nulls_last=True))
-    return _prioritize_landing_clans(list(qs))
+    return _attach_clan_battle_activity_badges(_prioritize_landing_clans(list(qs)), realm=realm)
 
 
 def get_landing_clans_payload(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict]:
@@ -1236,7 +1253,7 @@ def get_landing_best_clans_payload(force_refresh: bool = False, realm: str = DEF
 
 
 def _build_recent_clans(realm: str = DEFAULT_REALM) -> list[dict]:
-    return list(
+    return _attach_clan_battle_activity_badges(list(
         Clan.objects.exclude(name__isnull=True).exclude(name='').filter(
             realm=realm,
         ).exclude(
@@ -1251,7 +1268,7 @@ def _build_recent_clans(realm: str = DEFAULT_REALM) -> list[dict]:
             F('last_lookup').desc(nulls_last=True),
             'name',
         )[:40]
-    )
+    ), realm=realm)
 
 
 def get_landing_recent_clans_payload(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict]:

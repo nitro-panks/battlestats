@@ -5,7 +5,7 @@ from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
-from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, _summarize_best_clan_cb_window, warm_landing_best_entity_caches
+from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, _summarize_best_clan_cb_window, summarize_clan_battle_activity_badge, warm_landing_best_entity_caches
 from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, landing_player_published_metadata_key, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
 from warships.models import Clan, Player, PlayerExplorerSummary, realm_cache_key
 
@@ -635,6 +635,129 @@ class LandingHelperTests(TestCase):
         self.assertEqual(cb_names[0], 'HighParticipation')
         self.assertEqual(cb_names[1], 'FiftyFiveAnchor')
         self.assertEqual(cb_names[2], 'LowParticipation')
+
+    def test_clan_battle_activity_badge_requires_recent_sustained_participation(self):
+        today = timezone.now().date()
+
+        def season_date(offset_days: int) -> str:
+            return (today - timedelta(days=offset_days)).strftime('%Y-%m-%d')
+
+        season_meta = {
+            season_id: {
+                'name': f'Season {season_id}',
+                'label': f'S{season_id}',
+                'start_date': season_date((12 - season_id) * 90 + 21),
+                'end_date': season_date((12 - season_id) * 90),
+            }
+            for season_id in range(1, 13)
+        }
+
+        sustained_rows = [
+            {'season_id': season_id, 'participants': 8, 'roster_battles': 28}
+            for season_id in (12, 11, 10)
+        ]
+        low_share_rows = [
+            {'season_id': season_id, 'participants': 2, 'roster_battles': 28}
+            for season_id in (12, 11, 10)
+        ]
+        one_season_spike = [
+            {'season_id': 12, 'participants': 12, 'roster_battles': 40}
+        ]
+
+        with patch('warships.data._get_clan_battle_seasons_metadata', return_value=season_meta):
+            sustained = summarize_clan_battle_activity_badge(
+                sustained_rows,
+                total_members=40,
+                reference_date=today,
+            )
+            low_share = summarize_clan_battle_activity_badge(
+                low_share_rows,
+                total_members=40,
+                reference_date=today,
+            )
+            spike = summarize_clan_battle_activity_badge(
+                one_season_spike,
+                total_members=40,
+                reference_date=today,
+            )
+
+        self.assertTrue(sustained['is_clan_battle_active'])
+        self.assertFalse(low_share['is_clan_battle_active'])
+        self.assertFalse(spike['is_clan_battle_active'])
+
+    def test_best_clan_payload_marks_clan_battle_activity_badges(self):
+        now = timezone.now()
+
+        def create_candidate(clan_id: int, name: str):
+            clan = Clan.objects.create(
+                clan_id=clan_id,
+                name=name,
+                tag=name[:5].upper(),
+                members_count=40,
+                cached_clan_wr=58.0,
+                cached_total_battles=240000,
+                cached_active_member_count=28,
+            )
+            for index in range(5):
+                player = Player.objects.create(
+                    name=f'{name}Player{index}',
+                    player_id=clan_id * 100 + index,
+                    clan=clan,
+                    pvp_battles=7000,
+                    pvp_wins=3900,
+                    days_since_last_battle=3,
+                )
+                PlayerExplorerSummary.objects.create(
+                    player=player,
+                    player_score=5.2,
+                    clan_battle_total_battles=1400.0,
+                    clan_battle_overall_win_rate=60.0,
+                    clan_battle_summary_updated_at=now - timedelta(days=1),
+                )
+
+        create_candidate(7701, 'CBBadgeLeader')
+        create_candidate(7702, 'CBBadgeSleeper')
+
+        today = timezone.now().date()
+
+        def season_date(offset_days: int) -> str:
+            return (today - timedelta(days=offset_days)).strftime('%Y-%m-%d')
+
+        season_meta = {
+            season_id: {
+                'name': f'Season {season_id}',
+                'label': f'S{season_id}',
+                'start_date': season_date((12 - season_id) * 90 + 21),
+                'end_date': season_date((12 - season_id) * 90),
+            }
+            for season_id in range(1, 13)
+        }
+
+        season_rows_by_clan = {
+            '7701': [
+                {'season_id': season_id, 'participants': 8,
+                    'roster_battles': 28, 'roster_win_rate': 57.0}
+                for season_id in (12, 11, 10)
+            ],
+            '7702': [
+                {'season_id': 12, 'participants': 12,
+                    'roster_battles': 40, 'roster_win_rate': 62.0}
+            ],
+        }
+
+        with patch('warships.data._get_clan_battle_seasons_metadata', return_value=season_meta), \
+                patch('warships.data.refresh_clan_battle_seasons_cache', side_effect=lambda clan_id, realm='na': season_rows_by_clan.get(str(clan_id), [])):
+            cb_payload, _ = get_landing_best_clans_payload_with_cache_metadata(
+                force_refresh=True,
+                sort='cb',
+            )
+
+        badge_by_name = {
+            row['name']: row.get('is_clan_battle_active')
+            for row in cb_payload[:2]
+        }
+        self.assertTrue(badge_by_name['CBBadgeLeader'])
+        self.assertFalse(badge_by_name['CBBadgeSleeper'])
 
     def test_all_landing_player_modes_use_twelve_hour_cache_ttl(self):
         _, best_meta = get_landing_players_payload_with_cache_metadata(
