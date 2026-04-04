@@ -5380,6 +5380,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
             'clan_id': clan_id,
             'clan_name': str(clan_name).lower(),
             'clan_wr': float(clan_wr),
+            'members_count': int(total_members),
             'active_members': int(active_count),
             'activity_ratio': active_count / max(total_members, 1),
             'avg_member_score': float(avg_member_score),
