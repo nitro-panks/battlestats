@@ -181,7 +181,7 @@ const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18·Eff + 0.10·Vol_5-10 + 0.06·Ranked + 0.04·Clan) × M_share';
 const CLAN_BEST_OVERALL_FORMULA_APPROXIMATION = 'Overall ≈ 0.30·WR + 0.25·Activity + 0.20·MemberScore + 0.15·CB + 0.10·log(Battles)';
 const CLAN_BEST_WR_FORMULA_APPROXIMATION = 'WR ≈ WR + 0.40·max(CB_WR - WR, 0)·min(CB_battles/200, 1)·min(Active/25, 1)·min(MemberScore/6, 1)';
-const CLAN_BEST_CB_FORMULA_APPROXIMATION = 'CB ≈ average(last 10 completed season WR × min(season battles/30, 1); skipped seasons = 0)';
+const CLAN_BEST_CB_FORMULA_APPROXIMATION = 'CB ≈ average(last 10 completed season WR × min(season battles/30, 1) × min(season participants/clan members, 1); skipped seasons = 0)';
 const BEST_CLAN_FALLBACK_NOTICE = 'Best clan rankings are still warming up for this realm. Showing recent clans until enough tracked data is available.';
 
 const PlayerSearch: React.FC = () => {

@@ -5,7 +5,7 @@ from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
-from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, warm_landing_best_entity_caches
+from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, _summarize_best_clan_cb_window, warm_landing_best_entity_caches
 from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, landing_player_published_metadata_key, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
 from warships.models import Clan, Player, PlayerExplorerSummary, realm_cache_key
 
@@ -485,15 +485,18 @@ class LandingHelperTests(TestCase):
 
         season_rows_by_clan = {
             '7501': [
-                {'season_id': season_id, 'roster_battles': 30, 'roster_win_rate': 60.0}
+                {'season_id': season_id, 'participants': 24,
+                    'roster_battles': 30, 'roster_win_rate': 60.0}
                 for season_id in range(2, 12)
             ],
             '7502': [
-                {'season_id': season_id, 'roster_battles': 2, 'roster_win_rate': 60.0}
+                {'season_id': season_id, 'participants': 24,
+                    'roster_battles': 2, 'roster_win_rate': 60.0}
                 for season_id in range(2, 12)
             ],
             '7503': [
-                {'season_id': season_id, 'roster_battles': 30, 'roster_win_rate': 55.0}
+                {'season_id': season_id, 'participants': 24,
+                    'roster_battles': 30, 'roster_win_rate': 55.0}
                 for season_id in range(2, 12)
             ],
         }
@@ -508,6 +511,46 @@ class LandingHelperTests(TestCase):
         self.assertEqual(cb_names[0], 'ThirtyBattleSeason')
         self.assertEqual(cb_names[1], 'FiftyFiveAnchor')
         self.assertEqual(cb_names[2], 'TwoBattleSeason')
+
+    def test_best_clan_cb_window_summary_weights_same_wr_by_participation_share(self):
+        season_ids = list(range(11, 1, -1))
+        high_participation_rows = [
+            {'season_id': season_id, 'participants': 24, 'roster_battles': 30, 'roster_win_rate': 60.0}
+            for season_id in range(2, 12)
+        ]
+        low_participation_rows = [
+            {'season_id': season_id, 'participants': 2, 'roster_battles': 30, 'roster_win_rate': 60.0}
+            for season_id in range(2, 12)
+        ]
+        lower_wr_rows = [
+            {'season_id': season_id, 'participants': 24, 'roster_battles': 30, 'roster_win_rate': 55.0}
+            for season_id in range(2, 12)
+        ]
+
+        high_participation = _summarize_best_clan_cb_window(
+            high_participation_rows,
+            season_ids,
+            total_members=40,
+        )
+        low_participation = _summarize_best_clan_cb_window(
+            low_participation_rows,
+            season_ids,
+            total_members=40,
+        )
+        lower_wr = _summarize_best_clan_cb_window(
+            lower_wr_rows,
+            season_ids,
+            total_members=40,
+        )
+
+        self.assertGreater(
+            high_participation['cb_window_score'],
+            lower_wr['cb_window_score'],
+        )
+        self.assertGreater(
+            lower_wr['cb_window_score'],
+            low_participation['cb_window_score'],
+        )
 
     def test_all_landing_player_modes_use_twelve_hour_cache_ttl(self):
         _, best_meta = get_landing_players_payload_with_cache_metadata(

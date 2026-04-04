@@ -5178,7 +5178,11 @@ def _get_best_clan_cb_window_season_ids(reference_date: Optional[date] = None) -
     ]
 
 
-def _summarize_best_clan_cb_window(season_rows: Any, season_ids: list[int]) -> dict[str, float | int]:
+def _summarize_best_clan_cb_window(
+    season_rows: Any,
+    season_ids: list[int],
+    total_members: int = 0,
+) -> dict[str, float | int]:
     if not season_ids:
         return {
             'cb_window_score': 0.0,
@@ -5189,6 +5193,7 @@ def _summarize_best_clan_cb_window(season_rows: Any, season_ids: list[int]) -> d
     targeted_ids = set(season_ids)
     season_wr_by_id: dict[int, float] = {}
     season_battles_by_id: dict[int, int] = {}
+    season_participants_by_id: dict[int, int] = {}
 
     for row in season_rows or []:
         try:
@@ -5210,6 +5215,9 @@ def _summarize_best_clan_cb_window(season_rows: Any, season_ids: list[int]) -> d
 
         season_wr_by_id[season_id] = float(win_rate or 0.0)
         season_battles_by_id[season_id] = battles
+        participants = int(row.get('participants', 0) or 0)
+        if participants > 0:
+            season_participants_by_id[season_id] = participants
 
     total_score = 0.0
     participated_seasons = 0
@@ -5222,7 +5230,15 @@ def _summarize_best_clan_cb_window(season_rows: Any, season_ids: list[int]) -> d
                 season_battles / BEST_CLAN_CB_WINDOW_SEASON_BATTLES_TARGET,
                 1.0,
             )
-            total_score += season_score * battle_weight
+            participation_weight = 1.0
+            season_participants = season_participants_by_id.get(season_id, 0)
+            if total_members > 0 and season_participants > 0:
+                participation_weight = min(
+                    season_participants / total_members,
+                    1.0,
+                )
+
+            total_score += season_score * battle_weight * participation_weight
             participated_seasons += 1
             total_battles += season_battles
 
@@ -5495,6 +5511,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
                     **_summarize_best_clan_cb_window(
                         season_rows,
                         cb_window_season_ids,
+                        total_members=row.get('members_count') or 0,
                     ),
                 })
 

@@ -8,7 +8,7 @@ Status: Implemented - validated against current code, live production, and WG se
 Capture two things in one place:
 
 1. how the landing page Best -> CB sub-sort is derived today
-2. the shipped replacement model: rank clans on the most recent 10 completed clan-battle seasons and score each clan by the average of its battle-weighted seasonal win rates, with skipped seasons counted as `0`
+2. the shipped replacement model: rank clans on the most recent 10 completed clan-battle seasons and score each clan by the average of its battle-weighted, participation-weighted seasonal win rates, with skipped seasons counted as `0`
 
 This runbook reflects the current implementation, including the bounded-shortlist operational guardrail used during landing cache builds.
 
@@ -168,15 +168,16 @@ For each clan:
 2. compute a clan WR for each season in the window
 3. if a clan skipped a season, record that season as `0`
 4. weight each season's WR by how many clan-battle games the clan played that season
-5. score the clan by the average of those battle-weighted seasonal values
+5. weight that season again by what share of the clan actually participated that season
+6. score the clan by the average of those battle-weighted, participation-weighted seasonal values
 
 Approximate formula:
 
 ```text
 cb_window_score = (
-	season_wr_1 * min(season_battles_1 / 30, 1)
+	season_wr_1 * min(season_battles_1 / 30, 1) * min(season_participants_1 / clan_members, 1)
 	+ ...
-	+ season_wr_n * min(season_battles_n / 30, 1)
+	+ season_wr_n * min(season_battles_n / 30, 1) * min(season_participants_n / clan_members, 1)
 ) / n
 ```
 
@@ -184,8 +185,11 @@ Where:
 
 - `season_wr_n` is the clan's WR for that season if present
 - `season_battles_n` is the clan's derived roster clan-battle count for that season
+- `season_participants_n` is the number of tracked clan members with CB games in that season
+- `clan_members` is the clan's current member count used to derive a season participation share
 - `season_wr_n = 0` if the clan did not participate in that season
 - each season reaches full weight at `30` battles, so tiny same-WR samples do not score like full seasons
+- each season is also scaled by participation share, so tiny same-WR slices do not score like broadly roster-backed seasons
 - `n` must be defined explicitly by product rule, not inferred loosely from the phrase "last 2 years"
 
 ### Window rule
@@ -237,7 +241,7 @@ Instead, the recency boundary is handled structurally by the season window.
 
 The score becomes easier to explain:
 
-"Best CB clan = average recent seasonal CB win rate, with each season weighted by how many CB games the clan actually played and skipped seasons counted as zero."
+"Best CB clan = average recent seasonal CB win rate, with each season weighted by how many CB games the clan actually played, how much of the clan actually participated, and skipped seasons counted as zero."
 
 That is a much more legible product story than the current aggregate proxy.
 
