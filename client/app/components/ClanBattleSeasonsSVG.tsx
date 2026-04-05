@@ -9,6 +9,8 @@ export interface ClanBattleSeasonPoint {
     start_date?: string | null;
     roster_battles?: number;
     roster_wins?: number;
+    clan_battles?: number;
+    clan_wins?: number;
     participants: number;
     roster_win_rate: number;
 }
@@ -93,6 +95,8 @@ const drawChart = (
             roster_win_rate: 0,
             roster_battles: 0,
             roster_wins: 0,
+            clan_battles: 0,
+            clan_wins: 0,
         };
     });
 
@@ -122,8 +126,8 @@ const drawChart = (
     // --- Per-season rows ---
     const rows: SeasonRow[] = fullTimeline.map((d, i) => ({
         index: i,
-        battles: d.roster_battles || 0,
-        wins: d.roster_wins || 0,
+        battles: d.clan_battles || d.roster_battles || 0,
+        wins: d.clan_wins || d.roster_wins || 0,
         wr: d.roster_win_rate,
         hasData: byId.has(d.season_id),
         season: d,

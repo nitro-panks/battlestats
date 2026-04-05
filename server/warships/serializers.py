@@ -322,6 +322,8 @@ class ClanBattleSeasonSummarySerializer(serializers.Serializer):
     roster_wins = serializers.IntegerField()
     roster_losses = serializers.IntegerField()
     roster_win_rate = serializers.FloatField()
+    clan_battles = serializers.IntegerField(default=0)
+    clan_wins = serializers.IntegerField(default=0)
 
 
 class PlayerClanBattleSeasonSerializer(serializers.Serializer):

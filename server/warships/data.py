@@ -4031,6 +4031,9 @@ def refresh_clan_battle_seasons_cache(clan_id: str, realm: str = DEFAULT_REALM) 
                 if sid <= 0:
                     continue
 
+                wins = int(season.get('wins', 0) or 0)
+                losses = int(season.get('losses', 0) or 0)
+
                 summary = season_summaries.setdefault(sid, {
                     'season_id': sid,
                     'season_name': season_meta.get(sid, {}).get('name', f'Season {sid}'),
@@ -4043,12 +4046,17 @@ def refresh_clan_battle_seasons_cache(clan_id: str, realm: str = DEFAULT_REALM) 
                     'roster_battles': 0,
                     'roster_wins': 0,
                     'roster_losses': 0,
+                    'clan_battles': 0,
+                    'clan_wins': 0,
                 })
 
                 summary['participants'] += 1
                 summary['roster_battles'] += battles
-                summary['roster_wins'] += int(season.get('wins', 0) or 0)
-                summary['roster_losses'] += int(season.get('losses', 0) or 0)
+                summary['roster_wins'] += wins
+                summary['roster_losses'] += losses
+                if battles > summary['clan_battles']:
+                    summary['clan_battles'] = battles
+                    summary['clan_wins'] = wins
 
     result = []
     for summary in sorted(season_summaries.values(), key=_clan_battle_season_sort_key, reverse=True):

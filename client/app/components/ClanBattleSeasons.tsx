@@ -18,6 +18,8 @@ interface ClanBattleSeason {
     roster_wins: number;
     roster_losses: number;
     roster_win_rate: number;
+    clan_battles: number;
+    clan_wins: number;
 }
 
 interface ClanBattleSeasonsProps {
