@@ -25,6 +25,7 @@ try {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  poweredByHeader: false,
   env: {
     NEXT_PUBLIC_APP_VERSION: appVersion,
   },

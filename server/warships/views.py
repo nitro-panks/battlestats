@@ -1047,7 +1047,7 @@ def sitemap_entities(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_name_suggestions(request) -> Response:
-    query = (request.query_params.get('q') or '').strip()
+    query = (request.query_params.get('q') or '').strip().replace('\x00', '')
     if len(query) < 3:
         return Response([])
 

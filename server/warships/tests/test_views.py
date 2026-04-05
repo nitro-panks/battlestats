@@ -1686,6 +1686,10 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload[1]["name"], "CaptainBravo")
         self.assertNotEqual(payload[0]["name"], "AlphaCaptain")
 
+    def test_player_name_suggestions_null_byte_does_not_crash(self):
+        response = self.client.get("/api/landing/player-suggestions/?q=test\x00")
+        self.assertIn(response.status_code, [200, 400])
+
     def test_landing_players_excludes_hidden_players(self):
         cache.clear()
         today = timezone.now().date()
