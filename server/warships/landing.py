@@ -102,8 +102,14 @@ LANDING_PLAYER_BEST_WR_WEIGHT = 0.40
 LANDING_PLAYER_BEST_PLAYER_SCORE_WEIGHT = 0.22
 LANDING_PLAYER_BEST_EFFICIENCY_WEIGHT = 0.18
 LANDING_PLAYER_BEST_VOLUME_WEIGHT = 0.10
-LANDING_PLAYER_BEST_RANKED_WEIGHT = 0.06
-LANDING_PLAYER_BEST_CLAN_WEIGHT = 0.04
+LANDING_PLAYER_BEST_CLAN_WEIGHT = 0.10
+LANDING_PLAYER_BEST_RANKED_BOOST = 0.15
+LANDING_PLAYER_BEST_RANKED_QUALITY_LEAGUE_WEIGHT = 0.35
+LANDING_PLAYER_BEST_RANKED_QUALITY_WR_WEIGHT = 0.25
+LANDING_PLAYER_BEST_RANKED_QUALITY_DEPTH_WEIGHT = 0.25
+LANDING_PLAYER_BEST_RANKED_QUALITY_VOLUME_WEIGHT = 0.15
+LANDING_PLAYER_BEST_RANKED_QUALITY_MAX_SEASONS = 15
+LANDING_PLAYER_BEST_RANKED_QUALITY_MAX_BATTLES = 50
 LANDING_PLAYER_BEST_EFFICIENCY_NEUTRAL = 0.35
 LANDING_PLAYER_BEST_COMPETITIVE_SHARE_FLOOR = 0.55
 LANDING_PLAYER_RANKED_SORT_VOLUME_WEIGHT = 0.20
@@ -288,6 +294,34 @@ def _normalize_best_clan_score(is_clan_battle_player: bool | None, clan_battle_w
     return round(0.35 + (0.65 * win_rate_score), 4)
 
 
+def _ranked_quality_score(row: dict) -> float:
+    seasons = max(int(row.get('ranked_seasons_participated') or 0), 0)
+    latest_battles = max(int(row.get('latest_ranked_battles') or 0), 0)
+    league = row.get('highest_ranked_league_recent')
+    ranked_wr = row.get('ranked_overall_win_rate')
+
+    if seasons == 0 and latest_battles == 0:
+        return 0.0
+
+    league_score = _ranked_league_score(league)
+    wr_score = _normalize_best_wr_score(ranked_wr) if ranked_wr is not None else 0.0
+    depth_score = _clamp(
+        seasons / LANDING_PLAYER_BEST_RANKED_QUALITY_MAX_SEASONS, 0.0, 1.0)
+    volume_score = _clamp(
+        math.log1p(latest_battles) / math.log1p(
+            LANDING_PLAYER_BEST_RANKED_QUALITY_MAX_BATTLES),
+        0.0, 1.0,
+    )
+
+    return round(
+        LANDING_PLAYER_BEST_RANKED_QUALITY_LEAGUE_WEIGHT * league_score +
+        LANDING_PLAYER_BEST_RANKED_QUALITY_WR_WEIGHT * wr_score +
+        LANDING_PLAYER_BEST_RANKED_QUALITY_DEPTH_WEIGHT * depth_score +
+        LANDING_PLAYER_BEST_RANKED_QUALITY_VOLUME_WEIGHT * volume_score,
+        4,
+    )
+
+
 def _competitive_share_multiplier(pvp_battles: int | None, high_tier_battles: int | None) -> float:
     total_battles = max(int(pvp_battles or 0), 0)
     competitive_battles = max(int(high_tier_battles or 0), 0)
@@ -319,14 +353,15 @@ def _calculate_landing_best_score(row: dict) -> float:
             row.get('efficiency_rank_percentile'), row.get('shrunken_efficiency_strength')) +
         LANDING_PLAYER_BEST_VOLUME_WEIGHT * _normalize_best_volume_score(
             row.get('high_tier_pvp_battles')) +
-        LANDING_PLAYER_BEST_RANKED_WEIGHT * _normalize_best_ranked_score(
-            row.get('latest_ranked_battles'), row.get('highest_ranked_league_recent')) +
         LANDING_PLAYER_BEST_CLAN_WEIGHT * _normalize_best_clan_score(
             row.get('is_clan_battle_player'), row.get('clan_battle_win_rate'))
     )
 
+    ranked_multiplier = 1.0 + (
+        LANDING_PLAYER_BEST_RANKED_BOOST * _ranked_quality_score(row))
+
     return round(
-        base_score * _competitive_share_multiplier(
+        base_score * ranked_multiplier * _competitive_share_multiplier(
             row.get('pvp_battles'), row.get('high_tier_pvp_battles')),
         6,
     )
@@ -1390,6 +1425,8 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             minimum_tier=5,
         )
         ranked_rows = row.pop('ranked_json', None)
+        ranked_medal_summary = _summarize_ranked_medal_history(
+            ranked_rows or [])
         player_obj = players_by_id.get(player_id)
         es = getattr(player_obj, 'explorer_summary',
                      None) if player_obj else None
@@ -1398,6 +1435,8 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
         highest_ranked_league_recent = row.get('highest_ranked_league_recent')
         row['high_tier_pvp_battles'] = high_tier_battles
         row['high_tier_pvp_ratio'] = high_tier_ratio
+        row['ranked_overall_win_rate'] = ranked_medal_summary.get(
+            'ranked_overall_win_rate')
         row['is_pve_player'] = is_pve_player(
             row.get('total_battles'), row.get('pvp_battles'))
         row['is_sleepy_player'] = is_sleepy_player(
@@ -1552,6 +1591,8 @@ def _best_landing_player_candidate_rows(
         latest_ranked_battles=F('explorer_summary__latest_ranked_battles'),
         highest_ranked_league_recent=F(
             'explorer_summary__highest_ranked_league_recent'),
+        ranked_seasons_participated=F(
+            'explorer_summary__ranked_seasons_participated'),
         clan_battle_total_battles=F(
             'explorer_summary__clan_battle_total_battles'),
         clan_battle_seasons_participated=F(
@@ -1577,6 +1618,7 @@ def _best_landing_player_candidate_rows(
             'shrunken_efficiency_strength',
             'latest_ranked_battles',
             'highest_ranked_league_recent',
+            'ranked_seasons_participated',
             'clan_battle_total_battles',
             'clan_battle_seasons_participated',
             'clan_battle_overall_win_rate',
@@ -1597,6 +1639,7 @@ def _finalize_best_player_payload(rows: list[dict], limit: int) -> list[dict]:
         row.pop('ranked_total_battles', None)
         row.pop('ranked_total_wins', None)
         row.pop('highest_ranked_league_recent', None)
+        row.pop('ranked_seasons_participated', None)
         row.pop('ranked_updated_at', None)
     return rows[:limit]
 

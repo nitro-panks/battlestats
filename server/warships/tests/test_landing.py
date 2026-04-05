@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, _summarize_best_clan_cb_window, summarize_clan_battle_activity_badge, warm_landing_best_entity_caches
-from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
+from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, _calculate_landing_best_score, _ranked_quality_score, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
 from warships.models import Clan, LandingPlayerBestSnapshot, Player, PlayerExplorerSummary, realm_cache_key
 
 
@@ -324,6 +324,154 @@ class LandingHelperTests(TestCase):
             [row['name'] for row in snapshot.payload_json[:2]],
             ['SnapshotCbDurable', 'SnapshotCbStreaky'],
         )
+
+    def test_ranked_quality_score_no_ranked_data(self):
+        self.assertEqual(_ranked_quality_score({}), 0.0)
+        self.assertEqual(_ranked_quality_score({
+            'ranked_seasons_participated': 0,
+            'latest_ranked_battles': 0,
+        }), 0.0)
+
+    def test_ranked_quality_score_gold_high_volume(self):
+        row = {
+            'ranked_seasons_participated': 28,
+            'latest_ranked_battles': 135,
+            'highest_ranked_league_recent': 'Gold',
+            'ranked_overall_win_rate': 53.5,
+        }
+        score = _ranked_quality_score(row)
+        # Gold=1.0 (35%), WR=(53.5-45)/20=0.425 (25%), depth=28/15→1.0 (25%), volume=saturated (15%)
+        self.assertGreater(score, 0.8)
+        self.assertLess(score, 0.9)
+
+    def test_ranked_quality_score_bronze_minimal(self):
+        row = {
+            'ranked_seasons_participated': 1,
+            'latest_ranked_battles': 2,
+            'highest_ranked_league_recent': 'Bronze',
+            'ranked_overall_win_rate': 50.0,
+        }
+        score = _ranked_quality_score(row)
+        self.assertLess(score, 0.25)
+
+    def test_best_score_no_ranked_multiplier_is_one(self):
+        """Non-ranked player's score should not be boosted by ranked multiplier."""
+        row = {
+            'high_tier_pvp_ratio': 60.0,
+            'player_score': 7.5,
+            'efficiency_rank_percentile': 90.0,
+            'shrunken_efficiency_strength': 0.8,
+            'high_tier_pvp_battles': 3000,
+            'is_clan_battle_player': False,
+            'clan_battle_win_rate': None,
+            'pvp_battles': 5000,
+            'ranked_seasons_participated': 0,
+            'latest_ranked_battles': 0,
+            'highest_ranked_league_recent': None,
+            'ranked_overall_win_rate': None,
+        }
+        score = _calculate_landing_best_score(row)
+        self.assertGreater(score, 0.0)
+        # Ranked multiplier is 1.0, so score equals base * comp_share
+        self.assertEqual(_ranked_quality_score(row), 0.0)
+
+    def test_best_score_gold_ranked_beats_non_ranked(self):
+        """Gold ranked player with same base stats should score higher."""
+        base_row = {
+            'high_tier_pvp_ratio': 60.0,
+            'player_score': 7.5,
+            'efficiency_rank_percentile': 90.0,
+            'shrunken_efficiency_strength': 0.8,
+            'high_tier_pvp_battles': 3000,
+            'is_clan_battle_player': False,
+            'clan_battle_win_rate': None,
+            'pvp_battles': 5000,
+            'ranked_seasons_participated': 0,
+            'latest_ranked_battles': 0,
+            'highest_ranked_league_recent': None,
+            'ranked_overall_win_rate': None,
+        }
+        gold_row = {
+            **base_row,
+            'ranked_seasons_participated': 20,
+            'latest_ranked_battles': 100,
+            'highest_ranked_league_recent': 'Gold',
+            'ranked_overall_win_rate': 55.0,
+        }
+        non_ranked_score = _calculate_landing_best_score(base_row)
+        gold_score = _calculate_landing_best_score(gold_row)
+        self.assertGreater(gold_score, non_ranked_score)
+
+    def test_materialize_landing_player_best_snapshot_ranked_multiplier_affects_overall_order(self):
+        """Ranked Gold player should outrank non-ranked player with similar base stats."""
+        last_battle_date = timezone.now().date()
+
+        non_ranked = Player.objects.create(
+            name='NoRank',
+            player_id=5301,
+            realm='na',
+            is_hidden=False,
+            total_battles=8000,
+            pvp_battles=6000,
+            pvp_ratio=59.0,
+            days_since_last_battle=3,
+            last_battle_date=last_battle_date,
+            battles_json=[
+                {'ship_tier': 8, 'pvp_battles': 4000, 'wins': 2360},
+                {'ship_tier': 10, 'pvp_battles': 2000, 'wins': 1180},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=non_ranked,
+            player_score=8.0,
+            ranked_seasons_participated=0,
+            latest_ranked_battles=0,
+        )
+
+        gold_ranked = Player.objects.create(
+            name='GoldRanked',
+            player_id=5302,
+            realm='na',
+            is_hidden=False,
+            total_battles=8000,
+            pvp_battles=6000,
+            pvp_ratio=59.0,
+            days_since_last_battle=3,
+            last_battle_date=last_battle_date,
+            ranked_json=[
+                {
+                    'highest_league_name': 'Gold',
+                    'total_battles': 80,
+                    'total_wins': 48,
+                    'win_rate': 60.0,
+                },
+                {
+                    'highest_league_name': 'Gold',
+                    'total_battles': 50,
+                    'total_wins': 28,
+                    'win_rate': 56.0,
+                },
+            ],
+            battles_json=[
+                {'ship_tier': 8, 'pvp_battles': 4000, 'wins': 2360},
+                {'ship_tier': 10, 'pvp_battles': 2000, 'wins': 1180},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=gold_ranked,
+            player_score=8.0,
+            ranked_seasons_participated=2,
+            latest_ranked_battles=80,
+            highest_ranked_league_recent='Gold',
+        )
+
+        result = materialize_landing_player_best_snapshot('overall')
+
+        snapshot = LandingPlayerBestSnapshot.objects.get(
+            realm='na', sort='overall')
+        self.assertEqual(result['count'], 2)
+        names = [row['name'] for row in snapshot.payload_json[:2]]
+        self.assertEqual(names, ['GoldRanked', 'NoRank'])
 
     def test_landing_clans_use_twelve_hour_cache_ttl(self):
         _, metadata = get_landing_clans_payload_with_cache_metadata()
