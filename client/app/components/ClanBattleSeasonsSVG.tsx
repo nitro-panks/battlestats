@@ -19,6 +19,17 @@ interface ClanBattleSeasonsSVGProps {
 
 type Colors = typeof chartColors['light'];
 
+const selectColorByWR = (wr: number): string => {
+    if (wr > 65) return '#810c9e';
+    if (wr >= 60) return '#D042F3';
+    if (wr >= 56) return '#3182bd';
+    if (wr >= 54) return '#74c476';
+    if (wr >= 52) return '#a1d99b';
+    if (wr >= 50) return '#fed976';
+    if (wr >= 45) return '#fd8d3c';
+    return '#a50f15';
+};
+
 interface SeasonRow {
     index: number;
     wr: number;
@@ -146,7 +157,6 @@ const drawChart = (
     yAxis.select('.domain').remove();
 
     // --- Colors ---
-    const wrColor = colors.cbBar;
     const activityColor = colors.activityActive;
 
     // --- Draw WR bars ---
@@ -161,7 +171,7 @@ const drawChart = (
 
     const activeRows = rows.filter(d => d.hasData);
 
-    // WR bars
+    // WR bars — colored by WR value
     svg.selectAll('.wr-bar')
         .data(activeRows)
         .enter()
@@ -172,9 +182,9 @@ const drawChart = (
             const by = yScale(d.wr);
             return roundedTopBar(bx, by, barWidth, height - by, cornerR);
         })
-        .attr('fill', wrColor)
+        .attr('fill', (d: SeasonRow) => selectColorByWR(d.wr))
         .attr('fill-opacity', 0.75)
-        .attr('stroke', wrColor)
+        .attr('stroke', (d: SeasonRow) => selectColorByWR(d.wr))
         .attr('stroke-width', 0.5)
         .attr('stroke-opacity', 0.9);
 
@@ -265,7 +275,7 @@ const drawChart = (
                 tooltip
                     .html(
                         `<strong>${d.season.season_name}</strong><br/>` +
-                        `<span style="color:${wrColor}">WR: ${d.wr.toFixed(1)}%</span><br/>` +
+                        `<span style="color:${selectColorByWR(d.wr)}">WR: ${d.wr.toFixed(1)}%</span><br/>` +
                         `<span style="color:${activityColor}">Activity: ${d.activity.toFixed(0)}%</span>`
                     )
                     .style('opacity', 1);
@@ -290,7 +300,15 @@ const drawChart = (
     const legendG = svgRoot.append('g')
         .attr('transform', `translate(${margin.left}, ${legendY})`);
 
-    // WR legend — bar swatch
+    // WR legend — gradient swatch showing WR color range
+    const gradId = 'cb-wr-grad';
+    const defs = svgRoot.append('defs');
+    const grad = defs.append('linearGradient').attr('id', gradId);
+    grad.append('stop').attr('offset', '0%').attr('stop-color', '#fd8d3c');
+    grad.append('stop').attr('offset', '33%').attr('stop-color', '#fed976');
+    grad.append('stop').attr('offset', '66%').attr('stop-color', '#74c476');
+    grad.append('stop').attr('offset', '100%').attr('stop-color', '#810c9e');
+
     let legendX = 0;
     legendG.append('rect')
         .attr('x', legendX)
@@ -298,10 +316,8 @@ const drawChart = (
         .attr('width', 12)
         .attr('height', 10)
         .attr('rx', 3)
-        .attr('fill', wrColor)
-        .attr('fill-opacity', 0.75)
-        .attr('stroke', wrColor)
-        .attr('stroke-width', 0.5);
+        .attr('fill', `url(#${gradId})`)
+        .attr('fill-opacity', 0.75);
 
     legendG.append('text')
         .attr('x', legendX + 16)
