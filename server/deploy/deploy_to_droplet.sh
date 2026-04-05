@@ -337,7 +337,6 @@ materialize_best_player_snapshots() {
 
 migrate_env_value WARM_CACHES_ON_STARTUP WARM_LANDING_PAGE_ON_STARTUP 0
 migrate_env_value CACHE_WARMUP_START_DELAY_SECONDS LANDING_WARMUP_START_DELAY_SECONDS 5
-configure_local_rabbitmq
 
 set_env_value CELERY_DEFAULT_CONCURRENCY 3
 set_env_value CELERY_HYDRATION_CONCURRENCY 3
@@ -447,6 +446,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+configure_local_rabbitmq
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
 redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
 systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
@@ -459,7 +459,8 @@ if [[ "${active_release_after_restart}" != "${REMOTE_RELEASE}" ]]; then
 fi
 systemctl --no-pager --full status battlestats-gunicorn | sed -n '1,25p'
 
-find "${APP_ROOT}/releases" -mindepth 1 -maxdepth 1 -type d | sort | head -n -"${KEEP_RELEASES}" | xargs -r rm -rf
+# Release cleanup runs unconditionally — must not be gated by prior failures
+find "${APP_ROOT}/releases" -mindepth 1 -maxdepth 1 -type d | sort | head -n -"${KEEP_RELEASES}" | xargs -r rm -rf || true
 REMOTE
 
 VERIFY_ARGS=("${HOST}" verify --skip-client --expect-backend-release "${REMOTE_RELEASE}")

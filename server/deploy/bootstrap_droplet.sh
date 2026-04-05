@@ -214,7 +214,6 @@ chmod 640 /etc/battlestats-server.secrets.env
 
 migrate_env_value WARM_CACHES_ON_STARTUP WARM_LANDING_PAGE_ON_STARTUP 0
 migrate_env_value CACHE_WARMUP_START_DELAY_SECONDS LANDING_WARMUP_START_DELAY_SECONDS 5
-configure_local_rabbitmq
 
 cat > /etc/systemd/system/battlestats-gunicorn.service <<EOF
 [Unit]
@@ -328,7 +327,8 @@ EOF
 
 systemctl daemon-reload
 systemctl enable redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
-systemctl restart redis-server rabbitmq-server
+systemctl restart redis-server
+configure_local_rabbitmq
 
 if [[ -d "${APP_ROOT}/current/server" ]]; then
   # Clear crawl locks before restarting workers to prevent stale-lock watchdog triggers

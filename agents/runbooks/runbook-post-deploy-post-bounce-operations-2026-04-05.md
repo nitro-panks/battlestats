@@ -89,7 +89,7 @@ These are required after every backend redeploy.
 
 | Step | Why it matters | How it normally runs | Verification | Current status as of 2026-04-05 |
 |---|---|---|---|---|
-| Active backend release switch | New code is not live until `/opt/battlestats-server/current` points at the new release | Deploy script attempts this automatically | `readlink -f /opt/battlestats-server/current` | Required a manual fix during the CB rollout; verify explicitly every time |
+| Active backend release switch | New code is not live until `/opt/battlestats-server/current` points at the new release | Deploy script does this automatically with atomic `mv -T` and verification | `readlink -f /opt/battlestats-server/current` | Automated — deploy exits non-zero if activation fails. Previously required manual fix during CB rollout (see `runbook-stale-symlink-diagnosis-2026-04-05.md`). |
 | Gunicorn restart | Makes the new Django code serve traffic | Deploy script | `systemctl is-active battlestats-gunicorn` | Active |
 | Celery default restart | Restarts user-facing task queue on the new code | Deploy script | `systemctl is-active battlestats-celery` | Active |
 | Celery hydration restart | Restarts heavier request-driven refresh tasks on the new code | Deploy script | `systemctl is-active battlestats-celery-hydration` | Active |
@@ -271,115 +271,26 @@ Supported operations:
 
 This command returns structured JSON so the shell wrapper can fail closed without scraping freeform logs.
 
-## Operational Implementation Plan
+## Operational Implementation Plan (Completed)
 
-The current runbook is operator-accurate, but too much of the workflow still depends on manual SSH and ad hoc shell commands.
+All four phases of the original implementation plan are now complete:
 
-The implementation goal is:
+1. **Phase 1 (release and service verification)**: Both deploy scripts use atomic `mv -T` activation with `readlink -f` verification. The shared `scripts/post_deploy_operations.sh verify` subcommand checks release targets, systemd services, snapshot presence, and warmer locks.
+2. **Phase 2 (targeted follow-up operations)**: `scripts/post_deploy_operations.sh` supports `snapshots`, `invalidate`, `warm-landing`, `warm-best-entities` subcommands. All run serially and produce structured output.
+3. **Phase 3 (smoke verification)**: `scripts/post_deploy_operations.sh smoke` runs `server/scripts/smoke_test_site_endpoints.py` in JSON mode with clear pass/fail.
+4. **Phase 4 (wired into deploy scripts)**: Backend deploy auto-runs verification via `scripts/post_deploy_operations.sh verify`. Client deploy does the same for client-side checks. Heavy follow-up remains opt-in.
 
-1. make the checklist executable,
-2. keep heavy follow-up steps opt-in,
-3. fail closed when release activation or service health is wrong,
-4. preserve the current bounded-load behavior.
+### Deploy script ordering fix (2026-04-05)
 
-### Phase 1: Automate release and service verification
+The backend deploy script had a structural issue where `configure_local_rabbitmq()` ran before core release setup (`.env` symlinks, pip install, migrate, collectstatic, chown, activation). A RabbitMQ failure would abort the entire SSH block, leaving incomplete releases. This was fixed by moving `configure_local_rabbitmq()` after release activation but before service restart. See `runbook-stale-symlink-diagnosis-2026-04-05.md` for full diagnosis.
 
-Implement a single verification entrypoint that checks:
-
-1. backend `current` release target,
-2. client `current` release target,
-3. required systemd services,
-4. Best-player snapshot presence,
-5. active warmer locks.
-
-This phase should be verification-only. It should not invalidate caches or warm anything.
-
-This phase also needs to drive a code fix in the deploy paths themselves: verification is not enough if release activation can still silently drift. The implementation should harden activation first, then verify it.
-
-### Phase 2: Add opt-in targeted follow-up operations
-
-Implement an explicit post-deploy operations command or script that can run narrow follow-up steps serially.
-
-Required capabilities:
-
-1. rebuild Best-player snapshots for selected `realm + sort`,
-2. invalidate landing-player caches for selected realms,
-3. invalidate landing-clan caches for selected realms,
-4. warm landing payloads one realm at a time,
-5. optionally warm best-entity caches one realm at a time,
-6. print concise machine-readable status after each step.
-
-This phase must remain opt-in. Backend or client deploy should not automatically run heavy warms by default.
-
-### Phase 3: Add smoke verification as a final gate
-
-Implement a final smoke-verification step that runs only after targeted warm steps complete.
-
-Required behavior:
-
-1. run after verification and any requested follow-up operations,
-2. fail the overall post-deploy plan if smoke checks fail,
-3. emit a short summary that can be pasted into deploy notes or a runbook log.
-
-### Phase 4: Wire deploy scripts to the new plan conservatively
-
-Once the verification and targeted follow-up tooling exists, wire the deploy scripts to use it in a bounded way.
-
-Safe default behavior:
-
-1. backend deploy runs verification automatically,
-2. client deploy runs client-side verification automatically,
-3. heavy follow-up operations remain disabled by default and require explicit flags,
-4. smoke verification can be opt-in until it is proven stable enough to gate every deploy.
-
-Client and backend deploys should both converge on the same release-activation standard:
-
-1. switch `current` atomically,
-2. verify that `readlink -f` matches the intended release,
-3. fail the deploy if activation verification fails.
-
-## Code Changes Required
-
-| File | Change |
-|---|---|
-| `server/deploy/deploy_to_droplet.sh` | Harden release activation so `current` is switched atomically and verified every time, then call a shared post-deploy verifier. Fail immediately if the active backend release target or required backend services do not match expectations. Keep heavy warming behind explicit flags. |
-| `client/deploy/deploy_to_droplet.sh` | Replace the current unchecked `ln -sfn` activation with the same atomic-and-verified activation model used by the backend deploy, then call the shared verifier for client symlink and service health. |
-| `scripts/post_deploy_operations.sh` | New shell entrypoint for the operational plan. Support subcommands or flags for `verify`, `snapshots`, `invalidate`, `warm-landing`, `warm-best-entities`, and `smoke`. Ensure serial realm execution and readable summaries. |
-| `server/warships/management/commands/run_post_deploy_operations.py` | New management command for app-scoped operations that belong inside Django: snapshot rebuilds, landing cache invalidation, landing warm, best-entity warm, and lock/status reporting. Keep outputs structured JSON so the shell wrapper can compose them safely. |
-| `server/scripts/smoke_test_site_endpoints.py` | Review and harden smoke output so the post-deploy wrapper can reliably distinguish pass, fail, and partial failure without scraping ambiguous logs. This is the current smoke-script location in the repo and in the existing VS Code task. |
-| `agents/runbooks/runbook-backend-droplet-deploy.md` | Update after implementation so it documents the new default verifier and any new opt-in flags for targeted post-deploy operations. |
-| `agents/runbooks/runbook-client-droplet-deploy.md` | Update after implementation so it documents client-side verification behavior and how the shared post-deploy plan is invoked. |
-| `agents/runbooks/runbook-daily-data-refresh-schedule-2026-04-05.md` | Keep the boundary clear: daily refresh remains steady-state, while the new post-deploy tooling remains deploy-scoped and intentionally narrow. |
-
-## Guardrails For The Code Changes
+## Guardrails
 
 1. Do not add automatic full startup warming to deploy scripts.
 2. Do not run `na` and `eu` heavy warm steps in parallel.
 3. Do not make best-entity warming mandatory for every deploy.
 4. Do not make smoke testing block deploy by default until the current exit-code-15 flake is understood and stabilized.
 5. Prefer structured JSON summaries from operational commands over ad hoc log scraping.
-
-## Acceptance Criteria For The Implementation
-
-The implementation is complete when all of the following are true:
-
-1. backend deploy can prove the active backend release and required backend services without manual SSH follow-up,
-2. client deploy can prove the active client release and required client services without manual SSH follow-up,
-3. targeted post-deploy snapshot, invalidation, and warm steps can be executed from a single documented entrypoint,
-4. the operational entrypoint runs heavy steps serially and does not broaden default load,
-5. smoke verification can be invoked as the final step with a clear pass/fail summary,
-6. the deploy and daily-refresh runbooks still describe non-overlapping responsibilities.
-
-## QA Findings For The Implementation Plan
-
-This implementation-plan section was reviewed against the current repo layout and deploy tooling on 2026-04-05.
-
-Findings applied in this revision:
-
-1. corrected the smoke script path from `scripts/smoke_test_site_endpoints.py` to `server/scripts/smoke_test_site_endpoints.py`, which is the actual file tracked in the repo,
-2. added explicit client deploy activation hardening because the current client deploy still uses an unchecked `ln -sfn` switch,
-3. tightened the backend deploy plan so it fixes activation drift instead of only verifying after the fact,
-4. clarified that both deploy scripts should share the same atomic-and-verified activation standard before the post-deploy verifier is trusted.
 
 ## Verification Commands
 
