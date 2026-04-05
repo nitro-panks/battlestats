@@ -267,6 +267,13 @@ def _enrich_player_parallel(player_id, realm: str):
     refresh_player_explorer_summary(
         player, battles_rows=battles_rows, ranked_rows=ranked_rows)
 
+    # ── Phase 3e: clan battle summary (1 API call) ──────────
+    from warships.data import fetch_player_clan_battle_seasons
+    try:
+        fetch_player_clan_battle_seasons(int(player_id), realm=realm)
+    except Exception:
+        log.warning("CB data fetch failed for player_id=%s realm=%s", player_id, realm)
+
 
 def enrich_players(
     batch: int = DEFAULT_BATCH,
