@@ -82,6 +82,14 @@ Backend deploy defaults to the core site runtime only. Base dependencies install
 
 Single SSH call to the droplet. Reports worker health (memory/swap/CPU/uptime/OOM risk), Redis lock state, batch history + throughput + ETA, errors (enrichment/WorkerLost/SIGTERM/SIGKILL), live progress, clan crawl interference, and periodic task state. See `agents/runbooks/runbook-enrichment-crawler-2026-04-03.md` for the progress log.
 
+```bash
+cd server
+python manage.py backfill_clan_battle_data --realm eu --batch 500  # CB backfill for enriched players missing CB data
+python manage.py backfill_clan_battle_data --realm na --batch 500 --partition 0 --num-partitions 2  # Partitioned for parallelism
+```
+
+Backfills per-player clan battle data (`clan_battle_total_battles`, `clan_battle_seasons_participated`, `clan_battle_overall_win_rate`) for enriched players whose `PlayerExplorerSummary` is missing CB fields. The enrichment pipeline now includes CB fetch (Phase 3e), so this command is only needed for players enriched before 2026-04-05.
+
 ### DigitalOcean Functions (serverless background workers)
 
 ```bash
@@ -149,6 +157,8 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Distribution & correlation warming**: Proactive warming of player population distributions (WR, battles, avg tier) and correlations (tier-type, ranked WR-battles, WR-survival) every 55 min via the landing page task and on startup. TTL is 2 hours. Eliminates cold-cache penalty (10-30s full table scans).
 - **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) dispatches `startup_warm_caches_task` to the Celery background queue — sequentially warms landing page, hot entities, bulk cache, distributions, and correlations. Runs inside an existing worker rather than spawning a subprocess. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `runbook-deploy-oom-startup-warmers.md`.
 - **Player search suggestions**: Three-tier cache — client-side `Map` (instant, session-scoped, 200-entry cap) → Redis (10 min TTL, `suggest:<query>` keys) → Postgres with `pg_trgm` GIN index (`player_name_trgm_idx`). Minimum 3-character query. Raw `ILIKE` in `views.py` (Django's `icontains` generates `UPPER()` which bypasses trigram indexes).
+- **Clan battle seasons (clan-level)**: Request-driven — first visit queues `update_clan_battle_summary_task` which calls `refresh_clan_battle_seasons_cache()`. This fetches per-member CB stats from the WG API via ThreadPoolExecutor, aggregates by season, and writes to **Redis only** (TTL-based). Configured clans are pre-warmed by `warm_clan_battle_summaries_task` (env: `CLAN_BATTLE_WARM_CLAN_IDS`). Subsequent visits hit Redis until TTL expiry.
+- **Clan battle summary (per-player)**: Per-player CB stats (`clan_battle_total_battles`, `clan_battle_seasons_participated`, `clan_battle_overall_win_rate`) are persisted to **Postgres** on `PlayerExplorerSummary` via `_persist_player_clan_battle_summary()`. Populated by: enrichment pipeline (Phase 3e), player CB tab visits, and the `backfill_clan_battle_data` management command.
 - Redis-backed in production, LocMemCache in tests
 
 ### Celery queue architecture

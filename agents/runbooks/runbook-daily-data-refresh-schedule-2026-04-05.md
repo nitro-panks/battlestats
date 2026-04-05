@@ -106,7 +106,8 @@ Throughput at 10 req/s: ~5 clans/s. A 15-min invocation handles ~4,500 clans. Wi
 | `explorer_summary`                                        | Computed from battles + ranked         | 24 hr               | DO Function enrichment batch (via `refresh_player_explorer_summary`)       |
 | `achievements_json`                                       | player achievements API                | 7 days              | Phase 4: fold into enrichment batch                                        |
 | Clan metadata + membership                                | clans/info                             | 7 days              | DO Function clan sync (Phase 3)                                            |
-| CB seasons (clan-level)                                   | clan battles API                       | 7 days              | Celery `warm_clan_battle_summaries_task` (every 30 min)                    |
+| CB summary (per-player)                                   | clans/seasonstats                      | 24 hr               | DO Function enrichment batch (Phase 3e) + request-driven                   |
+| CB seasons (clan-level)                                   | clans/seasonstats (per member)         | 7 days              | Request-driven (`refresh_clan_battle_seasons_cache`) + configured warmers   |
 | Efficiency rank tier                                      | Computed from population               | 48 hr               | Celery `refresh_efficiency_rank_snapshot_task` (triggered post-enrichment) |
 
 ### What the enrichment batch touches per player
@@ -117,14 +118,21 @@ Each `_enrich_player_parallel()` call updates:
 2. `ranked_json` (from ranked account_info + ranked shipstats API)
 3. snapshot + activity (via `update_snapshot_data`)
 4. `explorer_summary` (via `refresh_player_explorer_summary`)
+5. `clan_battle_total_battles`, `clan_battle_seasons_participated`, `clan_battle_overall_win_rate` on `PlayerExplorerSummary` (via `fetch_player_clan_battle_seasons` — Phase 3e, added 2026-04-05)
 
-Net cost: ~3 WG API calls per player (2 parallel + 1 sequential).
+Net cost: ~4 WG API calls per player (2 parallel + 1 sequential + 1 CB seasons).
 
 ### What is NOT yet in the enrichment batch
 
 1. `efficiency_json` — separate Celery task, depends on battles_json being current (Phase 4)
 2. `achievements_json` — no enrichment support yet (Phase 4)
 3. Core player stats (`pvp_battles`, `pvp_ratio`, etc.) — request-driven only
+
+### CB backfill (one-time, 2026-04-05)
+
+Prior to Phase 3e, the enrichment pipeline did not fetch clan battle data. A dedicated `backfill_clan_battle_data` management command was written to fill the gap for already-enriched players. It calls `fetch_player_clan_battle_seasons()` per player, which fetches from the WG `clans/seasonstats/` API and persists to `PlayerExplorerSummary`.
+
+Backfill scope (2026-04-05): NA ~65K players, EU ~135K players. Run with 2 partitions per realm at ~950 players/min combined. Future enrichment passes include CB automatically via Phase 3e.
 
 ## Player Tier Definitions
 

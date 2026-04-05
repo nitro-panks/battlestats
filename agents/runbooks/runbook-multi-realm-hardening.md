@@ -1,7 +1,7 @@
 # Runbook: Multi-Realm Hardening & Asia Expansion
 
 **Created**: 2026-03-31
-**Updated**: 2026-04-01 — Phases 1-6 implemented and validated; Phase 8 (i18n) spec added
+**Updated**: 2026-04-05 — Post-fix: CB realm bug in `refresh_clan_battle_seasons_cache` (missed by Phase 1 audit)
 **Status**: Phases 1-6 complete; Phase 7 (Asia) and Phase 8 (i18n) deferred
 **Depends on**: `spec-multi-realm-eu-support.md` (Phases 1-6 complete)
 **Goal**: Fix realm propagation gaps discovered post-EU launch, add comprehensive test coverage, and prepare infrastructure for Asia — but **do not add Asia data or activate Asia crawls yet**.
@@ -59,6 +59,14 @@ All 6 public functions and the internal `_make_api_request` helper in `server/wa
 
 - `grep -rn '_fetch_clan' server/warships/data.py` — every call must include `realm=`.
 - Test: mock `make_api_request` and assert `realm='eu'` reaches it when an EU clan is fetched.
+
+### Post-fix (2026-04-05): CB realm bug in `refresh_clan_battle_seasons_cache`
+
+The Phase 1 audit caught all direct calls to `_fetch_clan_battle_season_stats` but missed an indirect one: `refresh_clan_battle_seasons_cache()` (`data.py:4007`) uses `ThreadPoolExecutor.submit(_get_player_clan_battle_season_stats, member['player_id'])` to fetch per-member CB stats in parallel. The `realm` parameter was not forwarded, so all EU clan CB aggregations silently queried the NA WG API. EU player IDs return empty from the NA endpoint, causing all EU clans to show zero CB season data.
+
+**Fix**: `8541a00` — added `realm=realm` to the `executor.submit()` call.
+
+**Lesson**: `grep` for missing `realm=` catches direct function calls but not `executor.submit()` / `functools.partial` / `lambda` wrappers. Future realm audits should also search for functions that accept `realm` as a parameter and trace whether all callers — including indirect dispatch — forward it.
 
 ---
 

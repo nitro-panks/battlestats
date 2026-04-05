@@ -372,6 +372,27 @@ As of 2026-04-05 after the CB ranking rollout:
 10. periodic warmers are confirmed active in steady state: `landing-page-warmer-{realm}` is enabled every 120 minutes and `hot-entity-cache-warmer-{realm}` is enabled every 30 minutes,
 11. those periodic warmers can republish landing player/clan payloads and advance the live `X-Landing-*-Cache-Cached-At` headers without any bounce or deploy-time invalidation.
 
+## Known Issue: systemd EnvironmentFile and AMQP URL quoting
+
+**Symptom**: After a deploy, Celery workers log `Cannot connect to amqp://guest:**@rabbitmq:5672//` instead of connecting to `127.0.0.1`. All request-driven background tasks (CB aggregation, ranked hydration, battle data refresh) silently fail. The `X-*-Pending` headers are set but never resolve.
+
+**Root cause**: systemd `EnvironmentFile` parsing treats unquoted `//` as a comment delimiter. The `CELERY_BROKER_URL=amqp://...@127.0.0.1:5672//` value gets truncated at the `//`, causing the env var to be empty. Workers fall back to the Django settings default (`amqp://guest:guest@rabbitmq:5672//` — the Docker-compose hostname).
+
+**Fix**: `set_env_value()` in `bootstrap_droplet.sh` now wraps all values in double quotes (`3a61628`). If the issue recurs, manually quote the value:
+
+```bash
+# Check current state
+grep CELERY_BROKER_URL /etc/battlestats-server.env
+# If unquoted, fix it
+sed -i 's|^CELERY_BROKER_URL=\(.*\)|CELERY_BROKER_URL="\1"|' /etc/battlestats-server.env
+# Restart workers
+systemctl restart battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
+# Verify
+journalctl -u battlestats-celery-hydration --since '10 sec ago' | grep 'Connected to'
+```
+
+**Detection**: Check for `Cannot connect to amqp://guest:**@rabbitmq:5672//` in any Celery worker journal. The `rabbitmq` hostname (vs `127.0.0.1`) is the tell.
+
 ## QA Findings
 
 The runbook was reviewed against the current deploy scripts, the startup warmer command, and live production state on 2026-04-05.
