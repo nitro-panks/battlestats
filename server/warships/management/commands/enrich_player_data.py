@@ -239,9 +239,11 @@ def _enrich_player_parallel(player_id, realm: str):
             'randoms_json', 'randoms_updated_at',
         ])
     else:
-        # No ship data — record attempt timestamp to avoid tight retry
+        # No ship data — set empty list to remove from candidate pool
+        # (candidates query filters on battles_json__isnull=True)
+        player.battles_json = []
         player.battles_updated_at = datetime.now()
-        player.save(update_fields=['battles_updated_at'])
+        player.save(update_fields=['battles_json', 'battles_updated_at'])
 
     # ── Phase 3b: process ranked data ────────────────────────
     ranked_rows = None

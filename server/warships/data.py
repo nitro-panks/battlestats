@@ -2391,10 +2391,11 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     ship_data = _fetch_ship_stats_for_player(player_id, realm=realm)
     if not ship_data:
         logging.warning(
-            f'No ship stats returned for player_id={player_id}; recording attempt timestamp to avoid tight retry loop.'
+            f'No ship stats returned for player_id={player_id}; recording empty battles_json to avoid re-selection.'
         )
+        player.battles_json = []
         player.battles_updated_at = datetime.now()
-        player.save(update_fields=['battles_updated_at'])
+        player.save(update_fields=['battles_json', 'battles_updated_at'])
         return
 
     prepared_data = []
