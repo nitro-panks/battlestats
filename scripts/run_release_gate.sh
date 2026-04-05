@@ -57,6 +57,7 @@ if command -v docker >/dev/null 2>&1; then
 else
   (
     cd "${ROOT_DIR}/server"
+    DJANGO_SECRET_KEY=release-gate-test-secret-key \
     "${PYTHON_BIN}" -m pytest \
       warships/tests/test_views.py \
       warships/tests/test_landing.py \

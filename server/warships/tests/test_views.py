@@ -3450,6 +3450,7 @@ class ApiContractTests(TestCase):
 
     def test_player_correlation_distribution_returns_tier_type_payload(self):
         cache.clear()
+        from warships.data import warm_player_tier_type_population_correlation
 
         Player.objects.create(
             name="TierTypeOne",
@@ -3489,6 +3490,10 @@ class ApiContractTests(TestCase):
                     "ship_tier": 10, "pvp_battles": 100, "wins": 60},
             ],
         )
+
+        # Pre-warm the population correlation cache so this request exercises
+        # the populated response path rather than the cold-cache pending path.
+        warm_player_tier_type_population_correlation()
 
         response = self.client.get(
             "/api/fetch/player_correlation/tier_type/8831/")
