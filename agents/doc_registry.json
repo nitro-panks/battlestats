@@ -328,10 +328,10 @@
                 "dependency-policy-replaced"
             ]
         },
-        "agents/runbooks/runbook-deploy-oom-startup-warmers.md": {
+        "agents/runbooks/archive/runbook-deploy-oom-startup-warmers.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "evergreen",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "operations",
             "owner": "backend",
             "aliases": [
@@ -345,9 +345,7 @@
                 "startup",
                 "celery"
             ],
-            "archive_on": [
-                "startup-warmer-model-replaced"
-            ]
+            "archive_on": []
         },
         "agents/runbooks/runbook-best-clan-eligibility.md": {
             "kind": "runbook",
@@ -742,10 +740,10 @@
                 "feature-stable"
             ]
         },
-        "agents/runbooks/runbook-enrichment-crawler-2026-04-02.md": {
+        "agents/runbooks/archive/runbook-enrichment-crawler-2026-04-02.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "data",
             "aliases": [
@@ -764,71 +762,35 @@
                 "crawler-model-replaced"
             ]
         },
-        "agents/runbooks/runbook-eu-best-player-population-2026-04-02.md": {
+        "agents/runbooks/archive/runbook-eu-best-player-population-2026-04-02.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "data",
-            "aliases": [
-                "eu best player population",
-                "eu best players"
-            ],
-            "tags": [
-                "eu",
-                "best players",
-                "population",
-                "landing",
-                "backfill"
-            ],
-            "archive_on": [
-                "population-fixed",
-                "population-model-replaced"
-            ]
+            "aliases": [],
+            "tags": ["eu", "best players", "population"],
+            "archive_on": []
         },
-        "agents/runbooks/runbook-eu-profile-chart-population-2026-04-02.md": {
+        "agents/runbooks/archive/runbook-eu-profile-chart-population-2026-04-02.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "data",
-            "aliases": [
-                "eu profile chart population",
-                "eu chart population"
-            ],
-            "tags": [
-                "eu",
-                "charts",
-                "population",
-                "profile",
-                "backfill"
-            ],
-            "archive_on": [
-                "population-fixed",
-                "chart-population-model-replaced"
-            ]
+            "aliases": [],
+            "tags": ["eu", "charts", "population"],
+            "archive_on": []
         },
-        "agents/runbooks/runbook-flower-observability-2026-04-02.md": {
+        "agents/runbooks/archive/runbook-flower-observability-2026-04-02.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "backend",
-            "aliases": [
-                "flower observability",
-                "celery flower"
-            ],
-            "tags": [
-                "flower",
-                "celery",
-                "observability",
-                "queues",
-                "operations"
-            ],
-            "archive_on": [
-                "flower-live",
-                "observability-model-replaced"
-            ]
+            "aliases": [],
+            "tags": ["flower", "celery", "observability"],
+            "archive_on": []
         },
         "agents/runbooks/runbook-icon-analysis.md": {
             "kind": "runbook",

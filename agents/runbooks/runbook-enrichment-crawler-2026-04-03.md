@@ -102,13 +102,16 @@ Crawler resumed and has been running continuously with zero errors. Batch interv
 
 | Metric                           | Value                                                     |
 | -------------------------------- | --------------------------------------------------------- |
-| Total players enriched (NA)      | 26,124 / 275,987 (9.5%)                                   |
+| Total players enriched (NA)      | 56,688 / 275,989 (20.5%)                                  |
+| Total players enriched (EU)      | 38,227 / 471,508 (8.1%)                                   |
 | Total errors                     | 0                                                         |
 | Error rate                       | 0%                                                        |
 | **Celery era** (batches 1-47)    | 23,500 enriched over ~27h (degraded by stalls/starvation) |
-| **DO Functions era** (batch 48+) | 2,624+ enriched, 0 errors, ~10k/hr steady                 |
+| **DO Functions era** (batch 48+) | 71,415+ enriched, 0 errors, ~10k/hr steady                |
 | Current throughput               | ~10,000 players/hour (DO Functions)                       |
-| Estimated NA completion          | ~2026-04-05 21:00 UTC                                     |
+| Estimated NA completion          | Passed — NA enrichment continued past original 9.5% when EU was added |
+
+_Last updated: 2026-04-05. Both realms are being enriched concurrently via DO Functions cron._
 
 ## Check-In Summary
 
@@ -310,13 +313,9 @@ Important scope note: this does **not** mean the full background-worker migratio
 - Lock file at `/tmp/enrichment-invoke.lock` (780s TTL) prevents overlapping invocations.
 - Close out the remaining Phase 1 monitoring item in the serverless spec once a full unattended run window has been observed.
 
-### After NA completes (~2026-04-05 21:00 UTC)
+### After NA completes
 
-1. Update `ENRICH_REALMS=eu` in `functions/.env`
-2. Redeploy: `bash functions/deploy.sh --include enrichment/enrich-batch`
-3. Verify first EU activation succeeds: `doctl serverless activations list --limit 3`
-4. Update monitoring to report EU progress explicitly, not just NA carry-over metrics
-5. EU population is larger (~120K+ eligible) — expect ~12 hours for EU pass
+_Status: EU enrichment was activated alongside NA before NA completed. Both realms are now being enriched concurrently. The original plan to run EU sequentially after NA was superseded by the higher throughput of DO Functions._
 
 ### After all enrichment completes
 

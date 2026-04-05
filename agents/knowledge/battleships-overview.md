@@ -1,6 +1,6 @@
 # Battlestats Overview
 
-Last verified: 2026-03-14
+Last verified: 2026-04-05
 
 ## Why This Matters
 
@@ -8,7 +8,8 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 
 ## Current Conclusion
 
-- battlestats is a Docker-first Django + DRF + Celery + Next.js application for World of Warships player and clan analytics.
+- battlestats is a Django + DRF + Celery + Next.js application for World of Warships player and clan analytics, deployed on a single DigitalOcean droplet.
+- background enrichment (player data population) runs as a DigitalOcean Function (`enrichment/enrich-batch`), not as a Celery task. Celery handles request-driven refresh, warmers, and periodic schedules.
 - the repo intentionally separates unreliable upstream WG API behavior from stable internal normalized payloads.
 - ranked history is now stored locally as the full non-empty season record, not a truncated tail.
 - request-time reads should prefer best-effort local data and degrade gracefully when async infrastructure is unavailable.
@@ -20,10 +21,14 @@ Future agent sessions need one high-density bootstrap file that explains the liv
   - `client/`: Next.js 15.5.10 app router frontend, React 18, TypeScript, Tailwind, D3, Font Awesome.
   - `server/`: Django backend, DRF APIs, Celery worker/beat, WG ingestion logic, agentic tooling.
   - `agents/`: persona markdown, runbooks, reviews, work items, knowledge base, contracts.
-- runtime stack via `docker-compose.yml`:
+- local dev runtime via `docker-compose.yml`:
   - Next client on `localhost:3001`
   - Django/Gunicorn on `localhost:8888`
   - Postgres, RabbitMQ, Redis, Celery worker, Celery beat
+- production droplet runtime:
+  - Gunicorn, 3 Celery worker pools (default/hydration/background), Beat, Redis, RabbitMQ, Next.js — all as systemd services
+  - DigitalOcean Functions for background enrichment (`enrichment/enrich-batch`) — runs outside the droplet, invoked via droplet crontab every 15 min
+  - DigitalOcean managed Postgres
 - key backend app: `server/warships/`
 - key frontend app: `client/app/components/`
 
@@ -184,7 +189,7 @@ Future agent sessions need one high-density bootstrap file that explains the liv
   - allowed to repair stale or incomplete ranked rows including missing top-ship enrichment
 - daily freshness lane:
   - `python manage.py incremental_ranked_data --state-file logs/incremental_ranked_data_state.json`
-  - queue-based
+  - queue-based Celery task on the `background` queue
   - known ranked + discovery candidates are interleaved
   - defaults in docker: `LIMIT=150`, `SKIP_FRESH_HOURS=24`, `KNOWN_LIMIT=300`, `DISCOVERY_LIMIT=75`
   - beat task name: `daily-ranked-incrementals`
@@ -259,6 +264,13 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 - safe task dispatch now logs broker failures as warnings instead of surfacing them as 500s on read paths.
 - crawler and ranked incremental jobs use locks; incremental ranked must not run while the clan crawl lock is active.
 - crawl watchdog can clear stale crawl locks and resume crawl scheduling.
+- background enrichment (`PlayerExplorerSummary` population) now runs as a DigitalOcean Function (`enrichment/enrich-batch`), not as a Celery task:
+  - invoked via droplet crontab every 15 min
+  - each invocation boots Django, loops through 500-player batches for up to ~14 min
+  - throughput: ~10k players/hour (vs ~1,760/hr peak on Celery background worker)
+  - realm targeting via `ENRICH_REALMS` env var in `functions/.env`
+  - see `agents/runbooks/spec-serverless-background-workers-2026-04-04.md` for architecture
+- the Celery `background` worker still handles warmers, crawlers, ranked incrementals, and player refresh — only enrichment has migrated to DO Functions so far.
 
 ## Agentic Subsystem
 

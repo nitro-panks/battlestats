@@ -1,9 +1,11 @@
 # Production Data Refresh Strategy — Spec
 
 **Date:** 2026-03-18  
-**Status:** Draft (QA-reviewed, amendments applied)  
+**Status:** Partially implemented — Phase 1 (`incremental_player_refresh_task`) landed; enrichment has migrated to DigitalOcean Functions (see `spec-serverless-background-workers-2026-04-04.md`).  
 **Scope:** Replace development-era full-population nightly crawl with a targeted, incremental refresh strategy suitable for production.  
 **QA Review:** 2026-03-18 — Conditional GO for Phase 1. Critical/High findings addressed below.
+
+> **Architecture update (2026-04-05):** Background enrichment — the heaviest sustained background workload — now runs as a DigitalOcean Function (`enrichment/enrich-batch`) outside the droplet, not as a Celery background task. This materially changes the capacity assumptions in this spec. The `background` queue is no longer contended by enrichment, so warmer/crawler coexistence is more viable than originally assessed. The `ENRICH_REALMS` env var controls realm targeting. See `runbook-enrichment-crawler-2026-04-03.md` for progress tracking.
 
 ---
 

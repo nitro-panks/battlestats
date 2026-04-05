@@ -87,7 +87,7 @@ Current explicit task routing:
    - landing warmers and hot-cache warmers
    - random landing queue refill tasks
    - bulk cache loader
-   - `enrich_player_data_task`
+   - ~~`enrich_player_data_task`~~ — **migrated to DigitalOcean Functions** as of 2026-04-04. Now runs as `enrichment/enrich-batch` outside the droplet, invoked via crontab every 15 min. See `spec-serverless-background-workers-2026-04-04.md`.
    - `startup_warm_caches_task`
    - `warm_all_clan_tier_distributions_task`
 2. `hydration`
@@ -192,26 +192,19 @@ That gap is now reduced. The following task classes were moved into `hydration` 
 
 The remaining question is whether any additional request-driven tasks should leave `default`, not whether `hydration` should stay as narrowly scoped as before.
 
-### Finding 3: `background` is safe, but still overloaded as a maintenance superqueue
+### Finding 3: `background` load reduced by enrichment migration
 
-`background` currently combines:
+`background` previously combined full crawls, incremental refreshes, landing warmers, startup warmers, bulk cache loads, and continuous enrichment. The enrichment lane — by far the heaviest sustained consumer — has migrated to DigitalOcean Functions as of 2026-04-04, materially reducing background queue pressure.
+
+The remaining background workload is:
 
 1. full crawls
 2. periodic incremental refreshes
 3. landing warmers
 4. startup warmers
 5. bulk cache loads
-6. continuous enrichment
 
-This is acceptable because the queue is intentionally non-interactive. It is not automatically wrong.
-
-However, it means freshness-oriented maintenance work can still wait behind crawler-class work inside the same maintenance lane.
-
-This becomes suboptimal when the product cares about:
-
-1. post-deploy warm completion time
-2. landing freshness during heavy crawl windows
-3. predictable warm latency independent of crawl backlog
+This is more manageable on `c=2` concurrency now that enrichment no longer competes for worker slots. However, warmer/crawl contention can still cause starvation during heavy crawl windows.
 
 ### Finding 4: local Docker queue topology was not matching production
 

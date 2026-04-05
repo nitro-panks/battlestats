@@ -33,17 +33,18 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 
 - `runbook-celery-queue-strategy.md`: current queue assessment for crawlers, warmers, and request-driven refresh tasks.
 - `runbook-droplet-memory-tuning-2026-04-02.md`: current droplet memory sizing and worker tuning snapshot.
-- `runbook-flower-observability-2026-04-02.md`: production Flower plan for Celery queue visibility on the droplet.
-- `runbook-enrichment-crawler-2026-04-02.md`: enrichment crawler architecture, operations, battles_json usage, and product roadmap.
+- `runbook-enrichment-crawler-2026-04-03.md`: enrichment progress log, DO Functions migration, and re-enablement plan.
 - `runbook-deleted-account-purge.md`: purge flow and safety notes for deleted accounts.
 - `runbook-dependency-audit.md`: dependency hygiene policy and current audit posture.
 - `runbook-post-deploy-post-bounce-operations-2026-04-05.md`: required post-redeploy verification, post-bounce behavior, and bounded warm sequencing.
+- `runbook-daily-data-refresh-schedule-2026-04-05.md`: daily refresh cadences, DO Functions enrichment schedule, and periodic task windows.
 
 ## Evergreen Architecture And Policy Guides
 
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`: cache-first and lazy-refresh contract.
 - `spec-multi-realm-eu-support.md`: multi-realm architecture, rollout status, and migration behavior.
-- `spec-production-data-refresh-strategy.md`: data refresh and maintenance intent.
+- `spec-production-data-refresh-strategy.md`: data refresh and maintenance intent (partially implemented; enrichment migrated to DO Functions).
+- `spec-serverless-background-workers-2026-04-04.md`: DO Functions architecture for offloading background work from the droplet.
 - `runbook-contract-strategy-implementation.md`: payload and contract maintenance expectations.
 - `runbook-best-clan-eligibility.md`: composite best-clan ranking rules and exclusions.
 - `runbook-seo.md`: metadata, sitemap, structured data, and analytics notes.
@@ -76,11 +77,7 @@ Open these only when the task matches them directly:
 - `runbook-clan-tier-distribution-recovery-2026-04-02.md`
 - `runbook-droplet-memory-tuning-2026-04-02.md`
 - `runbook-efficiency-rank-qa-2026-04-02.md`
-- `runbook-enrichment-crawler-2026-04-02.md`
 - `runbook-enrichment-crawler-2026-04-03.md`: progress log for the active enrichment crawl pass (batches, disruptions, check-ins)
-- `runbook-eu-best-player-population-2026-04-02.md`
-- `runbook-eu-profile-chart-population-2026-04-02.md`
-- `runbook-flower-observability-2026-04-02.md`
 - `runbook-best-clan-cb-window-2026-04-04.md`: current Best -> CB 10-completed-season window model and implementation notes
 - `runbook-landing-best-player-subsort-materialization-2026-04-05.md`: current Best-player snapshot materialization and cache behavior
 - `runbook-icon-analysis.md`
@@ -105,8 +102,7 @@ These stay active only while they still shape implementation or operations:
 - `spec-mobile-player-detail-ux-2026-03-28.md`
 - `spec-multi-realm-eu-support.md`
 - `spec-player-route-follow-up-improvements-2026-03-19.md`
-- `spec-production-data-refresh-strategy.md`
-- `spec-serverless-background-workers-2026-04-04.md`: DO Functions architecture for offloading background work (enrichment, crawlers, warmers) from the droplet
+- `spec-cb-seasons-chart-redesign-2026-04-05.md`: CB seasons chart layered redesign spec
 
 ## Archive Rule
 
