@@ -2,7 +2,7 @@
 
 _Created: 2026-04-05_
 _QA: 2026-04-05 (revised)_
-_Status: Implemented — pending deploy_
+_Status: Deployed (v1.7.0)_
 
 ## Decision
 
@@ -323,5 +323,5 @@ No migration rollback needed. The field addition is additive (nullable).
 - [x] Implementation spec with exact code changes, line numbers, and diffs
 - [x] QA revision: eliminated model/migration/enrichment steps — `ranked_overall_win_rate` computed on-the-fly from `ranked_json`
 - [x] Implementation: ranked multiplier scoring, pipeline wiring, 6 new tests (all pass)
-- [ ] Deploy + materialize snapshot
+- [x] Deployed v1.7.0, snapshot materialized (25 players, NA)
 - [ ] User review of live ranking feel — may need weight tuning
