@@ -157,20 +157,25 @@ else
 fi
 
 if grep -q '^REDIS_URL=' /etc/battlestats-server.env; then
-  sed -i 's|^REDIS_URL=.*|REDIS_URL=redis://127.0.0.1:6379/0|' /etc/battlestats-server.env
+  sed -i 's|^REDIS_URL=.*|REDIS_URL="redis://127.0.0.1:6379/0"|' /etc/battlestats-server.env
 else
-  echo 'REDIS_URL=redis://127.0.0.1:6379/0' >> /etc/battlestats-server.env
+  echo 'REDIS_URL="redis://127.0.0.1:6379/0"' >> /etc/battlestats-server.env
 fi
 
 get_env_value() {
   local key="$1"
-  grep -E "^${key}=" /etc/battlestats-server.env | tail -n1 | cut -d= -f2-
+  local raw
+  raw="$(grep -E "^${key}=" /etc/battlestats-server.env | tail -n1 | cut -d= -f2-)"
+  # Strip surrounding double quotes if present
+  raw="${raw#\"}"
+  raw="${raw%\"}"
+  echo "${raw}"
 }
 
 if grep -q '^CELERY_RESULT_BACKEND=' /etc/battlestats-server.env; then
-  sed -i 's|^CELERY_RESULT_BACKEND=.*|CELERY_RESULT_BACKEND=rpc://|' /etc/battlestats-server.env
+  sed -i 's|^CELERY_RESULT_BACKEND=.*|CELERY_RESULT_BACKEND="rpc://"|' /etc/battlestats-server.env
 else
-  echo 'CELERY_RESULT_BACKEND=rpc://' >> /etc/battlestats-server.env
+  echo 'CELERY_RESULT_BACKEND="rpc://"' >> /etc/battlestats-server.env
 fi
 
 # ENABLE_CRAWLER_SCHEDULES removed — crawlers migrated to DO Functions
@@ -178,10 +183,13 @@ fi
 set_env_value() {
   local key="$1"
   local value="$2"
+  # Wrap in double quotes so systemd EnvironmentFile parses values with
+  # special characters (e.g. // in AMQP URLs) correctly.
+  local quoted_value="\"${value}\""
   if grep -q "^${key}=" /etc/battlestats-server.env; then
-    sed -i "s|^${key}=.*|${key}=${value}|" /etc/battlestats-server.env
+    sed -i "s|^${key}=.*|${key}=${quoted_value}|" /etc/battlestats-server.env
   else
-    echo "${key}=${value}" >> /etc/battlestats-server.env
+    echo "${key}=${quoted_value}" >> /etc/battlestats-server.env
   fi
 }
 
