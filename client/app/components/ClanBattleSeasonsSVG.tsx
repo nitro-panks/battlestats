@@ -7,6 +7,8 @@ export interface ClanBattleSeasonPoint {
     season_name: string;
     season_label: string;
     start_date?: string | null;
+    roster_battles?: number;
+    roster_wins?: number;
     participants: number;
     roster_win_rate: number;
 }
@@ -33,8 +35,9 @@ const selectColorByWR = (wr: number): string => {
 
 interface SeasonRow {
     index: number;
+    battles: number;
+    wins: number;
     wr: number;
-    activity: number;
     hasData: boolean;
     season: ClanBattleSeasonPoint;
 }
@@ -42,7 +45,7 @@ interface SeasonRow {
 const drawChart = (
     container: HTMLDivElement,
     seasons: ClanBattleSeasonPoint[],
-    memberCount: number,
+    _memberCount: number,
     svgHeight: number,
     colors: Colors,
 ) => {
@@ -63,7 +66,6 @@ const drawChart = (
     // --- Build complete season timeline with gaps filled ---
     const byId = new Map(sorted.map(s => [s.season_id, s]));
 
-    // Fill gaps between consecutive seasons only within the same ID range group
     const allIds: number[] = [];
     for (let i = 0; i < sorted.length; i++) {
         const curr = sorted[i];
@@ -89,14 +91,16 @@ const drawChart = (
             season_label: `S${id}`,
             participants: 0,
             roster_win_rate: 0,
+            roster_battles: 0,
+            roster_wins: 0,
         };
     });
 
     const totalSvgWidth = containerWidth;
     const totalSvgHeight = compact ? Math.min(svgHeight, 260) : svgHeight;
     const margin = compact
-        ? { top: 16, right: 14, bottom: 46, left: 42 }
-        : { top: 20, right: 20, bottom: 52, left: 48 };
+        ? { top: 16, right: 14, bottom: 46, left: 48 }
+        : { top: 20, right: 20, bottom: 52, left: 54 };
 
     const width = totalSvgWidth - margin.left - margin.right;
     const height = totalSvgHeight - margin.top - margin.bottom;
@@ -118,14 +122,14 @@ const drawChart = (
     // --- Per-season rows ---
     const rows: SeasonRow[] = fullTimeline.map((d, i) => ({
         index: i,
+        battles: d.roster_battles || 0,
+        wins: d.roster_wins || 0,
         wr: d.roster_win_rate,
-        activity: memberCount > 0 ? (d.participants / memberCount) * 100 : 0,
         hasData: byId.has(d.season_id),
         season: d,
     }));
 
     // --- Scales ---
-    // Band-like positioning via linear scale for even spacing
     const n = fullTimeline.length;
     const bandPadding = 0.2;
     const totalBandWidth = width / n;
@@ -135,12 +139,9 @@ const drawChart = (
         .range([totalBandWidth / 2 - barWidth / 2, width - totalBandWidth / 2 - barWidth / 2]);
     const barCenter = (index: number) => xScale(index) + barWidth / 2;
 
-    // Y scale — percentage 0-100
-    const maxPct = Math.max(
-        d3.max(rows, (d: SeasonRow) => d.wr) || 60,
-        d3.max(rows, (d: SeasonRow) => d.activity) || 60,
-    );
-    const yDomainMax = Math.min(Math.ceil(maxPct / 10) * 10 + 10, 100);
+    // Y scale — game count
+    const maxBattles = d3.max(rows, (d: SeasonRow) => d.battles) || 100;
+    const yDomainMax = Math.ceil(maxBattles * 1.1 / 10) * 10;
     const yScale = d3.scaleLinear()
         .domain([0, yDomainMax])
         .range([height, 0]);
@@ -157,19 +158,17 @@ const drawChart = (
 
     // --- Y axis ---
     const yAxis = svg.append('g')
-        .call(d3.axisLeft(yScale).ticks(5).tickFormat((value: number) => `${value}%`).tickSize(0).tickPadding(6));
+        .call(d3.axisLeft(yScale).ticks(5).tickSize(0).tickPadding(6));
     yAxis.selectAll('text')
         .style('font-size', axisFontSize)
         .style('fill', colors.axisText);
     yAxis.select('.domain').remove();
 
-    // --- Colors ---
-    const activityColor = colors.activityActive;
-
-    // --- Draw WR bars ---
+    // --- Draw layered bars ---
     const cornerR = Math.min(3, barWidth / 2);
+    const winsBarWidth = barWidth * 0.65;
+    const winsBarOffset = (barWidth - winsBarWidth) / 2;
 
-    // Rounded top-corner bar path
     const roundedTopBar = (bx: number, by: number, bw: number, bh: number, r: number): string => {
         if (bh <= 0) return '';
         const cr = Math.min(r, bh / 2, bw / 2);
@@ -178,48 +177,35 @@ const drawChart = (
 
     const activeRows = rows.filter(d => d.hasData);
 
-    // WR bars — colored by WR value
-    svg.selectAll('.wr-bar')
+    // Background grey bars — total battles
+    svg.selectAll('.battles-bar')
         .data(activeRows)
         .enter()
         .append('path')
-        .attr('class', 'wr-bar')
+        .attr('class', 'battles-bar')
         .attr('d', (d: SeasonRow) => {
             const bx = xScale(d.index);
-            const by = yScale(d.wr);
+            const by = yScale(d.battles);
             return roundedTopBar(bx, by, barWidth, height - by, cornerR);
         })
+        .attr('fill', colors.barBg);
+
+    // Foreground colored bars — wins, colored by WR
+    svg.selectAll('.wins-bar')
+        .data(activeRows)
+        .enter()
+        .append('path')
+        .attr('class', 'wins-bar')
+        .attr('d', (d: SeasonRow) => {
+            const bx = xScale(d.index) + winsBarOffset;
+            const by = yScale(d.wins);
+            return roundedTopBar(bx, by, winsBarWidth, height - by, cornerR);
+        })
         .attr('fill', (d: SeasonRow) => selectColorByWR(d.wr))
-        .attr('fill-opacity', 0.75)
+        .attr('fill-opacity', 0.85)
         .attr('stroke', (d: SeasonRow) => selectColorByWR(d.wr))
         .attr('stroke-width', 0.5)
         .attr('stroke-opacity', 0.9);
-
-    // --- Activity line overlay ---
-    const lineCoords: [number, number][] = activeRows.map(d => [barCenter(d.index), yScale(d.activity)]);
-    const lineGen = d3.line().curve(d3.curveMonotoneX);
-
-    if (lineCoords.length > 1) {
-        svg.append('path')
-            .attr('d', lineGen(lineCoords))
-            .attr('fill', 'none')
-            .attr('stroke', activityColor)
-            .attr('stroke-width', 2)
-            .attr('stroke-opacity', 0.9);
-    }
-
-    // Activity dots
-    svg.selectAll('.activity-dot')
-        .data(activeRows)
-        .enter()
-        .append('circle')
-        .attr('class', 'activity-dot')
-        .attr('cx', (d: SeasonRow) => barCenter(d.index))
-        .attr('cy', (d: SeasonRow) => yScale(d.activity))
-        .attr('r', Math.min(4, barWidth / 3))
-        .attr('fill', activityColor)
-        .attr('stroke', colors.surface)
-        .attr('stroke-width', 1.5);
 
     // --- X axis ---
     const xAxisG = svg.append('g')
@@ -282,8 +268,8 @@ const drawChart = (
                 tooltip
                     .html(
                         `<strong>${d.season.season_name}</strong><br/>` +
-                        `<span style="color:${selectColorByWR(d.wr)}">WR: ${d.wr.toFixed(1)}%</span><br/>` +
-                        `<span style="color:${activityColor}">Activity: ${d.activity.toFixed(0)}%</span>`
+                        `Battles: ${d.battles.toLocaleString()}<br/>` +
+                        `<span style="color:${selectColorByWR(d.wr)}">Wins: ${d.wins.toLocaleString()} (${d.wr.toFixed(1)}%)</span>`
                     )
                     .style('opacity', 1);
             }
@@ -307,7 +293,27 @@ const drawChart = (
     const legendG = svgRoot.append('g')
         .attr('transform', `translate(${margin.left}, ${legendY})`);
 
-    // WR legend — gradient swatch showing WR color range
+    // Games Played legend — grey swatch
+    let legendX = 0;
+    legendG.append('rect')
+        .attr('x', legendX)
+        .attr('y', -5)
+        .attr('width', 12)
+        .attr('height', 10)
+        .attr('rx', 3)
+        .attr('fill', colors.barBg);
+
+    legendG.append('text')
+        .attr('x', legendX + 16)
+        .attr('y', 0)
+        .attr('dy', '0.35em')
+        .style('font-size', legendFontSize)
+        .style('fill', colors.labelText)
+        .text('Games Played');
+
+    legendX += 16 + 'Games Played'.length * (compact ? 6 : 7) + 16;
+
+    // Games Won legend — WR gradient swatch
     const gradId = 'cb-wr-grad';
     const defs = svgRoot.append('defs');
     const grad = defs.append('linearGradient').attr('id', gradId);
@@ -316,7 +322,6 @@ const drawChart = (
     grad.append('stop').attr('offset', '66%').attr('stop-color', '#74c476');
     grad.append('stop').attr('offset', '100%').attr('stop-color', '#810c9e');
 
-    let legendX = 0;
     legendG.append('rect')
         .attr('x', legendX)
         .attr('y', -5)
@@ -324,7 +329,7 @@ const drawChart = (
         .attr('height', 10)
         .attr('rx', 3)
         .attr('fill', `url(#${gradId})`)
-        .attr('fill-opacity', 0.75);
+        .attr('fill-opacity', 0.85);
 
     legendG.append('text')
         .attr('x', legendX + 16)
@@ -332,33 +337,7 @@ const drawChart = (
         .attr('dy', '0.35em')
         .style('font-size', legendFontSize)
         .style('fill', colors.labelText)
-        .text('Win Rate %');
-
-    legendX += 16 + 'Win Rate %'.length * (compact ? 6 : 7) + 16;
-
-    // Activity legend — line + dot swatch
-    legendG.append('line')
-        .attr('x1', legendX)
-        .attr('y1', 0)
-        .attr('x2', legendX + 12)
-        .attr('y2', 0)
-        .attr('stroke', activityColor)
-        .attr('stroke-width', 2);
-    legendG.append('circle')
-        .attr('cx', legendX + 6)
-        .attr('cy', 0)
-        .attr('r', 3)
-        .attr('fill', activityColor)
-        .attr('stroke', colors.surface)
-        .attr('stroke-width', 1);
-
-    legendG.append('text')
-        .attr('x', legendX + 16)
-        .attr('y', 0)
-        .attr('dy', '0.35em')
-        .style('font-size', legendFontSize)
-        .style('fill', colors.labelText)
-        .text('Clan Activity %');
+        .text('Games Won');
 };
 
 const ClanBattleSeasonsSVG: React.FC<ClanBattleSeasonsSVGProps> = ({
