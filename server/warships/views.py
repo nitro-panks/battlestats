@@ -1076,7 +1076,8 @@ def player_name_suggestions(request) -> Response:
                 [realm, f'%{query}%', f'{query}%'],
             )
             columns = [col[0] for col in cursor.description]
-            suggestions = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            suggestions = [dict(zip(columns, row))
+                           for row in cursor.fetchall()]
     else:
         prefix_lower = query.lower()
         suggestions = list(

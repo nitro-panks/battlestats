@@ -3352,7 +3352,7 @@ def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
 def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None, realm: str = DEFAULT_REALM) -> dict:
     player = player or Player.objects.get(player_id=player_id, realm=realm)
     population_payload = _fetch_player_tier_type_population_correlation(
-        realm=realm, allow_rebuild=False)
+        realm=realm)
 
     if population_payload is None:
         _dispatch_async_correlation_warm(realm=realm)

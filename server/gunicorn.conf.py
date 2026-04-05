@@ -23,7 +23,8 @@ def when_ready(server):
         return
     delay = int(os.getenv("CACHE_WARMUP_START_DELAY_SECONDS", "5"))
 
-    server.log.info("Dispatching startup cache warmers to Celery (countdown=%ds)...", delay)
+    server.log.info(
+        "Dispatching startup cache warmers to Celery (countdown=%ds)...", delay)
     try:
         from warships.tasks import startup_warm_caches_task
         startup_warm_caches_task.apply_async(countdown=delay)

