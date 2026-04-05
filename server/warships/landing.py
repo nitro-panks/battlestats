@@ -501,11 +501,13 @@ def _publish_landing_payload(
     payload: list[dict],
     metadata: dict[str, str | int],
     ttl_seconds: int,
+    dirty_keys: tuple[str, ...] = (),
 ) -> None:
     cache.set(cache_key, payload, ttl_seconds)
     cache.set(metadata_key, metadata, ttl_seconds)
     cache.set(published_cache_key, payload, timeout=None)
     cache.set(published_metadata_key, metadata, timeout=None)
+    _clear_cache_family_dirty(*dirty_keys)
 
 
 def _get_cached_landing_payload_with_fallback(
@@ -516,10 +518,14 @@ def _get_cached_landing_payload_with_fallback(
     ttl_seconds: int,
     force_refresh: bool,
     realm: str = DEFAULT_REALM,
+    dirty_keys: tuple[str, ...] = (),
 ) -> tuple[list[dict] | None, dict[str, str | int]]:
-    payload = None if force_refresh else cache.get(cache_key)
+    is_dirty = (not force_refresh) and any(
+        cache.get(dirty_key) is not None for dirty_key in dirty_keys
+    )
+    payload = None if force_refresh or is_dirty else cache.get(cache_key)
     metadata = _normalize_landing_player_cache_metadata(
-        None if force_refresh else cache.get(metadata_key), ttl_seconds)
+        None if force_refresh or is_dirty else cache.get(metadata_key), ttl_seconds)
 
     if payload is not None:
         if cache.get(metadata_key) is None:
@@ -528,7 +534,7 @@ def _get_cached_landing_payload_with_fallback(
         cache.set(published_metadata_key, metadata, timeout=None)
         return payload, metadata
 
-    published_payload = None if force_refresh else cache.get(
+    published_payload = None if force_refresh or is_dirty else cache.get(
         published_cache_key)
     if published_payload is not None:
         published_metadata = _normalize_landing_player_cache_metadata(
@@ -561,6 +567,7 @@ def get_landing_clans_payload_with_cache_metadata(force_refresh: bool = False, r
         ttl_seconds,
         force_refresh,
         realm=realm,
+        dirty_keys=(realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),),
     )
 
     if payload is None:
@@ -574,6 +581,7 @@ def get_landing_clans_payload_with_cache_metadata(force_refresh: bool = False, r
             payload,
             metadata,
             ttl_seconds,
+            dirty_keys=(realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),),
         )
 
     return payload, metadata
@@ -668,6 +676,7 @@ def invalidate_landing_recent_player_cache(realm: str = DEFAULT_REALM) -> None:
 
 
 def invalidate_landing_player_caches(include_recent: bool = False, realm: str = DEFAULT_REALM) -> None:
+    _bump_landing_players_cache_namespace(realm=realm)
     dirty_keys = [realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY)]
     if include_recent:
         dirty_keys.append(realm_cache_key(
@@ -1021,6 +1030,7 @@ def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = Fal
         ttl_seconds,
         force_refresh,
         realm=realm,
+        dirty_keys=(realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),),
     )
 
     if payload is None:
@@ -1035,6 +1045,7 @@ def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = Fal
             payload,
             metadata,
             ttl_seconds,
+            dirty_keys=(realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),),
         )
 
     return payload, metadata
@@ -1926,6 +1937,7 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
         ttl_seconds,
         force_refresh,
         realm=realm,
+        dirty_keys=(realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY),),
     )
 
     if payload is None:
@@ -1939,6 +1951,7 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
             payload,
             metadata,
             ttl_seconds,
+            dirty_keys=(realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY),),
         )
 
     return payload, metadata

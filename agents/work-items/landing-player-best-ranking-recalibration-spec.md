@@ -35,6 +35,12 @@ Validation completed for this update:
 1. focused API regression tests for ranked medal ordering passed in `server/warships/tests/test_views.py`,
 2. frontend explanatory copy in `client/app/components/PlayerSearch.tsx` was updated to match the shipped contract.
 
+Follow-up implementation note:
+
+1. landing player cache invalidation now bumps the player cache namespace and treats the player dirty key as authoritative during payload reads,
+2. this prevents stale published best-player payloads for non-default `limit` values from surviving a deploy or data refresh,
+3. focused landing cache regressions in `server/warships/tests/test_landing.py` now cover dirty rebuild behavior for player landing payloads.
+
 ## Goal
 
 Replace the landing page `Best` player filter with a more competitive, corpus-aware ranking that heavily discounts tiers 1-4 and ranks players using a blend of high-tier PvP performance, efficiency, achievements-derived signals, experience, and competitive activity.
