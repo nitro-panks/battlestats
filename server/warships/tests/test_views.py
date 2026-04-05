@@ -3547,6 +3547,11 @@ class ApiContractTests(TestCase):
             ],
         )
 
+        # Pre-warm the population correlation cache so the request path
+        # doesn't need to rebuild it inline (matches production behavior).
+        from warships.data import warm_player_tier_type_population_correlation
+        warm_player_tier_type_population_correlation()
+
         response = self.client.get(
             "/api/fetch/player_correlation/tier_type/8834/")
 
