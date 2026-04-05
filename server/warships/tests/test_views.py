@@ -2178,8 +2178,8 @@ class ApiContractTests(TestCase):
     def test_landing_players_best_ranked_sort_orders_by_ranked_strength(self):
         cache.clear()
         today = timezone.now().date()
-        volume_leader = Player.objects.create(
-            name="LandingRankedVolumeLeader",
+        gold_leader = Player.objects.create(
+            name="LandingRankedGoldLeader",
             player_id=4391,
             is_hidden=False,
             pvp_ratio=55.0,
@@ -2190,12 +2190,16 @@ class ApiContractTests(TestCase):
                 {"ship_tier": 8, "pvp_battles": 4200, "wins": 2310},
             ],
             ranked_json=[
-                {"season_id": 1, "total_battles": 38, "total_wins": 21,
+                {"season_id": 3, "total_battles": 38, "total_wins": 21,
                     "win_rate": 55.26, "highest_league": 1, "highest_league_name": "Gold"},
+                {"season_id": 2, "total_battles": 30, "total_wins": 18,
+                    "win_rate": 60.0, "highest_league": 1, "highest_league_name": "Gold"},
+                {"season_id": 1, "total_battles": 24, "total_wins": 14,
+                    "win_rate": 58.33, "highest_league": 2, "highest_league_name": "Silver"},
             ],
         )
-        balanced_runner = Player.objects.create(
-            name="LandingRankedRunnerUp",
+        wr_runner = Player.objects.create(
+            name="LandingRankedWRRunner",
             player_id=4392,
             is_hidden=False,
             pvp_ratio=58.0,
@@ -2206,21 +2210,25 @@ class ApiContractTests(TestCase):
                 {"ship_tier": 9, "pvp_battles": 4100, "wins": 2419},
             ],
             ranked_json=[
-                {"season_id": 1, "total_battles": 14, "total_wins": 8, "win_rate": 57.14,
+                {"season_id": 2, "total_battles": 20, "total_wins": 14, "win_rate": 70.0,
+                    "highest_league": 1, "highest_league_name": "Gold"},
+                {"season_id": 1, "total_battles": 16, "total_wins": 11, "win_rate": 68.75,
                     "highest_league": 2, "highest_league_name": "Silver"},
             ],
         )
         PlayerExplorerSummary.objects.create(
-            player=volume_leader,
+            player=gold_leader,
             player_score=6.0,
             latest_ranked_battles=38,
             highest_ranked_league_recent="Gold",
+            ranked_seasons_participated=3,
         )
         PlayerExplorerSummary.objects.create(
-            player=balanced_runner,
+            player=wr_runner,
             player_score=5.0,
-            latest_ranked_battles=14,
-            highest_ranked_league_recent="Silver",
+            latest_ranked_battles=20,
+            highest_ranked_league_recent="Gold",
+            ranked_seasons_participated=2,
         )
         bronze_grinder = Player.objects.create(
             name="LandingRankedBronzeGrinder",
@@ -2243,6 +2251,7 @@ class ApiContractTests(TestCase):
             player_score=9.8,
             latest_ranked_battles=40,
             highest_ranked_league_recent="Bronze",
+            ranked_seasons_participated=1,
         )
 
         response = self.client.get(
@@ -2252,17 +2261,17 @@ class ApiContractTests(TestCase):
         self.assertEqual(
             [row["name"] for row in response.json()[:3]],
             [
-                "LandingRankedVolumeLeader",
-                "LandingRankedRunnerUp",
+                "LandingRankedGoldLeader",
+                "LandingRankedWRRunner",
                 "LandingRankedBronzeGrinder",
             ],
         )
 
-    def test_landing_players_best_ranked_sort_prefers_stronger_same_league_profile(self):
+    def test_landing_players_best_ranked_sort_breaks_gold_ties_by_ranked_wr(self):
         cache.clear()
         today = timezone.now().date()
-        silver_grinder = Player.objects.create(
-            name="LandingSilverGrinder",
+        gold_grinder = Player.objects.create(
+            name="LandingGoldGrinder",
             player_id=4396,
             is_hidden=False,
             pvp_ratio=55.0,
@@ -2273,12 +2282,14 @@ class ApiContractTests(TestCase):
                 {"ship_tier": 8, "pvp_battles": 4500, "wins": 2475},
             ],
             ranked_json=[
-                {"season_id": 1, "total_battles": 40, "total_wins": 22,
-                    "win_rate": 55.0, "highest_league": 2, "highest_league_name": "Silver"},
+                {"season_id": 2, "total_battles": 40, "total_wins": 22,
+                    "win_rate": 55.0, "highest_league": 1, "highest_league_name": "Gold"},
+                {"season_id": 1, "total_battles": 18, "total_wins": 10,
+                    "win_rate": 55.56, "highest_league": 2, "highest_league_name": "Silver"},
             ],
         )
-        silver_ace = Player.objects.create(
-            name="LandingSilverAce",
+        gold_ace = Player.objects.create(
+            name="LandingGoldAce",
             player_id=4397,
             is_hidden=False,
             pvp_ratio=62.0,
@@ -2289,21 +2300,25 @@ class ApiContractTests(TestCase):
                 {"ship_tier": 9, "pvp_battles": 4200, "wins": 2604},
             ],
             ranked_json=[
-                {"season_id": 1, "total_battles": 14, "total_wins": 9,
-                    "win_rate": 64.29, "highest_league": 2, "highest_league_name": "Silver"},
+                {"season_id": 2, "total_battles": 14, "total_wins": 9,
+                    "win_rate": 64.29, "highest_league": 1, "highest_league_name": "Gold"},
+                {"season_id": 1, "total_battles": 12, "total_wins": 8,
+                    "win_rate": 66.67, "highest_league": 2, "highest_league_name": "Silver"},
             ],
         )
         PlayerExplorerSummary.objects.create(
-            player=silver_grinder,
+            player=gold_grinder,
             player_score=4.0,
             latest_ranked_battles=40,
-            highest_ranked_league_recent="Silver",
+            highest_ranked_league_recent="Gold",
+            ranked_seasons_participated=2,
         )
         PlayerExplorerSummary.objects.create(
-            player=silver_ace,
+            player=gold_ace,
             player_score=8.0,
             latest_ranked_battles=14,
-            highest_ranked_league_recent="Silver",
+            highest_ranked_league_recent="Gold",
+            ranked_seasons_participated=2,
         )
 
         response = self.client.get(
@@ -2312,14 +2327,14 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             [row["name"] for row in response.json()[:2]],
-            ["LandingSilverAce", "LandingSilverGrinder"],
+            ["LandingGoldAce", "LandingGoldGrinder"],
         )
 
-    def test_landing_players_best_ranked_sort_prefers_better_recent_ranked_wr_within_league(self):
+    def test_landing_players_best_ranked_sort_uses_silver_after_gold_and_wr_ties(self):
         cache.clear()
         today = timezone.now().date()
-        silver_volume = Player.objects.create(
-            name="LandingSilverVolume",
+        silver_stacker = Player.objects.create(
+            name="LandingSilverStacker",
             player_id=4398,
             is_hidden=False,
             pvp_ratio=58.0,
@@ -2330,12 +2345,16 @@ class ApiContractTests(TestCase):
                 {"ship_tier": 8, "pvp_battles": 4600, "wins": 2668},
             ],
             ranked_json=[
-                {"season_id": 1, "total_battles": 40, "total_wins": 20,
-                    "win_rate": 50.0, "highest_league": 2, "highest_league_name": "Silver"},
+                {"season_id": 3, "total_battles": 10, "total_wins": 6,
+                    "win_rate": 60.0, "highest_league": 2, "highest_league_name": "Silver"},
+                {"season_id": 2, "total_battles": 10, "total_wins": 6,
+                    "win_rate": 60.0, "highest_league": 2, "highest_league_name": "Silver"},
+                {"season_id": 1, "total_battles": 10, "total_wins": 6,
+                    "win_rate": 60.0, "highest_league": 2, "highest_league_name": "Silver"},
             ],
         )
-        silver_closer = Player.objects.create(
-            name="LandingSilverCloser",
+        bronze_stacker = Player.objects.create(
+            name="LandingBronzeStacker",
             player_id=4399,
             is_hidden=False,
             pvp_ratio=58.0,
@@ -2346,21 +2365,27 @@ class ApiContractTests(TestCase):
                 {"ship_tier": 9, "pvp_battles": 4300, "wins": 2494},
             ],
             ranked_json=[
-                {"season_id": 1, "total_battles": 18, "total_wins": 12,
-                    "win_rate": 66.67, "highest_league": 2, "highest_league_name": "Silver"},
+                {"season_id": 3, "total_battles": 10, "total_wins": 6,
+                    "win_rate": 60.0, "highest_league": 3, "highest_league_name": "Bronze"},
+                {"season_id": 2, "total_battles": 10, "total_wins": 6,
+                    "win_rate": 60.0, "highest_league": 3, "highest_league_name": "Bronze"},
+                {"season_id": 1, "total_battles": 10, "total_wins": 6,
+                    "win_rate": 60.0, "highest_league": 3, "highest_league_name": "Bronze"},
             ],
         )
         PlayerExplorerSummary.objects.create(
-            player=silver_volume,
+            player=silver_stacker,
             player_score=6.5,
-            latest_ranked_battles=40,
+            latest_ranked_battles=10,
             highest_ranked_league_recent="Silver",
+            ranked_seasons_participated=3,
         )
         PlayerExplorerSummary.objects.create(
-            player=silver_closer,
+            player=bronze_stacker,
             player_score=6.5,
-            latest_ranked_battles=18,
-            highest_ranked_league_recent="Silver",
+            latest_ranked_battles=10,
+            highest_ranked_league_recent="Bronze",
+            ranked_seasons_participated=3,
         )
 
         response = self.client.get(
@@ -2369,123 +2394,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             [row["name"] for row in response.json()[:2]],
-            ["LandingSilverCloser", "LandingSilverVolume"],
-        )
-
-    def test_landing_players_best_ranked_sort_damps_tiny_ranked_samples(self):
-        cache.clear()
-        today = timezone.now().date()
-        tiny_hot_streak = Player.objects.create(
-            name="LandingTinyHotStreak",
-            player_id=4400,
-            is_hidden=False,
-            pvp_ratio=58.0,
-            pvp_battles=4100,
-            days_since_last_battle=0,
-            last_battle_date=today,
-            battles_json=[
-                {"ship_tier": 8, "pvp_battles": 4100, "wins": 2378},
-            ],
-            ranked_json=[
-                {"season_id": 1, "total_battles": 3, "total_wins": 3,
-                    "win_rate": 100.0, "highest_league": 2, "highest_league_name": "Silver"},
-            ],
-        )
-        proven_silver = Player.objects.create(
-            name="LandingProvenSilver",
-            player_id=4401,
-            is_hidden=False,
-            pvp_ratio=58.0,
-            pvp_battles=4100,
-            days_since_last_battle=0,
-            last_battle_date=today,
-            battles_json=[
-                {"ship_tier": 9, "pvp_battles": 4100, "wins": 2378},
-            ],
-            ranked_json=[
-                {"season_id": 1, "total_battles": 18, "total_wins": 11,
-                    "win_rate": 61.11, "highest_league": 2, "highest_league_name": "Silver"},
-            ],
-        )
-        PlayerExplorerSummary.objects.create(
-            player=tiny_hot_streak,
-            player_score=6.5,
-            latest_ranked_battles=3,
-            highest_ranked_league_recent="Silver",
-        )
-        PlayerExplorerSummary.objects.create(
-            player=proven_silver,
-            player_score=6.5,
-            latest_ranked_battles=18,
-            highest_ranked_league_recent="Silver",
-        )
-
-        response = self.client.get(
-            "/api/landing/players/?mode=best&sort=ranked&limit=40")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [row["name"] for row in response.json()[:2]],
-            ["LandingProvenSilver", "LandingTinyHotStreak"],
-        )
-
-    def test_landing_players_best_ranked_sort_prefers_fresher_ranked_data_within_league(self):
-        cache.clear()
-        today = timezone.now().date()
-        stale_gold = Player.objects.create(
-            name="LandingStaleGold",
-            player_id=4402,
-            is_hidden=False,
-            pvp_ratio=60.0,
-            pvp_battles=4400,
-            days_since_last_battle=0,
-            last_battle_date=today,
-            battles_json=[
-                {"ship_tier": 10, "pvp_battles": 4400, "wins": 2640},
-            ],
-            ranked_json=[
-                {"season_id": 1, "total_battles": 24, "total_wins": 14,
-                    "win_rate": 58.33, "highest_league": 1, "highest_league_name": "Gold"},
-            ],
-            ranked_updated_at=timezone.now() - timedelta(days=120),
-        )
-        fresh_gold = Player.objects.create(
-            name="LandingFreshGold",
-            player_id=4403,
-            is_hidden=False,
-            pvp_ratio=59.0,
-            pvp_battles=4300,
-            days_since_last_battle=0,
-            last_battle_date=today,
-            battles_json=[
-                {"ship_tier": 9, "pvp_battles": 4300, "wins": 2537},
-            ],
-            ranked_json=[
-                {"season_id": 1, "total_battles": 20, "total_wins": 12,
-                    "win_rate": 60.0, "highest_league": 1, "highest_league_name": "Gold"},
-            ],
-            ranked_updated_at=timezone.now() - timedelta(days=3),
-        )
-        PlayerExplorerSummary.objects.create(
-            player=stale_gold,
-            player_score=7.4,
-            latest_ranked_battles=24,
-            highest_ranked_league_recent="Gold",
-        )
-        PlayerExplorerSummary.objects.create(
-            player=fresh_gold,
-            player_score=7.2,
-            latest_ranked_battles=20,
-            highest_ranked_league_recent="Gold",
-        )
-
-        response = self.client.get(
-            "/api/landing/players/?mode=best&sort=ranked&limit=40")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [row["name"] for row in response.json()[:2]],
-            ["LandingFreshGold", "LandingStaleGold"],
+            ["LandingSilverStacker", "LandingBronzeStacker"],
         )
 
     def test_landing_players_best_wr_sort_orders_by_high_tier_wr(self):

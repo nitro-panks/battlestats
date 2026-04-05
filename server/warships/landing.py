@@ -185,14 +185,6 @@ def _ranked_league_score(league: str | None) -> float:
     }.get(str(league or '').strip(), 0.0)
 
 
-def _ranked_league_sort_band(league: str | None) -> int:
-    return {
-        'Bronze': 1,
-        'Silver': 2,
-        'Gold': 3,
-    }.get(str(league or '').strip(), 0)
-
-
 def _normalize_ranked_volume_score(latest_ranked_battles: int | None) -> float:
     battles = max(int(latest_ranked_battles or 0), 0)
     if battles <= 0:
@@ -201,31 +193,45 @@ def _normalize_ranked_volume_score(latest_ranked_battles: int | None) -> float:
     return round(_clamp(math.log1p(battles) / math.log1p(40), 0.0, 1.0), 4)
 
 
-def _normalize_ranked_recent_wr_score(latest_ranked_win_rate: float | None, latest_ranked_battles: int | None) -> float:
-    battles = max(int(latest_ranked_battles or 0), 0)
-    if latest_ranked_win_rate is None:
-        return _normalize_best_wr_score(50.0) if battles > 0 else 0.0
+def _summarize_ranked_medal_history(ranked_rows) -> dict[str, int | float | None]:
+    rows = ranked_rows if isinstance(ranked_rows, list) else []
+    gold_count = 0
+    silver_count = 0
+    bronze_count = 0
+    total_wins = 0
+    total_battles = 0
 
-    if battles < LANDING_PLAYER_RANKED_SORT_WR_LOW_CONFIDENCE_BATTLES:
-        normalized_low_sample = battles / \
-            LANDING_PLAYER_RANKED_SORT_WR_LOW_CONFIDENCE_BATTLES
-        confidence = 0.05 + (0.20 * (normalized_low_sample ** 2))
-    else:
-        confidence = 0.25 + (0.75 * _clamp(
-            (
-                battles -
-                LANDING_PLAYER_RANKED_SORT_WR_LOW_CONFIDENCE_BATTLES
-            ) /
-            (
-                LANDING_PLAYER_RANKED_SORT_WR_FULL_CONFIDENCE_BATTLES -
-                LANDING_PLAYER_RANKED_SORT_WR_LOW_CONFIDENCE_BATTLES
-            ),
-            0.0,
-            1.0,
-        ))
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
 
-    smoothed_win_rate = 50.0 + ((float(latest_ranked_win_rate) - 50.0) * confidence)
-    return round(_normalize_best_wr_score(smoothed_win_rate), 4)
+        league_name = str(row.get('highest_league_name') or '').strip()
+        if league_name == 'Gold':
+            gold_count += 1
+        elif league_name == 'Silver':
+            silver_count += 1
+        elif league_name == 'Bronze':
+            bronze_count += 1
+
+        try:
+            battles = max(int(row.get('total_battles') or 0), 0)
+            wins = max(int(row.get('total_wins') or 0), 0)
+        except (TypeError, ValueError):
+            battles = 0
+            wins = 0
+
+        total_battles += battles
+        total_wins += min(wins, battles) if battles > 0 else 0
+
+    ranked_win_rate = round((total_wins / total_battles) * 100.0, 2) if total_battles > 0 else None
+    return {
+        'gold_medal_count': gold_count,
+        'silver_medal_count': silver_count,
+        'bronze_medal_count': bronze_count,
+        'ranked_total_battles': total_battles,
+        'ranked_total_wins': total_wins,
+        'ranked_overall_win_rate': ranked_win_rate,
+    }
 
 
 def _ranked_freshness_multiplier(ranked_updated_at) -> float:
@@ -319,32 +325,14 @@ def _calculate_landing_best_score(row: dict) -> float:
 
 
 def _calculate_landing_ranked_sort_score(row: dict) -> float:
-    league_band = _ranked_league_sort_band(
-        row.get('highest_ranked_league_recent'))
-    volume_score = _normalize_ranked_volume_score(
-        row.get('latest_ranked_battles'))
-    recent_wr_score = _normalize_ranked_recent_wr_score(
-        row.get('latest_ranked_win_rate'),
-        row.get('latest_ranked_battles'),
+    medal_weighted_score = (
+        (1000 * max(int(row.get('gold_medal_count') or 0), 0)) +
+        (100 * max(int(row.get('silver_medal_count') or 0), 0)) +
+        (10 * max(int(row.get('bronze_medal_count') or 0), 0))
     )
-    player_score = _normalize_best_player_score(row.get('player_score'))
-    wr_score = _normalize_best_wr_score(row.get('high_tier_pvp_ratio'))
-    freshness_multiplier = _ranked_freshness_multiplier(
-        row.get('ranked_updated_at'))
-    within_band_score = round(
-        (
-            (LANDING_PLAYER_RANKED_SORT_VOLUME_WEIGHT * volume_score) +
-            (LANDING_PLAYER_RANKED_SORT_RECENT_WR_WEIGHT * recent_wr_score) +
-            (LANDING_PLAYER_RANKED_SORT_PLAYER_SCORE_WEIGHT * player_score) +
-            (LANDING_PLAYER_RANKED_SORT_WR_WEIGHT * wr_score)
-        ) * freshness_multiplier,
-        6,
-    )
-
-    return round(
-        (league_band * 10.0) + within_band_score,
-        6,
-    )
+    ranked_wr = float(row.get('ranked_overall_win_rate') or 0.0)
+    freshness_multiplier = _ranked_freshness_multiplier(row.get('ranked_updated_at'))
+    return round((medal_weighted_score + ranked_wr) * freshness_multiplier, 6)
 
 
 def _calculate_landing_cb_sort_score(row: dict) -> float:
@@ -1557,6 +1545,12 @@ def _finalize_best_player_payload(rows: list[dict], limit: int) -> list[dict]:
         row.pop('shrunken_efficiency_strength', None)
         row.pop('latest_ranked_battles', None)
         row.pop('latest_ranked_win_rate', None)
+        row.pop('gold_medal_count', None)
+        row.pop('silver_medal_count', None)
+        row.pop('bronze_medal_count', None)
+        row.pop('ranked_overall_win_rate', None)
+        row.pop('ranked_total_battles', None)
+        row.pop('ranked_total_wins', None)
         row.pop('highest_ranked_league_recent', None)
         row.pop('ranked_updated_at', None)
         row.pop('clan_battle_total_battles', None)
@@ -1609,32 +1603,92 @@ def _build_best_overall_landing_players(limit: int, realm: str = DEFAULT_REALM) 
 
 
 def _build_best_ranked_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
-    candidate_rows = _best_landing_player_candidate_rows(
-        realm=realm,
-        min_pvp_battles=LANDING_PLAYER_BEST_MIN_PVP_BATTLES,
-        order_by=(
-            F('explorer_summary__latest_ranked_battles').desc(nulls_last=True),
-            F('explorer_summary__player_score').desc(nulls_last=True),
-            F('pvp_ratio').desc(nulls_last=True),
+    players = list(
+        Player.objects.exclude(name='').filter(
+            realm=realm,
+            is_hidden=False,
+            days_since_last_battle__lte=180,
+            pvp_battles__gt=LANDING_PLAYER_BEST_MIN_PVP_BATTLES,
+            explorer_summary__ranked_seasons_participated__gt=0,
+        ).exclude(
+            last_battle_date__isnull=True,
+        ).select_related('explorer_summary').only(
             'name',
-        ),
-        extra_filters={'explorer_summary__latest_ranked_battles__gt': 0},
+            'player_id',
+            'pvp_ratio',
+            'is_hidden',
+            'days_since_last_battle',
+            'total_battles',
+            'pvp_battles',
+            'ranked_json',
+            'ranked_updated_at',
+            'explorer_summary__player_score',
+            'explorer_summary__latest_ranked_battles',
+            'explorer_summary__highest_ranked_league_recent',
+            'explorer_summary__ranked_seasons_participated',
+            'explorer_summary__clan_battle_seasons_participated',
+            'explorer_summary__clan_battle_total_battles',
+            'explorer_summary__clan_battle_overall_win_rate',
+            'explorer_summary__efficiency_rank_percentile',
+            'explorer_summary__efficiency_rank_tier',
+            'explorer_summary__has_efficiency_rank_icon',
+            'explorer_summary__efficiency_rank_population_size',
+            'explorer_summary__efficiency_rank_updated_at',
+        )
     )
-    rows = _serialize_landing_player_rows(candidate_rows)
     ranked_rows = []
-    for row in rows:
-        if not row.get('is_ranked_player'):
+    for player in players:
+        explorer_summary = getattr(player, 'explorer_summary', None)
+        if explorer_summary is None:
             continue
+
+        ranked_history = player.ranked_json or []
+        medal_summary = _summarize_ranked_medal_history(ranked_history)
+        if (
+            medal_summary['gold_medal_count'] == 0
+            and medal_summary['silver_medal_count'] == 0
+            and medal_summary['bronze_medal_count'] == 0
+        ):
+            continue
+
+        row = {
+            'player_id': player.player_id,
+            'name': player.name,
+            'pvp_ratio': player.pvp_ratio,
+            'is_hidden': player.is_hidden,
+            'pvp_battles': player.pvp_battles,
+            'total_battles': player.total_battles,
+            'is_pve_player': is_pve_player(player.total_battles, player.pvp_battles),
+            'is_sleepy_player': is_sleepy_player(player.days_since_last_battle),
+            'is_ranked_player': True,
+            'highest_ranked_league': get_highest_ranked_league_name(ranked_history) or getattr(explorer_summary, 'highest_ranked_league_recent', None),
+            'is_clan_battle_player': is_clan_battle_enjoyer(
+                getattr(explorer_summary, 'clan_battle_total_battles', None),
+                getattr(explorer_summary, 'clan_battle_seasons_participated', None),
+            ),
+            'clan_battle_total_battles': getattr(explorer_summary, 'clan_battle_total_battles', None),
+            'clan_battle_seasons_participated': getattr(explorer_summary, 'clan_battle_seasons_participated', None),
+            'clan_battle_win_rate': getattr(explorer_summary, 'clan_battle_overall_win_rate', None),
+            'efficiency_rank_percentile': getattr(explorer_summary, 'efficiency_rank_percentile', None),
+            'efficiency_rank_tier': getattr(explorer_summary, 'efficiency_rank_tier', None),
+            'has_efficiency_rank_icon': bool(getattr(explorer_summary, 'has_efficiency_rank_icon', False)),
+            'efficiency_rank_population_size': getattr(explorer_summary, 'efficiency_rank_population_size', None),
+            'efficiency_rank_updated_at': getattr(explorer_summary, 'efficiency_rank_updated_at', None),
+            'player_score': getattr(explorer_summary, 'player_score', None),
+            'latest_ranked_battles': getattr(explorer_summary, 'latest_ranked_battles', None),
+            'latest_ranked_win_rate': ranked_history[0].get('win_rate') if isinstance(ranked_history, list) and ranked_history and isinstance(ranked_history[0], dict) else None,
+            'ranked_updated_at': player.ranked_updated_at,
+            **medal_summary,
+        }
         row['ranked_sort_score'] = _calculate_landing_ranked_sort_score(row)
         ranked_rows.append(row)
 
     ranked_rows.sort(key=lambda row: (
-        -(row.get('ranked_sort_score') if row.get('ranked_sort_score')
-          is not None else float('-inf')),
-                -(row.get('latest_ranked_win_rate')
-                    if row.get('latest_ranked_win_rate') is not None else float('-inf')),
-                -(row.get('ranked_updated_at').timestamp()
-                    if row.get('ranked_updated_at') is not None else float('-inf')),
+        -max(int(row.get('gold_medal_count') or 0), 0),
+        -(float(row.get('ranked_overall_win_rate')) if row.get('ranked_overall_win_rate') is not None else float('-inf')),
+        -max(int(row.get('silver_medal_count') or 0), 0),
+        -max(int(row.get('bronze_medal_count') or 0), 0),
+        -(_ranked_freshness_multiplier(row.get('ranked_updated_at')) if row.get('ranked_updated_at') is not None else LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR),
         -(row.get('latest_ranked_battles')
           if row.get('latest_ranked_battles') is not None else float('-inf')),
         -(row.get('player_score') if row.get('player_score')

@@ -2,6 +2,39 @@
 
 _Drafted: 2026-03-17_
 
+## Implementation Update: 2026-04-04
+
+The landing page `Best` surface now ships multiple backend sub-sorts behind the existing `/api/landing/players/?mode=best&sort=...` contract.
+
+Current shipped player sub-sorts are:
+
+1. `overall`
+2. `ranked`
+3. `efficiency`
+4. `wr`
+5. `cb`
+
+The `ranked` sub-sort has been updated to use medal-history ordering instead of the earlier weighted recent-performance heuristic.
+
+Current ranked ordering contract:
+
+1. more `Gold` finishes first,
+2. ties break by aggregate ranked win rate across ranked history,
+3. then more `Silver` finishes,
+4. then more `Bronze` finishes,
+5. freshness, recent ranked volume, and player score only break later ties.
+
+Implementation notes:
+
+1. medal counts are derived from `Player.ranked_json`,
+2. the ranking remains backend-only and does not change the landing row payload shape,
+3. landing cache warmers and best-player bulk entity warming now union all shipped `best` sub-sort cohorts so non-`overall` winners stay warm.
+
+Validation completed for this update:
+
+1. focused API regression tests for ranked medal ordering passed in `server/warships/tests/test_views.py`,
+2. frontend explanatory copy in `client/app/components/PlayerSearch.tsx` was updated to match the shipped contract.
+
 ## Goal
 
 Replace the landing page `Best` player filter with a more competitive, corpus-aware ranking that heavily discounts tiers 1-4 and ranks players using a blend of high-tier PvP performance, efficiency, achievements-derived signals, experience, and competitive activity.
