@@ -685,12 +685,13 @@ def normalize_landing_clan_limit(requested_limit: int | None) -> int:
     return max(1, min(parsed_limit, LANDING_CLAN_FEATURED_COUNT))
 
 
-def invalidate_landing_clan_caches(realm: str = DEFAULT_REALM) -> None:
+def invalidate_landing_clan_caches(realm: str = DEFAULT_REALM, queue_republish: bool = True) -> None:
     _mark_cache_family_dirty(
         realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),
         realm_cache_key(realm, LANDING_RECENT_CLANS_DIRTY_KEY),
     )
-    _queue_landing_republish(realm=realm)
+    if queue_republish:
+        _queue_landing_republish(realm=realm)
 
 
 RECENT_PLAYERS_INVALIDATE_COOLDOWN = 30  # seconds — coalesce rapid lookups
@@ -706,14 +707,15 @@ def invalidate_landing_recent_player_cache(realm: str = DEFAULT_REALM) -> None:
     _queue_landing_republish(realm=realm)
 
 
-def invalidate_landing_player_caches(include_recent: bool = False, realm: str = DEFAULT_REALM) -> None:
+def invalidate_landing_player_caches(include_recent: bool = False, realm: str = DEFAULT_REALM, queue_republish: bool = True) -> None:
     _bump_landing_players_cache_namespace(realm=realm)
     dirty_keys = [realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY)]
     if include_recent:
         dirty_keys.append(realm_cache_key(
             realm, LANDING_RECENT_PLAYERS_DIRTY_KEY))
     _mark_cache_family_dirty(*dirty_keys)
-    _queue_landing_republish(realm=realm)
+    if queue_republish:
+        _queue_landing_republish(realm=realm)
 
 
 def _normalize_cached_id_list(raw_value) -> list[int]:

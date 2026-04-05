@@ -5021,7 +5021,7 @@ def warm_landing_best_entity_caches(
                 continue
             seen_player_ids.add(player_id)
             best_player_ids.append(player_id)
-    best_clan_rows = get_landing_best_clans_payload()[:normalized_clan_limit]
+    best_clan_rows = get_landing_best_clans_payload(realm=realm)[:normalized_clan_limit]
 
     clan_ids = [
         int(row.get('clan_id') or 0)
@@ -5032,14 +5032,17 @@ def warm_landing_best_entity_caches(
     warmed_players = warm_player_entity_caches(
         best_player_ids,
         force_refresh=force_refresh,
+        realm=realm,
     )
     warmed_clans = warm_clan_entity_caches(
         clan_ids,
         force_refresh=force_refresh,
+        realm=realm,
     )
 
     return {
         'status': 'completed',
+        'realm': realm,
         'warmed': {
             'players': warmed_players,
             'clans': warmed_clans,

@@ -25,6 +25,7 @@ REMOTE_TMP_SECRETS="/tmp/battlestats-server.secrets.env.${RELEASE_ID}"
 REMOTE_TMP_CERT="/tmp/battlestats-do-ca.${RELEASE_ID}.crt"
 EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:-}"
 DEFAULT_PUBLIC_ALLOWED_HOSTS="${DEFAULT_PUBLIC_ALLOWED_HOSTS:-battlestats.online,www.battlestats.online}"
+POST_DEPLOY_VERIFY_REALMS="${POST_DEPLOY_VERIFY_REALMS:-na,eu}"
 
 case "${DEPLOY_AGENTIC_RUNTIME,,}" in
   1|true|yes|on)
@@ -451,9 +452,23 @@ redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans
 systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
 verify_broker_connection
 materialize_best_player_snapshots
+active_release_after_restart="$(readlink -f "${APP_ROOT}/current")"
+if [[ "${active_release_after_restart}" != "${REMOTE_RELEASE}" ]]; then
+  echo "Release activation drifted after restart: expected ${REMOTE_RELEASE}, got ${active_release_after_restart}" >&2
+  exit 1
+fi
 systemctl --no-pager --full status battlestats-gunicorn | sed -n '1,25p'
 
 find "${APP_ROOT}/releases" -mindepth 1 -maxdepth 1 -type d | sort | head -n -"${KEEP_RELEASES}" | xargs -r rm -rf
 REMOTE
+
+VERIFY_ARGS=("${HOST}" verify --skip-client --expect-backend-release "${REMOTE_RELEASE}")
+if [[ -n "${POST_DEPLOY_VERIFY_REALMS}" ]]; then
+  while IFS= read -r realm; do
+    [[ -n "${realm}" ]] || continue
+    VERIFY_ARGS+=(--realm "${realm}")
+  done < <(printf '%s' "${POST_DEPLOY_VERIFY_REALMS}" | tr ',' '\n' | awk 'NF')
+fi
+"${REPO_ROOT}/scripts/post_deploy_operations.sh" "${VERIFY_ARGS[@]}"
 
 echo "Backend deployed to ${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}"

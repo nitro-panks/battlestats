@@ -53,8 +53,17 @@ That command:
 - rsyncs the `client/` directory to a new release directory on the droplet
 - runs `npm ci`
 - runs `npm run build`
-- flips `/opt/battlestats-client/current` to the new release
+- flips `/opt/battlestats-client/current` to the new release via atomic-and-verified activation
 - restarts `battlestats-client`
+- verifies the active client release target and `battlestats-client` plus `nginx` via the shared post-deploy wrapper
+
+For deploy-time verification and cross-service follow-up after backend or client rollout, use `runbook-post-deploy-post-bounce-operations-2026-04-05.md` as the canonical checklist.
+
+If the rollout also requires deploy-scoped smoke checks or backend follow-up warms, run them explicitly from the repo root:
+
+```bash
+./scripts/post_deploy_operations.sh YOUR_DROPLET_IP smoke --base-url http://127.0.0.1:8888
+```
 
 ## Runtime config
 

@@ -52,6 +52,24 @@ ssh "${DEPLOY_USER}@${HOST}" \
   'bash -s' <<'REMOTE'
 set -euo pipefail
 
+activate_release() {
+  local release_name=""
+  local tmp_link=""
+  local active_release=""
+
+  release_name="$(basename "${REMOTE_RELEASE}")"
+  tmp_link="${APP_ROOT}/.current-${release_name}"
+
+  ln -sfn "${REMOTE_RELEASE}" "${tmp_link}"
+  mv -Tf "${tmp_link}" "${APP_ROOT}/current"
+
+  active_release="$(readlink -f "${APP_ROOT}/current")"
+  if [[ "${active_release}" != "${REMOTE_RELEASE}" ]]; then
+    echo "Failed to activate client release: expected ${REMOTE_RELEASE}, got ${active_release}" >&2
+    exit 1
+  fi
+}
+
 cd "${REMOTE_RELEASE}/client"
 
 # Source env so NEXT_PUBLIC_* vars are available at build time
@@ -63,7 +81,7 @@ npm ci
 npm run build
 
 chown -R "${APP_USER}:${APP_USER}" "${REMOTE_RELEASE}"
-ln -sfn "${REMOTE_RELEASE}" "${APP_ROOT}/current"
+activate_release
 
 # Kill any stale Next.js processes from prior deploys before restarting.
 # The systemd unit restarts the service, but orphaned node processes from
@@ -72,9 +90,16 @@ pkill -f 'next-server' 2>/dev/null || true
 sleep 1
 
 systemctl restart battlestats-client
+active_release_after_restart="$(readlink -f "${APP_ROOT}/current")"
+if [[ "${active_release_after_restart}" != "${REMOTE_RELEASE}" ]]; then
+  echo "Client release activation drifted after restart: expected ${REMOTE_RELEASE}, got ${active_release_after_restart}" >&2
+  exit 1
+fi
 systemctl --no-pager --full status battlestats-client | sed -n '1,25p'
 
 find "${APP_ROOT}/releases" -mindepth 1 -maxdepth 1 -type d | sort | head -n -"${KEEP_RELEASES}" | xargs -r rm -rf
 REMOTE
+
+"${REPO_ROOT}/scripts/post_deploy_operations.sh" "${HOST}" verify --skip-backend --expect-client-release "${REMOTE_RELEASE}"
 
 echo "Client deployed to ${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}"

@@ -32,6 +32,21 @@ Three legacy Celery crawlers are **retired from Beat** (listed in `signals.py _R
 | Incremental player refresh | Retired | `server/warships/management/commands/incremental_player_refresh.py` | ~2-3 per player |
 | Incremental ranked refresh | Retired | `server/warships/management/commands/incremental_ranked_data.py` | ~2 per player |
 
+## Deploy-Time And Bounce-Time Boundary
+
+This runbook covers steady-state refresh only.
+
+It does not define the deploy-time or post-bounce operating checklist.
+
+Those steps are documented separately in `runbook-post-deploy-post-bounce-operations-2026-04-05.md` because production currently keeps deploy-time follow-up deliberately narrower than the full steady-state refresh model.
+
+Current distinction:
+
+1. daily freshness is maintained by DO Functions, Celery Beat schedules, and targeted periodic warmers,
+2. a deploy or bounce only restarts services, runs bounded release verification, and performs any deploy-scoped snapshot rebuilds,
+3. production currently has `WARM_CACHES_ON_STARTUP=0`, so a bounce does not launch the full startup warming chain,
+4. if a deploy changes landing ranking, cache keys, or landing payload semantics, operators must still run targeted invalidation and warming manually and serially via `scripts/post_deploy_operations.sh`.
+
 ## Crawler Consolidation Strategy
 
 ### Incremental player refresh — subsumed by enrichment pipeline
@@ -291,11 +306,13 @@ These Celery Beat tasks depend on enrichment data being fresh. Their schedules a
 
 | Task | Current schedule | Realm stagger | Dependency |
 |---|---|---|---|
-| `landing-best-player-snapshot-materializer-{realm}` | Daily (EU 01:15, NA 07:15, Asia 13:15 UTC) | Yes | Reads `battles_json`, `ranked_json` from DB |
+| `landing-best-player-snapshot-materializer-{realm}` | Daily (EU 01:15, NA 07:15, Asia 13:15 UTC) | Yes | Reads `battles_json`, `ranked_json` from DB; deploys may also trigger targeted snapshot rebuilds |
 | `daily-clan-tier-dist-warmer-{realm}` | Daily (EU 02:30, NA 08:30, Asia 14:30 UTC) | Yes | Reads player tier data |
 | `refresh_efficiency_rank_snapshot_task` | Triggered post-crawl | No | Reads efficiency badges from DB |
 
 The Best-player snapshot materializer schedule will need adjustment once per-realm windows shift from backfill to steady-state. Target: run ~30 minutes after each realm's enrichment slot ends.
+
+This daily snapshot lane should not be conflated with deploy-time snapshot rebuilds. Deploy-time rebuilds exist to publish changed ranking logic immediately; the daily schedule exists to keep steady-state data current.
 
 ### Independent of enrichment timing
 

@@ -295,19 +295,45 @@ def parse_args() -> argparse.Namespace:
                         help="Base URL for the running app.")
     parser.add_argument("--timeout", type=float, default=30.0,
                         help="Per-request timeout in seconds.")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Emit a machine-readable JSON summary instead of line-oriented logs.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     failures: list[str] = []
+    case_results: list[dict[str, Any]] = []
 
     for case in build_cases():
         ok, message = run_case(case, args.base_url, args.timeout)
-        prefix = "PASS" if ok else "FAIL"
-        print(f"[{prefix}] {message}")
+        case_results.append({
+            "name": case.name,
+            "ok": ok,
+            "message": message,
+        })
+        if not args.json:
+            prefix = "PASS" if ok else "FAIL"
+            print(f"[{prefix}] {message}")
         if not ok:
             failures.append(case.name)
+
+    summary = {
+        "status": "failed" if failures else "passed",
+        "base_url": args.base_url,
+        "timeout": args.timeout,
+        "cases": case_results,
+        "failure_count": len(failures),
+        "failures": failures,
+    }
+
+    if args.json:
+        print(json.dumps(summary, sort_keys=True))
+        return 1 if failures else 0
 
     if failures:
         print(f"\nSmoke test failed: {len(failures)} case(s) failed")

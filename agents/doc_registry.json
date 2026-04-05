@@ -219,6 +219,30 @@
                 "client-deploy-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-post-deploy-post-bounce-operations-2026-04-05.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "post deploy checklist",
+                "post bounce checklist",
+                "deploy follow-up",
+                "redeploy warm plan"
+            ],
+            "tags": [
+                "deploy",
+                "bounce",
+                "operations",
+                "warming",
+                "verification",
+                "cache"
+            ],
+            "archive_on": [
+                "deploy-follow-up-model-replaced"
+            ]
+        },
         "agents/runbooks/runbook-db-target-switching.md": {
             "kind": "runbook",
             "status": "active",

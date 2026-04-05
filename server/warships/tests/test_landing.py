@@ -1479,10 +1479,11 @@ class LandingHelperTests(TestCase):
             {'clan_id': 204},
         ]) as mock_best_clans:
             result = warm_landing_best_entity_caches(
-                player_limit=25, clan_limit=99)
+                player_limit=25, clan_limit=99, realm='eu')
 
         self.assertEqual(result, {
             'status': 'completed',
+            'realm': 'eu',
             'warmed': {
                 'players': 7,
                 'clans': 4,
@@ -1496,8 +1497,10 @@ class LandingHelperTests(TestCase):
             'sort') for call in mock_best_players.call_args_list]
         self.assertCountEqual(best_player_sorts, [
                               'overall', 'ranked', 'efficiency', 'wr', 'cb'])
-        mock_best_clans.assert_called_once_with()
+        for call in mock_best_players.call_args_list:
+            self.assertEqual(call.kwargs.get('realm'), 'eu')
+        mock_best_clans.assert_called_once_with(realm='eu')
         mock_warm_players.assert_called_once_with(
-            [101, 102, 103, 104, 105, 106, 107], force_refresh=False)
+            [101, 102, 103, 104, 105, 106, 107], force_refresh=False, realm='eu')
         mock_warm_clans.assert_called_once_with(
-            [201, 202, 203, 204], force_refresh=False)
+            [201, 202, 203, 204], force_refresh=False, realm='eu')

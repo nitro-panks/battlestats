@@ -37,6 +37,7 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 - `runbook-enrichment-crawler-2026-04-02.md`: enrichment crawler architecture, operations, battles_json usage, and product roadmap.
 - `runbook-deleted-account-purge.md`: purge flow and safety notes for deleted accounts.
 - `runbook-dependency-audit.md`: dependency hygiene policy and current audit posture.
+- `runbook-post-deploy-post-bounce-operations-2026-04-05.md`: required post-redeploy verification, post-bounce behavior, and bounded warm sequencing.
 
 ## Evergreen Architecture And Policy Guides
 

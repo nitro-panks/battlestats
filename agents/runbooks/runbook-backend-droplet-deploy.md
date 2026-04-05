@@ -57,6 +57,12 @@ That deploy does all of the following:
 - restarts gunicorn, celery worker, and celery beat
 - runs `manage.py materialize_landing_player_best_snapshots` automatically after the new release is active unless explicitly disabled
 
+What the deploy does not guarantee on its own:
+
+- it does not perform a broad post-deploy cache repopulation on production,
+- it does not replace targeted cache invalidation and warming for landing or ranking changes,
+- it should not be treated as proof that `/opt/battlestats-server/current` is correct unless you verify it directly.
+
 To deploy the optional agentic runtime on purpose, enable it explicitly:
 
 ```bash
@@ -95,6 +101,35 @@ Automatic Best-player snapshot materialization is enabled by default. Optional d
 - `AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS=0` disables the post-deploy snapshot rebuild.
 - `MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS=na,eu` scopes the rebuild to specific realms.
 - `MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS=ranked,wr` scopes the rebuild to specific Best-player sorts.
+
+## Post-Deploy And Post-Bounce Follow-Up
+
+Use [agents/runbooks/runbook-post-deploy-post-bounce-operations-2026-04-05.md](agents/runbooks/runbook-post-deploy-post-bounce-operations-2026-04-05.md) as the canonical checklist after backend deploy or manual service bounce.
+
+Important current production behavior:
+
+1. `WARM_CACHES_ON_STARTUP=0` on the droplet, so a bounce does not auto-run the full startup warmer chain.
+2. For ranking or landing payload changes, follow-up invalidation and rewarming must be targeted and manual.
+3. Heavy warmers should run serially, one realm at a time.
+
+What the deploy now does automatically after a successful backend rollout:
+
+1. verifies that `/opt/battlestats-server/current` matches the intended release,
+2. verifies `battlestats-gunicorn`, `battlestats-celery`, `battlestats-celery-hydration`, `battlestats-celery-background`, `battlestats-beat`, `redis-server`, and `rabbitmq-server`,
+3. runs Django-side post-deploy verification for the realms in `POST_DEPLOY_VERIFY_REALMS`.
+
+Current default:
+
+- `POST_DEPLOY_VERIFY_REALMS=na,eu`
+
+Targeted follow-up remains manual via the shared wrapper:
+
+```bash
+./scripts/post_deploy_operations.sh YOUR_DROPLET_IP snapshots --realm na --sort cb
+./scripts/post_deploy_operations.sh YOUR_DROPLET_IP invalidate --realm na --players --include-recent
+./scripts/post_deploy_operations.sh YOUR_DROPLET_IP warm-landing --realm na --include-recent
+./scripts/post_deploy_operations.sh YOUR_DROPLET_IP warm-best-entities --realm na --player-limit 25 --clan-limit 25
+```
 
 When you are serving the app from a custom domain, pass the root domain and any aliases as a comma-separated `EXTRA_ALLOWED_HOSTS` value so Django accepts the incoming `Host` header.
 

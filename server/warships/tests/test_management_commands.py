@@ -1,14 +1,17 @@
+import json
 from io import StringIO
 from pathlib import Path
 import tempfile
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import warm_player_entity_caches
-from warships.models import Player, PlayerExplorerSummary
+from warships.models import LandingPlayerBestSnapshot, Player, PlayerExplorerSummary
+from warships.tasks import _landing_best_entity_warm_lock_key
 
 
 class AuditProfileChartReadinessCommandTests(TestCase):
@@ -253,6 +256,105 @@ class IncrementalPlayerRefreshCommandTests(TestCase):
         self.assertEqual(
             mock_refresh_player_detail_payloads.call_args.kwargs,
             {"force_refresh": False, "refresh_core": False},
+        )
+
+
+class RunPostDeployOperationsCommandTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_verify_reports_snapshot_coverage_and_locks(self):
+        LandingPlayerBestSnapshot.objects.create(
+            realm="na",
+            sort="overall",
+            payload_json=[],
+        )
+        LandingPlayerBestSnapshot.objects.create(
+            realm="na",
+            sort="cb",
+            payload_json=[],
+        )
+        LandingPlayerBestSnapshot.objects.create(
+            realm="eu",
+            sort="overall",
+            payload_json=[],
+        )
+        cache.set(_landing_best_entity_warm_lock_key("na"), 1, timeout=60)
+
+        out = StringIO()
+        call_command(
+            "run_post_deploy_operations",
+            "verify",
+            "--realm",
+            "na",
+            "--realm",
+            "eu",
+            stdout=out,
+        )
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(payload["operation"], "verify")
+        self.assertEqual(payload["realms"], ["na", "eu"])
+        self.assertEqual(payload["snapshots"]["na"]["present_sorts"], ["cb", "overall"])
+        self.assertIn("ranked", payload["snapshots"]["na"]["missing_sorts"])
+        self.assertEqual(payload["snapshots"]["eu"]["present_sorts"], ["overall"])
+        self.assertTrue(payload["locks"]["na"]["best_entities"])
+        self.assertFalse(payload["locks"]["eu"]["best_entities"])
+
+    @patch("warships.management.commands.run_post_deploy_operations.invalidate_landing_clan_caches")
+    @patch("warships.management.commands.run_post_deploy_operations.invalidate_landing_player_caches")
+    def test_invalidate_runs_without_queueing_republish(self, mock_invalidate_players, mock_invalidate_clans):
+        out = StringIO()
+        call_command(
+            "run_post_deploy_operations",
+            "invalidate",
+            realm="eu",
+            players=True,
+            clans=True,
+            include_recent=True,
+            stdout=out,
+        )
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(payload["invalidated"], {"players": ["eu"], "clans": ["eu"]})
+        mock_invalidate_players.assert_called_once_with(
+            include_recent=True,
+            realm="eu",
+            queue_republish=False,
+        )
+        mock_invalidate_clans.assert_called_once_with(
+            realm="eu",
+            queue_republish=False,
+        )
+
+    @patch("warships.management.commands.run_post_deploy_operations.warm_landing_best_entity_caches")
+    def test_warm_best_entities_passes_realm_limits_and_force_refresh(self, mock_warm_best_entities):
+        mock_warm_best_entities.return_value = {
+            "status": "completed",
+            "realm": "eu",
+            "warmed": {"players": 3, "clans": 2},
+            "candidate_counts": {"players": 3, "clans": 2},
+        }
+
+        out = StringIO()
+        call_command(
+            "run_post_deploy_operations",
+            "warm-best-entities",
+            realm="eu",
+            player_limit=12,
+            clan_limit=8,
+            force_refresh=True,
+            stdout=out,
+        )
+        payload = json.loads(out.getvalue())
+
+        self.assertEqual(payload["operation"], "warm-best-entities")
+        self.assertEqual(payload["realms"], ["eu"])
+        mock_warm_best_entities.assert_called_once_with(
+            player_limit=12,
+            clan_limit=8,
+            force_refresh=True,
+            realm="eu",
         )
 
 

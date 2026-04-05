@@ -25,7 +25,8 @@ def _fetch_clan_member_ids(clan_id: str, realm: str = DEFAULT_REALM) -> List[str
     }
     logging.info(f' ---> Remote fetching clan members for clan_id: {clan_id}')
     data = _make_api_request("clans/info/", params, realm=realm)
-    return data.get(str(clan_id), {}).get('members_ids', []) if data else []
+    clan_data = data.get(str(clan_id)) if data else None
+    return clan_data.get('members_ids', []) if isinstance(clan_data, dict) else []
 
 
 def _fetch_clan_battle_seasons_info(realm: str = DEFAULT_REALM) -> Dict:
