@@ -291,7 +291,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
                     realm=realm,
                 )
 
-        if not obj.is_hidden and (obj.battles_json is None or player_battle_data_needs_refresh(obj)):
+        if not obj.is_hidden and (not obj.battles_json or player_battle_data_needs_refresh(obj)):
             from warships.tasks import update_battle_data_task
 
             _delay_task_safely(
