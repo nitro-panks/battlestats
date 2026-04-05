@@ -99,6 +99,18 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Tests
+        env:
+          DB_ENGINE: postgresql_psycopg2
+          DB_NAME: battlestats
+          DB_USER: django
+          DB_PASSWORD: ci_password
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_SSLMODE: ""
+          DB_SSLROOTCERT: ""
+          DJANGO_SECRET_KEY: ci-test-secret-key-do-not-use-in-production
+          DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+          REDIS_URL: redis://127.0.0.1:6379/1
         run: |
           python -m pytest \
             warships/tests/test_views.py \
