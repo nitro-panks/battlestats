@@ -146,7 +146,7 @@ const drawChart = (
     yAxis.select('.domain').remove();
 
     // --- Colors ---
-    const wrColor = colors.metricWR;
+    const wrColor = colors.cbBar;
     const activityColor = colors.activityActive;
 
     // --- Draw WR bars ---

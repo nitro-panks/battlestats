@@ -50,6 +50,8 @@ export const chartColors: Record<ChartTheme, {
     metricWR: string;
     metricBattles: string;
     metricSurvival: string;
+    // Clan battle chart
+    cbBar: string;
     // Accent / UI colors used inside SVG
     accentLink: string;
     accentMid: string;
@@ -104,6 +106,8 @@ export const chartColors: Record<ChartTheme, {
         metricWR: '#4292c6',
         metricBattles: '#2171b5',
         metricSurvival: '#0f766e',
+        // Clan battle chart
+        cbBar: '#4292c6',
         // Accent / UI colors used inside SVG
         accentLink: '#084594',
         accentMid: '#2171b5',
@@ -158,6 +162,8 @@ export const chartColors: Record<ChartTheme, {
         metricWR: '#79c0ff',
         metricBattles: '#58a6ff',
         metricSurvival: '#2dd4bf',
+        // Clan battle chart
+        cbBar: '#6e7681',
         // Accent / UI colors used inside SVG
         accentLink: '#79c0ff',
         accentMid: '#58a6ff',
