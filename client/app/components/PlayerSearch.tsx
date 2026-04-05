@@ -675,6 +675,7 @@ const PlayerSearch: React.FC = () => {
                                     players={visibleLandingPlayers}
                                     onSelectPlayer={(player) => handleSelectMember(player.name)}
                                     theme={theme}
+                                    sort={playerBestSort}
                                 />
                             </div>
                             <PlayerNameGrid

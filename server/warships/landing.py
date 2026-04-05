@@ -116,8 +116,10 @@ LANDING_PLAYER_RANKED_SORT_FRESHNESS_GRACE_DAYS = 14
 LANDING_PLAYER_RANKED_SORT_FRESHNESS_STALE_DAYS = 90
 LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR = 0.82
 LANDING_PLAYER_CB_SORT_WILSON_Z = 1.2815515655446004
-LANDING_PLAYER_CB_SORT_SEASON_DEPTH_WEIGHT = 0.08
-LANDING_PLAYER_CB_SORT_MAX_BATTLES = 400
+LANDING_PLAYER_CB_SORT_WR_WEIGHT = 0.80
+LANDING_PLAYER_CB_SORT_VOLUME_WEIGHT = 0.15
+LANDING_PLAYER_CB_SORT_SEASON_DEPTH_WEIGHT = 0.05
+LANDING_PLAYER_CB_SORT_MAX_BATTLES = 4000
 LANDING_PLAYER_CB_SORT_MAX_SEASONS = 10
 LANDING_RANDOM_PLAYER_QUEUE_KEY = 'landing:queue:players:random:v1'
 LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_KEY = 'landing:queue:players:random:eligible:v1'
@@ -352,7 +354,8 @@ def _calculate_wilson_lower_bound(success_rate: float | None, sample_size: int |
     denominator = 1.0 + (z_squared / battles)
     center = proportion + (z_squared / (2.0 * battles))
     margin = z_score * math.sqrt(
-        ((proportion * (1.0 - proportion)) + (z_squared / (4.0 * battles))) / battles
+        ((proportion * (1.0 - proportion)) +
+         (z_squared / (4.0 * battles))) / battles
     )
     lower_bound = (center - margin) / denominator
     return round(_clamp(lower_bound, 0.0, 1.0), 6)
@@ -364,6 +367,11 @@ def _calculate_landing_cb_sort_score(row: dict) -> float:
         row.get('clan_battle_win_rate'),
         battles,
     )
+    volume_score = _clamp(
+        battles / LANDING_PLAYER_CB_SORT_MAX_BATTLES,
+        0.0,
+        1.0,
+    )
     season_depth_score = _clamp(
         max(int(row.get('clan_battle_seasons_participated') or 0), 0) /
         LANDING_PLAYER_CB_SORT_MAX_SEASONS,
@@ -371,7 +379,8 @@ def _calculate_landing_cb_sort_score(row: dict) -> float:
         1.0,
     )
     return round(
-        ((1.0 - LANDING_PLAYER_CB_SORT_SEASON_DEPTH_WEIGHT) * credible_wr_score) +
+        (LANDING_PLAYER_CB_SORT_WR_WEIGHT * credible_wr_score) +
+        (LANDING_PLAYER_CB_SORT_VOLUME_WEIGHT * volume_score) +
         (LANDING_PLAYER_CB_SORT_SEASON_DEPTH_WEIGHT * season_depth_score),
         6,
     )
@@ -1587,8 +1596,6 @@ def _finalize_best_player_payload(rows: list[dict], limit: int) -> list[dict]:
         row.pop('ranked_total_wins', None)
         row.pop('highest_ranked_league_recent', None)
         row.pop('ranked_updated_at', None)
-        row.pop('clan_battle_total_battles', None)
-        row.pop('clan_battle_seasons_participated', None)
     return rows[:limit]
 
 
@@ -1967,8 +1974,8 @@ def _build_best_cb_landing_players(limit: int, realm: str = DEFAULT_REALM) -> li
           is not None else float('-inf')),
         -(row.get('clan_battle_total_battles')
           if row.get('clan_battle_total_battles') is not None else float('-inf')),
-                -(row.get('clan_battle_seasons_participated')
-                    if row.get('clan_battle_seasons_participated') is not None else float('-inf')),
+        -(row.get('clan_battle_seasons_participated')
+          if row.get('clan_battle_seasons_participated') is not None else float('-inf')),
         row.get('name') or '',
     ))
 

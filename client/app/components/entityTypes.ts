@@ -29,6 +29,8 @@ export interface LandingPlayer {
     is_ranked_player?: boolean;
     is_clan_battle_player?: boolean;
     clan_battle_win_rate?: number | null;
+    clan_battle_total_battles?: number | null;
+    clan_battle_seasons_participated?: number | null;
     highest_ranked_league?: RankedLeagueName | null;
     efficiency_rank_percentile?: number | null;
     efficiency_rank_tier?: 'E' | 'I' | 'II' | 'III' | null;

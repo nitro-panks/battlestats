@@ -3,17 +3,23 @@ import * as d3 from 'd3';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import type { LandingPlayer } from './entityTypes';
 
+type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
+
 interface LandingPlayerSVGProps {
     players: LandingPlayer[];
     onSelectPlayer?: (player: LandingPlayer) => void;
     svgHeight?: number;
     theme?: ChartTheme;
+    sort?: PlayerBestSort;
 }
 
 interface PlotDatum extends LandingPlayer {
     pvp_ratio: number;
     pvp_battles: number;
     total_wins: number;
+    plot_battles: number;
+    plot_wr: number;
+    plot_wins: number;
 }
 
 const expandDomain = (minValue: number, maxValue: number, paddingRatio: number, floor?: number, ceiling?: number): [number, number] => {
@@ -52,7 +58,9 @@ const drawLandingPlayerChart = (
     containerWidth: number,
     svgHeight: number,
     colors: Colors,
+    sort: PlayerBestSort = 'overall',
 ) => {
+    const isCbMode = sort === 'cb';
     const margin = { top: 56, right: 16, bottom: 32, left: 48 };
     const width = containerWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -61,13 +69,26 @@ const drawLandingPlayerChart = (
     container.selectAll('*').remove();
 
     const plotData: PlotDatum[] = players
-        .filter((player) => player.pvp_ratio != null && player.pvp_battles != null && player.pvp_battles > 0)
-        .map((player) => ({
-            ...player,
-            pvp_ratio: player.pvp_ratio as number,
-            pvp_battles: player.pvp_battles as number,
-            total_wins: Math.round((player.pvp_battles as number) * ((player.pvp_ratio as number) / 100)),
-        }));
+        .filter((player) => {
+            if (isCbMode) {
+                return player.clan_battle_win_rate != null && player.clan_battle_total_battles != null && player.clan_battle_total_battles > 0;
+            }
+            return player.pvp_ratio != null && player.pvp_battles != null && player.pvp_battles > 0;
+        })
+        .map((player) => {
+            const battles = isCbMode ? (player.clan_battle_total_battles as number) : (player.pvp_battles as number);
+            const wr = isCbMode ? (player.clan_battle_win_rate as number) : (player.pvp_ratio as number);
+            const wins = Math.round(battles * (wr / 100));
+            return {
+                ...player,
+                pvp_ratio: player.pvp_ratio as number,
+                pvp_battles: player.pvp_battles as number,
+                total_wins: Math.round((player.pvp_battles as number || 0) * ((player.pvp_ratio as number || 0) / 100)),
+                plot_battles: battles,
+                plot_wr: wr,
+                plot_wins: wins,
+            };
+        });
 
     const svgRoot = container
         .append('svg')
@@ -88,8 +109,8 @@ const drawLandingPlayerChart = (
         return;
     }
 
-    const battlesExtent = d3.extent(plotData, (datum: PlotDatum) => datum.pvp_battles) as [number, number];
-    const wrExtent = d3.extent(plotData, (datum: PlotDatum) => datum.pvp_ratio) as [number, number];
+    const battlesExtent = d3.extent(plotData, (datum: PlotDatum) => datum.plot_battles) as [number, number];
+    const wrExtent = d3.extent(plotData, (datum: PlotDatum) => datum.plot_wr) as [number, number];
     const [xMin, xMax] = expandDomain(battlesExtent[0], battlesExtent[1], 0.1, 0);
     const [yMin, yMax] = expandDomain(wrExtent[0], wrExtent[1], 0.08, 0, 100);
 
@@ -133,7 +154,7 @@ const drawLandingPlayerChart = (
         .attr('text-anchor', 'middle')
         .attr('x', width / 2)
         .attr('y', height + 30)
-        .text('PvP Battles');
+        .text(isCbMode ? 'CB Battles' : 'PvP Battles');
 
     svg.append('text')
         .attr('class', 'axisLabel')
@@ -143,7 +164,7 @@ const drawLandingPlayerChart = (
         .attr('transform', 'rotate(-90)')
         .attr('x', -height / 2)
         .attr('y', -34)
-        .text('Player WR');
+        .text(isCbMode ? 'CB Win Rate' : 'Player WR');
 
     const showDetails = (datum: PlotDatum) => {
         const detailGroup = svgRoot
@@ -167,17 +188,21 @@ const drawLandingPlayerChart = (
             .style('fill', colors.labelText);
 
         metaText.append('tspan')
-            .text(`${datum.total_wins.toLocaleString()} Wins`);
+            .text(`${datum.plot_wins.toLocaleString()} Wins`);
 
         metaText.append('tspan')
             .attr('dx', 12)
-            .text(`${datum.pvp_battles.toLocaleString()} Battles`);
+            .text(`${datum.plot_battles.toLocaleString()} ${isCbMode ? 'CB ' : ''}Battles`);
 
         metaText.append('tspan')
             .attr('dx', 12)
-            .text(`${datum.pvp_ratio.toFixed(1)}% WR`);
+            .text(`${datum.plot_wr.toFixed(1)}% WR`);
 
-        if (datum.highest_ranked_league) {
+        if (isCbMode && datum.clan_battle_seasons_participated) {
+            metaText.append('tspan')
+                .attr('dx', 12)
+                .text(`${datum.clan_battle_seasons_participated} Seasons`);
+        } else if (!isCbMode && datum.highest_ranked_league) {
             metaText.append('tspan')
                 .attr('dx', 12)
                 .text(`${datum.highest_ranked_league} Ranked`);
@@ -216,11 +241,11 @@ const drawLandingPlayerChart = (
         .enter()
         .append('circle')
         .attr('class', 'data-circle')
-        .attr('cx', (datum: PlotDatum) => x(datum.pvp_battles))
-        .attr('cy', (datum: PlotDatum) => y(datum.pvp_ratio))
+        .attr('cx', (datum: PlotDatum) => x(datum.plot_battles))
+        .attr('cy', (datum: PlotDatum) => y(datum.plot_wr))
         .attr('r', 5.5)
         .style('cursor', onSelectPlayer ? 'pointer' : 'default')
-        .attr('fill', (datum: PlotDatum) => selectLandingPlayerColorByWR(datum.pvp_ratio))
+        .attr('fill', (datum: PlotDatum) => selectLandingPlayerColorByWR(datum.plot_wr))
         .attr('stroke', colors.axisLine)
         .attr('stroke-width', 1.25);
 
@@ -242,7 +267,7 @@ const drawLandingPlayerChart = (
             hideDetails();
             d3.select(this)
                 .classed('clan-dot-pulse', false)
-                .attr('fill', selectLandingPlayerColorByWR(datum.pvp_ratio));
+                .attr('fill', selectLandingPlayerColorByWR(datum.plot_wr));
         });
 };
 
@@ -251,14 +276,16 @@ const LandingPlayerSVG: React.FC<LandingPlayerSVGProps> = ({
     onSelectPlayer,
     svgHeight = 300,
     theme = 'light',
+    sort = 'overall',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerWidth, setContainerWidth] = useState(320);
     const [isChartReady, setIsChartReady] = useState(false);
     const chartSignature = useMemo(() => JSON.stringify({
-        players: players.map((player) => [player.name, player.pvp_ratio, player.pvp_battles, player.highest_ranked_league]),
+        players: players.map((player) => [player.name, player.pvp_ratio, player.pvp_battles, player.clan_battle_total_battles, player.clan_battle_win_rate, player.highest_ranked_league]),
         svgHeight,
-    }), [players, svgHeight]);
+        sort,
+    }), [players, svgHeight, sort]);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -276,12 +303,12 @@ const LandingPlayerSVG: React.FC<LandingPlayerSVGProps> = ({
         if (!containerRef.current || containerWidth < 100) return;
         const colors = chartColors[theme];
         setIsChartReady(false);
-        drawLandingPlayerChart(containerRef.current, players, onSelectPlayer, containerWidth, svgHeight, colors);
+        drawLandingPlayerChart(containerRef.current, players, onSelectPlayer, containerWidth, svgHeight, colors, sort);
         const frameId = window.requestAnimationFrame(() => {
             setIsChartReady(true);
         });
         return () => window.cancelAnimationFrame(frameId);
-    }, [chartSignature, containerWidth, onSelectPlayer, players, svgHeight, theme]);
+    }, [chartSignature, containerWidth, onSelectPlayer, players, sort, svgHeight, theme]);
 
     return <div ref={containerRef} className={`pr-8 transition-opacity duration-150 md:pr-16 ${isChartReady ? 'opacity-100' : 'opacity-0'}`}></div>;
 };
