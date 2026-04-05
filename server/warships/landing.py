@@ -103,8 +103,15 @@ LANDING_PLAYER_BEST_RANKED_WEIGHT = 0.06
 LANDING_PLAYER_BEST_CLAN_WEIGHT = 0.04
 LANDING_PLAYER_BEST_EFFICIENCY_NEUTRAL = 0.35
 LANDING_PLAYER_BEST_COMPETITIVE_SHARE_FLOOR = 0.55
-LANDING_PLAYER_RANKED_SORT_PLAYER_SCORE_WEIGHT = 0.20
-LANDING_PLAYER_RANKED_SORT_WR_WEIGHT = 0.10
+LANDING_PLAYER_RANKED_SORT_VOLUME_WEIGHT = 0.20
+LANDING_PLAYER_RANKED_SORT_RECENT_WR_WEIGHT = 0.40
+LANDING_PLAYER_RANKED_SORT_PLAYER_SCORE_WEIGHT = 0.25
+LANDING_PLAYER_RANKED_SORT_WR_WEIGHT = 0.15
+LANDING_PLAYER_RANKED_SORT_WR_LOW_CONFIDENCE_BATTLES = 8
+LANDING_PLAYER_RANKED_SORT_WR_FULL_CONFIDENCE_BATTLES = 28
+LANDING_PLAYER_RANKED_SORT_FRESHNESS_GRACE_DAYS = 14
+LANDING_PLAYER_RANKED_SORT_FRESHNESS_STALE_DAYS = 90
+LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR = 0.82
 LANDING_PLAYER_CB_SORT_MAX_BATTLES = 400
 LANDING_PLAYER_CB_SORT_MAX_SEASONS = 10
 LANDING_RANDOM_PLAYER_QUEUE_KEY = 'landing:queue:players:random:v1'
@@ -178,12 +185,83 @@ def _ranked_league_score(league: str | None) -> float:
     }.get(str(league or '').strip(), 0.0)
 
 
+def _ranked_league_sort_band(league: str | None) -> int:
+    return {
+        'Bronze': 1,
+        'Silver': 2,
+        'Gold': 3,
+    }.get(str(league or '').strip(), 0)
+
+
+def _normalize_ranked_volume_score(latest_ranked_battles: int | None) -> float:
+    battles = max(int(latest_ranked_battles or 0), 0)
+    if battles <= 0:
+        return 0.0
+
+    return round(_clamp(math.log1p(battles) / math.log1p(40), 0.0, 1.0), 4)
+
+
+def _normalize_ranked_recent_wr_score(latest_ranked_win_rate: float | None, latest_ranked_battles: int | None) -> float:
+    battles = max(int(latest_ranked_battles or 0), 0)
+    if latest_ranked_win_rate is None:
+        return _normalize_best_wr_score(50.0) if battles > 0 else 0.0
+
+    if battles < LANDING_PLAYER_RANKED_SORT_WR_LOW_CONFIDENCE_BATTLES:
+        normalized_low_sample = battles / \
+            LANDING_PLAYER_RANKED_SORT_WR_LOW_CONFIDENCE_BATTLES
+        confidence = 0.05 + (0.20 * (normalized_low_sample ** 2))
+    else:
+        confidence = 0.25 + (0.75 * _clamp(
+            (
+                battles -
+                LANDING_PLAYER_RANKED_SORT_WR_LOW_CONFIDENCE_BATTLES
+            ) /
+            (
+                LANDING_PLAYER_RANKED_SORT_WR_FULL_CONFIDENCE_BATTLES -
+                LANDING_PLAYER_RANKED_SORT_WR_LOW_CONFIDENCE_BATTLES
+            ),
+            0.0,
+            1.0,
+        ))
+
+    smoothed_win_rate = 50.0 + ((float(latest_ranked_win_rate) - 50.0) * confidence)
+    return round(_normalize_best_wr_score(smoothed_win_rate), 4)
+
+
+def _ranked_freshness_multiplier(ranked_updated_at) -> float:
+    if ranked_updated_at is None:
+        return LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR
+
+    age_delta = timezone.now() - ranked_updated_at
+    age_days = max(age_delta.total_seconds() / 86400.0, 0.0)
+    if age_days <= LANDING_PLAYER_RANKED_SORT_FRESHNESS_GRACE_DAYS:
+        return 1.0
+    if age_days >= LANDING_PLAYER_RANKED_SORT_FRESHNESS_STALE_DAYS:
+        return LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR
+
+    decay_progress = _clamp(
+        (
+            age_days - LANDING_PLAYER_RANKED_SORT_FRESHNESS_GRACE_DAYS
+        ) /
+        (
+            LANDING_PLAYER_RANKED_SORT_FRESHNESS_STALE_DAYS -
+            LANDING_PLAYER_RANKED_SORT_FRESHNESS_GRACE_DAYS
+        ),
+        0.0,
+        1.0,
+    )
+    return round(
+        1.0 - ((1.0 - LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR) * decay_progress),
+        4,
+    )
+
+
 def _normalize_best_ranked_score(latest_ranked_battles: int | None, highest_ranked_league: str | None) -> float:
     battles = max(int(latest_ranked_battles or 0), 0)
     if battles <= 0 and not highest_ranked_league:
         return 0.0
 
-    volume_score = _clamp(math.log1p(battles) / math.log1p(40), 0.0, 1.0)
+    volume_score = _normalize_ranked_volume_score(battles)
     league_score = _ranked_league_score(highest_ranked_league)
     return round((0.65 * league_score) + (0.35 * volume_score), 4)
 
@@ -241,16 +319,30 @@ def _calculate_landing_best_score(row: dict) -> float:
 
 
 def _calculate_landing_ranked_sort_score(row: dict) -> float:
-    ranked_score = _normalize_best_ranked_score(
+    league_band = _ranked_league_sort_band(
+        row.get('highest_ranked_league_recent'))
+    volume_score = _normalize_ranked_volume_score(
+        row.get('latest_ranked_battles'))
+    recent_wr_score = _normalize_ranked_recent_wr_score(
+        row.get('latest_ranked_win_rate'),
         row.get('latest_ranked_battles'),
-        row.get('highest_ranked_league_recent'),
     )
     player_score = _normalize_best_player_score(row.get('player_score'))
     wr_score = _normalize_best_wr_score(row.get('high_tier_pvp_ratio'))
+    freshness_multiplier = _ranked_freshness_multiplier(
+        row.get('ranked_updated_at'))
+    within_band_score = round(
+        (
+            (LANDING_PLAYER_RANKED_SORT_VOLUME_WEIGHT * volume_score) +
+            (LANDING_PLAYER_RANKED_SORT_RECENT_WR_WEIGHT * recent_wr_score) +
+            (LANDING_PLAYER_RANKED_SORT_PLAYER_SCORE_WEIGHT * player_score) +
+            (LANDING_PLAYER_RANKED_SORT_WR_WEIGHT * wr_score)
+        ) * freshness_multiplier,
+        6,
+    )
+
     return round(
-        (0.70 * ranked_score) +
-        (LANDING_PLAYER_RANKED_SORT_PLAYER_SCORE_WEIGHT * player_score) +
-        (LANDING_PLAYER_RANKED_SORT_WR_WEIGHT * wr_score),
+        (league_band * 10.0) + within_band_score,
         6,
     )
 
@@ -1292,6 +1384,14 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             es, 'clan_battle_overall_win_rate', None)
         row['highest_ranked_league'] = get_highest_ranked_league_name(
             ranked_rows) or highest_ranked_league_recent
+        latest_ranked_row = ranked_rows[0] if ranked_rows else None
+        row['latest_ranked_win_rate'] = (
+            float(latest_ranked_row.get('win_rate'))
+            if isinstance(latest_ranked_row, dict)
+            and latest_ranked_row.get('win_rate') is not None
+            else None
+        )
+        row['ranked_updated_at'] = getattr(player_obj, 'ranked_updated_at', None)
         # Use stored percentile directly — landing surfaces tolerate minor
         # input-data drift (unlike player detail, which uses the stricter
         # _get_published_efficiency_rank_payload freshness gate).
@@ -1456,7 +1556,9 @@ def _finalize_best_player_payload(rows: list[dict], limit: int) -> list[dict]:
         row.pop('player_score', None)
         row.pop('shrunken_efficiency_strength', None)
         row.pop('latest_ranked_battles', None)
+        row.pop('latest_ranked_win_rate', None)
         row.pop('highest_ranked_league_recent', None)
+        row.pop('ranked_updated_at', None)
         row.pop('clan_battle_total_battles', None)
         row.pop('clan_battle_seasons_participated', None)
     return rows[:limit]
@@ -1529,6 +1631,10 @@ def _build_best_ranked_landing_players(limit: int, realm: str = DEFAULT_REALM) -
     ranked_rows.sort(key=lambda row: (
         -(row.get('ranked_sort_score') if row.get('ranked_sort_score')
           is not None else float('-inf')),
+                -(row.get('latest_ranked_win_rate')
+                    if row.get('latest_ranked_win_rate') is not None else float('-inf')),
+                -(row.get('ranked_updated_at').timestamp()
+                    if row.get('ranked_updated_at') is not None else float('-inf')),
         -(row.get('latest_ranked_battles')
           if row.get('latest_ranked_battles') is not None else float('-inf')),
         -(row.get('player_score') if row.get('player_score')

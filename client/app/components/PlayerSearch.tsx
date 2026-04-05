@@ -189,7 +189,7 @@ type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 
 const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18·Eff + 0.10·Vol_5-10 + 0.06·Ranked + 0.04·Clan) × M_share';
-const PLAYER_BEST_RANKED_FORMULA_APPROXIMATION = 'Ranked ≈ 0.70·Ranked + 0.20·Score + 0.10·WR_5-10';
+const PLAYER_BEST_RANKED_FORMULA_APPROXIMATION = 'Ranked ≈ LeagueBand(Gold > Silver > Bronze) + (0.40·RankedWR_recent + 0.25·Score + 0.20·RankedVol + 0.15·WR_5-10) × Freshness';
 const PLAYER_BEST_EFFICIENCY_FORMULA_APPROXIMATION = 'Efficiency ≈ published efficiency percentile, then Score, then WR';
 const PLAYER_BEST_WR_FORMULA_APPROXIMATION = 'WR ≈ WR_5-10, then Battles_5-10, then Score, then Eff';
 const PLAYER_BEST_CB_FORMULA_APPROXIMATION = 'CB ≈ 0.55·CB_WR + 0.25·CB_Volume + 0.20·CB_Seasons';
@@ -651,6 +651,7 @@ const PlayerSearch: React.FC = () => {
                                                 <div>
                                                     <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Ranked</p>
                                                     <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{PLAYER_BEST_RANKED_FORMULA_APPROXIMATION}</p>
+                                                    <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">League bands are absolute. Recent ranked WR is pulled back toward 50% for tiny samples, and stale ranked snapshots get a mild discount inside the same league.</p>
                                                 </div>
                                                 <div>
                                                     <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Efficiency</p>
