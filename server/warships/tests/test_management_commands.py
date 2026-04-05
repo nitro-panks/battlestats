@@ -295,9 +295,11 @@ class RunPostDeployOperationsCommandTests(TestCase):
 
         self.assertEqual(payload["operation"], "verify")
         self.assertEqual(payload["realms"], ["na", "eu"])
-        self.assertEqual(payload["snapshots"]["na"]["present_sorts"], ["cb", "overall"])
+        self.assertEqual(payload["snapshots"]["na"]
+                         ["present_sorts"], ["cb", "overall"])
         self.assertIn("ranked", payload["snapshots"]["na"]["missing_sorts"])
-        self.assertEqual(payload["snapshots"]["eu"]["present_sorts"], ["overall"])
+        self.assertEqual(payload["snapshots"]["eu"]
+                         ["present_sorts"], ["overall"])
         self.assertTrue(payload["locks"]["na"]["best_entities"])
         self.assertFalse(payload["locks"]["eu"]["best_entities"])
 
@@ -316,7 +318,8 @@ class RunPostDeployOperationsCommandTests(TestCase):
         )
         payload = json.loads(out.getvalue())
 
-        self.assertEqual(payload["invalidated"], {"players": ["eu"], "clans": ["eu"]})
+        self.assertEqual(payload["invalidated"], {
+                         "players": ["eu"], "clans": ["eu"]})
         mock_invalidate_players.assert_called_once_with(
             include_recent=True,
             realm="eu",

@@ -2809,8 +2809,7 @@ def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
-                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)                          :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -5021,7 +5020,8 @@ def warm_landing_best_entity_caches(
                 continue
             seen_player_ids.add(player_id)
             best_player_ids.append(player_id)
-    best_clan_rows = get_landing_best_clans_payload(realm=realm)[:normalized_clan_limit]
+    best_clan_rows = get_landing_best_clans_payload(
+        realm=realm)[:normalized_clan_limit]
 
     clan_ids = [
         int(row.get('clan_id') or 0)

@@ -20,17 +20,24 @@ The enrichment pipeline (`enrichment/enrich-batch` DO Function) was built for **
 
 Backfill status as of 2026-04-05:
 
-- **NA**: In progress — 51,682 enriched, 27,444 remaining (65.3%)
-- **EU**: In progress — 24,738 enriched, 114,836 remaining (17.7%)
+- **NA**: Complete for the current eligible pool — 74,491 enriched, 0 remaining (100.0%)
+- **EU**: In progress — 91,413 enriched, 46,749 remaining (66.2%)
 - **Asia**: No eligible players in DB yet (no clan crawl has populated Asia realm data)
+
+Periodic cache-warming status verified on production on 2026-04-05:
+
+- `landing-page-warmer-na` and `landing-page-warmer-eu` are enabled in django-celery-beat and run every 120 minutes.
+- `hot-entity-cache-warmer-na` and `hot-entity-cache-warmer-eu` are enabled in django-celery-beat and run every 30 minutes.
+- Recent Beat logs show normal dispatches for those tasks, and worker logs show successful completion.
+- A visible landing cache `cached_at` refresh does not imply a bounce; the scheduled landing warmer republishes those payloads in steady state.
 
 Three legacy Celery crawlers are **retired from Beat** (listed in `signals.py _RETIRED_SCHEDULE_NAMES`) and marked for DO Functions migration:
 
-| Crawler | Status | Location | API calls/entity |
-|---|---|---|---|
-| Clan crawl | Retired | `server/warships/clan_crawl.py` | ~5-6 per member |
-| Incremental player refresh | Retired | `server/warships/management/commands/incremental_player_refresh.py` | ~2-3 per player |
-| Incremental ranked refresh | Retired | `server/warships/management/commands/incremental_ranked_data.py` | ~2 per player |
+| Crawler                    | Status  | Location                                                            | API calls/entity |
+| -------------------------- | ------- | ------------------------------------------------------------------- | ---------------- |
+| Clan crawl                 | Retired | `server/warships/clan_crawl.py`                                     | ~5-6 per member  |
+| Incremental player refresh | Retired | `server/warships/management/commands/incremental_player_refresh.py` | ~2-3 per player  |
+| Incremental ranked refresh | Retired | `server/warships/management/commands/incremental_ranked_data.py`    | ~2 per player    |
 
 ## Deploy-Time And Bounce-Time Boundary
 
@@ -89,18 +96,18 @@ Throughput at 10 req/s: ~5 clans/s. A 15-min invocation handles ~4,500 clans. Wi
 
 ## Player Data Field to Refresh Cycle Mapping
 
-| Field(s) | WG API source | Staleness threshold | Refresh trigger |
-|---|---|---|---|
-| `pvp_battles`, `pvp_ratio`, `name`, `clan_id` | account/info | 15 min | Request-driven (`update_player_data` in views.py) |
-| `battles_json`, `tiers_json`, `type_json`, `randoms_json` | ships/stats | 24 hr | DO Function enrichment batch |
-| `ranked_json` | ranked account_info + ranked shipstats | 24 hr | DO Function enrichment batch |
-| `efficiency_json` | Computed from battles_json | 48 hr | Phase 4: fold into enrichment batch |
-| `snapshot` / `activity` | Computed from account stats | 24 hr | DO Function enrichment batch (via `update_snapshot_data`) |
-| `explorer_summary` | Computed from battles + ranked | 24 hr | DO Function enrichment batch (via `refresh_player_explorer_summary`) |
-| `achievements_json` | player achievements API | 7 days | Phase 4: fold into enrichment batch |
-| Clan metadata + membership | clans/info | 7 days | DO Function clan sync (Phase 3) |
-| CB seasons (clan-level) | clan battles API | 7 days | Celery `warm_clan_battle_summaries_task` (every 30 min) |
-| Efficiency rank tier | Computed from population | 48 hr | Celery `refresh_efficiency_rank_snapshot_task` (triggered post-enrichment) |
+| Field(s)                                                  | WG API source                          | Staleness threshold | Refresh trigger                                                            |
+| --------------------------------------------------------- | -------------------------------------- | ------------------- | -------------------------------------------------------------------------- |
+| `pvp_battles`, `pvp_ratio`, `name`, `clan_id`             | account/info                           | 15 min              | Request-driven (`update_player_data` in views.py)                          |
+| `battles_json`, `tiers_json`, `type_json`, `randoms_json` | ships/stats                            | 24 hr               | DO Function enrichment batch                                               |
+| `ranked_json`                                             | ranked account_info + ranked shipstats | 24 hr               | DO Function enrichment batch                                               |
+| `efficiency_json`                                         | Computed from battles_json             | 48 hr               | Phase 4: fold into enrichment batch                                        |
+| `snapshot` / `activity`                                   | Computed from account stats            | 24 hr               | DO Function enrichment batch (via `update_snapshot_data`)                  |
+| `explorer_summary`                                        | Computed from battles + ranked         | 24 hr               | DO Function enrichment batch (via `refresh_player_explorer_summary`)       |
+| `achievements_json`                                       | player achievements API                | 7 days              | Phase 4: fold into enrichment batch                                        |
+| Clan metadata + membership                                | clans/info                             | 7 days              | DO Function clan sync (Phase 3)                                            |
+| CB seasons (clan-level)                                   | clan battles API                       | 7 days              | Celery `warm_clan_battle_summaries_task` (every 30 min)                    |
+| Efficiency rank tier                                      | Computed from population               | 48 hr               | Celery `refresh_efficiency_rank_snapshot_task` (triggered post-enrichment) |
 
 ### What the enrichment batch touches per player
 
@@ -121,12 +128,12 @@ Net cost: ~3 WG API calls per player (2 parallel + 1 sequential).
 
 ## Player Tier Definitions
 
-| Tier | Definition | Estimated size (per realm) | Refresh target |
-|---|---|---|---|
-| **Hot** | Visited on site in last 14 days (`EntityVisitDaily`) | ~200-500 | Daily, first in queue |
-| **Active** | `last_battle_date` within 30 days | ~15K-40K | Daily, after Hot |
-| **Warm** | `last_battle_date` within 90 days, but >30 days ago | ~20K-50K | Every 3 days |
-| **Cold** | `last_battle_date` > 90 days ago | ~80K-120K | Weekly or skip |
+| Tier       | Definition                                           | Estimated size (per realm) | Refresh target        |
+| ---------- | ---------------------------------------------------- | -------------------------- | --------------------- |
+| **Hot**    | Visited on site in last 14 days (`EntityVisitDaily`) | ~200-500                   | Daily, first in queue |
+| **Active** | `last_battle_date` within 30 days                    | ~15K-40K                   | Daily, after Hot      |
+| **Warm**   | `last_battle_date` within 90 days, but >30 days ago  | ~20K-50K                   | Every 3 days          |
+| **Cold**   | `last_battle_date` > 90 days ago                     | ~80K-120K                  | Weekly or skip        |
 
 Hot players are the highest priority because they are the ones site visitors are actually looking at. Active players are next because their stats are changing. Warm and Cold players change rarely and can tolerate longer staleness windows.
 
@@ -204,20 +211,20 @@ This requires a `mode` parameter on `_candidates()` and `enrich_players()`: `bac
 
 Stagger enrichment windows by realm using the existing `REALM_CRAWL_CRON_HOURS` offset pattern from `server/warships/signals.py`:
 
-| Realm | UTC window | Local context | Cron hours |
-|---|---|---|---|
-| **EU** | 00:00 - 05:45 | Early morning CET (off-peak) | 0-5 |
-| **NA** | 06:00 - 11:45 | Early morning ET (off-peak) | 6-11 |
-| **Asia** | 12:00 - 17:45 | Evening JST (off-peak) | 12-17 |
+| Realm    | UTC window    | Local context                | Cron hours |
+| -------- | ------------- | ---------------------------- | ---------- |
+| **EU**   | 00:00 - 05:45 | Early morning CET (off-peak) | 0-5        |
+| **NA**   | 06:00 - 11:45 | Early morning ET (off-peak)  | 6-11       |
+| **Asia** | 12:00 - 17:45 | Evening JST (off-peak)       | 12-17      |
 
 Each realm gets a 5h45m window. The remaining 6h15m (18:00-23:59 UTC) is buffer for retries, maintenance, and overlap avoidance.
 
 ### Window allocation per realm
 
-| Slot | Duration | Workload | API budget |
-|---|---|---|---|
-| First hour | 1h | Clan sync (stale clans >7d) | ~2 calls/clan, ~5 clans/s |
-| Remaining 4h45m | 4h45m | Player enrichment (tiered) | ~3 calls/player, ~6.6 players/s |
+| Slot            | Duration | Workload                    | API budget                      |
+| --------------- | -------- | --------------------------- | ------------------------------- |
+| First hour      | 1h       | Clan sync (stale clans >7d) | ~2 calls/clan, ~5 clans/s       |
+| Remaining 4h45m | 4h45m    | Player enrichment (tiered)  | ~3 calls/player, ~6.6 players/s |
 
 Clan sync runs first because it discovers new players that the enrichment pipeline can pick up in the same window.
 
@@ -256,25 +263,25 @@ This will transition to per-realm entries as backfills complete and steady-state
 
 ### Enrichment pipeline (per realm, 2 partitions)
 
-| Metric | Value |
-|---|---|
-| WG API rate limit | ~10 req/s per app_id |
-| API calls per player | ~3 (ships/stats + rank_info parallel, then ranked shipstats) |
-| Inter-player delay | 0.05s |
-| Effective throughput (2 partitions) | ~6.6 players/s, ~400/min, ~7.6 API req/s |
-| Per 15-min invocation (2 partitions) | ~5,600 players |
-| Per 4h45m enrichment slot (2 partitions) | ~76K players (19 invocations) |
-| Daily total (3 realms) | ~228K players |
+| Metric                                   | Value                                                        |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| WG API rate limit                        | ~10 req/s per app_id                                         |
+| API calls per player                     | ~3 (ships/stats + rank_info parallel, then ranked shipstats) |
+| Inter-player delay                       | 0.05s                                                        |
+| Effective throughput (2 partitions)      | ~6.6 players/s, ~400/min, ~7.6 API req/s                     |
+| Per 15-min invocation (2 partitions)     | ~5,600 players                                               |
+| Per 4h45m enrichment slot (2 partitions) | ~76K players (19 invocations)                                |
+| Daily total (3 realms)                   | ~228K players                                                |
 
 ### Clan sync (per realm, 1 partition)
 
-| Metric | Value |
-|---|---|
-| API calls per clan | ~2 (metadata + member list) |
-| Effective throughput | ~5 clans/s |
-| Per 15-min invocation | ~4,500 clans |
-| Per 1h sync slot (4 invocations) | ~18K clans |
-| Daily total (3 realms) | ~54K clans |
+| Metric                           | Value                       |
+| -------------------------------- | --------------------------- |
+| API calls per clan               | ~2 (metadata + member list) |
+| Effective throughput             | ~5 clans/s                  |
+| Per 15-min invocation            | ~4,500 clans                |
+| Per 1h sync slot (4 invocations) | ~18K clans                  |
+| Daily total (3 realms)           | ~54K clans                  |
 
 ### Coverage assessment
 
@@ -289,12 +296,12 @@ This will transition to per-realm entries as backfills complete and steady-state
 
 Adding efficiency_json and achievements_json to the enrichment loop increases per-player cost from ~3 to ~5 API calls:
 
-| Metric | Phase 3 (current) | Phase 4 (expanded) |
-|---|---|---|
-| API calls per player | ~3 | ~5 |
-| Throughput (2 partitions) | ~400/min | ~240/min |
-| Per enrichment slot | ~76K | ~45K |
-| Daily total (3 realms) | ~228K | ~135K |
+| Metric                    | Phase 3 (current) | Phase 4 (expanded) |
+| ------------------------- | ----------------- | ------------------ |
+| API calls per player      | ~3                | ~5                 |
+| Throughput (2 partitions) | ~400/min          | ~240/min           |
+| Per enrichment slot       | ~76K              | ~45K               |
+| Daily total (3 realms)    | ~228K             | ~135K              |
 
 At ~135K players/day with expanded scope, Hot + Active tiers are still fully covered. May need 3 partitions if Active pools trend toward the upper estimate (~40K/realm).
 
@@ -304,11 +311,11 @@ These Celery Beat tasks depend on enrichment data being fresh. Their schedules a
 
 ### Must run after enrichment window
 
-| Task | Current schedule | Realm stagger | Dependency |
-|---|---|---|---|
-| `landing-best-player-snapshot-materializer-{realm}` | Daily (EU 01:15, NA 07:15, Asia 13:15 UTC) | Yes | Reads `battles_json`, `ranked_json` from DB; deploys may also trigger targeted snapshot rebuilds |
-| `daily-clan-tier-dist-warmer-{realm}` | Daily (EU 02:30, NA 08:30, Asia 14:30 UTC) | Yes | Reads player tier data |
-| `refresh_efficiency_rank_snapshot_task` | Triggered post-crawl | No | Reads efficiency badges from DB |
+| Task                                                | Current schedule                           | Realm stagger | Dependency                                                                                       |
+| --------------------------------------------------- | ------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------ |
+| `landing-best-player-snapshot-materializer-{realm}` | Daily (EU 01:15, NA 07:15, Asia 13:15 UTC) | Yes           | Reads `battles_json`, `ranked_json` from DB; deploys may also trigger targeted snapshot rebuilds |
+| `daily-clan-tier-dist-warmer-{realm}`               | Daily (EU 02:30, NA 08:30, Asia 14:30 UTC) | Yes           | Reads player tier data                                                                           |
+| `refresh_efficiency_rank_snapshot_task`             | Triggered post-crawl                       | No            | Reads efficiency badges from DB                                                                  |
 
 The Best-player snapshot materializer schedule will need adjustment once per-realm windows shift from backfill to steady-state. Target: run ~30 minutes after each realm's enrichment slot ends.
 
@@ -316,15 +323,22 @@ This daily snapshot lane should not be conflated with deploy-time snapshot rebui
 
 ### Independent of enrichment timing
 
-| Task | Schedule | Notes |
-|---|---|---|
-| `landing-page-warmer-{realm}` | Every 120 min | Reads cached/published data |
-| `hot-entity-cache-warmer-{realm}` | Every 30 min | Warms detail page caches |
-| `player-distribution-warmer-{realm}` | Every 360 min | Full table scan, independent |
-| `player-correlation-warmer-{realm}` | Every 360 min | Full table scan, independent |
-| `bulk-entity-cache-loader-{realm}` | Every 12 hr | Loads top entities |
-| `recently-viewed-player-warmer-{realm}` | Every 10 min | Cache gap filler |
-| `clan-battle-summary-warmer` | Every 30 min | Configured clan IDs only |
+| Task                                    | Schedule      | Notes                        |
+| --------------------------------------- | ------------- | ---------------------------- |
+| `landing-page-warmer-{realm}`           | Every 120 min | Reads cached/published data  |
+| `hot-entity-cache-warmer-{realm}`       | Every 30 min  | Warms detail page caches     |
+| `player-distribution-warmer-{realm}`    | Every 360 min | Full table scan, independent |
+| `player-correlation-warmer-{realm}`     | Every 360 min | Full table scan, independent |
+| `bulk-entity-cache-loader-{realm}`      | Every 12 hr   | Loads top entities           |
+| `recently-viewed-player-warmer-{realm}` | Every 10 min  | Cache gap filler             |
+| `clan-battle-summary-warmer`            | Every 30 min  | Configured clan IDs only     |
+
+Observed production state on 2026-04-05:
+
+1. `landing-page-warmer-na` last ran at `2026-04-05T16:24:43Z` and was observed republishing landing payloads whose live `X-Landing-*-Cache-Cached-At` headers later advanced on schedule.
+2. `landing-page-warmer-eu` last ran at `2026-04-05T16:24:43Z`.
+3. `hot-entity-cache-warmer-na` and `hot-entity-cache-warmer-eu` last ran at `2026-04-05T17:54:43Z`.
+4. These are normal steady-state refreshes and should not be confused with deploy-time cache invalidation.
 
 ## Transition Plan
 
@@ -370,18 +384,18 @@ This daily snapshot lane should not be conflated with deploy-time snapshot rebui
 
 ### Functions
 
-| Function | Purpose | Invocation | Runtime |
-|---|---|---|---|
-| `enrichment/enrich-batch` | Player enrichment (backfill + steady-state) | Cron every 15 min during realm enrichment slot | Up to 14 min, 1GB RAM |
-| `clan/clan-sync` | Clan metadata + membership sync | Cron every 15 min during realm sync slot | Up to 14 min, 512MB RAM |
-| `battlestats/db-test` | DB connectivity check | Manual | 30s, 256MB RAM |
+| Function                  | Purpose                                     | Invocation                                     | Runtime                 |
+| ------------------------- | ------------------------------------------- | ---------------------------------------------- | ----------------------- |
+| `enrichment/enrich-batch` | Player enrichment (backfill + steady-state) | Cron every 15 min during realm enrichment slot | Up to 14 min, 1GB RAM   |
+| `clan/clan-sync`          | Clan metadata + membership sync             | Cron every 15 min during realm sync slot       | Up to 14 min, 512MB RAM |
+| `battlestats/db-test`     | DB connectivity check                       | Manual                                         | 30s, 256MB RAM          |
 
 ### Invocation scripts
 
-| Script | Launches |
-|---|---|
+| Script                 | Launches                                             |
+| ---------------------- | ---------------------------------------------------- |
 | `invoke-enrichment.sh` | N partitions of `enrichment/enrich-batch` (existing) |
-| `invoke-clan-sync.sh` | 1 partition of `clan/clan-sync` (new, Phase 3) |
+| `invoke-clan-sync.sh`  | 1 partition of `clan/clan-sync` (new, Phase 3)       |
 
 ### Environment variables
 
@@ -408,32 +422,32 @@ New for Phase 3 (`clan/clan-sync`):
 
 ### Phase 2
 
-| File | Change |
-|---|---|
+| File                                                        | Change                                                                                                                                                    |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `server/warships/management/commands/enrich_player_data.py` | Add `_candidates_steady_state()` with tier-aware queries (Hot/Active/Warm + Ranked Discovery), add `mode` param to `_candidates()` and `enrich_players()` |
-| `functions/packages/enrichment/enrich-batch/__main__.py` | Add `ENRICH_MODE` env var support, pass to `enrich_players()` |
-| `functions/project.yml` | Add `ENRICH_MODE` env var mapping |
-| Droplet cron | Replace single entry with per-realm staggered entries |
+| `functions/packages/enrichment/enrich-batch/__main__.py`    | Add `ENRICH_MODE` env var support, pass to `enrich_players()`                                                                                             |
+| `functions/project.yml`                                     | Add `ENRICH_MODE` env var mapping                                                                                                                         |
+| Droplet cron                                                | Replace single entry with per-realm staggered entries                                                                                                     |
 
 ### Phase 3
 
-| File | Change |
-|---|---|
+| File                                               | Change                                                                        |
+| -------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `server/warships/management/commands/clan_sync.py` | New command: lightweight clan metadata + membership sync with staleness check |
-| `functions/packages/clan/clan-sync/__main__.py` | New DO Function wrapper (same pattern as `enrich-batch`) |
-| `functions/packages/clan/clan-sync/build.sh` | Build script (copies server code) |
-| `functions/project.yml` | Add `clan` package with `clan-sync` function |
-| `functions/invoke-clan-sync.sh` | New invocation script |
-| Droplet cron | Add per-realm clan sync entries in first hour of each window |
+| `functions/packages/clan/clan-sync/__main__.py`    | New DO Function wrapper (same pattern as `enrich-batch`)                      |
+| `functions/packages/clan/clan-sync/build.sh`       | Build script (copies server code)                                             |
+| `functions/project.yml`                            | Add `clan` package with `clan-sync` function                                  |
+| `functions/invoke-clan-sync.sh`                    | New invocation script                                                         |
+| Droplet cron                                       | Add per-realm clan sync entries in first hour of each window                  |
 
 ### Phase 4
 
-| File | Change |
-|---|---|
-| `server/warships/management/commands/enrich_player_data.py` | Add efficiency_json + achievements_json to `_enrich_player_parallel()` |
-| `server/warships/clan_crawl.py` | Archive — functionality replaced by clan sync + enrichment pipeline |
-| `server/warships/management/commands/incremental_player_refresh.py` | Archive — replaced by enrichment pipeline steady-state |
-| `server/warships/management/commands/incremental_ranked_data.py` | Archive — replaced by enrichment pipeline |
+| File                                                                | Change                                                                 |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `server/warships/management/commands/enrich_player_data.py`         | Add efficiency_json + achievements_json to `_enrich_player_parallel()` |
+| `server/warships/clan_crawl.py`                                     | Archive — functionality replaced by clan sync + enrichment pipeline    |
+| `server/warships/management/commands/incremental_player_refresh.py` | Archive — replaced by enrichment pipeline steady-state                 |
+| `server/warships/management/commands/incremental_ranked_data.py`    | Archive — replaced by enrichment pipeline                              |
 
 ## Monitoring and Alerting
 

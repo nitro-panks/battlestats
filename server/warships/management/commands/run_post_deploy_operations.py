@@ -27,7 +27,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument(
             'operation',
-            choices=('verify', 'snapshots', 'invalidate', 'warm-landing', 'warm-best-entities'),
+            choices=('verify', 'snapshots', 'invalidate',
+                     'warm-landing', 'warm-best-entities'),
             help='Post-deploy operation to run.',
         )
         parser.add_argument(
@@ -46,8 +47,10 @@ class Command(BaseCommand):
         )
         parser.add_argument('--players', action='store_true', default=False)
         parser.add_argument('--clans', action='store_true', default=False)
-        parser.add_argument('--include-recent', action='store_true', default=False)
-        parser.add_argument('--force-refresh', action='store_true', default=False)
+        parser.add_argument('--include-recent',
+                            action='store_true', default=False)
+        parser.add_argument('--force-refresh',
+                            action='store_true', default=False)
         parser.add_argument('--player-limit', type=int, default=25)
         parser.add_argument('--clan-limit', type=int, default=25)
 
@@ -100,7 +103,8 @@ class Command(BaseCommand):
         snapshots = {}
         for realm in realms:
             present_sorts = sorted(set(snapshots_by_realm.get(realm, [])))
-            missing_sorts = [sort for sort in LANDING_PLAYER_BEST_SORTS if sort not in present_sorts]
+            missing_sorts = [
+                sort for sort in LANDING_PLAYER_BEST_SORTS if sort not in present_sorts]
             snapshots[realm] = {
                 'count': len(present_sorts),
                 'present_sorts': present_sorts,
@@ -147,7 +151,8 @@ class Command(BaseCommand):
 
     def _handle_invalidate(self, realms, players, clans, include_recent):
         if not players and not clans:
-            raise CommandError('invalidate requires at least one of --players or --clans')
+            raise CommandError(
+                'invalidate requires at least one of --players or --clans')
 
         invalidated = {
             'players': [],

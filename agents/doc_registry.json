@@ -769,7 +769,11 @@
             "section": "feature-recovery",
             "owner": "data",
             "aliases": [],
-            "tags": ["eu", "best players", "population"],
+            "tags": [
+                "eu",
+                "best players",
+                "population"
+            ],
             "archive_on": []
         },
         "agents/runbooks/archive/runbook-eu-profile-chart-population-2026-04-02.md": {
@@ -779,7 +783,11 @@
             "section": "feature-recovery",
             "owner": "data",
             "aliases": [],
-            "tags": ["eu", "charts", "population"],
+            "tags": [
+                "eu",
+                "charts",
+                "population"
+            ],
             "archive_on": []
         },
         "agents/runbooks/archive/runbook-flower-observability-2026-04-02.md": {
@@ -789,7 +797,11 @@
             "section": "feature-recovery",
             "owner": "backend",
             "aliases": [],
-            "tags": ["flower", "celery", "observability"],
+            "tags": [
+                "flower",
+                "celery",
+                "observability"
+            ],
             "archive_on": []
         },
         "agents/runbooks/runbook-icon-analysis.md": {

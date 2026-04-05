@@ -87,31 +87,31 @@ Use this checklist during the actual operation.
 
 These are required after every backend redeploy.
 
-| Step | Why it matters | How it normally runs | Verification | Current status as of 2026-04-05 |
-|---|---|---|---|---|
-| Active backend release switch | New code is not live until `/opt/battlestats-server/current` points at the new release | Deploy script does this automatically with atomic `mv -T` and verification | `readlink -f /opt/battlestats-server/current` | Automated — deploy exits non-zero if activation fails. Previously required manual fix during CB rollout (see `runbook-stale-symlink-diagnosis-2026-04-05.md`). |
-| Gunicorn restart | Makes the new Django code serve traffic | Deploy script | `systemctl is-active battlestats-gunicorn` | Active |
-| Celery default restart | Restarts user-facing task queue on the new code | Deploy script | `systemctl is-active battlestats-celery` | Active |
-| Celery hydration restart | Restarts heavier request-driven refresh tasks on the new code | Deploy script | `systemctl is-active battlestats-celery-hydration` | Active |
-| Celery background restart | Restarts warmers and long-running background tasks on the new code | Deploy script | `systemctl is-active battlestats-celery-background` | Active |
-| Celery beat restart | Resumes periodic schedule execution on the new code | Deploy script | `systemctl is-active battlestats-beat` | Active |
-| Redis restart | Restores cache backend and task-lock storage on the new rollout | Deploy script | `systemctl is-active redis-server` | Active |
-| RabbitMQ restart | Restores Celery broker connectivity on the new rollout | Deploy script | `systemctl is-active rabbitmq-server` | Active |
-| Migrations | Keeps DB schema aligned with code | Deploy script | deploy output and healthy app startup | Completed during deploy |
-| Collectstatic | Publishes current static assets for Django-side static references | Deploy script | deploy output | Completed during deploy |
-| Django check | Prevents shipping obviously broken server config | Deploy script | deploy output | Completed during deploy |
-| Best-player snapshot materialization | Keeps Best-player landing payloads off the request path | Deploy script unless disabled | query `LandingPlayerBestSnapshot` rows | Present for `na` and `eu` across `overall`, `ranked`, `efficiency`, `wr`, and `cb` |
+| Step                                 | Why it matters                                                                         | How it normally runs                                                       | Verification                                        | Current status as of 2026-04-05                                                                                                                                |
+| ------------------------------------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Active backend release switch        | New code is not live until `/opt/battlestats-server/current` points at the new release | Deploy script does this automatically with atomic `mv -T` and verification | `readlink -f /opt/battlestats-server/current`       | Automated — deploy exits non-zero if activation fails. Previously required manual fix during CB rollout (see `runbook-stale-symlink-diagnosis-2026-04-05.md`). |
+| Gunicorn restart                     | Makes the new Django code serve traffic                                                | Deploy script                                                              | `systemctl is-active battlestats-gunicorn`          | Active                                                                                                                                                         |
+| Celery default restart               | Restarts user-facing task queue on the new code                                        | Deploy script                                                              | `systemctl is-active battlestats-celery`            | Active                                                                                                                                                         |
+| Celery hydration restart             | Restarts heavier request-driven refresh tasks on the new code                          | Deploy script                                                              | `systemctl is-active battlestats-celery-hydration`  | Active                                                                                                                                                         |
+| Celery background restart            | Restarts warmers and long-running background tasks on the new code                     | Deploy script                                                              | `systemctl is-active battlestats-celery-background` | Active                                                                                                                                                         |
+| Celery beat restart                  | Resumes periodic schedule execution on the new code                                    | Deploy script                                                              | `systemctl is-active battlestats-beat`              | Active                                                                                                                                                         |
+| Redis restart                        | Restores cache backend and task-lock storage on the new rollout                        | Deploy script                                                              | `systemctl is-active redis-server`                  | Active                                                                                                                                                         |
+| RabbitMQ restart                     | Restores Celery broker connectivity on the new rollout                                 | Deploy script                                                              | `systemctl is-active rabbitmq-server`               | Active                                                                                                                                                         |
+| Migrations                           | Keeps DB schema aligned with code                                                      | Deploy script                                                              | deploy output and healthy app startup               | Completed during deploy                                                                                                                                        |
+| Collectstatic                        | Publishes current static assets for Django-side static references                      | Deploy script                                                              | deploy output                                       | Completed during deploy                                                                                                                                        |
+| Django check                         | Prevents shipping obviously broken server config                                       | Deploy script                                                              | deploy output                                       | Completed during deploy                                                                                                                                        |
+| Best-player snapshot materialization | Keeps Best-player landing payloads off the request path                                | Deploy script unless disabled                                              | query `LandingPlayerBestSnapshot` rows              | Present for `na` and `eu` across `overall`, `ranked`, `efficiency`, `wr`, and `cb`                                                                             |
 
 ### Client redeploy
 
 These are required after every client redeploy.
 
-| Step | Why it matters | How it normally runs | Verification | Current status as of 2026-04-05 |
-|---|---|---|---|---|
-| New client release switch | New frontend build is not live until `current` points at the new release | Client deploy script | `readlink -f /opt/battlestats-client/current` | Previously completed during CB rollout |
-| Stale Next process cleanup | Reclaims memory from orphaned node processes | Client deploy script | `ps` or healthy restart behavior | Handled by deploy path |
-| Client restart | Serves the new Next.js build | Client deploy script | `systemctl is-active battlestats-client` | Active |
-| Nginx health | Keeps public HTTP routing intact | Existing service, not redeployed each time | `systemctl is-active nginx` | Active |
+| Step                       | Why it matters                                                           | How it normally runs                       | Verification                                  | Current status as of 2026-04-05        |
+| -------------------------- | ------------------------------------------------------------------------ | ------------------------------------------ | --------------------------------------------- | -------------------------------------- |
+| New client release switch  | New frontend build is not live until `current` points at the new release | Client deploy script                       | `readlink -f /opt/battlestats-client/current` | Previously completed during CB rollout |
+| Stale Next process cleanup | Reclaims memory from orphaned node processes                             | Client deploy script                       | `ps` or healthy restart behavior              | Handled by deploy path                 |
+| Client restart             | Serves the new Next.js build                                             | Client deploy script                       | `systemctl is-active battlestats-client`      | Active                                 |
+| Nginx health               | Keeps public HTTP routing intact                                         | Existing service, not redeployed each time | `systemctl is-active nginx`                   | Active                                 |
 
 ## Post-Bounce Behavior
 
@@ -368,7 +368,9 @@ As of 2026-04-05 after the CB ranking rollout:
 6. the clan-member `None` upstream crash path was fixed and the NA clan-only best-entity warm completed,
 7. the EU clan-only verification no longer hit the old `AttributeError`, but concise completion output remained expensive to obtain because the realm-specific warm cascaded into additional hydration work,
 8. deploy scripts now auto-run a bounded release-and-service verifier after backend and client rollout,
-9. the smoke script now supports JSON output for deploy tooling, but smoke verification still remains opt-in until the broader flake history is retired.
+9. the smoke script now supports JSON output for deploy tooling, but smoke verification still remains opt-in until the broader flake history is retired,
+10. periodic warmers are confirmed active in steady state: `landing-page-warmer-{realm}` is enabled every 120 minutes and `hot-entity-cache-warmer-{realm}` is enabled every 30 minutes,
+11. those periodic warmers can republish landing player/clan payloads and advance the live `X-Landing-*-Cache-Cached-At` headers without any bounce or deploy-time invalidation.
 
 ## QA Findings
 
