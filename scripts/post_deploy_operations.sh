@@ -69,7 +69,7 @@ REMOTE
 verify_services() {
   local label="$1"
   shift
-  ssh "${DEPLOY_USER}@${HOST}" LABEL="${label}" 'bash -s' -- "$@" <<'REMOTE'
+  ssh "${DEPLOY_USER}@${HOST}" 'bash -s' -- "${label}" "$@" <<'REMOTE'
 set -euo pipefail
 label="$1"
 shift
