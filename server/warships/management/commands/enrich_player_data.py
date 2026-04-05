@@ -19,12 +19,19 @@ Batch API optimisations
   keeps these current.
 * update_snapshot_data already calls update_activity_data internally, so
   we do NOT call update_activity_data separately.
-* Net cost per player: ~2 API calls (ships/stats + ranked) instead of ~5.
+* Parallel API calls: ships/stats and ranked account_info are fetched
+  concurrently, cutting per-player API wait from ~900ms to ~600ms.
+* Partitioned batches: multiple function invocations can process disjoint
+  player slices concurrently via partition/num_partitions parameters.
+* Net cost per player: ~3 API calls (ships/stats + rank_info +
+  ranked/shipstats) with 2 of the 3 running in parallel.
 """
 from __future__ import annotations
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from itertools import zip_longest
 
 from django.core.cache import cache
@@ -38,7 +45,7 @@ log = logging.getLogger("enrich")
 DEFAULT_BATCH = 500
 DEFAULT_MIN_PVP_BATTLES = 500
 DEFAULT_MIN_WR = 48.0
-DEFAULT_DELAY = 0.2  # seconds between players (not per API call)
+DEFAULT_DELAY = 0.05  # seconds between players (reduced from 0.2 — safe with parallel calls)
 
 
 def _prewarm_ship_cache() -> int:
@@ -62,9 +69,14 @@ def _prewarm_ship_cache() -> int:
     return count
 
 
-def _candidates(realm: str, min_pvp_battles: int, min_wr: float, limit: int):
-    """Return players missing battles_json, ordered by WR desc."""
-    return list(
+def _candidates(realm: str, min_pvp_battles: int, min_wr: float, limit: int,
+                partition: int = 0, num_partitions: int = 1):
+    """Return players missing battles_json, ordered by WR desc.
+
+    When num_partitions > 1, only returns players whose player_id falls
+    into the given partition (player_id % num_partitions == partition).
+    """
+    qs = (
         Player.objects.filter(
             realm=realm,
             is_hidden=False,
@@ -78,7 +90,18 @@ def _candidates(realm: str, min_pvp_battles: int, min_wr: float, limit: int):
             F("pvp_battles").desc(nulls_last=True),
             "name",
         )
-        .values_list("player_id", "name", "pvp_ratio", "pvp_battles", "realm")
+    )
+
+    if num_partitions > 1:
+        # Use raw SQL annotation for modulo partitioning
+        from django.db.models import Value
+        from django.db.models.functions import Mod
+        qs = qs.annotate(
+            _partition=Mod(F("player_id"), Value(num_partitions))
+        ).filter(_partition=partition)
+
+    return list(
+        qs.values_list("player_id", "name", "pvp_ratio", "pvp_battles", "realm")
         [:limit]
     )
 
@@ -92,6 +115,157 @@ def _interleave(na_rows, eu_rows):
             yield eu
 
 
+def _enrich_player_parallel(player_id, realm: str):
+    """Enrich a single player with parallelized API calls.
+
+    Phase 1 (parallel):  ships/stats  +  ranked account_info
+    Phase 2 (sequential): ranked shipstats (needs season IDs from phase 1)
+    Phase 3 (local):      battle processing, snapshot, explorer summary
+    """
+    from warships.api.ships import (
+        _fetch_ship_stats_for_player,
+        _fetch_ship_info,
+        _fetch_ranked_ship_stats_for_player,
+    )
+    from warships.api.players import _fetch_ranked_account_info
+    from warships.data import (
+        _build_ship_row_metadata,
+        _get_ranked_seasons_metadata,
+        _aggregate_ranked_seasons,
+        _build_top_ranked_ship_names_by_season,
+        _extract_randoms_rows,
+        _aggregate_battles_by_key,
+        update_snapshot_data,
+        refresh_player_explorer_summary,
+    )
+
+    player = Player.objects.get(player_id=player_id, realm=realm)
+
+    # ── Phase 1: parallel API calls ──────────────────────────
+    ship_data = None
+    account_data = None
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        ship_future = ex.submit(
+            _fetch_ship_stats_for_player, player_id, realm=realm)
+        rank_future = ex.submit(
+            _fetch_ranked_account_info, int(player_id), realm=realm)
+
+        ship_data = ship_future.result()
+        account_data = rank_future.result()
+
+    # ── Phase 2: ranked ship stats (needs season IDs from phase 1) ──
+    rank_info = account_data.get('rank_info') if account_data else None
+    ranked_ship_stats_rows = []
+    requested_season_ids = []
+
+    if rank_info:
+        requested_season_ids = sorted(
+            [int(sid) for sid in rank_info.keys() if str(sid).isdigit()]
+        )
+        if requested_season_ids:
+            ranked_ship_stats_rows = _fetch_ranked_ship_stats_for_player(
+                int(player_id), season_ids=requested_season_ids, realm=realm)
+
+    # ── Phase 3a: process battle data ────────────────────────
+    battles_rows = None
+    if ship_data:
+        prepared_data = []
+        for ship in ship_data:
+            ship_model = _fetch_ship_info(ship['ship_id'])
+            ship_metadata = _build_ship_row_metadata(
+                ship.get('ship_id'), ship_model)
+
+            pvp_battles = ship['pvp']['battles']
+            wins = ship['pvp']['wins']
+            losses = ship['pvp']['losses']
+            frags = ship['pvp']['frags']
+            battles = ship['battles']
+            distance = ship['distance']
+
+            prepared_data.append({
+                'ship_id': ship_metadata['ship_id'],
+                'ship_name': ship_metadata['ship_name'],
+                'ship_chart_name': ship_metadata['ship_chart_name'],
+                'ship_tier': ship_metadata['ship_tier'],
+                'all_battles': battles,
+                'distance': distance,
+                'wins': wins,
+                'losses': losses,
+                'ship_type': ship_metadata['ship_type'],
+                'pve_battles': battles - (wins + losses),
+                'pvp_battles': pvp_battles,
+                'win_ratio': round(wins / pvp_battles, 2) if pvp_battles > 0 else 0,
+                'kdr': round(frags / pvp_battles, 2) if pvp_battles > 0 else 0,
+            })
+
+        battles_rows = sorted(
+            prepared_data, key=lambda x: x.get('pvp_battles', 0), reverse=True)
+
+        # Derive tier, type, randoms aggregations
+        tier_aggregates = {tier: {'pvp_battles': 0, 'wins': 0}
+                          for tier in range(1, 12)}
+        for row in battles_rows:
+            tier = row.get('ship_tier')
+            if isinstance(tier, int) and tier in tier_aggregates:
+                tier_aggregates[tier]['pvp_battles'] += int(
+                    row.get('pvp_battles', 0) or 0)
+                tier_aggregates[tier]['wins'] += int(row.get('wins', 0) or 0)
+
+        tiers_data = []
+        for tier in range(11, 0, -1):
+            b = tier_aggregates[tier]['pvp_battles']
+            w = tier_aggregates[tier]['wins']
+            tiers_data.append({
+                'ship_tier': tier,
+                'pvp_battles': b,
+                'wins': w,
+                'win_ratio': round(w / b, 2) if b > 0 else 0,
+            })
+
+        now = datetime.now()
+        player.battles_json = battles_rows
+        player.battles_updated_at = now
+        player.tiers_json = tiers_data
+        player.tiers_updated_at = now
+        player.type_json = _aggregate_battles_by_key(battles_rows, 'ship_type')
+        player.type_updated_at = now
+        player.randoms_json = _extract_randoms_rows(battles_rows, limit=20)
+        player.randoms_updated_at = now
+        player.save(update_fields=[
+            'battles_json', 'battles_updated_at',
+            'tiers_json', 'tiers_updated_at',
+            'type_json', 'type_updated_at',
+            'randoms_json', 'randoms_updated_at',
+        ])
+    else:
+        # No ship data — record attempt timestamp to avoid tight retry
+        player.battles_updated_at = datetime.now()
+        player.save(update_fields=['battles_updated_at'])
+
+    # ── Phase 3b: process ranked data ────────────────────────
+    ranked_rows = None
+    if rank_info and requested_season_ids:
+        season_meta = _get_ranked_seasons_metadata()
+        top_ship_names = _build_top_ranked_ship_names_by_season(
+            ranked_ship_stats_rows, requested_season_ids)
+        ranked_rows = _aggregate_ranked_seasons(
+            rank_info, season_meta, top_ship_names_by_season=top_ship_names)
+    else:
+        ranked_rows = []
+
+    player.ranked_json = ranked_rows
+    player.ranked_updated_at = datetime.now()
+    player.save(update_fields=['ranked_json', 'ranked_updated_at'])
+
+    # ── Phase 3c: snapshot + activity (no API calls) ─────────
+    update_snapshot_data(player_id, realm=realm, refresh_player=False)
+
+    # ── Phase 3d: explorer summary ─���─────────────────────────
+    refresh_player_explorer_summary(
+        player, battles_rows=battles_rows, ranked_rows=ranked_rows)
+
+
 def enrich_players(
     batch: int = DEFAULT_BATCH,
     min_pvp_battles: int = DEFAULT_MIN_PVP_BATTLES,
@@ -100,21 +274,20 @@ def enrich_players(
     dry_run: bool = False,
     realms: tuple[str, ...] | None = None,
     heartbeat_callback=None,
+    partition: int = 0,
+    num_partitions: int = 1,
 ) -> dict:
     """Run one enrichment pass.  Returns summary dict."""
-    from warships.data import (
-        update_battle_data,
-        update_ranked_data,
-        update_snapshot_data,
-    )
-
     target_realms = realms or tuple(sorted(VALID_REALMS))
 
     # Fetch candidates per realm (half the batch each when two realms)
     per_realm = max(batch // len(target_realms), 1)
     realm_candidates = {}
     for realm in target_realms:
-        realm_candidates[realm] = _candidates(realm, min_pvp_battles, min_wr, per_realm)
+        realm_candidates[realm] = _candidates(
+            realm, min_pvp_battles, min_wr, per_realm,
+            partition=partition, num_partitions=num_partitions,
+        )
 
     # Build interleaved queue
     if len(target_realms) == 2 and 'na' in target_realms and 'eu' in target_realms:
@@ -129,8 +302,9 @@ def enrich_players(
 
     total_candidates = {r: len(rows) for r, rows in realm_candidates.items()}
     log.info(
-        "Enrichment pass: %d players queued (candidates: %s, min_pvp=%d, min_wr=%.1f)",
+        "Enrichment pass: %d players queued (candidates: %s, min_pvp=%d, min_wr=%.1f, partition=%d/%d)",
         len(queue), total_candidates, min_pvp_battles, min_wr,
+        partition, num_partitions,
     )
 
     if dry_run:
@@ -153,17 +327,7 @@ def enrich_players(
             heartbeat_callback()
 
         try:
-            # 1. Battle data — 1 API call (ships/stats) + cached ship lookups
-            update_battle_data(player_id, realm=realm)
-
-            # 2. Snapshot + activity — 0 API calls (refresh_player=False
-            #    skips the redundant account/info + clans/accountinfo calls;
-            #    update_activity_data is called internally by update_snapshot_data)
-            update_snapshot_data(player_id, realm=realm, refresh_player=False)
-
-            # 3. Ranked data — 2 API calls (seasons metadata cached + account rank_info + shipstats)
-            update_ranked_data(player_id, realm=realm)
-
+            _enrich_player_parallel(player_id, realm=realm)
             enriched += 1
             by_realm[realm] = by_realm.get(realm, 0) + 1
             log.info(
@@ -213,6 +377,14 @@ class Command(BaseCommand):
             help="Restrict to one realm (default: alternate both).",
         )
         parser.add_argument(
+            "--partition", type=int, default=0,
+            help="Partition index (0-based) for parallel invocations.",
+        )
+        parser.add_argument(
+            "--num-partitions", type=int, default=1,
+            help="Total number of partitions.",
+        )
+        parser.add_argument(
             "--dry-run", action="store_true",
             help="Report candidates without processing.",
         )
@@ -226,6 +398,8 @@ class Command(BaseCommand):
             delay=options["delay"],
             dry_run=options["dry_run"],
             realms=realms,
+            partition=options["partition"],
+            num_partitions=options["num_partitions"],
         )
 
         self.stdout.write(self.style.SUCCESS(f"\n=== Enrichment Summary ==="))

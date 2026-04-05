@@ -28,6 +28,8 @@ packages:
       ENRICH_REALMS: "${ENRICH_REALMS}"
       ENRICH_BATCH_SIZE: "${ENRICH_BATCH_SIZE}"
       ENRICH_TIMEOUT_S: "${ENRICH_TIMEOUT_S}"
+      ENRICH_NUM_PARTITIONS: "${ENRICH_NUM_PARTITIONS}"
+      ENRICH_DELAY: "${ENRICH_DELAY}"
     functions:
       - name: enrich-batch
         runtime: python:3.12

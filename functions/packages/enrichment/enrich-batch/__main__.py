@@ -8,6 +8,11 @@ timeout so the next scheduled invocation picks up where it left off.
 
 Designed to replace the Celery-based enrich_player_data_task running on
 the background queue.
+
+Supports partitioned invocations: pass ``partition`` and
+``num_partitions`` in the request body to split the candidate pool
+across concurrent function instances.  Each partition processes a
+disjoint slice (player_id % num_partitions == partition).
 """
 
 import base64
@@ -27,9 +32,12 @@ HARD_TIMEOUT_S = int(os.getenv("ENRICH_TIMEOUT_S", "840"))
 BATCH_SIZE = int(os.getenv("ENRICH_BATCH_SIZE", "500"))
 MIN_PVP_BATTLES = int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500"))
 MIN_WR = float(os.getenv("ENRICH_MIN_WR", "48.0"))
-DELAY = float(os.getenv("ENRICH_DELAY", "0.2"))
+DELAY = float(os.getenv("ENRICH_DELAY", "0.05"))
 REALMS_ENV = os.getenv("ENRICH_REALMS", "").strip()
 REALMS = tuple(r.strip() for r in REALMS_ENV.split(",") if r.strip()) or None
+
+# ── Partition config (defaults to single partition) ─────────
+NUM_PARTITIONS = int(os.getenv("ENRICH_NUM_PARTITIONS", "1"))
 
 log = logging.getLogger("enrich-fn")
 
@@ -79,9 +87,22 @@ def _ensure_django():
 
 def main(event, context):
     start = time.time()
+
+    # ── Handle lightweight keep-warm pings ───────────────────
+    if isinstance(event, dict) and event.get("ping"):
+        return {"body": {"status": "pong", "elapsed_seconds": round(time.time() - start, 3)}}
+
     _ensure_django()
 
     from warships.management.commands.enrich_player_data import enrich_players
+
+    # ── Resolve partition from request body or env ───────────
+    partition = 0
+    num_partitions = NUM_PARTITIONS
+
+    if isinstance(event, dict):
+        partition = int(event.get("partition", partition))
+        num_partitions = int(event.get("num_partitions", num_partitions))
 
     batches_completed = 0
     total_enriched = 0
@@ -102,8 +123,9 @@ def main(event, context):
             break
 
         log.info(
-            "Starting batch %d (elapsed=%.0fs, remaining=%.0fs)",
+            "Starting batch %d (elapsed=%.0fs, remaining=%.0fs, partition=%d/%d)",
             batches_completed + 1, elapsed, remaining,
+            partition, num_partitions,
         )
 
         try:
@@ -113,6 +135,8 @@ def main(event, context):
                 min_wr=MIN_WR,
                 delay=DELAY,
                 realms=REALMS,
+                partition=partition,
+                num_partitions=num_partitions,
             )
         except Exception as exc:
             log.exception("Batch %d failed", batches_completed + 1)
@@ -148,6 +172,8 @@ def main(event, context):
         "elapsed_seconds": elapsed_total,
         "realms": list(REALMS) if REALMS else "all",
         "batch_size": BATCH_SIZE,
+        "partition": partition,
+        "num_partitions": num_partitions,
         "batch_summaries": batch_summaries,
     }
 
