@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, _summarize_best_clan_cb_window, summarize_clan_battle_activity_badge, warm_landing_best_entity_caches
-from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, _calculate_landing_best_score, _ranked_quality_score, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
+from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, _calculate_landing_best_score, _ranked_quality_score, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_cache_metadata_key, landing_best_clan_published_cache_key, landing_best_clan_published_metadata_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
 from warships.models import Clan, LandingPlayerBestSnapshot, Player, PlayerExplorerSummary, realm_cache_key
 
 
@@ -170,13 +170,13 @@ class LandingHelperTests(TestCase):
         mock_delay.assert_called_once_with(include_recent=True, realm='na')
 
     def test_best_player_payload_uses_materialized_snapshot_without_recomputing(self):
-        LandingPlayerBestSnapshot.objects.create(
+        LandingPlayerBestSnapshot.objects.update_or_create(
             realm='na',
             sort='ranked',
-            payload_json=[
+            defaults={'payload_json': [
                 {'name': 'SnapshotLeader', 'player_id': 4001, 'pvp_ratio': 62.1},
                 {'name': 'SnapshotRunnerUp', 'player_id': 4002, 'pvp_ratio': 61.4},
-            ],
+            ]},
         )
 
         with patch('warships.landing.materialize_landing_player_best_snapshot') as mock_materialize:
@@ -1258,6 +1258,60 @@ class LandingHelperTests(TestCase):
             'random', LANDING_PLAYER_LIMIT)), [{'name': 'cached-player'}])
         self.assertIsNotNone(cache.get(
             landing_player_published_metadata_key('random', LANDING_PLAYER_LIMIT)))
+
+    @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
+    def test_best_landing_clans_use_published_fallback_while_dirty(self, mock_queue_warm):
+        published_cache_key = landing_best_clan_published_cache_key('overall')
+        published_metadata_key = landing_best_clan_published_metadata_key(
+            'overall')
+        cache.set(published_cache_key, [
+                  {'name': 'published-best-clan'}], timeout=None)
+        cache.set(published_metadata_key, {
+            'ttl_seconds': LANDING_CLAN_CACHE_TTL,
+            'cached_at': '2026-03-25T00:00:00+00:00',
+            'expires_at': '2026-03-25T12:00:00+00:00',
+        }, timeout=None)
+        cache.set(realm_cache_key('na', LANDING_CLANS_DIRTY_KEY),
+                  'dirty', timeout=None)
+
+        with patch('warships.landing._build_best_landing_clans') as mock_builder:
+            payload, metadata = get_landing_best_clans_payload_with_cache_metadata(
+                sort='overall')
+
+        self.assertEqual(payload, [{'name': 'published-best-clan'}])
+        self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
+        mock_builder.assert_not_called()
+        mock_queue_warm.assert_called_once_with(realm='na')
+
+    @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
+    def test_best_landing_clans_preserve_non_empty_published_payload_when_primary_is_empty(self, mock_queue_warm):
+        primary_cache_key = landing_best_clan_cache_key('overall')
+        primary_metadata_key = landing_best_clan_cache_metadata_key('overall')
+        published_cache_key = landing_best_clan_published_cache_key('overall')
+        published_metadata_key = landing_best_clan_published_metadata_key(
+            'overall')
+        cache.set(primary_cache_key, [], 60)
+        cache.set(primary_metadata_key, {
+            'ttl_seconds': LANDING_CLAN_CACHE_TTL,
+            'cached_at': '2026-03-26T00:00:00+00:00',
+            'expires_at': '2026-03-26T12:00:00+00:00',
+        }, 60)
+        cache.set(published_cache_key, [
+                  {'name': 'durable-best-clan'}], timeout=None)
+        cache.set(published_metadata_key, {
+            'ttl_seconds': LANDING_CLAN_CACHE_TTL,
+            'cached_at': '2026-03-25T00:00:00+00:00',
+            'expires_at': '2026-03-25T12:00:00+00:00',
+        }, timeout=None)
+
+        payload, metadata = get_landing_best_clans_payload_with_cache_metadata(
+            sort='overall')
+
+        self.assertEqual(payload, [{'name': 'durable-best-clan'}])
+        self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
+        self.assertEqual(cache.get(published_cache_key),
+                         [{'name': 'durable-best-clan'}])
+        mock_queue_warm.assert_called_once_with(realm='na')
 
     def test_warm_landing_page_content_force_refresh_republishes_recent_surfaces_without_deleting(self):
         cache.set(realm_cache_key('na', LANDING_RECENT_CLANS_CACHE_KEY), [

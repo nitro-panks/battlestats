@@ -304,7 +304,8 @@ def _ranked_quality_score(row: dict) -> float:
         return 0.0
 
     league_score = _ranked_league_score(league)
-    wr_score = _normalize_best_wr_score(ranked_wr) if ranked_wr is not None else 0.0
+    wr_score = _normalize_best_wr_score(
+        ranked_wr) if ranked_wr is not None else 0.0
     depth_score = _clamp(
         seasons / LANDING_PLAYER_BEST_RANKED_QUALITY_MAX_SEASONS, 0.0, 1.0)
     volume_score = _clamp(
@@ -568,11 +569,13 @@ def _publish_landing_payload(
     metadata: dict[str, str | int],
     ttl_seconds: int,
     dirty_keys: tuple[str, ...] = (),
+    publish_empty_payload: bool = True,
 ) -> None:
     cache.set(cache_key, payload, ttl_seconds)
     cache.set(metadata_key, metadata, ttl_seconds)
-    cache.set(published_cache_key, payload, timeout=None)
-    cache.set(published_metadata_key, metadata, timeout=None)
+    if publish_empty_payload or payload:
+        cache.set(published_cache_key, payload, timeout=None)
+        cache.set(published_metadata_key, metadata, timeout=None)
     _clear_cache_family_dirty(*dirty_keys)
 
 
@@ -585,6 +588,9 @@ def _get_cached_landing_payload_with_fallback(
     force_refresh: bool,
     realm: str = DEFAULT_REALM,
     dirty_keys: tuple[str, ...] = (),
+    use_published_fallback_when_dirty: bool = False,
+    prefer_published_non_empty_payload: bool = False,
+    publish_empty_primary_payload: bool = True,
 ) -> tuple[list[dict] | None, dict[str, str | int]]:
     is_dirty = (not force_refresh) and any(
         cache.get(dirty_key) is not None for dirty_key in dirty_keys
@@ -594,13 +600,23 @@ def _get_cached_landing_payload_with_fallback(
         None if force_refresh or is_dirty else cache.get(metadata_key), ttl_seconds)
 
     if payload is not None:
+        if prefer_published_non_empty_payload and not payload:
+            published_payload = cache.get(published_cache_key)
+            if published_payload:
+                published_metadata = _normalize_landing_player_cache_metadata(
+                    cache.get(published_metadata_key), ttl_seconds)
+                cache.set(published_metadata_key,
+                          published_metadata, timeout=None)
+                _queue_landing_republish(realm=realm)
+                return published_payload, published_metadata
         if cache.get(metadata_key) is None:
             cache.set(metadata_key, metadata, ttl_seconds)
-        cache.set(published_cache_key, payload, timeout=None)
-        cache.set(published_metadata_key, metadata, timeout=None)
+        if publish_empty_primary_payload or payload:
+            cache.set(published_cache_key, payload, timeout=None)
+            cache.set(published_metadata_key, metadata, timeout=None)
         return payload, metadata
 
-    published_payload = None if force_refresh or is_dirty else cache.get(
+    published_payload = None if force_refresh or (is_dirty and not use_published_fallback_when_dirty) else cache.get(
         published_cache_key)
     if published_payload is not None:
         published_metadata = _normalize_landing_player_cache_metadata(
@@ -1099,6 +1115,9 @@ def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = Fal
         force_refresh,
         realm=realm,
         dirty_keys=(realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),),
+        use_published_fallback_when_dirty=True,
+        prefer_published_non_empty_payload=True,
+        publish_empty_primary_payload=False,
     )
 
     if payload is None:
@@ -1114,6 +1133,7 @@ def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = Fal
             metadata,
             ttl_seconds,
             dirty_keys=(realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),),
+            publish_empty_payload=False,
         )
 
     return payload, metadata

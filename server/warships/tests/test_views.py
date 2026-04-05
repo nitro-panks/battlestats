@@ -3252,7 +3252,17 @@ class ApiContractTests(TestCase):
     def test_warm_landing_page_content_populates_current_landing_cache_keys(self):
         cache.clear()
 
-        result = warm_landing_page_content()
+        with patch('warships.landing._build_best_landing_clans', return_value=[{
+            'clan_id': 93251,
+            'name': 'WarmLandingBestClan',
+            'tag': 'WLBC',
+            'members_count': 12,
+            'clan_wr': 58.4,
+            'total_battles': 180000,
+            'active_members': 8,
+            'is_clan_battle_active': False,
+        }]):
+            result = warm_landing_page_content()
 
         self.assertEqual(result['status'], 'completed')
         self.assertIsNotNone(
