@@ -272,18 +272,18 @@ Recommended ranking formula:
 
 ```text
 cb_sort_score =
-  0.55 * normalized_cb_wr
-  + 0.25 * normalized_cb_volume
-  + 0.20 * normalized_cb_season_depth
+  0.92 * wilson_lower_bound(cb_wr, cb_battles)
+  + 0.08 * normalized_cb_season_depth
 ```
 
 Where:
 
-1. `normalized_cb_wr` is derived from `clan_battle_overall_win_rate`
-2. `normalized_cb_volume` saturates on a reasonable battle floor instead of rewarding lifetime volume without bound
-3. `normalized_cb_season_depth` rewards multi-season participation over single-season spikes
+1. `cb_wr` is `clan_battle_overall_win_rate`
+2. `cb_battles` is `clan_battle_total_battles`
+3. `wilson_lower_bound(...)` is a confidence-adjusted win-rate score, so larger samples at the same WR rank higher
+4. `normalized_cb_season_depth` rewards multi-season participation over single-season spikes
 
-This should answer a player-level CB strength question without conflating it with clan-level CB ranking.
+This should answer a player-level CB strength question without conflating it with clan-level CB ranking. It also fixes the earlier problem where very large CB samples flattened too early once they cleared the old volume cap.
 
 ## Caching And Warming Requirements
 

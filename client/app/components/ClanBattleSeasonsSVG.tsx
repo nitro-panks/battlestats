@@ -6,6 +6,7 @@ export interface ClanBattleSeasonPoint {
     season_id: number;
     season_name: string;
     season_label: string;
+    start_date?: string | null;
     participants: number;
     roster_win_rate: number;
 }
@@ -50,26 +51,32 @@ const drawChart = (
 
     d3.select(container).selectAll('*').remove();
 
-    const sorted = [...seasons].sort((a, b) => a.season_id - b.season_id);
+    // Sort chronologically by start_date, falling back to season_id
+    const sorted = [...seasons].sort((a, b) => {
+        if (a.start_date && b.start_date) return a.start_date.localeCompare(b.start_date);
+        if (a.start_date) return -1;
+        if (b.start_date) return 1;
+        return a.season_id - b.season_id;
+    });
     if (sorted.length === 0) return;
 
     // --- Build complete season timeline with gaps filled ---
     const byId = new Map(sorted.map(s => [s.season_id, s]));
-    const rangeOf = (id: number) => Math.floor(id / 100);
 
-    const rangeGroups = new Map<number, number[]>();
-    for (const s of sorted) {
-        const r = rangeOf(s.season_id);
-        if (!rangeGroups.has(r)) rangeGroups.set(r, []);
-        rangeGroups.get(r)!.push(s.season_id);
-    }
-
+    // Fill gaps between consecutive seasons only within the same ID range group
     const allIds: number[] = [];
-    for (const [, ids] of [...rangeGroups.entries()].sort((a, b) => a[0] - b[0])) {
-        const min = Math.min(...ids);
-        const max = Math.max(...ids);
-        for (let id = min; id <= max; id++) {
-            allIds.push(id);
+    for (let i = 0; i < sorted.length; i++) {
+        const curr = sorted[i];
+        allIds.push(curr.season_id);
+        if (i < sorted.length - 1) {
+            const next = sorted[i + 1];
+            const currRange = Math.floor(curr.season_id / 100);
+            const nextRange = Math.floor(next.season_id / 100);
+            if (currRange === nextRange) {
+                for (let id = curr.season_id + 1; id < next.season_id; id++) {
+                    allIds.push(id);
+                }
+            }
         }
     }
 

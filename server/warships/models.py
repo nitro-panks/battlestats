@@ -14,7 +14,8 @@ def realm_cache_key(realm: str, key: str) -> str:
 class Player(models.Model):
     name = models.CharField(max_length=200)
     player_id = models.IntegerField(null=False, blank=False, db_index=True)
-    realm = models.CharField(max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     is_hidden = models.BooleanField(default=False)
     total_battles = models.IntegerField(default=0)
     pvp_battles = models.IntegerField(default=0)
@@ -68,7 +69,8 @@ class Player(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['player_id', 'realm'], name='unique_player_per_realm'),
+            models.UniqueConstraint(
+                fields=['player_id', 'realm'], name='unique_player_per_realm'),
         ]
         indexes = [
             models.Index(fields=['last_lookup'],
@@ -100,7 +102,8 @@ class Ship(models.Model):
 
 class Clan(models.Model):
     clan_id = models.IntegerField(db_index=True)
-    realm = models.CharField(max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     description = models.TextField(null=True, blank=True)
     leader_id = models.IntegerField(null=True, blank=True)
     leader_name = models.CharField(max_length=200, null=True, blank=True)
@@ -119,7 +122,8 @@ class Clan(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=['clan_id', 'realm'], name='unique_clan_per_realm'),
+            models.UniqueConstraint(
+                fields=['clan_id', 'realm'], name='unique_clan_per_realm'),
         ]
         indexes = [
             models.Index(fields=['last_lookup'], name='clan_last_lookup_idx'),
@@ -201,6 +205,29 @@ class PlayerExplorerSummary(models.Model):
         return f"Explorer summary for {self.player_id}"
 
 
+class LandingPlayerBestSnapshot(models.Model):
+    realm = models.CharField(
+        max_length=4,
+        choices=REALM_CHOICES,
+        default=DEFAULT_REALM,
+        db_index=True,
+    )
+    sort = models.CharField(max_length=16, db_index=True)
+    payload_json = models.JSONField(default=list, blank=True)
+    generated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['realm', 'sort'],
+                name='unique_landing_player_best_snapshot_per_realm_sort',
+            ),
+        ]
+
+    def __str__(self):
+        return f"Landing best snapshot {self.realm}:{self.sort}"
+
+
 class EntityVisitEvent(models.Model):
     ENTITY_TYPE_PLAYER = 'player'
     ENTITY_TYPE_CLAN = 'clan'
@@ -221,7 +248,8 @@ class EntityVisitEvent(models.Model):
     event_date = models.DateField(db_index=True)
     entity_type = models.CharField(max_length=16, choices=ENTITY_TYPE_CHOICES)
     entity_id = models.IntegerField()
-    realm = models.CharField(max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     entity_name_snapshot = models.CharField(max_length=200)
     entity_slug_snapshot = models.CharField(
         max_length=255, blank=True, default='')
@@ -254,7 +282,8 @@ class EntityVisitDaily(models.Model):
     entity_type = models.CharField(
         max_length=16, choices=EntityVisitEvent.ENTITY_TYPE_CHOICES)
     entity_id = models.IntegerField()
-    realm = models.CharField(max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     entity_name_snapshot = models.CharField(max_length=200)
     views_raw = models.IntegerField(default=0)
     views_deduped = models.IntegerField(default=0)

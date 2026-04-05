@@ -15,6 +15,9 @@ APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"
 APP_USER="${APP_USER:-battlestats}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME:-0}"
+AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS:-1}"
+MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS:-}"
+MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS:-}"
 RELEASE_ID="$(date +%Y%m%d%H%M%S)"
 REMOTE_RELEASE="${APP_ROOT}/releases/${RELEASE_ID}"
 REMOTE_TMP_ENV="/tmp/battlestats-server.env.${RELEASE_ID}"
@@ -29,6 +32,15 @@ case "${DEPLOY_AGENTIC_RUNTIME,,}" in
     ;;
   *)
     DEPLOY_AGENTIC_RUNTIME=0
+    ;;
+esac
+
+case "${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS,,}" in
+  1|true|yes|on)
+    AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS=1
+    ;;
+  *)
+    AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS=0
     ;;
 esac
 
@@ -57,6 +69,10 @@ if [[ "${DEPLOY_AGENTIC_RUNTIME}" == "1" ]]; then
   install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/agents"
 fi
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/logs"
+touch "${APP_ROOT}/shared/logs/django.log"
+chown "${APP_USER}:${APP_USER}" "${APP_ROOT}/shared/logs/django.log"
+rm -rf "${REMOTE_RELEASE}/server/logs"
+ln -sfn "${APP_ROOT}/shared/logs" "${REMOTE_RELEASE}/server/logs"
 REMOTE
 
 scp "${SERVER_DIR}/.env.cloud" "${DEPLOY_USER}@${HOST}:${REMOTE_TMP_ENV}"
@@ -90,6 +106,9 @@ ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \
   APP_USER="${APP_USER}" \
   DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME}" \
+  AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS}" \
+  MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS}" \
+  MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS}" \
   REMOTE_RELEASE="${REMOTE_RELEASE}" \
   REMOTE_TMP_ENV="${REMOTE_TMP_ENV}" \
   REMOTE_TMP_SECRETS="${REMOTE_TMP_SECRETS}" \
@@ -265,6 +284,56 @@ print("RabbitMQ broker authentication OK")
 PY
 }
 
+activate_release() {
+  local release_name=""
+  local tmp_link=""
+  local active_release=""
+
+  release_name="$(basename "${REMOTE_RELEASE}")"
+  tmp_link="${APP_ROOT}/.current-${release_name}"
+
+  ln -sfn "${REMOTE_RELEASE}" "${tmp_link}"
+  mv -Tf "${tmp_link}" "${APP_ROOT}/current"
+
+  active_release="$(readlink -f "${APP_ROOT}/current")"
+  if [[ "${active_release}" != "${REMOTE_RELEASE}" ]]; then
+    echo "Failed to activate release: expected ${REMOTE_RELEASE}, got ${active_release}" >&2
+    exit 1
+  fi
+}
+
+materialize_best_player_snapshots() {
+  local args=()
+  local realm=""
+  local sort=""
+
+  if [[ "${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS}" != "1" ]]; then
+    echo "Skipping landing Best-player snapshot materialization (disabled)"
+    return 0
+  fi
+
+  if [[ -n "${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS}" ]]; then
+    while IFS= read -r realm; do
+      [[ -n "${realm}" ]] || continue
+      args+=("--realm" "${realm}")
+    done < <(printf '%s' "${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS}" | tr ',' '\n' | awk 'NF')
+  fi
+
+  if [[ -n "${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS}" ]]; then
+    while IFS= read -r sort; do
+      [[ -n "${sort}" ]] || continue
+      args+=("--sort" "${sort}")
+    done < <(printf '%s' "${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS}" | tr ',' '\n' | awk 'NF')
+  fi
+
+  cd "${APP_ROOT}/current/server"
+  set -a
+  source /etc/battlestats-server.env
+  source /etc/battlestats-server.secrets.env
+  set +a
+  "${APP_ROOT}/venv/bin/python" manage.py materialize_landing_player_best_snapshots "${args[@]}"
+}
+
 migrate_env_value WARM_CACHES_ON_STARTUP WARM_LANDING_PAGE_ON_STARTUP 0
 migrate_env_value CACHE_WARMUP_START_DELAY_SECONDS LANDING_WARMUP_START_DELAY_SECONDS 5
 configure_local_rabbitmq
@@ -306,7 +375,9 @@ cd "${REMOTE_RELEASE}/server"
 "${APP_ROOT}/venv/bin/python" manage.py check
 
 chown -R "${APP_USER}:${APP_USER}" "${REMOTE_RELEASE}"
-ln -sfn "${REMOTE_RELEASE}" "${APP_ROOT}/current"
+touch "${APP_ROOT}/shared/logs/django.log"
+chown "${APP_USER}:${APP_USER}" "${APP_ROOT}/shared/logs/django.log"
+activate_release
 
 cat > /etc/systemd/system/battlestats-celery.service <<EOF
 [Unit]
@@ -379,6 +450,7 @@ redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-c
 redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
 systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
 verify_broker_connection
+materialize_best_player_snapshots
 systemctl --no-pager --full status battlestats-gunicorn | sed -n '1,25p'
 
 find "${APP_ROOT}/releases" -mindepth 1 -maxdepth 1 -type d | sort | head -n -"${KEEP_RELEASES}" | xargs -r rm -rf

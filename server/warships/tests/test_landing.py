@@ -6,8 +6,8 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, _summarize_best_clan_cb_window, summarize_clan_battle_activity_badge, warm_landing_best_entity_caches
-from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
-from warships.models import Clan, Player, PlayerExplorerSummary, realm_cache_key
+from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
+from warships.models import Clan, LandingPlayerBestSnapshot, Player, PlayerExplorerSummary, realm_cache_key
 
 
 class LandingHelperTests(TestCase):
@@ -168,6 +168,162 @@ class LandingHelperTests(TestCase):
 
         self.assertIsNotNone(cache.get(dirty_key))
         mock_delay.assert_called_once_with(include_recent=True, realm='na')
+
+    def test_best_player_payload_uses_materialized_snapshot_without_recomputing(self):
+        LandingPlayerBestSnapshot.objects.create(
+            realm='na',
+            sort='ranked',
+            payload_json=[
+                {'name': 'SnapshotLeader', 'player_id': 4001, 'pvp_ratio': 62.1},
+                {'name': 'SnapshotRunnerUp', 'player_id': 4002, 'pvp_ratio': 61.4},
+            ],
+        )
+
+        with patch('warships.landing.materialize_landing_player_best_snapshot') as mock_materialize:
+            payload, _metadata = get_landing_players_payload_with_cache_metadata(
+                mode='best',
+                sort='ranked',
+                limit=1,
+                force_refresh=True,
+            )
+
+        self.assertEqual(payload, [
+            {'name': 'SnapshotLeader', 'player_id': 4001, 'pvp_ratio': 62.1},
+        ])
+        mock_materialize.assert_not_called()
+
+    def test_materialize_landing_player_best_snapshot_persists_ranked_order(self):
+        now = timezone.now()
+        last_battle_date = now.date()
+
+        gold_leader = Player.objects.create(
+            name='GoldLeader',
+            player_id=5101,
+            realm='na',
+            is_hidden=False,
+            total_battles=6200,
+            pvp_battles=5400,
+            pvp_ratio=58.0,
+            days_since_last_battle=4,
+            last_battle_date=last_battle_date,
+            ranked_updated_at=now,
+            ranked_json=[
+                {
+                    'highest_league_name': 'Gold',
+                    'total_battles': 40,
+                    'total_wins': 24,
+                    'win_rate': 60.0,
+                },
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=gold_leader,
+            player_score=8.2,
+            ranked_seasons_participated=1,
+            latest_ranked_battles=40,
+            highest_ranked_league_recent='Gold',
+        )
+
+        silver_volume = Player.objects.create(
+            name='SilverVolume',
+            player_id=5102,
+            realm='na',
+            is_hidden=False,
+            total_battles=7000,
+            pvp_battles=5600,
+            pvp_ratio=63.0,
+            days_since_last_battle=4,
+            last_battle_date=last_battle_date,
+            ranked_updated_at=now,
+            ranked_json=[
+                {
+                    'highest_league_name': 'Silver',
+                    'total_battles': 80,
+                    'total_wins': 56,
+                    'win_rate': 70.0,
+                },
+                {
+                    'highest_league_name': 'Silver',
+                    'total_battles': 60,
+                    'total_wins': 42,
+                    'win_rate': 70.0,
+                },
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=silver_volume,
+            player_score=8.9,
+            ranked_seasons_participated=2,
+            latest_ranked_battles=80,
+            highest_ranked_league_recent='Silver',
+        )
+
+        result = materialize_landing_player_best_snapshot('ranked')
+
+        snapshot = LandingPlayerBestSnapshot.objects.get(
+            realm='na', sort='ranked')
+        self.assertEqual(result['count'], 2)
+        self.assertEqual(
+            [row['name'] for row in snapshot.payload_json[:2]],
+            ['GoldLeader', 'SilverVolume'],
+        )
+
+    def test_materialize_landing_player_best_snapshot_persists_cb_order(self):
+        last_battle_date = timezone.now().date()
+
+        durable_player = Player.objects.create(
+            name='SnapshotCbDurable',
+            player_id=5201,
+            realm='na',
+            is_hidden=False,
+            total_battles=9000,
+            pvp_battles=7500,
+            pvp_ratio=58.0,
+            days_since_last_battle=3,
+            last_battle_date=last_battle_date,
+            battles_json=[
+                {'ship_tier': 8, 'pvp_battles': 7500, 'wins': 4350},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=durable_player,
+            player_score=5.1,
+            clan_battle_total_battles=2400,
+            clan_battle_seasons_participated=8,
+            clan_battle_overall_win_rate=60.0,
+        )
+
+        streaky_player = Player.objects.create(
+            name='SnapshotCbStreaky',
+            player_id=5202,
+            realm='na',
+            is_hidden=False,
+            total_battles=9200,
+            pvp_battles=7600,
+            pvp_ratio=58.0,
+            days_since_last_battle=3,
+            last_battle_date=last_battle_date,
+            battles_json=[
+                {'ship_tier': 8, 'pvp_battles': 7600, 'wins': 4408},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=streaky_player,
+            player_score=8.6,
+            clan_battle_total_battles=240,
+            clan_battle_seasons_participated=8,
+            clan_battle_overall_win_rate=60.0,
+        )
+
+        result = materialize_landing_player_best_snapshot('cb')
+
+        snapshot = LandingPlayerBestSnapshot.objects.get(
+            realm='na', sort='cb')
+        self.assertEqual(result['count'], 2)
+        self.assertEqual(
+            [row['name'] for row in snapshot.payload_json[:2]],
+            ['SnapshotCbDurable', 'SnapshotCbStreaky'],
+        )
 
     def test_landing_clans_use_twelve_hour_cache_ttl(self):
         _, metadata = get_landing_clans_payload_with_cache_metadata()
@@ -1009,12 +1165,16 @@ class LandingHelperTests(TestCase):
 
     def test_get_landing_players_payload_rebuilds_when_dirty_instead_of_serving_published(self):
         cache_key = landing_player_cache_key('best', 5, sort='ranked')
-        metadata_key = landing_player_cache_metadata_key('best', 5, sort='ranked')
-        published_key = landing_player_published_cache_key('best', 5, sort='ranked')
-        published_metadata_key = landing_player_published_metadata_key('best', 5, sort='ranked')
+        metadata_key = landing_player_cache_metadata_key(
+            'best', 5, sort='ranked')
+        published_key = landing_player_published_cache_key(
+            'best', 5, sort='ranked')
+        published_metadata_key = landing_player_published_metadata_key(
+            'best', 5, sort='ranked')
         dirty_key = realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)
 
-        cache.set(cache_key, [{'name': 'old-current'}], LANDING_PLAYER_CACHE_TTL)
+        cache.set(cache_key, [{'name': 'old-current'}],
+                  LANDING_PLAYER_CACHE_TTL)
         cache.set(metadata_key, {
             'cached_at': '2026-01-01T00:00:00',
             'expires_at': '2026-01-01T06:00:00',

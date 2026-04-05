@@ -1,3 +1,4 @@
+import json
 import logging
 import random
 import time
@@ -8,10 +9,11 @@ from django.core.cache import cache
 from django.db import connection
 from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
 from django.db.models.functions import Cast, Coalesce
+from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 
 from warships.data import _calculate_tier_filtered_pvp_record, get_clan_battle_activity_badge, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
-from warships.models import Clan, DEFAULT_REALM, Player, realm_cache_key
+from warships.models import Clan, DEFAULT_REALM, LandingPlayerBestSnapshot, Player, realm_cache_key
 from warships.visit_analytics import get_top_entities
 
 
@@ -88,6 +90,7 @@ LANDING_CLAN_MODES = ('random', 'best')
 LANDING_CLAN_BEST_SORTS = ('overall', 'wr', 'cb')
 LANDING_PLAYER_LIMIT = 25
 LANDING_PLAYER_BEST_SORTS = ('overall', 'ranked', 'efficiency', 'wr', 'cb')
+LANDING_PLAYER_BEST_SNAPSHOT_LIMIT = LANDING_PLAYER_LIMIT
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 LANDING_PLAYER_BEST_MIN_HIGH_TIER_PVP_BATTLES = 500
@@ -112,6 +115,8 @@ LANDING_PLAYER_RANKED_SORT_WR_FULL_CONFIDENCE_BATTLES = 28
 LANDING_PLAYER_RANKED_SORT_FRESHNESS_GRACE_DAYS = 14
 LANDING_PLAYER_RANKED_SORT_FRESHNESS_STALE_DAYS = 90
 LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR = 0.82
+LANDING_PLAYER_CB_SORT_WILSON_Z = 1.2815515655446004
+LANDING_PLAYER_CB_SORT_SEASON_DEPTH_WEIGHT = 0.08
 LANDING_PLAYER_CB_SORT_MAX_BATTLES = 400
 LANDING_PLAYER_CB_SORT_MAX_SEASONS = 10
 LANDING_RANDOM_PLAYER_QUEUE_KEY = 'landing:queue:players:random:v1'
@@ -223,7 +228,8 @@ def _summarize_ranked_medal_history(ranked_rows) -> dict[str, int | float | None
         total_battles += battles
         total_wins += min(wins, battles) if battles > 0 else 0
 
-    ranked_win_rate = round((total_wins / total_battles) * 100.0, 2) if total_battles > 0 else None
+    ranked_win_rate = round((total_wins / total_battles)
+                            * 100.0, 2) if total_battles > 0 else None
     return {
         'gold_medal_count': gold_count,
         'silver_medal_count': silver_count,
@@ -331,17 +337,32 @@ def _calculate_landing_ranked_sort_score(row: dict) -> float:
         (10 * max(int(row.get('bronze_medal_count') or 0), 0))
     )
     ranked_wr = float(row.get('ranked_overall_win_rate') or 0.0)
-    freshness_multiplier = _ranked_freshness_multiplier(row.get('ranked_updated_at'))
+    freshness_multiplier = _ranked_freshness_multiplier(
+        row.get('ranked_updated_at'))
     return round((medal_weighted_score + ranked_wr) * freshness_multiplier, 6)
 
 
+def _calculate_wilson_lower_bound(success_rate: float | None, sample_size: int | None, z_score: float = LANDING_PLAYER_CB_SORT_WILSON_Z) -> float:
+    battles = max(int(sample_size or 0), 0)
+    if battles <= 0 or success_rate is None:
+        return 0.0
+
+    proportion = _clamp(float(success_rate) / 100.0, 0.0, 1.0)
+    z_squared = z_score * z_score
+    denominator = 1.0 + (z_squared / battles)
+    center = proportion + (z_squared / (2.0 * battles))
+    margin = z_score * math.sqrt(
+        ((proportion * (1.0 - proportion)) + (z_squared / (4.0 * battles))) / battles
+    )
+    lower_bound = (center - margin) / denominator
+    return round(_clamp(lower_bound, 0.0, 1.0), 6)
+
+
 def _calculate_landing_cb_sort_score(row: dict) -> float:
-    win_rate_score = _normalize_best_wr_score(row.get('clan_battle_win_rate'))
-    volume_score = _clamp(
-        max(int(row.get('clan_battle_total_battles') or 0), 0) /
-        LANDING_PLAYER_CB_SORT_MAX_BATTLES,
-        0.0,
-        1.0,
+    battles = max(int(row.get('clan_battle_total_battles') or 0), 0)
+    credible_wr_score = _calculate_wilson_lower_bound(
+        row.get('clan_battle_win_rate'),
+        battles,
     )
     season_depth_score = _clamp(
         max(int(row.get('clan_battle_seasons_participated') or 0), 0) /
@@ -350,9 +371,8 @@ def _calculate_landing_cb_sort_score(row: dict) -> float:
         1.0,
     )
     return round(
-        (0.55 * win_rate_score) +
-        (0.25 * volume_score) +
-        (0.20 * season_depth_score),
+        ((1.0 - LANDING_PLAYER_CB_SORT_SEASON_DEPTH_WEIGHT) * credible_wr_score) +
+        (LANDING_PLAYER_CB_SORT_SEASON_DEPTH_WEIGHT * season_depth_score),
         6,
     )
 
@@ -1392,7 +1412,8 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             and latest_ranked_row.get('win_rate') is not None
             else None
         )
-        row['ranked_updated_at'] = getattr(player_obj, 'ranked_updated_at', None)
+        row['ranked_updated_at'] = getattr(
+            player_obj, 'ranked_updated_at', None)
         # Use stored percentile directly — landing surfaces tolerate minor
         # input-data drift (unlike player detail, which uses the stricter
         # _get_published_efficiency_rank_payload freshness gate).
@@ -1571,6 +1592,97 @@ def _finalize_best_player_payload(rows: list[dict], limit: int) -> list[dict]:
     return rows[:limit]
 
 
+def _clone_landing_player_payload(payload: list[dict] | None, limit: int | None = None) -> list[dict]:
+    if not isinstance(payload, list):
+        return []
+
+    rows: list[dict] = []
+    max_rows = None if limit is None else max(int(limit), 0)
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        rows.append(dict(row))
+        if max_rows is not None and len(rows) >= max_rows:
+            break
+    return rows
+
+
+def _normalize_landing_player_snapshot_payload(payload: list[dict]) -> list[dict]:
+    return json.loads(json.dumps(payload, cls=DjangoJSONEncoder))
+
+
+def _get_landing_player_best_snapshot(sort: str, realm: str = DEFAULT_REALM) -> LandingPlayerBestSnapshot | None:
+    normalized_sort = normalize_landing_player_best_sort(sort)
+    return LandingPlayerBestSnapshot.objects.filter(
+        realm=realm,
+        sort=normalized_sort,
+    ).only('payload_json', 'generated_at').first()
+
+
+def _build_best_landing_player_snapshot_payload(sort: str, realm: str = DEFAULT_REALM) -> list[dict]:
+    normalized_sort = normalize_landing_player_best_sort(sort)
+    if normalized_sort == 'ranked':
+        return _build_best_ranked_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
+    if normalized_sort == 'efficiency':
+        return _build_best_efficiency_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
+    if normalized_sort == 'wr':
+        return _build_best_wr_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
+    if normalized_sort == 'cb':
+        return _build_best_cb_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
+    return _build_best_overall_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
+
+
+def materialize_landing_player_best_snapshot(sort: str, realm: str = DEFAULT_REALM) -> dict[str, object]:
+    normalized_sort = normalize_landing_player_best_sort(sort)
+    payload = _normalize_landing_player_snapshot_payload(
+        _build_best_landing_player_snapshot_payload(
+            normalized_sort,
+            realm=realm,
+        )
+    )
+    snapshot, _created = LandingPlayerBestSnapshot.objects.update_or_create(
+        realm=realm,
+        sort=normalized_sort,
+        defaults={'payload_json': payload},
+    )
+    return {
+        'realm': realm,
+        'sort': normalized_sort,
+        'count': len(payload),
+        'generated_at': snapshot.generated_at.isoformat(),
+    }
+
+
+def materialize_landing_player_best_snapshots(realm: str = DEFAULT_REALM, sorts: tuple[str, ...] | list[str] | None = None) -> dict[str, object]:
+    normalized_sorts = [
+        normalize_landing_player_best_sort(sort)
+        for sort in (sorts or LANDING_PLAYER_BEST_SORTS)
+    ]
+    results = [
+        materialize_landing_player_best_snapshot(sort, realm=realm)
+        for sort in normalized_sorts
+    ]
+    return {
+        'status': 'completed',
+        'realm': realm,
+        'results': results,
+    }
+
+
+def _get_materialized_best_landing_players(limit: int, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
+    normalized_sort = normalize_landing_player_best_sort(sort)
+    snapshot = _get_landing_player_best_snapshot(normalized_sort, realm=realm)
+    if snapshot is None:
+        materialize_landing_player_best_snapshot(normalized_sort, realm=realm)
+        snapshot = _get_landing_player_best_snapshot(
+            normalized_sort, realm=realm)
+
+    if snapshot is None:
+        return []
+
+    return _clone_landing_player_payload(snapshot.payload_json, limit=limit)
+
+
 def _build_best_overall_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
     candidate_rows = _best_landing_player_candidate_rows(
         realm=realm,
@@ -1677,7 +1789,8 @@ def _build_best_ranked_landing_players(limit: int, realm: str = DEFAULT_REALM) -
             'highest_ranked_league': get_highest_ranked_league_name(ranked_history) or getattr(explorer_summary, 'highest_ranked_league_recent', None),
             'is_clan_battle_player': is_clan_battle_enjoyer(
                 getattr(explorer_summary, 'clan_battle_total_battles', None),
-                getattr(explorer_summary, 'clan_battle_seasons_participated', None),
+                getattr(explorer_summary,
+                        'clan_battle_seasons_participated', None),
             ),
             'clan_battle_total_battles': getattr(explorer_summary, 'clan_battle_total_battles', None),
             'clan_battle_seasons_participated': getattr(explorer_summary, 'clan_battle_seasons_participated', None),
@@ -1698,10 +1811,12 @@ def _build_best_ranked_landing_players(limit: int, realm: str = DEFAULT_REALM) -
 
     ranked_rows.sort(key=lambda row: (
         -max(int(row.get('gold_medal_count') or 0), 0),
-        -(float(row.get('ranked_overall_win_rate')) if row.get('ranked_overall_win_rate') is not None else float('-inf')),
+        -(float(row.get('ranked_overall_win_rate'))
+          if row.get('ranked_overall_win_rate') is not None else float('-inf')),
         -max(int(row.get('silver_medal_count') or 0), 0),
         -max(int(row.get('bronze_medal_count') or 0), 0),
-        -(_ranked_freshness_multiplier(row.get('ranked_updated_at')) if row.get('ranked_updated_at') is not None else LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR),
+        -(_ranked_freshness_multiplier(row.get('ranked_updated_at')) if row.get('ranked_updated_at')
+          is not None else LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR),
         -(row.get('latest_ranked_battles')
           if row.get('latest_ranked_battles') is not None else float('-inf')),
         -(row.get('player_score') if row.get('player_score')
@@ -1852,6 +1967,8 @@ def _build_best_cb_landing_players(limit: int, realm: str = DEFAULT_REALM) -> li
           is not None else float('-inf')),
         -(row.get('clan_battle_total_battles')
           if row.get('clan_battle_total_battles') is not None else float('-inf')),
+                -(row.get('clan_battle_seasons_participated')
+                    if row.get('clan_battle_seasons_participated') is not None else float('-inf')),
         row.get('name') or '',
     ))
 
@@ -1862,16 +1979,7 @@ def _build_best_cb_landing_players(limit: int, realm: str = DEFAULT_REALM) -> li
 
 
 def _build_best_landing_players(limit: int, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
-    normalized_sort = normalize_landing_player_best_sort(sort)
-    if normalized_sort == 'ranked':
-        return _build_best_ranked_landing_players(limit, realm=realm)
-    if normalized_sort == 'efficiency':
-        return _build_best_efficiency_landing_players(limit, realm=realm)
-    if normalized_sort == 'wr':
-        return _build_best_wr_landing_players(limit, realm=realm)
-    if normalized_sort == 'cb':
-        return _build_best_cb_landing_players(limit, realm=realm)
-    return _build_best_overall_landing_players(limit, realm=realm)
+    return _get_materialized_best_landing_players(limit, realm=realm, sort=sort)
 
 
 def _build_sigma_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:

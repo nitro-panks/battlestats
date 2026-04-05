@@ -38,6 +38,7 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 LANDING_PAGE_WARM_LOCK_TIMEOUT = 20 * 60
 LANDING_PAGE_WARM_DISPATCH_TIMEOUT = 5 * 60
+LANDING_PLAYER_BEST_SNAPSHOT_REFRESH_LOCK_TIMEOUT = 2 * 60 * 60
 DISTRIBUTION_WARM_LOCK_TIMEOUT = 15 * 60
 CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60
 HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
@@ -86,6 +87,10 @@ def _landing_page_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
 
 def _distribution_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_player_distributions:{realm}:lock"
+
+
+def _landing_player_best_snapshot_refresh_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:materialize_landing_player_best_snapshots:{realm}:lock"
 
 
 def _correlation_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -796,6 +801,44 @@ def warm_player_distributions_task(self, realm=DEFAULT_REALM):
 
 
 @app.task(bind=True, **TASK_OPTS)
+def materialize_landing_player_best_snapshots_task(self, realm=DEFAULT_REALM, sorts=None):
+    from warships.landing import materialize_landing_player_best_snapshots
+
+    logger.info(
+        "Starting materialize_landing_player_best_snapshots_task realm=%s sorts=%s",
+        realm,
+        sorts,
+    )
+
+    lock_key = _landing_player_best_snapshot_refresh_lock_key(realm)
+    if not cache.add(lock_key, self.request.id, timeout=LANDING_PLAYER_BEST_SNAPSHOT_REFRESH_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping materialize_landing_player_best_snapshots_task because another snapshot refresh is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    normalized_sorts = None
+    if isinstance(sorts, str):
+        normalized_sorts = [sort.strip()
+                            for sort in sorts.split(',') if sort.strip()]
+    elif isinstance(sorts, (list, tuple)):
+        normalized_sorts = list(sorts)
+
+    try:
+        result = materialize_landing_player_best_snapshots(
+            realm=realm,
+            sorts=normalized_sorts,
+        )
+        logger.info(
+            "Finished materialize_landing_player_best_snapshots_task: %s",
+            result,
+        )
+        return result
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, **TASK_OPTS)
 def warm_player_correlations_task(self, realm=DEFAULT_REALM):
     from warships.data import warm_player_correlations
 
@@ -984,7 +1027,8 @@ def warm_all_clan_tier_distributions_task(self, realm=DEFAULT_REALM):
 
     try:
         result = warm_all_clan_tier_distributions(realm=realm)
-        logger.info("Finished warm_all_clan_tier_distributions_task: %s", result)
+        logger.info(
+            "Finished warm_all_clan_tier_distributions_task: %s", result)
         return result
     finally:
         cache.delete(lock_key)
@@ -1178,7 +1222,8 @@ def _maybe_redispatch_enrichment():
         for attempt in range(3):
             try:
                 enrich_player_data_task.apply_async(countdown=pause)
-                logger.info("Enrichment re-dispatched (%.0fs countdown)", pause)
+                logger.info(
+                    "Enrichment re-dispatched (%.0fs countdown)", pause)
                 return
             except Exception:
                 wait = 5 * (attempt + 1)
@@ -1187,7 +1232,8 @@ def _maybe_redispatch_enrichment():
                     attempt + 1, wait,
                 )
                 time.sleep(wait)
-        logger.error("Enrichment re-dispatch failed after 3 attempts — Beat kickstart will recover")
+        logger.error(
+            "Enrichment re-dispatch failed after 3 attempts — Beat kickstart will recover")
     except Exception:
         logger.exception("Failed to check for remaining enrichment candidates")
 
@@ -1221,7 +1267,8 @@ def enrich_player_data_task(self):
 
     lock_key = _enrich_player_data_lock_key()
     if not cache.add(lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT):
-        logger.info("Skipping enrich_player_data_task — another enrichment is already running")
+        logger.info(
+            "Skipping enrich_player_data_task — another enrichment is already running")
         return {"status": "skipped", "reason": "already-running"}
 
     try:
@@ -1229,7 +1276,8 @@ def enrich_player_data_task(self):
 
         batch_size = int(os.getenv("ENRICH_BATCH_SIZE", "500"))
         realms_env = os.getenv("ENRICH_REALMS", "").strip()
-        realms = tuple(r.strip() for r in realms_env.split(",") if r.strip()) or None
+        realms = tuple(r.strip()
+                       for r in realms_env.split(",") if r.strip()) or None
         summary = enrich_players(
             batch=batch_size,
             min_pvp_battles=int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500")),

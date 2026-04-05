@@ -99,6 +99,31 @@ def register_periodic_schedules(sender, **kwargs):
 
     PeriodicTask.objects.filter(name="landing-page-warmer").delete()
 
+    landing_best_snapshot_hour = int(
+        os.getenv("LANDING_BEST_PLAYER_SNAPSHOT_HOUR", "1"))
+    for realm in sorted(VALID_REALMS):
+        realm_hour = (landing_best_snapshot_hour +
+                      REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+        landing_best_snapshot_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute="15",
+            hour=str(realm_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"landing-best-player-snapshot-materializer-{realm}",
+            defaults={
+                "task": "warships.tasks.materialize_landing_player_best_snapshots_task",
+                "crontab": landing_best_snapshot_schedule,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Materializes daily landing Best-player sub-sort snapshots ({realm.upper()}).",
+            },
+        )
+
     # -- Player Distribution Warmer (split from landing warmer) --
     dist_warm_minutes = int(os.getenv("DISTRIBUTION_WARM_MINUTES", "360"))
     dist_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
@@ -209,7 +234,8 @@ def register_periodic_schedules(sender, **kwargs):
     # Staggered by realm to avoid concurrent DB pressure.
     clan_tier_dist_warm_hour = int(os.getenv("CLAN_TIER_DIST_WARM_HOUR", "2"))
     for realm in sorted(VALID_REALMS):
-        realm_hour = (clan_tier_dist_warm_hour + REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+        realm_hour = (clan_tier_dist_warm_hour +
+                      REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
         clan_tier_dist_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
             hour=str(realm_hour),
@@ -229,4 +255,3 @@ def register_periodic_schedules(sender, **kwargs):
                 "description": f"Daily recalculation of clan tier distribution cache for all clans ({realm.upper()}).",
             },
         )
-

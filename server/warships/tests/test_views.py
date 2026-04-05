@@ -2491,6 +2491,110 @@ class ApiContractTests(TestCase):
             ["LandingCbLeader", "LandingCbRunner"],
         )
 
+    def test_landing_players_best_cb_sort_prefers_larger_sample_for_same_wr(self):
+        cache.clear()
+        today = timezone.now().date()
+
+        durable_player = Player.objects.create(
+            name="LandingCbDurable",
+            player_id=4397,
+            is_hidden=False,
+            pvp_ratio=58.0,
+            pvp_battles=7000,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 7000, "wins": 4060},
+            ],
+        )
+        streaky_player = Player.objects.create(
+            name="LandingCbStreaky",
+            player_id=4398,
+            is_hidden=False,
+            pvp_ratio=58.0,
+            pvp_battles=7000,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 7000, "wins": 4060},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=durable_player,
+            player_score=5.0,
+            clan_battle_total_battles=2000,
+            clan_battle_seasons_participated=8,
+            clan_battle_overall_win_rate=60.0,
+        )
+        PlayerExplorerSummary.objects.create(
+            player=streaky_player,
+            player_score=8.0,
+            clan_battle_total_battles=200,
+            clan_battle_seasons_participated=8,
+            clan_battle_overall_win_rate=60.0,
+        )
+
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=cb&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:2]],
+            ["LandingCbDurable", "LandingCbStreaky"],
+        )
+
+    def test_landing_players_best_cb_sort_penalizes_tiny_sample_outlier(self):
+        cache.clear()
+        today = timezone.now().date()
+
+        durable_player = Player.objects.create(
+            name="LandingCbHugeSample",
+            player_id=4399,
+            is_hidden=False,
+            pvp_ratio=57.0,
+            pvp_battles=8000,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 8000, "wins": 4560},
+            ],
+        )
+        outlier_player = Player.objects.create(
+            name="LandingCbTinyOutlier",
+            player_id=4400,
+            is_hidden=False,
+            pvp_ratio=62.0,
+            pvp_battles=8000,
+            days_since_last_battle=0,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 8000, "wins": 4960},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=durable_player,
+            player_score=5.5,
+            clan_battle_total_battles=4000,
+            clan_battle_seasons_participated=9,
+            clan_battle_overall_win_rate=59.0,
+        )
+        PlayerExplorerSummary.objects.create(
+            player=outlier_player,
+            player_score=9.0,
+            clan_battle_total_battles=40,
+            clan_battle_seasons_participated=2,
+            clan_battle_overall_win_rate=65.0,
+        )
+
+        response = self.client.get(
+            "/api/landing/players/?mode=best&sort=cb&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:2]],
+            ["LandingCbHugeSample", "LandingCbTinyOutlier"],
+        )
+
     def test_landing_clans_expose_cache_expiry_headers(self):
         cache.clear()
         clan = Clan.objects.create(

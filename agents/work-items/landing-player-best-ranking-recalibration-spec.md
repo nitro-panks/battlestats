@@ -41,6 +41,23 @@ Follow-up implementation note:
 2. player published fallback keys are now namespaced too, which prevents stale non-default `limit` payloads from surviving a deploy or a family invalidation,
 3. focused landing cache regressions in `server/warships/tests/test_landing.py` now cover dirty rebuild behavior for player landing payloads.
 
+## Implementation Update: 2026-04-05
+
+The `Best` player sub-sort surfaces are now being moved off request-time recomputation and onto a DB-backed materialization path.
+
+Current implementation status:
+
+1. a new `LandingPlayerBestSnapshot` model stores the top-25 payload for each `realm + sort`,
+2. landing Best-player requests now read the stored snapshot and slice it for smaller `limit` values,
+3. if a snapshot is missing, the backend materializes it once and persists it before serving the request,
+4. a dedicated management command and daily Celery Beat schedule now refresh those snapshots once per day per realm.
+
+Operational intent:
+
+1. all shipped Best-player sub-sorts (`overall`, `ranked`, `efficiency`, `wr`, `cb`) share the same architecture,
+2. landing cache warmers republish Redis from the stored snapshot instead of recomputing the full leaderboard every warm cycle,
+3. this keeps the public `/api/landing/players/?mode=best&sort=...` contract unchanged while removing the expensive Ranked cold path from the request path.
+
 ## Goal
 
 Replace the landing page `Best` player filter with a more competitive, corpus-aware ranking that heavily discounts tiers 1-4 and ranks players using a blend of high-tier PvP performance, efficiency, achievements-derived signals, experience, and competitive activity.

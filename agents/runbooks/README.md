@@ -70,6 +70,7 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 
 Open these only when the task matches them directly:
 
+- `runbook-best-player-cb-ranking-2026-04-05.md`: implementation handoff for the Best players -> CB sort ranking update
 - `runbook-agentic-next-steps-2026-04-02.md`
 - `runbook-clan-tier-distribution-recovery-2026-04-02.md`
 - `runbook-droplet-memory-tuning-2026-04-02.md`
@@ -80,6 +81,7 @@ Open these only when the task matches them directly:
 - `runbook-eu-profile-chart-population-2026-04-02.md`
 - `runbook-flower-observability-2026-04-02.md`
 - `runbook-best-clan-cb-window-2026-04-04.md`: current Best -> CB 10-completed-season window model and implementation notes
+- `runbook-landing-best-player-subsort-materialization-2026-04-05.md`: current Best-player snapshot materialization and cache behavior
 - `runbook-icon-analysis.md`
 - `runbook-player-achievements-data-lane.md`
 - `runbook-kdr-backfill.md`
@@ -94,6 +96,7 @@ These stay active only while they still shape implementation or operations:
 - `spec-landing-best-by-class.md`
 - `spec-clan-battle-seasons-chart.md`: D3 multi-series chart for clan CB performance vs realm averages
 - `spec-best-clan-subfilters.md`: Best clan sub-filters (Overall, CB, WR) on the landing page
+- `spec-best-player-subfilters.md`: Best player sub-sorts (Overall, Ranked, Efficiency, WR, CB) on the landing page
 - `spec-clan-battles-by-tier.md`
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`
 - `spec-github-build-status-badge.md`

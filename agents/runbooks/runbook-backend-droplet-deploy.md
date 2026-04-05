@@ -46,14 +46,16 @@ That deploy does all of the following:
 - uploads `server/.env.secrets.cloud`
 - uploads `server/ca-certificate.crt`
 - syncs the `server/` directory to a timestamped release
+- wires each release `server/logs` path to `${APP_ROOT}/shared/logs` and ensures `django.log` is writable by the app user before Django management commands run
 - defaults `ENABLE_AGENTIC_RUNTIME=0` on the droplet so the core site boots without LangGraph, CrewAI, or the top-level `agents/` tree
 - updates the remote env files to use the absolute CA cert path, droplet-local Redis/RabbitMQ values, the explicit domain/IP allow-list you passed in, and the agentic runtime flag
 - installs Python dependencies into `/opt/battlestats-server/venv`
 - runs `manage.py migrate`
 - runs `manage.py collectstatic --noinput`
 - runs `manage.py check`
-- flips `/opt/battlestats-server/current` to the new release
+- flips `/opt/battlestats-server/current` to the new release with an atomic symlink move and verifies that the active target matches the new release path
 - restarts gunicorn, celery worker, and celery beat
+- runs `manage.py materialize_landing_player_best_snapshots` automatically after the new release is active unless explicitly disabled
 
 To deploy the optional agentic runtime on purpose, enable it explicitly:
 
@@ -82,6 +84,17 @@ The deploy also enforces droplet memory tuning for the Django and Celery process
 - `/etc/battlestats-server.env` also carries migration guardrails for multi-realm population: `MAX_CONCURRENT_REALM_CRAWLS=1`, `CLAN_CRAWL_RATE_LIMIT_DELAY=0.25`, and `CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY=0.10`.
 - Celery workers are restarted from systemd units that read those env vars and apply `--max-memory-per-child` to recycle unusually large worker children before memory drift accumulates.
 - Before restarting services, the deploy clears realm-scoped clan-crawl Redis keys so an interrupted EU resume crawl does not remain blocked behind stale locks after a rollout.
+
+The deploy now also hardens two previously observed backend rollout failures:
+
+- it does not rely on a plain in-place `ln -sfn` for `current`; it performs an atomic symlink replacement and verifies the active release target,
+- it ensures the shared Django file-log target exists and is writable before management commands and service startup, which prevents release-local `server/logs/django.log` permission drift from blocking gunicorn.
+
+Automatic Best-player snapshot materialization is enabled by default. Optional deploy-time controls:
+
+- `AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS=0` disables the post-deploy snapshot rebuild.
+- `MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS=na,eu` scopes the rebuild to specific realms.
+- `MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS=ranked,wr` scopes the rebuild to specific Best-player sorts.
 
 When you are serving the app from a custom domain, pass the root domain and any aliases as a comma-separated `EXTRA_ALLOWED_HOSTS` value so Django accepts the incoming `Host` header.
 
