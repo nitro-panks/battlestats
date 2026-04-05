@@ -4004,7 +4004,7 @@ def refresh_clan_battle_seasons_cache(clan_id: str, realm: str = DEFAULT_REALM) 
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {
-            executor.submit(_get_player_clan_battle_season_stats, member['player_id']): member
+            executor.submit(_get_player_clan_battle_season_stats, member['player_id'], realm=realm): member
             for member in members
         }
 
