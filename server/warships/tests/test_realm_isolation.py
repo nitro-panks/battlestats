@@ -47,6 +47,9 @@ class RealmAPIClientRoutingTests(TestCase):
     def test_eu_base_url(self):
         self.assertIn('api.worldofwarships.eu', get_base_url('eu'))
 
+    def test_asia_base_url(self):
+        self.assertIn('api.worldofwarships.asia', get_base_url('asia'))
+
     def test_unknown_realm_falls_back_to_na(self):
         self.assertEqual(get_base_url('na'), get_base_url('nonexistent'))
 
@@ -78,6 +81,10 @@ class RealmViewExtractionTests(TestCase):
     def test_na_realm_extracted(self):
         request = self.factory.get('/api/player/123/', {'realm': 'na'})
         self.assertEqual(_get_realm(request), 'na')
+
+    def test_asia_realm_extracted(self):
+        request = self.factory.get('/api/player/123/', {'realm': 'asia'})
+        self.assertEqual(_get_realm(request), 'asia')
 
     def test_invalid_realm_falls_back_to_na(self):
         request = self.factory.get('/api/player/123/', {'realm': 'invalid'})

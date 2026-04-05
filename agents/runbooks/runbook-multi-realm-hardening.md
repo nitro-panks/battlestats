@@ -1,8 +1,8 @@
 # Runbook: Multi-Realm Hardening & Asia Expansion
 
 **Created**: 2026-03-31
-**Updated**: 2026-04-05 — Post-fix: CB realm bug in `refresh_clan_battle_seasons_cache` (missed by Phase 1 audit)
-**Status**: Phases 1-6 complete; Phase 7 (Asia) and Phase 8 (i18n) deferred
+**Updated**: 2026-04-05 — Phase 7 (Asia) implemented; see `runbook-asia-realm-data-load-2026-04-05.md` for the operative plan
+**Status**: Phases 1-7 complete; Phase 8 (i18n) deferred
 **Depends on**: `spec-multi-realm-eu-support.md` (Phases 1-6 complete)
 **Goal**: Fix realm propagation gaps discovered post-EU launch, add comprehensive test coverage, and prepare infrastructure for Asia — but **do not add Asia data or activate Asia crawls yet**.
 
@@ -644,7 +644,7 @@ The i18n work breaks into 4 sub-phases that can ship incrementally:
 | 4 | EntityVisit realm field | Analytics can't distinguish cross-realm visits | Separate commit | **Done** |
 | 5 | Test suite | No automated detection of future regressions | Separate commit | **Done** |
 | 6 | Operational hardening | OOM, monitoring, crawl stagger | Separate commit | **Done** |
-| 7 | Asia realm addition | Final expansion step | Separate runbook | **No — deferred** |
+| 7 | Asia realm addition | Final expansion step | `runbook-asia-realm-data-load-2026-04-05.md` | **Done** — code committed, data load in progress |
 | 8 | Internationalization (i18n) | Asia audience can't read English UI | Ship 8j-1/2 before Phase 7; 8j-3/4 with Phase 7 | **No — deferred** |
 
 **Critical path**: Phases 1-3 must ship together as one commit — they're all facets of the same bug (realm not propagated). Phase 6b (stagger) prepares the schedule infrastructure so that when Asia is eventually added, it slots in without OOM risk.

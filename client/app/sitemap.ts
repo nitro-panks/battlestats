@@ -24,7 +24,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ];
 
   try {
-    const realms = ['na', 'eu'];
+    const realms = ['na', 'eu', 'asia'];
     for (const realm of realms) {
       const res = await fetch(`${API_ORIGIN}/api/sitemap-entities/?realm=${realm}`, {
         next: { revalidate: 3600 },

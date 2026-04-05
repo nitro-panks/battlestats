@@ -86,6 +86,7 @@ Open these only when the task matches them directly:
 - `runbook-mobile-player-detail-charts.md`
 - `runbook-mobile-routing-bugs.md`
 - `runbook-multi-realm-hardening.md`
+- `runbook-asia-realm-data-load-2026-04-05.md`: Asia realm data load — clan crawl + enrichment backfill operative plan
 
 ## Active Specs And Open Design Docs
 

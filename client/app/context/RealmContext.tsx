@@ -2,9 +2,9 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-export type Realm = 'na' | 'eu';
+export type Realm = 'na' | 'eu' | 'asia';
 
-const VALID_REALMS: Realm[] = ['na', 'eu'];
+const VALID_REALMS: Realm[] = ['na', 'eu', 'asia'];
 
 interface RealmContextValue {
     realm: Realm;

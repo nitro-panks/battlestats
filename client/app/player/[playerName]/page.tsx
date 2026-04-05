@@ -17,7 +17,7 @@ interface PlayerPageProps {
 export async function generateMetadata({ params, searchParams }: PlayerPageProps): Promise<Metadata> {
     const { playerName } = await params;
     const { realm } = await searchParams;
-    const realmParam = realm && ['na', 'eu'].includes(realm) ? realm : 'na';
+    const realmParam = realm && ['na', 'eu', 'asia'].includes(realm) ? realm : 'na';
     const decoded = decodeURIComponent(playerName);
     const url = getSiteUrl(`/player/${playerName}?realm=${realmParam}`);
 

@@ -2,7 +2,7 @@ from django.db import models
 from django.db.models.functions import Lower
 
 
-REALM_CHOICES = [('na', 'NA'), ('eu', 'EU')]
+REALM_CHOICES = [('na', 'NA'), ('eu', 'EU'), ('asia', 'ASIA')]
 VALID_REALMS = {code for code, _label in REALM_CHOICES}
 DEFAULT_REALM = 'na'
 

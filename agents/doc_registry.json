@@ -243,6 +243,30 @@
                 "deploy-follow-up-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-asia-realm-data-load-2026-04-05.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "asia data load",
+                "asia realm",
+                "asia crawl",
+                "asia backfill"
+            ],
+            "tags": [
+                "asia",
+                "realm",
+                "clan-crawl",
+                "enrichment",
+                "backfill",
+                "data-load"
+            ],
+            "archive_on": [
+                "asia-realm-fully-operational-and-steady-state"
+            ]
+        },
         "agents/runbooks/runbook-db-target-switching.md": {
             "kind": "runbook",
             "status": "active",

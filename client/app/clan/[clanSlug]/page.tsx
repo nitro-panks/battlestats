@@ -17,7 +17,7 @@ interface ClanPageProps {
 export async function generateMetadata({ params, searchParams }: ClanPageProps): Promise<Metadata> {
     const { clanSlug } = await params;
     const { realm } = await searchParams;
-    const realmParam = realm && ['na', 'eu'].includes(realm) ? realm : 'na';
+    const realmParam = realm && ['na', 'eu', 'asia'].includes(realm) ? realm : 'na';
     const decoded = decodeURIComponent(clanSlug);
     const label = decoded.replace(/^\d+-/, '') || decoded;
     const url = getSiteUrl(`/clan/${clanSlug}?realm=${realmParam}`);

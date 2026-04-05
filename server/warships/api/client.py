@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 REALM_BASE_URLS = {
     'na': 'https://api.worldofwarships.com/wows/',
     'eu': 'https://api.worldofwarships.eu/wows/',
+    'asia': 'https://api.worldofwarships.asia/wows/',
 }
 DEFAULT_REALM = 'na'
 

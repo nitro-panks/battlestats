@@ -45,7 +45,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('bs-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;var r=localStorage.getItem('bs-realm');if(r&&['na','eu'].indexOf(r)>=0)document.documentElement.dataset.realm=r;else document.documentElement.dataset.realm='na';})();` }} />
+        <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('bs-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.dataset.theme=t;var r=localStorage.getItem('bs-realm');if(r&&['na','eu','asia'].indexOf(r)>=0)document.documentElement.dataset.realm=r;else document.documentElement.dataset.realm='na';})();` }} />
         <script defer src="/umami/script.js" data-website-id="27c0ee6a-f534-42d4-b49f-27bbadad9848" />
       </head>
       {gaMeasurementId ? (

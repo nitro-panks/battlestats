@@ -14,6 +14,7 @@ interface RealmOption {
 const REALM_OPTIONS: RealmOption[] = [
     { value: 'na', label: 'NA' },
     { value: 'eu', label: 'EU' },
+    { value: 'asia', label: 'ASIA' },
 ];
 
 const INACTIVE_OPTION_COLOR = 'var(--text-secondary)';
