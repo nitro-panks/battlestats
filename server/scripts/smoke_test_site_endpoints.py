@@ -42,6 +42,8 @@ def fetch_json(base_url: str, path: str, timeout: float) -> tuple[int, dict[str,
             except json.JSONDecodeError:
                 payload = body
         return exc.code, dict(exc.headers.items()), payload
+    except (error.URLError, TimeoutError, OSError) as exc:
+        return 0, {}, {"request_error": str(exc)}
 
 
 def validate_case(case: SmokeCase, payload: Any) -> list[str]:
@@ -120,7 +122,13 @@ def run_case(case: SmokeCase, base_url: str, timeout: float) -> tuple[bool, str]
         return False, f"{case.name}: {'; '.join(errors)}"
 
     if last_status != case.expected_status:
-        return False, f"{case.name}: expected status {case.expected_status}, got {last_status}"
+        request_error = None
+        if isinstance(last_payload, dict):
+            request_error = last_payload.get("request_error")
+        detail = f"expected status {case.expected_status}, got {last_status}"
+        if request_error:
+            detail = f"{detail} ({request_error})"
+        return False, f"{case.name}: {detail}"
 
     # If we retried due to pending and data never arrived, warn but pass
     if pending_seen and case.retry_on_pending:
