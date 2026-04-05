@@ -38,7 +38,7 @@ Validation completed for this update:
 Follow-up implementation note:
 
 1. landing player cache invalidation now bumps the player cache namespace and treats the player dirty key as authoritative during payload reads,
-2. this prevents stale published best-player payloads for non-default `limit` values from surviving a deploy or data refresh,
+2. player published fallback keys are now namespaced too, which prevents stale non-default `limit` payloads from surviving a deploy or a family invalidation,
 3. focused landing cache regressions in `server/warships/tests/test_landing.py` now cover dirty rebuild behavior for player landing payloads.
 
 ## Goal

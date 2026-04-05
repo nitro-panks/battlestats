@@ -139,11 +139,16 @@ class LandingHelperTests(TestCase):
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_bumps_namespace(self, mock_delay):
         original_key = landing_player_cache_key('best', 5, sort='ranked')
+        original_published_key = landing_player_published_cache_key(
+            'best', 5, sort='ranked')
 
         invalidate_landing_player_caches()
 
         rebuilt_key = landing_player_cache_key('best', 5, sort='ranked')
+        rebuilt_published_key = landing_player_published_cache_key(
+            'best', 5, sort='ranked')
         self.assertNotEqual(original_key, rebuilt_key)
+        self.assertNotEqual(original_published_key, rebuilt_published_key)
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
         mock_delay.assert_called_once_with(include_recent=True, realm='na')

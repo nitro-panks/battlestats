@@ -428,19 +428,21 @@ def landing_player_cache_metadata_key(mode: str, limit: int, realm: str = DEFAUL
 
 
 def landing_player_published_cache_key(mode: str, limit: int, realm: str = DEFAULT_REALM, sort: str | None = None) -> str:
+    namespace = _get_landing_players_cache_namespace(realm=realm)
     canonical_mode, canonical_sort = _canonical_landing_player_mode_and_sort(
         mode, sort)
     if canonical_mode == 'best' and canonical_sort is not None:
-        return realm_cache_key(realm, f'landing:players:v13:published:best:{canonical_sort}:{limit}')
-    return realm_cache_key(realm, f'landing:players:v13:published:{canonical_mode}:{limit}')
+        return realm_cache_key(realm, f'landing:players:v13:n{namespace}:published:best:{canonical_sort}:{limit}')
+    return realm_cache_key(realm, f'landing:players:v13:n{namespace}:published:{canonical_mode}:{limit}')
 
 
 def landing_player_published_metadata_key(mode: str, limit: int, realm: str = DEFAULT_REALM, sort: str | None = None) -> str:
+    namespace = _get_landing_players_cache_namespace(realm=realm)
     canonical_mode, canonical_sort = _canonical_landing_player_mode_and_sort(
         mode, sort)
     if canonical_mode == 'best' and canonical_sort is not None:
-        return realm_cache_key(realm, f'landing:players:v13:published:best:{canonical_sort}:{limit}:meta')
-    return realm_cache_key(realm, f'landing:players:v13:published:{canonical_mode}:{limit}:meta')
+        return realm_cache_key(realm, f'landing:players:v13:n{namespace}:published:best:{canonical_sort}:{limit}:meta')
+    return realm_cache_key(realm, f'landing:players:v13:n{namespace}:published:{canonical_mode}:{limit}:meta')
 
 
 def landing_player_cache_ttl(mode: str) -> int:
