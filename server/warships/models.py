@@ -13,7 +13,7 @@ def realm_cache_key(realm: str, key: str) -> str:
 
 class Player(models.Model):
     name = models.CharField(max_length=200)
-    player_id = models.IntegerField(null=False, blank=False, db_index=True)
+    player_id = models.BigIntegerField(null=False, blank=False, db_index=True)
     realm = models.CharField(
         max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     is_hidden = models.BooleanField(default=False)
@@ -101,11 +101,11 @@ class Ship(models.Model):
 
 
 class Clan(models.Model):
-    clan_id = models.IntegerField(db_index=True)
+    clan_id = models.BigIntegerField(db_index=True)
     realm = models.CharField(
         max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     description = models.TextField(null=True, blank=True)
-    leader_id = models.IntegerField(null=True, blank=True)
+    leader_id = models.BigIntegerField(null=True, blank=True)
     leader_name = models.CharField(max_length=200, null=True, blank=True)
     members_count = models.IntegerField(default=0)
     name = models.CharField(max_length=200, null=True, blank=True)
@@ -247,7 +247,7 @@ class EntityVisitEvent(models.Model):
     occurred_at = models.DateTimeField()
     event_date = models.DateField(db_index=True)
     entity_type = models.CharField(max_length=16, choices=ENTITY_TYPE_CHOICES)
-    entity_id = models.IntegerField()
+    entity_id = models.BigIntegerField()
     realm = models.CharField(
         max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     entity_name_snapshot = models.CharField(max_length=200)
@@ -281,7 +281,7 @@ class EntityVisitDaily(models.Model):
     date = models.DateField()
     entity_type = models.CharField(
         max_length=16, choices=EntityVisitEvent.ENTITY_TYPE_CHOICES)
-    entity_id = models.IntegerField()
+    entity_id = models.BigIntegerField()
     realm = models.CharField(
         max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     entity_name_snapshot = models.CharField(max_length=200)
