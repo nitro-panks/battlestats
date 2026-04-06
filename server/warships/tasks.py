@@ -337,7 +337,10 @@ def _run_locked_task(task_name: str, resource_id: object, request_id: str, callb
         return {"status": "skipped", "reason": "already-running"}
 
     try:
-        callback()
+        result = callback()
+        if isinstance(result, dict):
+            result.setdefault("status", "completed")
+            return result
         return {"status": "completed"}
     finally:
         cache.delete(lock_key)
@@ -671,17 +674,36 @@ def update_player_efficiency_data_task(self, player_id, realm=DEFAULT_REALM):
 
 @app.task(bind=True, **TASK_OPTS)
 def refresh_efficiency_rank_snapshot_task(self, realm=DEFAULT_REALM):
-    from warships.data import recompute_efficiency_rank_snapshot
+    from warships.data import recompute_efficiency_rank_snapshot, invalidate_player_detail_cache
 
     logger.info("Starting refresh_efficiency_rank_snapshot_task realm=%s", realm)
     try:
-        return _run_locked_task(
+        result = _run_locked_task(
             "refresh_efficiency_rank_snapshot",
             "global",
             self.request.id,
             lambda: recompute_efficiency_rank_snapshot(
                 skip_refresh=True, realm=realm),
         )
+        # Invalidate cached player detail payloads for players whose
+        # efficiency rank was just recomputed, so the next request
+        # serves the updated icon/tier instead of stale cached data.
+        if isinstance(result, dict) and result.get('status') == 'completed':
+            from warships.models import PlayerExplorerSummary
+            updated_at = result.get('snapshot_updated_at')
+            if updated_at:
+                ranked_player_ids = list(
+                    PlayerExplorerSummary.objects
+                    .filter(efficiency_rank_updated_at=updated_at)
+                    .values_list('player__player_id', flat=True)
+                )
+                for pid in ranked_player_ids:
+                    invalidate_player_detail_cache(pid, realm=realm)
+                logger.info(
+                    "Invalidated %d player detail caches after rank snapshot (realm=%s)",
+                    len(ranked_player_ids), realm,
+                )
+        return result
     finally:
         cache.delete(_efficiency_snapshot_refresh_dispatch_key(realm=realm))
 

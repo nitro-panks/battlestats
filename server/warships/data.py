@@ -1219,6 +1219,8 @@ def _recompute_efficiency_rank_snapshot_sql(
         sorted_strengths = [float(row[0]) for row in cursor.fetchall()]
 
     return {
+        'status': 'completed',
+        'snapshot_updated_at': snapshot_updated_at,
         'publish_applied': publish_applied,
         'partial_population': player_limit > 0,
         'population_size': population_size,
