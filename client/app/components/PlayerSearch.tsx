@@ -485,107 +485,8 @@ const PlayerSearch: React.FC = () => {
                 <div>
                     {error && <p className="text-red-600 dark:text-red-400">{error}</p>}
 
-                    {(clans.length > 0 || recentClans.length > 0) && (
-                        <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Clans</h3>
-                                <button
-                                    type="button"
-                                    onClick={() => setClanMode('best')}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={clanMode === 'best'}
-                                >
-                                    Best
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => { setClanMode('random'); setClanBestSort('overall'); }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={clanMode === 'random'}
-                                >
-                                    Random
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => { setClanMode('recent'); setClanBestSort('overall'); }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={clanMode === 'recent'}
-                                >
-                                    Recent
-                                </button>
-                            </div>
-                            <div className="mt-1.5 min-h-7 pl-1" data-testid="clan-best-sort-bar-shell">
-                                <div
-                                    className={`flex items-center gap-1.5 transition-opacity ${showClanBestSortBar ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'}`}
-                                    aria-hidden={!showClanBestSortBar}
-                                    data-testid="clan-best-sort-bar"
-                                >
-                                    {(['overall', 'wr'] as const).map((sort, i) => (
-                                        <React.Fragment key={sort}>
-                                            {i > 0 && <span className="text-xs text-[var(--text-secondary)]">&middot;</span>}
-                                            <button
-                                                type="button"
-                                                onClick={() => setClanBestSort(sort)}
-                                                disabled={!showClanBestSortBar}
-                                                tabIndex={showClanBestSortBar ? 0 : -1}
-                                                className={`text-sm font-medium transition-colors disabled:cursor-default ${clanBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
-                                            >
-                                                {sort === 'overall' ? 'Overall' : 'WR'}
-                                            </button>
-                                            {sort === 'wr' ? (
-                                                <div className="group relative inline-flex items-center">
-                                                    <button
-                                                        type="button"
-                                                        className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-[var(--accent-light)] transition-colors hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
-                                                        aria-label="Clan ranking formula details"
-                                                    >
-                                                        <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
-                                                    </button>
-                                                    <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
-                                                        <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Clan ranking approximations</p>
-                                                        <p className="mt-2 leading-5 text-[var(--text-secondary)]">
-                                                            Hard filters require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. Backend ranking owns both Best sub-sorts.
-                                                        </p>
-                                                        <div className="mt-3 space-y-3">
-                                                            <div>
-                                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Overall</p>
-                                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_OVERALL_FORMULA_APPROXIMATION}</p>
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">WR</p>
-                                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_WR_FORMULA_APPROXIMATION}</p>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ) : null}
-                                        </React.Fragment>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="mt-3">
-                                {isBestClanFallbackActive ? (
-                                    <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
-                                        {BEST_CLAN_FALLBACK_NOTICE}
-                                    </p>
-                                ) : null}
-                                <LandingClanSVG
-                                    clans={visibleLandingClans}
-                                    heatmapClans={clans}
-                                    onSelectClan={handleSelectClan}
-                                    theme={theme}
-                                />
-                            </div>
-                            <ClanTagGrid
-                                clans={visibleLandingClans}
-                                onSelectClan={handleSelectClan}
-                                ariaLabelPrefix="Show"
-                            />
-                        </div>
-                    )}
-
                     {(players.length > 0 || recentPlayers.length > 0) && (
-                        <div className="mt-6 border-t border-[var(--border)] pt-6">
+                        <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
                             <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Players</h3>
                                 <button
@@ -681,6 +582,105 @@ const PlayerSearch: React.FC = () => {
                             <PlayerNameGrid
                                 players={visibleLandingPlayers}
                                 onSelectMember={handleSelectMember}
+                                ariaLabelPrefix="Show"
+                            />
+                        </div>
+                    )}
+
+                    {(clans.length > 0 || recentClans.length > 0) && (
+                        <div className="mt-6 border-t border-[var(--border)] pt-6">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Clans</h3>
+                                <button
+                                    type="button"
+                                    onClick={() => setClanMode('best')}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
+                                    aria-pressed={clanMode === 'best'}
+                                >
+                                    Best
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setClanMode('random'); setClanBestSort('overall'); }}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
+                                    aria-pressed={clanMode === 'random'}
+                                >
+                                    Random
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setClanMode('recent'); setClanBestSort('overall'); }}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
+                                    aria-pressed={clanMode === 'recent'}
+                                >
+                                    Recent
+                                </button>
+                            </div>
+                            <div className="mt-1.5 min-h-7 pl-1" data-testid="clan-best-sort-bar-shell">
+                                <div
+                                    className={`flex items-center gap-1.5 transition-opacity ${showClanBestSortBar ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'}`}
+                                    aria-hidden={!showClanBestSortBar}
+                                    data-testid="clan-best-sort-bar"
+                                >
+                                    {(['overall', 'wr'] as const).map((sort, i) => (
+                                        <React.Fragment key={sort}>
+                                            {i > 0 && <span className="text-xs text-[var(--text-secondary)]">&middot;</span>}
+                                            <button
+                                                type="button"
+                                                onClick={() => setClanBestSort(sort)}
+                                                disabled={!showClanBestSortBar}
+                                                tabIndex={showClanBestSortBar ? 0 : -1}
+                                                className={`text-sm font-medium transition-colors disabled:cursor-default ${clanBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
+                                            >
+                                                {sort === 'overall' ? 'Overall' : 'WR'}
+                                            </button>
+                                            {sort === 'wr' ? (
+                                                <div className="group relative inline-flex items-center">
+                                                    <button
+                                                        type="button"
+                                                        className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-[var(--accent-light)] transition-colors hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
+                                                        aria-label="Clan ranking formula details"
+                                                    >
+                                                        <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
+                                                    </button>
+                                                    <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
+                                                        <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Clan ranking approximations</p>
+                                                        <p className="mt-2 leading-5 text-[var(--text-secondary)]">
+                                                            Hard filters require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. Backend ranking owns both Best sub-sorts.
+                                                        </p>
+                                                        <div className="mt-3 space-y-3">
+                                                            <div>
+                                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Overall</p>
+                                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_OVERALL_FORMULA_APPROXIMATION}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">WR</p>
+                                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_WR_FORMULA_APPROXIMATION}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className="mt-3">
+                                {isBestClanFallbackActive ? (
+                                    <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+                                        {BEST_CLAN_FALLBACK_NOTICE}
+                                    </p>
+                                ) : null}
+                                <LandingClanSVG
+                                    clans={visibleLandingClans}
+                                    heatmapClans={clans}
+                                    onSelectClan={handleSelectClan}
+                                    theme={theme}
+                                />
+                            </div>
+                            <ClanTagGrid
+                                clans={visibleLandingClans}
+                                onSelectClan={handleSelectClan}
                                 ariaLabelPrefix="Show"
                             />
                         </div>
