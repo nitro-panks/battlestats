@@ -19,6 +19,8 @@ class Player(models.Model):
         max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     is_hidden = models.BooleanField(default=False)
     is_streamer = models.BooleanField(default=False)
+    twitch_handle = models.CharField(max_length=64, blank=True, default='')
+    twitch_url = models.URLField(max_length=500, blank=True, default='')
     total_battles = models.IntegerField(default=0)
     pvp_battles = models.IntegerField(default=0)
     pvp_wins = models.IntegerField(default=0)

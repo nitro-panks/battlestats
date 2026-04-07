@@ -43,6 +43,8 @@ interface PlayerDetailProps {
         recent_games: object;
         is_hidden: boolean;
         is_streamer?: boolean;
+        twitch_handle?: string | null;
+        twitch_url?: string | null;
         stats_updated_at: string;
         last_fetch: string;
         last_lookup: string | null;
@@ -412,7 +414,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 </h1>
                                 {player.is_hidden ? <HiddenAccountIcon className="text-sm text-[var(--accent-light)]" /> : null}
                                 {player.is_clan_leader ? <LeaderCrownIcon size="header" /> : null}
-                                {player.is_streamer ? <TwitchStreamerIcon size="header" /> : null}
                                 {isPveEnjoyer ? <PveEnjoyerIcon size="header" /> : null}
                                 {isSleepyPlayer ? <InactiveIcon size="header" /> : null}
                                 {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}
@@ -436,6 +437,20 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 ) : null}
                             </div>
                         </div>
+                        {player.is_streamer && player.twitch_handle && player.twitch_url ? (
+                            <div className="mt-2 flex justify-end">
+                                <a
+                                    href={player.twitch_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--accent-mid)] hover:text-[var(--accent-dark)] hover:underline"
+                                    aria-label={`Twitch channel for ${player.twitch_handle}`}
+                                >
+                                    <span>{player.twitch_handle}</span>
+                                    <TwitchStreamerIcon size="header" titleText={`Watch ${player.twitch_handle} on Twitch`} ariaLabel="Twitch" />
+                                </a>
+                            </div>
+                        ) : null}
                         <p className="mt-1 text-sm text-[var(--accent-light)]">
                             Last played {player.days_since_last_battle} days ago
                         </p>

@@ -43,14 +43,31 @@ class StreamerSubmissionAdmin(admin.ModelAdmin):
     actions = ('approve_selected', 'reject_selected')
 
     def approve_selected(self, request, queryset):
-        # TODO: follow-up — promote Player.is_streamer = True and persist
-        # twitch_url. See runbook-streamer-submission-feature-2026-04-07.md.
+        from .data import invalidate_player_detail_cache
+        promoted = 0
+        for sub in queryset:
+            qs = Player.objects.filter(name__iexact=sub.ign)
+            if sub.realm:
+                qs = qs.filter(realm=sub.realm)
+            player = qs.first()
+            if player is not None:
+                player.is_streamer = True
+                player.twitch_handle = sub.twitch_handle
+                player.twitch_url = sub.twitch_url
+                player.save(update_fields=[
+                    'is_streamer', 'twitch_handle', 'twitch_url'])
+                invalidate_player_detail_cache(
+                    player.player_id, realm=player.realm)
+                promoted += 1
         updated = queryset.update(
             status=StreamerSubmission.STATUS_APPROVED,
             reviewed_at=timezone.now(),
             reviewed_by=request.user,
         )
-        self.message_user(request, f"{updated} submission(s) approved.")
+        self.message_user(
+            request,
+            f"{updated} submission(s) approved; {promoted} player(s) promoted.",
+        )
     approve_selected.short_description = "Approve selected submissions"
 
     def reject_selected(self, request, queryset):
