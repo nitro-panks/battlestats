@@ -409,6 +409,22 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.queryByLabelText(/pve enjoyer/i)).not.toBeInTheDocument();
     });
 
+    it('renders the Twitch icon for flagged streamer accounts', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    is_streamer: true,
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByLabelText(/known streamer/i)).toBeInTheDocument();
+    });
+
     it('renders the clan battle shield immediately from cached player payload state', () => {
         render(
             <PlayerDetail

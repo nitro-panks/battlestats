@@ -3,6 +3,7 @@ import type { ClanMemberData } from './clanMembersShared';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import LeaderCrownIcon from './LeaderCrownIcon';
+import TwitchStreamerIcon from './TwitchStreamerIcon';
 import PveEnjoyerIcon from './PveEnjoyerIcon';
 import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
@@ -60,6 +61,7 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                                             {member.name}
                                             <HiddenAccountIcon className="text-[11px] text-[var(--accent-light)]" />
                                             {member.is_leader && <LeaderCrownIcon size="inline" />}
+                                            {member.is_streamer && <TwitchStreamerIcon size="inline" />}
                                             {member.is_pve_player && <PveEnjoyerIcon size="inline" />}
                                             {member.is_sleepy_player && <InactiveIcon size="inline" />}
                                             {member.is_ranked_player && <RankedPlayerIcon league={member.highest_ranked_league} size="inline" />}
@@ -82,6 +84,7 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                                         <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
                                         {member.name}
                                         {member.is_leader && <LeaderCrownIcon size="inline" />}
+                                        {member.is_streamer && <TwitchStreamerIcon size="inline" />}
                                         {member.is_pve_player && <PveEnjoyerIcon size="inline" />}
                                         {member.is_sleepy_player && <InactiveIcon size="inline" />}
                                         {member.is_ranked_player && <RankedPlayerIcon league={member.highest_ranked_league} size="inline" />}

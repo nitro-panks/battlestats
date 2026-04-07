@@ -5,6 +5,7 @@ export type ActivityBucketKey = 'active_7d' | 'active_30d' | 'cooling_90d' | 'do
 export interface ClanMemberData {
     name: string;
     is_hidden: boolean;
+    is_streamer?: boolean;
     pvp_ratio: number | null;
     days_since_last_battle: number | null;
     is_leader: boolean;

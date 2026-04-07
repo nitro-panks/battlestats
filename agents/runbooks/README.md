@@ -81,6 +81,7 @@ Open these only when the task matches them directly:
 - `runbook-enrichment-crawler-2026-04-03.md`: progress log for the active enrichment crawl pass (batches, disruptions, check-ins)
 - `runbook-best-clan-cb-window-2026-04-04.md`: current Best -> CB 10-completed-season window model and implementation notes
 - `runbook-landing-best-player-subsort-materialization-2026-04-05.md`: current Best-player snapshot materialization and cache behavior
+- `runbook-streamer-twitch-icon-2026-04-07.md`: static streamer flag and Twitch badge rollout plan
 - `runbook-icon-analysis.md`
 - `runbook-player-achievements-data-lane.md`
 - `runbook-kdr-backfill.md`

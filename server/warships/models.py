@@ -17,6 +17,7 @@ class Player(models.Model):
     realm = models.CharField(
         max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     is_hidden = models.BooleanField(default=False)
+    is_streamer = models.BooleanField(default=False)
     total_battles = models.IntegerField(default=0)
     pvp_battles = models.IntegerField(default=0)
     pvp_wins = models.IntegerField(default=0)

@@ -308,6 +308,42 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_exposes_streamer_flag(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        Player.objects.create(
+            name="StreamerFlaggedPlayer",
+            player_id=9062,
+            last_fetch=now,
+            is_hidden=False,
+            is_streamer=True,
+        )
+        Player.objects.create(
+            name="StreamerUnflaggedPlayer",
+            player_id=9063,
+            last_fetch=now,
+            is_hidden=False,
+            is_streamer=False,
+        )
+
+        flagged_response = self.client.get("/api/player/StreamerFlaggedPlayer/")
+        unflagged_response = self.client.get("/api/player/StreamerUnflaggedPlayer/")
+
+        self.assertEqual(flagged_response.status_code, 200)
+        self.assertEqual(unflagged_response.status_code, 200)
+        self.assertTrue(flagged_response.json()["is_streamer"])
+        self.assertFalse(unflagged_response.json()["is_streamer"])
+        self.assertEqual(mock_update_player_task.call_count, 2)
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
     @patch("warships.data._fetch_clan_battle_season_stats")
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
@@ -1033,6 +1069,7 @@ class ClanMembersEndpointTests(TestCase):
                          {
                              "name": "MemberOne",
                              "is_hidden": False,
+                             "is_streamer": False,
                              "pvp_ratio": None,
                              "days_since_last_battle": 6,
                              "is_leader": True,
@@ -1060,6 +1097,32 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(response["X-Efficiency-Hydration-Deferred"], "0")
         self.assertEqual(response["X-Efficiency-Hydration-Pending"], "0")
         self.assertEqual(response["X-Efficiency-Hydration-Max-In-Flight"], "8")
+        mock_update_clan_data.assert_not_called()
+        mock_update_clan_members.assert_not_called()
+
+    @patch("warships.data.update_clan_members")
+    @patch("warships.data.update_clan_data")
+    def test_clan_members_exposes_streamer_flag(
+        self,
+        mock_update_clan_data,
+        mock_update_clan_members,
+    ):
+        clan = Clan.objects.create(
+            clan_id=43, name="Streamer Clan", members_count=1, leader_id=10, leader_name="StreamerMate")
+        Player.objects.create(
+            name="StreamerMate",
+            player_id=10,
+            clan=clan,
+            is_streamer=True,
+            days_since_last_battle=2,
+            last_battle_date=timezone.now().date() - timedelta(days=2),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/43/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["name"], "StreamerMate")
+        self.assertTrue(response.json()[0]["is_streamer"])
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
 
@@ -3109,6 +3172,43 @@ class ApiContractTests(TestCase):
             "LandingPveYes": True,
             "LandingPveNoHighAbsolute": False,
         })
+
+    def test_landing_players_and_recent_players_expose_streamer_flag(self):
+        cache.clear()
+        today = timezone.now().date()
+        looked_up_at = timezone.now() - timedelta(minutes=1)
+        Player.objects.create(
+            name="LandingStreamer",
+            player_id=4414,
+            is_hidden=False,
+            is_streamer=True,
+            pvp_ratio=58.0,
+            total_battles=4200,
+            pvp_battles=3900,
+            days_since_last_battle=2,
+            last_battle_date=today,
+            last_lookup=looked_up_at,
+            battles_json=[
+                {"ship_tier": 10, "pvp_battles": 3900, "wins": 2262},
+            ],
+        )
+
+        landing_response = self.client.get(
+            "/api/landing/players/?mode=random&limit=40")
+        recent_response = self.client.get("/api/landing/recent/")
+
+        self.assertEqual(landing_response.status_code, 200)
+        self.assertEqual(recent_response.status_code, 200)
+
+        landing_row = next(
+            row for row in landing_response.json() if row["name"] == "LandingStreamer"
+        )
+        recent_row = next(
+            row for row in recent_response.json() if row["name"] == "LandingStreamer"
+        )
+
+        self.assertTrue(landing_row["is_streamer"])
+        self.assertTrue(recent_row["is_streamer"])
 
     def test_landing_players_and_recent_players_expose_published_efficiency_fields(self):
         cache.clear()

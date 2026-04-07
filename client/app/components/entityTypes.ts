@@ -21,6 +21,7 @@ export interface LandingPlayer {
     name: string;
     pvp_ratio: number | null;
     is_hidden?: boolean;
+    is_streamer?: boolean;
     pvp_battles?: number | null;
     high_tier_pvp_ratio?: number | null;
     high_tier_pvp_battles?: number | null;
@@ -59,6 +60,7 @@ export interface PlayerData {
     last_battle_date: string;
     recent_games: object;
     is_hidden: boolean;
+    is_streamer?: boolean;
     stats_updated_at: string;
     last_fetch: string;
     last_lookup: string | null;

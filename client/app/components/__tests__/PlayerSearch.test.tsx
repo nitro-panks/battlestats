@@ -73,6 +73,7 @@ const defaultPlayersByMode = {
             name: 'AcePlayer',
             pvp_ratio: 61.2,
             is_hidden: false,
+            is_streamer: true,
             is_ranked_player: true,
             is_pve_player: true,
             is_sleepy_player: false,
@@ -110,6 +111,7 @@ const defaultPlayersByBestSort = {
             name: 'BestPlayer',
             pvp_ratio: 64.1,
             is_hidden: false,
+            is_streamer: true,
             is_ranked_player: true,
             is_pve_player: true,
             is_sleepy_player: false,
@@ -324,6 +326,7 @@ describe('PlayerSearch landing efficiency icon', () => {
         const nonExpertRow = screen.getByRole('button', { name: /Show player BestRunnerUp/i });
 
         expect(within(expertRow).getByText('Σ')).toBeInTheDocument();
+        expect(within(expertRow).getByLabelText(/known streamer/i)).toBeInTheDocument();
         expect(within(expertRow).getByLabelText(/Battlestats efficiency rank Expert: 99th percentile among eligible tracked players\. Based on stored WG badge profile for 367 tracked players\./i)).toBeInTheDocument();
         expect(within(expertRow).getByLabelText(/ranked enjoyer \(Gold\)/i)).toBeInTheDocument();
         expect(within(expertRow).getByLabelText(/pve enjoyer/i)).toBeInTheDocument();

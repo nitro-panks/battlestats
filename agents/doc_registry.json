@@ -720,6 +720,29 @@
                 "plan-superseded"
             ]
         },
+        "agents/runbooks/runbook-streamer-twitch-icon-2026-04-07.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "frontend",
+            "aliases": [
+                "streamer twitch icon",
+                "twitch badge",
+                "streamer icon"
+            ],
+            "tags": [
+                "icons",
+                "frontend",
+                "player detail",
+                "landing page",
+                "streamer"
+            ],
+            "archive_on": [
+                "streamer-twitch-icon-landed",
+                "feature-superseded"
+            ]
+        },
         "agents/runbooks/runbook-clan-tier-distribution-recovery-2026-04-02.md": {
             "kind": "runbook",
             "status": "active",

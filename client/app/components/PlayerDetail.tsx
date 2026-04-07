@@ -11,6 +11,7 @@ import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import LeaderCrownIcon from './LeaderCrownIcon';
+import TwitchStreamerIcon from './TwitchStreamerIcon';
 import PveEnjoyerIcon from './PveEnjoyerIcon';
 import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
@@ -41,6 +42,7 @@ interface PlayerDetailProps {
         last_battle_date: string;
         recent_games: object;
         is_hidden: boolean;
+        is_streamer?: boolean;
         stats_updated_at: string;
         last_fetch: string;
         last_lookup: string | null;
@@ -410,6 +412,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 </h1>
                                 {player.is_hidden ? <HiddenAccountIcon className="text-sm text-[var(--accent-light)]" /> : null}
                                 {player.is_clan_leader ? <LeaderCrownIcon size="header" /> : null}
+                                {player.is_streamer ? <TwitchStreamerIcon size="header" /> : null}
                                 {isPveEnjoyer ? <PveEnjoyerIcon size="header" /> : null}
                                 {isSleepyPlayer ? <InactiveIcon size="header" /> : null}
                                 {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}

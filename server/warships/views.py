@@ -720,6 +720,7 @@ def clan_members(request, clan_id: str) -> Response:
         {
             'name': member.name,
             'is_hidden': member.is_hidden,
+            'is_streamer': member.is_streamer,
             'pvp_ratio': member.pvp_ratio,
             'days_since_last_battle': member.days_since_last_battle,
             'is_leader': (

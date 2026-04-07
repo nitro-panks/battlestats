@@ -11,6 +11,7 @@ import type { LandingClan, LandingPlayer, PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import HiddenAccountIcon from './HiddenAccountIcon';
+import TwitchStreamerIcon from './TwitchStreamerIcon';
 import PveEnjoyerIcon from './PveEnjoyerIcon';
 import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
@@ -90,6 +91,7 @@ const PlayerNameGrid: React.FC<{
             );
             const iconRow = (
                 <>
+                    {player.is_streamer ? <TwitchStreamerIcon size="search" /> : null}
                     {player.is_ranked_player ? <RankedPlayerIcon league={player.highest_ranked_league} size="search" /> : null}
                     {player.is_pve_player ? <PveEnjoyerIcon size="search" /> : null}
                     {player.is_sleepy_player ? <InactiveIcon size="search" /> : null}

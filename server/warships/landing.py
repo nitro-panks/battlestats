@@ -1426,6 +1426,7 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
         for player in Player.objects.filter(player_id__in=player_ids).select_related('explorer_summary').only(
             'player_id',
             'is_hidden',
+            'is_streamer',
             'pvp_battles',
             'efficiency_updated_at',
             'battles_updated_at',
@@ -1456,6 +1457,7 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
         player_obj = players_by_id.get(player_id)
         es = getattr(player_obj, 'explorer_summary',
                      None) if player_obj else None
+        row['is_streamer'] = bool(getattr(player_obj, 'is_streamer', False))
         latest_ranked_battles = max(
             int(row.get('latest_ranked_battles') or 0), 0)
         highest_ranked_league_recent = row.get('highest_ranked_league_recent')
@@ -1845,6 +1847,7 @@ def _build_best_ranked_landing_players(limit: int, realm: str = DEFAULT_REALM) -
             'player_id',
             'pvp_ratio',
             'is_hidden',
+            'is_streamer',
             'days_since_last_battle',
             'total_battles',
             'pvp_battles',
@@ -1884,6 +1887,7 @@ def _build_best_ranked_landing_players(limit: int, realm: str = DEFAULT_REALM) -
             'name': player.name,
             'pvp_ratio': player.pvp_ratio,
             'is_hidden': player.is_hidden,
+            'is_streamer': player.is_streamer,
             'pvp_battles': player.pvp_battles,
             'total_battles': player.total_battles,
             'is_pve_player': is_pve_player(player.total_battles, player.pvp_battles),
@@ -1948,6 +1952,7 @@ def _build_best_efficiency_landing_players(limit: int, realm: str = DEFAULT_REAL
             'player_id',
             'pvp_ratio',
             'is_hidden',
+            'is_streamer',
             'days_since_last_battle',
             'total_battles',
             'pvp_battles',
@@ -1981,6 +1986,7 @@ def _build_best_efficiency_landing_players(limit: int, realm: str = DEFAULT_REAL
             'name': player.name,
             'pvp_ratio': player.pvp_ratio,
             'is_hidden': player.is_hidden,
+            'is_streamer': player.is_streamer,
             'pvp_battles': player.pvp_battles,
             'total_battles': player.total_battles,
             'is_pve_player': is_pve_player(player.total_battles, player.pvp_battles),
@@ -2194,7 +2200,7 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
             realm=realm).exclude(last_lookup__isnull=True)
         .select_related('explorer_summary')
         .only(
-            'player_id', 'name', 'pvp_ratio', 'days_since_last_battle',
+            'player_id', 'name', 'pvp_ratio', 'is_hidden', 'is_streamer', 'days_since_last_battle',
             'total_battles', 'pvp_battles', 'ranked_json',
             'explorer_summary__clan_battle_total_battles',
             'explorer_summary__clan_battle_seasons_participated',
@@ -2213,8 +2219,11 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
         ranked_rows = player_obj.ranked_json
         es = getattr(player_obj, 'explorer_summary', None)
         row = {
+            'player_id': player_obj.player_id,
             'name': player_obj.name,
             'pvp_ratio': player_obj.pvp_ratio,
+            'is_hidden': player_obj.is_hidden,
+            'is_streamer': player_obj.is_streamer,
             'total_battles': player_obj.total_battles,
             'pvp_battles': player_obj.pvp_battles,
             'is_pve_player': is_pve_player(

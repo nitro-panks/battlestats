@@ -5,9 +5,9 @@ from .models import Player, Ship, Clan, Snapshot, EntityVisitDaily, EntityVisitE
 @admin.register(Player)
 class PlayerAdmin(admin.ModelAdmin):
     search_fields = ('name', 'player_id')
-    list_display = ('name', 'player_id', 'is_hidden',
+    list_display = ('name', 'player_id', 'is_hidden', 'is_streamer',
                     'last_lookup', 'last_fetch')
-    list_filter = ('is_hidden',)
+    list_filter = ('is_hidden', 'is_streamer')
 
 
 @admin.register(Ship)
