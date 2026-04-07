@@ -29,6 +29,7 @@ Do not scan every markdown file by default. Open `agents/reviews/`, `agents/work
 - Realm-aware behavior is part of the current architecture. Player and clan pages, landing endpoints, and crawl/warming flows must remain correct for both `na` and `eu`.
 - Production background work is split across three Celery lanes: `default`, `hydration`, and `background`.
 - The production droplet defaults to the non-agentic backend path. Base backend deps live in `server/requirements.txt`; optional LangGraph and CrewAI deps live in `server/requirements-agentic.txt` and are deployed only when `DEPLOY_AGENTIC_RUNTIME=1`.
+- Optional Hindsight-backed LangGraph memory also lives in the agentic dependency lane. Enable it with `BATTLESTATS_HINDSIGHT_ENABLED=1`, point `BATTLESTATS_HINDSIGHT_API_URL` at your Hindsight instance, and provide `HINDSIGHT_API_KEY` when the service requires authentication.
 - Homepage, hot entity, and distribution behavior relies on scheduled warming. Cold-path regressions usually show up as cache misses, stale locks, or queue pressure rather than missing UI wiring alone.
 
 ## Common Commands
@@ -110,6 +111,28 @@ cd server
 python scripts/run_agent_graph.py "fix clan hydration bug" --json
 ```
 
+For local agentic memory with Hindsight, start the local service first:
+
+```bash
+./scripts/start_local_hindsight.sh
+source ./scripts/use_local_hindsight_env.sh
+```
+
+Then use one of these URLs depending on where the agentic command runs:
+
+- Docker service-to-service: `BATTLESTATS_HINDSIGHT_API_URL=http://hindsight:8888`
+- Host venv / local shell: `BATTLESTATS_HINDSIGHT_API_URL=http://127.0.0.1:8899`
+
+Recommended local env:
+
+```bash
+ENABLE_AGENTIC_RUNTIME=1
+BATTLESTATS_HINDSIGHT_ENABLED=1
+BATTLESTATS_HINDSIGHT_BUDGET=mid
+BATTLESTATS_HINDSIGHT_MAX_TOKENS=4096
+BATTLESTATS_HINDSIGHT_TAGS=project:battlestats,env:local,engine:langgraph
+```
+
 ### CrewAI
 
 ```bash
@@ -125,3 +148,13 @@ python scripts/run_agent_workflow.py "plan and implement a ranked player workflo
 ```
 
 Use `agents/runbooks/runbook-agent-orchestrator-selection.md` and `agents/runbooks/runbook-langgraph-opinionated-workflow.md` for the current behavior and routing rules.
+
+When `BATTLESTATS_HINDSIGHT_ENABLED=1`, the LangGraph workflow compiles with a Hindsight-backed store automatically. Optional knobs:
+
+```bash
+BATTLESTATS_HINDSIGHT_API_URL=http://localhost:3000
+HINDSIGHT_API_KEY=
+BATTLESTATS_HINDSIGHT_BUDGET=mid
+BATTLESTATS_HINDSIGHT_MAX_TOKENS=4096
+BATTLESTATS_HINDSIGHT_TAGS=project:battlestats,engine:langgraph
+```

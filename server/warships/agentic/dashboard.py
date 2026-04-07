@@ -12,6 +12,7 @@ from warships.data import (
     PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG,
 )
 
+from .hindsight import get_hindsight_config_summary
 from .memory import get_memory_store_snapshot
 from .tracing import get_langsmith_project_name, is_langsmith_tracing_enabled
 
@@ -305,6 +306,7 @@ def get_agentic_trace_dashboard(limit: int = 12) -> dict[str, Any]:
     return {
         "project_name": get_langsmith_project_name(),
         "tracing_enabled": is_langsmith_tracing_enabled(),
+        "hindsight": get_hindsight_config_summary(),
         "api_key_configured": api_key_configured,
         "api_host": api_host,
         "recent_runs": runs,

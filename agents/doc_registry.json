@@ -612,6 +612,28 @@
                 "memory-review-process-replaced"
             ]
         },
+        "agents/runbooks/runbook-local-hindsight-sdlc.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "agentic",
+            "owner": "platform",
+            "aliases": [
+                "local hindsight",
+                "agentic local memory",
+                "hindsight local setup"
+            ],
+            "tags": [
+                "hindsight",
+                "agentic",
+                "local development",
+                "docker compose",
+                "memory"
+            ],
+            "archive_on": [
+                "local-memory-stack-replaced"
+            ]
+        },
         "agents/runbooks/runbook-crewai-integration.md": {
             "kind": "runbook",
             "status": "active",

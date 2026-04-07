@@ -265,6 +265,14 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `HOT_ENTITY_PLAYER_LIMIT` / `HOT_ENTITY_CLAN_LIMIT` — Hot entity cache size (defaults: 20/10)
 - `ENABLE_CRAWLER_SCHEDULES` — Enable daily clan crawl (set `1` in production)
 - `ENABLE_AGENTIC_RUNTIME` — Enable `/trace` and optional agentic runtime paths (default: `0` on the droplet)
+- `BATTLESTATS_HINDSIGHT_ENABLED` — Enable the optional Hindsight-backed LangGraph store (default: `0`)
+- `BATTLESTATS_HINDSIGHT_API_URL` — Base URL for the Hindsight API when the optional store is enabled
+- `HINDSIGHT_API_KEY` — Optional Hindsight API key when the service requires authentication
+- `BATTLESTATS_HINDSIGHT_BUDGET` — Default Hindsight recall budget for the LangGraph store (`low`, `mid`, `high`; default `mid`)
+- `BATTLESTATS_HINDSIGHT_MAX_TOKENS` — Max recall tokens for the LangGraph store (default `4096`)
+- `BATTLESTATS_HINDSIGHT_TAGS` — Comma-separated default tags applied to Hindsight retain operations
+
+For local SDLC, prefer a separate Hindsight service via the `agentic-memory` Docker Compose profile and point host-based commands at `http://127.0.0.1:8899`. Keep Hindsight off the production droplet unless agentic memory is intentionally part of that environment.
 - `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
 - `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)

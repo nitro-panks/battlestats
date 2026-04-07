@@ -12,6 +12,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .checkpoints import get_graph_checkpointer
 from .doctrine import merge_team_doctrine, summarize_team_doctrine
+from .hindsight import get_hindsight_config_summary, get_hindsight_store, is_hindsight_enabled
 from .memory import PHASE0_MEMORY_LIMIT, build_phase0_memory_candidates, infer_workflow_kind, prepare_phase0_memory_context
 from .personas import read_persona_context
 from .retrieval import retrieve_doctrine_guidance
@@ -948,6 +949,7 @@ def _graph_trace_inputs(task: str, context: dict[str, Any]) -> dict[str, Any]:
         "verification_command_count": len(context.get("verification_commands", [])),
         "checkpoint_backend": context.get("checkpoint_backend"),
         "memory_enabled": context.get("memory_enabled"),
+        "hindsight_enabled": is_hindsight_enabled(context),
     }
 
 
@@ -963,7 +965,7 @@ def _graph_trace_outputs(result: AgentState) -> dict[str, Any]:
     }
 
 
-def build_graph(checkpointer: Any | None = None):
+def build_graph(checkpointer: Any | None = None, context: dict[str, Any] | None = None):
     """Build and compile the guarded LangGraph workflow."""
 
     graph_builder = StateGraph(AgentState)
@@ -1014,7 +1016,11 @@ def build_graph(checkpointer: Any | None = None):
     graph_builder.add_edge("retry_verification", "run_verification_commands")
     graph_builder.add_edge("summarize", END)
 
-    return graph_builder.compile(checkpointer=checkpointer or MemorySaver())
+    compiled_checkpointer = checkpointer or MemorySaver()
+    hindsight_store = get_hindsight_store(context)
+    if hindsight_store is not None:
+        return graph_builder.compile(checkpointer=compiled_checkpointer, store=hindsight_store)
+    return graph_builder.compile(checkpointer=compiled_checkpointer)
 
 
 def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
@@ -1082,11 +1088,13 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
         }
 
         with get_graph_checkpointer(context=context) as checkpointer:
-            compiled = build_graph(checkpointer=checkpointer)
+            compiled = build_graph(checkpointer=checkpointer, context=context)
             result = compiled.invoke(
                 initial_state,
                 config={"configurable": {"thread_id": workflow_id}},
             )
+
+        result["hindsight"] = get_hindsight_config_summary(context)["configured"]
 
         trace_url = get_current_trace_url()
         if trace_url:

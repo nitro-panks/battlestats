@@ -1,36 +1,35 @@
 """Unified player enrichment crawler.
 
 Fills battles_json, tiers_json, type_json, randoms_json, ranked_json,
-and snapshot/activity data for players who are missing it.  Alternates
-between NA and EU to give both realms steady progress.
+and snapshot/activity data for players who are missing it.
 
-Players are selected by overall win-rate (descending) with configurable
-minimum PvP battle and WR thresholds so low-value accounts are skipped.
+Players are selected with configurable minimum PvP battle and WR
+thresholds so low-value accounts are skipped.
 
 Can run as a management command (manual / cron) or be invoked from a
 Celery task for scheduled background enrichment.
 
 Batch API optimisations
 -----------------------
+* Bulk API fetches: ships/stats and ranked accountinfo are fetched for
+  up to BULK_API_BATCH_SIZE players per API call (WG supports up to 100
+  comma-separated account_ids). This reduces per-player API overhead
+  from 2+ round-trips to ~0.02 per player for the heavy endpoints.
 * Ship cache pre-warm: bulk-loads all Ship records into Redis before the
   loop so per-ship DB lookups inside update_battle_data are cache hits.
 * refresh_player=False on snapshot: skips the redundant account/info +
-  clans/accountinfo API calls (2 per player) — the clan crawler already
+  clans/accountinfo API calls (2 per player) -- the clan crawler already
   keeps these current.
 * update_snapshot_data already calls update_activity_data internally, so
   we do NOT call update_activity_data separately.
-* Parallel API calls: ships/stats and ranked account_info are fetched
-  concurrently, cutting per-player API wait from ~900ms to ~600ms.
 * Partitioned batches: multiple function invocations can process disjoint
   player slices concurrently via partition/num_partitions parameters.
-* Net cost per player: ~3 API calls (ships/stats + rank_info +
-  ranked/shipstats) with 2 of the 3 running in parallel.
 """
 from __future__ import annotations
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from itertools import zip_longest
 
@@ -44,17 +43,13 @@ log = logging.getLogger("enrich")
 
 DEFAULT_BATCH = 500
 DEFAULT_MIN_PVP_BATTLES = 500
-DEFAULT_MIN_WR = 48.0
-DEFAULT_DELAY = 0.05  # seconds between players (reduced from 0.2 — safe with parallel calls)
+DEFAULT_MIN_WR = 0.0
+DEFAULT_DELAY = 0.0
+BULK_API_BATCH_SIZE = 100  # max account_ids per WG API call
 
 
 def _prewarm_ship_cache() -> int:
-    """Bulk-load all complete Ship records into Redis.
-
-    Avoids per-ship DB queries inside update_battle_data when processing
-    ships the crawler hasn't seen yet in this worker's cache.
-    Returns the number of ships cached.
-    """
+    """Bulk-load all complete Ship records into Redis."""
     from warships.api.ships import _ship_cache_is_complete
 
     ships = Ship.objects.filter(
@@ -71,11 +66,7 @@ def _prewarm_ship_cache() -> int:
 
 def _candidates(realm: str, min_pvp_battles: int, min_wr: float, limit: int,
                 partition: int = 0, num_partitions: int = 1):
-    """Return players missing battles_json, ordered by WR desc.
-
-    When num_partitions > 1, only returns players whose player_id falls
-    into the given partition (player_id % num_partitions == partition).
-    """
+    """Return players missing battles_json, ordered by WR desc."""
     qs = (
         Player.objects.filter(
             realm=realm,
@@ -93,7 +84,6 @@ def _candidates(realm: str, min_pvp_battles: int, min_wr: float, limit: int,
     )
 
     if num_partitions > 1:
-        # Use raw SQL annotation for modulo partitioning
         from django.db.models import Value
         from django.db.models.functions import Mod
         qs = qs.annotate(
@@ -115,165 +105,207 @@ def _interleave(na_rows, eu_rows):
             yield eu
 
 
-def _enrich_player_parallel(player_id, realm: str):
-    """Enrich a single player with parallelized API calls.
+# ── Bulk API fetchers ────────────────────────────────────────
 
-    Phase 1 (parallel):  ships/stats  +  ranked account_info
-    Phase 2 (sequential): ranked shipstats (needs season IDs from phase 1)
-    Phase 3 (local):      battle processing, snapshot, explorer summary
-    """
-    from warships.api.ships import (
-        _fetch_ship_stats_for_player,
-        _fetch_ship_info,
-        _fetch_ranked_ship_stats_for_player,
-    )
-    from warships.api.players import _fetch_ranked_account_info
+def _bulk_fetch_ship_stats(player_ids: list[int], realm: str) -> dict:
+    """Fetch ships/stats for up to 100 players in one API call."""
+    from warships.api.client import make_api_request
+    params = {"account_id": ",".join(str(pid) for pid in player_ids)}
+    log.info("Bulk fetching ships/stats for %d players [%s]", len(player_ids), realm.upper())
+    data = make_api_request("ships/stats/", params, realm=realm)
+    return data if isinstance(data, dict) else {}
+
+
+def _bulk_fetch_ranked_account_info(player_ids: list[int], realm: str) -> dict:
+    """Fetch seasons/accountinfo for up to 100 players in one API call."""
+    from warships.api.client import make_api_request
+    params = {
+        "account_id": ",".join(str(pid) for pid in player_ids),
+        "fields": "rank_info",
+    }
+    log.info("Bulk fetching ranked info for %d players [%s]", len(player_ids), realm.upper())
+    data = make_api_request("seasons/accountinfo/", params, realm=realm)
+    return data if isinstance(data, dict) else {}
+
+
+# ── Per-player processing (uses pre-fetched bulk data) ───────
+
+def _process_player_ship_data(player, ship_data_list):
+    """Process raw ship stats into battles_json, tiers_json, type_json, randoms_json."""
+    from warships.api.ships import _fetch_ship_info
     from warships.data import (
         _build_ship_row_metadata,
+        _extract_randoms_rows,
+        _aggregate_battles_by_key,
+    )
+
+    if not ship_data_list:
+        # Droplet IP is whitelisted — empty response means player legitimately
+        # has no ship records. Mark as checked to remove from eligible pool.
+        now = datetime.now()
+        player.battles_json = []
+        player.battles_updated_at = now
+        player.save(update_fields=['battles_json', 'battles_updated_at'])
+        return []
+
+    prepared_data = []
+    for ship in ship_data_list:
+        ship_model = _fetch_ship_info(ship['ship_id'])
+        ship_metadata = _build_ship_row_metadata(
+            ship.get('ship_id'), ship_model)
+
+        pvp = ship.get('pvp') or {}
+        pvp_battles = pvp.get('battles', 0)
+        wins = pvp.get('wins', 0)
+        losses = pvp.get('losses', 0)
+        frags = pvp.get('frags', 0)
+        battles = ship.get('battles', 0)
+        distance = ship.get('distance', 0)
+
+        prepared_data.append({
+            'ship_id': ship_metadata['ship_id'],
+            'ship_name': ship_metadata['ship_name'],
+            'ship_chart_name': ship_metadata['ship_chart_name'],
+            'ship_tier': ship_metadata['ship_tier'],
+            'all_battles': battles,
+            'distance': distance,
+            'wins': wins,
+            'losses': losses,
+            'ship_type': ship_metadata['ship_type'],
+            'pve_battles': battles - (wins + losses),
+            'pvp_battles': pvp_battles,
+            'win_ratio': round(wins / pvp_battles, 2) if pvp_battles > 0 else 0,
+            'kdr': round(frags / pvp_battles, 2) if pvp_battles > 0 else 0,
+        })
+
+    battles_rows = sorted(
+        prepared_data, key=lambda x: x.get('pvp_battles', 0), reverse=True)
+
+    tier_aggregates = {tier: {'pvp_battles': 0, 'wins': 0}
+                      for tier in range(1, 12)}
+    for row in battles_rows:
+        tier = row.get('ship_tier')
+        if isinstance(tier, int) and tier in tier_aggregates:
+            tier_aggregates[tier]['pvp_battles'] += int(
+                row.get('pvp_battles', 0) or 0)
+            tier_aggregates[tier]['wins'] += int(row.get('wins', 0) or 0)
+
+    tiers_data = []
+    for tier in range(11, 0, -1):
+        b = tier_aggregates[tier]['pvp_battles']
+        w = tier_aggregates[tier]['wins']
+        tiers_data.append({
+            'ship_tier': tier,
+            'pvp_battles': b,
+            'wins': w,
+            'win_ratio': round(w / b, 2) if b > 0 else 0,
+        })
+
+    now = datetime.now()
+    player.battles_json = battles_rows
+    player.battles_updated_at = now
+    player.tiers_json = tiers_data
+    player.tiers_updated_at = now
+    player.type_json = _aggregate_battles_by_key(battles_rows, 'ship_type')
+    player.type_updated_at = now
+    player.randoms_json = _extract_randoms_rows(battles_rows, limit=20)
+    player.randoms_updated_at = now
+    player.save(update_fields=[
+        'battles_json', 'battles_updated_at',
+        'tiers_json', 'tiers_updated_at',
+        'type_json', 'type_updated_at',
+        'randoms_json', 'randoms_updated_at',
+    ])
+    return battles_rows
+
+
+def _process_player_ranked_data(player, rank_info, realm: str):
+    """Fetch ranked ship stats and save ranked_json.
+
+    This is still per-player because seasons/shipstats does not support
+    multi-account lookups.
+    """
+    from warships.api.ships import _fetch_ranked_ship_stats_for_player
+    from warships.data import (
         _get_ranked_seasons_metadata,
         _aggregate_ranked_seasons,
         _build_top_ranked_ship_names_by_season,
-        _extract_randoms_rows,
-        _aggregate_battles_by_key,
-        update_snapshot_data,
-        refresh_player_explorer_summary,
     )
 
-    player = Player.objects.get(player_id=player_id, realm=realm)
-
-    # ── Phase 1: parallel API calls ──────────────────────────
-    ship_data = None
-    account_data = None
-
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        ship_future = ex.submit(
-            _fetch_ship_stats_for_player, player_id, realm=realm)
-        rank_future = ex.submit(
-            _fetch_ranked_account_info, int(player_id), realm=realm)
-
-        ship_data = ship_future.result()
-        account_data = rank_future.result()
-
-    # ── Phase 2: ranked ship stats (needs season IDs from phase 1) ──
-    rank_info = account_data.get('rank_info') if account_data else None
-    ranked_ship_stats_rows = []
-    requested_season_ids = []
-
+    ranked_rows = []
     if rank_info:
         requested_season_ids = sorted(
             [int(sid) for sid in rank_info.keys() if str(sid).isdigit()]
         )
         if requested_season_ids:
             ranked_ship_stats_rows = _fetch_ranked_ship_stats_for_player(
-                int(player_id), season_ids=requested_season_ids, realm=realm)
-
-    # ── Phase 3a: process battle data ────────────────────────
-    battles_rows = None
-    if ship_data:
-        prepared_data = []
-        for ship in ship_data:
-            ship_model = _fetch_ship_info(ship['ship_id'])
-            ship_metadata = _build_ship_row_metadata(
-                ship.get('ship_id'), ship_model)
-
-            pvp_battles = ship['pvp']['battles']
-            wins = ship['pvp']['wins']
-            losses = ship['pvp']['losses']
-            frags = ship['pvp']['frags']
-            battles = ship['battles']
-            distance = ship['distance']
-
-            prepared_data.append({
-                'ship_id': ship_metadata['ship_id'],
-                'ship_name': ship_metadata['ship_name'],
-                'ship_chart_name': ship_metadata['ship_chart_name'],
-                'ship_tier': ship_metadata['ship_tier'],
-                'all_battles': battles,
-                'distance': distance,
-                'wins': wins,
-                'losses': losses,
-                'ship_type': ship_metadata['ship_type'],
-                'pve_battles': battles - (wins + losses),
-                'pvp_battles': pvp_battles,
-                'win_ratio': round(wins / pvp_battles, 2) if pvp_battles > 0 else 0,
-                'kdr': round(frags / pvp_battles, 2) if pvp_battles > 0 else 0,
-            })
-
-        battles_rows = sorted(
-            prepared_data, key=lambda x: x.get('pvp_battles', 0), reverse=True)
-
-        # Derive tier, type, randoms aggregations
-        tier_aggregates = {tier: {'pvp_battles': 0, 'wins': 0}
-                          for tier in range(1, 12)}
-        for row in battles_rows:
-            tier = row.get('ship_tier')
-            if isinstance(tier, int) and tier in tier_aggregates:
-                tier_aggregates[tier]['pvp_battles'] += int(
-                    row.get('pvp_battles', 0) or 0)
-                tier_aggregates[tier]['wins'] += int(row.get('wins', 0) or 0)
-
-        tiers_data = []
-        for tier in range(11, 0, -1):
-            b = tier_aggregates[tier]['pvp_battles']
-            w = tier_aggregates[tier]['wins']
-            tiers_data.append({
-                'ship_tier': tier,
-                'pvp_battles': b,
-                'wins': w,
-                'win_ratio': round(w / b, 2) if b > 0 else 0,
-            })
-
-        now = datetime.now()
-        player.battles_json = battles_rows
-        player.battles_updated_at = now
-        player.tiers_json = tiers_data
-        player.tiers_updated_at = now
-        player.type_json = _aggregate_battles_by_key(battles_rows, 'ship_type')
-        player.type_updated_at = now
-        player.randoms_json = _extract_randoms_rows(battles_rows, limit=20)
-        player.randoms_updated_at = now
-        player.save(update_fields=[
-            'battles_json', 'battles_updated_at',
-            'tiers_json', 'tiers_updated_at',
-            'type_json', 'type_updated_at',
-            'randoms_json', 'randoms_updated_at',
-        ])
-    else:
-        # No ship data — set empty list to remove from candidate pool
-        # (candidates query filters on battles_json__isnull=True)
-        player.battles_json = []
-        player.battles_updated_at = datetime.now()
-        player.save(update_fields=['battles_json', 'battles_updated_at'])
-
-    # ── Phase 3b: process ranked data ────────────────────────
-    ranked_rows = None
-    if rank_info and requested_season_ids:
-        season_meta = _get_ranked_seasons_metadata()
-        top_ship_names = _build_top_ranked_ship_names_by_season(
-            ranked_ship_stats_rows, requested_season_ids)
-        ranked_rows = _aggregate_ranked_seasons(
-            rank_info, season_meta, top_ship_names_by_season=top_ship_names)
-    else:
-        ranked_rows = []
+                int(player.player_id), season_ids=requested_season_ids, realm=realm)
+            season_meta = _get_ranked_seasons_metadata()
+            top_ship_names = _build_top_ranked_ship_names_by_season(
+                ranked_ship_stats_rows, requested_season_ids)
+            ranked_rows = _aggregate_ranked_seasons(
+                rank_info, season_meta, top_ship_names_by_season=top_ship_names)
 
     player.ranked_json = ranked_rows
     player.ranked_updated_at = datetime.now()
     player.save(update_fields=['ranked_json', 'ranked_updated_at'])
+    return ranked_rows
 
-    # ── Phase 3c: snapshot + activity (no API calls) ─────────
+
+def _enrich_player_from_bulk(player_id, realm: str, ship_data_list, rank_account_data):
+    """Enrich a single player using pre-fetched bulk API data."""
+    from warships.data import (
+        update_snapshot_data,
+        refresh_player_explorer_summary,
+        fetch_player_clan_battle_seasons,
+    )
+
+    player = Player.objects.get(player_id=player_id, realm=realm)
+
+    # Process ship/battle data (no API call -- already bulk-fetched)
+    battles_rows = _process_player_ship_data(player, ship_data_list)
+
+    # Ranked data (1 API call for ranked ship stats if player has ranked seasons)
+    rank_info = rank_account_data.get('rank_info') if rank_account_data else None
+    ranked_rows = _process_player_ranked_data(player, rank_info, realm)
+
+    # Snapshot + activity (no API calls -- refresh_player=False)
     update_snapshot_data(player_id, realm=realm, refresh_player=False)
 
-    # ── Phase 3d: explorer summary ─���─────────────────────────
+    # Explorer summary (no API calls)
     refresh_player_explorer_summary(
         player, battles_rows=battles_rows, ranked_rows=ranked_rows)
 
-    # ── Phase 3e: clan battle summary (1 API call) ──────────
-    from warships.data import fetch_player_clan_battle_seasons
+    # Clan battle summary (2 API calls)
     try:
         fetch_player_clan_battle_seasons(int(player_id), realm=realm)
     except Exception:
         log.warning("CB data fetch failed for player_id=%s realm=%s", player_id, realm)
 
+
+# ── Legacy single-player enrichment (kept for Celery task compatibility) ──
+
+def _enrich_player_parallel(player_id, realm: str):
+    """Enrich a single player with individual API calls (non-bulk path)."""
+    from warships.api.ships import _fetch_ship_stats_for_player
+    from warships.api.players import _fetch_ranked_account_info
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        ship_future = ex.submit(
+            _fetch_ship_stats_for_player, player_id, realm=realm)
+        rank_future = ex.submit(
+            _fetch_ranked_account_info, int(player_id), realm=realm)
+        ship_data = ship_future.result()
+        account_data = rank_future.result()
+
+    _enrich_player_from_bulk(
+        player_id, realm,
+        ship_data_list=ship_data,
+        rank_account_data=account_data,
+    )
+
+
+# ── Main enrichment loop ────────────────────────────────────
 
 def enrich_players(
     batch: int = DEFAULT_BATCH,
@@ -289,7 +321,6 @@ def enrich_players(
     """Run one enrichment pass.  Returns summary dict."""
     target_realms = realms or tuple(sorted(VALID_REALMS))
 
-    # Fetch candidates per realm (half the batch each when two realms)
     per_realm = max(batch // len(target_realms), 1)
     realm_candidates = {}
     for realm in target_realms:
@@ -298,16 +329,10 @@ def enrich_players(
             partition=partition, num_partitions=num_partitions,
         )
 
-    # Build interleaved queue
-    if len(target_realms) == 2 and 'na' in target_realms and 'eu' in target_realms:
-        queue = list(_interleave(
-            realm_candidates.get('na', []),
-            realm_candidates.get('eu', []),
-        ))
-    else:
-        queue = []
-        for realm in target_realms:
-            queue.extend(realm_candidates.get(realm, []))
+    # Build queue grouped by realm (bulk fetches are per-realm)
+    queue = []
+    for realm in target_realms:
+        queue.extend(realm_candidates.get(realm, []))
 
     total_candidates = {r: len(rows) for r, rows in realm_candidates.items()}
     log.info(
@@ -323,32 +348,58 @@ def enrich_players(
             "queue_size": len(queue),
         }
 
-    # Pre-warm ship cache so per-ship lookups in update_battle_data are
-    # Redis hits instead of individual DB queries + API calls.
     _prewarm_ship_cache()
 
     enriched = 0
     errors = 0
     by_realm = {r: 0 for r in target_realms}
 
-    for player_id, name, wr, battles, realm in queue:
-        if heartbeat_callback:
-            heartbeat_callback()
+    # Group queue by realm for bulk API calls
+    realm_queues: dict[str, list] = {}
+    for row in queue:
+        realm_queues.setdefault(row[4], []).append(row)
 
-        try:
-            _enrich_player_parallel(player_id, realm=realm)
-            enriched += 1
-            by_realm[realm] = by_realm.get(realm, 0) + 1
-            log.info(
-                "Enriched %s [%s] WR=%.1f%% battles=%d (%d/%d)",
-                name, realm.upper(), wr, battles, enriched, len(queue),
-            )
-        except Exception:
-            log.exception("Failed to enrich player_id=%s name=%s realm=%s", player_id, name, realm)
-            errors += 1
+    for realm, realm_queue in realm_queues.items():
+        # Process in chunks of BULK_API_BATCH_SIZE for bulk API calls
+        for chunk_start in range(0, len(realm_queue), BULK_API_BATCH_SIZE):
+            chunk = realm_queue[chunk_start:chunk_start + BULK_API_BATCH_SIZE]
+            chunk_player_ids = [row[0] for row in chunk]
 
-        if delay > 0:
-            time.sleep(delay)
+            # Bulk fetch: 2 API calls for up to 100 players
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                ship_future = ex.submit(
+                    _bulk_fetch_ship_stats, chunk_player_ids, realm)
+                rank_future = ex.submit(
+                    _bulk_fetch_ranked_account_info, chunk_player_ids, realm)
+                bulk_ship_data = ship_future.result()
+                bulk_rank_data = rank_future.result()
+
+            # Process each player using pre-fetched data
+            for player_id, name, wr, battles, _ in chunk:
+                if heartbeat_callback:
+                    heartbeat_callback()
+
+                pid_str = str(player_id)
+                ship_data_list = bulk_ship_data.get(pid_str)
+                rank_account_data = bulk_rank_data.get(pid_str)
+
+                try:
+                    _enrich_player_from_bulk(
+                        player_id, realm, ship_data_list, rank_account_data)
+                    enriched += 1
+                    by_realm[realm] = by_realm.get(realm, 0) + 1
+                    log.info(
+                        "Enriched %s [%s] WR=%.1f%% battles=%d (%d/%d)",
+                        name, realm.upper(), wr, battles, enriched, len(queue),
+                    )
+                except Exception:
+                    log.exception(
+                        "Failed to enrich player_id=%s name=%s realm=%s",
+                        player_id, name, realm)
+                    errors += 1
+
+                if delay > 0:
+                    time.sleep(delay)
 
     summary = {
         "status": "completed",
@@ -362,7 +413,7 @@ def enrich_players(
 
 
 class Command(BaseCommand):
-    help = "Enrich players missing battle/ranked/activity data, ordered by WR, alternating realms."
+    help = "Enrich players missing battle/ranked/activity data."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -383,7 +434,7 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--realm", choices=sorted(VALID_REALMS), default=None,
-            help="Restrict to one realm (default: alternate both).",
+            help="Restrict to one realm (default: all realms).",
         )
         parser.add_argument(
             "--partition", type=int, default=0,
@@ -397,20 +448,49 @@ class Command(BaseCommand):
             "--dry-run", action="store_true",
             help="Report candidates without processing.",
         )
+        parser.add_argument(
+            "--continuous", action="store_true",
+            help="Chain batches until no eligible players remain.",
+        )
+        parser.add_argument(
+            "--batch-pause", type=int, default=5,
+            help="Seconds to pause between batches in continuous mode (default 5).",
+        )
 
     def handle(self, *args, **options):
         realms = (options["realm"],) if options["realm"] else None
-        summary = enrich_players(
-            batch=options["batch"],
-            min_pvp_battles=options["min_pvp_battles"],
-            min_wr=options["min_wr"],
-            delay=options["delay"],
-            dry_run=options["dry_run"],
-            realms=realms,
-            partition=options["partition"],
-            num_partitions=options["num_partitions"],
-        )
+        continuous = options["continuous"]
+        batch_pause = options["batch_pause"]
+        batch_num = 0
 
-        self.stdout.write(self.style.SUCCESS(f"\n=== Enrichment Summary ==="))
-        for key, val in summary.items():
-            self.stdout.write(f"  {key}: {val}")
+        while True:
+            batch_num += 1
+            if continuous:
+                self.stdout.write(f"\n--- Batch {batch_num} ---")
+
+            summary = enrich_players(
+                batch=options["batch"],
+                min_pvp_battles=options["min_pvp_battles"],
+                min_wr=options["min_wr"],
+                delay=options["delay"],
+                dry_run=options["dry_run"],
+                realms=realms,
+                partition=options["partition"],
+                num_partitions=options["num_partitions"],
+            )
+
+            self.stdout.write(self.style.SUCCESS(f"\n=== Enrichment Summary ==="))
+            for key, val in summary.items():
+                self.stdout.write(f"  {key}: {val}")
+
+            if not continuous:
+                break
+
+            if summary.get("enriched", 0) == 0:
+                self.stdout.write(self.style.SUCCESS(
+                    f"\nNo players enriched in batch {batch_num} -- all caught up."
+                ))
+                break
+
+            self.stdout.write(f"Pausing {batch_pause}s before next batch...")
+            time.sleep(batch_pause)
