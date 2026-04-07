@@ -137,7 +137,10 @@ class LandingHelperTests(TestCase):
         mock_delay.assert_called_once_with(include_recent=True, realm='na')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
-    def test_invalidate_landing_player_caches_bumps_namespace(self, mock_delay):
+    def test_invalidate_landing_player_caches_preserves_namespace_by_default(self, mock_delay):
+        # Per-row invalidations must NOT bump the namespace; doing so orphans
+        # the published fallback and forces inline rebuilds under load.
+        # See runbook-landing-random-cold-queue-2026-04-07.md
         original_key = landing_player_cache_key('best', 5, sort='ranked')
         original_published_key = landing_player_published_cache_key(
             'best', 5, sort='ranked')
@@ -147,11 +150,18 @@ class LandingHelperTests(TestCase):
         rebuilt_key = landing_player_cache_key('best', 5, sort='ranked')
         rebuilt_published_key = landing_player_published_cache_key(
             'best', 5, sort='ranked')
-        self.assertNotEqual(original_key, rebuilt_key)
-        self.assertNotEqual(original_published_key, rebuilt_published_key)
+        self.assertEqual(original_key, rebuilt_key)
+        self.assertEqual(original_published_key, rebuilt_published_key)
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
         mock_delay.assert_called_once_with(include_recent=True, realm='na')
+
+    @patch('warships.tasks.warm_landing_page_content_task.delay')
+    def test_invalidate_landing_player_caches_bumps_namespace_when_requested(self, mock_delay):
+        original_key = landing_player_cache_key('best', 5, sort='ranked')
+        invalidate_landing_player_caches(bump_namespace=True)
+        rebuilt_key = landing_player_cache_key('best', 5, sort='ranked')
+        self.assertNotEqual(original_key, rebuilt_key)
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_recent_player_cache_still_marks_dirty_during_cooldown(self, mock_delay):

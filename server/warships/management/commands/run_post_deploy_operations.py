@@ -165,6 +165,7 @@ class Command(BaseCommand):
                     include_recent=include_recent,
                     realm=realm,
                     queue_republish=False,
+                    bump_namespace=True,
                 )
                 invalidated['players'].append(realm)
             if clans:

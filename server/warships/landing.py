@@ -758,8 +758,14 @@ def invalidate_landing_recent_player_cache(realm: str = DEFAULT_REALM) -> None:
     _queue_landing_republish(realm=realm)
 
 
-def invalidate_landing_player_caches(include_recent: bool = False, realm: str = DEFAULT_REALM, queue_republish: bool = True) -> None:
-    _bump_landing_players_cache_namespace(realm=realm)
+def invalidate_landing_player_caches(include_recent: bool = False, realm: str = DEFAULT_REALM, queue_republish: bool = True, bump_namespace: bool = False) -> None:
+    # bump_namespace=True is reserved for deploy-time schema changes. Per-row
+    # invalidations must NOT bump, because the bump orphans the published
+    # fallback at the new namespace and forces every subsequent landing
+    # request to run the slow inline rebuild until the warmer catches up.
+    # See agents/runbooks/runbook-landing-random-cold-queue-2026-04-07.md
+    if bump_namespace:
+        _bump_landing_players_cache_namespace(realm=realm)
     dirty_keys = [realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY)]
     if include_recent:
         dirty_keys.append(realm_cache_key(
@@ -1559,31 +1565,56 @@ def get_landing_recent_clans_payload(force_refresh: bool = False, realm: str = D
     return payload
 
 
-def _build_random_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
-    eligible_ids = list(
-        Player.objects.exclude(name='').filter(
-            realm=realm,
-            is_hidden=False,
-            days_since_last_battle__lte=180,
-            pvp_battles__gt=LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES,
-        ).exclude(
-            last_battle_date__isnull=True
-        ).values_list('player_id', flat=True)
-    )
-    if not eligible_ids:
-        return []
+_LANDING_BUILD_LOCK_TIMEOUT = 30
+_LANDING_BUILD_LOCK_WAIT_SECONDS = 5
+_LANDING_BUILD_LOCK_POLL_INTERVAL = 0.1
 
-    selected_ids = random.sample(
-        eligible_ids, k=min(limit, len(eligible_ids)))
-    selected_order = {player_id: index for index,
-                      player_id in enumerate(selected_ids)}
-    rows = list(
-        Player.objects.filter(player_id__in=selected_ids).values(
-            'name', 'player_id', 'pvp_ratio', 'is_hidden', 'days_since_last_battle', 'total_battles', 'pvp_battles', 'battles_json', 'ranked_json'
-        )
-    )
-    rows.sort(key=lambda row: selected_order.get(
-        int(row.get('player_id') or 0), len(selected_order)))
+
+def _build_landing_payload_with_lock(cache_key, builder, normalized_limit, realm=DEFAULT_REALM):
+    """Run `builder` under a per-cache-key Redis lock to prevent thundering-herd
+    rebuilds. Concurrent waiters poll the cache for up to a few seconds and
+    return the lock-holder's result."""
+    lock_key = f"{cache_key}:build_lock"
+    if cache.add(lock_key, "building", timeout=_LANDING_BUILD_LOCK_TIMEOUT):
+        try:
+            return builder(normalized_limit)
+        finally:
+            cache.delete(lock_key)
+
+    deadline = time.monotonic() + _LANDING_BUILD_LOCK_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(_LANDING_BUILD_LOCK_POLL_INTERVAL)
+        cached_payload = cache.get(cache_key)
+        if cached_payload is not None:
+            return cached_payload
+    # Lock holder is taking too long; build anyway rather than block the user.
+    logger.warning("Landing build lock wait expired for %s; building inline", cache_key)
+    return builder(normalized_limit)
+
+
+def _build_random_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
+    # Postgres-side sampling: ORDER BY random() LIMIT N keeps the work in the
+    # database and returns only N rows over the wire, instead of materializing
+    # ~200K eligible player_ids in Python before random.sample. This is the
+    # hot path for /api/landing/players?mode=random and must stay fast even
+    # when the cache is cold (see runbook-landing-random-cold-queue-2026-04-07).
+    sql = """
+        SELECT name, player_id, pvp_ratio, is_hidden, days_since_last_battle,
+               total_battles, pvp_battles, battles_json, ranked_json
+        FROM warships_player
+        WHERE realm = %s
+          AND is_hidden = false
+          AND name <> ''
+          AND days_since_last_battle <= 180
+          AND pvp_battles > %s
+          AND last_battle_date IS NOT NULL
+        ORDER BY random()
+        LIMIT %s
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(sql, [realm, LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES, limit])
+        columns = [col[0] for col in cursor.description]
+        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
     return _serialize_landing_player_rows(rows)
 
 
@@ -2120,10 +2151,15 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
         force_refresh,
         realm=realm,
         dirty_keys=(realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY),),
+        # Random has no canonical "correct" answer, so a slightly stale published
+        # sample is preferable to forcing a slow synchronous rebuild on the user.
+        use_published_fallback_when_dirty=(canonical_mode == 'random'),
     )
 
     if payload is None:
-        payload = builder(normalized_limit)
+        payload = _build_landing_payload_with_lock(
+            cache_key, builder, normalized_limit, realm=realm,
+        )
         metadata = _build_landing_player_cache_metadata(ttl_seconds)
         _publish_landing_payload(
             cache_key,

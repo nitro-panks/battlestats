@@ -324,6 +324,7 @@ class RunPostDeployOperationsCommandTests(TestCase):
             include_recent=True,
             realm="eu",
             queue_republish=False,
+            bump_namespace=True,
         )
         mock_invalidate_clans.assert_called_once_with(
             realm="eu",
