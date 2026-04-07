@@ -437,8 +437,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 ) : null}
                             </div>
                         </div>
-                        {player.is_streamer && player.twitch_handle && player.twitch_url ? (
-                            <div className="mt-2 flex justify-end">
+                        <div className="mt-1 flex items-center justify-between gap-3">
+                            <p className="text-sm text-[var(--accent-light)]">
+                                Last played {player.days_since_last_battle} days ago
+                            </p>
+                            {player.is_streamer && player.twitch_handle && player.twitch_url ? (
                                 <a
                                     href={player.twitch_url}
                                     target="_blank"
@@ -449,11 +452,8 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     <span>{player.twitch_handle}</span>
                                     <TwitchStreamerIcon size="header" titleText={`Watch ${player.twitch_handle} on Twitch`} ariaLabel="Twitch" />
                                 </a>
-                            </div>
-                        ) : null}
-                        <p className="mt-1 text-sm text-[var(--accent-light)]">
-                            Last played {player.days_since_last_battle} days ago
-                        </p>
+                            ) : null}
+                        </div>
                     </div>
 
                     {player.is_hidden ? (

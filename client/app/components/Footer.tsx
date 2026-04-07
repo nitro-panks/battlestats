@@ -39,7 +39,7 @@ const Footer: React.FC = () => {
                         onClick={() => setStreamerModalOpen(true)}
                         className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                     >
-                        I&apos;m a streamer!
+                        Add a streamer!
                     </button>
                 </p>
                 <p>Data sourced from the Wargaming API. Not affiliated with Wargaming.net.</p>
