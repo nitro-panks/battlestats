@@ -1,7 +1,7 @@
 # Runbook: Landing Random Players List Goes Cold for End Users
 
 _Created: 2026-04-07_
-_Status: **Plan** — diagnosed, fix not yet implemented_
+_Status: **Resolved 2026-04-07** — implemented and verified in production. Random landing strip serves in 48–105 ms across all realms; namespace stable across player updates; published fallback now survives invalidation. Commit `6ced729`._
 _QA: 2026-04-07 — initial diagnosis was wrong; corrected. Second QA pass added dispatch-dedupe finding and verified all builder/lock claims._
 
 ## Symptom
