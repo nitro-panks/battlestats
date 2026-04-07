@@ -817,8 +817,21 @@ def _efficiency_rank_snapshot_is_fresh(
 
 
 def _get_published_efficiency_rank_payload(player: Player) -> dict[str, Any]:
+    # Serve the last-known snapshot whenever one exists. We intentionally do
+    # NOT call _efficiency_rank_snapshot_is_fresh() here because that helper
+    # also returns False when the player's efficiency_updated_at or
+    # battles_updated_at advance past efficiency_rank_updated_at — which is the
+    # right signal for "schedule a re-rank" (efficiency_rank_publication_needs_refresh)
+    # but the wrong signal for "blank the icon in the UI". Doing so causes
+    # sigma/efficiency-rank icons to flicker off across a clan members list
+    # whenever background hydration bumps any input timestamp, until the next
+    # refresh_efficiency_rank_snapshot pass restores them.
     explorer_summary = getattr(player, 'explorer_summary', None)
-    if not _efficiency_rank_snapshot_is_fresh(player, explorer_summary):
+    if (
+        player.is_hidden
+        or explorer_summary is None
+        or explorer_summary.efficiency_rank_updated_at is None
+    ):
         return {
             'efficiency_rank_percentile': None,
             'efficiency_rank_tier': None,
@@ -2671,15 +2684,17 @@ PLAYER_DISTRIBUTION_CONFIGS = {
 
 PLAYER_WR_SURVIVAL_CORRELATION_CONFIG = {
     'label': 'Win Rate vs Survival',
-    'x_label': 'Win Rate',
-    'y_label': 'Survival Rate',
+    'x_label': 'Survival Rate',
+    'y_label': 'Win Rate',
     'min_population_battles': 100,
-    'x_min': 35.0,
+    'min_survival_rate': 15.0,  # exclude noisy sub-15% population (new/bot/trash accounts)
+    # x is now survival rate, y is now win rate (axes flipped 2026-04-07)
+    'x_min': 15.0,
     'x_max': 75.0,
-    'x_bin_width': 1.0,
-    'y_min': 15.0,
+    'x_bin_width': 1.5,
+    'y_min': 35.0,
     'y_max': 75.0,
-    'y_bin_width': 1.5,
+    'y_bin_width': 1.0,
 }
 
 PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG = {
@@ -3431,6 +3446,7 @@ def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
                 pvp_battles__gte=config['min_population_battles'],
                 pvp_ratio__isnull=False,
                 pvp_survival_rate__isnull=False,
+                pvp_survival_rate__gte=config['min_survival_rate'],
             )
             if not mv_qs.exists():
                 raise MvPlayerDistributionStats.DoesNotExist
@@ -3442,14 +3458,16 @@ def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
                 pvp_battles__gte=config['min_population_battles'],
                 pvp_ratio__isnull=False,
                 pvp_survival_rate__isnull=False,
+                pvp_survival_rate__gte=config['min_survival_rate'],
             ).values_list('pvp_ratio', 'pvp_survival_rate')
 
         for win_rate, survival_rate in rows.iterator(chunk_size=5000):
             if win_rate is None or survival_rate is None:
                 continue
 
-            x_value = float(win_rate)
-            y_value = float(survival_rate)
+            # Axes flipped: x = survival rate, y = win rate
+            x_value = float(survival_rate)
+            y_value = float(win_rate)
 
             tracked_population += 1
             sum_x += x_value

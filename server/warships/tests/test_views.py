@@ -232,7 +232,7 @@ class PlayerViewSetTests(TestCase):
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
-    def test_player_detail_suppresses_stale_efficiency_rank_fields(
+    def test_player_detail_serves_stored_efficiency_rank_when_inputs_advanced(
         self,
         mock_update_player_task,
         mock_update_clan_task,
@@ -261,11 +261,11 @@ class PlayerViewSetTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertIsNone(payload["efficiency_rank_percentile"])
-        self.assertIsNone(payload["efficiency_rank_tier"])
-        self.assertFalse(payload["has_efficiency_rank_icon"])
-        self.assertIsNone(payload["efficiency_rank_population_size"])
-        self.assertIsNone(payload["efficiency_rank_updated_at"])
+        self.assertEqual(payload["efficiency_rank_percentile"], 0.81)
+        self.assertEqual(payload["efficiency_rank_tier"], "II")
+        self.assertTrue(payload["has_efficiency_rank_icon"])
+        self.assertEqual(payload["efficiency_rank_population_size"], 124)
+        self.assertIsNotNone(payload["efficiency_rank_updated_at"])
         mock_update_player_task.assert_called_once()
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
