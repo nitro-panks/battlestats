@@ -537,7 +537,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     responseHeaders: ['X-Randoms-Updated-At'],
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                 });
-                const result = normalizeRandomsRows(data);
+                const result = normalizeRandomsRows(data)
+                    .filter((row) => row.ship_type && row.ship_type.toLowerCase() !== 'unknown');
                 setAllShips(result);
                 setRandomsUpdatedAt(headers['X-Randoms-Updated-At'] ?? null);
 

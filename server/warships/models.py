@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.db.models.functions import Lower
 
@@ -348,6 +349,46 @@ class DeletedAccount(models.Model):
 
     def __str__(self):
         return f"DeletedAccount({self.account_id})"
+
+
+class StreamerSubmission(models.Model):
+    STATUS_PENDING = 'pending'
+    STATUS_APPROVED = 'approved'
+    STATUS_REJECTED = 'rejected'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_APPROVED, 'Approved'),
+        (STATUS_REJECTED, 'Rejected'),
+    ]
+
+    ign = models.CharField(max_length=64)
+    realm = models.CharField(max_length=8, blank=True, default='')
+    twitch_handle = models.CharField(max_length=64)
+    twitch_url = models.URLField(max_length=500)
+    submitter_ip = models.GenericIPAddressField(null=True, blank=True)
+    submitter_ua = models.CharField(max_length=300, blank=True, default='')
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='streamer_submissions_reviewed',
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'created_at'],
+                         name='streamer_sub_status_idx'),
+        ]
+
+    def __str__(self):
+        return f"StreamerSubmission({self.ign} -> {self.twitch_handle}, {self.status})"
 
 
 class MvPlayerDistributionStats(models.Model):

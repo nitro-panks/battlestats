@@ -1135,6 +1135,17 @@ def agentic_trace_dashboard(request) -> Response:
 
 @api_view(["POST"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def streamer_submission_view(request) -> Response:
+    from .serializers import StreamerSubmissionSerializer
+    serializer = StreamerSubmissionSerializer(
+        data=request.data, context={'request': request})
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response({'status': 'queued'}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def analytics_entity_view(request) -> Response:
     serializer = EntityVisitIngestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)

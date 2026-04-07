@@ -1,10 +1,12 @@
 "use client";
 
 import Link from 'next/link';
-import React from 'react';
+import React, { useState } from 'react';
 import { buildPlayerPath } from '../lib/entityRoutes';
+import StreamerSubmissionModal from './StreamerSubmissionModal';
 
 const Footer: React.FC = () => {
+    const [streamerModalOpen, setStreamerModalOpen] = useState(false);
     return (
         <footer className="border-t border-[var(--border)] py-4 text-center text-xs text-[var(--text-secondary)]">
             <div className="space-y-2 px-4 leading-5">
@@ -31,6 +33,14 @@ const Footer: React.FC = () => {
                     >
                         Fork me on GitHub
                     </a>
+                    {' · '}
+                    <button
+                        type="button"
+                        onClick={() => setStreamerModalOpen(true)}
+                        className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
+                    >
+                        I&apos;m a streamer!
+                    </button>
                 </p>
                 <p>Data sourced from the Wargaming API. Not affiliated with Wargaming.net.</p>
                 <p>
@@ -56,6 +66,10 @@ const Footer: React.FC = () => {
                     </a>
                 </p>
             </div>
+            <StreamerSubmissionModal
+                open={streamerModalOpen}
+                onClose={() => setStreamerModalOpen(false)}
+            />
         </footer>
     );
 };

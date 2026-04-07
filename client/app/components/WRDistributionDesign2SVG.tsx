@@ -134,8 +134,8 @@ const appendSummaryBlock = (
     marginLeft: number,
     width: number,
     payload: CorrelationPayload,
-    expectedSurvival: number | null,
-    survivalDelta: number | null,
+    expectedWR: number | null,
+    wrDelta: number | null,
     colors: typeof chartColors['light'],
 ) => {
     const header = svgRoot.append('g').attr('transform', `translate(${marginLeft + width - 6}, 10)`);
@@ -161,7 +161,7 @@ const appendSummaryBlock = (
         .style('font-size', '10px')
         .style('font-weight', '400')
         .style('fill', colors.axisText)
-        .text(expectedSurvival == null ? 'Expected survival unavailable' : `Expected survival ${formatPercent(expectedSurvival)}`);
+        .text(expectedWR == null ? 'Expected WR unavailable' : `Expected WR ${formatPercent(expectedWR)}`);
 
     headerText.append('tspan')
         .style('font-size', '10px')
@@ -172,8 +172,8 @@ const appendSummaryBlock = (
     headerText.append('tspan')
         .style('font-size', '10px')
         .style('font-weight', '700')
-        .style('fill', survivalDelta != null ? (survivalDelta >= 0 ? colors.heatmapAboveTrend : colors.heatmapBelowTrend) : colors.labelMuted)
-        .text(formatDelta(survivalDelta));
+        .style('fill', wrDelta != null ? (wrDelta >= 0 ? colors.heatmapAboveTrend : colors.heatmapBelowTrend) : colors.labelMuted)
+        .text(formatDelta(wrDelta));
 };
 
 const drawChart = (
@@ -296,13 +296,14 @@ const drawChart = (
         .attr('stroke-width', 1.75)
         .attr('d', trendLine);
 
-    const expectedSurvival = interpolateTrendValue(payload.trend, payload.x_domain, playerWR);
-    const survivalDelta = expectedSurvival == null ? null : playerSurvivalRate - expectedSurvival;
+    // Axes flipped: x = survival rate, y = win rate
+    const expectedWR = interpolateTrendValue(payload.trend, payload.x_domain, playerSurvivalRate);
+    const wrDelta = expectedWR == null ? null : playerWR - expectedWR;
     const playerColor = selectColorByWR(playerWR);
-    const plottedPlayerWR = clampToDomain(playerWR, payload.x_domain);
-    const plottedPlayerSurvivalRate = clampToDomain(playerSurvivalRate, payload.y_domain);
-    const playerX = x(plottedPlayerWR);
-    const playerY = y(plottedPlayerSurvivalRate);
+    const plottedPlayerSurvivalRate = clampToDomain(playerSurvivalRate, payload.x_domain);
+    const plottedPlayerWR = clampToDomain(playerWR, payload.y_domain);
+    const playerX = x(plottedPlayerSurvivalRate);
+    const playerY = y(plottedPlayerWR);
     const labelX = playerX > width * 0.7 ? playerX - 8 : playerX + 8;
     const labelAnchor = playerX > width * 0.7 ? 'end' : 'start';
     const labelY = playerY < height * 0.35 ? playerY + 28 : playerY - 18;
@@ -349,8 +350,8 @@ const drawChart = (
         .attr('dy', 14)
         .style('font-size', '10px')
         .style('font-weight', '400')
-        .style('fill', survivalDelta == null ? colors.labelMuted : (survivalDelta >= 0 ? colors.heatmapAboveTrend : colors.heatmapBelowTrend))
-        .text(formatDelta(survivalDelta));
+        .style('fill', wrDelta == null ? colors.labelMuted : (wrDelta >= 0 ? colors.heatmapAboveTrend : colors.heatmapBelowTrend))
+        .text(formatDelta(wrDelta));
 
     const labelNode = labelText.node();
     if (labelNode) {
@@ -366,7 +367,7 @@ const drawChart = (
             .attr('stroke', colors.axisLine);
     }
 
-    appendSummaryBlock(svgRoot, margin.left, width, payload, expectedSurvival, survivalDelta, colors);
+    appendSummaryBlock(svgRoot, margin.left, width, payload, expectedWR, wrDelta, colors);
 
     svg.append('text')
         .attr('x', width)

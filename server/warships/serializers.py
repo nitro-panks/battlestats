@@ -1,6 +1,80 @@
+import re
+import time
+
 from rest_framework import serializers
-from .models import Player, Clan, Ship
+from .models import Player, Clan, Ship, StreamerSubmission
 from .data import _calculate_player_kill_ratio, _coerce_battle_rows, _get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player
+
+
+TWITCH_URL_RE = re.compile(
+    r"^https://(www\.)?twitch\.tv/[A-Za-z0-9_]{3,25}/?$")
+TWITCH_HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{3,25}$")
+IGN_RE = re.compile(r"^[A-Za-z0-9_\-]{3,32}$")
+
+
+class StreamerSubmissionSerializer(serializers.ModelSerializer):
+    website = serializers.CharField(
+        required=False, allow_blank=True, write_only=True)
+    form_loaded_at = serializers.IntegerField(required=False, write_only=True)
+
+    class Meta:
+        model = StreamerSubmission
+        fields = ['ign', 'realm', 'twitch_handle',
+                  'twitch_url', 'website', 'form_loaded_at']
+
+    def validate_website(self, value):
+        if value:
+            raise serializers.ValidationError('spam')
+        return value
+
+    def validate_form_loaded_at(self, value):
+        if value and (time.time() * 1000 - value) < 2000:
+            raise serializers.ValidationError('too_fast')
+        return value
+
+    def validate_ign(self, value):
+        value = value.strip()
+        if not IGN_RE.match(value):
+            raise serializers.ValidationError('invalid IGN format')
+        return value
+
+    def validate_twitch_handle(self, value):
+        v = value.strip().lstrip('@')
+        if not TWITCH_HANDLE_RE.match(v):
+            raise serializers.ValidationError('invalid Twitch handle')
+        return v
+
+    def validate_twitch_url(self, value):
+        value = value.strip()
+        if not TWITCH_URL_RE.match(value):
+            raise serializers.ValidationError(
+                'must be a https://twitch.tv/<handle> URL')
+        return value
+
+    def validate_realm(self, value):
+        if not value:
+            return ''
+        v = value.strip().lower()
+        if v not in {'na', 'eu', 'asia'}:
+            raise serializers.ValidationError('invalid realm')
+        return v
+
+    def validate(self, attrs):
+        url_handle = attrs['twitch_url'].rstrip('/').rsplit('/', 1)[-1]
+        if url_handle.lower() != attrs['twitch_handle'].lower():
+            raise serializers.ValidationError(
+                'handle and URL handle must match')
+        return attrs
+
+    def create(self, validated):
+        validated.pop('website', None)
+        validated.pop('form_loaded_at', None)
+        request = self.context.get('request')
+        if request is not None:
+            validated['submitter_ip'] = request.META.get('REMOTE_ADDR')
+            validated['submitter_ua'] = (
+                request.META.get('HTTP_USER_AGENT') or '')[:300]
+        return super().create(validated)
 
 
 class PlayerSerializer(serializers.ModelSerializer):

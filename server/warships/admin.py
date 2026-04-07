@@ -1,5 +1,6 @@
 from django.contrib import admin
-from .models import Player, Ship, Clan, Snapshot, EntityVisitDaily, EntityVisitEvent
+from django.utils import timezone
+from .models import Player, Ship, Clan, Snapshot, EntityVisitDaily, EntityVisitEvent, StreamerSubmission
 
 
 @admin.register(Player)
@@ -30,6 +31,36 @@ class ClanAdmin(admin.ModelAdmin):
     list_display = ('name', 'tag', 'clan_id', 'members_count',
                     'last_lookup', 'last_fetch')
     list_filter = ('members_count',)
+
+
+@admin.register(StreamerSubmission)
+class StreamerSubmissionAdmin(admin.ModelAdmin):
+    list_display = ('ign', 'twitch_handle', 'realm', 'status',
+                    'created_at', 'submitter_ip')
+    list_filter = ('status', 'realm', 'created_at')
+    search_fields = ('ign', 'twitch_handle', 'twitch_url', 'submitter_ip')
+    readonly_fields = ('submitter_ip', 'submitter_ua', 'created_at')
+    actions = ('approve_selected', 'reject_selected')
+
+    def approve_selected(self, request, queryset):
+        # TODO: follow-up — promote Player.is_streamer = True and persist
+        # twitch_url. See runbook-streamer-submission-feature-2026-04-07.md.
+        updated = queryset.update(
+            status=StreamerSubmission.STATUS_APPROVED,
+            reviewed_at=timezone.now(),
+            reviewed_by=request.user,
+        )
+        self.message_user(request, f"{updated} submission(s) approved.")
+    approve_selected.short_description = "Approve selected submissions"
+
+    def reject_selected(self, request, queryset):
+        updated = queryset.update(
+            status=StreamerSubmission.STATUS_REJECTED,
+            reviewed_at=timezone.now(),
+            reviewed_by=request.user,
+        )
+        self.message_user(request, f"{updated} submission(s) rejected.")
+    reject_selected.short_description = "Reject selected submissions"
 
 
 @admin.register(EntityVisitEvent)

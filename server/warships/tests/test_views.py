@@ -4923,3 +4923,65 @@ class ApiThrottleTests(TestCase):
         self.assertTrue(cache.get(cache_key))
         mock_lookup.assert_called_once_with(
             "PlayerThatWillNeverExist", realm='na')
+
+
+class StreamerSubmissionViewTests(TestCase):
+    URL = '/api/streamer-submissions/'
+
+    def setUp(self):
+        cache.clear()
+
+    def _payload(self, **overrides):
+        payload = {
+            'ign': 'bfk_ferlyfe',
+            'realm': 'na',
+            'twitch_handle': 'bfk_fer1yfe',
+            'twitch_url': 'https://www.twitch.tv/bfk_fer1yfe',
+            'website': '',
+            'form_loaded_at': 1,  # ancient timestamp passes the > 2s gate
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_happy_path_creates_pending_submission(self):
+        from warships.models import StreamerSubmission
+        response = self.client.post(
+            self.URL, data=self._payload(), content_type='application/json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(StreamerSubmission.objects.count(), 1)
+        sub = StreamerSubmission.objects.first()
+        self.assertEqual(sub.status, StreamerSubmission.STATUS_PENDING)
+        self.assertEqual(sub.ign, 'bfk_ferlyfe')
+        self.assertEqual(sub.twitch_handle, 'bfk_fer1yfe')
+
+    def test_honeypot_trips(self):
+        from warships.models import StreamerSubmission
+        response = self.client.post(
+            self.URL,
+            data=self._payload(website='spamspam'),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(StreamerSubmission.objects.count(), 0)
+
+    def test_url_handle_mismatch_rejected(self):
+        from warships.models import StreamerSubmission
+        response = self.client.post(
+            self.URL,
+            data=self._payload(twitch_url='https://www.twitch.tv/someoneelse'),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(StreamerSubmission.objects.count(), 0)
+
+    def test_too_fast_submission_rejected(self):
+        import time as _time
+        from warships.models import StreamerSubmission
+        now_ms = int(_time.time() * 1000)
+        response = self.client.post(
+            self.URL,
+            data=self._payload(form_loaded_at=now_ms),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(StreamerSubmission.objects.count(), 0)
