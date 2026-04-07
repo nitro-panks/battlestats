@@ -27,15 +27,19 @@ Batch API optimisations
 """
 from __future__ import annotations
 
+import enum
 import logging
+import os
+import random
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import zip_longest
 
 from django.core.cache import cache
 from django.core.management.base import BaseCommand
 from django.db.models import F
+from django.utils import timezone
 
 from warships.models import DEFAULT_REALM, Player, Ship, VALID_REALMS
 
@@ -46,6 +50,20 @@ DEFAULT_MIN_PVP_BATTLES = 500
 DEFAULT_MIN_WR = 0.0
 DEFAULT_DELAY = 0.0
 BULK_API_BATCH_SIZE = 100  # max account_ids per WG API call
+
+# Health-check tunables (env-overridable)
+DQ_SAMPLE_EVERY_PASSES = int(os.environ.get("ENRICH_DQ_SAMPLE_EVERY_PASSES", "10"))
+DQ_SAMPLE_SIZE = int(os.environ.get("ENRICH_DQ_SAMPLE_SIZE", "20"))
+DQ_ENABLED = os.environ.get("ENRICH_DQ_ENABLED", "1") == "1"
+RATIO_GUARD_MIN = float(os.environ.get("ENRICH_RATIO_GUARD_MIN", "0.05"))
+RATIO_GUARD_MIN_SAMPLE = int(os.environ.get("ENRICH_RATIO_GUARD_MIN_SAMPLE", "50"))
+RATIO_GUARD_MAX_CONSECUTIVE = int(os.environ.get("ENRICH_RATIO_GUARD_MAX_CONSECUTIVE", "3"))
+
+
+class EnrichOutcome(enum.Enum):
+    ENRICHED = "enriched"   # real ship data written
+    EMPTY = "empty"         # marked battles_json=[] because WG returned no ships
+    SKIPPED = "skipped"     # transient failure, left eligible for retry
 
 
 def _prewarm_ship_cache() -> int:
@@ -107,31 +125,79 @@ def _interleave(na_rows, eu_rows):
 
 # ── Bulk API fetchers ────────────────────────────────────────
 
-def _bulk_fetch_ship_stats(player_ids: list[int], realm: str) -> dict:
-    """Fetch ships/stats for up to 100 players in one API call."""
-    from warships.api.client import make_api_request
+def _bulk_fetch_ship_stats(player_ids: list[int], realm: str) -> tuple[dict, str | None]:
+    """Fetch ships/stats for up to 100 players. Returns (data, error_code)."""
+    from warships.api.client import make_api_request_typed
     params = {"account_id": ",".join(str(pid) for pid in player_ids)}
     log.info("Bulk fetching ships/stats for %d players [%s]", len(player_ids), realm.upper())
-    data = make_api_request("ships/stats/", params, realm=realm)
-    return data if isinstance(data, dict) else {}
+    data, err = make_api_request_typed("ships/stats/", params, realm=realm)
+    return (data if isinstance(data, dict) else {}), err
 
 
-def _bulk_fetch_ranked_account_info(player_ids: list[int], realm: str) -> dict:
-    """Fetch seasons/accountinfo for up to 100 players in one API call."""
-    from warships.api.client import make_api_request
+def _bulk_fetch_ranked_account_info(player_ids: list[int], realm: str) -> tuple[dict, str | None]:
+    """Fetch seasons/accountinfo for up to 100 players. Returns (data, error_code)."""
+    from warships.api.client import make_api_request_typed
     params = {
         "account_id": ",".join(str(pid) for pid in player_ids),
         "fields": "rank_info",
     }
     log.info("Bulk fetching ranked info for %d players [%s]", len(player_ids), realm.upper())
-    data = make_api_request("seasons/accountinfo/", params, realm=realm)
-    return data if isinstance(data, dict) else {}
+    data, err = make_api_request_typed("seasons/accountinfo/", params, realm=realm)
+    return (data if isinstance(data, dict) else {}), err
+
+
+def _fetch_ranked_account_info_single(player_id: int, realm: str) -> dict | None:
+    """Per-player seasons/accountinfo fetch for poison-batch fallback."""
+    from warships.api.client import make_api_request
+    data = make_api_request(
+        "seasons/accountinfo/",
+        {"account_id": str(player_id), "fields": "rank_info"},
+        realm=realm,
+    )
+    if isinstance(data, dict):
+        return data.get(str(player_id))
+    return None
+
+
+def _per_player_ship_fallback(player_ids: list[int], realm: str) -> dict:
+    """Fallback: fetch ships/stats individually to isolate poison IDs."""
+    from warships.api.ships import _fetch_ship_stats_for_player
+    out: dict = {}
+    for pid in player_ids:
+        try:
+            r = _fetch_ship_stats_for_player(pid, realm=realm)
+            if r is not None:
+                out[str(pid)] = r
+            else:
+                out[str(pid)] = None  # explicit empty -> EMPTY outcome
+        except Exception:
+            log.warning("Per-player ship fallback failed for %s [%s]", pid, realm)
+            out[str(pid)] = "SKIP"  # sentinel: transient
+    return out
+
+
+def _per_player_rank_fallback(player_ids: list[int], realm: str) -> dict:
+    """Fallback: fetch seasons/accountinfo individually."""
+    out: dict = {}
+    for pid in player_ids:
+        try:
+            r = _fetch_ranked_account_info_single(pid, realm=realm)
+            out[str(pid)] = r
+        except Exception:
+            log.warning("Per-player rank fallback failed for %s [%s]", pid, realm)
+            out[str(pid)] = None
+    return out
 
 
 # ── Per-player processing (uses pre-fetched bulk data) ───────
 
 def _process_player_ship_data(player, ship_data_list):
-    """Process raw ship stats into battles_json, tiers_json, type_json, randoms_json."""
+    """Process raw ship stats. Returns (battles_rows, EnrichOutcome).
+
+    - ship_data_list is None  -> SKIPPED (transient, leave eligible)
+    - ship_data_list is []    -> EMPTY   (genuine no-ships, mark as checked)
+    - ship_data_list has rows -> ENRICHED
+    """
     from warships.api.ships import _fetch_ship_info
     from warships.data import (
         _build_ship_row_metadata,
@@ -139,14 +205,17 @@ def _process_player_ship_data(player, ship_data_list):
         _aggregate_battles_by_key,
     )
 
+    if ship_data_list is None:
+        return None, EnrichOutcome.SKIPPED
+
     if not ship_data_list:
-        # Droplet IP is whitelisted — empty response means player legitimately
-        # has no ship records. Mark as checked to remove from eligible pool.
+        # Empty list = WG confirmed the player has no ship records.
+        # Only write this when we TRUST the source (post-fallback).
         now = datetime.now()
         player.battles_json = []
         player.battles_updated_at = now
         player.save(update_fields=['battles_json', 'battles_updated_at'])
-        return []
+        return [], EnrichOutcome.EMPTY
 
     prepared_data = []
     for ship in ship_data_list:
@@ -216,7 +285,7 @@ def _process_player_ship_data(player, ship_data_list):
         'type_json', 'type_updated_at',
         'randoms_json', 'randoms_updated_at',
     ])
-    return battles_rows
+    return battles_rows, EnrichOutcome.ENRICHED
 
 
 def _process_player_ranked_data(player, rank_info, realm: str):
@@ -253,7 +322,11 @@ def _process_player_ranked_data(player, rank_info, realm: str):
 
 
 def _enrich_player_from_bulk(player_id, realm: str, ship_data_list, rank_account_data):
-    """Enrich a single player using pre-fetched bulk API data."""
+    """Enrich a single player using pre-fetched bulk API data.
+
+    Returns an EnrichOutcome so the caller can tally real enrichments
+    separately from empties (for health checks).
+    """
     from warships.data import (
         update_snapshot_data,
         refresh_player_explorer_summary,
@@ -263,7 +336,11 @@ def _enrich_player_from_bulk(player_id, realm: str, ship_data_list, rank_account
     player = Player.objects.get(player_id=player_id, realm=realm)
 
     # Process ship/battle data (no API call -- already bulk-fetched)
-    battles_rows = _process_player_ship_data(player, ship_data_list)
+    battles_rows, outcome = _process_player_ship_data(player, ship_data_list)
+
+    if outcome == EnrichOutcome.SKIPPED:
+        # Transient: don't touch snapshot/ranked/CB; next pass will retry.
+        return outcome
 
     # Ranked data (1 API call for ranked ship stats if player has ranked seasons)
     rank_info = rank_account_data.get('rank_info') if rank_account_data else None
@@ -274,13 +351,62 @@ def _enrich_player_from_bulk(player_id, realm: str, ship_data_list, rank_account
 
     # Explorer summary (no API calls)
     refresh_player_explorer_summary(
-        player, battles_rows=battles_rows, ranked_rows=ranked_rows)
+        player, battles_rows=battles_rows or [], ranked_rows=ranked_rows)
 
-    # Clan battle summary (2 API calls)
-    try:
-        fetch_player_clan_battle_seasons(int(player_id), realm=realm)
-    except Exception:
-        log.warning("CB data fetch failed for player_id=%s realm=%s", player_id, realm)
+    # Clan battle summary (2 API calls) -- only for enriched players
+    if outcome == EnrichOutcome.ENRICHED:
+        try:
+            fetch_player_clan_battle_seasons(int(player_id), realm=realm)
+        except Exception:
+            log.warning("CB data fetch failed for player_id=%s realm=%s", player_id, realm)
+
+    return outcome
+
+
+def _run_data_quality_sample() -> tuple[int, int, list[str]]:
+    """Sample recently-enriched players and validate structure.
+
+    Returns (passed, failed, messages).
+    """
+    cutoff = timezone.now() - timedelta(minutes=30)
+    qs = Player.objects.filter(
+        battles_updated_at__gte=cutoff,
+        battles_json__isnull=False,
+    ).exclude(battles_json=[])
+    ids = list(qs.values_list('player_id', flat=True)[:DQ_SAMPLE_SIZE * 5])
+    if not ids:
+        return 0, 0, ["no recent enrichments to sample"]
+    sample_ids = random.sample(ids, min(DQ_SAMPLE_SIZE, len(ids)))
+    sample = Player.objects.filter(player_id__in=sample_ids).only(
+        'player_id', 'name', 'battles_json', 'tiers_json', 'type_json', 'ranked_json')
+
+    passed = 0
+    failed = 0
+    messages: list[str] = []
+    for p in sample:
+        try:
+            bj = p.battles_json or []
+            if not isinstance(bj, list) or not bj:
+                raise ValueError("battles_json empty/non-list")
+            required_keys = {'ship_id', 'ship_name', 'ship_tier', 'pvp_battles', 'wins'}
+            for row in bj:
+                missing = required_keys - set(row.keys())
+                if missing:
+                    raise ValueError(f"battles row missing keys: {missing}")
+            # Tier sum cross-check
+            bj_sum = sum(int(r.get('pvp_battles', 0) or 0) for r in bj)
+            tj = p.tiers_json or []
+            tj_sum = sum(int(r.get('pvp_battles', 0) or 0) for r in tj)
+            if tj_sum != bj_sum:
+                raise ValueError(f"tier sum {tj_sum} != battles sum {bj_sum}")
+            # type_json present
+            if not isinstance(p.type_json, list) or not p.type_json:
+                raise ValueError("type_json empty/non-list")
+            passed += 1
+        except Exception as e:
+            failed += 1
+            messages.append(f"player_id={p.player_id} name={p.name}: {e}")
+    return passed, failed, messages
 
 
 # ── Legacy single-player enrichment (kept for Celery task compatibility) ──
@@ -350,8 +476,10 @@ def enrich_players(
 
     _prewarm_ship_cache()
 
-    enriched = 0
-    errors = 0
+    enriched = 0        # real ship-data writes
+    empty = 0           # marked battles_json=[]
+    skipped = 0         # transient failures, left eligible
+    errors = 0          # exceptions
     by_realm = {r: 0 for r in target_realms}
 
     # Group queue by realm for bulk API calls
@@ -371,8 +499,37 @@ def enrich_players(
                     _bulk_fetch_ship_stats, chunk_player_ids, realm)
                 rank_future = ex.submit(
                     _bulk_fetch_ranked_account_info, chunk_player_ids, realm)
-                bulk_ship_data = ship_future.result()
-                bulk_rank_data = rank_future.result()
+                bulk_ship_data, ship_err = ship_future.result()
+                bulk_rank_data, rank_err = rank_future.result()
+
+            # POISON-BATCH FALLBACK: WG rejects the whole batch if any ID
+            # is invalid. Fall back to per-player fetches ONLY for account
+            # errors (not transient 5xx/timeout) to isolate the bad ID.
+            if ship_err == "INVALID_ACCOUNT_ID":
+                log.warning(
+                    "Poison ship batch [%s] (%d players) — per-player fallback",
+                    realm.upper(), len(chunk_player_ids),
+                )
+                bulk_ship_data = _per_player_ship_fallback(chunk_player_ids, realm)
+            elif ship_err:
+                log.error(
+                    "Transient ship bulk error '%s' [%s] — skipping chunk",
+                    ship_err, realm.upper(),
+                )
+                skipped += len(chunk_player_ids)
+                continue
+
+            if rank_err == "INVALID_ACCOUNT_ID":
+                log.warning(
+                    "Poison rank batch [%s] — per-player fallback", realm.upper())
+                bulk_rank_data = _per_player_rank_fallback(chunk_player_ids, realm)
+            elif rank_err:
+                # Rank is secondary — log and proceed with empty rank data
+                log.warning(
+                    "Transient rank bulk error '%s' [%s] — proceeding without rank",
+                    rank_err, realm.upper(),
+                )
+                bulk_rank_data = {}
 
             # Process each player using pre-fetched data
             for player_id, name, wr, battles, _ in chunk:
@@ -381,17 +538,27 @@ def enrich_players(
 
                 pid_str = str(player_id)
                 ship_data_list = bulk_ship_data.get(pid_str)
+                # Fallback sentinel: transient per-player failure -> SKIP
+                if ship_data_list == "SKIP":
+                    skipped += 1
+                    continue
                 rank_account_data = bulk_rank_data.get(pid_str)
 
                 try:
-                    _enrich_player_from_bulk(
+                    outcome = _enrich_player_from_bulk(
                         player_id, realm, ship_data_list, rank_account_data)
-                    enriched += 1
-                    by_realm[realm] = by_realm.get(realm, 0) + 1
-                    log.info(
-                        "Enriched %s [%s] WR=%.1f%% battles=%d (%d/%d)",
-                        name, realm.upper(), wr, battles, enriched, len(queue),
-                    )
+                    if outcome == EnrichOutcome.ENRICHED:
+                        enriched += 1
+                        by_realm[realm] = by_realm.get(realm, 0) + 1
+                        log.info(
+                            "Enriched %s [%s] WR=%.1f%% battles=%d (e=%d emp=%d/%d)",
+                            name, realm.upper(), wr, battles,
+                            enriched, empty, len(queue),
+                        )
+                    elif outcome == EnrichOutcome.EMPTY:
+                        empty += 1
+                    else:
+                        skipped += 1
                 except Exception:
                     log.exception(
                         "Failed to enrich player_id=%s name=%s realm=%s",
@@ -404,6 +571,8 @@ def enrich_players(
     summary = {
         "status": "completed",
         "enriched": enriched,
+        "empty": empty,
+        "skipped": skipped,
         "errors": errors,
         "by_realm": by_realm,
         "candidates": total_candidates,
@@ -462,6 +631,8 @@ class Command(BaseCommand):
         continuous = options["continuous"]
         batch_pause = options["batch_pause"]
         batch_num = 0
+        consecutive_degraded = 0
+        consecutive_dq_failures = 0
 
         while True:
             batch_num += 1
@@ -483,12 +654,50 @@ class Command(BaseCommand):
             for key, val in summary.items():
                 self.stdout.write(f"  {key}: {val}")
 
+            # ── Ratio guard: catch any future silent-empty regressions ──
+            pass_real = summary.get("enriched", 0)
+            pass_empty = summary.get("empty", 0)
+            total = pass_real + pass_empty
+            if total >= RATIO_GUARD_MIN_SAMPLE:
+                ratio = pass_real / total
+                if ratio < RATIO_GUARD_MIN:
+                    log.error(
+                        "RATIO GUARD: real=%d empty=%d ratio=%.2f%% < %.1f%% floor",
+                        pass_real, pass_empty, ratio * 100, RATIO_GUARD_MIN * 100,
+                    )
+                    consecutive_degraded += 1
+                    if consecutive_degraded >= RATIO_GUARD_MAX_CONSECUTIVE:
+                        raise RuntimeError(
+                            f"Enrichment aborted: {consecutive_degraded} consecutive "
+                            f"degraded passes (real/empty ratio below "
+                            f"{RATIO_GUARD_MIN * 100:.0f}%)"
+                        )
+                else:
+                    consecutive_degraded = 0
+
+            # ── Data-quality sampling ──
+            if DQ_ENABLED and batch_num % DQ_SAMPLE_EVERY_PASSES == 0:
+                passed, failed, msgs = _run_data_quality_sample()
+                log.info(
+                    "DQ sample (batch %d): passed=%d failed=%d", batch_num, passed, failed)
+                if failed > 0:
+                    for m in msgs:
+                        log.error("DQ FAIL: %s", m)
+                    consecutive_dq_failures += 1
+                    if consecutive_dq_failures >= 3:
+                        raise RuntimeError(
+                            f"Enrichment aborted: {consecutive_dq_failures} consecutive "
+                            f"failed data-quality samples"
+                        )
+                else:
+                    consecutive_dq_failures = 0
+
             if not continuous:
                 break
 
-            if summary.get("enriched", 0) == 0:
+            if total == 0 and summary.get("skipped", 0) == 0:
                 self.stdout.write(self.style.SUCCESS(
-                    f"\nNo players enriched in batch {batch_num} -- all caught up."
+                    f"\nNo players processed in batch {batch_num} -- all caught up."
                 ))
                 break
 

@@ -119,3 +119,49 @@ def make_api_request_with_meta(endpoint: str, params: Dict[str, Any], realm: str
         "data": payload.get("data"),
         "meta": payload.get("meta") or {},
     }
+
+
+def make_api_request_typed(endpoint: str, params: Dict[str, Any], realm: str = DEFAULT_REALM):
+    """Like make_api_request but returns (data, error_code).
+
+    error_code is:
+      - None on success
+      - The WG error message string (e.g. "INVALID_ACCOUNT_ID") on API-level error
+      - "TRANSPORT_ERROR" on HTTP/network/JSON failure
+    Callers can use the error_code to distinguish poison-batch failures from
+    transient failures and respond accordingly.
+    """
+    if not APP_ID:
+        logger.error("WG_APP_ID environment variable is not set")
+        return None, "TRANSPORT_ERROR"
+
+    clean_endpoint = endpoint.lstrip("/")
+    clean_params = {key: value for key, value in params.items() if value is not None}
+    clean_params.setdefault("application_id", APP_ID)
+    base_url = get_base_url(realm)
+
+    try:
+        response = _get_session().get(
+            base_url + clean_endpoint,
+            params=clean_params,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as error:
+        logger.error("HTTP request failed for endpoint '%s': %s", clean_endpoint, error)
+        return None, "TRANSPORT_ERROR"
+    except ValueError as error:
+        logger.error("Invalid JSON from endpoint '%s': %s", clean_endpoint, error)
+        return None, "TRANSPORT_ERROR"
+
+    if not isinstance(payload, dict):
+        logger.error("Unexpected non-dict API response for endpoint '%s'", clean_endpoint)
+        return None, "TRANSPORT_ERROR"
+
+    if payload.get("status") != "ok":
+        err = (payload.get("error") or {}).get("message") or "UNKNOWN_ERROR"
+        logger.error("Error in response for endpoint '%s': %s", clean_endpoint, payload)
+        return None, err
+
+    return payload.get("data"), None
