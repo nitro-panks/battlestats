@@ -2,6 +2,7 @@
 
 _Created: 2026-04-05_
 _Status: **Ready to execute** — code changes complete, awaiting commit + deploy_
+_Updated: 2026-04-08 — **DO Functions enrichment reverted.** Wherever this runbook says "deploy the DO Function" or "set `ENRICH_REALMS=asia` in `functions/.env`", instead set `ENRICH_REALMS=asia` on the droplet (`/etc/battlestats-server.env`), restart `battlestats-celery-background`, and dispatch `enrich_player_data_task` via Django shell. The `player-enrichment-kickstart` Beat schedule will keep it self-chaining. See `archive/spec-serverless-background-workers-2026-04-04.md` for the post-mortem._
 
 ## Purpose
 

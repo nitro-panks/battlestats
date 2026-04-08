@@ -1,11 +1,20 @@
 # Runbook: Enrichment Crawler Progress Log
 
 Created: 2026-04-03
-Status: **Active** — enrichment now runs via DO Functions cron; this runbook tracks the migration handoff and live progress while the broader background-worker migration remains in progress
+Status: **Active** — enrichment runs on the droplet's Celery `background` worker via `warships.tasks.enrich_player_data_task`, re-seeded by the `player-enrichment-kickstart` Beat schedule. This runbook tracks the live progress of the enrichment pass.
+
+## 2026-04-08 — Reverted from DO Functions
+
+The migration to `functions/enrichment/enrich-batch` was reverted. DO Functions egress from a rotating IP pool that cannot be whitelisted by the Wargaming `application_id`, so every invocation failed with `407 INVALID_IP_ADDRESS`. Silent degradation ran from 2026-04-06 05:00 UTC to 2026-04-08 03:00 UTC. See `archive/spec-serverless-background-workers-2026-04-04.md` for the post-mortem. The crawler is now back on the droplet (where the throughput in batches 6–47 below originally came from) and resumed via `enrich_player_data_task.apply_async(queue='background')` followed by the Beat kickstart.
+
+**Secondary incident during recovery:** the post-revert `deploy_to_droplet.sh` run left the `battlestats-celery-background` worker booted against an `/etc/battlestats-server.env` snapshot missing `CELERY_BROKER_URL`. The worker fell through to a broken `settings.py` fallback default (`amqp://rabbitmq:5672//` — the docker-compose service hostname, unreachable on the droplet) and entered an infinite DNS-failure reconnect loop. Fixed by a manual `systemctl restart battlestats-celery-background` after the env file was finalized. Two hardening changes landed in the same commit as this note:
+
+1. `server/battlestats/settings.py` — `CELERY_BROKER_URL` now raises `ImproperlyConfigured` when unset in production (non-docker, non-debug, non-test), so a misconfigured worker fails fast instead of looping silently. Docker default is explicit; local dev default is `localhost`.
+2. `server/deploy/deploy_to_droplet.sh` — (a) stops all app services at the top of the remote block before any env mutation (eliminates the inode-race between `sed -i` and systemd's `EnvironmentFile` reads), and (b) extends `verify_broker_connection` to read `/proc/<pid>/environ` for each celery worker and fail the deploy if `CELERY_BROKER_URL` is missing. This is the canary that would have caught the original incident at deploy time.
 
 ## Purpose
 
-Track the progress of the enrichment pass and its migration from the Celery background worker to the DigitalOcean Function `enrichment/enrich-batch`, which populates `PlayerExplorerSummary` rows with efficiency rank, ranked league, clan battle stats, and other derived metrics for the full player population.
+Track the progress of the enrichment pass, which populates `PlayerExplorerSummary` rows with efficiency rank, ranked league, clan battle stats, and other derived metrics for the full player population.
 
 ## Crawler Configuration
 

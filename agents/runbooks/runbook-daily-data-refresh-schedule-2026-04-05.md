@@ -1,6 +1,7 @@
 # Runbook: Daily Data Refresh Schedule
 
 _Created: 2026-04-05_
+_Updated: 2026-04-08 — **DO Functions enrichment reverted.** All references to `enrichment/enrich-batch` and the `functions/` runtime below are historical. Enrichment runs on the droplet's Celery `background` worker via `warships.tasks.enrich_player_data_task`, kickstarted every 15 min by the `player-enrichment-kickstart` Beat schedule. Reason: DO Functions egress IPs cannot be whitelisted by Wargaming's `application_id`. See `archive/spec-serverless-background-workers-2026-04-04.md` for the post-mortem. The field mapping, candidate queries, and throughput targets in this runbook are still valid; only the runtime has changed._
 
 ## Purpose
 

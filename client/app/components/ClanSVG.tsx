@@ -378,7 +378,7 @@ const drawClanPlot = (
         .attr('cx', 0)
         .attr('cy', 0)
         .attr('class', (datum: ClanPlotPoint) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase() ? 'clan-player-dot' : null)
-        .attr('r', 6.2)
+        .attr('r', 4.65)
         .style('stroke', colors.axisLine)
         .style('stroke-width', 1.25)
         .style('cursor', onSelectMember ? 'pointer' : 'default')
@@ -422,9 +422,9 @@ const drawClanPlot = (
             })
             .attr('r', (datum: ClanPlotPoint) => {
                 if (!hoveredBucket) {
-                    return 6.2;
+                    return 4.65;
                 }
-                return datum.activity_bucket === hoveredBucket ? 7.0 : 4.7;
+                return datum.activity_bucket === hoveredBucket ? 5.25 : 3.525;
             });
 
         points
@@ -462,13 +462,17 @@ const drawClanPlot = (
             .attr('stroke-linecap', 'round')
             .style('pointer-events', 'none');
 
-        const A = 14;
-        const B = 10;
+        const A = 10.5;
+        const B = 7.5;
         const a = 3;
         const b = 2;
         const delta = Math.PI / 2;
-        const speed = 0.0012;
+        const speed = 0.0009;
         const trailPoints = 220;
+        // ROYGBIV palette for slow color cycling on the orbit dot
+        const roygbiv = ['#ff0000', '#ff7f00', '#ffff00', '#00ff00', '#0000ff', '#4b0082', '#9400d3'];
+        const colorInterp = d3.interpolateRgbBasisClosed(roygbiv);
+        const colorCycleSpeed = 0.00012;
 
         const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -481,7 +485,10 @@ const drawClanPlot = (
                 const cx = A * Math.sin(a * t + delta);
                 const cy = B * Math.sin(b * t);
 
-                orbitDot.attr('cx', cx).attr('cy', cy);
+                const hueT = ((now - startTime) * colorCycleSpeed) % 1;
+                const orbitColor = colorInterp(hueT);
+                orbitDot.attr('cx', cx).attr('cy', cy).attr('fill', orbitColor);
+                orbitTrail.attr('stroke', orbitColor);
 
                 trail.push([cx, cy]);
                 if (trail.length > trailPoints) trail.shift();

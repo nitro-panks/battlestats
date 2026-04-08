@@ -311,9 +311,17 @@ describe('PlayerSearch landing efficiency icon', () => {
         jest.useRealTimers();
     });
 
-    const getClanRecentButton = async () => (await screen.findAllByRole('button', { name: 'Recent' }))[0];
-    const getPlayerRandomButton = async () => (await screen.findAllByRole('button', { name: 'Random' }))[1];
-    const getPlayerRecentButton = async () => (await screen.findAllByRole('button', { name: 'Recent' }))[1];
+    const getClanModeToolbar = async () => {
+        const heading = await screen.findByRole('heading', { name: 'Active Clans' });
+        return heading.parentElement as HTMLElement;
+    };
+    const getPlayerModeToolbar = async () => {
+        const heading = await screen.findByRole('heading', { name: 'Active Players' });
+        return heading.parentElement as HTMLElement;
+    };
+    const getClanRecentButton = async () => within(await getClanModeToolbar()).getByRole('button', { name: 'Recent' });
+    const getPlayerRandomButton = async () => within(await getPlayerModeToolbar()).getByRole('button', { name: 'Random' });
+    const getPlayerRecentButton = async () => within(await getPlayerModeToolbar()).getByRole('button', { name: 'Recent' });
 
     it('renders the sigma only for Expert landing rows while preserving existing landing icons', async () => {
         render(<PlayerSearch />);
@@ -348,6 +356,18 @@ describe('PlayerSearch landing efficiency icon', () => {
         });
 
         expect(screen.getByTestId('player-best-sort-bar')).toHaveAttribute('aria-hidden', 'false');
+        expect(screen.queryByRole('button', { name: 'ABS' })).not.toBeInTheDocument();
+    });
+
+    it('renders only the supported best-sort controls for players and clans', async () => {
+        render(<PlayerSearch />);
+
+        await screen.findByTestId('player-best-sort-bar');
+        await screen.findByTestId('clan-best-sort-bar');
+
+        expect(within(screen.getByTestId('player-best-sort-bar')).queryByRole('button', { name: 'ABS' })).not.toBeInTheDocument();
+        expect(within(screen.getByTestId('clan-best-sort-bar')).queryByRole('button', { name: 'ABS' })).not.toBeInTheDocument();
+        expect(within(screen.getByTestId('clan-best-sort-bar')).queryByRole('button', { name: 'CB' })).not.toBeInTheDocument();
     });
 
     it('moves Efficiency under Best and switches the landing request to the efficiency sub-sort', async () => {
@@ -455,11 +475,12 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         render(<PlayerSearch />);
 
-        const playerBestButton = (await screen.findAllByRole('button', { name: 'Best' }))[1];
-        const playerRandomButton = (await screen.findAllByRole('button', { name: 'Random' }))[1];
-        const recentButton = await getPlayerRecentButton();
-        expect(playerBestButton.compareDocumentPosition(playerRandomButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(playerRandomButton.compareDocumentPosition(recentButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        const playerToolbar = within(await getPlayerModeToolbar());
+        const modeButtons = playerToolbar
+            .getAllByRole('button')
+            .filter((button) => ['Best', 'Random', 'Recent'].includes(button.textContent?.trim() || ''));
+        const recentButton = playerToolbar.getByRole('button', { name: 'Recent' });
+        expect(modeButtons.map((button) => button.textContent?.trim())).toEqual(['Best', 'Random', 'Recent']);
 
         fireEvent.click(recentButton);
 
@@ -518,7 +539,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         render(<PlayerSearch />);
 
-        const bestClanButton = (await screen.findAllByRole('button', { name: 'Best' }))[0];
+        const bestClanButton = within(await getClanModeToolbar()).getByRole('button', { name: 'Best' });
         fireEvent.click(bestClanButton);
 
         expect(await screen.findByText(/Best clan rankings are still warming up for this realm\./i)).toBeInTheDocument();
@@ -638,7 +659,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         render(<PlayerSearch />);
 
-        fireEvent.click((await screen.findAllByRole('button', { name: 'Best' }))[0]);
+        fireEvent.click(within(await getClanModeToolbar()).getByRole('button', { name: 'Best' }));
 
         await waitFor(() => {
             const clanButtons = screen.getAllByRole('button', { name: /Show clan /i });
@@ -698,10 +719,6 @@ describe('PlayerSearch landing efficiency icon', () => {
                 wr: [
                     { clan_id: 811, name: 'WR First', tag: 'WR1', members_count: 40, clan_wr: 63.0, total_battles: 165000, active_members: 14, avg_cb_wr: 70.0 },
                     { clan_id: 812, name: 'WR Second', tag: 'WR2', members_count: 40, clan_wr: 61.0, total_battles: 150000, active_members: 13, avg_cb_wr: 66.0 },
-                ],
-                cb: [
-                    { clan_id: 821, name: 'CB First', tag: 'CB1', members_count: 40, clan_wr: 54.0, total_battles: 160000, active_members: 18, avg_cb_battles: 80, avg_cb_wr: 65.0 },
-                    { clan_id: 822, name: 'CB Second', tag: 'CB2', members_count: 40, clan_wr: 53.0, total_battles: 155000, active_members: 17, avg_cb_battles: 72, avg_cb_wr: 62.0 },
                 ],
             },
         });
@@ -912,6 +929,7 @@ describe('PlayerSearch landing efficiency icon', () => {
         });
 
         expect(screen.getByText(/Best ≈ \(0\.40·WR_5-10 \+ 0\.22·Score \+ 0\.18·Eff \+ 0\.10·Vol_5-10 \+ 0\.06·Ranked \+ 0\.04·Clan\) × M_share/i)).toBeInTheDocument();
+        expect(screen.queryByText(/^ABS$/i)).not.toBeInTheDocument();
         expect(screen.queryByText(/Current random cache refreshes in about/i)).not.toBeInTheDocument();
         expect(infoButton).toBeInTheDocument();
     });
@@ -924,6 +942,7 @@ describe('PlayerSearch landing efficiency icon', () => {
         });
 
         expect(screen.getByText(/Overall ≈ 0\.30·WR \+ 0\.25·Activity \+ 0\.20·MemberScore \+ 0\.15·CB \+ 0\.10·log\(Battles\)/i)).toBeInTheDocument();
+        expect(screen.queryByText(/^ABS$/i)).not.toBeInTheDocument();
         expect(screen.queryByText(/Current clan cache refreshes in about/i)).not.toBeInTheDocument();
         expect(infoButton).toBeInTheDocument();
     });

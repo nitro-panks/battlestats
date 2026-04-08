@@ -246,8 +246,27 @@ logging.config.dictConfig({
 
 
 # Celery settings
-CELERY_BROKER_URL = os.getenv(
-    'CELERY_BROKER_URL', 'amqp://rabbitmq:5672//')
+#
+# Broker URL resolution is deliberately strict. In production (non-docker,
+# non-debug, non-test) a missing CELERY_BROKER_URL must raise — silently
+# falling back to a docker-compose service hostname caused a multi-hour
+# enrichment outage on 2026-04-08 when a celery worker booted against an
+# EnvironmentFile that was missing the variable and then entered an infinite
+# DNS-failure reconnect loop. Fail fast so systemd marks the unit failed and
+# the deploy's verify_broker_connection step catches it.
+_running_tests = 'test' in sys.argv or 'pytest' in sys.argv[0]
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL')
+if not CELERY_BROKER_URL:
+    if is_docker:
+        CELERY_BROKER_URL = 'amqp://guest:guest@rabbitmq:5672//'
+    elif DEBUG or _running_tests:
+        CELERY_BROKER_URL = 'amqp://guest:guest@localhost:5672//'
+    else:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured(
+            "CELERY_BROKER_URL must be set in production "
+            "(non-docker, DJANGO_DEBUG=False)."
+        )
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'rpc://')
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BROKER_POOL_LIMIT = int(os.getenv('CELERY_BROKER_POOL_LIMIT', '10'))

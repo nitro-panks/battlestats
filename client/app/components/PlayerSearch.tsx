@@ -184,9 +184,9 @@ const SHOW_PLAYER_EXPLORER = false;
 const LANDING_FETCH_TTL_MS = 1500;
 
 type LandingClanMode = 'random' | 'best' | 'recent';
-type ClanBestSort = 'overall' | 'wr' | 'abs' | 'cb';
+type ClanBestSort = 'overall' | 'wr';
 type LandingPlayerMode = 'best' | 'random' | 'recent';
-type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'abs' | 'cb';
+type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
 
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 
@@ -194,12 +194,9 @@ const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18
 const PLAYER_BEST_RANKED_FORMULA_APPROXIMATION = 'Ranked ≈ Gold medals, then Ranked WR, then Silver medals, then Bronze medals';
 const PLAYER_BEST_EFFICIENCY_FORMULA_APPROXIMATION = 'Efficiency ≈ published efficiency percentile, then Score, then WR';
 const PLAYER_BEST_WR_FORMULA_APPROXIMATION = 'WR ≈ WR_5-10, then Battles_5-10, then Score, then Eff';
-const PLAYER_BEST_ABS_FORMULA_APPROXIMATION = 'ABS ≈ overall pvp_wins / pvp_battles, then total PvP battles';
 const PLAYER_BEST_CB_FORMULA_APPROXIMATION = 'CB ≈ 0.55·CB_WR + 0.25·CB_Volume + 0.20·CB_Seasons';
 const CLAN_BEST_OVERALL_FORMULA_APPROXIMATION = 'Overall ≈ 0.30·WR + 0.25·Activity + 0.20·MemberScore + 0.15·CB + 0.10·log(Battles)';
 const CLAN_BEST_WR_FORMULA_APPROXIMATION = 'WR ≈ WR + 0.40·max(CB_WR - WR, 0)·min(CB_battles/200, 1)·min(Active/25, 1)·min(MemberScore/6, 1)';
-const CLAN_BEST_ABS_FORMULA_APPROXIMATION = 'ABS ≈ cached clan WR, then total battles';
-const CLAN_BEST_CB_FORMULA_APPROXIMATION = 'CB ≈ average(last 10 completed season WR × min(season battles/30, 1) × min(season participants/clan members, 1); skipped seasons = 0)';
 const BEST_CLAN_FALLBACK_NOTICE = 'Best clan rankings are still warming up for this realm. Showing recent clans until enough tracked data is available.';
 
 const PlayerSearch: React.FC = () => {
@@ -524,7 +521,7 @@ const PlayerSearch: React.FC = () => {
                                     aria-hidden={!showPlayerBestSortBar}
                                     data-testid="player-best-sort-bar"
                                 >
-                                    {(['overall', 'ranked', 'efficiency', 'wr', 'abs', 'cb'] as const).map((sort, i) => (
+                                    {(['overall', 'ranked', 'efficiency', 'wr', 'cb'] as const).map((sort, i) => (
                                         <React.Fragment key={sort}>
                                             {i > 0 && <span className="text-xs text-[var(--text-secondary)]">&middot;</span>}
                                             <button
@@ -534,7 +531,7 @@ const PlayerSearch: React.FC = () => {
                                                 tabIndex={showPlayerBestSortBar ? 0 : -1}
                                                 className={`text-sm font-medium transition-colors disabled:cursor-default ${playerBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
                                             >
-                                                {sort === 'overall' ? 'Overall' : sort === 'ranked' ? 'Ranked' : sort === 'efficiency' ? 'Efficiency' : sort === 'wr' ? 'WR' : sort === 'abs' ? 'ABS' : 'CB'}
+                                                {sort === 'overall' ? 'Overall' : sort === 'ranked' ? 'Ranked' : sort === 'efficiency' ? 'Efficiency' : sort === 'wr' ? 'WR' : 'CB'}
                                             </button>
                                         </React.Fragment>
                                     ))}
@@ -565,11 +562,6 @@ const PlayerSearch: React.FC = () => {
                                                 <div>
                                                     <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">WR</p>
                                                     <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{PLAYER_BEST_WR_FORMULA_APPROXIMATION}</p>
-                                                </div>
-                                                <div>
-                                                    <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">ABS</p>
-                                                    <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{PLAYER_BEST_ABS_FORMULA_APPROXIMATION}</p>
-                                                    <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">Absolute best — pure overall win rate with no penalties. Only sanity floor is &ge;100 PvP battles. Includes inactive accounts and players with low high-tier volume that the WR sort filters out.</p>
                                                 </div>
                                                 <div>
                                                     <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">CB</p>
@@ -631,7 +623,7 @@ const PlayerSearch: React.FC = () => {
                                     aria-hidden={!showClanBestSortBar}
                                     data-testid="clan-best-sort-bar"
                                 >
-                                    {(['overall', 'wr', 'abs'] as const).map((sort, i) => (
+                                    {(['overall', 'wr'] as const).map((sort, i) => (
                                         <React.Fragment key={sort}>
                                             {i > 0 && <span className="text-xs text-[var(--text-secondary)]">&middot;</span>}
                                             <button
@@ -641,42 +633,35 @@ const PlayerSearch: React.FC = () => {
                                                 tabIndex={showClanBestSortBar ? 0 : -1}
                                                 className={`text-sm font-medium transition-colors disabled:cursor-default ${clanBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
                                             >
-                                                {sort === 'overall' ? 'Overall' : sort === 'wr' ? 'WR' : 'ABS'}
+                                                {sort === 'overall' ? 'Overall' : 'WR'}
                                             </button>
-                                            {sort === 'abs' ? (
-                                                <div className="group relative inline-flex items-center">
-                                                    <button
-                                                        type="button"
-                                                        className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-[var(--accent-light)] transition-colors hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
-                                                        aria-label="Clan ranking formula details"
-                                                    >
-                                                        <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
-                                                    </button>
-                                                    <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
-                                                        <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Clan ranking approximations</p>
-                                                        <p className="mt-2 leading-5 text-[var(--text-secondary)]">
-                                                            Overall and WR require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. ABS keeps only lighter sanity floors.
-                                                        </p>
-                                                        <div className="mt-3 space-y-3">
-                                                            <div>
-                                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Overall</p>
-                                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_OVERALL_FORMULA_APPROXIMATION}</p>
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">WR</p>
-                                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_WR_FORMULA_APPROXIMATION}</p>
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">ABS</p>
-                                                                <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_ABS_FORMULA_APPROXIMATION}</p>
-                                                                <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">Absolute best — pure clan WR with no CB lift, no activity / member-score gates. Sanity floors are &ge;10 members and &ge;1,000 total clan battles.</p>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ) : null}
                                         </React.Fragment>
                                     ))}
+                                    <div className="group relative inline-flex items-center">
+                                        <button
+                                            type="button"
+                                            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-[var(--accent-light)] transition-colors hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
+                                            aria-label="Clan ranking formula details"
+                                        >
+                                            <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
+                                        </button>
+                                        <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
+                                            <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Clan ranking approximations</p>
+                                            <p className="mt-2 leading-5 text-[var(--text-secondary)]">
+                                                Overall and WR require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. The WR view may add a qualified clan-battle lift only when CB performance is backed by enough volume, active members, and member quality.
+                                            </p>
+                                            <div className="mt-3 space-y-3">
+                                                <div>
+                                                    <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Overall</p>
+                                                    <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_OVERALL_FORMULA_APPROXIMATION}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">WR</p>
+                                                    <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_WR_FORMULA_APPROXIMATION}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div className="mt-3">

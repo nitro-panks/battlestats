@@ -671,6 +671,35 @@
                 "plan-superseded"
             ]
         },
+        "agents/runbooks/runbook-abs-deprecation-2026-04-07.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "platform",
+            "aliases": [
+                "abs deprecation",
+                "remove abs",
+                "abs retirement",
+                "abs removal plan",
+                "remove clan cb sort",
+                "clan cb deprecation"
+            ],
+            "tags": [
+                "landing",
+                "best sorts",
+                "abs",
+                "clan cb",
+                "deprecation",
+                "cache cleanup",
+                "snapshot cleanup"
+            ],
+            "archive_on": [
+                "abs-removed",
+                "clan-cb-removed",
+                "deprecation-complete"
+            ]
+        },
         "agents/runbooks/runbook-streamer-twitch-icon-2026-04-07.md": {
             "kind": "runbook",
             "status": "active",
@@ -1434,6 +1463,219 @@
             "archive_on": [
                 "endpoint-retired",
                 "contract-replaced"
+            ]
+        },
+        "agents/runbooks/archive/runbook-abs-best-sort-2026-04-07.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "feature-recovery",
+            "owner": "platform",
+            "aliases": [
+                "abs sort",
+                "absolute best sort",
+                "pure wr sort"
+            ],
+            "tags": [
+                "landing",
+                "best players",
+                "best clans",
+                "abs",
+                "sort",
+                "ranking"
+            ],
+            "archive_on": [
+                "abs-removed",
+                "sort-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-daily-data-refresh-schedule-2026-04-05.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "data",
+            "aliases": [
+                "daily refresh schedule",
+                "data refresh cadence",
+                "refresh schedule"
+            ],
+            "tags": [
+                "refresh",
+                "schedule",
+                "enrichment",
+                "do functions",
+                "periodic tasks",
+                "multi realm"
+            ],
+            "archive_on": [
+                "schedule-replaced",
+                "refresh-strategy-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-enrichment-crawler-2026-04-03.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "data",
+            "aliases": [
+                "enrichment crawler",
+                "enrichment progress log",
+                "do functions enrichment"
+            ],
+            "tags": [
+                "crawler",
+                "enrichment",
+                "do functions",
+                "progress log",
+                "backfill",
+                "player explorer"
+            ],
+            "archive_on": [
+                "enrichment-stable",
+                "crawler-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-landing-best-player-subsort-materialization-2026-04-05.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "best player subsort materialization",
+                "landing best player snapshot",
+                "best player daily snapshot"
+            ],
+            "tags": [
+                "landing",
+                "best players",
+                "subsort",
+                "materialization",
+                "cache",
+                "snapshot"
+            ],
+            "archive_on": [
+                "materialization-stable",
+                "subsort-system-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-security-audit-2026-04-05.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "platform",
+            "aliases": [
+                "security audit",
+                "wapiti audit",
+                "security findings"
+            ],
+            "tags": [
+                "security",
+                "audit",
+                "wapiti",
+                "nginx",
+                "headers",
+                "remediation"
+            ],
+            "archive_on": [
+                "audit-remediated",
+                "audit-superseded"
+            ]
+        },
+        "agents/runbooks/runbook-streamer-submission-feature-2026-04-07.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "frontend",
+            "aliases": [
+                "streamer submission",
+                "streamer queue",
+                "twitch submission"
+            ],
+            "tags": [
+                "streamer",
+                "submission",
+                "moderation",
+                "admin",
+                "footer modal",
+                "feature"
+            ],
+            "archive_on": [
+                "feature-shipped",
+                "approval-side-promoted"
+            ]
+        },
+        "agents/runbooks/spec-best-clan-subfilters.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "data",
+            "aliases": [
+                "best clan subfilters",
+                "best clan sub sorts",
+                "best clan modes"
+            ],
+            "tags": [
+                "landing",
+                "best clans",
+                "subfilters",
+                "ranking",
+                "spec"
+            ],
+            "archive_on": [
+                "feature-shipped",
+                "spec-superseded"
+            ]
+        },
+        "agents/runbooks/spec-best-player-subfilters.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "data",
+            "aliases": [
+                "best player subfilters",
+                "best player sub sorts",
+                "best player modes"
+            ],
+            "tags": [
+                "landing",
+                "best players",
+                "subfilters",
+                "ranking",
+                "spec"
+            ],
+            "archive_on": [
+                "feature-shipped",
+                "spec-superseded"
+            ]
+        },
+        "agents/runbooks/spec-cb-seasons-chart-redesign-2026-04-05.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "frontend",
+            "aliases": [
+                "cb seasons chart redesign",
+                "clan battle seasons chart redesign"
+            ],
+            "tags": [
+                "clan battles",
+                "chart",
+                "redesign",
+                "d3",
+                "frontend",
+                "spec"
+            ],
+            "archive_on": [
+                "redesign-shipped",
+                "chart-design-replaced"
             ]
         },
         "agents/contracts/upstream/wows-ships-badges.yaml": {

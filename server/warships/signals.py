@@ -17,12 +17,15 @@ def _configured_clan_battle_warm_ids():
     return [clan_id.strip() for clan_id in raw_value.split(",") if clan_id.strip()]
 
 
-# Tasks migrated to DO Functions (no longer registered as Celery Beat schedules):
-#   - daily-clan-crawl-{realm}        → Functions Phase 2
-#   - clan-crawl-watchdog-{realm}     → Functions Phase 2
-#   - player-enrichment-kickstart     → Functions enrichment/enrich-batch
-#   - incremental-player-refresh-*    → Functions Phase 2
-#   - daily-ranked-incrementals-*     → Functions Phase 2
+# Retired schedule names — removed from Celery Beat on next post_migrate.
+# Kept as a deletion list so stale PeriodicTask rows are cleaned up across deploys.
+#
+# Historical note: the DO Functions migration (2026-04-04) removed several of
+# these tasks in favor of serverless workers. The enrichment portion of that
+# migration was reverted on 2026-04-08 because DO Functions' rotating egress
+# IPs cannot be whitelisted by the Wargaming application_id — every call
+# returned 407 INVALID_IP_ADDRESS. Enrichment is back on this worker via
+# `player-enrichment-kickstart` below. The remaining names here stay retired.
 _RETIRED_SCHEDULE_NAMES = [
     "daily-clan-crawl",
     "daily-clan-crawl-eu",
@@ -30,7 +33,6 @@ _RETIRED_SCHEDULE_NAMES = [
     "clan-crawl-watchdog",
     "clan-crawl-watchdog-eu",
     "clan-crawl-watchdog-na",
-    "player-enrichment-kickstart",
     "daily-player-enrichment",
     "player-enrichment",
     "incremental-player-refresh-am",
@@ -228,6 +230,30 @@ def register_periodic_schedules(sender, **kwargs):
         )
 
     PeriodicTask.objects.filter(name="recently-viewed-player-warmer").delete()
+
+    # -- Player Enrichment Kickstart --
+    # The enrichment task self-chains between batches via apply_async(countdown=10s),
+    # so this periodic task only exists to re-seed the chain if it ever stops (worker
+    # restart, cleared lock, purged queue). The task itself checks its Redis lock and
+    # returns immediately with {'status': 'skipped', 'reason': 'already-running'} when
+    # a batch is in progress, so a frequent interval is safe and cheap.
+    enrich_kickstart_minutes = int(
+        os.getenv("ENRICH_KICKSTART_MINUTES", "15"))
+    enrich_kickstart_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=enrich_kickstart_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+    PeriodicTask.objects.update_or_create(
+        name="player-enrichment-kickstart",
+        defaults={
+            "task": "warships.tasks.enrich_player_data_task",
+            "interval": enrich_kickstart_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Periodically re-seeds the self-chaining player enrichment crawler. No-op if a batch is already running.",
+        },
+    )
 
     # -- Daily Clan Tier Distribution Warmer --
     # Recalculates tier distribution cache for every clan with members.

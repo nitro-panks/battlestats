@@ -119,6 +119,15 @@ ssh "${DEPLOY_USER}@${HOST}" \
   'bash -s' <<'REMOTE'
 set -euo pipefail
 
+# Stop-first barrier: no app services may be running while /etc/battlestats-server.env
+# is being mutated below. `set_env_value` uses `sed -i`, which replaces the file inode,
+# and `configure_local_rabbitmq` rotates the broker password and restarts rabbitmq-server
+# mid-script. On 2026-04-08 a celery worker booted against an EnvironmentFile snapshot
+# that was missing CELERY_BROKER_URL and entered an infinite reconnect loop. Stopping
+# services up front eliminates the race — they are started cleanly at the end of the
+# remote block (line ~460) after all env writes are finalized.
+systemctl stop battlestats-beat battlestats-celery-background battlestats-celery-hydration battlestats-celery battlestats-gunicorn 2>/dev/null || true
+
 cp "${REMOTE_TMP_ENV}" /etc/battlestats-server.env
 cp "${REMOTE_TMP_SECRETS}" /etc/battlestats-server.secrets.env
 cp "${REMOTE_TMP_CERT}" /etc/ssl/certs/battlestats-do-ca-certificate.crt
@@ -291,6 +300,27 @@ with Connection(os.environ["CELERY_BROKER_URL"], connect_timeout=10) as connecti
 
 print("RabbitMQ broker authentication OK")
 PY
+
+  # Canary: every celery worker's MainPID must have CELERY_BROKER_URL in its
+  # process env, matching the finalized env file. If the EnvironmentFile was
+  # mutated after systemd started the unit, /proc/<pid>/environ will lack it
+  # and the worker will silently fall back to the settings.py default. Fail
+  # the deploy hard — see the 2026-04-08 incident in
+  # agents/runbooks/runbook-enrichment-crawler-2026-04-03.md.
+  for svc in battlestats-celery battlestats-celery-hydration battlestats-celery-background; do
+    local pid
+    pid="$(systemctl show -p MainPID --value "${svc}")"
+    if [[ -z "${pid}" || "${pid}" == "0" ]]; then
+      echo "FATAL: ${svc} has no MainPID after restart" >&2
+      exit 1
+    fi
+    if ! tr '\0' '\n' < "/proc/${pid}/environ" | grep -q '^CELERY_BROKER_URL=amqp://battlestats:'; then
+      echo "FATAL: ${svc} MainPID ${pid} missing or wrong CELERY_BROKER_URL in process env" >&2
+      echo "       env file shows: $(grep '^CELERY_BROKER_URL=' /etc/battlestats-server.env || echo '(missing)')" >&2
+      exit 1
+    fi
+  done
+  echo "Celery worker process env verified (CELERY_BROKER_URL present in all 3 workers)"
 }
 
 activate_release() {

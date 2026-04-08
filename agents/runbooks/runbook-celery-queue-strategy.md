@@ -87,7 +87,7 @@ Current explicit task routing:
    - landing warmers and hot-cache warmers
    - random landing queue refill tasks
    - bulk cache loader
-   - ~~`enrich_player_data_task`~~ — **migrated to DigitalOcean Functions** as of 2026-04-04. Now runs as `enrichment/enrich-batch` outside the droplet, invoked via crontab every 15 min. See `spec-serverless-background-workers-2026-04-04.md`.
+   - `enrich_player_data_task` — self-chaining player enrichment crawler. Re-seeded every 15 min by the `player-enrichment-kickstart` Beat schedule (no-op if a batch is already running). A DO Functions migration (2026-04-04) was reverted on 2026-04-08; see `archive/spec-serverless-background-workers-2026-04-04.md`.
    - `startup_warm_caches_task`
    - `warm_all_clan_tier_distributions_task`
 2. `hydration`

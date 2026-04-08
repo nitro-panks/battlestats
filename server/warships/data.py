@@ -5237,9 +5237,7 @@ CLAN_BATTLE_ACTIVITY_BADGE_RECENCY_WEIGHTS = (
     (365 * 2, 0.6),
     (365 * 3, 0.35),
 )
-BEST_CLAN_ABS_MIN_MEMBERS = 10
-BEST_CLAN_ABS_MIN_TOTAL_BATTLES = 1_000
-BEST_CLAN_SORTS = ('overall', 'wr', 'abs', 'cb')
+BEST_CLAN_SORTS = ('overall', 'wr')
 
 
 def _minmax_normalize(values: list[float]) -> list[float]:
@@ -5261,26 +5259,6 @@ def _parse_clan_battle_meta_date(raw_value: Any) -> Optional[date]:
         return datetime.strptime(str(raw_value), '%Y-%m-%d').date()
     except ValueError:
         return None
-
-
-def _get_best_clan_cb_window_season_ids(reference_date: Optional[date] = None) -> list[int]:
-    target_date = reference_date or django_timezone.now().date()
-    completed_seasons: list[tuple[date, date, int]] = []
-
-    for season_id, meta in _get_clan_battle_seasons_metadata().items():
-        end_date = _parse_clan_battle_meta_date(meta.get('end_date'))
-        if end_date is None or end_date > target_date:
-            continue
-
-        start_date = _parse_clan_battle_meta_date(
-            meta.get('start_date')) or end_date
-        completed_seasons.append((end_date, start_date, int(season_id)))
-
-    completed_seasons.sort(reverse=True)
-    return [
-        season_id
-        for _end_date, _start_date, season_id in completed_seasons[:BEST_CLAN_CB_WINDOW_COMPLETED_SEASONS]
-    ]
 
 
 def _clan_battle_activity_badge_weight(age_days: int) -> float:
@@ -5426,77 +5404,6 @@ def get_clan_battle_activity_badge(
     )
 
 
-def _summarize_best_clan_cb_window(
-    season_rows: Any,
-    season_ids: list[int],
-    total_members: int = 0,
-) -> dict[str, float | int]:
-    if not season_ids:
-        return {
-            'cb_window_score': 0.0,
-            'cb_window_participated_seasons': 0,
-            'cb_window_total_battles': 0,
-        }
-
-    targeted_ids = set(season_ids)
-    season_wr_by_id: dict[int, float] = {}
-    season_battles_by_id: dict[int, int] = {}
-    season_participants_by_id: dict[int, int] = {}
-
-    for row in season_rows or []:
-        try:
-            season_id = int(row.get('season_id') or 0)
-        except (TypeError, ValueError):
-            continue
-
-        if season_id not in targeted_ids:
-            continue
-
-        battles = int(row.get('roster_battles', row.get('battles', 0)) or 0)
-        if battles <= 0:
-            continue
-
-        win_rate = row.get('roster_win_rate')
-        if win_rate is None:
-            wins = int(row.get('roster_wins', row.get('wins', 0)) or 0)
-            win_rate = round((wins / battles) * 100, 1) if battles > 0 else 0.0
-
-        season_wr_by_id[season_id] = float(win_rate or 0.0)
-        season_battles_by_id[season_id] = battles
-        participants = int(row.get('participants', 0) or 0)
-        if participants > 0:
-            season_participants_by_id[season_id] = participants
-
-    total_score = 0.0
-    participated_seasons = 0
-    total_battles = 0
-    for season_id in season_ids:
-        season_score = season_wr_by_id.get(season_id, 0.0)
-        season_battles = season_battles_by_id.get(season_id, 0)
-        if season_battles > 0:
-            battle_weight = min(
-                season_battles / BEST_CLAN_CB_WINDOW_SEASON_BATTLES_TARGET,
-                1.0,
-            )
-            participation_weight = 1.0
-            season_participants = season_participants_by_id.get(season_id, 0)
-            if total_members > 0 and season_participants > 0:
-                participation_weight = min(
-                    season_participants / total_members,
-                    1.0,
-                )
-
-            total_score += season_score * battle_weight * participation_weight
-            participated_seasons += 1
-            total_battles += season_battles
-
-    return {
-        'cb_window_score': round(total_score / len(season_ids), 4),
-        'cb_window_participated_seasons': participated_seasons,
-        'cb_window_total_battles': total_battles,
-    }
-
-
 def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEFAULT_REALM, sort: str = 'overall') -> tuple[list[int], dict[int, dict]]:
     """Score and rank clans using the composite Best Clan eligibility criteria.
 
@@ -5508,34 +5415,6 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     normalized_sort = (sort or 'overall').strip().lower()
     if normalized_sort not in BEST_CLAN_SORTS:
         raise ValueError(f"sort must be one of: {', '.join(BEST_CLAN_SORTS)}")
-
-    if normalized_sort == 'abs':
-        # Pure clan WR with only sanity floors. No activity ratio, no member
-        # score, no CB lift, no tracked-player gate. Includes inactive clans.
-        abs_rows = list(
-            Clan.objects.filter(realm=realm)
-            .exclude(name__isnull=True).exclude(name='')
-            .exclude(clan_id__in=BEST_CLAN_EXCLUDED_IDS)
-            .filter(
-                members_count__gte=BEST_CLAN_ABS_MIN_MEMBERS,
-                cached_total_battles__gte=BEST_CLAN_ABS_MIN_TOTAL_BATTLES,
-                cached_clan_wr__isnull=False,
-            )
-            .values('clan_id', 'name', 'cached_clan_wr', 'cached_total_battles')
-        )
-        abs_rows.sort(key=lambda row: (
-            -(row.get('cached_clan_wr') or 0.0),
-            -(row.get('cached_total_battles') or 0),
-            (row.get('name') or '').lower(),
-            int(row['clan_id']),
-        ))
-        top_ids = [int(row['clan_id']) for row in abs_rows[:limit]]
-        if top_ids:
-            logging.info(
-                "score_best_clans: top %d clans for sort=abs from %d candidates",
-                len(top_ids), len(abs_rows),
-            )
-        return top_ids, {}
 
     now = django_timezone.now()
 
@@ -5728,19 +5607,6 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
             'wr_sort_avg_cb_wr': float(wr_sort_avg_cb_wr),
         })
 
-    def _cb_proxy_sort_key(row: dict[str, Any]) -> tuple:
-        return (
-            -row['cb_sort_score'],
-            -row['avg_cb_wr'],
-            -row['avg_member_score'],
-            -row['clan_wr'],
-            -row['activity_ratio'],
-            -row['avg_cb_battles'],
-            -row['overall_score'],
-            row['clan_name'],
-            row['clan_id'],
-        )
-
     if normalized_sort == 'overall':
         ranked_rows.sort(key=lambda row: (
             -row['overall_score'],
@@ -5764,45 +5630,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
             row['clan_id'],
         ))
     else:
-        cb_window_season_ids = _get_best_clan_cb_window_season_ids(now.date())
-        if not cb_window_season_ids:
-            ranked_rows.sort(key=_cb_proxy_sort_key)
-        else:
-            shortlist_size = min(
-                max(limit * BEST_CLAN_CB_WINDOW_SHORTLIST_MULTIPLIER, limit),
-                BEST_CLAN_CB_WINDOW_SHORTLIST_MAX,
-            )
-            proxy_ranked_rows = sorted(ranked_rows, key=_cb_proxy_sort_key)
-            bounded_rows: list[dict[str, Any]] = []
-
-            for row in proxy_ranked_rows[:shortlist_size]:
-                cache_key = _get_clan_battle_summary_cache_key(
-                    str(row['clan_id']), realm=realm)
-                season_rows = cache.get(cache_key)
-                if season_rows is None:
-                    season_rows = refresh_clan_battle_seasons_cache(
-                        str(row['clan_id']), realm=realm)
-
-                bounded_rows.append({
-                    **row,
-                    **_summarize_best_clan_cb_window(
-                        season_rows,
-                        cb_window_season_ids,
-                        total_members=row.get('members_count') or 0,
-                    ),
-                })
-
-            ranked_rows = bounded_rows
-            ranked_rows.sort(key=lambda row: (
-                -row['cb_window_score'],
-                -row['cb_window_participated_seasons'],
-                -row['cb_window_total_battles'],
-                -row['avg_member_score'],
-                -row['clan_wr'],
-                -row['overall_score'],
-                row['clan_name'],
-                row['clan_id'],
-            ))
+        raise ValueError(f"sort must be one of: {', '.join(BEST_CLAN_SORTS)}")
 
     top = ranked_rows[:limit]
 

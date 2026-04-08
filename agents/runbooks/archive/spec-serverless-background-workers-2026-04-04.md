@@ -1,7 +1,33 @@
 # Spec: Serverless Background Workers via DigitalOcean Functions
 
 Created: 2026-04-04
-Status: **Phase 1 Running** — enrichment function deployed, validated, and running autonomously via cron
+Archived: 2026-04-08
+Status: **Reverted** — migration abandoned for workloads that touch the Wargaming API.
+
+## Post-mortem (2026-04-08)
+
+The enrichment function ran successfully for ~2 days before silently degrading on 2026-04-06 ~05:00 UTC. Every subsequent invocation failed with Wargaming API error `407 INVALID_IP_ADDRESS` on every `seasons/accountinfo/`, `ships/stats/`, `clans/season/`, and `clans/seasonstats/` call, then timed out at the 900s function limit. No enrichment occurred between 2026-04-06 05:00 and 2026-04-08 ~03:00 UTC.
+
+**Root cause:** DigitalOcean Functions do not have a static egress IP. Outbound traffic exits through a rotating pool of addresses that is neither documented nor whitelistable by Wargaming's `application_id`, which IP-locks each key to a single host (the droplet). As soon as the function was scheduled on an egress IP outside the whitelist, every WG API call failed.
+
+**Mitigations considered and rejected:**
+
+1. **Proxy WG API calls through the droplet** (forward proxy + HTTPS_PROXY env on the function). Would preserve the serverless architecture but (a) reintroduces the droplet as a single point of failure the migration was trying to remove, (b) adds a new auth/monitoring surface, and (c) doesn't address the underlying shape mismatch — enrichment is a long sequential crawl rate-limited by a third-party API, which is a daemon workload, not a function workload.
+2. **Request a CIDR whitelist from Wargaming.** WG's portal only supports per-IP entries, and DO does not publish or commit to a CIDR for Functions egress.
+
+**Decision:** enrichment returned to the droplet's Celery `background` worker. See `CLAUDE.md` → "Background enrichment" and `server/warships/signals.py` → `player-enrichment-kickstart`. Prior steady-state throughput (batches 6–47 in `runbook-enrichment-crawler-2026-04-03.md`) was ~500 players per 17–20 min with zero errors — adequate for the ~280K pending population. Compute was not the bottleneck; the WG API was.
+
+**What remains useful:**
+
+- `functions/packages/battlestats/db-test` — Postgres connectivity probe from DO Functions, still valid.
+- The `functions/` deploy tooling — reusable for any future worker that does **not** call the Wargaming API (e.g., sitemap generation, cache warming against internal endpoints, DB-only aggregations).
+- The enrichment function code at `functions/packages/enrichment/enrich-batch/` is kept for reference but is no longer invoked by any cron. Do not re-enable without first solving the egress IP problem.
+
+---
+
+## Original spec below (historical)
+
+Status at time of writing: **Phase 1 Running** — enrichment function deployed, validated, and running autonomously via cron
 
 ## Problem
 

@@ -3,7 +3,7 @@ import * as d3 from 'd3';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import type { LandingPlayer } from './entityTypes';
 
-type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'abs' | 'cb';
+type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
 
 interface LandingPlayerSVGProps {
     players: LandingPlayer[];
@@ -61,7 +61,6 @@ const drawLandingPlayerChart = (
     sort: PlayerBestSort = 'overall',
 ) => {
     const isCbMode = sort === 'cb';
-    const isAbsMode = sort === 'abs';
     const margin = { top: 56, right: 16, bottom: 32, left: 48 };
     const width = containerWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -115,15 +114,7 @@ const drawLandingPlayerChart = (
     const [yMin, yMax] = expandDomain(wrExtent[0], wrExtent[1], 0.08, 0, 100);
 
     const linearDomain = expandDomain(battlesExtent[0], battlesExtent[1], 0.1, 0);
-    const x = isAbsMode
-        ? d3.scaleLog()
-            .domain([
-                Math.max(1, Math.floor(Math.max(1, battlesExtent[0]) * 0.8)),
-                Math.max(10, Math.ceil(Math.max(1, battlesExtent[1]) * 1.05)),
-            ])
-            .range([0, width])
-            .nice()
-        : d3.scaleLinear().domain(linearDomain).range([0, width]);
+    const x = d3.scaleLinear().domain(linearDomain).range([0, width]);
     const y = d3.scaleLinear().domain([yMin, yMax]).range([height, 0]);
 
     svg.append('g')

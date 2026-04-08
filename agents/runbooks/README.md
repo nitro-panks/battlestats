@@ -33,18 +33,18 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 
 - `runbook-celery-queue-strategy.md`: current queue assessment for crawlers, warmers, and request-driven refresh tasks.
 - `runbook-droplet-memory-tuning-2026-04-02.md`: current droplet memory sizing and worker tuning snapshot.
-- `runbook-enrichment-crawler-2026-04-03.md`: enrichment progress log, DO Functions migration, and re-enablement plan.
+- `runbook-enrichment-crawler-2026-04-03.md`: enrichment progress log. Enrichment runs on the droplet's Celery `background` worker via `enrich_player_data_task`, re-seeded by the `player-enrichment-kickstart` Beat schedule.
 - `runbook-deleted-account-purge.md`: purge flow and safety notes for deleted accounts.
 - `runbook-dependency-audit.md`: dependency hygiene policy and current audit posture.
 - `runbook-post-deploy-post-bounce-operations-2026-04-05.md`: required post-redeploy verification, post-bounce behavior, and bounded warm sequencing.
-- `runbook-daily-data-refresh-schedule-2026-04-05.md`: daily refresh cadences, DO Functions enrichment schedule, and periodic task windows.
+- `runbook-daily-data-refresh-schedule-2026-04-05.md`: daily refresh cadences and periodic task windows (note: the DO Functions enrichment schedule referenced inside was reverted 2026-04-08 — see the status banner at the top of that runbook).
+- `runbook-abs-deprecation-2026-04-07.md`: implemented ABS and clan-CB best-sort retirement plan, plus remaining deploy-time artifact cleanup steps.
 
 ## Evergreen Architecture And Policy Guides
 
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`: cache-first and lazy-refresh contract.
 - `spec-multi-realm-eu-support.md`: multi-realm architecture, rollout status, and migration behavior.
-- `spec-production-data-refresh-strategy.md`: data refresh and maintenance intent (partially implemented; enrichment migrated to DO Functions).
-- `spec-serverless-background-workers-2026-04-04.md`: DO Functions architecture for offloading background work from the droplet.
+- `spec-production-data-refresh-strategy.md`: data refresh and maintenance intent (partially implemented; enrichment runs on the droplet's Celery `background` worker).
 - `runbook-contract-strategy-implementation.md`: payload and contract maintenance expectations.
 - `runbook-best-clan-eligibility.md`: composite best-clan ranking rules and exclusions.
 - `runbook-seo.md`: metadata, sitemap, structured data, and analytics notes.
@@ -79,6 +79,7 @@ Open these only when the task matches them directly:
 - `runbook-efficiency-rank-qa-2026-04-02.md`
 - `runbook-enrichment-crawler-2026-04-03.md`: progress log for the active enrichment crawl pass (batches, disruptions, check-ins)
 - `runbook-landing-best-player-subsort-materialization-2026-04-05.md`: current Best-player snapshot materialization and cache behavior
+- `runbook-abs-deprecation-2026-04-07.md`: implemented retirement of ABS and clan-CB best sorts, with deploy cleanup steps for stale snapshots and caches
 - `runbook-streamer-twitch-icon-2026-04-07.md`: static streamer flag and Twitch badge rollout plan
 - `runbook-streamer-submission-feature-2026-04-07.md`: streamer submission queue (footer modal + admin moderation), with deferred approval-side promotion
 - `runbook-security-audit-2026-04-05.md`: Wapiti production audit findings and remediation plan (nginx headers, input validation)
@@ -96,9 +97,8 @@ These stay active only while they still shape implementation or operations:
 
 - `spec-landing-best-by-class.md`
 - `spec-clan-battle-seasons-chart.md`: D3 multi-series chart for clan CB performance vs realm averages
-- `spec-best-clan-subfilters.md`: Best clan sub-filters (Overall, WR, ABS, CB) on the landing page
-- `spec-best-player-subfilters.md`: Best player sub-sorts (Overall, Ranked, Efficiency, WR, ABS, CB) on the landing page
-- `runbook-abs-best-sort-2026-04-07.md`: ABS (Absolute Best) pure-WR sub-sort, no penalties
+- `spec-best-clan-subfilters.md`: Best clan sub-filters (Overall, WR) on the landing page
+- `spec-best-player-subfilters.md`: Best player sub-sorts (Overall, Ranked, Efficiency, WR, CB) on the landing page
 - `spec-clan-battles-by-tier.md`
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`
 - `spec-github-build-status-badge.md`

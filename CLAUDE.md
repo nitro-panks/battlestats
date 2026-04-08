@@ -90,18 +90,11 @@ python manage.py backfill_clan_battle_data --realm na --batch 500 --partition 0 
 
 Backfills per-player clan battle data (`clan_battle_total_battles`, `clan_battle_seasons_participated`, `clan_battle_overall_win_rate`) for enriched players whose `PlayerExplorerSummary` is missing CB fields. The enrichment pipeline now includes CB fetch (Phase 3e), so this command is only needed for players enriched before 2026-04-05.
 
-### DigitalOcean Functions (serverless background workers)
+### Background enrichment
 
-```bash
-bash functions/deploy.sh                              # Deploy all functions (copies server code, builds, deploys)
-bash functions/deploy.sh --include enrichment/enrich-batch  # Deploy specific function
-./functions/invoke-enrichment.sh                       # Trigger enrichment (async)
-./functions/invoke-enrichment.sh --wait                # Trigger enrichment (wait for result)
-doctl serverless functions invoke battlestats/db-test  # DB connectivity test
-doctl serverless activations result <activation-id>    # Check invocation result
-```
+Player enrichment runs on the droplet's Celery `background` worker via `warships.tasks.enrich_player_data_task`. The task self-chains between batches (~17–20 min per 500 players at steady state) and is kickstarted periodically by Celery Beat (`player-enrichment-kickstart`, every 15 min — a no-op if a batch is already running). Kickstart is also dispatched by the Gunicorn `when_ready` startup warmer.
 
-Background enrichment runs as a DO Function (`enrichment/enrich-batch`) instead of a Celery background task. Each invocation boots Django, loops through multiple 500-player batches for up to ~14 minutes, then exits. Namespace: `fn-8a3da3a9-0287-49e0-ab78-1bec319a6de7` in `nyc1`. See `agents/runbooks/spec-serverless-background-workers-2026-04-04.md` for architecture and migration plan.
+**Historical note:** An experimental DigitalOcean Functions migration (`functions/enrichment/enrich-batch`) was reverted on 2026-04-08 because DO Functions egress from a rotating IP pool that cannot be whitelisted by the Wargaming `application_id`, causing every call to fail with `407 INVALID_IP_ADDRESS`. See `agents/runbooks/archive/spec-serverless-background-workers-2026-04-04.md` for the post-mortem. The `functions/` directory and `db-test` function remain for potential future workers that do not touch the WG API.
 
 ### Releases
 

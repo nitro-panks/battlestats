@@ -87,14 +87,13 @@ LANDING_RECENT_PLAYERS_DIRTY_KEY = 'landing:recent_players:dirty:v1'
 LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_CLAN_MODES = ('random', 'best')
-LANDING_CLAN_BEST_SORTS = ('overall', 'wr', 'abs', 'cb')
+LANDING_CLAN_BEST_SORTS = ('overall', 'wr')
 LANDING_PLAYER_LIMIT = 25
 LANDING_PLAYER_BEST_SORTS = (
-    'overall', 'ranked', 'efficiency', 'wr', 'abs', 'cb')
+    'overall', 'ranked', 'efficiency', 'wr', 'cb')
 LANDING_PLAYER_BEST_SNAPSHOT_LIMIT = LANDING_PLAYER_LIMIT
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
-LANDING_PLAYER_BEST_ABS_MIN_PVP_BATTLES = 100
 LANDING_PLAYER_BEST_MIN_HIGH_TIER_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_TARGET_HIGH_TIER_PVP_BATTLES = 5000
 LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 1200
@@ -682,7 +681,7 @@ def normalize_landing_player_best_sort(sort: str | None) -> str:
     normalized_sort = (sort or 'overall').strip().lower()
     if normalized_sort not in LANDING_PLAYER_BEST_SORTS:
         raise ValueError(
-            'sort must be one of: overall, ranked, efficiency, wr, abs, cb')
+            'sort must be one of: overall, ranked, efficiency, wr, cb')
     return normalized_sort
 
 
@@ -696,7 +695,7 @@ def normalize_landing_clan_mode(mode: str | None) -> str:
 def normalize_landing_clan_best_sort(sort: str | None) -> str:
     normalized_sort = (sort or 'overall').strip().lower()
     if normalized_sort not in LANDING_CLAN_BEST_SORTS:
-        raise ValueError('sort must be one of: overall, wr, abs, cb')
+        raise ValueError('sort must be one of: overall, wr')
     return normalized_sort
 
 
@@ -1741,8 +1740,6 @@ def _build_best_landing_player_snapshot_payload(sort: str, realm: str = DEFAULT_
         return _build_best_efficiency_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
     if normalized_sort == 'wr':
         return _build_best_wr_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
-    if normalized_sort == 'abs':
-        return _build_best_abs_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
     if normalized_sort == 'cb':
         return _build_best_cb_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
     return _build_best_overall_landing_players(LANDING_PLAYER_BEST_SNAPSHOT_LIMIT, realm=realm)
@@ -2060,35 +2057,6 @@ def _build_best_wr_landing_players(limit: int, realm: str = DEFAULT_REALM) -> li
     return _finalize_best_player_payload(wr_rows, limit)
 
 
-def _build_best_abs_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
-    """Absolute best by pure overall PvP win rate.
-
-    Strips the WR sort's high-tier-only filter, recency cap, and 2.5k battle
-    floor. Only sanity floor: pvp_battles >= LANDING_PLAYER_BEST_ABS_MIN_PVP_BATTLES
-    so a 50%-WR-over-3-battles account doesn't take the top slot. Sort key is
-    overall pvp_ratio with battle volume as the tiebreaker.
-    """
-    candidate_rows = _best_landing_player_candidate_rows(
-        realm=realm,
-        min_pvp_battles=LANDING_PLAYER_BEST_ABS_MIN_PVP_BATTLES,
-        order_by=(
-            F('pvp_ratio').desc(nulls_last=True),
-            F('pvp_battles').desc(nulls_last=True),
-            'name',
-        ),
-        apply_recency_cap=False,
-    )
-    rows = _serialize_landing_player_rows(candidate_rows)
-    rows.sort(key=lambda row: (
-        -(row.get('pvp_ratio') if row.get('pvp_ratio')
-          is not None else float('-inf')),
-        -(row.get('pvp_battles') if row.get('pvp_battles')
-          is not None else float('-inf')),
-        row.get('name') or '',
-    ))
-    return _finalize_best_player_payload(rows, limit)
-
-
 def _build_best_cb_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
     candidate_rows = _best_landing_player_candidate_rows(
         realm=realm,
@@ -2319,14 +2287,11 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
         'players_best_ranked': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='ranked')),
         'players_best_efficiency': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='efficiency')),
         'players_best_wr': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='wr')),
-        'players_best_abs': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='abs')),
         'players_best_cb': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='cb')),
         'players_popular': lambda: len(get_landing_players_payload('popular', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
         'clans': lambda: len(get_landing_clans_payload(force_refresh=force_refresh, realm=realm)),
         'clans_best_overall': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='overall')),
         'clans_best_wr': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='wr')),
-        'clans_best_abs': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='abs')),
-        'clans_best_cb': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='cb')),
         'recent_clans': lambda: len(get_landing_recent_clans_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
         'recent_players': lambda: len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
     }
