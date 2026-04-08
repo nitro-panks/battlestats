@@ -1,4 +1,4 @@
-# Spec: Best Player Sub-Sorts (Overall, Ranked, Efficiency, WR, CB)
+# Spec: Best Player Sub-Sorts (Overall, Ranked, Efficiency, WR, ABS, CB)
 
 Created: 2026-04-04
 Status: Implemented in 1.6.9
@@ -13,7 +13,7 @@ Target UX:
 
 - main button order: Best, Random, Recent
 - Best is the default player mode on page load
-- Best exposes a secondary sub-sort row in this order: Overall, Ranked, Efficiency, WR, CB
+- Best exposes a secondary sub-sort row in this order: Overall, Ranked, Efficiency, WR, ABS, CB
 - all ranking and filtering stay in the backend
 - the players shown by any Best sub-sort stay hot in cache so opening a row is usually a cache hit
 
@@ -27,7 +27,7 @@ Implemented behavior:
 
 - Active Players now defaults to `Best`
 - player mode order is `Best | Random | Recent`
-- Best-only sub-sort row is `Overall | Ranked | Efficiency | WR | CB`
+- Best-only sub-sort row is `Overall | Ranked | Efficiency | WR | ABS | CB`
 - the client requests `mode=best&sort=...` and does not re-rank rows locally
 - `mode=sigma` remains accepted as a backend alias to `mode=best&sort=efficiency`
 - Best-player cache entries are separated per sub-sort
@@ -100,7 +100,7 @@ Best should be the default on first load, matching the clan surface.
 
 When Best is active, show a secondary row of understated text links in this order:
 
-`Overall | Ranked | Efficiency | WR | CB`
+`Overall | Ranked | Efficiency | WR | ABS | CB`
 
 Behavior:
 
@@ -124,7 +124,7 @@ Extend the existing player landing endpoint to support a Best sort parameter:
 
 Recommended helper additions in `server/warships/landing.py`:
 
-- `LANDING_PLAYER_BEST_SORTS = ('overall', 'ranked', 'efficiency', 'wr', 'cb')`
+- `LANDING_PLAYER_BEST_SORTS = ('overall', 'ranked', 'efficiency', 'wr', 'abs', 'cb')`
 - `normalize_landing_player_best_sort(sort)`
 - sort-aware player Best cache key builders similar to the clan Best helpers
 
@@ -390,7 +390,7 @@ Add or update tests for:
 
 1. main player button order: Best, Random, Recent
 2. Best default on initial load
-3. player sub-sort order: Overall, Ranked, Efficiency, WR, CB
+3. player sub-sort order: Overall, Ranked, Efficiency, WR, ABS, CB
 4. Sigma no longer shown as a top-level player mode
 5. fetches include `sort` when Best is active
 6. rendered player order matches backend payload order exactly

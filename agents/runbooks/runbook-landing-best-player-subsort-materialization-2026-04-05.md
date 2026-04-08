@@ -15,13 +15,14 @@ This document is the continuation point for any follow-up work on:
 
 ## Executive Summary
 
-The landing page Best-player surface now exposes five backend-controlled sub-sorts behind the existing `/api/landing/players/?mode=best&sort=...` contract:
+The landing page Best-player surface now exposes six backend-controlled sub-sorts behind the existing `/api/landing/players/?mode=best&sort=...` contract:
 
 1. `overall`
 2. `ranked`
 3. `efficiency`
 4. `wr`
-5. `cb`
+5. `abs` — pure WR with minimal sanity floors (added 2026-04-07, see `runbook-abs-best-sort-2026-04-07.md`)
+6. `cb`
 
 The Ranked sub-sort was initially tuned as a heuristic competitive score, but the intended product meaning was later clarified to be a medal table:
 

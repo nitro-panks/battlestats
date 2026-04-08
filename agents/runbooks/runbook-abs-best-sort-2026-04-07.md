@@ -18,27 +18,27 @@ Users wanted a "no asterisks" view: just show the highest pure win rate on the r
 
 ABS is not "no filters" — those would surface 99%-WR-over-3-battles noise. The minimum floors are:
 
-| Entity | Filter | Value |
-|---|---|---|
-| Player | not hidden | required |
-| Player | `pvp_battles >` | 100 |
-| Player | sort key | overall `pvp_ratio`, then `pvp_battles`, then name |
-| Clan | excluded clan ids | respected |
-| Clan | `members_count >=` | 10 |
-| Clan | `cached_total_battles >=` | 1,000 |
-| Clan | sort key | `cached_clan_wr`, then `cached_total_battles`, then name |
+| Entity | Filter                    | Value                                                    |
+| ------ | ------------------------- | -------------------------------------------------------- |
+| Player | not hidden                | required                                                 |
+| Player | `pvp_battles >`           | 100                                                      |
+| Player | sort key                  | overall `pvp_ratio`, then `pvp_battles`, then name       |
+| Clan   | excluded clan ids         | respected                                                |
+| Clan   | `members_count >=`        | 10                                                       |
+| Clan   | `cached_total_battles >=` | 1,000                                                    |
+| Clan   | sort key                  | `cached_clan_wr`, then `cached_total_battles`, then name |
 
 The 100-battle player floor plus the 10-member and 1,000-battle clan floors are the minimum that keeps the leaderboard meaningful. They are deliberately documented in the in-app tooltips so users know what they're looking at.
 
 ## Files touched
 
-| File | Change |
-|---|---|
-| `server/warships/landing.py` | Added `'abs'` to `LANDING_PLAYER_BEST_SORTS` and `LANDING_CLAN_BEST_SORTS`; new constant `LANDING_PLAYER_BEST_ABS_MIN_PVP_BATTLES = 100`; new builder `_build_best_abs_landing_players`; dispatch branch in `_build_best_landing_player_snapshot_payload`; `apply_recency_cap` kwarg on `_best_landing_player_candidate_rows`; updated normalizer error strings. |
-| `server/warships/data.py` | Added `'abs'` to `BEST_CLAN_SORTS`; new constants `BEST_CLAN_ABS_MIN_MEMBERS = 10` and `BEST_CLAN_ABS_MIN_TOTAL_BATTLES = 1_000`; early-return ABS branch in `score_best_clans` (relaxed query, pure clan_wr ordering). |
-| `server/warships/tests/test_landing.py` | Updated normalizer rejection-message assertions; added `test_normalize_landing_*_best_sort_accepts_abs`; added `test_materialize_landing_player_best_snapshot_abs_ignores_recency_and_high_tier_filters`; added `test_best_clan_abs_sort_requires_ten_members`. |
-| `client/app/components/PlayerSearch.tsx` | Widened `PlayerBestSort` and `ClanBestSort` types; added `'abs'` to player and clan sort button arrays after `'wr'`; new label branches; new formula constants `PLAYER_BEST_ABS_FORMULA_APPROXIMATION` and `CLAN_BEST_ABS_FORMULA_APPROXIMATION`; added ABS sections to both ranking-formula tooltips; updated clan tooltip copy to document the `>=10 members` and `>=1,000 total battles` sanity floors. |
-| `agents/runbooks/runbook-abs-best-sort-2026-04-07.md` | This runbook. |
+| File                                                  | Change                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server/warships/landing.py`                          | Added `'abs'` to `LANDING_PLAYER_BEST_SORTS` and `LANDING_CLAN_BEST_SORTS`; new constant `LANDING_PLAYER_BEST_ABS_MIN_PVP_BATTLES = 100`; new builder `_build_best_abs_landing_players`; dispatch branch in `_build_best_landing_player_snapshot_payload`; `apply_recency_cap` kwarg on `_best_landing_player_candidate_rows`; updated normalizer error strings.                                           |
+| `server/warships/data.py`                             | Added `'abs'` to `BEST_CLAN_SORTS`; new constants `BEST_CLAN_ABS_MIN_MEMBERS = 10` and `BEST_CLAN_ABS_MIN_TOTAL_BATTLES = 1_000`; early-return ABS branch in `score_best_clans` (relaxed query, pure clan_wr ordering).                                                                                                                                                                                    |
+| `server/warships/tests/test_landing.py`               | Updated normalizer rejection-message assertions; added `test_normalize_landing_*_best_sort_accepts_abs`; added `test_materialize_landing_player_best_snapshot_abs_ignores_recency_and_high_tier_filters`; added `test_best_clan_abs_sort_requires_ten_members`.                                                                                                                                            |
+| `client/app/components/PlayerSearch.tsx`              | Widened `PlayerBestSort` and `ClanBestSort` types; added `'abs'` to player and clan sort button arrays after `'wr'`; new label branches; new formula constants `PLAYER_BEST_ABS_FORMULA_APPROXIMATION` and `CLAN_BEST_ABS_FORMULA_APPROXIMATION`; added ABS sections to both ranking-formula tooltips; updated clan tooltip copy to document the `>=10 members` and `>=1,000 total battles` sanity floors. |
+| `agents/runbooks/runbook-abs-best-sort-2026-04-07.md` | This runbook.                                                                                                                                                                                                                                                                                                                                                                                              |
 
 No model changes — `LandingPlayerBestSnapshot` is generic on `(realm, sort)`. No cache key format changes — sort name is interpolated. No namespace bump.
 

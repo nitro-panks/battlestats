@@ -1,4 +1,4 @@
-# Spec: Best Clan Sub-Filters (Overall, WR, CB)
+# Spec: Best Clan Sub-Filters (Overall, WR, ABS, CB)
 
 Created: 2026-04-03
 Status: **Implemented** — backend-owned top-25 sub-sorts validated locally 2026-04-04
@@ -127,7 +127,7 @@ The clan mode buttons are reordered from `Random | Best | Recent` to:
 
 ```
 Active Clans  [ Best ]  [ Random ]  [ Recent ]  (i)
-               Overall · WR · CB                    ← sub-filter row (visible on load)
+               Overall · WR · ABS · CB                    ← sub-filter row (visible on load)
 ```
 
 **Best is the default mode.** The `clanMode` state initializes to `'best'` instead of `'random'`. The sub-filter row is visible immediately on page load.
@@ -138,7 +138,7 @@ The sub-filters appear as a secondary row of understated text links below the ma
 
 **Design direction:** Underlined text links, smaller font, no borders or background fills. The active sub-filter gets a stronger text color or a bottom border accent. The inactive sub-filters use muted text with underline on hover.
 
-**Sub-filter order:** Overall, WR, CB.
+**Sub-filter order:** Overall, WR, ABS, CB.
 
 **Behavior:**
 
@@ -239,7 +239,7 @@ This is more correct than the v1.6.3 client-side approach because it changes the
 ### Phase 1: Backend — add backend sort modes
 
 1. Add a `sort` parameter to the landing best-clans path
-2. Build dedicated ranking helpers for `overall`, `wr`, and `cb`
+2. Build dedicated ranking helpers for `overall`, `wr`, `abs`, and `cb`
 3. Rank against the full Best-eligible population for each helper
 4. Return the top 25 rows for the selected sort
 5. Version or invalidate cache keys so each sort gets its own cached payload per realm
@@ -253,7 +253,7 @@ This is more correct than the v1.6.3 client-side approach because it changes the
 
 1. Reorder clan mode buttons: Best, Random, Recent (Best first)
 2. Change `clanMode` initial state from `'random'` to `'best'`
-3. Add `clanBestSort` state (`'overall' | 'wr' | 'cb'`, default `'overall'`)
+3. Add `clanBestSort` state (`'overall' | 'wr' | 'abs' | 'cb'`, default `'overall'`)
 4. Render sub-filter link row when `clanMode === 'best'` (visible on load)
 5. Request the selected backend sort and render the payload in returned order
 6. Reset sub-filter to `'overall'` when mode changes or realm changes
@@ -278,7 +278,7 @@ This is more correct than the v1.6.3 client-side approach because it changes the
 - **Frontend:** Playwright test that WR and CB sub-filters issue distinct backend requests and render returned order directly
 - **Frontend:** Playwright test that Best is the default mode and sub-filters are visible on initial load
 - **Frontend:** Visual/layout test that switching between Best, Random, and Recent does not move the clan content block vertically
-- **Backend:** Tests that `overall`, `wr`, and `cb` each produce their own top-25 ranking from the full eligible pool
+- **Backend:** Tests that `overall`, `wr`, `abs`, and `cb` each produce their own top-25 ranking from the full eligible pool
 - **Backend:** Contract test that the endpoint accepts `sort` and preserves returned order
 - **Edge cases:** Clans with no CB data, single-clan Best list, realm switch resets sub-filter, and cases where WR/CB top 25 diverge materially from Overall
 

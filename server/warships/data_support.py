@@ -132,7 +132,14 @@ def _queue_limited_player_hydration(
             deferred_player_ids.add(player.player_id)
             break
 
-    pending_player_ids.update(deferred_player_ids)
+    # Intentionally do NOT fold deferred_player_ids into pending_player_ids.
+    # `pending` is the set of players with work actually in flight (max_in_flight slots).
+    # Deferred players are eligible-but-waiting; they will be picked up on subsequent
+    # polls as in-flight slots free up. Folding them in caused the clan-members
+    # "Updating N members" banner to report the entire stale population on every
+    # poll instead of the actual in-flight count, which combined with the frontend
+    # poll cap produced a wedged banner. See
+    # runbook-clan-members-hydration-wedge-2026-04-07.md.
 
     return {
         'pending_player_ids': pending_player_ids,

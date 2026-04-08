@@ -130,6 +130,16 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
                     timeoutId = setTimeout(() => {
                         void fetchMembers(false, attempt + 1);
                     }, priorityDelay);
+                } else if (shouldPollAgain) {
+                    // Reached the poll cap with hydration still pending. Clear the
+                    // per-member pending flags so the "Updating N members" banner
+                    // does not stick at a non-zero count after we stop polling.
+                    // See runbook-clan-members-hydration-wedge-2026-04-07.md.
+                    setMembers((current) => current.map((member) => (
+                        member.ranked_hydration_pending || member.efficiency_hydration_pending
+                            ? { ...member, ranked_hydration_pending: false, efficiency_hydration_pending: false }
+                            : member
+                    )));
                 }
             } catch (fetchError) {
                 if (isAbortError(fetchError)) {
