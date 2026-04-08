@@ -3,7 +3,7 @@ import * as d3 from 'd3';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import type { LandingPlayer } from './entityTypes';
 
-type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
+type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'abs' | 'cb';
 
 interface LandingPlayerSVGProps {
     players: LandingPlayer[];
