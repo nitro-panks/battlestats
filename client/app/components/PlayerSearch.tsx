@@ -643,7 +643,7 @@ const PlayerSearch: React.FC = () => {
                                             >
                                                 {sort === 'overall' ? 'Overall' : sort === 'wr' ? 'WR' : 'ABS'}
                                             </button>
-                                            {sort === 'wr' ? (
+                                            {sort === 'abs' ? (
                                                 <div className="group relative inline-flex items-center">
                                                     <button
                                                         type="button"
@@ -690,6 +690,7 @@ const PlayerSearch: React.FC = () => {
                                     heatmapClans={clans}
                                     onSelectClan={handleSelectClan}
                                     theme={theme}
+                                    sort={clanBestSort}
                                 />
                             </div>
                             <ClanTagGrid

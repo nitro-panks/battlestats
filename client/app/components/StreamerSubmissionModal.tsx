@@ -169,7 +169,7 @@ const StreamerSubmissionModal: React.FC<StreamerSubmissionModalProps> = ({ open,
                                 type="text"
                                 value={ign}
                                 onChange={(e) => setIgn(e.target.value)}
-                                placeholder="bfk_ferlyfe"
+                                placeholder="Enter the streamer\'s in-game name"
                                 required
                                 minLength={3}
                                 maxLength={32}
@@ -208,7 +208,7 @@ const StreamerSubmissionModal: React.FC<StreamerSubmissionModalProps> = ({ open,
                                 type="text"
                                 value={twitchHandle}
                                 onChange={(e) => setTwitchHandle(e.target.value)}
-                                placeholder="bfk_fer1yfe"
+                                placeholder="Enter the Twitch handle without @"
                                 required
                                 minLength={3}
                                 maxLength={25}
@@ -227,7 +227,7 @@ const StreamerSubmissionModal: React.FC<StreamerSubmissionModalProps> = ({ open,
                                 type="url"
                                 value={twitchUrl}
                                 onChange={(e) => setTwitchUrl(e.target.value)}
-                                placeholder="https://www.twitch.tv/bfk_fer1yfe"
+                                placeholder="Paste the full Twitch channel URL"
                                 required
                                 className={inputClass}
                             />

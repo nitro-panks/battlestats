@@ -17,6 +17,7 @@ interface LandingClanSVGProps {
     onSelectClan?: (clan: ClanDatum) => void;
     svgHeight?: number;
     theme?: ChartTheme;
+    sort?: 'overall' | 'wr' | 'abs' | 'cb';
 }
 
 interface PlotDatum {
@@ -63,7 +64,9 @@ const drawLandingClanChart = (
     containerWidth: number,
     svgHeight: number,
     colors: typeof chartColors.light,
+    sort: NonNullable<LandingClanSVGProps['sort']> = 'overall',
 ) => {
+    const isAbsMode = sort === 'abs';
     const margin = { top: 56, right: 16, bottom: 32, left: 48 };
     const width = containerWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -101,10 +104,18 @@ const drawLandingClanChart = (
 
     const battlesExtent = d3.extent(plotData, (datum: PlotDatum) => datum.total_battles) as [number, number];
     const wrExtent = d3.extent(plotData, (datum: PlotDatum) => datum.clan_wr) as [number, number];
-    const [xMin, xMax] = expandDomain(battlesExtent[0], battlesExtent[1], 0.1, 0);
     const [yMin, yMax] = expandDomain(wrExtent[0], wrExtent[1], 0.08, 0, 100);
 
-    const x = d3.scaleLinear().domain([xMin, xMax]).range([0, width]);
+    const linearDomain = expandDomain(battlesExtent[0], battlesExtent[1], 0.1, 0);
+    const x = isAbsMode
+        ? d3.scaleLog()
+            .domain([
+                Math.max(1, Math.floor(Math.max(1, battlesExtent[0]) * 0.8)),
+                Math.max(10, Math.ceil(Math.max(1, battlesExtent[1]) * 1.05)),
+            ])
+            .range([0, width])
+            .nice()
+        : d3.scaleLinear().domain(linearDomain).range([0, width]);
     const y = d3.scaleLinear().domain([yMin, yMax]).range([height, 0]);
 
     svg.append('g')
@@ -127,7 +138,7 @@ const drawLandingClanChart = (
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
         .style('color', colors.labelMuted)
-        .call(d3.axisBottom(x).ticks(6).tickFormat((value: number) => formatCompactCount(value)).tickSizeOuter(0))
+        .call(d3.axisBottom(x).ticks(6).tickFormat((value: number | { valueOf(): number }) => formatCompactCount(Number(value))).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
 
@@ -261,6 +272,7 @@ const LandingClanSVG: React.FC<LandingClanSVGProps> = ({
     onSelectClan,
     svgHeight = 300,
     theme = 'light',
+    sort = 'overall',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [containerWidth, setContainerWidth] = useState(320);
@@ -286,12 +298,12 @@ const LandingClanSVG: React.FC<LandingClanSVGProps> = ({
         if (!containerRef.current || containerWidth < 100) return;
         const colors = chartColors[theme];
         setIsChartReady(false);
-        drawLandingClanChart(containerRef.current, clans, onSelectClan, containerWidth, svgHeight, colors);
+        drawLandingClanChart(containerRef.current, clans, onSelectClan, containerWidth, svgHeight, colors, sort);
         const frameId = window.requestAnimationFrame(() => {
             setIsChartReady(true);
         });
         return () => window.cancelAnimationFrame(frameId);
-    }, [chartSignature, clans, containerWidth, onSelectClan, svgHeight, theme]);
+    }, [chartSignature, clans, containerWidth, onSelectClan, svgHeight, sort, theme]);
 
     return <div ref={containerRef} className={`pr-8 transition-opacity duration-150 md:pr-16 ${isChartReady ? 'opacity-100' : 'opacity-0'}`}></div>;
 };
