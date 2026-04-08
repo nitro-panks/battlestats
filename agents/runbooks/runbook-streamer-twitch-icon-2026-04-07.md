@@ -102,7 +102,6 @@ Additional Twitch names supplied by the operator on 2026-04-07 and checked again
 - `RedTigerrf`
 - `jensi2018`
 - `lafamiliaHazze`
-- `unlivingskunk`
 - `u_n_d_e_r_w_o_o_d`
 - `7sedoy7angel7`
 - `sezuooo`
@@ -148,11 +147,14 @@ The following creator names were checked against the live Battlestats player API
 | battlefieldbadco1 | `eu`   |  `586236219` | `Battlefieldbadco1`    |
 | Tsaver            | `eu`   |  `501896318` | `Tsaver`               |
 | lafamiliaHazze    | `eu`   |  `575820384` | `LaFamiliaHaZze`       |
-| unlivingskunk     | `na`   | `1043979835` | `UnlivingSkunk`        |
 | u_n_d_e_r_w_o_o_d | `eu`   |  `588405399` | `U_N_D_E_R_W_O_O_D`    |
 | sezuooo           | `eu`   |  `571198679` | `SEZUOOO`              |
 | the1andonlyeee    | `eu`   |  `531307702` | `the1andOnlyEEE`       |
 | termiite          | `na`   | `1076018645` | `Termiite`             |
+
+Operator update:
+
+- `UnlivingSkunk` (`na`, `player_id=1043979835`) was manually removed from the production streamer set on request after the initial approved mapping was recorded.
 
 ### Platform names seen but not yet confirmed to Battlestats accounts
 

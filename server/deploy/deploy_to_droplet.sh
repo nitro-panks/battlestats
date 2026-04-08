@@ -408,6 +408,11 @@ if [[ "${DEPLOY_AGENTIC_RUNTIME}" == "1" ]]; then
 fi
 
 cd "${REMOTE_RELEASE}/server"
+# Ensure CELERY_BROKER_URL is populated in /etc/battlestats-server.env before
+# any Django management command runs — the hardened settings.py now raises
+# ImproperlyConfigured if the var is unset in production, and manage.py imports
+# settings at startup even for commands (migrate, check) that do not use Celery.
+configure_local_rabbitmq
 "${APP_ROOT}/venv/bin/python" manage.py migrate
 "${APP_ROOT}/venv/bin/python" manage.py collectstatic --noinput
 "${APP_ROOT}/venv/bin/python" manage.py check
@@ -484,7 +489,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-configure_local_rabbitmq
+# configure_local_rabbitmq already ran before `manage.py migrate` above — the
+# env file and broker credentials are finalized at this point.
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
 redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
 systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat

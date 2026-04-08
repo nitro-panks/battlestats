@@ -917,7 +917,7 @@ def landing_clans(request) -> Response:
         best_sort = normalize_landing_clan_best_sort(
             request.query_params.get('sort'))
     except ValueError:
-        return Response({'detail': 'sort must be one of: overall, wr, cb'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'sort must be one of: overall, wr'}, status=status.HTTP_400_BAD_REQUEST)
 
     realm = _get_realm(request)
     limit = normalize_landing_clan_limit(request.query_params.get('limit'))

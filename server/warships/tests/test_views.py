@@ -2719,7 +2719,7 @@ class ApiContractTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {
-                         'detail': 'sort must be one of: overall, wr, cb'})
+                         'detail': 'sort must be one of: overall, wr'})
 
     @patch("warships.views.get_landing_clans_payload_with_cache_metadata")
     def test_landing_random_clans_use_cached_headers(self, mock_cached_payload):

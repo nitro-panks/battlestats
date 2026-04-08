@@ -645,7 +645,7 @@ const PlayerSearch: React.FC = () => {
                                         >
                                             <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
                                         </button>
-                                        <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
+                                        <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
                                             <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Clan ranking approximations</p>
                                             <p className="mt-2 leading-5 text-[var(--text-secondary)]">
                                                 Overall and WR require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. The WR view may add a qualified clan-battle lift only when CB performance is backed by enough volume, active members, and member quality.
