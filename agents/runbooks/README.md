@@ -73,15 +73,15 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 
 Open these only when the task matches them directly:
 
-- `runbook-best-player-cb-ranking-2026-04-05.md`: implementation handoff for the Best players -> CB sort ranking update
 - `runbook-agentic-next-steps-2026-04-02.md`
 - `runbook-clan-tier-distribution-recovery-2026-04-02.md`
 - `runbook-droplet-memory-tuning-2026-04-02.md`
 - `runbook-efficiency-rank-qa-2026-04-02.md`
 - `runbook-enrichment-crawler-2026-04-03.md`: progress log for the active enrichment crawl pass (batches, disruptions, check-ins)
-- `runbook-best-clan-cb-window-2026-04-04.md`: current Best -> CB 10-completed-season window model and implementation notes
 - `runbook-landing-best-player-subsort-materialization-2026-04-05.md`: current Best-player snapshot materialization and cache behavior
 - `runbook-streamer-twitch-icon-2026-04-07.md`: static streamer flag and Twitch badge rollout plan
+- `runbook-streamer-submission-feature-2026-04-07.md`: streamer submission queue (footer modal + admin moderation), with deferred approval-side promotion
+- `runbook-security-audit-2026-04-05.md`: Wapiti production audit findings and remediation plan (nginx headers, input validation)
 - `runbook-icon-analysis.md`
 - `runbook-player-achievements-data-lane.md`
 - `runbook-kdr-backfill.md`

@@ -1094,7 +1094,8 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
                 config={"configurable": {"thread_id": workflow_id}},
             )
 
-        result["hindsight"] = get_hindsight_config_summary(context)["configured"]
+        result["hindsight"] = get_hindsight_config_summary(context)[
+            "configured"]
 
         trace_url = get_current_trace_url()
         if trace_url:

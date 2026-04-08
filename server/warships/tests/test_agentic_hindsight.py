@@ -8,7 +8,8 @@ MODULE_PATH = Path(__file__).resolve().parents[1] / "agentic" / "hindsight.py"
 
 
 def _load_module():
-    spec = importlib.util.spec_from_file_location("battlestats_agentic_hindsight_test", MODULE_PATH)
+    spec = importlib.util.spec_from_file_location(
+        "battlestats_agentic_hindsight_test", MODULE_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -41,11 +42,13 @@ def test_hindsight_store_uses_env_configuration(monkeypatch):
         calls["configure_kwargs"] = kwargs
 
     monkeypatch.setenv("BATTLESTATS_HINDSIGHT_ENABLED", "1")
-    monkeypatch.setenv("BATTLESTATS_HINDSIGHT_API_URL", "http://localhost:3000")
+    monkeypatch.setenv("BATTLESTATS_HINDSIGHT_API_URL",
+                       "http://localhost:3000")
     monkeypatch.setenv("HINDSIGHT_API_KEY", "secret")
     monkeypatch.setenv("BATTLESTATS_HINDSIGHT_BUDGET", "high")
     monkeypatch.setenv("BATTLESTATS_HINDSIGHT_MAX_TOKENS", "8192")
-    monkeypatch.setenv("BATTLESTATS_HINDSIGHT_TAGS", "project:battlestats,engine:langgraph")
+    monkeypatch.setenv("BATTLESTATS_HINDSIGHT_TAGS",
+                       "project:battlestats,engine:langgraph")
     monkeypatch.setattr(module, "HindsightStore", FakeStore)
     monkeypatch.setattr(module, "configure_hindsight", fake_configure)
 

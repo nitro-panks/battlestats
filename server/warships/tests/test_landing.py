@@ -360,7 +360,8 @@ class LandingHelperTests(TestCase):
             last_battle_date=last_battle_date,
             battles_json=[{'ship_tier': 4, 'pvp_battles': 400, 'wins': 280}],
         )
-        PlayerExplorerSummary.objects.create(player=stale_top, player_score=2.0)
+        PlayerExplorerSummary.objects.create(
+            player=stale_top, player_score=2.0)
 
         # Active mid-WR player with lots of high-tier battles — would dominate
         # the WR sort but should rank below AbsStaleTop in ABS.
@@ -374,9 +375,11 @@ class LandingHelperTests(TestCase):
             pvp_ratio=55.0,
             days_since_last_battle=1,
             last_battle_date=last_battle_date,
-            battles_json=[{'ship_tier': 9, 'pvp_battles': 10000, 'wins': 5500}],
+            battles_json=[
+                {'ship_tier': 9, 'pvp_battles': 10000, 'wins': 5500}],
         )
-        PlayerExplorerSummary.objects.create(player=active_mid, player_score=6.0)
+        PlayerExplorerSummary.objects.create(
+            player=active_mid, player_score=6.0)
 
         # Below the 100-battle sanity floor — must be excluded.
         Player.objects.create(
@@ -394,7 +397,8 @@ class LandingHelperTests(TestCase):
 
         result = materialize_landing_player_best_snapshot('abs')
 
-        snapshot = LandingPlayerBestSnapshot.objects.get(realm='na', sort='abs')
+        snapshot = LandingPlayerBestSnapshot.objects.get(
+            realm='na', sort='abs')
         names = [row['name'] for row in snapshot.payload_json]
         self.assertEqual(result['count'], 2)
         self.assertEqual(names, ['AbsStaleTop', 'AbsActiveMid'])

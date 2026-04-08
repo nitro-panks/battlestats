@@ -273,6 +273,7 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `BATTLESTATS_HINDSIGHT_TAGS` — Comma-separated default tags applied to Hindsight retain operations
 
 For local SDLC, prefer a separate Hindsight service via the `agentic-memory` Docker Compose profile and point host-based commands at `http://127.0.0.1:8899`. Keep Hindsight off the production droplet unless agentic memory is intentionally part of that environment.
+
 - `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
 - `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)

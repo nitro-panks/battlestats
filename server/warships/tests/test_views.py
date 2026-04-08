@@ -333,8 +333,10 @@ class PlayerViewSetTests(TestCase):
             is_streamer=False,
         )
 
-        flagged_response = self.client.get("/api/player/StreamerFlaggedPlayer/")
-        unflagged_response = self.client.get("/api/player/StreamerUnflaggedPlayer/")
+        flagged_response = self.client.get(
+            "/api/player/StreamerFlaggedPlayer/")
+        unflagged_response = self.client.get(
+            "/api/player/StreamerUnflaggedPlayer/")
 
         self.assertEqual(flagged_response.status_code, 200)
         self.assertEqual(unflagged_response.status_code, 200)
@@ -1750,7 +1752,8 @@ class ApiContractTests(TestCase):
         self.assertNotEqual(payload[0]["name"], "AlphaCaptain")
 
     def test_player_name_suggestions_null_byte_does_not_crash(self):
-        response = self.client.get("/api/landing/player-suggestions/?q=test\x00")
+        response = self.client.get(
+            "/api/landing/player-suggestions/?q=test\x00")
         self.assertIn(response.status_code, [200, 400])
 
     def test_landing_players_excludes_hidden_players(self):

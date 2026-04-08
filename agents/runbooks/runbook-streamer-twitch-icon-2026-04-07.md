@@ -27,18 +27,18 @@ Do not key streamer status by player name alone. Names are not the stable identi
 
 Resolved from the live Battlestats player API on 2026-04-07.
 
-| Display name | Canonical account name | Realm | Player ID | Notes |
-| --- | --- | --- | ---: | --- |
-| Notser | Notser | `na` | `1005803644` | Valid live account |
-| Notser | Notser | `eu` | `551165634` | Valid live account |
-| OverlordBou | OverLordBou | `na` | `1007388916` | Live API canonicalizes to `OverLordBou` |
-| NProv | NProv | `na` | `1003184455` | User-supplied Battlestats profile resolved successfully |
-| messovich | messovich | `eu` | `601662651` | User-supplied Battlestats profile resolved successfully |
-| Rita | RitaGamer | `eu` | `504126228` | User-supplied Battlestats profile resolved successfully |
-| Viper | vipersocks | `eu` | `501018468` | User-supplied Battlestats profile resolved successfully |
-| TheOldManGaming | TheOldManGaming | `eu` | `502025228` | User-supplied Battlestats profile resolved successfully |
-| clydethamonkey | CLyDeThaMonKeY | `eu` | `507836339` | Live API canonicalizes to mixed-case account name |
-| I_have_no_Minimap | I_have_no_Minimap | `eu` | `618362421` | User-supplied Battlestats profile resolved successfully |
+| Display name      | Canonical account name | Realm |    Player ID | Notes                                                   |
+| ----------------- | ---------------------- | ----- | -----------: | ------------------------------------------------------- |
+| Notser            | Notser                 | `na`  | `1005803644` | Valid live account                                      |
+| Notser            | Notser                 | `eu`  |  `551165634` | Valid live account                                      |
+| OverlordBou       | OverLordBou            | `na`  | `1007388916` | Live API canonicalizes to `OverLordBou`                 |
+| NProv             | NProv                  | `na`  | `1003184455` | User-supplied Battlestats profile resolved successfully |
+| messovich         | messovich              | `eu`  |  `601662651` | User-supplied Battlestats profile resolved successfully |
+| Rita              | RitaGamer              | `eu`  |  `504126228` | User-supplied Battlestats profile resolved successfully |
+| Viper             | vipersocks             | `eu`  |  `501018468` | User-supplied Battlestats profile resolved successfully |
+| TheOldManGaming   | TheOldManGaming        | `eu`  |  `502025228` | User-supplied Battlestats profile resolved successfully |
+| clydethamonkey    | CLyDeThaMonKeY         | `eu`  |  `507836339` | Live API canonicalizes to mixed-case account name       |
+| I_have_no_Minimap | I_have_no_Minimap      | `eu`  |  `618362421` | User-supplied Battlestats profile resolved successfully |
 
 Current non-matches observed during verification:
 
@@ -127,32 +127,32 @@ These channels appeared in the YouTube result snapshots and look relevant to Wor
 
 The following creator names were checked against the live Battlestats player API and resolved successfully.
 
-| Creator name | Realm | Player ID | Canonical account name |
-| --- | --- | ---: | --- |
-| StatsBloke | `na` | `1032207698` | `StatsBloke` |
-| StatsBloke | `eu` | `544862717` | `StatsBloke` |
-| ChaosMachineGR | `eu` | `546077628` | `ChaosMachineGR` |
-| Paniramix | `na` | `1040354269` | `Paniramix` |
-| Paniramix | `eu` | `547072276` | `Paniramix` |
-| Paniramix | `asia` | `2045404269` | `Paniramix` |
-| DavyJ90 | `eu` | `519830231` | `davyJ90` |
-| Der7teZwerg_ | `eu` | `538815436` | `Der7teZwerg_` |
-| Flamu | `eu` | `539072843` | `Flamu` |
-| RitaGamer | `eu` | `504126228` | `RitaGamer` |
-| vipersocks | `eu` | `501018468` | `vipersocks` |
-| TheOldManGaming | `eu` | `502025228` | `TheOldManGaming` |
-| clydethamonkey | `eu` | `507836339` | `CLyDeThaMonKeY` |
-| I_have_no_Minimap | `eu` | `618362421` | `I_have_no_Minimap` |
-| NProv | `na` | `1003184455` | `NProv` |
-| messovich | `eu` | `601662651` | `messovich` |
-| battlefieldbadco1 | `eu` | `586236219` | `Battlefieldbadco1` |
-| Tsaver | `eu` | `501896318` | `Tsaver` |
-| lafamiliaHazze | `eu` | `575820384` | `LaFamiliaHaZze` |
-| unlivingskunk | `na` | `1043979835` | `UnlivingSkunk` |
-| u_n_d_e_r_w_o_o_d | `eu` | `588405399` | `U_N_D_E_R_W_O_O_D` |
-| sezuooo | `eu` | `571198679` | `SEZUOOO` |
-| the1andonlyeee | `eu` | `531307702` | `the1andOnlyEEE` |
-| termiite | `na` | `1076018645` | `Termiite` |
+| Creator name      | Realm  |    Player ID | Canonical account name |
+| ----------------- | ------ | -----------: | ---------------------- |
+| StatsBloke        | `na`   | `1032207698` | `StatsBloke`           |
+| StatsBloke        | `eu`   |  `544862717` | `StatsBloke`           |
+| ChaosMachineGR    | `eu`   |  `546077628` | `ChaosMachineGR`       |
+| Paniramix         | `na`   | `1040354269` | `Paniramix`            |
+| Paniramix         | `eu`   |  `547072276` | `Paniramix`            |
+| Paniramix         | `asia` | `2045404269` | `Paniramix`            |
+| DavyJ90           | `eu`   |  `519830231` | `davyJ90`              |
+| Der7teZwerg\_     | `eu`   |  `538815436` | `Der7teZwerg_`         |
+| Flamu             | `eu`   |  `539072843` | `Flamu`                |
+| RitaGamer         | `eu`   |  `504126228` | `RitaGamer`            |
+| vipersocks        | `eu`   |  `501018468` | `vipersocks`           |
+| TheOldManGaming   | `eu`   |  `502025228` | `TheOldManGaming`      |
+| clydethamonkey    | `eu`   |  `507836339` | `CLyDeThaMonKeY`       |
+| I_have_no_Minimap | `eu`   |  `618362421` | `I_have_no_Minimap`    |
+| NProv             | `na`   | `1003184455` | `NProv`                |
+| messovich         | `eu`   |  `601662651` | `messovich`            |
+| battlefieldbadco1 | `eu`   |  `586236219` | `Battlefieldbadco1`    |
+| Tsaver            | `eu`   |  `501896318` | `Tsaver`               |
+| lafamiliaHazze    | `eu`   |  `575820384` | `LaFamiliaHaZze`       |
+| unlivingskunk     | `na`   | `1043979835` | `UnlivingSkunk`        |
+| u_n_d_e_r_w_o_o_d | `eu`   |  `588405399` | `U_N_D_E_R_W_O_O_D`    |
+| sezuooo           | `eu`   |  `571198679` | `SEZUOOO`              |
+| the1andonlyeee    | `eu`   |  `531307702` | `the1andOnlyEEE`       |
+| termiite          | `na`   | `1076018645` | `Termiite`             |
 
 ### Platform names seen but not yet confirmed to Battlestats accounts
 
@@ -369,7 +369,7 @@ Implementation validation performed during rollout:
 - generated Django migration `server/warships/migrations/0042_player_is_streamer.py`
 - synced client dependency lockfile for `@fortawesome/free-brands-svg-icons`
 - added focused backend coverage in [server/warships/tests/test_views.py](/home/august/code/archive/battlestats/server/warships/tests/test_views.py)
-- added focused frontend coverage in [client/app/components/__tests__/PlayerDetail.test.tsx](/home/august/code/archive/battlestats/client/app/components/__tests__/PlayerDetail.test.tsx) and [client/app/components/__tests__/PlayerSearch.test.tsx](/home/august/code/archive/battlestats/client/app/components/__tests__/PlayerSearch.test.tsx)
+- added focused frontend coverage in [client/app/components/**tests**/PlayerDetail.test.tsx](/home/august/code/archive/battlestats/client/app/components/__tests__/PlayerDetail.test.tsx) and [client/app/components/**tests**/PlayerSearch.test.tsx](/home/august/code/archive/battlestats/client/app/components/__tests__/PlayerSearch.test.tsx)
 
 ## Open Decision
 

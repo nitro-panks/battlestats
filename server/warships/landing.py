@@ -89,7 +89,8 @@ LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_CLAN_MODES = ('random', 'best')
 LANDING_CLAN_BEST_SORTS = ('overall', 'wr', 'abs', 'cb')
 LANDING_PLAYER_LIMIT = 25
-LANDING_PLAYER_BEST_SORTS = ('overall', 'ranked', 'efficiency', 'wr', 'abs', 'cb')
+LANDING_PLAYER_BEST_SORTS = (
+    'overall', 'ranked', 'efficiency', 'wr', 'abs', 'cb')
 LANDING_PLAYER_BEST_SNAPSHOT_LIMIT = LANDING_PLAYER_LIMIT
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
@@ -1591,7 +1592,8 @@ def _build_landing_payload_with_lock(cache_key, builder, normalized_limit, realm
         if cached_payload is not None:
             return cached_payload
     # Lock holder is taking too long; build anyway rather than block the user.
-    logger.warning("Landing build lock wait expired for %s; building inline", cache_key)
+    logger.warning(
+        "Landing build lock wait expired for %s; building inline", cache_key)
     return builder(normalized_limit)
 
 
@@ -1615,7 +1617,8 @@ def _build_random_landing_players(limit: int, realm: str = DEFAULT_REALM) -> lis
         LIMIT %s
     """
     with connection.cursor() as cursor:
-        cursor.execute(sql, [realm, LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES, limit])
+        cursor.execute(
+            sql, [realm, LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES, limit])
         columns = [col[0] for col in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
     return _serialize_landing_player_rows(rows)
@@ -2077,8 +2080,10 @@ def _build_best_abs_landing_players(limit: int, realm: str = DEFAULT_REALM) -> l
     )
     rows = _serialize_landing_player_rows(candidate_rows)
     rows.sort(key=lambda row: (
-        -(row.get('pvp_ratio') if row.get('pvp_ratio') is not None else float('-inf')),
-        -(row.get('pvp_battles') if row.get('pvp_battles') is not None else float('-inf')),
+        -(row.get('pvp_ratio') if row.get('pvp_ratio')
+          is not None else float('-inf')),
+        -(row.get('pvp_battles') if row.get('pvp_battles')
+          is not None else float('-inf')),
         row.get('name') or '',
     ))
     return _finalize_best_player_payload(rows, limit)

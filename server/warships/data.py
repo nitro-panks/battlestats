@@ -2687,7 +2687,8 @@ PLAYER_WR_SURVIVAL_CORRELATION_CONFIG = {
     'x_label': 'Survival Rate',
     'y_label': 'Win Rate',
     'min_population_battles': 100,
-    'min_survival_rate': 15.0,  # exclude noisy sub-15% population (new/bot/trash accounts)
+    # exclude noisy sub-15% population (new/bot/trash accounts)
+    'min_survival_rate': 15.0,
     # x is now survival rate, y is now win rate (axes flipped 2026-04-07)
     'x_min': 15.0,
     'x_max': 75.0,
@@ -2826,7 +2827,7 @@ def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)                          :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
