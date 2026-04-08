@@ -5236,7 +5236,8 @@ CLAN_BATTLE_ACTIVITY_BADGE_RECENCY_WEIGHTS = (
     (365 * 2, 0.6),
     (365 * 3, 0.35),
 )
-BEST_CLAN_SORTS = ('overall', 'wr', 'cb')
+BEST_CLAN_ABS_MIN_TOTAL_BATTLES = 1_000
+BEST_CLAN_SORTS = ('overall', 'wr', 'abs', 'cb')
 
 
 def _minmax_normalize(values: list[float]) -> list[float]:
@@ -5505,6 +5506,34 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     normalized_sort = (sort or 'overall').strip().lower()
     if normalized_sort not in BEST_CLAN_SORTS:
         raise ValueError(f"sort must be one of: {', '.join(BEST_CLAN_SORTS)}")
+
+    if normalized_sort == 'abs':
+        # Pure clan WR with only sanity floors. No activity ratio, no member
+        # score, no CB lift, no tracked-player gate. Includes inactive clans.
+        abs_rows = list(
+            Clan.objects.filter(realm=realm)
+            .exclude(name__isnull=True).exclude(name='')
+            .exclude(clan_id__in=BEST_CLAN_EXCLUDED_IDS)
+            .filter(
+                members_count__gt=0,
+                cached_total_battles__gte=BEST_CLAN_ABS_MIN_TOTAL_BATTLES,
+                cached_clan_wr__isnull=False,
+            )
+            .values('clan_id', 'name', 'cached_clan_wr', 'cached_total_battles')
+        )
+        abs_rows.sort(key=lambda row: (
+            -(row.get('cached_clan_wr') or 0.0),
+            -(row.get('cached_total_battles') or 0),
+            (row.get('name') or '').lower(),
+            int(row['clan_id']),
+        ))
+        top_ids = [int(row['clan_id']) for row in abs_rows[:limit]]
+        if top_ids:
+            logging.info(
+                "score_best_clans: top %d clans for sort=abs from %d candidates",
+                len(top_ids), len(abs_rows),
+            )
+        return top_ids, {}
 
     now = django_timezone.now()
 

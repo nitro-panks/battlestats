@@ -34,8 +34,12 @@ class LandingHelperTests(TestCase):
         self.assertEqual(normalize_landing_player_best_sort(None), 'overall')
 
     def test_normalize_landing_player_best_sort_rejects_unknown_mode(self):
-        with self.assertRaisesMessage(ValueError, 'sort must be one of: overall, ranked, efficiency, wr, cb'):
+        with self.assertRaisesMessage(ValueError, 'sort must be one of: overall, ranked, efficiency, wr, abs, cb'):
             normalize_landing_player_best_sort('sigma')
+
+    def test_normalize_landing_player_best_sort_accepts_abs(self):
+        self.assertEqual(normalize_landing_player_best_sort('abs'), 'abs')
+        self.assertEqual(normalize_landing_player_best_sort(' ABS '), 'abs')
 
     def test_normalize_landing_player_limit_clamps_requested_values(self):
         self.assertEqual(normalize_landing_player_limit(
@@ -64,8 +68,12 @@ class LandingHelperTests(TestCase):
         self.assertEqual(normalize_landing_clan_best_sort(None), 'overall')
 
     def test_normalize_landing_clan_best_sort_rejects_unknown_mode(self):
-        with self.assertRaisesMessage(ValueError, 'sort must be one of: overall, wr, cb'):
+        with self.assertRaisesMessage(ValueError, 'sort must be one of: overall, wr, abs, cb'):
             normalize_landing_clan_best_sort('activity')
+
+    def test_normalize_landing_clan_best_sort_accepts_abs(self):
+        self.assertEqual(normalize_landing_clan_best_sort('abs'), 'abs')
+        self.assertEqual(normalize_landing_clan_best_sort(' ABS '), 'abs')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_clan_caches_marks_dirty_and_preserves_current_keys(self, mock_delay):
@@ -334,6 +342,63 @@ class LandingHelperTests(TestCase):
             [row['name'] for row in snapshot.payload_json[:2]],
             ['SnapshotCbDurable', 'SnapshotCbStreaky'],
         )
+
+    def test_materialize_landing_player_best_snapshot_abs_ignores_recency_and_high_tier_filters(self):
+        last_battle_date = timezone.now().date()
+
+        # Stale player with high overall WR but no recent battles — WR sort would
+        # exclude (recency cap) and so would the volume floor; ABS should keep.
+        stale_top = Player.objects.create(
+            name='AbsStaleTop',
+            player_id=7301,
+            realm='na',
+            is_hidden=False,
+            total_battles=400,
+            pvp_battles=400,
+            pvp_ratio=70.0,
+            days_since_last_battle=900,
+            last_battle_date=last_battle_date,
+            battles_json=[{'ship_tier': 4, 'pvp_battles': 400, 'wins': 280}],
+        )
+        PlayerExplorerSummary.objects.create(player=stale_top, player_score=2.0)
+
+        # Active mid-WR player with lots of high-tier battles — would dominate
+        # the WR sort but should rank below AbsStaleTop in ABS.
+        active_mid = Player.objects.create(
+            name='AbsActiveMid',
+            player_id=7302,
+            realm='na',
+            is_hidden=False,
+            total_battles=12000,
+            pvp_battles=10000,
+            pvp_ratio=55.0,
+            days_since_last_battle=1,
+            last_battle_date=last_battle_date,
+            battles_json=[{'ship_tier': 9, 'pvp_battles': 10000, 'wins': 5500}],
+        )
+        PlayerExplorerSummary.objects.create(player=active_mid, player_score=6.0)
+
+        # Below the 100-battle sanity floor — must be excluded.
+        Player.objects.create(
+            name='AbsTooFew',
+            player_id=7303,
+            realm='na',
+            is_hidden=False,
+            total_battles=50,
+            pvp_battles=50,
+            pvp_ratio=99.0,
+            days_since_last_battle=1,
+            last_battle_date=last_battle_date,
+            battles_json=[{'ship_tier': 5, 'pvp_battles': 50, 'wins': 49}],
+        )
+
+        result = materialize_landing_player_best_snapshot('abs')
+
+        snapshot = LandingPlayerBestSnapshot.objects.get(realm='na', sort='abs')
+        names = [row['name'] for row in snapshot.payload_json]
+        self.assertEqual(result['count'], 2)
+        self.assertEqual(names, ['AbsStaleTop', 'AbsActiveMid'])
+        self.assertNotIn('AbsTooFew', names)
 
     def test_ranked_quality_score_no_ranked_data(self):
         self.assertEqual(_ranked_quality_score({}), 0.0)
