@@ -49,6 +49,7 @@ DEFAULT_BATCH = 500
 DEFAULT_MIN_PVP_BATTLES = 500
 DEFAULT_MIN_WR = 0.0
 DEFAULT_DELAY = 0.0
+DEFAULT_MAX_INACTIVE_DAYS = 365
 BULK_API_BATCH_SIZE = 100  # max account_ids per WG API call
 
 # Health-check tunables (env-overridable)
@@ -88,9 +89,11 @@ def _candidates(realm: str, min_pvp_battles: int, min_wr: float, limit: int,
     qs = (
         Player.objects.filter(
             realm=realm,
+            enrichment_status=Player.ENRICHMENT_PENDING,
             is_hidden=False,
             pvp_battles__gte=min_pvp_battles,
             pvp_ratio__gte=min_wr,
+            days_since_last_battle__lte=DEFAULT_MAX_INACTIVE_DAYS,
             battles_json__isnull=True,
         )
         .exclude(name="")
@@ -214,7 +217,9 @@ def _process_player_ship_data(player, ship_data_list):
         now = datetime.now()
         player.battles_json = []
         player.battles_updated_at = now
-        player.save(update_fields=['battles_json', 'battles_updated_at'])
+        player.enrichment_status = Player.ENRICHMENT_EMPTY
+        player.save(update_fields=[
+            'battles_json', 'battles_updated_at', 'enrichment_status'])
         return [], EnrichOutcome.EMPTY
 
     prepared_data = []
@@ -279,11 +284,13 @@ def _process_player_ship_data(player, ship_data_list):
     player.type_updated_at = now
     player.randoms_json = _extract_randoms_rows(battles_rows, limit=20)
     player.randoms_updated_at = now
+    player.enrichment_status = Player.ENRICHMENT_ENRICHED
     player.save(update_fields=[
         'battles_json', 'battles_updated_at',
         'tiers_json', 'tiers_updated_at',
         'type_json', 'type_updated_at',
         'randoms_json', 'randoms_updated_at',
+        'enrichment_status',
     ])
     return battles_rows, EnrichOutcome.ENRICHED
 

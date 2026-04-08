@@ -67,6 +67,27 @@ class Player(models.Model):
 
     verdict = models.CharField(max_length=20, null=True, blank=True)
 
+    ENRICHMENT_PENDING = 'pending'
+    ENRICHMENT_ENRICHED = 'enriched'
+    ENRICHMENT_EMPTY = 'empty'
+    ENRICHMENT_SKIPPED_HIDDEN = 'skipped_hidden'
+    ENRICHMENT_SKIPPED_LOW_BATTLES = 'skipped_low_battles'
+    ENRICHMENT_SKIPPED_INACTIVE = 'skipped_inactive'
+    ENRICHMENT_STATUS_CHOICES = [
+        (ENRICHMENT_PENDING, 'Pending'),
+        (ENRICHMENT_ENRICHED, 'Enriched'),
+        (ENRICHMENT_EMPTY, 'Empty'),
+        (ENRICHMENT_SKIPPED_HIDDEN, 'Skipped — hidden'),
+        (ENRICHMENT_SKIPPED_LOW_BATTLES, 'Skipped — low battles'),
+        (ENRICHMENT_SKIPPED_INACTIVE, 'Skipped — inactive'),
+    ]
+    enrichment_status = models.CharField(
+        max_length=24,
+        choices=ENRICHMENT_STATUS_CHOICES,
+        default=ENRICHMENT_PENDING,
+        db_index=True,
+    )
+
     def __str__(self):
         clan_name = self.clan.name if self.clan else "No Clan"
         return f"{self.name} ({self.player_id}) {clan_name}"
