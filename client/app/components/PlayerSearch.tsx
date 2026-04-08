@@ -655,7 +655,7 @@ const PlayerSearch: React.FC = () => {
                                                     <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
                                                         <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Clan ranking approximations</p>
                                                         <p className="mt-2 leading-5 text-[var(--text-secondary)]">
-                                                            Overall and WR require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. ABS bypasses those gates.
+                                                            Overall and WR require &gt;10 members, &ge;40% active share, &ge;5 tracked players, and &ge;50k total battles. ABS keeps only lighter sanity floors.
                                                         </p>
                                                         <div className="mt-3 space-y-3">
                                                             <div>
@@ -669,7 +669,7 @@ const PlayerSearch: React.FC = () => {
                                                             <div>
                                                                 <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">ABS</p>
                                                                 <p className="mt-1 font-mono text-[11px] leading-5 text-[var(--accent-dark)]">{CLAN_BEST_ABS_FORMULA_APPROXIMATION}</p>
-                                                                <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">Absolute best — pure clan WR with no CB lift, no activity / member-score gates. Only sanity floor is &ge;1,000 total clan battles.</p>
+                                                                <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">Absolute best — pure clan WR with no CB lift, no activity / member-score gates. Sanity floors are &ge;10 members and &ge;1,000 total clan battles.</p>
                                                             </div>
                                                         </div>
                                                     </div>

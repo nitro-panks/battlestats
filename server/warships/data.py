@@ -5236,6 +5236,7 @@ CLAN_BATTLE_ACTIVITY_BADGE_RECENCY_WEIGHTS = (
     (365 * 2, 0.6),
     (365 * 3, 0.35),
 )
+BEST_CLAN_ABS_MIN_MEMBERS = 10
 BEST_CLAN_ABS_MIN_TOTAL_BATTLES = 1_000
 BEST_CLAN_SORTS = ('overall', 'wr', 'abs', 'cb')
 
@@ -5515,7 +5516,7 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
             .exclude(name__isnull=True).exclude(name='')
             .exclude(clan_id__in=BEST_CLAN_EXCLUDED_IDS)
             .filter(
-                members_count__gt=0,
+                members_count__gte=BEST_CLAN_ABS_MIN_MEMBERS,
                 cached_total_battles__gte=BEST_CLAN_ABS_MIN_TOTAL_BATTLES,
                 cached_clan_wr__isnull=False,
             )

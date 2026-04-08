@@ -5,7 +5,7 @@ from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
-from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, _summarize_best_clan_cb_window, summarize_clan_battle_activity_badge, warm_landing_best_entity_caches
+from warships.data import BEST_CLAN_ABS_MIN_MEMBERS, BEST_CLAN_WR_MIN_CB_BATTLES, _summarize_best_clan_cb_window, score_best_clans, summarize_clan_battle_activity_badge, warm_landing_best_entity_caches
 from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, _calculate_landing_best_score, _ranked_quality_score, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_cache_metadata_key, landing_best_clan_published_cache_key, landing_best_clan_published_metadata_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
 from warships.models import Clan, LandingPlayerBestSnapshot, Player, PlayerExplorerSummary, realm_cache_key
 
@@ -649,6 +649,40 @@ class LandingHelperTests(TestCase):
         self.assertEqual(cb_payload[0]['name'], 'CBLeader')
         self.assertIn('avg_cb_battles', wr_payload[0])
         self.assertIn('avg_cb_wr', cb_payload[0])
+
+    def test_best_clan_abs_sort_requires_ten_members(self):
+        Clan.objects.create(
+            clan_id=7151,
+            name='TinyShellLeader',
+            tag='TSL',
+            realm='na',
+            members_count=BEST_CLAN_ABS_MIN_MEMBERS - 1,
+            cached_clan_wr=79.5,
+            cached_total_battles=9000,
+        )
+        Clan.objects.create(
+            clan_id=7152,
+            name='EligibleLeader',
+            tag='ELG',
+            realm='na',
+            members_count=BEST_CLAN_ABS_MIN_MEMBERS,
+            cached_clan_wr=71.2,
+            cached_total_battles=8000,
+        )
+        Clan.objects.create(
+            clan_id=7153,
+            name='EligibleRunnerUp',
+            tag='ERU',
+            realm='na',
+            members_count=BEST_CLAN_ABS_MIN_MEMBERS + 5,
+            cached_clan_wr=68.4,
+            cached_total_battles=12000,
+        )
+
+        clan_ids, _metrics = score_best_clans(limit=5, realm='na', sort='abs')
+
+        self.assertEqual(clan_ids[:2], [7152, 7153])
+        self.assertNotIn(7151, clan_ids)
 
     def test_best_clan_wr_sort_ignores_tiny_cb_samples(self):
         now = timezone.now()
@@ -1683,6 +1717,7 @@ class LandingHelperTests(TestCase):
                 'clans': 1,
                 'clans_best_overall': 1,
                 'clans_best_wr': 1,
+                'clans_best_abs': 1,
                 'clans_best_cb': 1,
                 'recent_clans': 1,
                 'players_random': 1,
@@ -1690,6 +1725,7 @@ class LandingHelperTests(TestCase):
                 'players_best_ranked': 1,
                 'players_best_efficiency': 1,
                 'players_best_wr': 1,
+                'players_best_abs': 1,
                 'players_best_cb': 1,
                 'players_popular': 1,
                 'recent_players': 1,
@@ -1699,7 +1735,7 @@ class LandingHelperTests(TestCase):
             force_refresh=True, realm='na')
         best_clan_sorts = [call.kwargs.get('sort')
                            for call in mock_best_clans.call_args_list]
-        self.assertCountEqual(best_clan_sorts, ['overall', 'wr', 'cb'])
+        self.assertCountEqual(best_clan_sorts, ['overall', 'wr', 'abs', 'cb'])
         for call in mock_best_clans.call_args_list:
             self.assertEqual(call.kwargs.get('force_refresh'), True)
             self.assertEqual(call.kwargs.get('realm'), 'na')
@@ -1719,10 +1755,10 @@ class LandingHelperTests(TestCase):
                          ('popular', LANDING_PLAYER_LIMIT))
         best_calls = [
             call for call in mock_players.call_args_list if call.args[0] == 'best']
-        self.assertEqual(len(best_calls), 5)
+        self.assertEqual(len(best_calls), 6)
         self.assertCountEqual(
             [call.kwargs.get('sort') for call in best_calls],
-            ['overall', 'ranked', 'efficiency', 'wr', 'cb'],
+            ['overall', 'ranked', 'efficiency', 'wr', 'abs', 'cb'],
         )
         for call in best_calls:
             self.assertEqual(call.args, ('best', LANDING_PLAYER_LIMIT))
