@@ -73,6 +73,7 @@ class Player(models.Model):
     ENRICHMENT_SKIPPED_HIDDEN = 'skipped_hidden'
     ENRICHMENT_SKIPPED_LOW_BATTLES = 'skipped_low_battles'
     ENRICHMENT_SKIPPED_INACTIVE = 'skipped_inactive'
+    ENRICHMENT_SKIPPED_LOW_WR = 'skipped_low_wr'
     ENRICHMENT_STATUS_CHOICES = [
         (ENRICHMENT_PENDING, 'Pending'),
         (ENRICHMENT_ENRICHED, 'Enriched'),
@@ -80,6 +81,7 @@ class Player(models.Model):
         (ENRICHMENT_SKIPPED_HIDDEN, 'Skipped — hidden'),
         (ENRICHMENT_SKIPPED_LOW_BATTLES, 'Skipped — low battles'),
         (ENRICHMENT_SKIPPED_INACTIVE, 'Skipped — inactive'),
+        (ENRICHMENT_SKIPPED_LOW_WR, 'Skipped — low win rate'),
     ]
     enrichment_status = models.CharField(
         max_length=24,
