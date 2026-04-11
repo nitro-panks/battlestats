@@ -103,20 +103,17 @@ fi
 
 scp "${REPO_ROOT}/docker-compose.yml" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/docker-compose.yml"
 
-ssh "${DEPLOY_USER}@${HOST}" \
-  APP_ROOT="${APP_ROOT}" \
-  APP_USER="${APP_USER}" \
-  DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME}" \
-  AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS}" \
-  MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS}" \
-  MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS}" \
-  REMOTE_RELEASE="${REMOTE_RELEASE}" \
-  REMOTE_TMP_ENV="${REMOTE_TMP_ENV}" \
-  REMOTE_TMP_SECRETS="${REMOTE_TMP_SECRETS}" \
-  REMOTE_TMP_CERT="${REMOTE_TMP_CERT}" \
-  DJANGO_ALLOWED_HOSTS="${DJANGO_ALLOWED_HOSTS}" \
-  KEEP_RELEASES="${KEEP_RELEASES}" \
-  'bash -s' <<'REMOTE'
+REMOTE_DEPLOY_SCRIPT="/tmp/battlestats-deploy-${RELEASE_ID}.sh"
+
+# Write the deploy script body to a file on the remote first, then execute it
+# in a separate ssh call. This eliminates the silent-truncation bug we hit on
+# 2026-04-10 where `'bash -s' <<'REMOTE'` would deliver the script via stdin
+# and any child process that touched stdin (or any heredoc parse anomaly)
+# could desync the bash command stream, causing the script to silently exit 0
+# after configure_local_rabbitmq with migrate/collectstatic/restart all
+# skipped. Writing to a file removes stdin from the picture entirely.
+ssh "${DEPLOY_USER}@${HOST}" "cat > ${REMOTE_DEPLOY_SCRIPT}" <<'REMOTE'
+#!/usr/bin/env bash
 set -euo pipefail
 
 # Stop-first barrier: no app services may be running while /etc/battlestats-server.env
@@ -397,6 +394,10 @@ set_env_value ENRICH_MIN_WR 48.0
 set_env_value ENRICH_DELAY 0.2
 set_env_value ENRICH_PAUSE_BETWEEN_BATCHES 10
 set_env_value ENABLE_AGENTIC_RUNTIME "${DEPLOY_AGENTIC_RUNTIME}"
+set_env_value PLAYER_REFRESH_INTERVAL_MINUTES 180
+set_env_value RANKED_REFRESH_INTERVAL_MINUTES 120
+set_env_value CELERY_BROKER_HEARTBEAT 0
+set_env_value ENABLE_CRAWLER_SCHEDULES 1
 
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"
@@ -413,7 +414,7 @@ cd "${REMOTE_RELEASE}/server"
 # ImproperlyConfigured if the var is unset in production, and manage.py imports
 # settings at startup even for commands (migrate, check) that do not use Celery.
 configure_local_rabbitmq
-"${APP_ROOT}/venv/bin/python" manage.py migrate
+"${APP_ROOT}/venv/bin/python" manage.py migrate --noinput
 "${APP_ROOT}/venv/bin/python" manage.py collectstatic --noinput
 "${APP_ROOT}/venv/bin/python" manage.py check
 
@@ -506,6 +507,24 @@ systemctl --no-pager --full status battlestats-gunicorn | sed -n '1,25p'
 # Release cleanup runs unconditionally — must not be gated by prior failures
 find "${APP_ROOT}/releases" -mindepth 1 -maxdepth 1 -type d | sort | head -n -"${KEEP_RELEASES}" | xargs -r rm -rf || true
 REMOTE
+
+# Execute the script on the remote without stdin redirection. Env vars are
+# passed inline (ssh concatenates trailing args into the remote command, so
+# `VAR=val bash ...` runs in the remote login shell).
+ssh "${DEPLOY_USER}@${HOST}" \
+  APP_ROOT="${APP_ROOT}" \
+  APP_USER="${APP_USER}" \
+  DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME}" \
+  AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS}" \
+  MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS}" \
+  MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS}" \
+  REMOTE_RELEASE="${REMOTE_RELEASE}" \
+  REMOTE_TMP_ENV="${REMOTE_TMP_ENV}" \
+  REMOTE_TMP_SECRETS="${REMOTE_TMP_SECRETS}" \
+  REMOTE_TMP_CERT="${REMOTE_TMP_CERT}" \
+  DJANGO_ALLOWED_HOSTS="${DJANGO_ALLOWED_HOSTS}" \
+  KEEP_RELEASES="${KEEP_RELEASES}" \
+  "bash ${REMOTE_DEPLOY_SCRIPT}; rc=\$?; rm -f ${REMOTE_DEPLOY_SCRIPT}; exit \$rc"
 
 VERIFY_ARGS=("${HOST}" verify --skip-client --expect-backend-release "${REMOTE_RELEASE}")
 if [[ -n "${POST_DEPLOY_VERIFY_REALMS}" ]]; then
