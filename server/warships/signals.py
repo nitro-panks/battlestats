@@ -320,8 +320,11 @@ def register_periodic_schedules(sender, **kwargs):
         )
 
     # -- Incremental Player Refresh (per realm) --
+    # Default 180 min: each cycle walks ~1200 players × 6 WG API calls + DB
+    # writes and takes 35-78 min/realm. With -c 2 worker slots the safe minimum
+    # interval is cycle_time × num_realms / num_slots ≈ 117 min.
     player_refresh_minutes = int(
-        os.getenv("PLAYER_REFRESH_INTERVAL_MINUTES", "30"))
+        os.getenv("PLAYER_REFRESH_INTERVAL_MINUTES", "180"))
     player_refresh_schedule, _ = IntervalSchedule.objects.get_or_create(
         every=player_refresh_minutes,
         period=IntervalSchedule.MINUTES,
@@ -341,7 +344,7 @@ def register_periodic_schedules(sender, **kwargs):
 
     # -- Incremental Ranked Refresh (per realm) --
     ranked_refresh_minutes = int(
-        os.getenv("RANKED_REFRESH_INTERVAL_MINUTES", "60"))
+        os.getenv("RANKED_REFRESH_INTERVAL_MINUTES", "120"))
     ranked_refresh_schedule, _ = IntervalSchedule.objects.get_or_create(
         every=ranked_refresh_minutes,
         period=IntervalSchedule.MINUTES,
