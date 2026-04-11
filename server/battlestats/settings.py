@@ -270,6 +270,13 @@ if not CELERY_BROKER_URL:
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'rpc://')
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 CELERY_BROKER_POOL_LIMIT = int(os.getenv('CELERY_BROKER_POOL_LIMIT', '10'))
+# Disable amqp-level heartbeats. The default 60s heartbeat is starved by
+# long-running tasks (incremental_player_refresh_task can run 35-78 min per
+# realm), causing the broker to drop the worker connection mid-task with
+# "BrokenPipeError on stopping Hub", systemd to restart the unit, and the
+# in-flight task to be re-queued. We rely on TCP keepalive instead, which is
+# fine for our single-host worker → local rabbitmq topology.
+CELERY_BROKER_HEARTBEAT = int(os.getenv('CELERY_BROKER_HEARTBEAT', '0'))
 
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'

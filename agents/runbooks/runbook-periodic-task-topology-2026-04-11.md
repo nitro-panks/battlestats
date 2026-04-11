@@ -107,10 +107,14 @@ Only the 4 realm-suffixed `daily-clan-crawl-*` and `clan-crawl-watchdog-*` entri
 
 | Var | Default | Purpose |
 |---|---|---|
-| `PLAYER_REFRESH_INTERVAL_MINUTES` | `30` | Incremental player refresh cadence per realm |
-| `RANKED_REFRESH_INTERVAL_MINUTES` | `60` | Incremental ranked refresh cadence per realm |
+| `PLAYER_REFRESH_INTERVAL_MINUTES` | `180` | Incremental player refresh cadence per realm |
+| `RANKED_REFRESH_INTERVAL_MINUTES` | `120` | Incremental ranked refresh cadence per realm |
+| `CELERY_BROKER_HEARTBEAT` | `0` | amqp heartbeat seconds; `0` disables. See the cycle-time note below. |
 
-Note on cadence choice: the pre-retirement code ran player refresh twice a day (`incremental-player-refresh-am` at 05:00 UTC + `incremental-player-refresh-pm` at 15:00 UTC, realm-offset). That's now too sparse for a site with steady user activity. **30 minutes** is 48× the old 12-hour gap, which is aggressive but still well under the 1×/hour cadence that most warmers run at. The task takes ~2-4 min/cycle and self-locks per realm, so a 30-min interval gives each realm ~26 min of idle headroom between cycles. If this turns out to be too hot for the WG API budget or the `background` worker, dial it up via `PLAYER_REFRESH_INTERVAL_MINUTES` — the runbook is the source of truth for the default only.
+Note on cadence choice (revised 2026-04-11 ~15:30 UTC, post-shipping):
+The pre-retirement code ran player refresh twice a day (`incremental-player-refresh-am` at 05:00 UTC + `incremental-player-refresh-pm` at 15:00 UTC, realm-offset). The runbook initially shipped at **30 minutes** based on a guess that each cycle would take 2-4 min — that estimate was wrong. After observing one full deploy cycle the actual per-realm walk takes **35-78 minutes** because the task touches type/randoms/battles/activity/snapshot/ranked endpoints for ~1200 players per pass × 6 WG API calls each + DB writes. With `-c 2` worker slots the safe minimum interval is `cycle_time × num_realms / num_slots = 78 × 3 / 2 ≈ 117 min`. The default is now **180 min (3h)**, which gives ~25% headroom for variance. Tunable via the env var; tighter values (e.g. 120 min) work but will leave less slack.
+
+The `CELERY_BROKER_HEARTBEAT=0` change is the second half of the fix. With the default 60s amqp heartbeat, a worker stuck in a 35-78 min task starves the heartbeat, the broker drops the connection, the worker exits with `BrokenPipeError on stopping Hub`, and systemd restarts the unit — re-queueing the in-flight task. This was happening every 60-90 min after the deploy until both fixes were applied. TCP keepalive replaces the application-level heartbeat for our single-host worker → local rabbitmq topology.
 
 ### New schedule registrations
 
@@ -148,14 +152,14 @@ All registered inside `register_periodic_schedules(sender, **kwargs)` in `signal
 - Args: `kwargs={"realm": realm}`
 - Gated by `ENABLE_CRAWLER_SCHEDULES`
 
-### Slot budget on `background` worker (`-c 2`)
+### Slot budget on `background` worker (`-c 2`) — corrected post-deploy
 
 | Task family | Cadence | Duration/cycle | Slot-seconds/hour |
 |---|---|---:|---:|
-| enrichment (post-drain, from the 2026-04-11 reclassification work) | self-chain ~10s | ~5s avg | ~1800 |
+| enrichment (post-drain) | self-chain ~10s | ~5s avg | ~1800 |
 | clan crawl (1 realm active at a time, daily) | daily per realm, staggered 6h | ~90 min | ~225 |
-| incremental player refresh × 3 realms | 30 min per realm | ~2-4 min | ~1200 |
-| incremental ranked refresh × 3 realms | 60 min per realm | ~30s | ~90 |
+| incremental player refresh × 3 realms | **180 min per realm** | **~35-78 min** | ~3120 (3 × 78 × 60 / 180 ≈ 78 slot-min/h × 60/60) |
+| incremental ranked refresh × 3 realms | 120 min per realm | ~30s | ~45 |
 | landing warmer × 3 | 120 min per realm | ~60s | ~90 |
 | hot entity × 3 | 30 min per realm | ~10s | ~60 |
 | distributions × 3, correlations × 3 | 360 min per realm | ~30s | ~60 |
@@ -163,9 +167,9 @@ All registered inside `register_periodic_schedules(sender, **kwargs)` in `signal
 | bulk loader × 3 | 720 min per realm | ~2 min | ~90 |
 | clan battle summary warmer | 30 min | ~20s | ~40 |
 | clan tier dist × 3 | daily cron | ~5 min | ~38 |
-| **total** | | | **~3800 / 7200** (≈53%) |
+| **total** | | | **~5658 / 7200** (≈79%) |
 
-53% utilization of 2 slots. Comfortable headroom. The dominant consumers are enrichment (opportunistic, cheap) and incremental player refresh (the real workhorse). Clan crawls are concentrated in 6h realm windows and preempt the incremental refresher, which already handles this cleanly by deferring rather than stalling.
+79% utilization of 2 slots at 180-min refresh interval. Player refresh is the dominant workhorse and effectively monopolizes one of the two slots. Clan crawls are concentrated in 6h realm windows and preempt the incremental refresher (which defers cleanly). Headroom is tight but workable; further tightening of the player refresh interval below 180 min will start to back up the queue.
 
 ---
 

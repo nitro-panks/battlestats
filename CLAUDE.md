@@ -261,8 +261,9 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `ENABLE_CRAWLER_SCHEDULES` — Master kill switch for the daily clan crawl, clan-crawl watchdog, incremental player refresh, and incremental ranked refresh schedules (set `1` in production)
 - `CLAN_CRAWL_SCHEDULE_HOUR` / `CLAN_CRAWL_SCHEDULE_MINUTE` — Base UTC hour/minute for the daily clan crawl cron; per-realm offsets come from `REALM_CRAWL_CRON_HOURS` in `signals.py` (defaults: hour=`3`, minute=`0`)
 - `CLAN_CRAWL_WATCHDOG_MINUTES` — Clan crawl watchdog poll interval in minutes (default: `5`)
-- `PLAYER_REFRESH_INTERVAL_MINUTES` — Incremental player refresh cadence per realm (default: `30`)
-- `RANKED_REFRESH_INTERVAL_MINUTES` — Incremental ranked refresh cadence per realm (default: `60`)
+- `PLAYER_REFRESH_INTERVAL_MINUTES` — Incremental player refresh cadence per realm (default: `180`). Each cycle walks the graduated hot/active/warm tiers and takes ~35-78 min/realm at steady state, so the safe minimum is `cycle_time × num_realms / num_slots`.
+- `RANKED_REFRESH_INTERVAL_MINUTES` — Incremental ranked refresh cadence per realm (default: `120`)
+- `CELERY_BROKER_HEARTBEAT` — amqp heartbeat in seconds; `0` disables (default: `0`). The default 60s heartbeat is starved by long-running tasks (`incremental_player_refresh_task`), causing `BrokenPipeError on stopping Hub` and systemd worker restarts. We rely on TCP keepalive instead.
 - `ENABLE_AGENTIC_RUNTIME` — Enable `/trace` and optional agentic runtime paths (default: `0` on the droplet)
 - `BATTLESTATS_SLM_ENABLED` — Enable the optional SuperLocalMemory layer at the `_retrieve_guidance` seam (default: `0`)
 - `BATTLESTATS_SLM_MODE` — SuperLocalMemory operating mode: `A` (math-only, zero LLM, droplet-safe), `B` (Ollama), `C` (cloud LLM). Only Mode A is wired up today (default: `A`)
