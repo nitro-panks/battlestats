@@ -15,7 +15,7 @@ APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"
 APP_USER="${APP_USER:-battlestats}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME:-0}"
-AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS:-1}"
+AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS:-0}"
 MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS:-}"
 MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS:-}"
 RELEASE_ID="$(date +%Y%m%d%H%M%S)"
@@ -343,8 +343,18 @@ materialize_best_player_snapshots() {
   local realm=""
   local sort=""
 
+  # Defaults to disabled — see deploy script header. The
+  # `landing-best-player-snapshot-materializer-{realm}` Celery cron refreshes
+  # the persisted snapshots daily at 01:15 UTC + per-realm offset, and the
+  # snapshots survive deploys, so re-running the materialize on every deploy
+  # is redundant. It also competes with the celery workers / cache warmers /
+  # gunicorn workers that have just been (re)started moments earlier on a
+  # 4 GB droplet, and OOM-killed the deploy on 2026-04-11. Operators that
+  # need a forced rebuild (e.g. after adding a new sort) can set
+  # AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS=1 on the deploy invocation
+  # or run `manage.py materialize_landing_player_best_snapshots` directly.
   if [[ "${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS}" != "1" ]]; then
-    echo "Skipping landing Best-player snapshot materialization (disabled)"
+    echo "Skipping landing Best-player snapshot materialization (disabled by default; daily celery cron handles refresh)"
     return 0
   fi
 

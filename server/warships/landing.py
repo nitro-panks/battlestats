@@ -1,3 +1,4 @@
+import gc
 import json
 import logging
 import random
@@ -1771,10 +1772,19 @@ def materialize_landing_player_best_snapshots(realm: str = DEFAULT_REALM, sorts:
         normalize_landing_player_best_sort(sort)
         for sort in (sorts or LANDING_PLAYER_BEST_SORTS)
     ]
-    results = [
-        materialize_landing_player_best_snapshot(sort, realm=realm)
-        for sort in normalized_sorts
-    ]
+    # Each sort loads up to LANDING_PLAYER_BEST_CANDIDATE_LIMIT (1200) player
+    # rows including their `battles_json` and `ranked_json` columns, which can
+    # peak at 100-500 MB of transient garbage per sort. On the 4 GB droplet
+    # this is enough to push the box into OOM territory if we don't release
+    # references between iterations. Run as an explicit loop and gc.collect()
+    # after each sort so the candidate row list, the serialized rows, and the
+    # snapshot payload all get reaped before the next sort begins.
+    results: list[dict[str, object]] = []
+    for sort in normalized_sorts:
+        results.append(
+            materialize_landing_player_best_snapshot(sort, realm=realm)
+        )
+        gc.collect()
     return {
         'status': 'completed',
         'realm': realm,
