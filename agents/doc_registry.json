@@ -563,26 +563,28 @@
                 "memory-review-process-replaced"
             ]
         },
-        "agents/runbooks/runbook-local-hindsight-sdlc.md": {
+        "agents/runbooks/runbook-memory-layering-2026-04-10.md": {
             "kind": "runbook",
             "status": "active",
             "lifecycle": "evergreen",
             "section": "agentic",
             "owner": "platform",
             "aliases": [
-                "local hindsight",
-                "agentic local memory",
-                "hindsight local setup"
+                "memory layering",
+                "superlocalmemory",
+                "agentic memory layers",
+                "slm guidance rerank"
             ],
             "tags": [
-                "hindsight",
+                "superlocalmemory",
+                "slm",
                 "agentic",
-                "local development",
-                "docker compose",
+                "guidance",
+                "retrieval",
                 "memory"
             ],
             "archive_on": [
-                "local-memory-stack-replaced"
+                "memory-layering-replaced"
             ]
         },
         "agents/runbooks/runbook-crewai-integration.md": {

@@ -56,7 +56,7 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 - `runbook-langgraph-opinionated-workflow.md`: guarded LangGraph workflow behavior.
 - `runbook-crewai-integration.md`: CrewAI platform shape and execution model.
 - `runbook-agentic-memory-review.md`: review loop for durable memory.
-- `runbook-local-hindsight-sdlc.md`: local-only Hindsight service and env setup for agentic development.
+- `runbook-memory-layering-2026-04-10.md`: agentic memory layering — SuperLocalMemory at the guidance seam.
 - `runbook-langsmith-trace-dashboard.md`: `/trace` dashboard, LangSmith wiring, and validation notes.
 - `spec-langmem-agentic-memory-pilot-2026-03-26.md`: memory pilot scope and current limitations.
 

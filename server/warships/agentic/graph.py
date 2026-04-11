@@ -12,11 +12,34 @@ from langgraph.graph import END, START, StateGraph
 
 from .checkpoints import get_graph_checkpointer
 from .doctrine import merge_team_doctrine, summarize_team_doctrine
-from .hindsight import get_hindsight_config_summary, get_hindsight_store, is_hindsight_enabled
 from .memory import PHASE0_MEMORY_LIMIT, build_phase0_memory_candidates, infer_workflow_kind, prepare_phase0_memory_context
 from .personas import read_persona_context
 from .retrieval import retrieve_doctrine_guidance
+from .superlocalmemory import (
+    DEFAULT_RERANK_LIMIT as SLM_DEFAULT_RERANK_LIMIT,
+    ensure_corpus_indexed as slm_ensure_corpus_indexed,
+    get_slm_client,
+    get_slm_config_summary,
+    is_slm_enabled,
+    rerank_guidance as slm_rerank_guidance,
+)
 from .tracing import get_current_trace_url, get_langsmith_project_name, trace_block
+
+
+def _context_from_state(state: "AgentState") -> dict[str, Any]:
+    """Pull optional memory-layer overrides out of the workflow state.
+
+    Lets callers pass per-run overrides for the SuperLocalMemory layer without
+    setting environment variables.
+    """
+
+    keys = (
+        "slm_enabled",
+        "slm_mode",
+        "slm_db_path",
+        "slm_reindex_on_boot",
+    )
+    return {key: state.get(key) for key in keys if key in state}
 
 
 class AgentState(TypedDict, total=False):
@@ -344,6 +367,19 @@ def _retrieve_guidance(state: AgentState) -> dict:
         limit=3,
         workflow_kind=_state_workflow_kind(state),
     )
+
+    slm_context = _context_from_state(state)
+    slm_client = get_slm_client(slm_context)
+    slm_index_stats: dict[str, Any] | None = None
+    if slm_client is not None:
+        slm_index_stats = slm_ensure_corpus_indexed(slm_client)
+        guidance = slm_rerank_guidance(
+            slm_client,
+            task,
+            guidance,
+            limit=SLM_DEFAULT_RERANK_LIMIT,
+        )
+
     notes = list(state.get("guidance_notes", []))
     if guidance:
         notes.append(
@@ -353,6 +389,16 @@ def _retrieve_guidance(state: AgentState) -> dict:
     else:
         notes.append(
             "No closely matched battlestats guidance documents were retrieved for this task.")
+    if slm_client is not None:
+        if slm_index_stats:
+            notes.append(
+                "SuperLocalMemory reranked guidance "
+                f"(indexed={slm_index_stats.get('indexed', 0)}, "
+                f"skipped={slm_index_stats.get('skipped', 0)}, "
+                f"files={slm_index_stats.get('files', 0)})."
+            )
+        else:
+            notes.append("SuperLocalMemory reranked guidance.")
 
     return {
         "retrieved_guidance": guidance,
@@ -949,7 +995,7 @@ def _graph_trace_inputs(task: str, context: dict[str, Any]) -> dict[str, Any]:
         "verification_command_count": len(context.get("verification_commands", [])),
         "checkpoint_backend": context.get("checkpoint_backend"),
         "memory_enabled": context.get("memory_enabled"),
-        "hindsight_enabled": is_hindsight_enabled(context),
+        "slm_enabled": is_slm_enabled(context),
     }
 
 
@@ -1017,9 +1063,6 @@ def build_graph(checkpointer: Any | None = None, context: dict[str, Any] | None 
     graph_builder.add_edge("summarize", END)
 
     compiled_checkpointer = checkpointer or MemorySaver()
-    hindsight_store = get_hindsight_store(context)
-    if hindsight_store is not None:
-        return graph_builder.compile(checkpointer=compiled_checkpointer, store=hindsight_store)
     return graph_builder.compile(checkpointer=compiled_checkpointer)
 
 
@@ -1094,8 +1137,7 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
                 config={"configurable": {"thread_id": workflow_id}},
             )
 
-        result["hindsight"] = get_hindsight_config_summary(context)[
-            "configured"]
+        result["slm"] = get_slm_config_summary(context)["configured"]
 
         trace_url = get_current_trace_url()
         if trace_url:

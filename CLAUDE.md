@@ -258,14 +258,12 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `HOT_ENTITY_PLAYER_LIMIT` / `HOT_ENTITY_CLAN_LIMIT` — Hot entity cache size (defaults: 20/10)
 - `ENABLE_CRAWLER_SCHEDULES` — Enable daily clan crawl (set `1` in production)
 - `ENABLE_AGENTIC_RUNTIME` — Enable `/trace` and optional agentic runtime paths (default: `0` on the droplet)
-- `BATTLESTATS_HINDSIGHT_ENABLED` — Enable the optional Hindsight-backed LangGraph store (default: `0`)
-- `BATTLESTATS_HINDSIGHT_API_URL` — Base URL for the Hindsight API when the optional store is enabled
-- `HINDSIGHT_API_KEY` — Optional Hindsight API key when the service requires authentication
-- `BATTLESTATS_HINDSIGHT_BUDGET` — Default Hindsight recall budget for the LangGraph store (`low`, `mid`, `high`; default `mid`)
-- `BATTLESTATS_HINDSIGHT_MAX_TOKENS` — Max recall tokens for the LangGraph store (default `4096`)
-- `BATTLESTATS_HINDSIGHT_TAGS` — Comma-separated default tags applied to Hindsight retain operations
+- `BATTLESTATS_SLM_ENABLED` — Enable the optional SuperLocalMemory layer at the `_retrieve_guidance` seam (default: `0`)
+- `BATTLESTATS_SLM_MODE` — SuperLocalMemory operating mode: `A` (math-only, zero LLM, droplet-safe), `B` (Ollama), `C` (cloud LLM). Only Mode A is wired up today (default: `A`)
+- `BATTLESTATS_SLM_DB_PATH` — SQLite location for the SuperLocalMemory corpus index (default: `server/logs/agentic/slm/corpus.db`)
+- `BATTLESTATS_SLM_REINDEX_ON_BOOT` — Force a full reindex of the `agents/` corpus on next call (default: `0`)
 
-For local SDLC, prefer a separate Hindsight service via the `agentic-memory` Docker Compose profile and point host-based commands at `http://127.0.0.1:8899`. Keep Hindsight off the production droplet unless agentic memory is intentionally part of that environment.
+The agentic memory layer plugs into the LangGraph `_retrieve_guidance` node only: SuperLocalMemory reranks the deterministic `retrieve_doctrine_guidance` output against a semantic recall over the `agents/` markdown corpus, which is indexed lazily on first call. The layer is additive — if SLM is disabled or returns no hits, the existing behavior is byte-for-byte identical. See `agents/runbooks/runbook-memory-layering-2026-04-10.md`.
 
 - `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
