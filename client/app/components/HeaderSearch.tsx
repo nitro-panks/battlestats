@@ -324,7 +324,7 @@ const HeaderSearch: React.FC = () => {
             </div>
             <button
                 type="submit"
-                className="rounded-md bg-[var(--accent-mid)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-dark)]"
+                className={`rounded-md px-4 py-2 text-sm font-medium text-white transition-colors ${searchMode === "clan" ? "bg-emerald-500 hover:bg-emerald-600" : "bg-[var(--accent-mid)] hover:bg-[var(--accent-dark)]"}`}
             >
                 Go
             </button>
