@@ -1106,7 +1106,7 @@ def player_name_suggestions(request) -> Response:
 @throttle_classes(PUBLIC_API_THROTTLES)
 def clan_name_suggestions(request) -> Response:
     query = (request.query_params.get('q') or '').strip().replace('\x00', '')
-    if len(query) < 3:
+    if len(query) < 2:
         return Response([])
 
     realm = _get_realm(request)

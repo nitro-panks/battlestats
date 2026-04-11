@@ -123,7 +123,8 @@ const HeaderSearch: React.FC = () => {
 
     useEffect(() => {
         const trimmedQuery = query.trim().toLowerCase();
-        if (trimmedQuery.length < 3) {
+        const minLength = searchMode === "clan" ? 2 : 3;
+        if (trimmedQuery.length < minLength) {
             setSuggestions([]);
             setHighlightedSuggestionIndex(-1);
             return;
