@@ -90,6 +90,7 @@ Open these only when the task matches them directly:
 - `runbook-mobile-routing-bugs.md`
 - `runbook-multi-realm-hardening.md`
 - `runbook-asia-realm-data-load-2026-04-05.md`: Asia realm data load — clan crawl + enrichment backfill operative plan
+- `runbook-search-toggle.md`: header search toggle between player and clan search, with new clan suggestions endpoint
 
 ## Active Specs And Open Design Docs
 

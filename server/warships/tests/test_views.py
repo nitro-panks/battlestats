@@ -1756,6 +1756,53 @@ class ApiContractTests(TestCase):
             "/api/landing/player-suggestions/?q=test\x00")
         self.assertIn(response.status_code, [200, 400])
 
+    def test_clan_name_suggestions_returns_matching_clans(self):
+        Clan.objects.create(clan_id=9001, name="Storm Fleet", tag="STORM", members_count=40)
+        Clan.objects.create(clan_id=9002, name="Thunderstorm", tag="THDR", members_count=20)
+        Clan.objects.create(clan_id=9003, name="Calm Seas", tag="CALM", members_count=30)
+
+        response = self.client.get("/api/landing/clan-suggestions/?q=storm")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 2)
+        self.assertEqual(payload[0]["name"], "Storm Fleet")
+        self.assertEqual(payload[1]["name"], "Thunderstorm")
+        for entry in payload:
+            self.assertIn("clan_id", entry)
+            self.assertIn("tag", entry)
+            self.assertIn("name", entry)
+            self.assertIn("members_count", entry)
+
+    def test_clan_name_suggestions_matches_tag(self):
+        Clan.objects.create(clan_id=9010, name="Alpha Fleet", tag="ALFA", members_count=25)
+        Clan.objects.create(clan_id=9011, name="Bravo Crew", tag="BRV", members_count=15)
+
+        response = self.client.get("/api/landing/clan-suggestions/?q=alfa")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["tag"], "ALFA")
+
+    def test_clan_name_suggestions_short_query_returns_empty(self):
+        response = self.client.get("/api/landing/clan-suggestions/?q=ab")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+
+    def test_clan_name_suggestions_respects_realm(self):
+        Clan.objects.create(clan_id=9020, name="Euro Fleet", tag="EURO", members_count=30, realm="eu")
+        Clan.objects.create(clan_id=9021, name="Euro Corps", tag="EURC", members_count=20, realm="na")
+
+        response = self.client.get("/api/landing/clan-suggestions/?q=euro&realm=eu")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["clan_id"], 9020)
+
+    def test_clan_name_suggestions_null_byte_does_not_crash(self):
+        response = self.client.get(
+            "/api/landing/clan-suggestions/?q=test\x00")
+        self.assertIn(response.status_code, [200, 400])
+
     def test_landing_players_excludes_hidden_players(self):
         cache.clear()
         today = timezone.now().date()

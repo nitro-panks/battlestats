@@ -1104,6 +1104,61 @@ def player_name_suggestions(request) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def clan_name_suggestions(request) -> Response:
+    query = (request.query_params.get('q') or '').strip().replace('\x00', '')
+    if len(query) < 3:
+        return Response([])
+
+    realm = _get_realm(request)
+    cache_key = f'{realm}:clan-suggest:{query.lower()}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached)
+
+    from django.db import connection
+    if connection.vendor == 'postgresql':
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT clan_id, tag, name, members_count
+                FROM warships_clan
+                WHERE realm = %s
+                  AND (name ILIKE %s OR tag ILIKE %s)
+                ORDER BY
+                    CASE WHEN name ILIKE %s OR tag ILIKE %s THEN 0 ELSE 1 END,
+                    members_count DESC NULLS LAST,
+                    name
+                LIMIT 8
+                """,
+                [realm, f'%{query}%', f'%{query}%', f'{query}%', f'{query}%'],
+            )
+            columns = [col[0] for col in cursor.description]
+            suggestions = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    else:
+        suggestions = list(
+            Clan.objects.filter(
+                realm=realm,
+            ).filter(
+                Q(name__icontains=query) | Q(tag__icontains=query),
+            ).annotate(
+                prefix_match=Case(
+                    When(Q(name__istartswith=query) | Q(tag__istartswith=query), then=Value(0)),
+                    default=Value(1),
+                    output_field=IntegerField(),
+                ),
+            ).order_by(
+                'prefix_match',
+                F('members_count').desc(nulls_last=True),
+                'name',
+            ).values('clan_id', 'tag', 'name', 'members_count')[:8]
+        )
+
+    cache.set(cache_key, suggestions, timeout=600)
+    return Response(suggestions)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def db_stats(request) -> Response:
     realm = _get_realm(request)
 
