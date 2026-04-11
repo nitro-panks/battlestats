@@ -124,7 +124,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - `server/warships/landing.py` — Landing page modes (Best, Random, Sigma, Popular) with published-cache + durable fallback
 - `server/warships/tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing warmup, distribution/correlation warming
 - `server/warships/signals.py` — Registers all Celery Beat periodic tasks via `@receiver(post_migrate)` (landing warmer, hot entity warmer, clan crawl, player refresh, etc.)
-- `server/warships/views.py` — DRF views and `@api_view` endpoints
+- `server/warships/views.py` — DRF views, `@api_view` endpoints, `player_name_suggestions()` and `clan_name_suggestions()` autocomplete views
 
 ### Key frontend patterns
 
@@ -136,7 +136,8 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - `client/app/lib/sharedJsonFetch.ts` — Fetch with retry, cache, and chart fetch priority counter (`chartFetchesInFlight`) for coordinating request priority between chart rendering and hydration polling
 - `client/app/lib/entityRoutes.ts` — URL encoding/decoding for player/clan routes
 - `client/app/globals.css` — CSS custom properties for theming (`--bg-*`, `--text-*`, `--accent-*`), dark mode via `[data-theme="dark"]`
-- `client/app/components/HeaderSearch.tsx` — Player search autocomplete with client-side suggestion cache and themed input
+- `client/app/components/HeaderSearch.tsx` — Dual-mode player/clan search with toggle, debounced autocomplete, client-side suggestion cache per mode, and themed input
+- `client/app/components/SearchModeToggle.tsx` — Compact pill toggle (P/C) for switching between player and clan search modes
 - Shared icon components in `client/app/components/` — 7 player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon) with `size` prop for surface variants
 
 ### Caching strategy
@@ -150,6 +151,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Distribution & correlation warming**: Proactive warming of player population distributions (WR, battles, avg tier) and correlations (tier-type, ranked WR-battles, WR-survival) every 55 min via the landing page task and on startup. TTL is 2 hours. Eliminates cold-cache penalty (10-30s full table scans).
 - **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) dispatches `startup_warm_caches_task` to the Celery background queue — sequentially warms landing page, hot entities, bulk cache, distributions, and correlations. Runs inside an existing worker rather than spawning a subprocess. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `runbook-deploy-oom-startup-warmers.md`.
 - **Player search suggestions**: Three-tier cache — client-side `Map` (instant, session-scoped, 200-entry cap) → Redis (10 min TTL, `suggest:<query>` keys) → Postgres with `pg_trgm` GIN index (`player_name_trgm_idx`). Minimum 3-character query. Raw `ILIKE` in `views.py` (Django's `icontains` generates `UPPER()` which bypasses trigram indexes).
+- **Clan search suggestions**: Same three-tier pattern as player suggestions. Endpoint: `/api/landing/clan-suggestions`. Matches on `Clan.name` OR `Clan.tag` via `ILIKE` with `pg_trgm` GIN indexes (`clan_name_trgm_idx`, `clan_tag_trgm_idx`). Redis key: `{realm}:clan-suggest:{query}`, 600s TTL. Ordered by prefix match → `members_count` DESC → name. Client-side cache is keyed separately per search mode.
 - **Clan battle seasons (clan-level)**: Request-driven — first visit queues `update_clan_battle_summary_task` which calls `refresh_clan_battle_seasons_cache()`. This fetches per-member CB stats from the WG API via ThreadPoolExecutor, aggregates by season, and writes to **Redis only** (TTL-based). Configured clans are pre-warmed by `warm_clan_battle_summaries_task` (env: `CLAN_BATTLE_WARM_CLAN_IDS`). Subsequent visits hit Redis until TTL expiry.
 - **Clan battle summary (per-player)**: Per-player CB stats (`clan_battle_total_battles`, `clan_battle_seasons_participated`, `clan_battle_overall_win_rate`) are persisted to **Postgres** on `PlayerExplorerSummary` via `_persist_player_clan_battle_summary()`. Populated by: enrichment pipeline (Phase 3e), player CB tab visits, and the `backfill_clan_battle_data` management command.
 - Redis-backed in production, LocMemCache in tests
