@@ -256,7 +256,11 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `CLAN_BATTLE_WARM_CLAN_IDS` — Comma-separated clan IDs for clan battle summary warming
 - `BEST_CLAN_EXCLUDED_IDS` — Comma-separated clan IDs excluded from Best clan ranking
 - `HOT_ENTITY_PLAYER_LIMIT` / `HOT_ENTITY_CLAN_LIMIT` — Hot entity cache size (defaults: 20/10)
-- `ENABLE_CRAWLER_SCHEDULES` — Enable daily clan crawl (set `1` in production)
+- `ENABLE_CRAWLER_SCHEDULES` — Master kill switch for the daily clan crawl, clan-crawl watchdog, incremental player refresh, and incremental ranked refresh schedules (set `1` in production)
+- `CLAN_CRAWL_SCHEDULE_HOUR` / `CLAN_CRAWL_SCHEDULE_MINUTE` — Base UTC hour/minute for the daily clan crawl cron; per-realm offsets come from `REALM_CRAWL_CRON_HOURS` in `signals.py` (defaults: hour=`3`, minute=`0`)
+- `CLAN_CRAWL_WATCHDOG_MINUTES` — Clan crawl watchdog poll interval in minutes (default: `5`)
+- `PLAYER_REFRESH_INTERVAL_MINUTES` — Incremental player refresh cadence per realm (default: `30`)
+- `RANKED_REFRESH_INTERVAL_MINUTES` — Incremental ranked refresh cadence per realm (default: `60`)
 - `ENABLE_AGENTIC_RUNTIME` — Enable `/trace` and optional agentic runtime paths (default: `0` on the droplet)
 - `BATTLESTATS_SLM_ENABLED` — Enable the optional SuperLocalMemory layer at the `_retrieve_guidance` seam (default: `0`)
 - `BATTLESTATS_SLM_MODE` — SuperLocalMemory operating mode: `A` (math-only, zero LLM, droplet-safe), `B` (Ollama), `C` (cloud LLM). Only Mode A is wired up today (default: `A`)

@@ -17,22 +17,33 @@ def _configured_clan_battle_warm_ids():
     return [clan_id.strip() for clan_id in raw_value.split(",") if clan_id.strip()]
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 # Retired schedule names — removed from Celery Beat on next post_migrate.
 # Kept as a deletion list so stale PeriodicTask rows are cleaned up across deploys.
 #
-# Historical note: the DO Functions migration (2026-04-04) removed several of
-# these tasks in favor of serverless workers. The enrichment portion of that
-# migration was reverted on 2026-04-08 because DO Functions' rotating egress
-# IPs cannot be whitelisted by the Wargaming application_id — every call
-# returned 407 INVALID_IP_ADDRESS. Enrichment is back on this worker via
-# `player-enrichment-kickstart` below. The remaining names here stay retired.
+# Historical arc:
+#   2026-04-04 (c8f542d) — DO Functions migration retired clan crawl,
+#       enrichment, incremental player refresh, and incremental ranked
+#       refresh schedules in favor of serverless cron triggers.
+#   2026-04-08           — Migration reverted. DO Functions egress from a
+#       rotating IP pool that cannot be whitelisted by the Wargaming
+#       application_id; every serverless call returned 407 INVALID_IP_ADDRESS.
+#       Only the enrichment schedule was restored at that time (via
+#       `player-enrichment-kickstart` below).
+#   2026-04-11           — Clan crawl, incremental player refresh, and
+#       incremental ranked refresh schedules restored here as well,
+#       completing the revert. The legacy am/pm player refresh names and
+#       `daily-ranked-incrementals-*` names stay retired because the new
+#       schedules use different (interval-based) names.
 _RETIRED_SCHEDULE_NAMES = [
     "daily-clan-crawl",
-    "daily-clan-crawl-eu",
-    "daily-clan-crawl-na",
     "clan-crawl-watchdog",
-    "clan-crawl-watchdog-eu",
-    "clan-crawl-watchdog-na",
     "daily-player-enrichment",
     "player-enrichment",
     "incremental-player-refresh-am",
@@ -254,6 +265,99 @@ def register_periodic_schedules(sender, **kwargs):
             "description": "Periodically re-seeds the self-chaining player enrichment crawler. No-op if a batch is already running.",
         },
     )
+
+    # -- Clan Crawl + Incremental Refresh Families --
+    # Gated by ENABLE_CRAWLER_SCHEDULES. These four families were retired on
+    # 2026-04-04 for the DO Functions migration and restored on 2026-04-11
+    # after the revert — see the historical arc comment on _RETIRED_SCHEDULE_NAMES
+    # above and `agents/runbooks/runbook-periodic-task-topology-2026-04-11.md`.
+    crawler_schedules_enabled = _env_flag("ENABLE_CRAWLER_SCHEDULES", False)
+
+    # -- Daily Clan Crawl (per realm, staggered via REALM_CRAWL_CRON_HOURS) --
+    clan_crawl_base_hour = int(os.getenv("CLAN_CRAWL_SCHEDULE_HOUR", "3"))
+    clan_crawl_minute = os.getenv("CLAN_CRAWL_SCHEDULE_MINUTE", "0")
+    for realm in sorted(VALID_REALMS):
+        realm_hour = (clan_crawl_base_hour +
+                      REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+        clan_crawl_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=clan_crawl_minute,
+            hour=str(realm_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"daily-clan-crawl-{realm}",
+            defaults={
+                "task": "warships.tasks.crawl_all_clans_task",
+                "crontab": clan_crawl_schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"resume": False, "realm": realm}),
+                "description": f"Daily full crawl of clans and players from the Wargaming API ({realm.upper()}).",
+            },
+        )
+
+    # -- Clan Crawl Watchdog (per realm) --
+    clan_crawl_watchdog_minutes = int(
+        os.getenv("CLAN_CRAWL_WATCHDOG_MINUTES", "5"))
+    clan_crawl_watchdog_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=clan_crawl_watchdog_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"clan-crawl-watchdog-{realm}",
+            defaults={
+                "task": "warships.tasks.ensure_crawl_all_clans_running_task",
+                "interval": clan_crawl_watchdog_schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Clears stale clan-crawl locks and re-dispatches if a crawl died mid-flight ({realm.upper()}).",
+            },
+        )
+
+    # -- Incremental Player Refresh (per realm) --
+    player_refresh_minutes = int(
+        os.getenv("PLAYER_REFRESH_INTERVAL_MINUTES", "30"))
+    player_refresh_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=player_refresh_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"incremental-player-refresh-{realm}",
+            defaults={
+                "task": "warships.tasks.incremental_player_refresh_task",
+                "interval": player_refresh_schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Graduated hot/active/warm incremental player refresh ({realm.upper()}). Defers while a clan crawl holds its realm lock.",
+            },
+        )
+
+    # -- Incremental Ranked Refresh (per realm) --
+    ranked_refresh_minutes = int(
+        os.getenv("RANKED_REFRESH_INTERVAL_MINUTES", "60"))
+    ranked_refresh_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=ranked_refresh_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"incremental-ranked-refresh-{realm}",
+            defaults={
+                "task": "warships.tasks.incremental_ranked_data_task",
+                "interval": ranked_refresh_schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Incremental ranked data refresh ({realm.upper()}). Defers while a clan crawl holds its realm lock.",
+            },
+        )
 
     # -- Daily Clan Tier Distribution Warmer --
     # Recalculates tier distribution cache for every clan with members.
