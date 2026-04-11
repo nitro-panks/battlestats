@@ -513,6 +513,23 @@ const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRo
     }
 };
 
+const RANDOMS_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+const RANDOMS_REHYDRATE_DELAY_MS = 6_000;
+const RANDOMS_REHYDRATE_MAX_ATTEMPTS = 4;
+
+const isRandomsTimestampStale = (timestamp: string | null): boolean => {
+    if (!timestamp) {
+        return true;
+    }
+
+    const updatedAt = new Date(timestamp).getTime();
+    if (Number.isNaN(updatedAt)) {
+        return true;
+    }
+
+    return Date.now() - updatedAt > RANDOMS_STALE_THRESHOLD_MS;
+};
+
 const RandomsSVG: React.FC<RandomsSVGProps> = ({
     playerId,
     isLoading = false,
@@ -527,34 +544,73 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    // Fetch ALL ships once
+    // Fetch ALL ships, then re-fetch if stale until the backend delivers fresh data.
     useEffect(() => {
-        const fetchData = async () => {
-            setIsChartLoading(true);
+        let cancelled = false;
+        let rehydrateTimeout: ReturnType<typeof setTimeout> | null = null;
+
+        const applyResult = (data: unknown, updatedAt: string | null) => {
+            const result = normalizeRandomsRows(data)
+                .filter((row) => row.ship_type && row.ship_type.toLowerCase() !== 'unknown');
+            setAllShips(result);
+            setRandomsUpdatedAt(updatedAt);
+
+            const types = Array.from(new Set(result.map((r) => r.ship_type)));
+            const tiers = Array.from(new Set(result.map((r) => r.ship_tier)))
+                .filter((tier) => tier >= 5)
+                .sort((a, b) => b - a);
+            setSelectedTypes(types);
+            setSelectedTiers(tiers);
+        };
+
+        const fetchRandoms = async (attempt: number) => {
+            if (attempt === 0) {
+                setIsChartLoading(true);
+            }
+
             try {
                 const { data, headers } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/randoms_data/${playerId}/?all=true`, realm), {
                     label: `Randoms data ${playerId}`,
                     responseHeaders: ['X-Randoms-Updated-At'],
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                    cacheKey: `randoms:${playerId}:${attempt}`,
                 });
-                const result = normalizeRandomsRows(data)
-                    .filter((row) => row.ship_type && row.ship_type.toLowerCase() !== 'unknown');
-                setAllShips(result);
-                setRandomsUpdatedAt(headers['X-Randoms-Updated-At'] ?? null);
 
-                const types = Array.from(new Set(result.map((r) => r.ship_type)));
-                const tiers = Array.from(new Set(result.map((r) => r.ship_tier)))
-                    .filter((tier) => tier >= 5)
-                    .sort((a, b) => b - a);
-                setSelectedTypes(types);
-                setSelectedTiers(tiers);
+                if (cancelled) {
+                    return;
+                }
+
+                const updatedAt = headers['X-Randoms-Updated-At'] ?? null;
+                applyResult(data, updatedAt);
+
+                // If still stale and we haven't exhausted retries, schedule a re-fetch
+                // so we pick up the Celery-refreshed data without a page reload.
+                if (isRandomsTimestampStale(updatedAt) && attempt < RANDOMS_REHYDRATE_MAX_ATTEMPTS) {
+                    rehydrateTimeout = setTimeout(() => {
+                        if (!cancelled) {
+                            void fetchRandoms(attempt + 1);
+                        }
+                    }, RANDOMS_REHYDRATE_DELAY_MS);
+                }
             } catch (error) {
-                console.error('Error fetching data:', error);
+                if (!cancelled) {
+                    console.error('Error fetching data:', error);
+                }
             } finally {
-                setIsChartLoading(false);
+                if (!cancelled && attempt === 0) {
+                    setIsChartLoading(false);
+                }
             }
         };
-        fetchData();
+
+        void fetchRandoms(0);
+
+        return () => {
+            cancelled = true;
+            if (rehydrateTimeout) {
+                clearTimeout(rehydrateTimeout);
+            }
+        };
     }, [playerId, realm]);
 
     // Filter, sort, and take top N
