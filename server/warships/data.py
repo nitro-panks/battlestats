@@ -2680,6 +2680,18 @@ PLAYER_DISTRIBUTION_CONFIGS = {
         'min_population_battles': 100,
         'bin_edges': [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400],
     },
+    'player_score': {
+        'label': 'Player Score',
+        'x_label': 'Score',
+        'scale': 'linear',
+        'value_format': 'decimal',
+        'field_name': 'player_score',
+        'min_population_battles': 100,
+        'range_min': 0.0,
+        'range_max': 10.0,
+        'bin_width': 0.5,
+        'source_model': 'explorer_summary',
+    },
 }
 
 PLAYER_WR_SURVIVAL_CORRELATION_CONFIG = {
@@ -2998,21 +3010,30 @@ def fetch_player_population_distribution(metric: str, realm: str = DEFAULT_REALM
         return published
 
     field_name = config['field_name']
-    try:
-        qs = MvPlayerDistributionStats.objects.filter(
-            realm=realm,
-            pvp_battles__gte=config['min_population_battles'],
+    source_model = config.get('source_model')
+
+    if source_model == 'explorer_summary':
+        qs = PlayerExplorerSummary.objects.filter(
+            player__realm=realm,
+            player__pvp_battles__gte=config['min_population_battles'],
             **{f'{field_name}__isnull': False},
         )
-        if not qs.exists():
-            raise MvPlayerDistributionStats.DoesNotExist
-    except Exception:
-        qs = Player.objects.filter(
-            realm=realm,
-            is_hidden=False,
-            pvp_battles__gte=config['min_population_battles'],
-            **{f'{field_name}__isnull': False},
-        )
+    else:
+        try:
+            qs = MvPlayerDistributionStats.objects.filter(
+                realm=realm,
+                pvp_battles__gte=config['min_population_battles'],
+                **{f'{field_name}__isnull': False},
+            )
+            if not qs.exists():
+                raise MvPlayerDistributionStats.DoesNotExist
+        except Exception:
+            qs = Player.objects.filter(
+                realm=realm,
+                is_hidden=False,
+                pvp_battles__gte=config['min_population_battles'],
+                **{f'{field_name}__isnull': False},
+            )
 
     with transaction.atomic(), _elevated_work_mem():
         if config['scale'] == 'log':

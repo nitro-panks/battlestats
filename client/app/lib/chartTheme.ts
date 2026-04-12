@@ -50,6 +50,7 @@ export const chartColors: Record<ChartTheme, {
     metricWR: string;
     metricBattles: string;
     metricSurvival: string;
+    metricScore: string;
 // Accent / UI colors used inside SVG
     accentLink: string;
     accentMid: string;
@@ -104,6 +105,7 @@ export const chartColors: Record<ChartTheme, {
         metricWR: '#4292c6',
         metricBattles: '#2171b5',
         metricSurvival: '#0f766e',
+        metricScore: '#9333ea',
 // Accent / UI colors used inside SVG
         accentLink: '#084594',
         accentMid: '#2171b5',
@@ -158,6 +160,7 @@ export const chartColors: Record<ChartTheme, {
         metricWR: '#79c0ff',
         metricBattles: '#58a6ff',
         metricSurvival: '#2dd4bf',
+        metricScore: '#c084fc',
 // Accent / UI colors used inside SVG
         accentLink: '#79c0ff',
         accentMid: '#58a6ff',

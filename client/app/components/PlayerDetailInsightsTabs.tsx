@@ -20,6 +20,7 @@ interface PlayerDetailInsightsTabsProps {
     pvpRatio: number;
     pvpSurvivalRate: number;
     pvpBattles: number;
+    playerScore: number | null;
     hasKnownRankedGames: boolean;
     hasClan: boolean;
     efficiencyRows?: Array<{
@@ -92,6 +93,11 @@ const BattlesDistributionSVG = dynamic(() => resilientDynamicImport(() => import
     loading: () => <LoadingPanel label="Loading battles distribution..." minHeight={284} />,
 });
 
+const PlayerScoreDistributionSVG = dynamic(() => resilientDynamicImport(() => import('./PlayerScoreDistributionSVG'), 'PlayerDetailInsightsTabs-PlayerScoreDistributionSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading score distribution..." minHeight={284} />,
+});
+
 const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; minHeight: number; }> = [
     { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 920 },
     { id: 'ships', label: 'Ships', panelLabel: 'Ship insights', minHeight: 560 },
@@ -126,6 +132,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     pvpRatio,
     pvpSurvivalRate,
     pvpBattles,
+    playerScore,
     hasKnownRankedGames,
     hasClan,
     efficiencyRows = null,
@@ -370,6 +377,17 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     className="mb-2"
                                 />
                                 <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={284} theme={theme} />
+                            </div>
+                        ) : null}
+
+                        {playerScore != null ? (
+                            <div className="mt-6">
+                                <SectionHeadingWithTooltip
+                                    title="Player Score Distribution"
+                                    description="Player score blends win rate, kill ratio, survival, battle volume, tier diversity, and recent activity into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
+                                    className="mb-2"
+                                />
+                                <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={284} theme={theme} />
                             </div>
                         ) : null}
                     </div>

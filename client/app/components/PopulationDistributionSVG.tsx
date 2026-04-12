@@ -6,7 +6,7 @@ import { ChartTheme, chartColors } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
-type DistributionMetric = 'win_rate' | 'survival_rate' | 'battles_played';
+type DistributionMetric = 'win_rate' | 'survival_rate' | 'battles_played' | 'player_score';
 
 interface PopulationDistributionSVGProps {
     primaryMetric: DistributionMetric;
@@ -29,7 +29,7 @@ interface DistributionPayload {
     label: string;
     x_label: string;
     scale: 'linear' | 'log';
-    value_format: 'percent' | 'integer';
+    value_format: 'percent' | 'integer' | 'decimal';
     tracked_population: number;
     bins: DistributionBin[];
 }
@@ -61,6 +61,7 @@ const metricLineColor = (metric: DistributionMetric, theme: ChartTheme = 'light'
     const c = chartColors[theme];
     if (metric === 'survival_rate') return c.metricSurvival;
     if (metric === 'battles_played') return c.metricBattles;
+    if (metric === 'player_score') return c.metricScore;
     return c.metricWR;
 };
 
@@ -85,12 +86,20 @@ const formatMetricValue = (payload: DistributionPayload, value: number): string 
         return `${value.toFixed(1)}%`;
     }
 
+    if (payload.value_format === 'decimal') {
+        return value.toFixed(1);
+    }
+
     return d3.format(',')(Math.round(value));
 };
 
 const formatAxisTick = (payload: DistributionPayload, value: number): string => {
     if (payload.value_format === 'percent') {
         return `${value}%`;
+    }
+
+    if (payload.value_format === 'decimal') {
+        return value % 1 === 0 ? `${value}` : value.toFixed(1);
     }
 
     const compact = d3.format('~s')(value);
