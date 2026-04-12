@@ -250,6 +250,16 @@ configure_local_rabbitmq() {
 listeners.tcp.default = 127.0.0.1:5672
 EOF
 
+  # Disable consumer_timeout so RabbitMQ does not kill channels when a
+  # long-running task (enrichment batch, clan crawl) holds an unacked
+  # message for more than 30 min. With CELERY_TASK_ACKS_LATE=True the
+  # default 1800000ms timeout causes PRECONDITION_FAILED → zombie worker.
+  # The new-style .conf format does not support `false`/`undefined` for
+  # this key in RabbitMQ 3.12, so we use advanced.config (Erlang term).
+  cat > /etc/rabbitmq/advanced.config <<'EOF'
+[{rabbit, [{consumer_timeout, undefined}]}].
+EOF
+
   systemctl enable rabbitmq-server >/dev/null 2>&1 || true
   systemctl restart rabbitmq-server
   rabbitmqctl await_startup
@@ -499,7 +509,53 @@ TimeoutStartSec=120
 WantedBy=multi-user.target
 EOF
 
+# Celery consumer watchdog: detects zombie workers (process alive, AMQP
+# consumer dead) and restarts them. Runs every 5 minutes via systemd timer.
+cat > /usr/local/bin/battlestats-celery-watchdog.sh <<'WATCHDOG'
+#!/usr/bin/env bash
+set -euo pipefail
+check_worker() {
+  local queue_name="$1" service_name="$2"
+  systemctl is-active --quiet "${service_name}" || return 0
+  local consumers
+  consumers=$(rabbitmqctl -q list_queues name consumers 2>/dev/null \
+    | awk -v q="${queue_name}" '$1 == q { print $2 }')
+  if [[ "${consumers}" == "0" ]]; then
+    logger -t battlestats-watchdog "ALERT: ${service_name} has 0 consumers on queue '${queue_name}' — restarting"
+    systemctl restart "${service_name}"
+  fi
+}
+check_worker default   battlestats-celery
+check_worker hydration battlestats-celery-hydration
+check_worker background battlestats-celery-background
+WATCHDOG
+chmod +x /usr/local/bin/battlestats-celery-watchdog.sh
+
+cat > /etc/systemd/system/battlestats-celery-watchdog.service <<'EOF'
+[Unit]
+Description=Battlestats Celery consumer watchdog
+After=rabbitmq-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/battlestats-celery-watchdog.sh
+EOF
+
+cat > /etc/systemd/system/battlestats-celery-watchdog.timer <<'EOF'
+[Unit]
+Description=Run Battlestats Celery consumer watchdog every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
+systemctl enable --now battlestats-celery-watchdog.timer 2>/dev/null || true
 # configure_local_rabbitmq already ran before `manage.py migrate` above — the
 # env file and broker credentials are finalized at this point.
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
