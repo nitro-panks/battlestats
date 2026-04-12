@@ -153,6 +153,8 @@ The code does more than separate queues:
 6. cross-realm crawl mutex limits concurrent full crawls
 7. enrichment defers when crawls are active to avoid WG API contention
 8. periodic schedules are staggered by realm to avoid synchronized spikes
+9. RabbitMQ `consumer_timeout` is disabled via `advanced.config` to prevent channel kills on long-held unacked messages (required by `acks_late`)
+10. systemd consumer watchdog runs every 5 min to detect and recover zombie workers (process alive, 0 consumers)
 
 This is already a mature bounded-load posture.
 
@@ -192,19 +194,22 @@ That gap is now reduced. The following task classes were moved into `hydration` 
 
 The remaining question is whether any additional request-driven tasks should leave `default`, not whether `hydration` should stay as narrowly scoped as before.
 
-### Finding 3: `background` load reduced by enrichment migration
+### Finding 3: `background` carries the heaviest sustained load
 
-`background` previously combined full crawls, incremental refreshes, landing warmers, startup warmers, bulk cache loads, and continuous enrichment. The enrichment lane — by far the heaviest sustained consumer — has migrated to DigitalOcean Functions as of 2026-04-04, materially reducing background queue pressure.
+`background` combines full crawls, incremental refreshes, landing warmers, startup warmers, bulk cache loads, and continuous enrichment. The enrichment lane was briefly migrated to DigitalOcean Functions (2026-04-04) but was reverted on 2026-04-08 because DO Functions egress from a rotating IP pool that cannot be whitelisted by the Wargaming `application_id`. Enrichment runs on the `background` queue via self-chaining `enrich_player_data_task` (17-20 min per batch).
 
-The remaining background workload is:
+The `background` workload is:
 
 1. full crawls
-2. periodic incremental refreshes
+2. periodic incremental refreshes (35-78 min per realm)
 3. landing warmers
 4. startup warmers
 5. bulk cache loads
+6. enrichment batches (17-20 min, self-chaining)
 
-This is more manageable on `c=2` concurrency now that enrichment no longer competes for worker slots. However, warmer/crawl contention can still cause starvation during heavy crawl windows.
+At `c=2` concurrency, warmer/crawl contention can cause starvation during heavy crawl windows.
+
+**Operational note (2026-04-12):** Long-running tasks on `background` are vulnerable to RabbitMQ `consumer_timeout` (default 30 min) when combined with `CELERY_TASK_ACKS_LATE = True`. This was the root cause of a zombie worker incident. The deploy script now disables `consumer_timeout` via `advanced.config` and runs a consumer watchdog timer. See `runbook-incident-celery-zombie-worker-2026-04-12.md`.
 
 ### Finding 4: local Docker queue topology was not matching production
 

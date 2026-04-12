@@ -121,5 +121,17 @@ ss -tlnp | grep 3002
 
 - [x] H1: SSH hardening — Implemented 2026-04-09. `PermitRootLogin prohibit-password`, `PasswordAuthentication no`, `PermitEmptyPasswords no`. Backup at `/etc/ssh/sshd_config.bak.20260409`. Key auth verified working.
 - [x] H2: TLS 1.0/1.1 removal — Implemented 2026-04-09. Removed TLSv1 and TLSv1.1 from `/etc/nginx/nginx.conf`. Backup at `/etc/nginx/nginx.conf.bak.20260409`. TLS 1.2+ verified working.
-- [ ] H3: EPMD localhost binding — **Deferred.** EPMD is managed by systemd socket activation (`epmd.socket`). Overriding to IPv4-only breaks RabbitMQ (Erlang requires IPv6 EPMD). UFW blocks port 4369 externally, so risk is mitigated. Revisit if RabbitMQ is upgraded or if UFW rules change. **Incident note:** The RabbitMQ restart during this attempt cascaded — Gunicorn and all three Celery workers depend on the broker and went down. Required manual `systemctl start` of all four services. ~9 min outage (21:05–21:14 UTC).
+- [ ] H3: EPMD localhost binding — **Deferred.** EPMD is managed by systemd socket activation (`epmd.socket`). Overriding to IPv4-only breaks RabbitMQ (Erlang requires IPv6 EPMD). UFW blocks port 4369 externally, so risk is mitigated. Revisit if RabbitMQ is upgraded or if UFW rules change. **Incident note:** The RabbitMQ restart during this attempt cascaded — Gunicorn and all three Celery workers depend on the broker and went down. Required manual `systemctl start` of all four services. ~9 min outage (21:05–21:14 UTC). This cascading failure was the same pattern that recurred on 2026-04-12 and was permanently fixed by switching systemd units from `Requires=` to `Wants=` — see `runbook-incident-celery-zombie-worker-2026-04-12.md`.
 - [x] H4: Umami localhost binding — Implemented 2026-04-09. Changed `umami.service` ExecStart to `next start -H 127.0.0.1 -p 3002`. Verified bound to `127.0.0.1:3002` and accessible via nginx proxy.
+
+### H5: Systemd `Requires=` → `Wants=` (added 2026-04-12)
+
+**Risk: High — caused two separate production outages**
+
+All five battlestats systemd units used `Requires=redis-server.service rabbitmq-server.service`. This creates a hard dependency: if Redis or RabbitMQ restarts for any reason (config change, OOM, manual restart), systemd cascades the stop to gunicorn and all Celery workers. Gunicorn's restart attempt fails because the dependency is briefly unsatisfied during the required service's startup sequence.
+
+This caused outages on both 2026-04-09 (H3 EPMD attempt) and 2026-04-12 (advanced.config deployment).
+
+**Remediation:** Changed to `Wants=redis-server.service rabbitmq-server.service` on all five units. `After=` is retained for boot ordering. Committed to deploy script in `28557f5`.
+
+- [x] H5: Systemd dependency hardening — Implemented 2026-04-12. All battlestats systemd units changed from `Requires=` to `Wants=` on droplet and in deploy script.

@@ -164,6 +164,12 @@ Three queues with dedicated workers:
 - **hydration** (`-c 3`) — heavier request-driven upstream/data refreshes. Tasks include ranked, efficiency, battle-data, clan-members, clan-battle, and clan-battle-summary refreshes
 - **background** (`-c 2`) — long-running crawls, warmers, incremental refreshes, startup warmers, and enrichment
 
+Resilience mechanisms:
+- **`CELERY_TASK_ACKS_LATE = True`** — messages are not acknowledged until task completion, providing at-least-once delivery for crash recovery
+- **RabbitMQ `consumer_timeout` disabled** — via `/etc/rabbitmq/advanced.config` (`[{rabbit, [{consumer_timeout, undefined}]}].`). Required because `acks_late` + the default 30-min timeout causes `PRECONDITION_FAILED` on long-running tasks (enrichment, crawls), leaving workers in zombie state
+- **Consumer watchdog** — systemd timer (`battlestats-celery-watchdog.timer`) checks consumer counts every 5 min via `rabbitmqctl list_queues` and restarts zombie workers (process alive, 0 consumers)
+- **Soft systemd dependencies** — service units use `Wants=` (not `Requires=`) for Redis/RabbitMQ to prevent cascading stops during dependency restarts
+
 ### Nginx / HTTP
 
 - **HTTP/2** enabled on the production nginx 443 listeners. Eliminates the browser's 6-connection-per-origin limit under HTTP/1.1, allowing all concurrent chart and hydration requests to proceed without slot contention.

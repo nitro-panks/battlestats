@@ -91,10 +91,22 @@ The deploy also enforces droplet memory tuning for the Django and Celery process
 - Celery workers are restarted from systemd units that read those env vars and apply `--max-memory-per-child` to recycle unusually large worker children before memory drift accumulates.
 - Before restarting services, the deploy clears realm-scoped clan-crawl Redis keys so an interrupted EU resume crawl does not remain blocked behind stale locks after a rollout.
 
-The deploy now also hardens two previously observed backend rollout failures:
+The deploy now also hardens several previously observed backend rollout failures:
 
 - it does not rely on a plain in-place `ln -sfn` for `current`; it performs an atomic symlink replacement and verifies the active release target,
 - it ensures the shared Django file-log target exists and is writable before management commands and service startup, which prevents release-local `server/logs/django.log` permission drift from blocking gunicorn.
+
+### RabbitMQ and Celery hardening (added 2026-04-12)
+
+The deploy script now provisions three additional resilience mechanisms:
+
+1. **RabbitMQ `advanced.config`** — Disables `consumer_timeout` (default 30 min in RabbitMQ 3.12). Without this, long-running tasks using `CELERY_TASK_ACKS_LATE = True` get their AMQP channel killed with `PRECONDITION_FAILED`, leaving the worker in a zombie state (process alive, 0 consumers). Created during `configure_local_rabbitmq()`.
+
+2. **Celery consumer watchdog** — A systemd timer (`battlestats-celery-watchdog.timer`) runs `/usr/local/bin/battlestats-celery-watchdog.sh` every 5 minutes. The script checks each queue's consumer count via `rabbitmqctl list_queues` and restarts any service with 0 consumers. Logs events via `logger -t battlestats-watchdog`.
+
+3. **`Wants=` instead of `Requires=`** — Celery worker systemd units use `Wants=redis-server.service rabbitmq-server.service` instead of `Requires=`. This prevents cascading service failures when Redis or RabbitMQ restarts. `After=` is retained for boot ordering.
+
+See `runbook-incident-celery-zombie-worker-2026-04-12.md` for the full incident that motivated these changes.
 
 Automatic Best-player snapshot materialization is enabled by default. Optional deploy-time controls:
 
@@ -144,5 +156,24 @@ ssh root@YOUR_DROPLET_IP 'systemctl status battlestats-beat --no-pager'
 ssh root@YOUR_DROPLET_IP 'journalctl -u battlestats-gunicorn -n 100 --no-pager'
 ssh root@YOUR_DROPLET_IP 'curl -s http://127.0.0.1:8888/api/player/Mebuki/ | head'
 ```
+
+### Celery health (consumer counts)
+
+`systemctl status` is **not sufficient** to verify Celery worker health. A worker can show `active (running)` while having 0 AMQP consumers (zombie state). Always check consumer counts:
+
+```bash
+ssh root@YOUR_DROPLET_IP 'rabbitmqctl -q list_queues name consumers messages'
+```
+
+Expected output: each of `default`, `hydration`, `background` should have ≥1 consumer.
+
+### Watchdog status
+
+```bash
+ssh root@YOUR_DROPLET_IP 'systemctl status battlestats-celery-watchdog.timer --no-pager'
+ssh root@YOUR_DROPLET_IP 'journalctl -t battlestats-watchdog --no-pager -n 20'
+```
+
+Any `ALERT` entries in the watchdog journal indicate the watchdog caught and recovered a zombie worker.
 
 For clan-chart regressions specifically, verify that a stale clan shell does not suppress a plot built from already-present members. A healthy post-deploy check is that `/api/fetch/clan_data/<clan_id>:active` returns real rows for populated clans rather than `[]` with `X-Clan-Plot-Pending: true` indefinitely.
