@@ -339,8 +339,8 @@ const drawDistribution = (
     const c = chartColors[theme];
     const compact = svgWidth < 480;
     const margin = compact
-        ? { top: 22, right: 6, bottom: 36, left: 30 }
-        : { top: 22, right: 14, bottom: 38, left: 42 };
+        ? { top: 22, right: 6, bottom: 40, left: 30 }
+        : { top: 22, right: 14, bottom: 44, left: 42 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
