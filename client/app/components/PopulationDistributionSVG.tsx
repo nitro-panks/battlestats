@@ -503,23 +503,7 @@ const drawDistribution = (
         .attr('stroke-width', 2)
         .attr('d', line);
 
-    // Count labels on clipped bins
-    if (yCapEnabled) {
-        primaryPoints.forEach((point) => {
-            if (point.count > effectiveYMax) {
-                const label = d3.format('~s')(point.count).replace('G', 'B');
-                svg.append('text')
-                    .attr('x', x(point.value))
-                    .attr('y', y(effectiveYMax * 0.98) - 2)
-                    .attr('text-anchor', 'middle')
-                    .style('font-size', compact ? '8px' : '9px')
-                    .style('font-weight', '600')
-                    .style('fill', c.labelText)
-                    .style('opacity', 0.7)
-                    .text(`${label} ↑`);
-            }
-        });
-    }
+
 
     if (primaryPayload.metric === 'win_rate') {
         WOWS_WR_BREAKPOINTS
