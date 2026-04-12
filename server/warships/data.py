@@ -2672,7 +2672,7 @@ PLAYER_DISTRIBUTION_CONFIGS = {
         'value_format': 'decimal',
         'field_name': 'player_score',
         'min_population_battles': 100,
-        'range_min': 0.0,
+        'range_min': 2.0,
         'range_max': 10.0,
         'bin_width': 0.5,
         'source_model': 'explorer_summary',

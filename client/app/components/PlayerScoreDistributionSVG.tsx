@@ -9,12 +9,18 @@ interface PlayerScoreDistributionSVGProps {
     theme?: ChartTheme;
 }
 
+const SCORE_FLOOR = 2.0;
+
 const PlayerScoreDistributionSVG: React.FC<PlayerScoreDistributionSVGProps> = ({
     playerScore,
     svgWidth = 600,
     svgHeight = 184,
     theme,
 }) => {
+    if (playerScore == null || playerScore < SCORE_FLOOR) {
+        return null;
+    }
+
     return (
         <PopulationDistributionSVG
             primaryMetric="player_score"
