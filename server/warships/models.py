@@ -182,6 +182,8 @@ class PlayerExplorerSummary(models.Model):
         on_delete=models.CASCADE,
         related_name='explorer_summary',
     )
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     battles_last_29_days = models.IntegerField(null=True, blank=True)
     wins_last_29_days = models.IntegerField(null=True, blank=True)
     active_days_last_29_days = models.IntegerField(null=True, blank=True)
@@ -226,6 +228,8 @@ class PlayerExplorerSummary(models.Model):
         indexes = [
             models.Index(fields=['efficiency_rank_percentile'],
                          name='explorer_eff_rank_idx'),
+            models.Index(fields=['realm', 'player_score'],
+                         name='explorer_realm_score_idx'),
         ]
 
     def __str__(self):

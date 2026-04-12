@@ -2013,6 +2013,7 @@ def refresh_player_explorer_summary(
     explorer_summary, _ = PlayerExplorerSummary.objects.update_or_create(
         player=player,
         defaults={
+            'realm': player.realm,
             'battles_last_29_days': summary['battles_last_29_days'],
             'wins_last_29_days': summary['wins_last_29_days'],
             'active_days_last_29_days': summary['active_days_last_29_days'],
@@ -3014,8 +3015,7 @@ def fetch_player_population_distribution(metric: str, realm: str = DEFAULT_REALM
 
     if source_model == 'explorer_summary':
         qs = PlayerExplorerSummary.objects.filter(
-            player__realm=realm,
-            player__pvp_battles__gte=config['min_population_battles'],
+            realm=realm,
             **{f'{field_name}__isnull': False},
         )
     else:
@@ -3910,8 +3910,10 @@ def _persist_player_clan_battle_summary(
     if player is None:
         return
 
-    explorer_summary, _ = PlayerExplorerSummary.objects.get_or_create(
-        player=player)
+    explorer_summary, created = PlayerExplorerSummary.objects.get_or_create(
+        player=player, defaults={'realm': player.realm})
+    if not created and not explorer_summary.realm:
+        explorer_summary.realm = player.realm
     total_battles = int(summary.get('total_battles') or 0)
     seasons_participated = int(summary.get('seasons_participated') or 0)
     win_rate = summary.get('win_rate')
@@ -3926,6 +3928,7 @@ def _persist_player_clan_battle_summary(
     explorer_summary.clan_battle_overall_win_rate = win_rate
     explorer_summary.clan_battle_summary_updated_at = django_timezone.now()
     explorer_summary.save(update_fields=[
+        'realm',
         'clan_battle_total_battles',
         'clan_battle_seasons_participated',
         'clan_battle_overall_win_rate',
