@@ -5385,6 +5385,7 @@ def get_clan_battle_activity_badge(
     total_members: int = 0,
     realm: str = DEFAULT_REALM,
     reference_date: Optional[date] = None,
+    cache_only: bool = False,
 ) -> dict[str, float | int | bool]:
     normalized_clan_id = str(clan_id or '').strip()
     if not normalized_clan_id:
@@ -5394,6 +5395,14 @@ def get_clan_battle_activity_badge(
         normalized_clan_id, realm=realm)
     season_rows = cache.get(cache_key)
     if season_rows is None:
+        if cache_only:
+            # Caller is on a hot request path (e.g. landing render). Return a
+            # default badge and let the caller queue an async refresh — never
+            # fire a synchronous WG API fan-out from inside a request.
+            badge = summarize_clan_battle_activity_badge(
+                [], total_members=total_members, reference_date=reference_date)
+            badge['cache_miss'] = True
+            return badge
         season_rows = refresh_clan_battle_seasons_cache(
             normalized_clan_id, realm=realm)
 

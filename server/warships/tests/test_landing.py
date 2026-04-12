@@ -757,8 +757,13 @@ class LandingHelperTests(TestCase):
             ],
         }
 
-        with patch('warships.data._get_clan_battle_seasons_metadata', return_value=season_meta), \
-                patch('warships.data.refresh_clan_battle_seasons_cache', side_effect=lambda clan_id, realm='na': season_rows_by_clan.get(str(clan_id), [])):
+        # Pre-populate the clan battle summary cache so the cache-only badge
+        # path resolves on hit (production: warmed by background refresh).
+        from warships.data import _get_clan_battle_summary_cache_key
+        for clan_id, rows in season_rows_by_clan.items():
+            cache.set(_get_clan_battle_summary_cache_key(clan_id), rows, 600)
+
+        with patch('warships.data._get_clan_battle_seasons_metadata', return_value=season_meta):
             payload, _ = get_landing_best_clans_payload_with_cache_metadata(
                 force_refresh=True,
                 sort='overall',
@@ -770,6 +775,33 @@ class LandingHelperTests(TestCase):
         }
         self.assertTrue(badge_by_name['CBBadgeLeader'])
         self.assertFalse(badge_by_name['CBBadgeSleeper'])
+
+    def test_landing_clan_badges_cache_miss_defers_to_async_refresh(self):
+        """Cache miss on the hot path must NOT fire synchronous WG API calls.
+
+        Regression guard for the gunicorn 30s timeout that hit
+        /api/landing/clans?mode=random when the clan battle summary cache was
+        cold. The fix routes misses through queue_clan_battle_summary_refresh
+        instead of refresh_clan_battle_seasons_cache.
+        """
+        from warships.landing import _attach_clan_battle_activity_badges
+
+        rows = [
+            {'clan_id': 9001, 'name': 'ColdCacheClan', 'members_count': 30},
+            {'clan_id': 9002, 'name': 'AlsoCold', 'members_count': 25},
+        ]
+
+        with patch('warships.data.refresh_clan_battle_seasons_cache') as sync_refresh, \
+                patch('warships.tasks.queue_clan_battle_summary_refresh', return_value={'status': 'queued'}) as queue_refresh:
+            result = _attach_clan_battle_activity_badges(rows, realm='na')
+
+        # No synchronous WG API fan-out from the request thread.
+        sync_refresh.assert_not_called()
+        # Both cache misses scheduled async refreshes.
+        self.assertEqual(queue_refresh.call_count, 2)
+        # Default badge is False on miss; the page renders without blocking.
+        self.assertFalse(result[0]['is_clan_battle_active'])
+        self.assertFalse(result[1]['is_clan_battle_active'])
 
     def test_all_landing_player_modes_use_six_hour_cache_ttl(self):
         _, best_meta = get_landing_players_payload_with_cache_metadata(

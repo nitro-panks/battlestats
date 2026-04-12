@@ -51,6 +51,7 @@ def _clan_wr_annotation():
 
 
 def _attach_clan_battle_activity_badges(rows: list[dict], realm: str = DEFAULT_REALM) -> list[dict]:
+    pending_refresh: list[object] = []
     for row in rows:
         clan_id = row.get('clan_id')
         if clan_id is None:
@@ -61,8 +62,25 @@ def _attach_clan_battle_activity_badges(rows: list[dict], realm: str = DEFAULT_R
             clan_id,
             total_members=int(row.get('members_count') or 0),
             realm=realm,
+            cache_only=True,
         )
         row['is_clan_battle_active'] = bool(badge.get('is_clan_battle_active'))
+        if badge.get('cache_miss'):
+            pending_refresh.append(clan_id)
+
+    if pending_refresh:
+        # Cache miss on a hot path: defer the WG API fan-out to the celery
+        # background queue so the request thread never blocks. Each clan's
+        # refresh has its own dispatch dedup lock inside the helper.
+        from warships.tasks import queue_clan_battle_summary_refresh
+        for clan_id in pending_refresh:
+            try:
+                queue_clan_battle_summary_refresh(clan_id, realm=realm)
+            except Exception as error:
+                logger.warning(
+                    'Failed to queue clan battle summary refresh for clan_id=%s: %s',
+                    clan_id, error,
+                )
 
     return rows
 
