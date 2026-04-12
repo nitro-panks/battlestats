@@ -50,11 +50,10 @@ KILL_RATIO_MID_TIER_WEIGHT = 0.65
 KILL_RATIO_HIGH_TIER_WEIGHT = 1.0
 KILL_RATIO_SMOOTHING_BATTLES = 12.0
 KILL_RATIO_PRIOR = 0.7
-PLAYER_SCORE_WR_WEIGHT = 0.36
-PLAYER_SCORE_KDR_WEIGHT = 0.24
-PLAYER_SCORE_SURVIVAL_WEIGHT = 0.14
-PLAYER_SCORE_BATTLES_WEIGHT = 0.10
-PLAYER_SCORE_ACTIVITY_WEIGHT = 0.16
+PLAYER_SCORE_WR_WEIGHT = 0.40
+PLAYER_SCORE_KDR_WEIGHT = 0.28
+PLAYER_SCORE_SURVIVAL_WEIGHT = 0.18
+PLAYER_SCORE_BATTLES_WEIGHT = 0.14
 PLAYER_SCORE_MAX = 10.0
 PLAYER_SCORE_INACTIVITY_GRACE_DAYS = 7
 PLAYER_SCORE_180_DAY_CAP = 2.0
@@ -1774,8 +1773,6 @@ def _calculate_player_score(
     kill_ratio: Optional[float],
     pvp_survival_rate: Optional[float],
     total_battles: Optional[int],
-    activity_rows: Any,
-    days_since_last_battle: Optional[int],
     battle_rows: list[dict],
 ) -> Optional[float]:
     component_values = [
@@ -1784,8 +1781,6 @@ def _calculate_player_score(
         (PLAYER_SCORE_SURVIVAL_WEIGHT, _normalize_survival_score(pvp_survival_rate)),
         (PLAYER_SCORE_BATTLES_WEIGHT, _normalize_battle_volume_score(
             total_battles, battle_rows)),
-        (PLAYER_SCORE_ACTIVITY_WEIGHT, _calculate_recent_activity_score(
-            activity_rows, days_since_last_battle)),
     ]
 
     weighted_sum = 0.0
@@ -1800,13 +1795,6 @@ def _calculate_player_score(
         return None
 
     score = round((weighted_sum / total_weight) * PLAYER_SCORE_MAX, 2)
-    score = round(
-        score * _calculate_competitive_tier_factor(battle_rows, total_battles), 2)
-
-    inactivity_cap = _inactivity_score_cap(days_since_last_battle)
-    if inactivity_cap is not None:
-        score = min(score, inactivity_cap)
-
     return score
 
 
@@ -1830,8 +1818,6 @@ def _explorer_summary_needs_refresh(player: Player) -> bool:
         kill_ratio=expected_kill_ratio,
         pvp_survival_rate=player.pvp_survival_rate,
         total_battles=player.total_battles or player.pvp_battles,
-        activity_rows=player.activity_json,
-        days_since_last_battle=player.days_since_last_battle,
         battle_rows=battle_rows,
     )
 
@@ -1973,8 +1959,6 @@ def build_player_summary(
             kill_ratio=summary['kill_ratio'],
             pvp_survival_rate=player.pvp_survival_rate,
             total_battles=player.total_battles or player.pvp_battles,
-            activity_rows=normalized_activity_rows,
-            days_since_last_battle=player.days_since_last_battle,
             battle_rows=normalized_battles_rows,
         ),
         'ships_played_total': len(played_rows) if has_battle_data else None,
