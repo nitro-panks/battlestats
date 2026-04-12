@@ -396,9 +396,25 @@ const drawDistribution = (
         d3.max(primaryPoints, (point: DistributionPoint) => point.count) || 0,
         d3.max(overlayPoints, (point: DistributionPoint) => point.count) || 0,
     ]) || 1;
+
+    // Auto-cap Y-axis when one bin dominates (heavy-tailed skew)
+    const sortedBinCounts = primaryPoints
+        .map((p) => p.count)
+        .filter((c) => c > 0)
+        .sort((a, b) => b - a);
+    const yCapEnabled = sortedBinCounts.length >= 2
+        && sortedBinCounts[0] > 2.5 * sortedBinCounts[1];
+    const effectiveYMax = yCapEnabled
+        ? sortedBinCounts[1] * 2
+        : yMax;
+
     const y = d3.scaleLinear()
-        .domain([0, yMax * 1.08])
+        .domain([0, effectiveYMax * 1.08])
         .range([height, 0]);
+
+    const capCount = (count: number): number => Math.min(count, effectiveYMax * 1.02);
+    const cappedPrimary = anchoredPrimary.map((p) => ({ ...p, count: capCount(p.count) }));
+    const cappedOverlay = anchoredOverlay.map((p) => ({ ...p, count: capCount(p.count) }));
 
     const xAxis = primaryPayload.scale === 'log'
         ? d3.axisBottom(x as LogScale)
@@ -471,7 +487,7 @@ const drawDistribution = (
         .curve(d3.curveBasis);
 
     svg.append('path')
-        .datum(anchoredPrimary)
+        .datum(cappedPrimary)
         .attr('fill', `url(#${gradientId})`)
         .attr('d', area);
 
@@ -481,11 +497,29 @@ const drawDistribution = (
         .curve(d3.curveBasis);
 
     svg.append('path')
-        .datum(anchoredPrimary)
+        .datum(cappedPrimary)
         .attr('fill', 'none')
         .attr('stroke', metricLineColor(primaryPayload.metric, theme))
         .attr('stroke-width', 2)
         .attr('d', line);
+
+    // Count labels on clipped bins
+    if (yCapEnabled) {
+        primaryPoints.forEach((point) => {
+            if (point.count > effectiveYMax) {
+                const label = d3.format('~s')(point.count).replace('G', 'B');
+                svg.append('text')
+                    .attr('x', x(point.value))
+                    .attr('y', y(effectiveYMax * 0.98) - 2)
+                    .attr('text-anchor', 'middle')
+                    .style('font-size', compact ? '8px' : '9px')
+                    .style('font-weight', '600')
+                    .style('fill', c.labelText)
+                    .style('opacity', 0.7)
+                    .text(`${label} ↑`);
+            }
+        });
+    }
 
     if (primaryPayload.metric === 'win_rate') {
         WOWS_WR_BREAKPOINTS
@@ -504,7 +538,7 @@ const drawDistribution = (
     }
 
     const clampedPrimaryValue = Math.max(primaryPayload.bins[0].bin_min, Math.min(primaryPayload.bins[primaryPayload.bins.length - 1].bin_max, primaryValue));
-    const primaryCount = interpolateCountAtValue(primaryPoints, clampedPrimaryValue, primaryPayload.scale);
+    const primaryCount = capCount(interpolateCountAtValue(primaryPoints, clampedPrimaryValue, primaryPayload.scale));
     const primaryX = x(clampedPrimaryValue);
     const primaryColor = metricValueColor(primaryPayload.metric, primaryValue, theme);
     const primaryPercentile = percentileLabelForValue(
@@ -549,7 +583,7 @@ const drawDistribution = (
     if (overlayPayload && overlayPayload.scale === primaryPayload.scale && overlayValue != null && overlayPayload.bins.length) {
         const overlayColor = metricValueColor(overlayPayload.metric, overlayValue, theme);
         const clampedOverlayValue = Math.max(overlayPayload.bins[0].bin_min, Math.min(overlayPayload.bins[overlayPayload.bins.length - 1].bin_max, overlayValue));
-        const overlayCount = interpolateCountAtValue(overlayPoints, clampedOverlayValue, overlayPayload.scale);
+        const overlayCount = capCount(interpolateCountAtValue(overlayPoints, clampedOverlayValue, overlayPayload.scale));
         const overlayX = x(clampedOverlayValue);
         const overlayPercentile = percentileLabelForValue(
             overlayPayload.bins,
@@ -559,7 +593,7 @@ const drawDistribution = (
         );
 
         svg.append('path')
-            .datum(anchoredOverlay)
+            .datum(cappedOverlay)
             .attr('fill', 'none')
             .attr('stroke', metricLineColor(overlayPayload.metric, theme))
             .attr('stroke-width', 2)
