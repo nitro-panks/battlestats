@@ -19,6 +19,7 @@ interface PlayerExplorerRow {
     kill_ratio: number | null;
     player_score: number | null;
     pvp_survival_rate: number | null;
+    activity_trend_direction: string | null;
 }
 
 interface PlayerExplorerResponse {
@@ -56,6 +57,19 @@ const formatPercent = (value: number | null | undefined): string => {
         return '—';
     }
     return `${value.toFixed(1)}%`;
+};
+
+const TrendArrow: React.FC<{ direction: string | null }> = ({ direction }) => {
+    if (direction === 'up') {
+        return <span className="text-emerald-500" title="Trending up">▲</span>;
+    }
+    if (direction === 'down') {
+        return <span className="text-red-400" title="Trending down">▼</span>;
+    }
+    if (direction === 'flat') {
+        return <span className="text-[var(--text-secondary)]" title="Flat">—</span>;
+    }
+    return <span className="text-[var(--text-secondary)]">·</span>;
 };
 
 const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
@@ -221,6 +235,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                     <thead className="bg-[var(--bg-surface)]">
                         <tr>
                             <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Player</th>
+                            <th className="px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]" title="Activity trend (last 29 days)">Trend</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Score</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Total Battles</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Survive %</th>
@@ -243,6 +258,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                                         {row.is_hidden ? <HiddenAccountIcon /> : null}
                                     </button>
                                 </td>
+                                <td className="px-3 py-3 text-center"><TrendArrow direction={row.activity_trend_direction} /></td>
                                 <td className="px-3 py-3 text-right text-[var(--accent-dark)]">{formatMetric(row.player_score)}</td>
                                 <td className="px-3 py-3 text-right text-[var(--accent-dark)]">{formatMetric(row.pvp_battles)}</td>
                                 <td className="px-3 py-3 text-right text-[var(--accent-dark)]">{formatPercent(row.pvp_survival_rate)}</td>
@@ -254,7 +270,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                         ))}
                         {!isLoading && (data?.results.length || 0) === 0 ? (
                             <tr>
-                                <td colSpan={8} className="px-3 py-6 text-center text-sm text-[var(--text-secondary)]">No players matched the current explorer filters.</td>
+                                <td colSpan={9} className="px-3 py-6 text-center text-sm text-[var(--text-secondary)]">No players matched the current explorer filters.</td>
                             </tr>
                         ) : null}
                     </tbody>
