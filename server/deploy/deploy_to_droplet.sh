@@ -447,7 +447,7 @@ cat > /etc/systemd/system/battlestats-celery.service <<EOF
 [Unit]
 Description=Battlestats Celery worker (default queue — user-facing tasks)
 After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
-Requires=redis-server.service rabbitmq-server.service
+Wants=redis-server.service rabbitmq-server.service
 
 [Service]
 Type=simple
@@ -469,7 +469,7 @@ cat > /etc/systemd/system/battlestats-celery-hydration.service <<EOF
 [Unit]
 Description=Battlestats Celery worker (hydration queue — ranked + efficiency refresh)
 After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
-Requires=redis-server.service rabbitmq-server.service
+Wants=redis-server.service rabbitmq-server.service
 
 [Service]
 Type=simple
@@ -491,7 +491,7 @@ cat > /etc/systemd/system/battlestats-celery-background.service <<EOF
 [Unit]
 Description=Battlestats Celery worker (background queue — crawls, warmers, snapshots)
 After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
-Requires=redis-server.service rabbitmq-server.service
+Wants=redis-server.service rabbitmq-server.service
 
 [Service]
 Type=simple
