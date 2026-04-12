@@ -384,7 +384,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             <div className="mt-6">
                                 <SectionHeadingWithTooltip
                                     title="Player Score Distribution"
-                                    description="Player score blends win rate, kill ratio, survival, battle volume, tier diversity, and recent activity into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
+                                    description="Player score blends win rate, kill ratio, survival, and battle volume into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
                                     className="mb-2"
                                 />
                                 <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={284} theme={theme} />
