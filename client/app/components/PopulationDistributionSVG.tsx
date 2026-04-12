@@ -339,8 +339,8 @@ const drawDistribution = (
     const c = chartColors[theme];
     const compact = svgWidth < 480;
     const margin = compact
-        ? { top: 22, right: 6, bottom: 28, left: 30 }
-        : { top: 22, right: 14, bottom: 28, left: 42 };
+        ? { top: 22, right: 6, bottom: 36, left: 30 }
+        : { top: 22, right: 14, bottom: 38, left: 42 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -369,6 +369,18 @@ const drawDistribution = (
         value: midpointForBin(bin, primaryPayload.scale),
         count: bin.count,
     }));
+
+    // Anchor the curve to domain edges so it meets the y-axis and right edge
+    const anchorToEdges = (points: DistributionPoint[], domain: [number, number]): DistributionPoint[] => {
+        const anchored = [...points];
+        if (anchored.length && anchored[0].value > domain[0]) {
+            anchored.unshift({ value: domain[0], count: 0 });
+        }
+        if (anchored.length && anchored[anchored.length - 1].value < domain[1]) {
+            anchored.push({ value: domain[1], count: 0 });
+        }
+        return anchored;
+    };
     const overlayPoints = overlayPayload && overlayPayload.scale === primaryPayload.scale
         ? overlayPayload.bins.map((bin) => ({
             value: midpointForBin(bin, overlayPayload.scale),
@@ -377,6 +389,8 @@ const drawDistribution = (
         : [];
 
     const xDomain = combinedDomain(primaryPayload, primaryValue, overlayPayload, overlayValue);
+    const anchoredPrimary = anchorToEdges(primaryPoints, xDomain);
+    const anchoredOverlay = overlayPoints.length ? anchorToEdges(overlayPoints, xDomain) : [];
     const x = buildXScale(primaryPayload, xDomain, width);
     const yMax = d3.max([
         d3.max(primaryPoints, (point: DistributionPoint) => point.count) || 0,
@@ -457,7 +471,7 @@ const drawDistribution = (
         .curve(d3.curveBasis);
 
     svg.append('path')
-        .datum(primaryPoints)
+        .datum(anchoredPrimary)
         .attr('fill', `url(#${gradientId})`)
         .attr('d', area);
 
@@ -467,7 +481,7 @@ const drawDistribution = (
         .curve(d3.curveBasis);
 
     svg.append('path')
-        .datum(primaryPoints)
+        .datum(anchoredPrimary)
         .attr('fill', 'none')
         .attr('stroke', metricLineColor(primaryPayload.metric, theme))
         .attr('stroke-width', 2)
@@ -545,7 +559,7 @@ const drawDistribution = (
         );
 
         svg.append('path')
-            .datum(overlayPoints)
+            .datum(anchoredOverlay)
             .attr('fill', 'none')
             .attr('stroke', metricLineColor(overlayPayload.metric, theme))
             .attr('stroke-width', 2)
