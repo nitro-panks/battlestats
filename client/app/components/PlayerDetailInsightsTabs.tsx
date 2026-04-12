@@ -380,7 +380,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             </div>
                         ) : null}
 
-                        {playerScore != null ? (
+                        {playerScore != null && playerScore >= 2.0 ? (
                             <div className="mt-6">
                                 <SectionHeadingWithTooltip
                                     title="Player Score Distribution"
