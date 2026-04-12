@@ -457,7 +457,7 @@ class PlayerPopulationDistributionSerializer(serializers.Serializer):
     label = serializers.CharField()
     x_label = serializers.CharField()
     scale = serializers.ChoiceField(choices=['linear', 'log'])
-    value_format = serializers.ChoiceField(choices=['percent', 'integer'])
+    value_format = serializers.ChoiceField(choices=['percent', 'integer', 'decimal'])
     tracked_population = serializers.IntegerField()
     bins = PlayerPopulationDistributionBinSerializer(many=True)
 
