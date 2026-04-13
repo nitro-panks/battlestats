@@ -51,7 +51,6 @@ check() {
     fi
 
     if $ok; then
-        log "OK    ${label}  (${http_code}, ${size}B)"
         (( PASS++ )) || true
     else
         log "FAIL  ${label}  ${reason}  url=${url}"
@@ -62,8 +61,6 @@ check() {
 }
 
 # ── page routes (HTML) ───────────────────────────────────────────────────────
-
-log "── run start ──────────────────────────────────────"
 
 # Landing page — must contain the search form / app shell
 check "page:landing" \
@@ -178,8 +175,8 @@ check "api:sitemap-entities" \
 # ── summary ──────────────────────────────────────────────────────────────────
 
 TOTAL=$((PASS + FAIL))
-log "── run end ── ${PASS}/${TOTAL} passed, ${FAIL} failed ──"
 
 if (( FAIL > 0 )); then
+    log "── ${FAIL}/${TOTAL} checks failed ──"
     exit 1
 fi
