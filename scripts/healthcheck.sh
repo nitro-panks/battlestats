@@ -172,6 +172,66 @@ check "api:sitemap-entities" \
     '"players"|"clans"|\[' \
     32
 
+# ── droplet services ─────────────────────────────────────────────────────────
+
+# Celery Beat dispatches every periodic task (player/ranked refresh, warmers,
+# crawl schedules). If it dies, the site keeps serving cached data and every
+# HTTP probe above still passes — silent failure. Ship it died undetected for
+# 10 days on 2026-04-12 before we noticed manually.
+check_systemd_unit() {
+    local unit="$1"
+    local state
+    state=$(ssh -o BatchMode=yes -o ConnectTimeout=5 root@battlestats.online \
+        "systemctl is-active $unit" 2>/dev/null) || state="unreachable"
+
+    if [[ "$state" == "active" ]]; then
+        (( PASS++ )) || true
+    else
+        log "FAIL  service:${unit}  state=${state}"
+        (( FAIL++ )) || true
+    fi
+}
+
+check_systemd_unit "battlestats-beat.service"
+
+# ── celery queue depth ──────────────────────────────────────────────────────
+#
+# Pairs with the beat check above. If a worker hangs (zombie consumer, stuck
+# task, crash loop), beat keeps dispatching but nothing drains — the queue
+# climbs. Catch within 10 min instead of noticing manually days later.
+#
+# Thresholds chosen from observed steady-state on 2026-04-22:
+#   default/hydration  — drain continuously, normally ≈0. Anything above ~100
+#                        means consumers are absent or wedged.
+#   background         — absorbs long-running tasks (incremental_player_refresh
+#                        runs ~20–40 min, both -c 2 slots can be busy while the
+#                        queue backs up to ~900). 2000 gives comfortable headroom
+#                        before alerting.
+check_queue_depth() {
+    local queue="$1" threshold="$2"
+    local depth
+    depth=$(ssh -o BatchMode=yes -o ConnectTimeout=5 root@battlestats.online \
+        "rabbitmqctl list_queues -q name messages --no-table-headers 2>/dev/null | awk -v q='$queue' '\$1==q {print \$2}'" \
+        2>/dev/null) || depth=""
+
+    if [[ -z "$depth" ]]; then
+        log "FAIL  queue:${queue}  unreachable or missing"
+        (( FAIL++ )) || true
+        return
+    fi
+
+    if (( depth > threshold )); then
+        log "FAIL  queue:${queue}  depth=${depth} > ${threshold}"
+        (( FAIL++ )) || true
+    else
+        (( PASS++ )) || true
+    fi
+}
+
+check_queue_depth "default"    100
+check_queue_depth "hydration"  100
+check_queue_depth "background" 2000
+
 # ── summary ──────────────────────────────────────────────────────────────────
 
 TOTAL=$((PASS + FAIL))
