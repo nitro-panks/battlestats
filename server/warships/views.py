@@ -452,7 +452,7 @@ def ranked_data(request, player_id: str) -> Response:
     response = _validated_list_response(data, RankedDataSerializer)
 
     player = Player.objects.filter(player_id=player_id, realm=realm).first()
-    if not data and is_ranked_data_refresh_pending(player_id):
+    if is_ranked_data_refresh_pending(player_id):
         response["X-Ranked-Pending"] = "true"
     if player and player.ranked_updated_at:
         response["X-Ranked-Updated-At"] = player.ranked_updated_at.isoformat()

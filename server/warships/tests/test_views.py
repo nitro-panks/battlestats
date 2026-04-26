@@ -4948,6 +4948,43 @@ class ApiThrottleTests(TestCase):
         self.assertIn("X-Ranked-Updated-At", response)
         mock_fetch_ranked_data.assert_called_once_with("778", realm='na')
 
+    @patch("warships.views.is_ranked_data_refresh_pending", return_value=True)
+    @patch("warships.views.fetch_ranked_data")
+    def test_ranked_data_flags_pending_even_when_stale_payload_returned(self, mock_fetch_ranked_data, _mock_pending):
+        # Regression: when cache is stale but populated, fetch_ranked_data serves the
+        # stale payload and queues a background refresh. The header must still flag
+        # the pending refresh so the client polls for the updated payload — otherwise
+        # users only see fresh numbers after a hard reload.
+        mock_fetch_ranked_data.return_value = [
+            {
+                "season_id": 1025,
+                "season_name": "Season 25",
+                "season_label": "Season 25",
+                "start_date": "2025-12-01",
+                "end_date": "2026-01-15",
+                "highest_league": 1,
+                "highest_league_name": "Gold",
+                "total_battles": 100,
+                "total_wins": 55,
+                "win_rate": 0.55,
+                "top_ship_name": "Stalingrad",
+                "best_sprint": None,
+                "sprints": [],
+            }
+        ]
+        Player.objects.create(
+            name="StaleRankedPlayer",
+            player_id=779,
+            ranked_json=mock_fetch_ranked_data.return_value,
+            ranked_updated_at=timezone.now() - timedelta(hours=2),
+        )
+
+        response = self.client.get("/api/fetch/ranked_data/779/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response["X-Ranked-Pending"], "true")
+
     @patch("warships.views._fetch_player_id_by_name", return_value=None)
     def test_missing_player_lookup_uses_standard_drf_error_shape(self, _mock_lookup):
         response = self.client.get("/api/player/PlayerThatWillNeverExist/")
