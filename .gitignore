@@ -17,7 +17,8 @@ server/.env.*
 server/ca-certificate.crt
 
 .vscode/
-.claude/
+.claude/*
+!.claude/skills/
 .idea/
 
 logs/

@@ -220,6 +220,19 @@ These rules from that file apply to every commit:
 - Avoid new browser-triggered WG API calls when stored data already exists.
 - Avoid large unscoped refactors during feature delivery.
 
+## Claude Code Skills
+
+Project-scoped skills live in `.claude/skills/<name>/SKILL.md` and are auto-loaded by Claude Code when their trigger phrases are matched. Current skills:
+
+- **`doctrine-precommit`** — "ready to commit", "doctrine check". Walks the pre-commit checklist from `agents/knowledge/agentic-team-doctrine.json` against the current diff. Read-only.
+- **`release-gate`** — "run the release gate", "ready to release". Runs the curated lean release gate (4 backend pytest files + frontend `npm test`) in parallel and reports pass/fail. Read-only.
+- **`runbook-author`** — "write a runbook for X", "document this incident". Creates a new runbook with the project's naming + structural conventions; pre-populates from conversation context. Stages, does not commit.
+- **`runbook-archive`** — "archive this runbook", "this runbook is superseded". `git mv`'s a runbook to `agents/runbooks/archive/` and updates `doc_registry.json` if registered. Stages, does not commit.
+- **`deploy-droplet`** — "deploy frontend", "deploy backend", "ship to prod". Runs the deploy script (with optional `DEPLOY_AGENTIC_RUNTIME=1`), then post-deploy verify + healthcheck. Mutates production.
+- **`enrichment-status`** — "how's enrichment", "check the crawler". Runs `check_enrichment_crawler.sh` and interprets output against the enrichment + celery-zombie runbooks. Read-only.
+
+Rollout context and design rationale: `agents/runbooks/runbook-claude-skills-rollout-2026-04-26.md`.
+
 ## Versioning
 
 The project uses semantic versioning with a root `VERSION` file as the single source of truth. The version is surfaced in the client footer at build time via `NEXT_PUBLIC_APP_VERSION`.
