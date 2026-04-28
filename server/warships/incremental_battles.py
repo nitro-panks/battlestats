@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 
 
 logger = logging.getLogger(__name__)
@@ -340,7 +340,7 @@ def record_observation_from_payloads(
 
     Returns a status dict matching `record_observation_and_diff`.
     """
-    from warships.models import BattleEvent, BattleObservation, Ship
+    from warships.models import BattleEvent, BattleObservation, Player, Ship
 
     if player_data is not None:
         snapshot = coerce_observation_payload(player_data, ship_data)
@@ -398,6 +398,7 @@ def record_observation_from_payloads(
         )
 
         created = 0
+        latest_detected_at = None
         for event in events:
             event_row = BattleEvent.objects.create(
                 player=player,
@@ -415,7 +416,20 @@ def record_observation_from_payloads(
                 to_observation=observation,
             )
             _apply_event_to_daily_summary(event_row)
+            if latest_detected_at is None or event_row.detected_at > latest_detected_at:
+                latest_detected_at = event_row.detected_at
             created += 1
+
+        if created > 0 and latest_detected_at is not None:
+            # Drives the landing "Active" sub-sort. The conditional UPDATE
+            # only advances the column forward — if a concurrent writer
+            # already set a later value, the WHERE clause excludes us and
+            # the UPDATE is a no-op. Single atomic statement, portable
+            # across SQLite (tests) and Postgres (prod).
+            Player.objects.filter(pk=player.pk).filter(
+                Q(last_random_battle_at__isnull=True)
+                | Q(last_random_battle_at__lt=latest_detected_at)
+            ).update(last_random_battle_at=latest_detected_at)
 
     if created > 0:
         _invalidate_battle_history_cache(player)

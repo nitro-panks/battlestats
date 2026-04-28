@@ -322,6 +322,118 @@ class RecordObservationFromPayloadsTests(TestCase):
             self.assertIsNone(_apply_event_to_daily_summary(object()))
 
 
+class LastRandomBattleAtTests(TestCase):
+    """Player.last_random_battle_at is the timestamp driving the landing
+    'Active' sub-sort. It must:
+      - start NULL on a fresh player,
+      - advance to the latest event's detected_at when events are written,
+      - stay untouched when an observation produces zero events,
+      - never regress (Greatest() guard against concurrent writers).
+    """
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="active_bench", player_id=4242424243, realm="na",
+            pvp_battles=100, pvp_wins=50, pvp_losses=50, pvp_frags=80,
+            pvp_survived_battles=60,
+        )
+        Ship.objects.create(
+            ship_id=43, name="Iowa", nation="usa", ship_type="Battleship",
+            tier=9,
+        )
+
+    def _ship_payload(self, *, battles, wins=0, frags=0, damage=0, xp=0,
+                      planes=0, survived=0, ship_id=43):
+        return [{"ship_id": ship_id, "pvp": {
+            "battles": battles, "wins": wins, "losses": 0, "frags": frags,
+            "damage_dealt": damage, "xp": xp, "planes_killed": planes,
+            "survived_battles": survived,
+        }}]
+
+    def test_column_starts_null_on_fresh_player(self):
+        self.player.refresh_from_db()
+        self.assertIsNone(self.player.last_random_battle_at)
+
+    def test_baseline_observation_does_not_set_column(self):
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.refresh_from_db()
+        self.assertIsNone(self.player.last_random_battle_at)
+
+    def test_first_event_observation_sets_column_to_event_time(self):
+        # Baseline.
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.pvp_battles = 101
+        self.player.pvp_wins = 51
+        self.player.pvp_frags = 82
+        self.player.pvp_survived_battles = 61
+        self.player.save()
+        # Advance.
+        record_observation_from_payloads(
+            self.player,
+            ship_data=self._ship_payload(battles=101, wins=1, frags=2,
+                                         damage=48_000, xp=1_500, survived=1),
+        )
+        self.player.refresh_from_db()
+        self.assertIsNotNone(self.player.last_random_battle_at)
+
+        event = BattleEvent.objects.get(player=self.player)
+        self.assertEqual(self.player.last_random_battle_at, event.detected_at)
+
+    def test_zero_event_observation_leaves_column_untouched(self):
+        # Baseline + first advance to populate the column.
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.pvp_battles = 101
+        self.player.save()
+        record_observation_from_payloads(
+            self.player,
+            ship_data=self._ship_payload(battles=101, wins=1, survived=1),
+        )
+        self.player.refresh_from_db()
+        first_value = self.player.last_random_battle_at
+        self.assertIsNotNone(first_value)
+
+        # Identical totals — no positive delta, no event written.
+        record_observation_from_payloads(
+            self.player,
+            ship_data=self._ship_payload(battles=101, wins=1, survived=1),
+        )
+        self.player.refresh_from_db()
+        self.assertEqual(self.player.last_random_battle_at, first_value)
+
+    def test_column_never_regresses(self):
+        # Set the column to a future time (simulating a concurrent writer
+        # that observed a later event first); the conditional UPDATE must
+        # keep the later value when our update tries to write an earlier
+        # one. Note: refresh_from_db before save() is required because the
+        # in-memory model copy from setUp doesn't have the QuerySet.update
+        # value, and a full save() would overwrite it.
+        future = django_timezone.now() + timedelta(hours=1)
+        Player.objects.filter(pk=self.player.pk).update(
+            last_random_battle_at=future,
+        )
+        # Baseline (no events).
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.refresh_from_db()
+        self.player.pvp_battles = 101
+        self.player.save()
+        # Advance — the new event's detected_at is ~now, strictly less
+        # than `future`. Our conditional UPDATE should not fire.
+        record_observation_from_payloads(
+            self.player,
+            ship_data=self._ship_payload(battles=101, wins=1, survived=1),
+        )
+        self.player.refresh_from_db()
+        self.assertEqual(self.player.last_random_battle_at, future)
+
+
 class RecordObservationAndDiffTests(TestCase):
     """End-to-end wrapper: stubs the WG client, exercises the full path."""
 

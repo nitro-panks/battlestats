@@ -39,6 +39,8 @@ class Player(models.Model):
         'Clan', on_delete=models.CASCADE, null=True, blank=True)
     last_lookup = models.DateTimeField(null=True, blank=True)
     last_fetch = models.DateTimeField(null=True, blank=True)
+    last_random_battle_at = models.DateTimeField(
+        null=True, blank=True, db_index=True)
 
     # TODO: consider refactoring these fields into a separate model
     battles_json = models.JSONField(null=True, blank=True)
