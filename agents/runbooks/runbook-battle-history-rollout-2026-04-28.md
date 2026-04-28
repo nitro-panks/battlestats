@@ -283,6 +283,31 @@ Capture is automatic — it's a side-effect of the WG calls the site already mak
 
 **Optional accelerator for seeding.** If you want every active player observed within 24 h of flipping the capture flag, temporarily lower `PLAYER_REFRESH_INTERVAL_MINUTES` from `180` to `60` for one cycle. Triples observation rate, then revert. Existing infrastructure does the work — no new code, no new WG calls beyond what the existing crawl already issues.
 
+## Cadence guarantees (load contract)
+
+Two contracts the rollout is designed around. They're enforced by **existing** code, not a new throttle — call them out explicitly so a future engineer doesn't add a faster path that violates them.
+
+### Per-player capture: at most one observation every 15 minutes
+
+The capture hook lives at the **tail** of `update_battle_data` (`server/warships/data.py:~2450`), past the existing 15-min freshness early-bail at line 2382:
+
+```python
+if player.battles_json and player.battles_updated_at and datetime.now() - player.battles_updated_at < timedelta(minutes=15):
+    return player.battles_json   # capture hook NOT reached
+```
+
+Threshold is `PLAYER_BATTLE_DATA_STALE_AFTER = timedelta(minutes=15)` (`data.py:114`). Any visit-driven or crawl-driven call to `update_battle_data` within 15 min of the last refresh returns early without issuing a WG fetch and without firing the capture hook. **Visit storms on hot players are naturally throttled.**
+
+The user-facing manual refresh control on `PlayerDetail` mirrors this server-side throttle visually: red until 15 min has elapsed since the player's last fetch, green and clickable thereafter. Clicking issues a single forced refresh that passes through `update_battle_data`'s normal flow (still gated by the 15-min window if multiple users hit it at once on the same player).
+
+If a future change ever wants sub-15-min freshness for a specific user surface, the safe path is a separate code path that does **not** trigger `update_battle_data` — never lower the global `PLAYER_BATTLE_DATA_STALE_AFTER`.
+
+### Per-player coverage: daily differentials on every active player
+
+`incremental_player_refresh_task` walks the entire playerbase per realm in graduated tiers (`hot` / `active` / `warm`) on a ~3 h cycle. Hot players (visited in the last 12 h) cycle every ~10 min within the task; active players every ~1 h; warm players every cycle. Any player who's been seen by the site in the last 30 days is touched by the crawl at least 4–8 times per day, which means **at least 4–8 `BattleObservation` rows per active player per day** once capture is on — enough to compute meaningful daily differentials.
+
+The PoC's 60 s tracked-player loop continues to run for `lil_boots` and any other names in `BATTLE_TRACKING_PLAYER_NAMES` — that's a deliberate exception, scoped to a 1-row whitelist. Production droplet leaves `BATTLE_TRACKING_PLAYER_NAMES` empty, so the 15-min throttle is universal in prod.
+
 ## Operational watchpoints
 
 - **Storage growth** in `warships_battleobservation`. Pruning at day-14 is non-negotiable. Watch `pg_total_relation_size` daily during the first two weeks; if it overshoots the ~7 GB/realm envelope before pruning enables, narrow the per-ship JSON shape (`incremental_battles.py:_serialize_ships_payload`) first rather than disabling capture.
