@@ -43,3 +43,9 @@ deleted_accounts*
 server/purge_transcript_*.jsonl
 
 server/static/rest_framework/**/*.png
+
+# Pipenv files (deploy uses pip -r requirements.txt; pipenv is not
+# operational. Local dev may regenerate Pipfile* but they are not
+# checked in to avoid Dependabot lock-file noise on transitive deps.)
+server/Pipfile
+server/Pipfile.lock
