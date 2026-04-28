@@ -2449,6 +2449,25 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     refresh_player_explorer_summary(player, battles_rows=sorted_data)
     logging.info(f"Updated battles_json data: {player.name}")
 
+    # Battle-history capture hook (Phase 2 of the playerbase rollout).
+    # Runbook: agents/runbooks/runbook-battle-history-rollout-2026-04-28.md
+    # Off in production until BATTLE_HISTORY_CAPTURE_ENABLED=1 is set.
+    if os.getenv("BATTLE_HISTORY_CAPTURE_ENABLED", "0") == "1":
+        try:
+            from warships.incremental_battles import record_observation_from_payloads
+            from warships.models import BattleObservation
+            record_observation_from_payloads(
+                player,
+                player_data=None,
+                ship_data=ship_data,
+                source=BattleObservation.SOURCE_POLL,
+            )
+        except Exception:
+            logging.exception(
+                "battle-history capture failed for player_id=%s realm=%s",
+                player.player_id, realm,
+            )
+
 
 def fetch_tier_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     """

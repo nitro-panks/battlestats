@@ -297,6 +297,7 @@ The agentic memory layer plugs into the LangGraph `_retrieve_guidance` node only
 - `ENRICH_REALMS` — Comma-separated realm list for enrichment crawler (e.g. `na`, `na,eu`). Empty or unset means all realms
 - `BATTLE_TRACKING_PLAYER_NAMES` — Comma-separated player names tracked by the incremental-battle PoC dispatcher. Empty/unset on production = no-op. Local dev sets it to `lil_boots`. See `agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md`
 - `BATTLE_TRACKING_POLL_SECONDS` — Beat tick interval for the PoC dispatcher (default: `60`)
+- `BATTLE_HISTORY_CAPTURE_ENABLED` — When `1`, the tail of `update_battle_data` writes a `BattleObservation` (and any resulting `BattleEvent` rows) for every refreshed player as a side-effect of the existing `ships/stats/` fetch. No new WG calls. Default `0`. See `agents/runbooks/runbook-battle-history-rollout-2026-04-28.md` (Phase 2)
 
 ### Client env
 

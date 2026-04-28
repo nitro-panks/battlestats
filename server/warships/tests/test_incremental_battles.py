@@ -355,3 +355,134 @@ class RecordObservationAndDiffTests(TestCase):
             )
         self.assertEqual(result["status"], "skipped")
         self.assertEqual(result["reason"], "wg-fetch-failed-or-hidden")
+
+
+class UpdateBattleDataCaptureHookTests(TestCase):
+    """Phase 2: visit-driven refresh writes a BattleObservation iff the
+    BATTLE_HISTORY_CAPTURE_ENABLED env flag is set.
+
+    Mocks the WG ship-stats fetch so no network calls fire.
+    """
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="capture_hook_player", player_id=8675309, realm="na",
+            pvp_battles=200, pvp_wins=110, pvp_losses=90, pvp_frags=160,
+            pvp_survived_battles=120,
+            battles_json=None,
+        )
+        self.ship = Ship.objects.create(
+            ship_id=4179870672, name="Dalian", nation="pan_asia",
+            ship_type="Destroyer", tier=9,
+        )
+        # Minimal ship payload that update_battle_data needs to materialize
+        # battles_json + that the capture hook consumes for the observation.
+        self.ship_payload = [{
+            "ship_id": 4179870672,
+            "battles": 200,
+            "distance": 12345,
+            "pvp": {
+                "battles": 200, "wins": 110, "losses": 90, "frags": 160,
+                "damage_dealt": 8_000_000, "xp": 240_000, "planes_killed": 4,
+                "survived_battles": 120,
+            },
+        }]
+
+    def _run_update_battle_data(self):
+        from warships.data import update_battle_data
+        with mock.patch(
+            "warships.data._fetch_ship_stats_for_player",
+            return_value=self.ship_payload,
+        ), mock.patch(
+            "warships.data.update_tiers_data",
+        ), mock.patch(
+            "warships.data.update_type_data",
+        ), mock.patch(
+            "warships.data.update_randoms_data",
+        ), mock.patch(
+            "warships.data.refresh_player_explorer_summary",
+        ), mock.patch(
+            "warships.data._fetch_ship_info",
+            return_value=self.ship,
+        ):
+            update_battle_data(player_id=self.player.player_id, realm="na")
+
+    def test_hook_is_noop_when_flag_is_off(self):
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_CAPTURE_ENABLED": "0"},
+            clear=False,
+        ):
+            self._run_update_battle_data()
+        self.assertEqual(
+            BattleObservation.objects.filter(player=self.player).count(),
+            0,
+            "no observation should be written with the flag off",
+        )
+
+    def test_hook_writes_observation_when_flag_is_on(self):
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_CAPTURE_ENABLED": "1"},
+            clear=False,
+        ):
+            self._run_update_battle_data()
+        observations = BattleObservation.objects.filter(player=self.player)
+        self.assertEqual(observations.count(), 1)
+        observation = observations.get()
+        self.assertEqual(observation.pvp_battles, 200)
+        self.assertEqual(observation.pvp_frags, 160)
+        # ships_stats_json is the wider Phase-1 shape: damage/xp/planes/survived.
+        self.assertEqual(len(observation.ships_stats_json), 1)
+        ship_row = observation.ships_stats_json[0]
+        self.assertEqual(ship_row["damage_dealt"], 8_000_000)
+        self.assertEqual(ship_row["planes_killed"], 4)
+
+    def test_hook_failure_does_not_raise_into_refresh_path(self):
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_CAPTURE_ENABLED": "1"},
+            clear=False,
+        ), mock.patch(
+            "warships.incremental_battles.record_observation_from_payloads",
+            side_effect=RuntimeError("simulated capture bug"),
+        ):
+            # Must not raise — refresh path stays whole.
+            self._run_update_battle_data()
+        # And no observation rows because the capture function itself failed.
+        self.assertEqual(
+            BattleObservation.objects.filter(player=self.player).count(), 0,
+        )
+
+    def test_hook_emits_event_on_advance_across_two_visits(self):
+        """End-to-end Phase 2 capture: two refreshes with pvp_battles
+        advancing between them produces one BattleEvent row."""
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_CAPTURE_ENABLED": "1"},
+            clear=False,
+        ):
+            self._run_update_battle_data()  # baseline
+            # Player row reflects post-match state — update_player_data
+            # would have refreshed these before update_battle_data fires.
+            self.player.pvp_battles = 201
+            self.player.pvp_wins = 111
+            self.player.pvp_frags = 162
+            self.player.pvp_survived_battles = 121
+            self.player.save()
+            # Updated ship payload: same ship, +1 battle.
+            self.ship_payload[0]["pvp"].update({
+                "battles": 201, "wins": 111, "losses": 90, "frags": 162,
+                "damage_dealt": 8_048_000, "xp": 241_500, "planes_killed": 4,
+                "survived_battles": 121,
+            })
+            self._run_update_battle_data()
+
+        events = BattleEvent.objects.filter(player=self.player)
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.battles_delta, 1)
+        self.assertEqual(event.wins_delta, 1)
+        self.assertEqual(event.frags_delta, 2)
+        self.assertEqual(event.damage_delta, 48_000)
+        self.assertTrue(event.survived)
