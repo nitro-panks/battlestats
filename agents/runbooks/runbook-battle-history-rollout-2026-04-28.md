@@ -134,15 +134,21 @@ Two writers, both gated by `BATTLE_HISTORY_ROLLUP_ENABLED`, both idempotent on t
 
 Both writers share a helper `_apply_event_to_daily_summary(event)` so the math lives in one place.
 
-### Pruning
+### Retention model — durable stream + rolling forensic window
 
-`BattleObservation` rows are heavy: each one carries a per-ship JSON (~30–60 KB). At playerbase scale this is the dominant cost.
+The conceptual model is a **single unbounded stream of capture events per player**, of which the 7-day card is one bounded window. Daily / weekly / monthly / yearly rollups are progressively coarser windows over the same stream. Nothing in the analytical record gets thrown away.
 
-- `cleanup_old_battle_observations_task` — Celery Beat daily, deletes `BattleObservation` rows older than `BATTLE_OBSERVATION_RETENTION_DAYS` (default 14).
-- `BattleEvent` rows are small (one per detected match per ship) and stay 90 days, then prune.
-- `PlayerDailyShipStats` rows are small and retained indefinitely (the durable artifact).
+Tier 1: **`PlayerDailyShipStats` is the durable artifact — kept forever.** This is the floor of displayed resolution and the source for all coarser rollups. Storage: ~10 K rows/day at playerbase scale, ~3.6 M rows/year, fine for Postgres for many years before any compression revisit.
 
-Pruning is the **last** rollout step, enabled only after 14 days of data exist — otherwise the cleanup task would prune the only data we have.
+Tier 2: **`PlayerWeeklyShipStats` / `PlayerMonthlyShipStats` / `PlayerYearlyShipStats`** (Phase 6 below — not in the initial rollout) — also durable. Materialized rollups built from the daily layer, 1/7, 1/30, 1/365 the row count respectively.
+
+Tier 3 (forensic): **`BattleObservation`** — heavy JSON (~30–60 KB/row), only useful as the prior-state input to the next diff. Pruned on a rolling forensic window via `cleanup_old_battle_observations_task` (`BATTLE_OBSERVATION_RETENTION_DAYS`, default `14`).
+
+Tier 4 (forensic): **`BattleEvent`** — small, one row per detected match per ship. Could keep forever; cheap. Default plan: keep 1 year, then prune. The daily rollup carries the analytical record forward.
+
+Pruning runs only against tiers 3 and 4. **The analytical record (tiers 1 + 2) is permanent.**
+
+The rolling forensic prune is enabled only **after 14 days of data exist** — otherwise the cleanup would target the only observations we have.
 
 ### API
 
@@ -363,6 +369,7 @@ Filed here so a future engineer knows what got deliberately deferred and where t
 - **Per-match-level resolution.** The WG API has no per-match endpoint; multi-match collapse between observations is acceptable. Out forever.
 - **Co-op / scenario / operations battles.** Only `pvp.battles` is tracked; non-PvP modes are silent in the current shape.
 - **Authenticated "log in to see _your_ history."** Battlestats has no auth surface today; the read path is `/api/player/<name>/battle-history`, addressable to anyone who knows a name. Privacy is identical to the existing player-detail page.
+- **Weekly / monthly / yearly rollup tiers + period API (Phase 6).** Three new materialized tables — `PlayerWeeklyShipStats(player, week_start, ship_id, ...)`, `PlayerMonthlyShipStats(player, month_start, ship_id, ...)`, `PlayerYearlyShipStats(player, year, ship_id, ...)` — each kept forever. Built nightly from `PlayerDailyShipStats` by extending `roll_up_player_daily_ship_stats_task` (or three siblings). Read API extends to `/api/player/<name>/battle-history?period=daily|weekly|monthly|yearly&windows=N`; default stays `daily, windows=7` for back-compat. Frontend adds a small period switcher above the per-ship table. Storage cost is trivial (1/7, 1/30, 1/365 the daily row count). The daily layer remains the source of truth — coarser tiers are derived, never written-to directly.
 - **Ranked battles (Phase 7).** WG exposes per-season per-ship ranked stats at `seasons/shipstats/`; the codebase already wraps it as `_fetch_ranked_ship_stats_for_player` (`server/warships/api/ships.py`). Same diff-and-aggregate pattern as randoms, but each event needs a `mode='ranked'` tag and `BattleObservation` needs a parallel `ranked_ships_stats_json` to hold the prior totals. Land once randoms is stable in production.
 - **First-party expected values (Phase 8).** Once population coverage is meaningful (~2 weeks post-capture-on), aggregate `BattleObservation.ships_stats_json` across all players to compute per-ship population averages — our own equivalent of wows-numbers' expected-values dataset. Surfaces "vs field" badges on the `BattleHistoryCard`. Cold-start gate: suppress the comparison until `sample_battles >= 50` per ship. Nightly aggregator at 04:30 UTC matches the freshness reference above.
 - **Compression (Phase 9).** Move `ships_stats_json` to `bytea` + zstd, or null it out on rows older than the active diff window (only the most recent observation per player is consulted by `compute_battle_events`; everything else is cold history). Open only if real storage measurements during the rollout justify it.
