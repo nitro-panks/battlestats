@@ -431,3 +431,81 @@ class MvPlayerDistributionStats(models.Model):
     class Meta:
         managed = False
         db_table = 'mv_player_distribution_stats'
+
+
+class BattleObservation(models.Model):
+    SOURCE_POLL = 'poll'
+    SOURCE_MANUAL = 'manual'
+    SOURCE_CHOICES = [
+        (SOURCE_POLL, 'Poll'),
+        (SOURCE_MANUAL, 'Manual'),
+    ]
+
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name='battle_observations')
+    observed_at = models.DateTimeField(auto_now_add=True)
+    pvp_battles = models.IntegerField(default=0)
+    pvp_wins = models.IntegerField(default=0)
+    pvp_losses = models.IntegerField(default=0)
+    pvp_frags = models.IntegerField(default=0)
+    pvp_survived_battles = models.IntegerField(default=0)
+    last_battle_time = models.DateTimeField(null=True, blank=True)
+    ships_stats_json = models.JSONField(null=True, blank=True)
+    source = models.CharField(
+        max_length=12, choices=SOURCE_CHOICES, default=SOURCE_POLL)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['player', 'observed_at'],
+                name='unique_battle_observation_per_player_time',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['player', '-observed_at'],
+                         name='battle_obs_player_time_idx'),
+        ]
+
+    def __str__(self):
+        return f"BattleObservation({self.player_id} @ {self.observed_at.isoformat()})"
+
+
+class BattleEvent(models.Model):
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name='battle_events')
+    detected_at = models.DateTimeField(auto_now_add=True)
+    ship_id = models.BigIntegerField()
+    ship_name = models.CharField(max_length=200, blank=True, default='')
+    battles_delta = models.IntegerField(default=0)
+    wins_delta = models.IntegerField(default=0)
+    losses_delta = models.IntegerField(default=0)
+    frags_delta = models.IntegerField(default=0)
+    damage_delta = models.IntegerField(null=True, blank=True)
+    xp_delta = models.IntegerField(null=True, blank=True)
+    planes_killed_delta = models.IntegerField(null=True, blank=True)
+    survived = models.BooleanField(null=True, blank=True)
+    from_observation = models.ForeignKey(
+        BattleObservation,
+        on_delete=models.CASCADE,
+        related_name='outgoing_events',
+    )
+    to_observation = models.ForeignKey(
+        BattleObservation,
+        on_delete=models.CASCADE,
+        related_name='incoming_events',
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['from_observation', 'to_observation', 'ship_id'],
+                name='unique_battle_event_per_observation_pair',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['player', '-detected_at'],
+                         name='battle_event_player_time_idx'),
+        ]
+
+    def __str__(self):
+        return f"BattleEvent({self.player_id} ship={self.ship_id} +{self.battles_delta})"

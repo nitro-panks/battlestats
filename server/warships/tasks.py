@@ -1328,6 +1328,83 @@ def enrich_player_data_task(self):
         _maybe_redispatch_enrichment()
 
 
+# ---------------------------------------------------------------------------
+# Incremental battle capture PoC (lil_boots tracking)
+# Runbook: agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md
+# ---------------------------------------------------------------------------
+
+POLL_TRACKED_BATTLES_LOCK_TIMEOUT = 5 * 60
+
+
+def _battle_tracking_player_names() -> list[str]:
+    raw_value = os.getenv("BATTLE_TRACKING_PLAYER_NAMES", "")
+    return [name.strip() for name in raw_value.split(",") if name.strip()]
+
+
+@app.task(bind=True, queue='background', **TASK_OPTS)
+def poll_tracked_player_battles_task(self, player_id, realm=DEFAULT_REALM):
+    """Poll WG for one tracked player, write an observation, diff vs prior."""
+    from warships.incremental_battles import record_observation_and_diff
+
+    logger.info(
+        "Starting poll_tracked_player_battles_task for player_id=%s realm=%s",
+        player_id,
+        realm,
+    )
+
+    lock_key = _task_lock_key("poll_tracked_player_battles", player_id)
+    if not cache.add(lock_key, self.request.id, timeout=POLL_TRACKED_BATTLES_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping poll_tracked_player_battles for player_id=%s — already running",
+            player_id,
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        return record_observation_and_diff(player_id=int(player_id), realm=realm)
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(queue='background', **TASK_OPTS)
+def dispatch_tracked_player_polls_task():
+    """Beat-driven dispatcher: resolve BATTLE_TRACKING_PLAYER_NAMES → tasks.
+
+    No-op when the env var is empty/unset, which is the default in production.
+    """
+    from django.db.models.functions import Lower
+
+    from warships.models import Player
+
+    names = _battle_tracking_player_names()
+    if not names:
+        return {"status": "skipped", "reason": "no-tracked-players"}
+
+    name_set = {name.casefold() for name in names}
+    players = list(
+        Player.objects
+        .alias(name_lower=Lower("name"))
+        .filter(name_lower__in=name_set)
+        .values("player_id", "realm", "name")
+    )
+
+    if not players:
+        logger.warning(
+            "BATTLE_TRACKING_PLAYER_NAMES set to %s but no Player rows matched", names)
+        return {"status": "skipped", "reason": "no-matching-players"}
+
+    dispatched = 0
+    for player in players:
+        try:
+            poll_tracked_player_battles_task.delay(
+                player_id=player["player_id"], realm=player["realm"])
+            dispatched += 1
+        except Exception:
+            logger.exception(
+                "Failed to dispatch poll_tracked_player_battles_task for %s", player)
+    return {"status": "completed", "dispatched": dispatched, "tracked": len(players)}
+
+
 @app.task(
     queue='background',
     time_limit=600,

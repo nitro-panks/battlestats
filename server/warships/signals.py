@@ -388,3 +388,25 @@ def register_periodic_schedules(sender, **kwargs):
                 "description": f"Daily recalculation of clan tier distribution cache for all clans ({realm.upper()}).",
             },
         )
+
+    # -- Incremental Battle Capture PoC dispatcher --
+    # Runbook: agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md
+    # The dispatcher reads BATTLE_TRACKING_PLAYER_NAMES at runtime; if unset it
+    # short-circuits with no work. Production droplet leaves it unset.
+    poll_interval_seconds = int(
+        os.getenv("BATTLE_TRACKING_POLL_SECONDS", "60"))
+    poll_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=poll_interval_seconds,
+        period=IntervalSchedule.SECONDS,
+    )
+    PeriodicTask.objects.update_or_create(
+        name="poll-tracked-player-battles",
+        defaults={
+            "task": "warships.tasks.dispatch_tracked_player_polls_task",
+            "interval": poll_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Incremental battle capture PoC dispatcher. No-op unless BATTLE_TRACKING_PLAYER_NAMES is set.",
+        },
+    )

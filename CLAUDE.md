@@ -295,6 +295,8 @@ The agentic memory layer plugs into the LangGraph `_retrieve_guidance` node only
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
 - `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)
 - `ENRICH_REALMS` — Comma-separated realm list for enrichment crawler (e.g. `na`, `na,eu`). Empty or unset means all realms
+- `BATTLE_TRACKING_PLAYER_NAMES` — Comma-separated player names tracked by the incremental-battle PoC dispatcher. Empty/unset on production = no-op. Local dev sets it to `lil_boots`. See `agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md`
+- `BATTLE_TRACKING_POLL_SECONDS` — Beat tick interval for the PoC dispatcher (default: `60`)
 
 ### Client env
 
