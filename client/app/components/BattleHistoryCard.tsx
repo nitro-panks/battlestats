@@ -86,6 +86,10 @@ const computeKdr = (frags: number, battles: number, survived: number): number =>
     return frags / deaths;
 };
 
+// Format KDR for the per-ship table: trim trailing zeros so 1.50 → "1.5"
+// and 1.00 → "1". The totals tile keeps full toFixed(2) for column alignment.
+const formatTableKdr = (v: number): string => v.toFixed(2).replace(/\.?0+$/, '');
+
 const SHIP_TYPE_LABEL: Record<string, string> = {
     Destroyer: 'DD',
     Cruiser: 'CA',
@@ -523,7 +527,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                     className="py-1 px-2 text-center tabular-nums text-[var(--text-strong)]"
                                     title={`${row.frags} frags / ${Math.max(0, row.battles - row.survived_battles)} deaths`}
                                 >
-                                    {row.kdr.toFixed(2)}
+                                    {formatTableKdr(row.kdr)}
                                 </td>
                             </tr>
                         ))}
