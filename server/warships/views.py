@@ -476,15 +476,63 @@ BATTLE_HISTORY_DEFAULT_DAYS = 7
 BATTLE_HISTORY_MAX_DAYS = 30
 BATTLE_HISTORY_CACHE_TTL = 5 * 60  # 5 minutes
 
+# Phase 6: period switcher. Each period maps to a backing model + a default
+# window count + a cap.
+BATTLE_HISTORY_PERIODS = {
+    "daily": {"default_windows": 7, "max_windows": 30},
+    "weekly": {"default_windows": 12, "max_windows": 52},
+    "monthly": {"default_windows": 12, "max_windows": 36},
+    "yearly": {"default_windows": 5, "max_windows": 20},
+}
 
-def _battle_history_cache_key(realm: str, player_name: str, days: int) -> str:
+
+def _battle_history_cache_key(realm: str, player_name: str, period: str, windows: int) -> str:
     norm = (player_name or "").strip().lower()
-    return realm_cache_key(realm, f"battle-history:{norm}:{days}")
+    return realm_cache_key(realm, f"battle-history:{norm}:{period}:{windows}")
 
 
-def _build_battle_history_payload(player, days: int) -> dict:
-    """Read PlayerDailyShipStats for `player` over the last `days` days
-    and return the totals / by_ship / by_day shape.
+def _period_window_start(today, period: str, windows: int):
+    """Return the inclusive lower bound for `windows` periods ending today."""
+    from datetime import timedelta as _td
+
+    if period == "daily":
+        return today - _td(days=windows - 1)
+    if period == "weekly":
+        # Window starts at the Monday of `windows-1` weeks ago.
+        from warships.incremental_battles import _week_start
+        current_week_start = _week_start(today)
+        return current_week_start - _td(days=7 * (windows - 1))
+    if period == "monthly":
+        # Walk back N-1 months, snap to first-of-month.
+        m = today.month - (windows - 1)
+        y = today.year
+        while m <= 0:
+            m += 12
+            y -= 1
+        return today.replace(year=y, month=m, day=1)
+    if period == "yearly":
+        return today.replace(year=today.year - (windows - 1), month=1, day=1)
+    raise ValueError(f"Unknown period: {period}")
+
+
+def _battle_history_period_table(period: str):
+    from warships.models import (
+        PlayerDailyShipStats,
+        PlayerMonthlyShipStats,
+        PlayerWeeklyShipStats,
+        PlayerYearlyShipStats,
+    )
+    return {
+        "daily": PlayerDailyShipStats,
+        "weekly": PlayerWeeklyShipStats,
+        "monthly": PlayerMonthlyShipStats,
+        "yearly": PlayerYearlyShipStats,
+    }[period]
+
+
+def _build_battle_history_payload(player, period: str, windows: int) -> dict:
+    """Read the period rollup table for `player` over the last `windows`
+    periods and return the totals / by_ship / by_day shape.
 
     Each by_ship entry is enriched with `lifetime_*` (the player's career
     aggregate from Player.battles_json for that ship) and `delta_*` (how
@@ -492,15 +540,26 @@ def _build_battle_history_payload(player, days: int) -> dict:
     period outperformed prior history, negative means it dragged it
     down). Returns null on those fields when the lifetime aggregate is
     not available.
-    """
-    from warships.models import PlayerDailyShipStats
 
+    The `by_day` field name is preserved for back-compat with the
+    frontend even when period != daily; entries' `date` carries the
+    period_start (Monday for weekly, first-of-month for monthly, Jan 1
+    for yearly).
+    """
     today = timezone.now().date()
-    since = today - timedelta(days=days - 1)
+    since = _period_window_start(today, period, windows)
+    table = _battle_history_period_table(period)
+
+    if period == "daily":
+        # Daily layer keeps `date`; period rollups use `period_start`.
+        date_field = "date"
+    else:
+        date_field = "period_start"
+
     rows = list(
-        PlayerDailyShipStats.objects
-        .filter(player=player, date__gte=since)
-        .order_by("date", "ship_id")
+        table.objects
+        .filter(player=player, **{f"{date_field}__gte": since})
+        .order_by(date_field, "ship_id")
     )
 
     # Lookup table for per-ship lifetime aggregates (Player.battles_json
@@ -566,7 +625,8 @@ def _build_battle_history_payload(player, days: int) -> dict:
         ship_entry["planes_killed"] += row.planes_killed
         ship_entry["survived_battles"] += row.survived_battles
 
-        day_iso = row.date.isoformat()
+        bucket_date = row.date if period == "daily" else row.period_start
+        day_iso = bucket_date.isoformat()
         day_entry = by_day_acc.setdefault(day_iso, {
             "date": day_iso,
             "battles": 0, "wins": 0, "damage": 0, "frags": 0,
@@ -638,7 +698,9 @@ def _build_battle_history_payload(player, days: int) -> dict:
         delta_overall_wr = None
 
     return {
-        "window_days": days,
+        "period": period,
+        "windows": windows,
+        "window_days": windows if period == "daily" else None,
         "as_of": timezone.now().isoformat(),
         "totals": {
             **totals,
@@ -669,11 +731,22 @@ def battle_history(request, player_name: str) -> Response:
         return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
     realm = _get_realm(request)
+    period = request.query_params.get("period", "daily")
+    if period not in BATTLE_HISTORY_PERIODS:
+        period = "daily"
+    period_cfg = BATTLE_HISTORY_PERIODS[period]
+
+    # Accept the legacy `days` param when period=daily for back-compat;
+    # otherwise prefer `windows`.
+    raw_windows = request.query_params.get(
+        "windows",
+        request.query_params.get("days") if period == "daily" else None,
+    )
     try:
-        days = int(request.query_params.get("days", BATTLE_HISTORY_DEFAULT_DAYS))
+        windows = int(raw_windows) if raw_windows is not None else period_cfg["default_windows"]
     except (TypeError, ValueError):
-        days = BATTLE_HISTORY_DEFAULT_DAYS
-    days = max(1, min(BATTLE_HISTORY_MAX_DAYS, days))
+        windows = period_cfg["default_windows"]
+    windows = max(1, min(period_cfg["max_windows"], windows))
 
     player = (
         Player.objects
@@ -685,12 +758,12 @@ def battle_history(request, player_name: str) -> Response:
         return Response({"detail": "Player not found."},
                         status=status.HTTP_404_NOT_FOUND)
 
-    cache_key = _battle_history_cache_key(realm, player.name, days)
+    cache_key = _battle_history_cache_key(realm, player.name, period, windows)
     cached = cache.get(cache_key)
     if cached is not None:
         return Response(cached)
 
-    payload = _build_battle_history_payload(player, days)
+    payload = _build_battle_history_payload(player, period, windows)
     cache.set(cache_key, payload, BATTLE_HISTORY_CACHE_TTL)
     return Response(payload)
 

@@ -52,7 +52,9 @@ export interface BattleHistoryTotals {
 }
 
 export interface BattleHistoryPayload {
-    window_days: number;
+    window_days?: number | null;
+    windows?: number;
+    period?: 'daily' | 'weekly' | 'monthly' | 'yearly';
     as_of: string;
     totals: BattleHistoryTotals;
     by_ship: BattleHistoryByShip[];
@@ -320,6 +322,14 @@ const buildOverallWrSeries = (
     });
 };
 
+type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
+const PERIOD_DEFAULT_WINDOWS: Record<Period, number> = {
+    daily: 7, weekly: 12, monthly: 12, yearly: 5,
+};
+const PERIOD_LABEL: Record<Period, string> = {
+    daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly',
+};
+
 const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     playerName,
     realm,
@@ -328,6 +338,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
     const [error, setError] = useState<Error | null>(null);
     const [loading, setLoading] = useState(true);
+    const [period, setPeriod] = useState<Period>('daily');
     const { theme } = useTheme();
     const palette = chartColors[theme];
 
@@ -345,9 +356,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     useEffect(() => {
         let cancelled = false;
         setLoading(true);
-        const url = `/api/player/${encodeURIComponent(playerName)}/battle-history/?days=${days}&realm=${encodeURIComponent(realm)}`;
+        const windows = period === 'daily'
+            ? days
+            : PERIOD_DEFAULT_WINDOWS[period];
+        const url = `/api/player/${encodeURIComponent(playerName)}/battle-history/`
+            + `?period=${period}&windows=${windows}&realm=${encodeURIComponent(realm)}`;
         fetchSharedJson<BattleHistoryPayload>(url, {
-            label: 'BattleHistoryCard',
+            label: `BattleHistoryCard:${period}`,
             ttlMs: 60_000,
         })
             .then(({ data }) => {
@@ -368,7 +383,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [playerName, realm, days]);
+    }, [playerName, realm, days, period]);
 
     const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
         key: 'battles', direction: 'desc',
@@ -415,9 +430,31 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             aria-label="Recent battles"
         >
             <header className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                    Last {payload.window_days} days
-                </h2>
+                <div className="flex flex-wrap items-baseline gap-3">
+                    <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                        {period === 'daily'
+                            ? `Last ${payload.windows ?? payload.window_days} days`
+                            : `Last ${payload.windows} ${period === 'weekly' ? 'weeks'
+                                : period === 'monthly' ? 'months' : 'years'}`}
+                    </h2>
+                    <div className="flex items-center gap-1 text-xs">
+                        {(['daily', 'weekly', 'monthly', 'yearly'] as Period[]).map((p) => (
+                            <button
+                                key={p}
+                                type="button"
+                                onClick={() => setPeriod(p)}
+                                className={`rounded px-2 py-0.5 transition-colors ${
+                                    period === p
+                                        ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
+                                        : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
+                                }`}
+                                aria-pressed={period === p}
+                            >
+                                {PERIOD_LABEL[p]}
+                            </button>
+                        ))}
+                    </div>
+                </div>
                 <span className="text-xs text-[var(--text-muted)]">
                     {formatInt(totals.battles)} battles · {formatPercent(totals.win_rate)} WR · {formatInt(totals.avg_damage)} avg dmg
                 </span>

@@ -133,13 +133,14 @@ describe('BattleHistoryCard', () => {
         expect(container).toBeEmptyDOMElement();
     });
 
-    test('passes the days param to the URL', () => {
+    test('passes period + windows + realm to the URL on initial daily fetch', () => {
         mockFetchSharedJson.mockReturnValueOnce(new Promise(() => {}));
         render(<BattleHistoryCard playerName="lil_boots" realm="eu" days={14} />);
         expect(mockFetchSharedJson).toHaveBeenCalledTimes(1);
         const [url] = mockFetchSharedJson.mock.calls[0];
         expect(url).toContain('/api/player/lil_boots/battle-history/');
-        expect(url).toContain('days=14');
+        expect(url).toContain('period=daily');
+        expect(url).toContain('windows=14');
         expect(url).toContain('realm=eu');
     });
 });

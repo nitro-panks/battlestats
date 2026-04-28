@@ -1418,7 +1418,10 @@ def roll_up_player_daily_ship_stats_task(target_date_iso=None):
 
     from datetime import datetime, timedelta, timezone as dt_timezone
 
-    from warships.incremental_battles import rebuild_daily_ship_stats_for_date
+    from warships.incremental_battles import (
+        rebuild_daily_ship_stats_for_date,
+        rebuild_period_rollups_for_date,
+    )
 
     if target_date_iso:
         target_date = datetime.strptime(target_date_iso, "%Y-%m-%d").date()
@@ -1429,10 +1432,18 @@ def roll_up_player_daily_ship_stats_task(target_date_iso=None):
 
     logger.info(
         "Starting roll_up_player_daily_ship_stats_task for date=%s", target_date)
-    result = rebuild_daily_ship_stats_for_date(target_date)
+    daily_result = rebuild_daily_ship_stats_for_date(target_date)
+    # Cascade into the weekly / monthly / yearly tiers covering the same
+    # date, so coarser views always reflect the latest daily layer.
+    period_result = rebuild_period_rollups_for_date(target_date)
     logger.info(
-        "Finished roll_up_player_daily_ship_stats_task: %s", result)
-    return result
+        "Finished roll_up_player_daily_ship_stats_task: daily=%s period=%s",
+        daily_result, period_result)
+    return {
+        "status": "completed",
+        "daily": daily_result,
+        "period": period_result,
+    }
 
 
 @app.task(

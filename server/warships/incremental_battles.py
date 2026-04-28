@@ -428,14 +428,12 @@ def record_observation_from_payloads(
 
 
 def _invalidate_battle_history_cache(player) -> None:
-    """Drop the battle-history Redis cache for this player so the next API
-    read returns the fresh rollup. Called when new events have just been
-    written; the visit-driven page-load path then sees current data without
-    waiting on the 5-min TTL.
+    """Drop all battle-history Redis cache entries for this player so the
+    next API read returns the fresh rollup. Called when new events have
+    just been written.
 
-    Iterates the supported days range (1..BATTLE_HISTORY_MAX_DAYS) — small
-    enough that 30 cache.delete calls are cheaper than a delete_pattern
-    scan over Redis keyspace.
+    Iterates the supported (period, windows) combinations — bounded and
+    cheaper than a delete_pattern scan over Redis keyspace.
     """
     from django.core.cache import cache
 
@@ -445,10 +443,12 @@ def _invalidate_battle_history_cache(player) -> None:
     if not name:
         return
     realm = player.realm or "na"
-    keys = [
-        realm_cache_key(realm, f"battle-history:{name}:{days}")
-        for days in range(1, 31)
-    ]
+    # Phase 6 cache keys: {realm}:battle-history:{name}:{period}:{windows}.
+    period_caps = {"daily": 30, "weekly": 52, "monthly": 36, "yearly": 20}
+    keys = []
+    for period, cap in period_caps.items():
+        for windows in range(1, cap + 1):
+            keys.append(realm_cache_key(realm, f"battle-history:{name}:{period}:{windows}"))
     cache.delete_many(keys)
 
 
@@ -516,6 +516,134 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
         "events_seen": events.count() if rows else BattleEvent.objects.filter(
             detected_at__date=target_date,
         ).count(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Period rollups (Phase 6) — weekly / monthly / yearly aggregates of the
+# daily layer. Materialized; daily layer remains the source of truth.
+# ---------------------------------------------------------------------------
+
+def _week_start(d) -> "date":
+    """ISO week Monday for the date `d`."""
+    from datetime import timedelta as _td
+    return d - _td(days=d.weekday())
+
+
+def _month_start(d) -> "date":
+    return d.replace(day=1)
+
+
+def _year_start(d) -> "date":
+    return d.replace(month=1, day=1)
+
+
+def _aggregate_into_period_table(
+    target_period_start,
+    period_end_inclusive,
+    period_table,
+):
+    """Rebuild `period_table` rows for the `(target_period_start,
+    period_end_inclusive)` window from `PlayerDailyShipStats`. Idempotent.
+
+    `period_table` is one of `PlayerWeeklyShipStats`,
+    `PlayerMonthlyShipStats`, `PlayerYearlyShipStats` — they share the
+    same column shape via the abstract base.
+    """
+    from warships.models import PlayerDailyShipStats
+
+    with transaction.atomic():
+        period_table.objects.filter(period_start=target_period_start).delete()
+
+        daily_qs = PlayerDailyShipStats.objects.filter(
+            date__gte=target_period_start, date__lte=period_end_inclusive,
+        ).order_by("date")
+
+        rows: Dict[tuple, Dict[str, Any]] = {}
+        for d in daily_qs:
+            key = (d.player_id, d.ship_id)
+            row = rows.get(key)
+            if row is None:
+                row = {
+                    "player_id": d.player_id,
+                    "period_start": target_period_start,
+                    "ship_id": d.ship_id,
+                    "ship_name": d.ship_name or "",
+                    "battles": 0, "wins": 0, "losses": 0, "frags": 0,
+                    "damage": 0, "xp": 0, "planes_killed": 0,
+                    "survived_battles": 0,
+                    "first_event_at": d.first_event_at,
+                    "last_event_at": d.last_event_at,
+                }
+                rows[key] = row
+            row["battles"] += d.battles
+            row["wins"] += d.wins
+            row["losses"] += d.losses
+            row["frags"] += d.frags
+            row["damage"] += d.damage
+            row["xp"] += d.xp
+            row["planes_killed"] += d.planes_killed
+            row["survived_battles"] += d.survived_battles
+            if d.first_event_at and (row["first_event_at"] is None
+                                     or d.first_event_at < row["first_event_at"]):
+                row["first_event_at"] = d.first_event_at
+            if d.last_event_at and (row["last_event_at"] is None
+                                    or d.last_event_at > row["last_event_at"]):
+                row["last_event_at"] = d.last_event_at
+            if d.ship_name and not row["ship_name"]:
+                row["ship_name"] = d.ship_name
+
+        if rows:
+            period_table.objects.bulk_create([
+                period_table(**row) for row in rows.values()
+            ])
+
+    return {
+        "rows_written": len(rows),
+        "period_start": str(target_period_start),
+    }
+
+
+def rebuild_period_rollups_for_date(target_date) -> Dict[str, Any]:
+    """Rebuild weekly + monthly + yearly rollup rows that cover `target_date`.
+
+    Called by the nightly sweeper after `rebuild_daily_ship_stats_for_date`,
+    so the period rollups always reflect the latest daily layer. Idempotent.
+    """
+    from datetime import timedelta as _td
+
+    from warships.models import (
+        PlayerMonthlyShipStats,
+        PlayerWeeklyShipStats,
+        PlayerYearlyShipStats,
+    )
+
+    week_start = _week_start(target_date)
+    week_end = week_start + _td(days=6)
+
+    month_start = _month_start(target_date)
+    if month_start.month == 12:
+        next_month = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        next_month = month_start.replace(month=month_start.month + 1)
+    month_end = next_month - _td(days=1)
+
+    year_start = _year_start(target_date)
+    year_end = year_start.replace(month=12, day=31)
+
+    weekly = _aggregate_into_period_table(
+        week_start, week_end, PlayerWeeklyShipStats)
+    monthly = _aggregate_into_period_table(
+        month_start, month_end, PlayerMonthlyShipStats)
+    yearly = _aggregate_into_period_table(
+        year_start, year_end, PlayerYearlyShipStats)
+
+    return {
+        "status": "completed",
+        "target_date": str(target_date),
+        "weekly": weekly,
+        "monthly": monthly,
+        "yearly": yearly,
     }
 
 

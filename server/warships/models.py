@@ -547,3 +547,89 @@ class PlayerDailyShipStats(models.Model):
 
     def __str__(self):
         return f"PlayerDailyShipStats({self.player_id} {self.date} ship={self.ship_id} battles={self.battles})"
+
+
+class _PlayerPeriodShipStatsBase(models.Model):
+    """Shared shape for the weekly / monthly / yearly rollup tiers.
+
+    Each row is a player × ship × period-start aggregate of battles, wins,
+    losses, frags, damage, xp, planes_killed, survived_battles. period_start
+    is the first day of the period (Monday for ISO week; first-of-month for
+    monthly; Jan 1 for yearly). Materialized from PlayerDailyShipStats by
+    the nightly sweeper; never written directly.
+    """
+    player = models.ForeignKey(Player, on_delete=models.CASCADE)
+    period_start = models.DateField(db_index=True)
+    ship_id = models.BigIntegerField(db_index=True)
+    ship_name = models.CharField(max_length=200, blank=True, default='')
+    battles = models.IntegerField(default=0)
+    wins = models.IntegerField(default=0)
+    losses = models.IntegerField(default=0)
+    frags = models.IntegerField(default=0)
+    damage = models.BigIntegerField(default=0)
+    xp = models.BigIntegerField(default=0)
+    planes_killed = models.IntegerField(default=0)
+    survived_battles = models.IntegerField(default=0)
+    first_event_at = models.DateTimeField(null=True, blank=True)
+    last_event_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+
+
+class PlayerWeeklyShipStats(_PlayerPeriodShipStatsBase):
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['player', 'period_start', 'ship_id'],
+                name='unique_player_weekly_ship_stats',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['player', '-period_start'],
+                         name='wk_ship_player_period_idx'),
+            models.Index(fields=['player', 'ship_id', '-period_start'],
+                         name='wk_ship_player_shipprd_idx'),
+        ]
+
+    def __str__(self):
+        return f"PlayerWeeklyShipStats({self.player_id} wk={self.period_start} ship={self.ship_id} battles={self.battles})"
+
+
+class PlayerMonthlyShipStats(_PlayerPeriodShipStatsBase):
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['player', 'period_start', 'ship_id'],
+                name='unique_player_monthly_ship_stats',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['player', '-period_start'],
+                         name='mo_ship_player_period_idx'),
+            models.Index(fields=['player', 'ship_id', '-period_start'],
+                         name='mo_ship_player_shipprd_idx'),
+        ]
+
+    def __str__(self):
+        return f"PlayerMonthlyShipStats({self.player_id} mo={self.period_start} ship={self.ship_id} battles={self.battles})"
+
+
+class PlayerYearlyShipStats(_PlayerPeriodShipStatsBase):
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['player', 'period_start', 'ship_id'],
+                name='unique_player_yearly_ship_stats',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['player', '-period_start'],
+                         name='yr_ship_player_period_idx'),
+            models.Index(fields=['player', 'ship_id', '-period_start'],
+                         name='yr_ship_player_shipprd_idx'),
+        ]
+
+    def __str__(self):
+        return f"PlayerYearlyShipStats({self.player_id} yr={self.period_start.year} ship={self.ship_id} battles={self.battles})"
