@@ -496,7 +496,15 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             })()}
             <div className="mt-4">
                 {(() => {
-                    const windowed = buildWindowedDays(payload.by_day, payload.window_days);
+                    // Only pad with zero days for the daily period — for
+                    // weekly/monthly/yearly, by_day already contains one
+                    // entry per period bucket, no padding needed.
+                    const windowed = (payload.period ?? 'daily') === 'daily'
+                        ? buildWindowedDays(
+                            payload.by_day,
+                            payload.window_days ?? payload.windows ?? 7,
+                        )
+                        : payload.by_day;
                     const wrSeries = buildOverallWrSeries(windowed, totals);
                     if (wrSeries) {
                         return (
