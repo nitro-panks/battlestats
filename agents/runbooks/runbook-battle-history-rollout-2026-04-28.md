@@ -2,13 +2,30 @@
 
 _Created: 2026-04-28_
 _Context: Take the lil_boots incremental-battle PoC (`runbook-incremental-battle-poc-2026-04-27.md`) playerbase-wide as a longitudinal "your last week of battles" feature, surfaced per ship per day for any player on the site. Reuses existing refresh paths so no new WG calls are introduced._
-_Status: Design draft. Depends on the PoC runbook landing first (its migration + `incremental_battles.py` orchestrator are prerequisites)._
+_Status: Implementation complete on local branches; ready to push, open PRs, and execute the production rollout sequence below. All curated release gates pass (backend 268+, frontend 88), with one pre-existing unrelated failure deselected._
 
 ## Purpose
 
 Battlestats today shows running totals only. The PoC proved that diffing two consecutive snapshots of WG `account/info/` + `ships/stats/` yields per-ship per-match deltas (battles, wins, frags, damage, xp, planes_killed, survived). This rollout takes that mechanism playerbase-wide as a longitudinal record — "show me my last 7 days of battles, by ship and by day" — for any player on the site. Multi-match collapse between observations is acceptable; what matters is that **daily totals per ship are stable and trend over time**.
 
 The PoC's "poll every 60 s" model does not scale: applied to even a small fraction of the 274 K-player base it would saturate the WG `application_id` rate budget. The rollout instead **piggybacks capture on the WG calls the site already makes** during visit-driven and incremental-crawl refreshes, then layers a denormalized daily roll-up table optimized for longitudinal reads.
+
+## Implementation status
+
+All eight rollout phases are committed locally on independent feature branches and pass their respective release gates. They are deploy-ready in the order below; pushing them to GitHub and merging into `main` is the first action the engineer rolling this out should take.
+
+| Phase | Branch | Commit | Flag landed (default off in prod) | Tests |
+|---|---|---|---|---|
+| 0 — PoC tree | `feature/incremental-battles-poc` | `d49600c` | `BATTLE_TRACKING_PLAYER_NAMES` (empty in prod) | smoke + lil_boots live capture |
+| Runbook reconcile | `runbook/battle-history-rollout-2026-04-28` | `51a86f1` (this commit) | docs only | n/a |
+| 1 — Orchestrator refactor | `feature/battle-history-phase1-refactor` | `e949320` | none (refactor) | 18 new pytest cases |
+| 2 — Capture hook | `feature/battle-history-phase2-capture-hook` | `28ef5ae` | `BATTLE_HISTORY_CAPTURE_ENABLED` | 22 cumulative |
+| 3 — Rollup table + writers | `feature/battle-history-phase3-rollup` | `8a4e60b` | `BATTLE_HISTORY_ROLLUP_ENABLED` | 30 cumulative |
+| 4 — Read API | `feature/battle-history-phase4-api` | `e14ee51` | `BATTLE_HISTORY_API_ENABLED` | 36 cumulative |
+| 4.6 — Lifetime + delta | `feature/battle-history-phase4.6-vs-lifetime` | `9005d61` | none (extends API) | 39 cumulative |
+| 5 — Frontend `BattleHistoryCard` | `feature/battle-history-phase5-frontend` | `b3b0a79` | gated by API flag | 88 frontend |
+
+Migrations 0051 / 0052 / 0053 are additive `CreateModel` / `AddField` only — no `AlterField` on existing tables, no `NOT NULL` columns added. The deploy script's `python manage.py migrate --noinput` (`server/deploy/deploy_to_droplet.sh:437`) applies them on the first deploy. Tables exist but stay empty until the corresponding env flag is flipped on.
 
 ## Premise: capture is a side-effect, not a poll
 
@@ -21,13 +38,9 @@ Result: every player whose page is visited or whose tier rotates through the inc
 
 ## Dependencies
 
-This runbook is a follow-on to the PoC. The PoC tranche is built and verified locally — see `feature/incremental-battles-poc` (commit `d49600c`) — and lands as a separate PR ahead of this rollout. Specifically, by the time the rollout phases begin, the PoC commit will already provide:
+All prerequisite phases (PoC + Phases 1–5 + 4.6) are committed locally on the branches listed in **Implementation status**. The first task in the rollout is pushing those eight branches and opening their PRs in the order shown.
 
-1. Migrations `0051_battle_observation_event.py` (creates `BattleObservation` + `BattleEvent`) and `0052_battle_event_combat_metrics.py` (adds `damage_delta`, `xp_delta`, `planes_killed_delta`).
-2. `server/warships/incremental_battles.py` with `record_observation_and_diff(player_id, realm)`, `compute_battle_events`, and the per-ship `ShipSnapshot` shape that already includes `damage_dealt`, `xp`, `planes_killed`, and `survived_battles` — i.e. the wider `ships_stats_json` shape this runbook anticipates is already in tree on the PoC commit, no further widening required.
-3. `BATTLE_TRACKING_PLAYER_NAMES` env var support and the `poll-tracked-player-battles` Beat schedule (`server/warships/tasks.py` and `server/warships/signals.py`).
-
-The PoC's 60-second poll loop and `BATTLE_TRACKING_PLAYER_NAMES` env var stay intact through the rollout. The rollout coexists with the PoC; they share the same orchestrator function (`record_observation_from_payloads`, introduced in Phase 1 of the rollout as a refactor of the PoC's `record_observation_and_diff`).
+The PoC's 60-second poll loop and `BATTLE_TRACKING_PLAYER_NAMES` env var stay intact through the rollout. The rollout coexists with the PoC; they share the same orchestrator function (`record_observation_from_payloads`, introduced in Phase 1 as a refactor of the PoC's `record_observation_and_diff`).
 
 ## Design
 
@@ -202,16 +215,94 @@ If this tranche lands backend-only first, data accumulates while the frontend is
 - Backfill: management command `python manage.py rebuild_player_daily_ship_stats --since 2026-04-28` rebuilds rows from `BattleEvent`. No historical backfill is needed for the first week (events only exist from when capture turned on).
 - Rollback: drop `PlayerDailyShipStats` (single reverse migration). No FKs from existing tables point into it.
 
-## Rollout staging (gated, reversible)
+## Production rollout sequence
 
-Each stage is gated by an independent env flag so the team can stop or roll back any individual step.
+Five stages over ~2 weeks. Every flag flip is an edit to the droplet's `/etc/battlestats-server.env` (or `/etc/battlestats-celery.env`) followed by `systemctl restart battlestats-server battlestats-celery battlestats-celery-beat`. **No code change is required between stages** — `os.getenv` is read at runtime, so a worker restart is enough to pick up the new flag value.
 
-1. **Capture-only.** Deploy the `record_observation_from_payloads` hook. Flip `BATTLE_HISTORY_CAPTURE_ENABLED=1` on the droplet. Observations + events accumulate; no UI yet. Watch for 2 days under real load to confirm that `BattleObservation` write volume matches expected refresh volume and that `BattleEvent` rows appear for known-active players.
-2. **Roll-up.** Deploy nightly task + on-write incremental + the new table migration. Flip `BATTLE_HISTORY_ROLLUP_ENABLED=1`. Watch the table grow; spot-check daily totals against `BattleEvent` aggregates with the validation queries below.
-3. **API + UI.** Flip `BATTLE_HISTORY_API_ENABLED=1` to expose `/api/player/.../battle-history`. Ship `BattleHistoryCard.tsx` in the same deploy or defer.
-4. **Pruning.** Enable `cleanup_old_battle_observations_task` after 14 days of data exist.
+### Day 0 — deploy code with all flags off
 
-Kill switch: unset any of the env flags. Tables remain (harmless).
+1. Push the eight branches in the order listed in **Implementation status**, open PRs, merge each in order.
+2. Run `./server/deploy/deploy_to_droplet.sh battlestats.online`. Migrations 0051 / 0052 / 0053 apply. Tables exist but stay empty.
+3. Verify zero log noise on the droplet: `journalctl -u battlestats-server -u battlestats-celery --since "5 minutes ago"`.
+
+### Day 1 — `BATTLE_HISTORY_CAPTURE_ENABLED=1`
+
+Restart server + workers. Watch for 24–48 h:
+
+```sql
+-- Should see hundreds per hour at steady state.
+SELECT count(*) FROM warships_battleobservation WHERE observed_at > now() - interval '1 hour';
+
+-- Storage envelope check.
+SELECT pg_size_pretty(pg_total_relation_size('warships_battleobservation'));
+```
+
+Expected envelope: ~10 K rows/day per realm at steady state, ~30–60 KB/row, so **≤ 7 GB per realm before pruning kicks in**. If growth exceeds the envelope, drop or extend the active-ships filter in `incremental_battles.py:_serialize_ships_payload` (only ships with `pvp.battles > 0`) before stage 2.
+
+### Day 3 — `BATTLE_HISTORY_ROLLUP_ENABLED=1`
+
+On-write incremental + nightly sweeper (04:30 UTC) start filling `PlayerDailyShipStats`. Spot-check after one beat tick:
+
+```sql
+SELECT date, COUNT(*) FROM warships_playerdailyshipstats GROUP BY date ORDER BY date DESC LIMIT 5;
+```
+
+Cross-validate aggregates for any sample player:
+
+```sql
+-- Period totals from BattleEvent and PlayerDailyShipStats must match for any (player, day).
+SELECT SUM(battles_delta), SUM(damage_delta) FROM warships_battleevent
+  WHERE player_id=? AND detected_at::date = '2026-MM-DD';
+SELECT SUM(battles), SUM(damage) FROM warships_playerdailyshipstats
+  WHERE player_id=? AND date = '2026-MM-DD';
+```
+
+### Day 5 — `BATTLE_HISTORY_API_ENABLED=1` + frontend ship
+
+Flip the API flag. `GET /api/player/<name>/battle-history?days=N` goes live. Curl-verify against a known-active player; expect p95 < 50 ms warm, < 200 ms cold. Frontend deploy ships `BattleHistoryCard` in the same window — the card silently no-ops when `totals.battles=0`, so cold-start players see nothing extra on their detail page.
+
+### Day 14+ — pruning
+
+Once at least 14 days of capture data exist, enable retention:
+
+```bash
+# Dry-run first to confirm the row count targeted matches expectation.
+python manage.py rebuild_player_daily_ship_stats --since 2026-MM-DD --dry-run  # use as a similar-shape probe
+```
+
+Then set `BATTLE_OBSERVATION_RETENTION_DAYS=14` on the droplet env. Daily prune sweeps `BattleObservation` rows older than 14 days. `BattleEvent` and `PlayerDailyShipStats` rows are untouched.
+
+Reversibility: un-flip any flag at any stage and the system returns to its pre-rollout behavior. Tables remain (harmless). No production data is on the line until day 14.
+
+## Scaling to all active players
+
+Capture is automatic — it's a side-effect of the WG calls the site already makes:
+
+- `incremental_player_refresh_task` (`server/warships/tasks.py:1138`) walks every NA / EU / Asia player every ~3 h and calls `update_player_data` → `update_battle_data`. Phase 2's hook captures every one of those refreshes for free. **No new WG API budget consumed.**
+- Visit-driven `/api/player/<name>/` hits add real-time coverage for the active-fan slice.
+
+**Optional accelerator for seeding.** If you want every active player observed within 24 h of flipping the capture flag, temporarily lower `PLAYER_REFRESH_INTERVAL_MINUTES` from `180` to `60` for one cycle. Triples observation rate, then revert. Existing infrastructure does the work — no new code, no new WG calls beyond what the existing crawl already issues.
+
+## Operational watchpoints
+
+- **Storage growth** in `warships_battleobservation`. Pruning at day-14 is non-negotiable. Watch `pg_total_relation_size` daily during the first two weeks; if it overshoots the ~7 GB/realm envelope before pruning enables, narrow the per-ship JSON shape (`incremental_battles.py:_serialize_ships_payload`) first rather than disabling capture.
+- **Worker queue depth.** Each `update_battle_data` now does an extra DB write + diff (negligible per call). Watch `celery -A battlestats inspect active` after the capture flip; if depth climbs unexpectedly the diff is hot-pathing somewhere it shouldn't.
+- **API p95 latency** on `/api/player/.../battle-history`. Should be sub-50 ms warm, sub-200 ms cold. The cold case for a player with thousands of `PlayerDailyShipStats` rows is the worst-case shape — load-test before flipping.
+- **Cache invalidation.** The 5-min Redis TTL is forgiving. If immediate freshness on the card after a player refresh is wanted, hook the existing `update_player_data` callsite to `cache.delete_pattern("...battle-history*")`. Optional, costs a few % of refresh latency.
+
+## Freshness reference
+
+[wows-numbers.com](https://wows-numbers.com), the canonical community Personal-Rating source, updates its expected-values dataset no more than every 15 minutes. That's a useful baseline for what counts as "fresh enough" in this domain:
+
+- The **PoC's 60 s poll** for `lil_boots` is 15× tighter than the community baseline — appropriate for the dev loop where we want sub-minute observation; overkill for population-averages math.
+- **Visit-driven captures match** the 15-min benchmark whenever a player's page is loaded.
+- The **3 h incremental-crawl cadence** is the lagging edge — coarse for population-averages staleness but plenty for the "your last week of battles" feature this rollout is delivering.
+
+When the future first-party expected-values phase lands (see **Out of scope** below), the nightly aggregator at 04:30 UTC is the right cadence: our underlying samples already match wows-numbers' 15-min freshness for active players, and recomputing rolling averages once a day from a fresh pile of samples is the correct cadence for *aggregates*, not individual samples.
+
+## Kill switch
+
+Unset any of `BATTLE_HISTORY_CAPTURE_ENABLED`, `BATTLE_HISTORY_ROLLUP_ENABLED`, or `BATTLE_HISTORY_API_ENABLED` and `systemctl restart` the workers + server. The corresponding behavior is dormant on the next tick. Tables and any captured data remain in place (harmless).
 
 ## Validation
 
@@ -240,12 +331,17 @@ The one cost is **storage and write amplification**: every refresh now writes a 
 - `ships_stats_json` only includes ships where `pvp.battles > 0` (4–8× shrink).
 - Postgres `jsonb` is already efficient; if size becomes a problem, a follow-on can compress to `bytea` + zstd.
 
-## Out of scope
+## Out of scope (filed for future phases)
 
-- Per-match-level resolution (the WG API has no per-match endpoint; multi-match collapse is acceptable).
-- Co-op / scenario / operations battles — only `pvp.battles` is tracked; non-PvP modes are silent.
-- Authenticated "log in to see _your_ history" — battlestats has no auth surface today; the read path is `/api/player/<name>/battle-history`, addressable to anyone who knows a name. Privacy is identical to the existing player-detail page.
-- Replacing the PoC's 60 s loop for `lil_boots` — the rollout coexists.
+Filed here so a future engineer knows what got deliberately deferred and where the design notes live.
+
+- **Per-match-level resolution.** The WG API has no per-match endpoint; multi-match collapse between observations is acceptable. Out forever.
+- **Co-op / scenario / operations battles.** Only `pvp.battles` is tracked; non-PvP modes are silent in the current shape.
+- **Authenticated "log in to see _your_ history."** Battlestats has no auth surface today; the read path is `/api/player/<name>/battle-history`, addressable to anyone who knows a name. Privacy is identical to the existing player-detail page.
+- **Ranked battles (Phase 7).** WG exposes per-season per-ship ranked stats at `seasons/shipstats/`; the codebase already wraps it as `_fetch_ranked_ship_stats_for_player` (`server/warships/api/ships.py`). Same diff-and-aggregate pattern as randoms, but each event needs a `mode='ranked'` tag and `BattleObservation` needs a parallel `ranked_ships_stats_json` to hold the prior totals. Land once randoms is stable in production.
+- **First-party expected values (Phase 8).** Once population coverage is meaningful (~2 weeks post-capture-on), aggregate `BattleObservation.ships_stats_json` across all players to compute per-ship population averages — our own equivalent of wows-numbers' expected-values dataset. Surfaces "vs field" badges on the `BattleHistoryCard`. Cold-start gate: suppress the comparison until `sample_battles >= 50` per ship. Nightly aggregator at 04:30 UTC matches the freshness reference above.
+- **Compression (Phase 9).** Move `ships_stats_json` to `bytea` + zstd, or null it out on rows older than the active diff window (only the most recent observation per player is consulted by `compute_battle_events`; everything else is cold history). Open only if real storage measurements during the rollout justify it.
+- **Replacing the PoC's 60 s loop for `lil_boots`** — the rollout coexists with the PoC indefinitely. The PoC stays valuable as a high-frequency reference signal to spot-check the lower-cadence rollout against.
 
 ## File map (touch list for the implementation tranche)
 
