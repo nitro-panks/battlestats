@@ -415,6 +415,8 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={{
                     ...basePlayer,
                     is_streamer: true,
+                    twitch_handle: 'rankcaptain',
+                    twitch_url: 'https://www.twitch.tv/rankcaptain',
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
@@ -422,7 +424,9 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByLabelText(/known streamer/i)).toBeInTheDocument();
+        expect(
+            screen.getByLabelText(/twitch channel for rankcaptain/i),
+        ).toBeInTheDocument();
     });
 
     it('renders the clan battle shield immediately from cached player payload state', () => {

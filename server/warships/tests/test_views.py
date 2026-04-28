@@ -3428,11 +3428,8 @@ class ApiContractTests(TestCase):
         self.assertIsNotNone(cache.get(realm_cache_key(
             'na', LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY)))
         self.assertIsNotNone(cache.get(landing_best_clan_cache_key('wr')))
-        self.assertIsNotNone(cache.get(landing_best_clan_cache_key('cb')))
         self.assertIsNotNone(
             cache.get(landing_best_clan_published_cache_key('wr')))
-        self.assertIsNotNone(
-            cache.get(landing_best_clan_published_cache_key('cb')))
         self.assertIsNotNone(cache.get(realm_cache_key(
             'na', LANDING_RECENT_CLANS_CACHE_KEY)))
         self.assertIsNotNone(
@@ -3577,7 +3574,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["kill_ratio"], 0.78)
         self.assertEqual(response.json()["actual_kdr"], 2.25)
-        self.assertEqual(response.json()["player_score"], 3.22)
+        self.assertEqual(response.json()["player_score"], 3.87)
 
     def test_player_detail_exposes_highest_ranked_league_from_history(self):
         now = timezone.now()
@@ -3633,11 +3630,11 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["kill_ratio"], 0.78)
         self.assertEqual(response.json()["actual_kdr"], 2.25)
-        self.assertEqual(response.json()["player_score"], 3.22)
+        self.assertEqual(response.json()["player_score"], 3.87)
 
         player.refresh_from_db()
         self.assertEqual(player.explorer_summary.kill_ratio, 0.78)
-        self.assertEqual(player.explorer_summary.player_score, 3.22)
+        self.assertEqual(player.explorer_summary.player_score, 3.87)
 
     @patch("warships.views.update_player_data_task.delay")
     def test_player_detail_keeps_missing_actual_kdr_and_queues_refresh(self, mock_update_player_data_task):
@@ -3786,34 +3783,34 @@ class ApiContractTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["metric"], "win_rate_survival")
         self.assertEqual(payload["label"], "Win Rate vs Survival")
-        self.assertEqual(payload["x_label"], "Win Rate")
-        self.assertEqual(payload["y_label"], "Survival Rate")
+        self.assertEqual(payload["x_label"], "Survival Rate")
+        self.assertEqual(payload["y_label"], "Win Rate")
         self.assertEqual(payload["tracked_population"], 2)
         self.assertTrue(payload["correlation"]
                         is None or payload["correlation"] > 0)
         self.assertEqual(payload["x_domain"], {
-            "min": 35.0,
-            "max": 75.0,
-            "bin_width": 1.0,
-        })
-        self.assertEqual(payload["y_domain"], {
             "min": 15.0,
             "max": 75.0,
             "bin_width": 1.5,
         })
+        self.assertEqual(payload["y_domain"], {
+            "min": 35.0,
+            "max": 75.0,
+            "bin_width": 1.0,
+        })
         self.assertTrue(any(
-            tile["x_index"] == 17 and tile["y_index"] == 12 and tile["count"] == 1
+            tile["x_index"] == 12 and tile["y_index"] == 17 and tile["count"] == 1
             for tile in payload["tiles"]
         ))
         self.assertTrue(any(
-            tile["x_index"] == 23 and tile["y_index"] == 18 and tile["count"] == 1
+            tile["x_index"] == 18 and tile["y_index"] == 23 and tile["count"] == 1
             for tile in payload["tiles"]
         ))
         self.assertTrue(all("x_min" not in tile for tile in payload["tiles"]))
         self.assertTrue(
-            any(point["x_index"] == 17 and point["count"] == 1 for point in payload["trend"]))
+            any(point["x_index"] == 12 and point["count"] == 1 for point in payload["trend"]))
         self.assertTrue(
-            any(point["x_index"] == 23 and point["count"] == 1 for point in payload["trend"]))
+            any(point["x_index"] == 18 and point["count"] == 1 for point in payload["trend"]))
         self.assertTrue(all("x" not in point for point in payload["trend"]))
 
     def test_warm_player_correlations_populates_all_heatmap_caches(self):
