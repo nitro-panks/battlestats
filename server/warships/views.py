@@ -472,6 +472,157 @@ def player_summary(request, player_id: str) -> Response:
     return _validated_single_response(data, PlayerSummarySerializer)
 
 
+BATTLE_HISTORY_DEFAULT_DAYS = 7
+BATTLE_HISTORY_MAX_DAYS = 30
+BATTLE_HISTORY_CACHE_TTL = 5 * 60  # 5 minutes
+
+
+def _battle_history_cache_key(realm: str, player_name: str, days: int) -> str:
+    norm = (player_name or "").strip().lower()
+    return realm_cache_key(realm, f"battle-history:{norm}:{days}")
+
+
+def _build_battle_history_payload(player, days: int) -> dict:
+    """Read PlayerDailyShipStats for `player` over the last `days` days
+    and return the totals / by_ship / by_day shape.
+    """
+    from warships.models import PlayerDailyShipStats
+
+    today = timezone.now().date()
+    since = today - timedelta(days=days - 1)
+    rows = list(
+        PlayerDailyShipStats.objects
+        .filter(player=player, date__gte=since)
+        .order_by("date", "ship_id")
+    )
+
+    totals = {
+        "battles": 0, "wins": 0, "losses": 0,
+        "damage": 0, "frags": 0, "xp": 0, "planes_killed": 0,
+        "survived_battles": 0,
+    }
+    by_ship_acc: dict = {}
+    by_day_acc: dict = {}
+
+    ship_ids = {row.ship_id for row in rows}
+    ship_meta = {
+        s.ship_id: s for s in Ship.objects.filter(ship_id__in=ship_ids)
+    }
+
+    for row in rows:
+        totals["battles"] += row.battles
+        totals["wins"] += row.wins
+        totals["losses"] += row.losses
+        totals["damage"] += row.damage
+        totals["frags"] += row.frags
+        totals["xp"] += row.xp
+        totals["planes_killed"] += row.planes_killed
+        totals["survived_battles"] += row.survived_battles
+
+        ship_entry = by_ship_acc.setdefault(row.ship_id, {
+            "ship_id": row.ship_id,
+            "ship_name": row.ship_name or (ship_meta.get(row.ship_id).name
+                                           if ship_meta.get(row.ship_id)
+                                           else ""),
+            "ship_tier": ship_meta.get(row.ship_id).tier
+            if ship_meta.get(row.ship_id) else None,
+            "ship_type": ship_meta.get(row.ship_id).ship_type
+            if ship_meta.get(row.ship_id) else None,
+            "battles": 0, "wins": 0, "losses": 0, "frags": 0,
+            "damage": 0, "xp": 0, "planes_killed": 0,
+            "survived_battles": 0,
+        })
+        ship_entry["battles"] += row.battles
+        ship_entry["wins"] += row.wins
+        ship_entry["losses"] += row.losses
+        ship_entry["frags"] += row.frags
+        ship_entry["damage"] += row.damage
+        ship_entry["xp"] += row.xp
+        ship_entry["planes_killed"] += row.planes_killed
+        ship_entry["survived_battles"] += row.survived_battles
+
+        day_iso = row.date.isoformat()
+        day_entry = by_day_acc.setdefault(day_iso, {
+            "date": day_iso,
+            "battles": 0, "wins": 0, "damage": 0, "frags": 0,
+        })
+        day_entry["battles"] += row.battles
+        day_entry["wins"] += row.wins
+        day_entry["damage"] += row.damage
+        day_entry["frags"] += row.frags
+
+    win_rate = round(100.0 * totals["wins"] / totals["battles"], 1) \
+        if totals["battles"] else 0.0
+    avg_damage = int(round(totals["damage"] / totals["battles"])) \
+        if totals["battles"] else 0
+    survival_rate = round(
+        100.0 * totals["survived_battles"] / totals["battles"], 1
+    ) if totals["battles"] else 0.0
+
+    by_ship = sorted(by_ship_acc.values(),
+                     key=lambda s: s["battles"], reverse=True)
+    for s in by_ship:
+        s["win_rate"] = round(
+            100.0 * s["wins"] / s["battles"], 1) if s["battles"] else 0.0
+        s["avg_damage"] = int(round(s["damage"] / s["battles"])) \
+            if s["battles"] else 0
+    by_day = sorted(by_day_acc.values(), key=lambda d: d["date"])
+
+    return {
+        "window_days": days,
+        "as_of": timezone.now().isoformat(),
+        "totals": {
+            **totals,
+            "win_rate": win_rate,
+            "avg_damage": avg_damage,
+            "survival_rate": survival_rate,
+        },
+        "by_ship": by_ship,
+        "by_day": by_day,
+    }
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def battle_history(request, player_name: str) -> Response:
+    """Per-player longitudinal battle history.
+
+    Phase 4 of the battle-history rollout. Reads PlayerDailyShipStats only.
+    Returns 404 when BATTLE_HISTORY_API_ENABLED is not set so the absence
+    is indistinguishable from a missing route.
+    """
+    import os
+
+    if os.getenv("BATTLE_HISTORY_API_ENABLED", "0") != "1":
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    realm = _get_realm(request)
+    try:
+        days = int(request.query_params.get("days", BATTLE_HISTORY_DEFAULT_DAYS))
+    except (TypeError, ValueError):
+        days = BATTLE_HISTORY_DEFAULT_DAYS
+    days = max(1, min(BATTLE_HISTORY_MAX_DAYS, days))
+
+    player = (
+        Player.objects
+        .alias(name_lower=Lower("name"))
+        .filter(name_lower=(player_name or "").strip().lower(), realm=realm)
+        .first()
+    )
+    if player is None:
+        return Response({"detail": "Player not found."},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    cache_key = _battle_history_cache_key(realm, player.name, days)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached)
+
+    payload = _build_battle_history_payload(player, days)
+    cache.set(cache_key, payload, BATTLE_HISTORY_CACHE_TTL)
+    return Response(payload)
+
+
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def wr_distribution(request) -> Response:

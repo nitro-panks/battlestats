@@ -694,3 +694,143 @@ class RebuildManagementCommandTests(TestCase):
             stdout=out,
         )
         self.assertIn("2026-04-28", out.getvalue())
+
+
+class BattleHistoryEndpointTests(TestCase):
+    """Phase 4 read-side API."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.player = Player.objects.create(
+            name="api_test", player_id=44444, realm="na",
+            pvp_battles=200,
+        )
+        Ship.objects.create(
+            ship_id=42, name="Yamato", nation="japan", ship_type="Battleship",
+            tier=10,
+        )
+        Ship.objects.create(
+            ship_id=43, name="Dalian", nation="pan_asia",
+            ship_type="Destroyer", tier=9,
+        )
+
+    def _seed_daily_rows(self, ships_payload):
+        today = django_timezone.now().date()
+        rows = []
+        for ship_id, payload in ships_payload.items():
+            rows.append(PlayerDailyShipStats.objects.create(
+                player=self.player,
+                date=payload.get("date", today),
+                ship_id=ship_id,
+                ship_name=payload.get("ship_name", ""),
+                battles=payload.get("battles", 0),
+                wins=payload.get("wins", 0),
+                losses=payload.get("losses", 0),
+                frags=payload.get("frags", 0),
+                damage=payload.get("damage", 0),
+                xp=payload.get("xp", 0),
+                planes_killed=payload.get("planes_killed", 0),
+                survived_battles=payload.get("survived_battles", 0),
+            ))
+        return rows
+
+    def test_returns_404_when_api_flag_off(self):
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "0"},
+            clear=False,
+        ):
+            response = self.client.get("/api/player/api_test/battle-history/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_returns_payload_when_flag_on_with_data(self):
+        self._seed_daily_rows({
+            42: {"battles": 6, "wins": 4, "losses": 2, "frags": 12,
+                 "damage": 287_400, "survived_battles": 3,
+                 "ship_name": "Yamato"},
+            43: {"battles": 2, "wins": 1, "losses": 1, "frags": 3,
+                 "damage": 95_000, "survived_battles": 1,
+                 "ship_name": "Dalian"},
+        })
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get("/api/player/api_test/battle-history/?days=7")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["window_days"], 7)
+        self.assertEqual(body["totals"]["battles"], 8)
+        self.assertEqual(body["totals"]["wins"], 5)
+        self.assertEqual(body["totals"]["damage"], 382_400)
+        self.assertEqual(body["totals"]["win_rate"], 62.5)
+
+        by_ship = {s["ship_id"]: s for s in body["by_ship"]}
+        self.assertEqual(by_ship[42]["battles"], 6)
+        self.assertEqual(by_ship[42]["ship_tier"], 10)
+        self.assertEqual(by_ship[42]["ship_type"], "Battleship")
+        self.assertEqual(by_ship[42]["avg_damage"], 47_900)
+        # Sorted by battles desc: Yamato (6) before Dalian (2).
+        self.assertEqual(body["by_ship"][0]["ship_id"], 42)
+        # Both ships' rows are on the same day → one entry in by_day.
+        self.assertEqual(len(body["by_day"]), 1)
+        self.assertEqual(body["by_day"][0]["battles"], 8)
+
+    def test_returns_zero_totals_when_player_has_no_events(self):
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get("/api/player/api_test/battle-history/?days=7")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["totals"]["battles"], 0)
+        self.assertEqual(body["totals"]["win_rate"], 0.0)
+        self.assertEqual(body["by_ship"], [])
+        self.assertEqual(body["by_day"], [])
+
+    def test_returns_404_when_player_unknown(self):
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get("/api/player/no_such_player/battle-history/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_clamps_days_to_max(self):
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get("/api/player/api_test/battle-history/?days=999")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["window_days"], 30)
+
+    def test_caches_payload(self):
+        from django.core.cache import cache
+        self._seed_daily_rows({
+            42: {"battles": 1, "wins": 1, "ship_name": "Yamato"},
+        })
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r1 = self.client.get("/api/player/api_test/battle-history/?days=7")
+            self.assertEqual(r1.status_code, 200)
+            self.assertEqual(r1.json()["totals"]["battles"], 1)
+
+            # Mutate the underlying row; cached response should still reflect old value.
+            PlayerDailyShipStats.objects.update(battles=99)
+            r2 = self.client.get("/api/player/api_test/battle-history/?days=7")
+            self.assertEqual(r2.json()["totals"]["battles"], 1, "cache hit")
+
+            # After cache clear we see the new value.
+            cache.clear()
+            r3 = self.client.get("/api/player/api_test/battle-history/?days=7")
+            self.assertEqual(r3.json()["totals"]["battles"], 99)

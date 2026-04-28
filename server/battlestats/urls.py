@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_tier_distribution, clan_member_tiers, clan_battle_seasons, player_clan_battle_seasons, landing_activity_attrition, landing_best_warmup, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, clan_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats, agentic_trace_dashboard, analytics_entity_view, analytics_top_entities, sitemap_entities, streamer_submission_view
+from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_tier_distribution, clan_member_tiers, clan_battle_seasons, player_clan_battle_seasons, landing_activity_attrition, landing_best_warmup, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, clan_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats, agentic_trace_dashboard, analytics_entity_view, analytics_top_entities, sitemap_entities, streamer_submission_view, battle_history
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -56,6 +56,10 @@ urlpatterns = [
          player_summary, name='fetch_player_summary'),
     path('api/fetch/player_summary/<str:player_id>',
          player_summary, name='fetch_player_summary_no_slash'),
+    path('api/player/<str:player_name>/battle-history/',
+         battle_history, name='battle_history'),
+    path('api/player/<str:player_name>/battle-history',
+         battle_history, name='battle_history_no_slash'),
     path('api/fetch/clan_members/<str:clan_id>/',
          clan_members, name='fetch_clan_members'),
     path('api/fetch/clan_members/<str:clan_id>',
