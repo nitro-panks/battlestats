@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import wrColor from '../lib/wrColor';
+import { chartColors } from '../lib/chartTheme';
+import { useTheme } from '../context/ThemeContext';
 
 export interface BattleHistoryByShip {
     ship_id: number;
@@ -66,14 +68,80 @@ interface BattleHistoryCardProps {
 const formatInt = (n: number): string => n.toLocaleString();
 const formatPercent = (n: number): string => `${n.toFixed(1)}%`;
 
-interface WrDeltaProps {
-    lifetimeWinRate: number | null | undefined;
-    deltaWinRate: number | null | undefined;
+const tierBlue = (tier: number | null | undefined): string => {
+    if (tier == null) return 'var(--text-muted)';
+    const clamped = Math.max(1, Math.min(11, tier));
+    // Saturation ramps 25% (T1, pale) → 95% (T11, deep). Lightness held at
+    // 50% so the color reads on both light and dark themes.
+    const sat = 25 + ((clamped - 1) / 10) * 70;
+    return `hsl(215, ${sat}%, 50%)`;
+};
+
+type SortKey = 'ship_name' | 'ship_tier' | 'ship_type' | 'battles' | 'win_rate'
+    | 'avg_damage' | 'kdr';
+
+const computeKdr = (frags: number, battles: number, survived: number): number => {
+    const deaths = Math.max(0, battles - survived);
+    if (deaths <= 0) return frags;
+    return frags / deaths;
+};
+
+const SHIP_TYPE_LABEL: Record<string, string> = {
+    Destroyer: 'DD',
+    Cruiser: 'CA',
+    Battleship: 'BB',
+    AirCarrier: 'CV',
+    Submarine: 'SS',
+};
+
+const shipTypeShort = (type: string | null | undefined): string => {
+    if (!type) return '—';
+    return SHIP_TYPE_LABEL[type] ?? type.slice(0, 2).toUpperCase();
+};
+type SortDirection = 'asc' | 'desc';
+
+const DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
+    ship_name: 'asc', ship_tier: 'asc', ship_type: 'asc',
+    battles: 'desc', win_rate: 'desc', avg_damage: 'desc',
+    kdr: 'desc',
+};
+
+interface SortableThProps {
+    sortKey: SortKey;
+    activeKey: SortKey;
+    direction: SortDirection;
+    onSortClick: (key: SortKey) => void;
+    children: React.ReactNode;
 }
 
-const WrDelta: React.FC<WrDeltaProps> = ({ lifetimeWinRate, deltaWinRate }) => {
-    if (lifetimeWinRate == null) return null;
-    const sign = deltaWinRate == null ? '' : deltaWinRate > 0 ? '▲' : deltaWinRate < 0 ? '▼' : '·';
+const SortableTh: React.FC<SortableThProps> = ({
+    sortKey, activeKey, direction, onSortClick, children,
+}) => {
+    const active = activeKey === sortKey;
+    const arrow = active ? (direction === 'asc' ? '▲' : '▼') : '';
+    return (
+        <th
+            scope="col"
+            className="py-1 px-2 cursor-pointer select-none hover:text-[var(--text-strong)] text-center"
+            onClick={() => onSortClick(sortKey)}
+            aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+        >
+            <span>{children}</span>
+            <span className="ml-1 text-[10px]" aria-hidden="true">{arrow || '↕'}</span>
+        </th>
+    );
+};
+
+interface WrCellProps {
+    periodWinRate: number;
+    lifetimeWinRate: number | null | undefined;
+    deltaWinRate: number | null | undefined;
+    stacked?: boolean;
+}
+
+const WrCell: React.FC<WrCellProps> = ({
+    periodWinRate, lifetimeWinRate, deltaWinRate, stacked = false,
+}) => {
     const tone = deltaWinRate == null
         ? 'var(--text-muted)'
         : deltaWinRate > 0
@@ -81,14 +149,49 @@ const WrDelta: React.FC<WrDeltaProps> = ({ lifetimeWinRate, deltaWinRate }) => {
             : deltaWinRate < 0
                 ? '#a50f15'
                 : 'var(--text-muted)';
+    const signedDelta = deltaWinRate == null
+        ? null
+        : `${deltaWinRate > 0 ? '+' : ''}${deltaWinRate.toFixed(1)}%`;
+    const tooltip = lifetimeWinRate != null
+        ? `Period ${formatPercent(periodWinRate)} · Lifetime ${formatPercent(lifetimeWinRate)}${signedDelta != null ? ` (Δ${signedDelta})` : ''}`
+        : `Period ${formatPercent(periodWinRate)}`;
+    const periodEl = (
+        <span style={{ color: wrColor(periodWinRate) }} className="font-semibold">
+            {formatPercent(periodWinRate)}
+        </span>
+    );
+    const lifetimeEl = lifetimeWinRate != null ? (
+        <span className="text-xs" style={{ color: wrColor(lifetimeWinRate) }}>
+            {formatPercent(lifetimeWinRate)}
+        </span>
+    ) : null;
+    const deltaEl = signedDelta != null ? (
+        <span className="text-xs font-medium" style={{ color: tone }}>
+            Δ{signedDelta}
+        </span>
+    ) : null;
+
+    if (stacked) {
+        return (
+            <span className="tabular-nums flex flex-col items-start" title={tooltip}>
+                {periodEl}
+                {(lifetimeEl || deltaEl) ? (
+                    <span className="inline-flex items-baseline gap-2 whitespace-nowrap">
+                        {lifetimeEl}
+                        {deltaEl}
+                    </span>
+                ) : null}
+            </span>
+        );
+    }
     return (
-        <span className="block text-xs text-[var(--text-muted)] tabular-nums">
-            lifetime {formatPercent(lifetimeWinRate)}
-            {deltaWinRate != null ? (
-                <span style={{ color: tone, marginLeft: '0.25rem' }}>
-                    {sign}{Math.abs(deltaWinRate).toFixed(1)}%
-                </span>
-            ) : null}
+        <span
+            className="tabular-nums inline-flex items-baseline gap-2 justify-end whitespace-nowrap"
+            title={tooltip}
+        >
+            {periodEl}
+            {lifetimeEl}
+            {deltaEl}
         </span>
     );
 };
@@ -114,17 +217,40 @@ const buildWindowedDays = (
     return padded;
 };
 
-const Sparkline: React.FC<{ days: BattleHistoryByDay[] }> = ({ days }) => {
-    if (days.length === 0) return null;
+interface SparklinePoint {
+    date: string;
+    value: number;
+    color: string;
+    tooltip: string;
+}
+
+const Sparkline: React.FC<{ points: SparklinePoint[]; ariaLabel: string }> = ({
+    points, ariaLabel,
+}) => {
+    if (points.length === 0) return null;
     const width = 240;
     const height = 36;
     const pad = 2;
-    const maxBattles = Math.max(1, ...days.map((d) => d.battles));
-    const points = days.map((d, idx) => {
-        const x = pad + (idx * (width - 2 * pad)) / Math.max(1, days.length - 1);
-        const y = height - pad - ((d.battles / maxBattles) * (height - 2 * pad));
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-    });
+    const values = points.map((p) => p.value);
+    const minV = Math.min(...values);
+    const maxV = Math.max(...values);
+    // Auto-scale: pad the range so a flat line still has visual room.
+    const range = Math.max(maxV - minV, 0.0001);
+    const padding = range * 0.15 + 0.0001;
+    const yMin = minV - padding;
+    const yMax = maxV + padding;
+    const span = yMax - yMin;
+    const xy = (idx: number, value: number): [number, number] => {
+        const x = pad + (idx * (width - 2 * pad)) / Math.max(1, points.length - 1);
+        const y = height - pad - ((value - yMin) / span) * (height - 2 * pad);
+        return [x, y];
+    };
+    const polyline = points
+        .map((p, i) => {
+            const [x, y] = xy(i, p.value);
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        })
+        .join(' ');
     return (
         <svg
             viewBox={`0 0 ${width} ${height}`}
@@ -132,35 +258,62 @@ const Sparkline: React.FC<{ days: BattleHistoryByDay[] }> = ({ days }) => {
             height={height}
             preserveAspectRatio="none"
             className="block"
-            aria-label="Battles per day sparkline"
+            aria-label={ariaLabel}
             role="img"
         >
             <polyline
                 fill="none"
                 stroke="var(--accent-mid)"
                 strokeWidth="1.5"
-                points={points.join(' ')}
+                points={polyline}
             />
-            {days.map((d, idx) => {
-                const x = pad + (idx * (width - 2 * pad)) / Math.max(1, days.length - 1);
-                const y = height - pad - ((d.battles / maxBattles) * (height - 2 * pad));
-                const winRate = d.battles ? (100 * d.wins) / d.battles : 0;
+            {points.map((p, i) => {
+                const [x, y] = xy(i, p.value);
                 return (
-                    <circle
-                        key={d.date}
-                        cx={x}
-                        cy={y}
-                        r={2.5}
-                        fill={wrColor(d.battles ? winRate : null)}
-                    >
-                        <title>
-                            {d.date}: {d.battles} battles, {formatPercent(winRate)} WR, {formatInt(d.damage)} damage
-                        </title>
+                    <circle key={p.date} cx={x} cy={y} r={2.5} fill={p.color}>
+                        <title>{p.tooltip}</title>
                     </circle>
                 );
             })}
         </svg>
     );
+};
+
+const buildOverallWrSeries = (
+    days: BattleHistoryByDay[],
+    totals: BattleHistoryTotals,
+): SparklinePoint[] | null => {
+    // Need lifetime baseline to anchor the running overall WR.
+    const lifetimeBattles = totals.lifetime_battles ?? null;
+    const lifetimeWr = totals.lifetime_win_rate ?? null;
+    if (lifetimeBattles == null || lifetimeWr == null || lifetimeBattles <= 0) {
+        return null;
+    }
+    const lifetimeWins = Math.round(lifetimeBattles * (lifetimeWr / 100));
+    // Walk forward through the window: cumulative includes everything up
+    // to and including day i. Resulting overall WR at end of day i =
+    // (priorWins + cumWins) / (priorBattles + cumBattles).
+    const periodBattles = totals.battles;
+    const periodWins = totals.wins;
+    const priorBattles = Math.max(0, lifetimeBattles - periodBattles);
+    const priorWins = Math.max(0, lifetimeWins - periodWins);
+
+    let cumBattles = 0;
+    let cumWins = 0;
+    return days.map((d) => {
+        cumBattles += d.battles;
+        cumWins += d.wins;
+        const denom = priorBattles + cumBattles;
+        const overall = denom > 0 ? (100 * (priorWins + cumWins)) / denom : 0;
+        const dayWr = d.battles ? (100 * d.wins) / d.battles : null;
+        const dayWrText = dayWr == null ? 'no battles' : `${dayWr.toFixed(1)}% WR (${d.wins}/${d.battles})`;
+        return {
+            date: d.date,
+            value: overall,
+            color: wrColor(d.battles ? dayWr : overall),
+            tooltip: `${d.date} — ${dayWrText} → overall ${overall.toFixed(2)}%`,
+        };
+    });
 };
 
 const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
@@ -171,6 +324,19 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
     const [error, setError] = useState<Error | null>(null);
     const [loading, setLoading] = useState(true);
+    const { theme } = useTheme();
+    const palette = chartColors[theme];
+
+    const shipTypeColor = (type: string | null | undefined): string => {
+        switch (type) {
+            case 'Destroyer': return palette.shipDD;
+            case 'Cruiser': return palette.shipCA;
+            case 'Battleship': return palette.shipBB;
+            case 'AirCarrier': return palette.shipCV;
+            case 'Submarine': return palette.shipSS;
+            default: return palette.shipDefault;
+        }
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -200,10 +366,35 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         };
     }, [playerName, realm, days]);
 
-    const visibleByShip = useMemo(
-        () => (payload?.by_ship ?? []).slice(0, 12),
-        [payload?.by_ship],
-    );
+    const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
+        key: 'battles', direction: 'desc',
+    });
+
+    const onSortClick = (key: SortKey) => {
+        setSort((s) => s.key === key
+            ? { key, direction: s.direction === 'asc' ? 'desc' : 'asc' }
+            : { key, direction: DEFAULT_DIRECTION[key] });
+    };
+
+    const visibleByShip = useMemo(() => {
+        const rows = (payload?.by_ship ?? []).map((r) => ({
+            ...r,
+            kdr: computeKdr(r.frags, r.battles, r.survived_battles),
+        }));
+        const sortVal = (row: typeof rows[number]): string | number => {
+            const v = (row as Record<string, unknown>)[sort.key];
+            if (v == null) return sort.direction === 'asc' ? Infinity : -Infinity;
+            return typeof v === 'string' ? v.toLowerCase() : (v as number);
+        };
+        rows.sort((a, b) => {
+            const av = sortVal(a);
+            const bv = sortVal(b);
+            if (av < bv) return sort.direction === 'asc' ? -1 : 1;
+            if (av > bv) return sort.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+        return rows.slice(0, 12);
+    }, [payload?.by_ship, sort]);
 
     if (loading || error) {
         return null;
@@ -238,16 +429,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         </div>
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Win rate</div>
-                            <div
-                                className="text-lg font-semibold"
-                                style={{ color: wrColor(totals.win_rate) }}
-                            >
-                                {formatPercent(totals.win_rate)}
+                            <div className="text-lg">
+                                <WrCell
+                                    periodWinRate={totals.win_rate}
+                                    lifetimeWinRate={totals.lifetime_win_rate}
+                                    deltaWinRate={totals.delta_win_rate}
+                                    stacked
+                                />
                             </div>
-                            <WrDelta
-                                lifetimeWinRate={totals.lifetime_win_rate}
-                                deltaWinRate={totals.delta_win_rate}
-                            />
                         </div>
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
@@ -265,18 +454,41 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 );
             })()}
             <div className="mt-4">
-                <Sparkline days={buildWindowedDays(payload.by_day, payload.window_days)} />
+                {(() => {
+                    const windowed = buildWindowedDays(payload.by_day, payload.window_days);
+                    const wrSeries = buildOverallWrSeries(windowed, totals);
+                    if (wrSeries) {
+                        return (
+                            <Sparkline
+                                points={wrSeries}
+                                ariaLabel="Overall win rate over the period"
+                            />
+                        );
+                    }
+                    // Fallback: battles-per-day shape when lifetime baseline is absent.
+                    const fallback: SparklinePoint[] = windowed.map((d) => {
+                        const dayWr = d.battles ? (100 * d.wins) / d.battles : null;
+                        return {
+                            date: d.date,
+                            value: d.battles,
+                            color: wrColor(d.battles ? dayWr : null),
+                            tooltip: `${d.date}: ${d.battles} battles${dayWr != null ? `, ${dayWr.toFixed(1)}% WR` : ''}`,
+                        };
+                    });
+                    return <Sparkline points={fallback} ariaLabel="Battles per day sparkline" />;
+                })()}
             </div>
             <div className="mt-4 overflow-x-auto">
                 <table className="w-full text-left text-sm">
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                            <th scope="col" className="py-1 pr-2">Ship</th>
-                            <th scope="col" className="py-1 pr-2 text-right">Battles</th>
-                            <th scope="col" className="py-1 pr-2 text-right">WR</th>
-                            <th scope="col" className="py-1 pr-2 text-right">Avg dmg</th>
-                            <th scope="col" className="py-1 pr-2 text-right">Frags</th>
-                            <th scope="col" className="py-1 pr-2 text-right">Survived</th>
+                            <SortableTh sortKey="ship_name" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Ship</SortableTh>
+                            <SortableTh sortKey="ship_tier" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Tier</SortableTh>
+                            <SortableTh sortKey="ship_type" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Type</SortableTh>
+                            <SortableTh sortKey="battles" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>#</SortableTh>
+                            <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Win Rate</SortableTh>
+                            <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Avg dmg</SortableTh>
+                            <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>KDR</SortableTh>
                         </tr>
                     </thead>
                     <tbody>
@@ -285,29 +497,33 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 key={row.ship_id}
                                 className="border-b border-[var(--accent-faint)] last:border-b-0"
                             >
-                                <td className="py-1 pr-2">
-                                    <span className="text-[var(--text-strong)]">{row.ship_name || `Ship ${row.ship_id}`}</span>
-                                    {row.ship_tier ? (
-                                        <span className="ml-1 text-xs text-[var(--text-muted)]">T{row.ship_tier}</span>
-                                    ) : null}
+                                <td className="py-1 pr-2 text-[var(--text-strong)]">
+                                    {row.ship_name || `Ship ${row.ship_id}`}
                                 </td>
-                                <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.battles)}</td>
+                                <td className="py-1 px-2 text-center tabular-nums text-[var(--text-muted)]">
+                                    {row.ship_tier ?? '—'}
+                                </td>
+                                <td
+                                    className="py-1 px-2 text-center font-semibold"
+                                    style={{ color: shipTypeColor(row.ship_type) }}
+                                    title={row.ship_type ?? ''}
+                                >
+                                    {shipTypeShort(row.ship_type)}
+                                </td>
+                                <td className="py-1 px-2 text-center tabular-nums text-[var(--text-strong)]">{formatInt(row.battles)}</td>
                                 <td className="py-1 pr-2 text-right">
-                                    <span
-                                        className="block tabular-nums font-semibold"
-                                        style={{ color: wrColor(row.win_rate) }}
-                                    >
-                                        {formatPercent(row.win_rate)}
-                                    </span>
-                                    <WrDelta
+                                    <WrCell
+                                        periodWinRate={row.win_rate}
                                         lifetimeWinRate={row.lifetime_win_rate}
                                         deltaWinRate={row.delta_win_rate}
                                     />
                                 </td>
                                 <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.avg_damage)}</td>
-                                <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.frags)}</td>
-                                <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-strong)]">
-                                    {formatInt(row.survived_battles)}/{formatInt(row.battles)}
+                                <td
+                                    className="py-1 px-2 text-center tabular-nums text-[var(--text-strong)]"
+                                    title={`${row.frags} frags / ${Math.max(0, row.battles - row.survived_battles)} deaths`}
+                                >
+                                    {row.kdr.toFixed(2)}
                                 </td>
                             </tr>
                         ))}
