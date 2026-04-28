@@ -417,11 +417,39 @@ def record_observation_from_payloads(
             _apply_event_to_daily_summary(event_row)
             created += 1
 
-        return {
-            "status": "completed",
-            "observation_id": observation.id,
-            "events_created": created,
-        }
+    if created > 0:
+        _invalidate_battle_history_cache(player)
+
+    return {
+        "status": "completed",
+        "observation_id": observation.id,
+        "events_created": created,
+    }
+
+
+def _invalidate_battle_history_cache(player) -> None:
+    """Drop the battle-history Redis cache for this player so the next API
+    read returns the fresh rollup. Called when new events have just been
+    written; the visit-driven page-load path then sees current data without
+    waiting on the 5-min TTL.
+
+    Iterates the supported days range (1..BATTLE_HISTORY_MAX_DAYS) — small
+    enough that 30 cache.delete calls are cheaper than a delete_pattern
+    scan over Redis keyspace.
+    """
+    from django.core.cache import cache
+
+    from warships.models import realm_cache_key
+
+    name = (player.name or "").strip().lower()
+    if not name:
+        return
+    realm = player.realm or "na"
+    keys = [
+        realm_cache_key(realm, f"battle-history:{name}:{days}")
+        for days in range(1, 31)
+    ]
+    cache.delete_many(keys)
 
 
 def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
