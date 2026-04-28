@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "jest --runInBand app/lib/__tests__/entityRoutes.test.ts app/lib/__tests__/visitAnalytics.test.ts app/components/__tests__/PlayerSearch.test.tsx app/components/__tests__/PlayerRouteViewWarmup.test.tsx app/components/__tests__/PlayerDetail.test.tsx app/components/__tests__/PlayerDetailInsightsTabs.test.tsx app/components/__tests__/ClanRouteView.test.tsx app/components/__tests__/ClanDetail.test.tsx app/components/__tests__/RealmSelector.test.tsx app/components/__tests__/HeaderSearch.test.tsx",
+    "test": "jest --runInBand app/lib/__tests__/entityRoutes.test.ts app/lib/__tests__/visitAnalytics.test.ts app/components/__tests__/PlayerSearch.test.tsx app/components/__tests__/PlayerRouteViewWarmup.test.tsx app/components/__tests__/PlayerDetail.test.tsx app/components/__tests__/PlayerDetailInsightsTabs.test.tsx app/components/__tests__/ClanRouteView.test.tsx app/components/__tests__/ClanDetail.test.tsx app/components/__tests__/RealmSelector.test.tsx app/components/__tests__/HeaderSearch.test.tsx app/components/__tests__/BattleHistoryCard.test.tsx",
     "test:ci": "npm test"
   },
   "dependencies": {

@@ -7,6 +7,7 @@ import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getHighestRankedLeagueName, type RankedLeagueName } from './rankedLeague';
 import PlayerDetailInsightsTabs from './PlayerDetailInsightsTabs';
+import BattleHistoryCard from './BattleHistoryCard';
 import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
@@ -512,6 +513,10 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     ) : null}
                                 </div>
                             )}
+                            <BattleHistoryCard
+                                playerName={player.name}
+                                realm={realm}
+                            />
                             <div className="mt-6" />
                             <PlayerDetailInsightsTabs
                                 playerId={player.player_id}
