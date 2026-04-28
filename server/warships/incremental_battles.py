@@ -1,15 +1,22 @@
-"""Incremental battle capture PoC — pull-and-diff WG aggregate stats.
+"""Incremental battle capture — pull-and-diff WG aggregate stats.
 
-Companion runbook: `agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md`.
+Companion runbooks:
+* `agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md` (PoC, 60 s poll)
+* `agents/runbooks/runbook-battle-history-rollout-2026-04-28.md` (playerbase rollout)
 
 The Wargaming public API exposes only running totals; per-battle deltas must be
-computed by diffing successive snapshots. This module owns:
+computed by diffing successive snapshots.
 
-* `compute_battle_events()` — pure in-memory diff between two observations.
-* `fetch_player_observation()` — single WG poll, returning the prepared row dict.
-* `record_observation_and_diff()` — DB orchestrator that writes a
-  `BattleObservation`, looks up the prior one, and persists any
-  `BattleEvent` rows the diff produced.
+The module exposes two entry points to the same diff machinery:
+
+* `record_observation_from_payloads(player, player_data, ship_data)` — core
+  orchestrator. Issues no WG calls. Takes the in-memory payloads the caller
+  already fetched (or `None` for `player_data` to read aggregates straight
+  off the `Player` row, which the rollout's piggyback hook does).
+* `record_observation_and_diff(player_id, realm)` — thin wrapper. Resolves
+  the `Player`, issues the WG calls, then defers to the core orchestrator.
+  Used by the lil_boots PoC poll task and by tests that want to drive the
+  end-to-end path with a stubbed WG client.
 """
 from __future__ import annotations
 
@@ -88,12 +95,7 @@ def coerce_observation_payload(
         except (TypeError, ValueError, OSError):
             last_battle_time = None
 
-    ships: Dict[int, ShipSnapshot] = {}
-    for ship_dict in ship_data or []:
-        ship_snapshot = _coerce_ship_snapshot(ship_dict)
-        if ship_snapshot is None:
-            continue
-        ships[ship_snapshot.ship_id] = ship_snapshot
+    ships = _ships_from_iterable(ship_data)
 
     try:
         return PlayerSnapshot(
@@ -109,6 +111,36 @@ def coerce_observation_payload(
         return None
 
 
+def _ships_from_iterable(ship_data: Iterable[Dict[str, Any]]) -> Dict[int, ShipSnapshot]:
+    ships: Dict[int, ShipSnapshot] = {}
+    for ship_dict in ship_data or []:
+        ship_snapshot = _coerce_ship_snapshot(ship_dict)
+        if ship_snapshot is None:
+            continue
+        ships[ship_snapshot.ship_id] = ship_snapshot
+    return ships
+
+
+def _snapshot_from_player_row(player, ship_data: Iterable[Dict[str, Any]]) -> Optional[PlayerSnapshot]:
+    """Build a PlayerSnapshot from a refreshed `Player` row + ship_data payload.
+
+    Used by the rollout's piggyback hook in `update_battle_data`, which has
+    already refreshed the Player aggregates via `update_player_data` and just
+    finished the `ships/stats/` fetch.
+    """
+    if getattr(player, "is_hidden", False):
+        return None
+    return PlayerSnapshot(
+        pvp_battles=int(player.pvp_battles or 0),
+        pvp_wins=int(player.pvp_wins or 0),
+        pvp_losses=int(player.pvp_losses or 0),
+        pvp_frags=int(player.pvp_frags or 0),
+        pvp_survived_battles=int(player.pvp_survived_battles or 0),
+        last_battle_time=None,
+        ships=_ships_from_iterable(ship_data),
+    )
+
+
 def compute_battle_events(
     previous: PlayerSnapshot,
     current: PlayerSnapshot,
@@ -117,7 +149,8 @@ def compute_battle_events(
 
     Pure function: callable from tests without any DB. Returns a list of dicts
     with stable keys: ship_id, battles_delta, wins_delta, losses_delta,
-    frags_delta, survived. Empty list when nothing advanced.
+    frags_delta, damage_delta, xp_delta, planes_killed_delta, survived_delta,
+    survived. Empty list when nothing advanced.
     """
     if current.pvp_battles <= previous.pvp_battles:
         return []
@@ -184,26 +217,8 @@ def fetch_player_observation_payload(player_id: int, realm: str) -> Optional[Pla
     return coerce_observation_payload(player_data, ship_data)
 
 
-def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
-    """Poll WG, persist a BattleObservation, diff against the prior observation,
-    and persist BattleEvent rows for any ship whose battle count advanced.
-
-    Returns a status dict suitable for surfacing in task results / logs.
-    """
-    from warships.models import BattleEvent, BattleObservation, Player, Ship
-
-    snapshot = fetch_player_observation_payload(player_id, realm=realm)
-    if snapshot is None:
-        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
-
-    try:
-        player = Player.objects.get(player_id=player_id, realm=realm)
-    except Player.DoesNotExist:
-        logger.warning("Tracked player not found locally: player_id=%s realm=%s",
-                       player_id, realm)
-        return {"status": "skipped", "reason": "player-not-found"}
-
-    ships_payload = [
+def _serialize_ships_payload(snapshot: PlayerSnapshot) -> List[Dict[str, Any]]:
+    return [
         {
             "ship_id": ship.ship_id,
             "battles": ship.battles,
@@ -217,6 +232,78 @@ def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
         }
         for ship in snapshot.ships.values()
     ]
+
+
+def _hydrate_previous_snapshot(previous) -> PlayerSnapshot:
+    return PlayerSnapshot(
+        pvp_battles=previous.pvp_battles,
+        pvp_wins=previous.pvp_wins,
+        pvp_losses=previous.pvp_losses,
+        pvp_frags=previous.pvp_frags,
+        pvp_survived_battles=previous.pvp_survived_battles,
+        last_battle_time=previous.last_battle_time,
+        ships={
+            int(row["ship_id"]): ShipSnapshot(
+                ship_id=int(row["ship_id"]),
+                battles=int(row.get("battles", 0)),
+                wins=int(row.get("wins", 0)),
+                losses=int(row.get("losses", 0)),
+                frags=int(row.get("frags", 0)),
+                damage_dealt=int(row.get("damage_dealt", 0)),
+                xp=int(row.get("xp", 0)),
+                planes_killed=int(row.get("planes_killed", 0)),
+                survived_battles=int(row.get("survived_battles", 0)),
+            )
+            for row in (previous.ships_stats_json or [])
+            if row.get("ship_id") is not None
+        },
+    )
+
+
+def _apply_event_to_daily_summary(event) -> None:
+    """Stub. Phase 3 of the rollout fills this in to update PlayerDailyShipStats.
+
+    Called inside the same `transaction.atomic()` block as the BattleEvent
+    insert so the rollup write cannot drift from the event row. No-op today;
+    the BattleEvent row alone is the durable artifact until Phase 3.
+    """
+    return None
+
+
+def record_observation_from_payloads(
+    player,
+    *,
+    player_data: Optional[Dict[str, Any]] = None,
+    ship_data: Iterable[Dict[str, Any]],
+    source: str = None,
+) -> Dict[str, Any]:
+    """Persist a `BattleObservation` for `player` and emit `BattleEvent` rows.
+
+    Issues no WG calls — caller supplies the payloads. The two valid input
+    shapes are:
+
+    * `player_data` is the raw `account/info/` dict, `ship_data` is the
+      `ships/stats/` list. PoC poll path uses this.
+    * `player_data` is `None` (or omitted), `ship_data` is the `ships/stats/`
+      list, and `player.pvp_*` columns are already up to date. Rollout
+      piggyback hook in `update_battle_data` uses this — `update_player_data`
+      has just refreshed those columns.
+
+    Returns a status dict matching `record_observation_and_diff`.
+    """
+    from warships.models import BattleEvent, BattleObservation, Ship
+
+    if player_data is not None:
+        snapshot = coerce_observation_payload(player_data, ship_data)
+    else:
+        snapshot = _snapshot_from_player_row(player, ship_data)
+
+    if snapshot is None:
+        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+
+    ships_payload = _serialize_ships_payload(snapshot)
+    if source is None:
+        source = BattleObservation.SOURCE_POLL
 
     with transaction.atomic():
         previous = (
@@ -235,7 +322,7 @@ def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
             pvp_survived_battles=snapshot.pvp_survived_battles,
             last_battle_time=snapshot.last_battle_time,
             ships_stats_json=ships_payload,
-            source=BattleObservation.SOURCE_POLL,
+            source=source,
         )
 
         if previous is None:
@@ -246,30 +333,7 @@ def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
                 "reason": "baseline",
             }
 
-        previous_snapshot = PlayerSnapshot(
-            pvp_battles=previous.pvp_battles,
-            pvp_wins=previous.pvp_wins,
-            pvp_losses=previous.pvp_losses,
-            pvp_frags=previous.pvp_frags,
-            pvp_survived_battles=previous.pvp_survived_battles,
-            last_battle_time=previous.last_battle_time,
-            ships={
-                int(row["ship_id"]): ShipSnapshot(
-                    ship_id=int(row["ship_id"]),
-                    battles=int(row.get("battles", 0)),
-                    wins=int(row.get("wins", 0)),
-                    losses=int(row.get("losses", 0)),
-                    frags=int(row.get("frags", 0)),
-                    damage_dealt=int(row.get("damage_dealt", 0)),
-                    xp=int(row.get("xp", 0)),
-                    planes_killed=int(row.get("planes_killed", 0)),
-                    survived_battles=int(row.get("survived_battles", 0)),
-                )
-                for row in (previous.ships_stats_json or [])
-                if row.get("ship_id") is not None
-            },
-        )
-
+        previous_snapshot = _hydrate_previous_snapshot(previous)
         events = compute_battle_events(previous_snapshot, snapshot)
         if not events:
             return {
@@ -278,17 +342,15 @@ def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
                 "events_created": 0,
             }
 
-        ship_names: Dict[int, str] = {}
-        if events:
-            ship_ids = [event["ship_id"] for event in events]
-            ship_names = dict(
-                Ship.objects.filter(ship_id__in=ship_ids)
-                .values_list("ship_id", "name")
-            )
+        ship_ids = [event["ship_id"] for event in events]
+        ship_names = dict(
+            Ship.objects.filter(ship_id__in=ship_ids)
+            .values_list("ship_id", "name")
+        )
 
         created = 0
         for event in events:
-            BattleEvent.objects.create(
+            event_row = BattleEvent.objects.create(
                 player=player,
                 ship_id=event["ship_id"],
                 ship_name=ship_names.get(event["ship_id"], ""),
@@ -303,6 +365,7 @@ def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
                 from_observation=previous,
                 to_observation=observation,
             )
+            _apply_event_to_daily_summary(event_row)
             created += 1
 
         return {
@@ -310,3 +373,47 @@ def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
             "observation_id": observation.id,
             "events_created": created,
         }
+
+
+def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
+    """Fetch WG, then run the orchestrator. PoC poll path.
+
+    Thin wrapper around `record_observation_from_payloads`. Issues two WG
+    calls (`account/info/` + `ships/stats/`). Used by
+    `poll_tracked_player_battles_task` for `lil_boots` and by tests that
+    want to drive the full pipeline with a stubbed WG client.
+    """
+    from warships.api.players import _fetch_player_personal_data
+    from warships.api.ships import _fetch_ship_stats_for_player
+    from warships.models import Player
+
+    try:
+        player = Player.objects.get(player_id=player_id, realm=realm)
+    except Player.DoesNotExist:
+        logger.warning("Tracked player not found locally: player_id=%s realm=%s",
+                       player_id, realm)
+        return {"status": "skipped", "reason": "player-not-found"}
+
+    try:
+        player_data = _fetch_player_personal_data(player_id, realm=realm)
+    except Exception:
+        logger.exception("WG account/info fetch failed for player_id=%s", player_id)
+        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+    if not player_data:
+        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+
+    try:
+        ship_data = _fetch_ship_stats_for_player(player_id, realm=realm)
+    except Exception:
+        logger.exception("WG ships/stats fetch failed for player_id=%s", player_id)
+        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+    if ship_data is None:
+        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+    if isinstance(ship_data, dict):
+        ship_data = []
+
+    return record_observation_from_payloads(
+        player,
+        player_data=player_data,
+        ship_data=ship_data,
+    )
