@@ -1414,3 +1414,58 @@ class LandingHelperTests(TestCase):
             [101, 102, 103, 104, 105, 106, 107], force_refresh=False, realm='eu')
         mock_warm_clans.assert_called_once_with(
             [201, 202, 203, 204], force_refresh=False, realm='eu')
+
+
+class QueueLandingPageWarmGateTests(TestCase):
+    """Regression coverage for the dispatch gate that prevents the
+    self-fanout pileup observed on 2026-04-27 (4581 duplicate
+    warm_landing_page_content_task messages in the background queue).
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    @patch('warships.tasks.warm_landing_page_content_task.delay')
+    def test_enqueues_when_no_lock_or_dispatch_key(self, mock_delay):
+        from warships.tasks import queue_landing_page_warm
+
+        result = queue_landing_page_warm(realm='na')
+
+        self.assertEqual(result, {'status': 'queued'})
+        mock_delay.assert_called_once_with(include_recent=True, realm='na')
+
+    @patch('warships.tasks.warm_landing_page_content_task.delay')
+    def test_skips_when_warm_lock_is_held(self, mock_delay):
+        from warships.tasks import _landing_page_warm_lock_key, queue_landing_page_warm
+
+        cache.set(_landing_page_warm_lock_key('na'), 'in-flight', 60)
+
+        result = queue_landing_page_warm(realm='na')
+
+        self.assertEqual(
+            result, {'status': 'skipped', 'reason': 'already-running'})
+        mock_delay.assert_not_called()
+
+    @patch('warships.tasks.warm_landing_page_content_task.delay')
+    def test_skips_when_dispatch_key_is_held(self, mock_delay):
+        from warships.tasks import _landing_page_warm_dispatch_key, queue_landing_page_warm
+
+        cache.set(_landing_page_warm_dispatch_key('na'), 'queued', 30)
+
+        result = queue_landing_page_warm(realm='na')
+
+        self.assertEqual(
+            result, {'status': 'skipped', 'reason': 'already-queued'})
+        mock_delay.assert_not_called()
+
+    @patch('warships.tasks.warm_landing_page_content_task.delay',
+           side_effect=RuntimeError('broker down'))
+    def test_cleans_dispatch_key_on_enqueue_failure(self, mock_delay):
+        from warships.tasks import _landing_page_warm_dispatch_key, queue_landing_page_warm
+
+        result = queue_landing_page_warm(realm='na')
+
+        self.assertEqual(
+            result, {'status': 'skipped', 'reason': 'enqueue-failed'})
+        self.assertIsNone(cache.get(_landing_page_warm_dispatch_key('na')))
+        mock_delay.assert_called_once()

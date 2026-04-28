@@ -264,6 +264,14 @@ def is_clan_battle_summary_refresh_pending(clan_id: object, realm: str = DEFAULT
 
 
 def queue_landing_page_warm(realm: str = DEFAULT_REALM):
+    # If a warm is already executing for this realm, skip enqueue. The 30s
+    # dispatch dedup expires while the 1200s task runs, so without this gate,
+    # cache-fallback paths invoked from inside the warm itself would re-enqueue
+    # in a loop (root cause of the 4581-message background-queue pileup
+    # observed on 2026-04-27).
+    if cache.get(_landing_page_warm_lock_key(realm)):
+        return {"status": "skipped", "reason": "already-running"}
+
     dispatch_key = _landing_page_warm_dispatch_key(realm)
     if not cache.add(
         dispatch_key,
