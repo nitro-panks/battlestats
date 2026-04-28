@@ -298,6 +298,8 @@ The agentic memory layer plugs into the LangGraph `_retrieve_guidance` node only
 - `BATTLE_TRACKING_PLAYER_NAMES` — Comma-separated player names tracked by the incremental-battle PoC dispatcher. Empty/unset on production = no-op. Local dev sets it to `lil_boots`. See `agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md`
 - `BATTLE_TRACKING_POLL_SECONDS` — Beat tick interval for the PoC dispatcher (default: `60`)
 - `BATTLE_HISTORY_CAPTURE_ENABLED` — When `1`, the tail of `update_battle_data` writes a `BattleObservation` (and any resulting `BattleEvent` rows) for every refreshed player as a side-effect of the existing `ships/stats/` fetch. No new WG calls. Default `0`. See `agents/runbooks/runbook-battle-history-rollout-2026-04-28.md` (Phase 2)
+- `BATTLE_HISTORY_ROLLUP_ENABLED` — When `1`, the on-write incremental writer fills `PlayerDailyShipStats` rows from `BattleEvent` deltas as they're created, and the nightly `roll_up_player_daily_ship_stats_task` rebuilds the previous calendar day from scratch. Default `0`. (Phase 3)
+- `BATTLE_HISTORY_ROLLUP_HOUR` / `BATTLE_HISTORY_ROLLUP_MINUTE` — Cron hour/minute (UTC) for the nightly rollup sweeper (defaults: `4` / `30`)
 
 ### Client env
 

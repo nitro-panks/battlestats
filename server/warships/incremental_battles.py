@@ -21,11 +21,13 @@ The module exposes two entry points to the same diff machinery:
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from django.db import transaction
+from django.db.models import F
 
 
 logger = logging.getLogger(__name__)
@@ -261,12 +263,59 @@ def _hydrate_previous_snapshot(previous) -> PlayerSnapshot:
 
 
 def _apply_event_to_daily_summary(event) -> None:
-    """Stub. Phase 3 of the rollout fills this in to update PlayerDailyShipStats.
+    """Update or create the PlayerDailyShipStats row covering `event`.
+
+    Phase 3 of the battle-history rollout. Gated by
+    BATTLE_HISTORY_ROLLUP_ENABLED — when off this function is a no-op.
 
     Called inside the same `transaction.atomic()` block as the BattleEvent
-    insert so the rollup write cannot drift from the event row. No-op today;
-    the BattleEvent row alone is the durable artifact until Phase 3.
+    insert so the rollup write cannot drift from the event row. The
+    `(player, date, ship_id)` unique key is the dedup boundary; on conflict
+    we F-add the deltas atomically so concurrent writers cannot race.
     """
+    if os.getenv("BATTLE_HISTORY_ROLLUP_ENABLED", "0") != "1":
+        return None
+
+    from warships.models import PlayerDailyShipStats
+
+    event_date = event.detected_at.date()
+    survived_battles_increment = 1 if event.survived else 0
+
+    obj, created = PlayerDailyShipStats.objects.get_or_create(
+        player_id=event.player_id,
+        date=event_date,
+        ship_id=event.ship_id,
+        defaults={
+            "ship_name": event.ship_name,
+            "battles": event.battles_delta,
+            "wins": event.wins_delta,
+            "losses": event.losses_delta,
+            "frags": event.frags_delta,
+            "damage": event.damage_delta or 0,
+            "xp": event.xp_delta or 0,
+            "planes_killed": event.planes_killed_delta or 0,
+            "survived_battles": survived_battles_increment,
+            "first_event_at": event.detected_at,
+            "last_event_at": event.detected_at,
+        },
+    )
+    if created:
+        return None
+
+    PlayerDailyShipStats.objects.filter(pk=obj.pk).update(
+        battles=F("battles") + event.battles_delta,
+        wins=F("wins") + event.wins_delta,
+        losses=F("losses") + event.losses_delta,
+        frags=F("frags") + event.frags_delta,
+        damage=F("damage") + (event.damage_delta or 0),
+        xp=F("xp") + (event.xp_delta or 0),
+        planes_killed=F("planes_killed") + (event.planes_killed_delta or 0),
+        survived_battles=F("survived_battles") + survived_battles_increment,
+        last_event_at=event.detected_at,
+        # Re-stamp ship_name in case it was empty when the row was created
+        # earlier in the day (e.g. Ship row hadn't been resolved yet).
+        ship_name=event.ship_name or obj.ship_name,
+    )
     return None
 
 
@@ -373,6 +422,73 @@ def record_observation_from_payloads(
             "observation_id": observation.id,
             "events_created": created,
         }
+
+
+def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
+    """Rebuild `PlayerDailyShipStats` rows for `target_date` from BattleEvent.
+
+    Idempotent: deletes rows for the date, then recomputes from scratch.
+    Used by the nightly sweeper task and by the
+    `rebuild_player_daily_ship_stats` management command.
+
+    Always runs regardless of BATTLE_HISTORY_ROLLUP_ENABLED, since the caller
+    has explicitly asked for a rebuild.
+    """
+    from warships.models import BattleEvent, PlayerDailyShipStats
+
+    with transaction.atomic():
+        deleted, _ = PlayerDailyShipStats.objects.filter(
+            date=target_date,
+        ).delete()
+
+        events = BattleEvent.objects.filter(
+            detected_at__date=target_date,
+        ).order_by("detected_at")
+
+        rows: Dict[tuple, Dict[str, Any]] = {}
+        for event in events:
+            key = (event.player_id, event.ship_id)
+            row = rows.get(key)
+            if row is None:
+                row = {
+                    "player_id": event.player_id,
+                    "date": target_date,
+                    "ship_id": event.ship_id,
+                    "ship_name": event.ship_name or "",
+                    "battles": 0, "wins": 0, "losses": 0, "frags": 0,
+                    "damage": 0, "xp": 0, "planes_killed": 0,
+                    "survived_battles": 0,
+                    "first_event_at": event.detected_at,
+                    "last_event_at": event.detected_at,
+                }
+                rows[key] = row
+            row["battles"] += event.battles_delta or 0
+            row["wins"] += event.wins_delta or 0
+            row["losses"] += event.losses_delta or 0
+            row["frags"] += event.frags_delta or 0
+            row["damage"] += event.damage_delta or 0
+            row["xp"] += event.xp_delta or 0
+            row["planes_killed"] += event.planes_killed_delta or 0
+            if event.survived:
+                row["survived_battles"] += 1
+            row["last_event_at"] = event.detected_at
+            if event.ship_name and not row["ship_name"]:
+                row["ship_name"] = event.ship_name
+
+        if rows:
+            PlayerDailyShipStats.objects.bulk_create([
+                PlayerDailyShipStats(**row) for row in rows.values()
+            ])
+
+    return {
+        "status": "completed",
+        "date": str(target_date),
+        "rows_deleted": deleted,
+        "rows_written": len(rows),
+        "events_seen": events.count() if rows else BattleEvent.objects.filter(
+            detected_at__date=target_date,
+        ).count(),
+    }
 
 
 def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:

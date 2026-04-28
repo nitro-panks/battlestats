@@ -410,3 +410,29 @@ def register_periodic_schedules(sender, **kwargs):
             "description": "Incremental battle capture PoC dispatcher. No-op unless BATTLE_TRACKING_PLAYER_NAMES is set.",
         },
     )
+
+    # -- Battle History Rollup nightly sweeper --
+    # Runbook: agents/runbooks/runbook-battle-history-rollout-2026-04-28.md
+    # Phase 3. Rebuilds PlayerDailyShipStats for the previous UTC day from
+    # BattleEvent rows. No-op unless BATTLE_HISTORY_ROLLUP_ENABLED=1.
+    rollup_hour = os.getenv("BATTLE_HISTORY_ROLLUP_HOUR", "4")
+    rollup_minute = os.getenv("BATTLE_HISTORY_ROLLUP_MINUTE", "30")
+    battle_history_rollup_schedule, _ = CrontabSchedule.objects.get_or_create(
+        minute=str(rollup_minute),
+        hour=str(rollup_hour),
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        timezone="UTC",
+    )
+    PeriodicTask.objects.update_or_create(
+        name="battle-history-daily-rollup",
+        defaults={
+            "task": "warships.tasks.roll_up_player_daily_ship_stats_task",
+            "crontab": battle_history_rollup_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Nightly rebuild of PlayerDailyShipStats from BattleEvent. No-op unless BATTLE_HISTORY_ROLLUP_ENABLED=1.",
+        },
+    )

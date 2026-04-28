@@ -509,3 +509,41 @@ class BattleEvent(models.Model):
 
     def __str__(self):
         return f"BattleEvent({self.player_id} ship={self.ship_id} +{self.battles_delta})"
+
+
+class PlayerDailyShipStats(models.Model):
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name='daily_ship_stats')
+    date = models.DateField(db_index=True)
+    ship_id = models.BigIntegerField(db_index=True)
+    ship_name = models.CharField(max_length=200, blank=True, default='')
+    battles = models.IntegerField(default=0)
+    wins = models.IntegerField(default=0)
+    losses = models.IntegerField(default=0)
+    frags = models.IntegerField(default=0)
+    damage = models.BigIntegerField(default=0)
+    xp = models.BigIntegerField(default=0)
+    planes_killed = models.IntegerField(default=0)
+    survived_battles = models.IntegerField(default=0)
+    first_event_at = models.DateTimeField(null=True, blank=True)
+    last_event_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['player', 'date', 'ship_id'],
+                name='unique_player_daily_ship_stats',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['player', '-date'],
+                         name='dly_ship_player_date_idx'),
+            models.Index(fields=['player', 'ship_id', '-date'],
+                         name='dly_ship_player_shipdt_idx'),
+            models.Index(fields=['date', '-battles'],
+                         name='dly_ship_date_battles_idx'),
+        ]
+
+    def __str__(self):
+        return f"PlayerDailyShipStats({self.player_id} {self.date} ship={self.ship_id} battles={self.battles})"

@@ -9,10 +9,13 @@ Covers two layers:
   fake `Ship` row + a synthesized `Player` row, no WG calls.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from io import StringIO
 from unittest import mock
 
+from django.core.management import call_command
 from django.test import TestCase
+from django.utils import timezone as django_timezone
 
 from warships.incremental_battles import (
     PlayerSnapshot,
@@ -21,6 +24,7 @@ from warships.incremental_battles import (
     _snapshot_from_player_row,
     coerce_observation_payload,
     compute_battle_events,
+    rebuild_daily_ship_stats_for_date,
     record_observation_and_diff,
     record_observation_from_payloads,
 )
@@ -28,6 +32,7 @@ from warships.models import (
     BattleEvent,
     BattleObservation,
     Player,
+    PlayerDailyShipStats,
     Ship,
 )
 
@@ -486,3 +491,206 @@ class UpdateBattleDataCaptureHookTests(TestCase):
         self.assertEqual(event.frags_delta, 2)
         self.assertEqual(event.damage_delta, 48_000)
         self.assertTrue(event.survived)
+
+
+class ApplyEventToDailySummaryTests(TestCase):
+    """Phase 3 on-write incremental writer."""
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="rollup_test", player_id=11111, realm="na",
+            pvp_battles=100,
+        )
+        self.ship = Ship.objects.create(
+            ship_id=42, name="Yamato", nation="japan", ship_type="Battleship",
+            tier=10,
+        )
+        # Two observations to satisfy BattleEvent FKs.
+        self.from_obs = BattleObservation.objects.create(
+            player=self.player, pvp_battles=100,
+        )
+        self.to_obs = BattleObservation.objects.create(
+            player=self.player, pvp_battles=101,
+        )
+
+    def _make_event(self, **overrides):
+        defaults = dict(
+            player=self.player,
+            ship_id=42,
+            ship_name="Yamato",
+            battles_delta=1,
+            wins_delta=1,
+            losses_delta=0,
+            frags_delta=2,
+            damage_delta=48_000,
+            xp_delta=1_500,
+            planes_killed_delta=0,
+            survived=True,
+            from_observation=self.from_obs,
+            to_observation=self.to_obs,
+        )
+        defaults.update(overrides)
+        return BattleEvent.objects.create(**defaults)
+
+    def test_noop_when_rollup_flag_off(self):
+        event = self._make_event()
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_ROLLUP_ENABLED": "0"},
+            clear=False,
+        ):
+            _apply_event_to_daily_summary(event)
+        self.assertEqual(PlayerDailyShipStats.objects.count(), 0)
+
+    def test_creates_row_on_first_event_with_flag_on(self):
+        event = self._make_event()
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_ROLLUP_ENABLED": "1"},
+            clear=False,
+        ):
+            _apply_event_to_daily_summary(event)
+        row = PlayerDailyShipStats.objects.get()
+        self.assertEqual(row.battles, 1)
+        self.assertEqual(row.wins, 1)
+        self.assertEqual(row.frags, 2)
+        self.assertEqual(row.damage, 48_000)
+        self.assertEqual(row.survived_battles, 1)
+
+    def test_increments_on_second_event_same_day_same_ship(self):
+        # Distinct observation pairs to satisfy BattleEvent's unique key.
+        third_obs = BattleObservation.objects.create(
+            player=self.player, pvp_battles=103,
+        )
+        first = self._make_event()
+        second = self._make_event(
+            battles_delta=2, wins_delta=1, losses_delta=1, frags_delta=3,
+            damage_delta=92_000, xp_delta=2_700, survived=False,
+            from_observation=self.to_obs, to_observation=third_obs,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_ROLLUP_ENABLED": "1"},
+            clear=False,
+        ):
+            _apply_event_to_daily_summary(first)
+            _apply_event_to_daily_summary(second)
+        row = PlayerDailyShipStats.objects.get()
+        self.assertEqual(row.battles, 3)
+        self.assertEqual(row.wins, 2)
+        self.assertEqual(row.losses, 1)
+        self.assertEqual(row.frags, 5)
+        self.assertEqual(row.damage, 140_000)
+        self.assertEqual(row.survived_battles, 1)
+
+
+class RebuildDailyShipStatsTests(TestCase):
+    """Phase 3 sweeper: cross-validation, idempotency."""
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="sweeper_test", player_id=22222, realm="na",
+            pvp_battles=100,
+        )
+        Ship.objects.create(
+            ship_id=42, name="Yamato", nation="japan", ship_type="Battleship",
+            tier=10,
+        )
+        self.target_date = date(2026, 4, 28)
+        # Two observations + three events on the target date.
+        self.obs_a = BattleObservation.objects.create(
+            player=self.player, pvp_battles=100,
+        )
+        self.obs_b = BattleObservation.objects.create(
+            player=self.player, pvp_battles=101,
+        )
+        self.obs_c = BattleObservation.objects.create(
+            player=self.player, pvp_battles=102,
+        )
+        midday = django_timezone.make_aware(
+            datetime(2026, 4, 28, 12, 0, 0),
+        )
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            battles_delta=1, wins_delta=1, frags_delta=2,
+            damage_delta=48_000, xp_delta=1_500, survived=True,
+            from_observation=self.obs_a, to_observation=self.obs_b,
+        )
+        # Emulate the date by overriding detected_at via update.
+        BattleEvent.objects.filter().update(detected_at=midday)
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            battles_delta=1, wins_delta=0, losses_delta=1,
+            frags_delta=1, damage_delta=22_000, xp_delta=900,
+            survived=False,
+            from_observation=self.obs_b, to_observation=self.obs_c,
+        )
+        BattleEvent.objects.filter(detected_at__gt=midday).update(
+            detected_at=midday + timedelta(hours=1),
+        )
+
+    def test_rebuild_aggregates_match_event_sums(self):
+        result = rebuild_daily_ship_stats_for_date(self.target_date)
+        self.assertEqual(result["status"], "completed")
+        rows = PlayerDailyShipStats.objects.filter(date=self.target_date)
+        self.assertEqual(rows.count(), 1)
+        row = rows.get()
+        self.assertEqual(row.battles, 2)
+        self.assertEqual(row.wins, 1)
+        self.assertEqual(row.losses, 1)
+        self.assertEqual(row.frags, 3)
+        self.assertEqual(row.damage, 70_000)
+        self.assertEqual(row.xp, 2_400)
+        self.assertEqual(row.survived_battles, 1)
+
+    def test_rebuild_is_idempotent(self):
+        rebuild_daily_ship_stats_for_date(self.target_date)
+        first_count = PlayerDailyShipStats.objects.count()
+        first_battles = PlayerDailyShipStats.objects.get(date=self.target_date).battles
+
+        rebuild_daily_ship_stats_for_date(self.target_date)
+        second_count = PlayerDailyShipStats.objects.count()
+        second_battles = PlayerDailyShipStats.objects.get(date=self.target_date).battles
+
+        self.assertEqual(first_count, second_count)
+        self.assertEqual(first_battles, second_battles)
+
+    def test_rebuild_does_not_touch_other_dates(self):
+        # Insert an existing row for a different date that should not move.
+        canary = PlayerDailyShipStats.objects.create(
+            player=self.player, date=date(2026, 4, 27),
+            ship_id=42, ship_name="Yamato",
+            battles=99, wins=99, frags=99,
+        )
+        rebuild_daily_ship_stats_for_date(self.target_date)
+        canary.refresh_from_db()
+        self.assertEqual(canary.battles, 99)
+
+
+class RebuildManagementCommandTests(TestCase):
+    """`python manage.py rebuild_player_daily_ship_stats --since ...`."""
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="cmd_test", player_id=33333, realm="na",
+            pvp_battles=100,
+        )
+
+    def test_dry_run_does_not_write(self):
+        out = StringIO()
+        call_command(
+            "rebuild_player_daily_ship_stats",
+            "--since", "2026-04-28", "--dry-run",
+            stdout=out,
+        )
+        self.assertIn("[dry-run]", out.getvalue())
+        self.assertEqual(PlayerDailyShipStats.objects.count(), 0)
+
+    def test_runs_for_single_date_when_until_omitted(self):
+        out = StringIO()
+        call_command(
+            "rebuild_player_daily_ship_stats",
+            "--since", "2026-04-28",
+            stdout=out,
+        )
+        self.assertIn("2026-04-28", out.getvalue())

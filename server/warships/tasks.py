@@ -1405,6 +1405,36 @@ def dispatch_tracked_player_polls_task():
     return {"status": "completed", "dispatched": dispatched, "tracked": len(players)}
 
 
+@app.task(queue='background', **TASK_OPTS)
+def roll_up_player_daily_ship_stats_task(target_date_iso=None):
+    """Nightly sweeper: rebuild PlayerDailyShipStats for the previous calendar
+    day from BattleEvent rows. No-op when BATTLE_HISTORY_ROLLUP_ENABLED!=1.
+
+    Phase 3 of the battle-history rollout. Idempotent — re-running produces
+    identical row counts and values for the same target date.
+    """
+    if os.getenv("BATTLE_HISTORY_ROLLUP_ENABLED", "0") != "1":
+        return {"status": "skipped", "reason": "rollup-disabled"}
+
+    from datetime import datetime, timedelta, timezone as dt_timezone
+
+    from warships.incremental_battles import rebuild_daily_ship_stats_for_date
+
+    if target_date_iso:
+        target_date = datetime.strptime(target_date_iso, "%Y-%m-%d").date()
+    else:
+        target_date = (
+            datetime.now(dt_timezone.utc) - timedelta(days=1)
+        ).date()
+
+    logger.info(
+        "Starting roll_up_player_daily_ship_stats_task for date=%s", target_date)
+    result = rebuild_daily_ship_stats_for_date(target_date)
+    logger.info(
+        "Finished roll_up_player_daily_ship_stats_task: %s", result)
+    return result
+
+
 @app.task(
     queue='background',
     time_limit=600,
