@@ -21,13 +21,13 @@ Result: every player whose page is visited or whose tier rotates through the inc
 
 ## Dependencies
 
-This runbook is a follow-on to the PoC. Before the rollout tranche can land:
+This runbook is a follow-on to the PoC. The PoC tranche is built and verified locally — see `feature/incremental-battles-poc` (commit `d49600c`) — and lands as a separate PR ahead of this rollout. Specifically, by the time the rollout phases begin, the PoC commit will already provide:
 
-1. The PoC migration (`0051_battleobservation_battleevent.py` or equivalent) must be generated and applied. The PoC scaffolds `BattleObservation` and `BattleEvent` in `server/warships/models.py:436,473` but no migration exists yet.
-2. `server/warships/incremental_battles.py` must exist with `record_observation_and_diff(player_id, realm)`. It is referenced from `server/warships/tasks.py:1339` but the file is not in tree today.
-3. The PoC's `BattleObservation.ships_stats_json` shape must be widened (see "Storage shape" below) before any data is written, since the rollout's `BattleEvent.damage_delta` / `xp_delta` / `planes_killed_delta` / `survived` columns require it.
+1. Migrations `0051_battle_observation_event.py` (creates `BattleObservation` + `BattleEvent`) and `0052_battle_event_combat_metrics.py` (adds `damage_delta`, `xp_delta`, `planes_killed_delta`).
+2. `server/warships/incremental_battles.py` with `record_observation_and_diff(player_id, realm)`, `compute_battle_events`, and the per-ship `ShipSnapshot` shape that already includes `damage_dealt`, `xp`, `planes_killed`, and `survived_battles` — i.e. the wider `ships_stats_json` shape this runbook anticipates is already in tree on the PoC commit, no further widening required.
+3. `BATTLE_TRACKING_PLAYER_NAMES` env var support and the `poll-tracked-player-battles` Beat schedule (`server/warships/tasks.py` and `server/warships/signals.py`).
 
-The PoC's 60-second poll loop and `BATTLE_TRACKING_PLAYER_NAMES` env var stay intact. The rollout coexists with it; they share the same orchestrator function.
+The PoC's 60-second poll loop and `BATTLE_TRACKING_PLAYER_NAMES` env var stay intact through the rollout. The rollout coexists with the PoC; they share the same orchestrator function (`record_observation_from_payloads`, introduced in Phase 1 of the rollout as a refactor of the PoC's `record_observation_and_diff`).
 
 ## Design
 
@@ -61,28 +61,14 @@ The hook never raises into the refresh path: failures are logged and swallowed s
 
 ### Storage shape
 
-#### Widened observation (modifies the PoC schema before any data lands)
+#### Per-ship observation shape (already in tree on the PoC commit)
 
-The PoC's `ships_stats_json` was specced as compact `{ship_id: {battles, wins, losses, frags}}`. To support the rollout's full delta vocabulary, **before the PoC migration lands** widen the per-ship JSON shape to:
+The PoC commit already writes `BattleObservation.ships_stats_json` as a list of dicts with the full delta vocabulary the rollout needs — `battles`, `wins`, `losses`, `frags`, `damage_dealt`, `xp`, `planes_killed`, `survived_battles` per ship. See `server/warships/incremental_battles.py:_coerce_ship_snapshot` and `record_observation_and_diff`. No further shape widening is required for the rollout phases.
 
-```json
-{
-  "<ship_id>": {
-    "battles": int,
-    "wins": int,
-    "losses": int,
-    "frags": int,
-    "damage_dealt": int,
-    "original_xp": int,
-    "planes_killed": int,
-    "survived_battles": int
-  }
-}
-```
+Two open optimizations remain (deferable, not blocking):
 
-Stored only for ships where `pvp.battles > 0`. Most accounts have touched <100 of the ~548 ships in the game, so this filter cuts the JSON 4–8× vs. storing every ship.
-
-No DB migration is required for this change — `ships_stats_json` is already a `JSONField`. The PoC orchestrator just writes a richer dict.
+1. **Restrict to active ships.** Today every ship returned by `ships/stats/` is captured. Most accounts have touched <100 of the ~548 ships in the game; filtering to `pvp.battles > 0` would cut the JSON 4–8×. Land in Phase 7 or earlier if storage growth in Phase 2 exceeds the envelope.
+2. **Compression of stale rows.** `BattleObservation` rows older than the active diff window (only the most recent observation per player is read by `compute_battle_events`) could be compressed or have their `ships_stats_json` nulled out once the corresponding `BattleEvent` rows exist. Phase 7 territory; see "Compression / shape work" at the bottom of this runbook.
 
 #### New table: `PlayerDailyShipStats`
 
