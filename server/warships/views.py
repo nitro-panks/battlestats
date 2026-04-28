@@ -485,6 +485,13 @@ def _battle_history_cache_key(realm: str, player_name: str, days: int) -> str:
 def _build_battle_history_payload(player, days: int) -> dict:
     """Read PlayerDailyShipStats for `player` over the last `days` days
     and return the totals / by_ship / by_day shape.
+
+    Each by_ship entry is enriched with `lifetime_*` (the player's career
+    aggregate from Player.battles_json for that ship) and `delta_*` (how
+    much the period dragged the lifetime number — positive means the
+    period outperformed prior history, negative means it dragged it
+    down). Returns null on those fields when the lifetime aggregate is
+    not available.
     """
     from warships.models import PlayerDailyShipStats
 
@@ -495,6 +502,24 @@ def _build_battle_history_payload(player, days: int) -> dict:
         .filter(player=player, date__gte=since)
         .order_by("date", "ship_id")
     )
+
+    # Lookup table for per-ship lifetime aggregates (Player.battles_json
+    # is one row per ship the player has touched).
+    lifetime_by_ship: dict = {}
+    for entry in (player.battles_json or []):
+        if not isinstance(entry, dict):
+            continue
+        ship_id = entry.get("ship_id")
+        if ship_id is None:
+            continue
+        try:
+            lifetime_by_ship[int(ship_id)] = {
+                "battles": int(entry.get("pvp_battles", 0) or 0),
+                "wins": int(entry.get("wins", 0) or 0),
+                "losses": int(entry.get("losses", 0) or 0),
+            }
+        except (TypeError, ValueError):
+            continue
 
     totals = {
         "battles": 0, "wins": 0, "losses": 0,
@@ -566,7 +591,51 @@ def _build_battle_history_payload(player, days: int) -> dict:
             100.0 * s["wins"] / s["battles"], 1) if s["battles"] else 0.0
         s["avg_damage"] = int(round(s["damage"] / s["battles"])) \
             if s["battles"] else 0
+
+        lifetime = lifetime_by_ship.get(s["ship_id"])
+        if lifetime and lifetime["battles"] >= s["battles"]:
+            # The period rolls into lifetime — battles_json is the
+            # latest snapshot, including the period's matches. Subtract
+            # to get the "prior" state.
+            prior_battles = lifetime["battles"] - s["battles"]
+            prior_wins = lifetime["wins"] - s["wins"]
+            lifetime_wr_now = round(
+                100.0 * lifetime["wins"] / lifetime["battles"], 1)
+            prior_wr = round(
+                100.0 * prior_wins / prior_battles, 1) if prior_battles > 0 else None
+            s["lifetime_battles"] = lifetime["battles"]
+            s["lifetime_win_rate"] = lifetime_wr_now
+            s["delta_win_rate"] = round(
+                lifetime_wr_now - prior_wr, 1) if prior_wr is not None else None
+        else:
+            # Lifetime row is missing or stale (period > lifetime, which
+            # shouldn't happen in practice — guard for sync skew).
+            s["lifetime_battles"] = None
+            s["lifetime_win_rate"] = None
+            s["delta_win_rate"] = None
+
     by_day = sorted(by_day_acc.values(), key=lambda d: d["date"])
+
+    # Overall lifetime delta — uses Player aggregate columns directly.
+    lifetime_battles_overall = int(player.pvp_battles or 0)
+    lifetime_wins_overall = int(player.pvp_wins or 0)
+    lifetime_overall_wr = round(
+        100.0 * lifetime_wins_overall / lifetime_battles_overall, 1
+    ) if lifetime_battles_overall else None
+    if (
+        lifetime_battles_overall >= totals["battles"]
+        and totals["battles"] > 0
+    ):
+        prior_battles_overall = lifetime_battles_overall - totals["battles"]
+        prior_wins_overall = lifetime_wins_overall - totals["wins"]
+        prior_overall_wr = round(
+            100.0 * prior_wins_overall / prior_battles_overall, 1
+        ) if prior_battles_overall > 0 else None
+        delta_overall_wr = round(
+            lifetime_overall_wr - prior_overall_wr, 1
+        ) if prior_overall_wr is not None else None
+    else:
+        delta_overall_wr = None
 
     return {
         "window_days": days,
@@ -576,6 +645,9 @@ def _build_battle_history_payload(player, days: int) -> dict:
             "win_rate": win_rate,
             "avg_damage": avg_damage,
             "survival_rate": survival_rate,
+            "lifetime_battles": lifetime_battles_overall or None,
+            "lifetime_win_rate": lifetime_overall_wr,
+            "delta_win_rate": delta_overall_wr,
         },
         "by_ship": by_ship,
         "by_day": by_day,

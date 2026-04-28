@@ -19,6 +19,9 @@ export interface BattleHistoryByShip {
     xp: number;
     planes_killed: number;
     survived_battles: number;
+    lifetime_battles?: number | null;
+    lifetime_win_rate?: number | null;
+    delta_win_rate?: number | null;
 }
 
 export interface BattleHistoryByDay {
@@ -41,6 +44,9 @@ export interface BattleHistoryTotals {
     planes_killed: number;
     survived_battles: number;
     survival_rate: number;
+    lifetime_battles?: number | null;
+    lifetime_win_rate?: number | null;
+    delta_win_rate?: number | null;
 }
 
 export interface BattleHistoryPayload {
@@ -60,6 +66,54 @@ interface BattleHistoryCardProps {
 const formatInt = (n: number): string => n.toLocaleString();
 const formatPercent = (n: number): string => `${n.toFixed(1)}%`;
 
+interface WrDeltaProps {
+    lifetimeWinRate: number | null | undefined;
+    deltaWinRate: number | null | undefined;
+}
+
+const WrDelta: React.FC<WrDeltaProps> = ({ lifetimeWinRate, deltaWinRate }) => {
+    if (lifetimeWinRate == null) return null;
+    const sign = deltaWinRate == null ? '' : deltaWinRate > 0 ? '▲' : deltaWinRate < 0 ? '▼' : '·';
+    const tone = deltaWinRate == null
+        ? 'var(--text-muted)'
+        : deltaWinRate > 0
+            ? '#74c476'
+            : deltaWinRate < 0
+                ? '#a50f15'
+                : 'var(--text-muted)';
+    return (
+        <span className="block text-xs text-[var(--text-muted)] tabular-nums">
+            lifetime {formatPercent(lifetimeWinRate)}
+            {deltaWinRate != null ? (
+                <span style={{ color: tone, marginLeft: '0.25rem' }}>
+                    {sign}{Math.abs(deltaWinRate).toFixed(1)}%
+                </span>
+            ) : null}
+        </span>
+    );
+};
+
+const buildWindowedDays = (
+    days: BattleHistoryByDay[],
+    windowDays: number,
+): BattleHistoryByDay[] => {
+    const byDate = new Map(days.map((d) => [d.date, d]));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const padded: BattleHistoryByDay[] = [];
+    for (let i = windowDays - 1; i >= 0; i -= 1) {
+        const d = new Date(today);
+        d.setDate(today.getDate() - i);
+        const iso = d.toISOString().slice(0, 10);
+        const existing = byDate.get(iso);
+        padded.push(existing ?? {
+            date: iso,
+            battles: 0, wins: 0, damage: 0, frags: 0,
+        });
+    }
+    return padded;
+};
+
 const Sparkline: React.FC<{ days: BattleHistoryByDay[] }> = ({ days }) => {
     if (days.length === 0) return null;
     const width = 240;
@@ -74,8 +128,10 @@ const Sparkline: React.FC<{ days: BattleHistoryByDay[] }> = ({ days }) => {
     return (
         <svg
             viewBox={`0 0 ${width} ${height}`}
-            width={width}
+            width="100%"
             height={height}
+            preserveAspectRatio="none"
+            className="block"
             aria-label="Battles per day sparkline"
             role="img"
         >
@@ -171,31 +227,45 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     {formatInt(totals.battles)} battles · {formatPercent(totals.win_rate)} WR · {formatInt(totals.avg_damage)} avg dmg
                 </span>
             </header>
-            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                <div>
-                    <div className="text-xs text-[var(--text-muted)]">Battles</div>
-                    <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals.battles)}</div>
-                </div>
-                <div>
-                    <div className="text-xs text-[var(--text-muted)]">Win rate</div>
-                    <div
-                        className="text-lg font-semibold"
-                        style={{ color: wrColor(totals.win_rate) }}
-                    >
-                        {formatPercent(totals.win_rate)}
+            {(() => {
+                const deaths = Math.max(0, totals.battles - totals.survived_battles);
+                const kdr = deaths > 0 ? totals.frags / deaths : totals.frags;
+                return (
+                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                        <div>
+                            <div className="text-xs text-[var(--text-muted)]">Battles</div>
+                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals.battles)}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-[var(--text-muted)]">Win rate</div>
+                            <div
+                                className="text-lg font-semibold"
+                                style={{ color: wrColor(totals.win_rate) }}
+                            >
+                                {formatPercent(totals.win_rate)}
+                            </div>
+                            <WrDelta
+                                lifetimeWinRate={totals.lifetime_win_rate}
+                                deltaWinRate={totals.delta_win_rate}
+                            />
+                        </div>
+                        <div>
+                            <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
+                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals.avg_damage)}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-[var(--text-muted)]">Frags</div>
+                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals.frags)}</div>
+                        </div>
+                        <div>
+                            <div className="text-xs text-[var(--text-muted)]">KDR</div>
+                            <div className="text-lg font-semibold text-[var(--text-strong)]">{kdr.toFixed(2)}</div>
+                        </div>
                     </div>
-                </div>
-                <div>
-                    <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
-                    <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals.avg_damage)}</div>
-                </div>
-                <div>
-                    <div className="text-xs text-[var(--text-muted)]">Frags</div>
-                    <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals.frags)}</div>
-                </div>
-            </div>
+                );
+            })()}
             <div className="mt-4">
-                <Sparkline days={payload.by_day} />
+                <Sparkline days={buildWindowedDays(payload.by_day, payload.window_days)} />
             </div>
             <div className="mt-4 overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -222,11 +292,17 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                     ) : null}
                                 </td>
                                 <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.battles)}</td>
-                                <td
-                                    className="py-1 pr-2 text-right tabular-nums font-semibold"
-                                    style={{ color: wrColor(row.win_rate) }}
-                                >
-                                    {formatPercent(row.win_rate)}
+                                <td className="py-1 pr-2 text-right">
+                                    <span
+                                        className="block tabular-nums font-semibold"
+                                        style={{ color: wrColor(row.win_rate) }}
+                                    >
+                                        {formatPercent(row.win_rate)}
+                                    </span>
+                                    <WrDelta
+                                        lifetimeWinRate={row.lifetime_win_rate}
+                                        deltaWinRate={row.delta_win_rate}
+                                    />
                                 </td>
                                 <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.avg_damage)}</td>
                                 <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.frags)}</td>

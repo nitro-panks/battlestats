@@ -306,10 +306,16 @@ class RecordObservationFromPayloadsTests(TestCase):
         called_arg = stub.call_args.args[0]
         self.assertIsInstance(called_arg, BattleEvent)
 
-    def test_stub_apply_is_a_noop(self):
-        # Phase 1 contract: the stub does not raise and does not write
-        # anywhere. Phase 3 fills it in.
-        self.assertIsNone(_apply_event_to_daily_summary(object()))
+    def test_apply_returns_none_when_rollup_flag_off(self):
+        # When BATTLE_HISTORY_ROLLUP_ENABLED!=1 the writer short-circuits
+        # before touching the event, so a sentinel object that lacks the
+        # BattleEvent shape is acceptable.
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_ROLLUP_ENABLED": "0"},
+            clear=False,
+        ):
+            self.assertIsNone(_apply_event_to_daily_summary(object()))
 
 
 class RecordObservationAndDiffTests(TestCase):
@@ -810,6 +816,79 @@ class BattleHistoryEndpointTests(TestCase):
             response = self.client.get("/api/player/api_test/battle-history/?days=999")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["window_days"], 30)
+
+    def test_lifetime_delta_per_ship_uses_battles_json(self):
+        """Phase 4.6: per-ship lifetime + delta come from Player.battles_json."""
+        self.player.pvp_battles = 1000
+        self.player.pvp_wins = 530
+        self.player.battles_json = [
+            {
+                "ship_id": 42, "ship_name": "Yamato", "ship_tier": 10,
+                "ship_type": "Battleship",
+                "pvp_battles": 100, "wins": 56, "losses": 44, "win_ratio": 0.56,
+                "kdr": 1.2, "all_battles": 100,
+            },
+        ]
+        self.player.save()
+        self._seed_daily_rows({
+            42: {"battles": 4, "wins": 1, "losses": 3, "frags": 5,
+                 "damage": 180_000, "ship_name": "Yamato"},
+        })
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get(
+                "/api/player/api_test/battle-history/?days=7",
+            )
+        self.assertEqual(response.status_code, 200)
+        ship = response.json()["by_ship"][0]
+        self.assertEqual(ship["lifetime_battles"], 100)
+        self.assertEqual(ship["lifetime_win_rate"], 56.0)
+        # Period: 1 win in 4 battles. Prior: 55/96 = 57.3%. Delta: 56 - 57.3 = -1.3.
+        self.assertEqual(ship["delta_win_rate"], -1.3)
+
+    def test_overall_lifetime_delta_uses_player_aggregates(self):
+        """Phase 4.6: totals tile lifetime delta uses player's PvP aggregate."""
+        self.player.pvp_battles = 1000
+        self.player.pvp_wins = 530
+        self.player.battles_json = []
+        self.player.save()
+        self._seed_daily_rows({
+            42: {"battles": 4, "wins": 1, "losses": 3, "ship_name": "Yamato"},
+        })
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get(
+                "/api/player/api_test/battle-history/?days=7",
+            )
+        body = response.json()
+        # Overall lifetime now: 530/1000 = 53.0%. Prior: 529/996 = 53.1%. Delta: -0.1.
+        self.assertEqual(body["totals"]["lifetime_win_rate"], 53.0)
+        self.assertEqual(body["totals"]["delta_win_rate"], -0.1)
+
+    def test_lifetime_null_when_battles_json_missing_ship(self):
+        self.player.pvp_battles = 0
+        self.player.battles_json = None
+        self.player.save()
+        self._seed_daily_rows({
+            42: {"battles": 1, "wins": 1, "ship_name": "Yamato"},
+        })
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get(
+                "/api/player/api_test/battle-history/?days=7",
+            )
+        ship = response.json()["by_ship"][0]
+        self.assertIsNone(ship["lifetime_win_rate"])
+        self.assertIsNone(ship["delta_win_rate"])
 
     def test_caches_payload(self):
         from django.core.cache import cache
