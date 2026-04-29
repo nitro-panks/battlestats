@@ -1,5 +1,4 @@
 import React from 'react';
-import WRDistributionDesign1SVG from './WRDistributionDesign1SVG';
 import WRDistributionDesign2SVG from './WRDistributionDesign2SVG';
 import { ChartTheme } from '../lib/chartTheme';
 
@@ -28,5 +27,4 @@ const WRDistributionSVG: React.FC<WRDistributionProps> = ({
     );
 };
 
-export { WRDistributionDesign1SVG, WRDistributionDesign2SVG };
 export default WRDistributionSVG;

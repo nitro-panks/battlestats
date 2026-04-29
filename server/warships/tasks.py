@@ -568,20 +568,6 @@ def update_battle_data_task(self, player_id, realm=DEFAULT_REALM):
 
 
 @app.task(**TASK_OPTS)
-def preload_battles_json_task():
-    from warships.data import preload_battles_json
-    logger.info("Starting preload_battles_json_task")
-    preload_battles_json()
-
-
-@app.task(**TASK_OPTS)
-def preload_activity_data_task():
-    from warships.data import preload_activity_data
-    logger.info("Starting preload_activity_data_task")
-    preload_activity_data()
-
-
-@app.task(**TASK_OPTS)
 def update_randoms_data_task(player_id, realm=DEFAULT_REALM):
     from warships.data import update_randoms_data
     logger.info(

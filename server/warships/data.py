@@ -5844,24 +5844,3 @@ def bulk_load_entity_caches(
     }
 
 
-def preload_battles_json(realm: str = DEFAULT_REALM) -> None:
-    logging.info("Preloading battles_json data for all players")
-    players = Player.objects.filter(realm=realm)
-    for player in players:
-        if not player.battles_json:
-            update_battle_data(player.player_id, realm=realm)
-        logging.info(f"Preloaded battles json for player: {player.name}")
-    logging.info("Preloading complete")
-
-
-def preload_activity_data(realm: str = DEFAULT_REALM) -> None:
-    # because this function isn't calling update_snapshot_data, it's just creating
-    # an empty data structure for the player's activity_json field, which helps the
-    # front end to render the activity faster, while it loads the actual data in the background
-    logging.info("Preloading activity data for all players")
-    players = Player.objects.filter(realm=realm)
-    for player in players:
-        if not player.activity_json:
-            update_activity_data(player.player_id, realm=realm)
-        logging.info(f"Preloaded activity data for player: {player.name}")
-    logging.info("Preloading complete")
