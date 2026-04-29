@@ -158,46 +158,49 @@ const WrCell: React.FC<WrCellProps> = ({
     const signedDelta = deltaWinRate == null
         ? null
         : `${deltaWinRate > 0 ? '+' : ''}${deltaWinRate.toFixed(1)}%`;
-    const tooltip = lifetimeWinRate != null
-        ? `Period ${formatPercent(periodWinRate)} · Lifetime ${formatPercent(lifetimeWinRate)}${signedDelta != null ? ` (Δ${signedDelta})` : ''}`
-        : `Period ${formatPercent(periodWinRate)}`;
+    const lifetimeMissing = lifetimeWinRate == null;
+    const tooltip = lifetimeMissing
+        ? `Period ${formatPercent(periodWinRate)} · Lifetime N/A (never played)`
+        : `Period ${formatPercent(periodWinRate)} · Lifetime ${formatPercent(lifetimeWinRate)}${signedDelta != null ? ` (Δ${signedDelta})` : ''}`;
     const periodEl = (
         <span style={{ color: wrColor(periodWinRate) }} className="font-semibold">
             {formatPercent(periodWinRate)}
         </span>
     );
-    const lifetimeEl = lifetimeWinRate != null ? (
+    const lifetimeEl = !lifetimeMissing ? (
         <span className="text-xs" style={{ color: wrColor(lifetimeWinRate) }}>
             {formatPercent(lifetimeWinRate)}
         </span>
-    ) : null;
+    ) : (
+        <span className="text-xs text-[var(--text-muted)]">N/A</span>
+    );
     const deltaEl = signedDelta != null ? (
         <span className="text-xs font-medium" style={{ color: tone }}>
             Δ{signedDelta}
         </span>
-    ) : null;
+    ) : (
+        <span className="text-xs text-[var(--text-muted)]">—</span>
+    );
 
     if (stacked) {
         return (
             <span className="tabular-nums flex flex-col items-start" title={tooltip}>
                 {periodEl}
-                {(lifetimeEl || deltaEl) ? (
-                    <span className="inline-flex items-baseline gap-2 whitespace-nowrap">
-                        {lifetimeEl}
-                        {deltaEl}
-                    </span>
-                ) : null}
+                <span className="inline-grid grid-cols-[3rem_4rem] gap-2 items-baseline whitespace-nowrap">
+                    <span className="text-left">{lifetimeEl}</span>
+                    <span className="text-left">{deltaEl}</span>
+                </span>
             </span>
         );
     }
     return (
         <span
-            className="tabular-nums inline-flex items-baseline gap-2 justify-end whitespace-nowrap"
+            className="tabular-nums inline-grid grid-cols-[3.5rem_3rem_4rem] gap-2 items-baseline whitespace-nowrap"
             title={tooltip}
         >
-            {periodEl}
-            {lifetimeEl}
-            {deltaEl}
+            <span className="text-right">{periodEl}</span>
+            <span className="text-right">{lifetimeEl}</span>
+            <span className="text-right">{deltaEl}</span>
         </span>
     );
 };
