@@ -3091,6 +3091,60 @@ class ApiContractTests(TestCase):
             ["RecentNoScore", "RecentLowScore", "RecentHighScore"],
         )
 
+    def test_landing_active_players_orders_by_last_random_battle_at_desc(self):
+        cache.clear()
+        now = timezone.now()
+        Player.objects.create(
+            name="ActiveOldest",
+            player_id=4501,
+            pvp_ratio=58.0,
+            last_random_battle_at=now - timedelta(hours=3),
+        )
+        Player.objects.create(
+            name="ActiveNewest",
+            player_id=4502,
+            pvp_ratio=51.0,
+            last_random_battle_at=now,
+        )
+        Player.objects.create(
+            name="ActiveMiddle",
+            player_id=4503,
+            pvp_ratio=54.0,
+            last_random_battle_at=now - timedelta(hours=1),
+        )
+        # Player with NULL last_random_battle_at must not appear.
+        Player.objects.create(
+            name="NeverPlayedRandoms",
+            player_id=4504,
+            pvp_ratio=60.0,
+            last_random_battle_at=None,
+        )
+
+        response = self.client.get("/api/landing/active/")
+
+        self.assertEqual(response.status_code, 200)
+        names = [row["name"] for row in response.json()]
+        self.assertEqual(names[:3], ["ActiveNewest", "ActiveMiddle", "ActiveOldest"])
+        self.assertNotIn("NeverPlayedRandoms", names)
+
+    def test_landing_active_players_row_shape_matches_recent(self):
+        cache.clear()
+        now = timezone.now()
+        Player.objects.create(
+            name="ShapeProbeActive",
+            player_id=4505,
+            pvp_ratio=55.0,
+            last_random_battle_at=now,
+            last_lookup=now,
+        )
+
+        active = self.client.get("/api/landing/active/").json()
+        recent = self.client.get("/api/landing/recent/").json()
+
+        self.assertEqual(len(active), 1)
+        self.assertEqual(len(recent), 1)
+        self.assertEqual(set(active[0].keys()), set(recent[0].keys()))
+
     def test_landing_players_and_recent_players_expose_clan_battle_enjoyer_from_cache(self):
         cache.clear()
         today = timezone.now().date()
