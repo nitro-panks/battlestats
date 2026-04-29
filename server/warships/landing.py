@@ -97,14 +97,12 @@ LANDING_CLANS_BEST_CACHE_METADATA_KEY = 'landing:clans:best:v2:overall:meta'
 LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY = 'landing:clans:best:v2:overall:published'
 LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY = 'landing:clans:best:v2:overall:published:meta'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
-LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v6'
-LANDING_ACTIVE_PLAYERS_CACHE_KEY = 'landing:active_players:battle:v1'
+LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:battle:v7'
 LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v13:namespace'
 LANDING_CLANS_DIRTY_KEY = 'landing:clans:dirty:v1'
 LANDING_PLAYERS_DIRTY_KEY = 'landing:players:dirty:v1'
 LANDING_RECENT_CLANS_DIRTY_KEY = 'landing:recent_clans:dirty:v1'
-LANDING_RECENT_PLAYERS_DIRTY_KEY = 'landing:recent_players:dirty:v1'
-LANDING_ACTIVE_PLAYERS_DIRTY_KEY = 'landing:active_players:dirty:v1'
+LANDING_RECENT_PLAYERS_DIRTY_KEY = 'landing:recent_players:dirty:v2'
 LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_CLAN_MODES = ('random', 'best')
@@ -775,19 +773,6 @@ def invalidate_landing_recent_player_cache(realm: str = DEFAULT_REALM) -> None:
         realm, 'landing:recent_players:invalidate_cooldown')
     _mark_cache_family_dirty(realm_cache_key(
         realm, LANDING_RECENT_PLAYERS_DIRTY_KEY))
-    if not cache.add(cooldown_key, 1, timeout=RECENT_PLAYERS_INVALIDATE_COOLDOWN):
-        return
-    _queue_landing_republish(realm=realm)
-
-
-def invalidate_landing_active_players_cache(realm: str = DEFAULT_REALM) -> None:
-    # Invoked from the BattleEvent capture path; a single crawler tier tick
-    # can fire hundreds of these within seconds, so the 30s cooldown
-    # coalesces them into one republish.
-    cooldown_key = realm_cache_key(
-        realm, 'landing:active_players:invalidate_cooldown')
-    _mark_cache_family_dirty(realm_cache_key(
-        realm, LANDING_ACTIVE_PLAYERS_DIRTY_KEY))
     if not cache.add(cooldown_key, 1, timeout=RECENT_PLAYERS_INVALIDATE_COOLDOWN):
         return
     _queue_landing_republish(realm=realm)
@@ -2302,24 +2287,11 @@ def _serialize_landing_player_row(player_obj) -> dict:
 
 
 def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
-    # Single query: fetch lightweight columns + ranked_json, joined with
-    # explorer_summary to avoid N+1.
-    players = list(
-        Player.objects.exclude(name='').filter(
-            realm=realm).exclude(last_lookup__isnull=True)
-        .select_related('explorer_summary')
-        .only(*_LANDING_PLAYER_ROW_ONLY_FIELDS)
-        .order_by(F('last_lookup').desc(nulls_last=True), 'name')[:40]
-    )
-    return [_serialize_landing_player_row(p) for p in players]
-
-
-def _build_active_players(realm: str = DEFAULT_REALM) -> list[dict]:
     # Players ordered by most-recently-detected random battle. The
     # `last_random_battle_at` column is populated by the capture hook in
-    # `record_observation_from_payloads` (see Tranche 1, commit a4927a4)
-    # whenever a `BattleEvent` is written for the player. Empty list when
-    # the column is NULL across the playerbase (e.g. capture flag off).
+    # `record_observation_from_payloads` whenever a `BattleEvent` is
+    # written. Empty list when the column is NULL across the playerbase
+    # (e.g. before capture has fired enough times).
     players = list(
         Player.objects.exclude(name='').filter(
             realm=realm, last_random_battle_at__isnull=False)
@@ -2343,19 +2315,6 @@ def get_landing_recent_players_payload(force_refresh: bool = False, realm: str =
     return payload
 
 
-def get_landing_active_players_payload(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict]:
-    dirty_key = realm_cache_key(realm, LANDING_ACTIVE_PLAYERS_DIRTY_KEY)
-    cache_key = realm_cache_key(realm, LANDING_ACTIVE_PLAYERS_CACHE_KEY)
-    is_dirty = not force_refresh and cache.get(dirty_key) is not None
-    payload = None if force_refresh or is_dirty else cache.get(cache_key)
-    if payload is None:
-        payload = _build_active_players(realm=realm)
-        cache.set(cache_key, payload, LANDING_CACHE_TTL)
-        if is_dirty:
-            cache.delete(dirty_key)
-    return payload
-
-
 def warm_landing_page_content(force_refresh: bool = False, include_recent: bool = True, realm: str = DEFAULT_REALM) -> dict:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -2372,7 +2331,6 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
         'clans_best_wr': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='wr')),
         'recent_clans': lambda: len(get_landing_recent_clans_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
         'recent_players': lambda: len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
-        'active_players': lambda: len(get_landing_active_players_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
     }
 
     def _run_surface(fn):
@@ -2409,6 +2367,5 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
         realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY),
         realm_cache_key(realm, LANDING_RECENT_CLANS_DIRTY_KEY),
         realm_cache_key(realm, LANDING_RECENT_PLAYERS_DIRTY_KEY),
-        realm_cache_key(realm, LANDING_ACTIVE_PLAYERS_DIRTY_KEY),
     )
     return {'status': 'completed', 'warmed': warmed}

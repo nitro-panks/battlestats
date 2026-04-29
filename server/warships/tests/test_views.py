@@ -526,12 +526,16 @@ class LandingWarmupViewTests(TestCase):
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
-    def test_player_lookup_invalidates_recent_players_cache(
+    def test_player_lookup_does_not_invalidate_recent_players_cache(
         self,
         _mock_update_player_task,
         _mock_update_clan_task,
         _mock_update_clan_members_task,
     ):
+        """Recent now means recently-battled (Player.last_random_battle_at);
+        page views no longer drive that ordering, so visiting a player's
+        page must not mark the recent-players cache dirty.
+        Invalidation is the BattleEvent capture path's responsibility."""
         now = timezone.now()
         clan = Clan.objects.create(
             clan_id=953,
@@ -554,13 +558,13 @@ class LandingWarmupViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
             {'name': 'stale'}])
-        self.assertIsNotNone(cache.get(realm_cache_key(
+        self.assertIsNone(cache.get(realm_cache_key(
             'na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
 
-    def test_player_cache_hit_still_updates_last_lookup_and_invalidates_recent(self):
-        """When the player detail cache is pre-populated, the cache-hit path
-        should still bump last_lookup and mark the recent-players cache dirty
-        so newly viewed players propagate to the landing page."""
+    def test_player_cache_hit_still_updates_last_lookup_without_invalidating_recent(self):
+        """Cache-hit path bumps last_lookup (analytics, hot-entity warmer)
+        but must not mark the recent-players cache dirty — Recent is now
+        battle-driven, not view-driven."""
         now = timezone.now()
         clan = Clan.objects.create(
             clan_id=954, name="CacheHitClan", members_count=1, last_fetch=now,
@@ -587,8 +591,8 @@ class LandingWarmupViewTests(TestCase):
         player.refresh_from_db()
         self.assertIsNotNone(player.last_lookup)
         self.assertGreaterEqual(player.last_lookup, request_started_at)
-        # Dirty flag should be set
-        self.assertIsNotNone(cache.get(realm_cache_key(
+        # Recent dirty flag should NOT be set — Recent is battle-driven now.
+        self.assertIsNone(cache.get(realm_cache_key(
             'na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
 
     def test_clan_members_lookup_updates_clan_last_lookup_timestamp(self):
@@ -3057,93 +3061,43 @@ class ApiContractTests(TestCase):
         self.assertIn("LandingActivePlayer", names)
         self.assertNotIn("LandingInactivePlayer", names)
 
-    def test_landing_recent_players_orders_by_last_lookup_desc(self):
-        cache.clear()
-        now = timezone.now()
-        recent_high = Player.objects.create(
-            name="RecentHighScore",
-            player_id=4401,
-            pvp_ratio=58.0,
-            last_lookup=now - timedelta(minutes=30),
-        )
-        recent_low = Player.objects.create(
-            name="RecentLowScore",
-            player_id=4402,
-            pvp_ratio=51.0,
-            last_lookup=now - timedelta(minutes=5),
-        )
-        recent_none = Player.objects.create(
-            name="RecentNoScore",
-            player_id=4403,
-            pvp_ratio=54.0,
-            last_lookup=now - timedelta(minutes=1),
-        )
-        PlayerExplorerSummary.objects.create(
-            player=recent_high, player_score=8.2)
-        PlayerExplorerSummary.objects.create(
-            player=recent_low, player_score=2.4)
-
-        response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [row["name"] for row in response.json()[:3]],
-            ["RecentNoScore", "RecentLowScore", "RecentHighScore"],
-        )
-
-    def test_landing_active_players_orders_by_last_random_battle_at_desc(self):
+    def test_landing_recent_players_orders_by_last_random_battle_at_desc(self):
         cache.clear()
         now = timezone.now()
         Player.objects.create(
-            name="ActiveOldest",
-            player_id=4501,
+            name="RecentOldest",
+            player_id=4401,
             pvp_ratio=58.0,
             last_random_battle_at=now - timedelta(hours=3),
         )
         Player.objects.create(
-            name="ActiveNewest",
-            player_id=4502,
+            name="RecentNewest",
+            player_id=4402,
             pvp_ratio=51.0,
             last_random_battle_at=now,
         )
         Player.objects.create(
-            name="ActiveMiddle",
-            player_id=4503,
+            name="RecentMiddle",
+            player_id=4403,
             pvp_ratio=54.0,
             last_random_battle_at=now - timedelta(hours=1),
         )
-        # Player with NULL last_random_battle_at must not appear.
+        # Player with NULL last_random_battle_at (page-viewed but not
+        # detected as having played) must not appear.
         Player.objects.create(
             name="NeverPlayedRandoms",
-            player_id=4504,
+            player_id=4404,
             pvp_ratio=60.0,
+            last_lookup=now,
             last_random_battle_at=None,
         )
 
-        response = self.client.get("/api/landing/active/")
+        response = self.client.get("/api/landing/recent/")
 
         self.assertEqual(response.status_code, 200)
         names = [row["name"] for row in response.json()]
-        self.assertEqual(names[:3], ["ActiveNewest", "ActiveMiddle", "ActiveOldest"])
+        self.assertEqual(names[:3], ["RecentNewest", "RecentMiddle", "RecentOldest"])
         self.assertNotIn("NeverPlayedRandoms", names)
-
-    def test_landing_active_players_row_shape_matches_recent(self):
-        cache.clear()
-        now = timezone.now()
-        Player.objects.create(
-            name="ShapeProbeActive",
-            player_id=4505,
-            pvp_ratio=55.0,
-            last_random_battle_at=now,
-            last_lookup=now,
-        )
-
-        active = self.client.get("/api/landing/active/").json()
-        recent = self.client.get("/api/landing/recent/").json()
-
-        self.assertEqual(len(active), 1)
-        self.assertEqual(len(recent), 1)
-        self.assertEqual(set(active[0].keys()), set(recent[0].keys()))
 
     def test_landing_players_and_recent_players_expose_clan_battle_enjoyer_from_cache(self):
         cache.clear()
@@ -3158,6 +3112,7 @@ class ApiContractTests(TestCase):
             pvp_battles=3800,
             last_battle_date=today,
             last_lookup=looked_up_at,
+            last_random_battle_at=looked_up_at,
         )
         PlayerExplorerSummary.objects.create(
             player=player,
@@ -3200,6 +3155,7 @@ class ApiContractTests(TestCase):
             pvp_battles=3800,
             last_battle_date=today,
             last_lookup=looked_up_at,
+            last_random_battle_at=looked_up_at,
         )
         PlayerExplorerSummary.objects.create(
             player=player,
@@ -3243,6 +3199,7 @@ class ApiContractTests(TestCase):
             days_since_last_battle=7,
             last_battle_date=today,
             last_lookup=looked_up_at,
+            last_random_battle_at=looked_up_at,
         )
         Player.objects.create(
             name="LandingPveNoHighAbsolute",
@@ -3254,6 +3211,7 @@ class ApiContractTests(TestCase):
             days_since_last_battle=3,
             last_battle_date=today,
             last_lookup=looked_up_at - timedelta(minutes=1),
+            last_random_battle_at=looked_up_at - timedelta(minutes=1),
         )
 
         landing_response = self.client.get(
@@ -3292,6 +3250,7 @@ class ApiContractTests(TestCase):
             days_since_last_battle=2,
             last_battle_date=today,
             last_lookup=looked_up_at,
+            last_random_battle_at=looked_up_at,
             battles_json=[
                 {"ship_tier": 10, "pvp_battles": 3900, "wins": 2262},
             ],
@@ -3328,6 +3287,7 @@ class ApiContractTests(TestCase):
             days_since_last_battle=4,
             last_battle_date=today,
             last_lookup=now - timedelta(minutes=2),
+            last_random_battle_at=now - timedelta(minutes=2),
             efficiency_updated_at=now - timedelta(hours=3),
             battles_updated_at=now - timedelta(hours=3),
         )
@@ -3341,6 +3301,7 @@ class ApiContractTests(TestCase):
             days_since_last_battle=2,
             last_battle_date=today,
             last_lookup=now - timedelta(minutes=1),
+            last_random_battle_at=now - timedelta(minutes=1),
             efficiency_updated_at=now - timedelta(hours=3),
             battles_updated_at=now - timedelta(hours=3),
         )
@@ -3354,6 +3315,7 @@ class ApiContractTests(TestCase):
             days_since_last_battle=1,
             last_battle_date=today,
             last_lookup=now,
+            last_random_battle_at=now,
             efficiency_updated_at=now - timedelta(hours=3),
             battles_updated_at=now - timedelta(hours=3),
         )
@@ -3448,6 +3410,7 @@ class ApiContractTests(TestCase):
             pvp_ratio=49.0,
             days_since_last_battle=500,
             last_lookup=now - timedelta(minutes=2),
+            last_random_battle_at=now - timedelta(minutes=2),
         )
 
         response = self.client.get("/api/landing/recent/")
@@ -4587,7 +4550,7 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(landing_players.cls.throttle_classes,
                          PUBLIC_API_THROTTLES)
 
-    def test_landing_recent_players_orders_by_last_lookup_desc_and_limits_to_40(self):
+    def test_landing_recent_players_orders_by_last_random_battle_at_desc_and_limits_to_40(self):
         cache.delete(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY))
         now = timezone.now()
 
@@ -4595,7 +4558,7 @@ class ApiThrottleTests(TestCase):
             Player.objects.create(
                 name=f"RecentPlayer{index}",
                 player_id=10000 + index,
-                last_lookup=now - timedelta(minutes=index),
+                last_random_battle_at=now - timedelta(minutes=index),
             )
 
         response = self.client.get("/api/landing/recent/")

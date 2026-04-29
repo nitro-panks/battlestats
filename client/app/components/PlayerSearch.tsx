@@ -185,7 +185,7 @@ const LANDING_FETCH_TTL_MS = 1500;
 
 type LandingClanMode = 'random' | 'best' | 'recent';
 type ClanBestSort = 'overall' | 'wr';
-type LandingPlayerMode = 'best' | 'random' | 'recent' | 'active';
+type LandingPlayerMode = 'best' | 'random' | 'recent';
 type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
 
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
@@ -215,7 +215,6 @@ const PlayerSearch: React.FC = () => {
     const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('best');
     const [playerBestSort, setPlayerBestSort] = useState<PlayerBestSort>('overall');
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
-    const [activePlayers, setActivePlayers] = useState<LandingPlayer[]>([]);
     const lastSubmittedSearchRef = useRef<string>('');
     const bestLandingWarmupRequestedRef = useRef(false);
 
@@ -256,7 +255,7 @@ const PlayerSearch: React.FC = () => {
         triggerBestLandingWarmup();
 
         try {
-            const [{ data: recentClansPayload }, { data: recentPlayersPayload }, { data: activePlayersPayload }] = await Promise.all([
+            const [{ data: recentClansPayload }, { data: recentPlayersPayload }] = await Promise.all([
                 fetchSharedJson<LandingClan[]>(withRealm('/api/landing/recent-clans/', realm), {
                     label: 'Recent clans',
                     ttlMs: LANDING_FETCH_TTL_MS,
@@ -265,14 +264,9 @@ const PlayerSearch: React.FC = () => {
                     label: 'Recent players',
                     ttlMs: LANDING_FETCH_TTL_MS,
                 }),
-                fetchSharedJson<LandingPlayer[]>(withRealm('/api/landing/active/', realm), {
-                    label: 'Active players',
-                    ttlMs: LANDING_FETCH_TTL_MS,
-                }),
             ]);
             setRecentClans(Array.isArray(recentClansPayload) ? recentClansPayload : []);
             setRecentPlayers(Array.isArray(recentPlayersPayload) ? recentPlayersPayload : []);
-            setActivePlayers(Array.isArray(activePlayersPayload) ? activePlayersPayload : []);
         } catch (err) {
             console.error('Error fetching landing data:', err);
         }
@@ -345,7 +339,7 @@ const PlayerSearch: React.FC = () => {
     }, [realm]);
 
     useEffect(() => {
-        if (playerMode === 'recent' || playerMode === 'active') return;
+        if (playerMode === 'recent') return;
         void fetchLandingPlayers(playerMode, playerMode === 'best' ? playerBestSort : 'overall');
     }, [fetchLandingPlayers, playerBestSort, playerMode]);
 
@@ -360,7 +354,7 @@ const PlayerSearch: React.FC = () => {
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
     useIntervalRefresh(() => {
-        if (playerMode !== 'recent' && playerMode !== 'active') {
+        if (playerMode !== 'recent') {
             void fetchLandingPlayers(playerMode, playerMode === 'best' ? playerBestSort : 'overall');
         }
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
@@ -423,12 +417,9 @@ const PlayerSearch: React.FC = () => {
         if (playerMode === 'recent') {
             return recentPlayers.slice(0, LANDING_PLAYER_LIMIT);
         }
-        if (playerMode === 'active') {
-            return activePlayers.slice(0, LANDING_PLAYER_LIMIT);
-        }
 
         return players;
-    }, [playerMode, players, recentPlayers, activePlayers]);
+    }, [playerMode, players, recentPlayers]);
     const showPlayerBestSortBar = playerMode === 'best';
 
     const handleSelectMember = useCallback(async (memberName: string) => {
@@ -495,7 +486,7 @@ const PlayerSearch: React.FC = () => {
                 <div>
                     {error && <p className="text-red-600 dark:text-red-400">{error}</p>}
 
-                    {(players.length > 0 || recentPlayers.length > 0 || activePlayers.length > 0) && (
+                    {(players.length > 0 || recentPlayers.length > 0) && (
                         <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
                             <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Players</h3>
@@ -522,14 +513,6 @@ const PlayerSearch: React.FC = () => {
                                     aria-pressed={playerMode === 'recent'}
                                 >
                                     Recent
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => { setPlayerMode('active'); setPlayerBestSort('overall'); }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'active' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={playerMode === 'active'}
-                                >
-                                    Active
                                 </button>
                             </div>
                             <div className="mt-1.5 min-h-7 pl-1" data-testid="player-best-sort-bar-shell">

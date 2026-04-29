@@ -185,7 +185,6 @@ const installFetchMock = ({
     clansByBestSort,
     recentClans = [],
     recentPlayers = [],
-    activePlayers = [],
     recentPlayersResponses,
     recentClansResponse,
     playersByMode = defaultPlayersByMode,
@@ -196,7 +195,6 @@ const installFetchMock = ({
     clansByBestSort?: Record<string, unknown[]>;
     recentClans?: unknown[];
     recentPlayers?: unknown[];
-    activePlayers?: unknown[];
     recentPlayersResponses?: unknown[][];
     recentClansResponse?: ReturnType<typeof buildJsonResponse> | ReturnType<typeof buildErrorResponse>;
     playersByMode?: Record<string, unknown[]>;
@@ -224,10 +222,6 @@ const installFetchMock = ({
                 return Promise.resolve(recentClansResponse);
             }
             return Promise.resolve(buildJsonResponse(recentClans));
-        }
-
-        if (url.startsWith('/api/landing/active')) {
-            return Promise.resolve(buildJsonResponse(activePlayers));
         }
 
         if (url.startsWith('/api/landing/recent')) {
@@ -484,56 +478,15 @@ describe('PlayerSearch landing efficiency icon', () => {
         const playerToolbar = within(await getPlayerModeToolbar());
         const modeButtons = playerToolbar
             .getAllByRole('button')
-            .filter((button) => ['Best', 'Random', 'Recent', 'Active'].includes(button.textContent?.trim() || ''));
+            .filter((button) => ['Best', 'Random', 'Recent'].includes(button.textContent?.trim() || ''));
         const recentButton = playerToolbar.getByRole('button', { name: 'Recent' });
-        expect(modeButtons.map((button) => button.textContent?.trim())).toEqual(['Best', 'Random', 'Recent', 'Active']);
+        expect(modeButtons.map((button) => button.textContent?.trim())).toEqual(['Best', 'Random', 'Recent']);
 
         fireEvent.click(recentButton);
 
         expect(await screen.findByRole('button', { name: /Show player RecentCaptain/i })).toBeInTheDocument();
         expect(screen.queryByText('Recently Viewed')).not.toBeInTheDocument();
         expect(await getPlayerRecentButton()).toHaveAttribute('aria-pressed', 'true');
-    });
-
-    it('exposes the Active pill backed by /api/landing/active and shows those players when clicked', async () => {
-        installFetchMock({
-            activePlayers: [
-                {
-                    name: 'JustBattled',
-                    pvp_ratio: 56.0,
-                    is_hidden: false,
-                    is_streamer: false,
-                    is_ranked_player: false,
-                    is_pve_player: false,
-                    is_sleepy_player: false,
-                    is_clan_battle_player: false,
-                    clan_battle_win_rate: null,
-                    highest_ranked_league: null,
-                    efficiency_rank_percentile: 0.74,
-                    efficiency_rank_tier: 'III',
-                    has_efficiency_rank_icon: true,
-                    efficiency_rank_population_size: 367,
-                    efficiency_rank_updated_at: '2026-04-28T00:00:00Z',
-                },
-            ],
-        });
-
-        render(<PlayerSearch />);
-
-        await waitFor(() => {
-            const calls = (global.fetch as jest.Mock).mock.calls.map(([url]) => url.toString());
-            expect(calls.some((url) => url.startsWith('/api/landing/active'))).toBe(true);
-        });
-
-        const playerToolbar = within(await getPlayerModeToolbar());
-        const activeButton = playerToolbar.getByRole('button', { name: 'Active' });
-        expect(activeButton).toHaveAttribute('aria-pressed', 'false');
-
-        fireEvent.click(activeButton);
-
-        expect(await screen.findByRole('button', { name: /Show player JustBattled/i })).toBeInTheDocument();
-        expect(playerToolbar.getByRole('button', { name: 'Active' })).toHaveAttribute('aria-pressed', 'true');
-        expect(playerToolbar.getByRole('button', { name: 'Recent' })).toHaveAttribute('aria-pressed', 'false');
     });
 
     it('requests 30 clans while keeping player landing requests at 25', async () => {

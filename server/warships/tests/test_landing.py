@@ -1306,8 +1306,7 @@ class LandingHelperTests(TestCase):
                 patch('warships.landing.get_landing_players_payload', side_effect=lambda mode, *a, **kw: [
                     {'name': mode.capitalize()}
                 ]) as mock_players, \
-                patch('warships.landing.get_landing_recent_players_payload', return_value=[{'name': 'Recent Player'}]) as mock_recent_players, \
-                patch('warships.landing.get_landing_active_players_payload', return_value=[{'name': 'Active Player'}]) as mock_active_players:
+                patch('warships.landing.get_landing_recent_players_payload', return_value=[{'name': 'Recent Player'}]) as mock_recent_players:
             from warships.landing import warm_landing_page_content
 
             result = warm_landing_page_content(force_refresh=True)
@@ -1327,7 +1326,6 @@ class LandingHelperTests(TestCase):
                 'players_best_cb': 1,
                 'players_popular': 1,
                 'recent_players': 1,
-                'active_players': 1,
             },
         })
         mock_random_clans.assert_called_once_with(
@@ -1418,9 +1416,10 @@ class LandingHelperTests(TestCase):
             [201, 202, 203, 204], force_refresh=False, realm='eu')
 
 
-class LandingActivePlayersTests(TestCase):
-    """The 'Active' sub-sort orders by Player.last_random_battle_at —
-    populated by the BattleEvent capture hook in Tranche 1.
+class LandingRecentPlayersBattleOrderingTests(TestCase):
+    """Recent sub-sort orders by Player.last_random_battle_at, populated
+    by the BattleEvent capture hook. Replaces the prior last_lookup
+    ordering as of 2026-04-29.
     """
 
     def setUp(self):
@@ -1439,16 +1438,16 @@ class LandingActivePlayersTests(TestCase):
         )
 
     def test_empty_when_no_players_have_column_set(self):
-        from warships.landing import _build_active_players
+        from warships.landing import _build_recent_players
 
         Player.objects.create(
             name='no_battle_player', player_id=1, realm='na',
             last_random_battle_at=None,
         )
-        self.assertEqual(_build_active_players(realm='na'), [])
+        self.assertEqual(_build_recent_players(realm='na'), [])
 
     def test_orders_by_last_random_battle_at_descending(self):
-        from warships.landing import _build_active_players
+        from warships.landing import _build_recent_players
 
         now = timezone.now()
         self._make_player(name='oldest', player_id=10,
@@ -1458,11 +1457,11 @@ class LandingActivePlayersTests(TestCase):
         self._make_player(name='middle', player_id=12,
                           last_random_battle_at=now - timedelta(hours=1))
 
-        rows = _build_active_players(realm='na')
+        rows = _build_recent_players(realm='na')
         self.assertEqual([r['name'] for r in rows], ['newest', 'middle', 'oldest'])
 
     def test_realm_isolation(self):
-        from warships.landing import _build_active_players
+        from warships.landing import _build_recent_players
 
         now = timezone.now()
         self._make_player(name='na_player', player_id=20,
@@ -1470,55 +1469,25 @@ class LandingActivePlayersTests(TestCase):
         self._make_player(name='eu_player', player_id=21,
                           last_random_battle_at=now, realm='eu')
 
-        na_rows = _build_active_players(realm='na')
-        eu_rows = _build_active_players(realm='eu')
+        na_rows = _build_recent_players(realm='na')
+        eu_rows = _build_recent_players(realm='eu')
         self.assertEqual([r['name'] for r in na_rows], ['na_player'])
         self.assertEqual([r['name'] for r in eu_rows], ['eu_player'])
 
-    def test_payload_caches_and_serves_from_cache_on_subsequent_calls(self):
-        from warships.landing import (
-            LANDING_ACTIVE_PLAYERS_CACHE_KEY,
-            get_landing_active_players_payload,
-        )
+    def test_excludes_players_with_null_last_random_battle_at(self):
+        from warships.landing import _build_recent_players
 
         now = timezone.now()
-        self._make_player(name='player_a', player_id=30,
+        # Page-viewed only — no battle detected — must not appear.
+        Player.objects.create(
+            name='only_viewed', player_id=40, realm='na',
+            last_lookup=now, last_random_battle_at=None,
+        )
+        self._make_player(name='battled', player_id=41,
                           last_random_battle_at=now)
 
-        payload = get_landing_active_players_payload(realm='na')
-        self.assertEqual(len(payload), 1)
-        self.assertEqual(payload[0]['name'], 'player_a')
-        self.assertEqual(
-            cache.get(realm_cache_key('na', LANDING_ACTIVE_PLAYERS_CACHE_KEY)),
-            payload,
-        )
-
-        # Mutate the DB without invalidating the cache; payload should
-        # still come from cache (unchanged) since no dirty key is set.
-        Player.objects.filter(player_id=30).update(name='player_a_renamed')
-        payload2 = get_landing_active_players_payload(realm='na')
-        self.assertEqual(payload2[0]['name'], 'player_a')
-
-    def test_dirty_key_triggers_rebuild(self):
-        from warships.landing import (
-            LANDING_ACTIVE_PLAYERS_CACHE_KEY,
-            LANDING_ACTIVE_PLAYERS_DIRTY_KEY,
-            get_landing_active_players_payload,
-        )
-
-        cache.set(realm_cache_key('na', LANDING_ACTIVE_PLAYERS_CACHE_KEY),
-                  [{'name': 'stale'}], LANDING_CACHE_TTL)
-        cache.set(realm_cache_key('na', LANDING_ACTIVE_PLAYERS_DIRTY_KEY),
-                  'dirty', timeout=None)
-
-        with patch('warships.landing._build_active_players',
-                   return_value=[{'name': 'fresh'}]) as mock_build:
-            payload = get_landing_active_players_payload(realm='na')
-
-        self.assertEqual(payload, [{'name': 'fresh'}])
-        self.assertIsNone(cache.get(
-            realm_cache_key('na', LANDING_ACTIVE_PLAYERS_DIRTY_KEY)))
-        mock_build.assert_called_once_with(realm='na')
+        rows = _build_recent_players(realm='na')
+        self.assertEqual([r['name'] for r in rows], ['battled'])
 
 
 class QueueLandingPageWarmGateTests(TestCase):
