@@ -105,14 +105,6 @@ def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COU
     return featured + remainder
 
 
-def _player_score_ordering(secondary_field: str):
-    return (
-        F('explorer_summary__player_score').desc(nulls_last=True),
-        F(secondary_field).desc(nulls_last=True),
-        'name',
-    )
-
-
 class PlayerViewSet(viewsets.ModelViewSet):
     queryset = Player.objects.select_related('clan', 'explorer_summary').all()
     serializer_class = PlayerSerializer
@@ -996,17 +988,28 @@ def clan_members(request, clan_id: str) -> Response:
             realm=realm,
         )
 
-    # B1: Check response cache before doing expensive member serialization
+    # B1: Check response cache before doing expensive member serialization.
+    # v2 of the cache key: ordering simplified to recently-played-first
+    # (with hidden players sinking to the bottom), so v1 entries served
+    # under the old player_score-primary ordering are skipped.
     CLAN_MEMBERS_CACHE_TTL = 300  # 5 minutes
-    cache_key = realm_cache_key(realm, f'clan:members:{clan_id}')
+    cache_key = realm_cache_key(realm, f'clan:members:v2:{clan_id}')
     cached = cache.get(cache_key)
     if cached is not None:
         response = Response(cached)
         response['X-Clan-Members-Cache'] = 'hit'
         return response
 
+    # Simplified ordering: hidden players cluster at the bottom; otherwise
+    # most-recently-played first with name as the deterministic tiebreak.
+    # Drives the "recent activity" feel of the clan-members list and lets
+    # the frontend FLIP animation surface real upward moves when a refresh
+    # rotates active players to the top.
     members = clan.player_set.select_related('explorer_summary').exclude(name='').order_by(
-        *_player_score_ordering('last_battle_date'))
+        F('is_hidden').asc(),
+        F('last_battle_date').desc(nulls_last=True),
+        'name',
+    )
 
     members = list(members)
     hydration_state = queue_clan_ranked_hydration(members, realm=realm)

@@ -1053,6 +1053,45 @@ class ClanMembersEndpointTests(TestCase):
 
     @patch("warships.data.update_clan_members")
     @patch("warships.data.update_clan_data")
+    def test_clan_members_orders_by_recent_battle_with_hidden_at_bottom(
+        self,
+        mock_update_clan_data,
+        mock_update_clan_members,
+    ):
+        # Recent-battle ordering with hidden players sinking to the bottom.
+        # Visible/recent first → visible/older next → hidden last,
+        # hidden block also internally sorted by recency.
+        today = timezone.now().date()
+        clan = Clan.objects.create(
+            clan_id=4242, name="Order Clan", members_count=4)
+        Player.objects.create(
+            name="OldVisible", player_id=10, clan=clan, is_hidden=False,
+            last_battle_date=today - timedelta(days=14),
+        )
+        Player.objects.create(
+            name="HiddenRecent", player_id=11, clan=clan, is_hidden=True,
+            last_battle_date=today - timedelta(days=1),
+        )
+        Player.objects.create(
+            name="VisibleRecent", player_id=12, clan=clan, is_hidden=False,
+            last_battle_date=today - timedelta(days=2),
+        )
+        Player.objects.create(
+            name="HiddenAncient", player_id=13, clan=clan, is_hidden=True,
+            last_battle_date=today - timedelta(days=90),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/4242/")
+
+        self.assertEqual(response.status_code, 200)
+        names = [row["name"] for row in response.json()]
+        self.assertEqual(
+            names,
+            ["VisibleRecent", "OldVisible", "HiddenRecent", "HiddenAncient"],
+        )
+
+    @patch("warships.data.update_clan_members")
+    @patch("warships.data.update_clan_data")
     def test_clan_members_returns_data_when_members_exist(
         self,
         mock_update_clan_data,
@@ -1627,39 +1666,40 @@ class ClanMembersEndpointTests(TestCase):
             },
         )
 
-    def test_clan_members_orders_by_player_score_desc(self):
+    def test_clan_members_orders_by_last_battle_date_desc(self):
+        # Ordering contract: most-recent battle first, NULL last_battle_date
+        # last, name as deterministic tiebreak. player_score is no longer
+        # part of the ordering (simplified 2026-04-29).
         clan = Clan.objects.create(
-            clan_id=77, name="Score Clan", members_count=3)
-        low = Player.objects.create(
-            name="LowScoreMember",
+            clan_id=77, name="Recency Clan", members_count=3)
+        Player.objects.create(
+            name="OneDayIdle",
             player_id=7701,
             clan=clan,
             pvp_ratio=52.0,
             last_battle_date=timezone.now().date() - timedelta(days=1),
         )
-        high = Player.objects.create(
-            name="HighScoreMember",
+        Player.objects.create(
+            name="ThreeDaysIdle",
             player_id=7702,
             clan=clan,
             pvp_ratio=55.0,
             last_battle_date=timezone.now().date() - timedelta(days=3),
         )
-        no_score = Player.objects.create(
-            name="NoScoreMember",
+        Player.objects.create(
+            name="PlayedToday",
             player_id=7703,
             clan=clan,
             pvp_ratio=57.0,
             last_battle_date=timezone.now().date(),
         )
-        PlayerExplorerSummary.objects.create(player=low, player_score=3.4)
-        PlayerExplorerSummary.objects.create(player=high, player_score=8.6)
 
         response = self.client.get("/api/fetch/clan_members/77/")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             [row["name"] for row in response.json()],
-            ["HighScoreMember", "LowScoreMember", "NoScoreMember"],
+            ["PlayedToday", "OneDayIdle", "ThreeDaysIdle"],
         )
 
     def test_clan_members_exposes_fresh_efficiency_rank_fields(self):

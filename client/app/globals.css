@@ -91,6 +91,35 @@ body {
   }
 }
 
+/* Flash highlight applied by useFlipAnimation when an item moves up after
+   a refresh. The slide itself is a JS-driven transform; this class only
+   provides the green pulse so the eye catches the move. */
+.flip-flash {
+  animation: flip-flash-pulse 720ms ease-out;
+  border-radius: 0.25rem;
+}
+
+@keyframes flip-flash-pulse {
+  0% {
+    background-color: rgba(74, 222, 128, 0.30);
+    box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.45);
+  }
+  60% {
+    background-color: rgba(74, 222, 128, 0.12);
+    box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.18);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flip-flash {
+    animation: none;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
