@@ -212,7 +212,7 @@ const PlayerSearch: React.FC = () => {
     const [clanBestSort, setClanBestSort] = useState<ClanBestSort>('overall');
     const [recentClans, setRecentClans] = useState<LandingClan[]>([]);
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
-    const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('best');
+    const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('recent');
     const [playerBestSort, setPlayerBestSort] = useState<PlayerBestSort>('overall');
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
     const lastSubmittedSearchRef = useRef<string>('');
@@ -486,10 +486,21 @@ const PlayerSearch: React.FC = () => {
                 <div>
                     {error && <p className="text-red-600 dark:text-red-400">{error}</p>}
 
-                    {(players.length > 0 || recentPlayers.length > 0) && (
+                    {/* Toolbar is always visible once the landing pane is mounted —
+                     keeps the empty-state UX coherent for both Recent and Best
+                     when the underlying lists return zero rows. */}
+                    {true && (
                         <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
                             <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Players</h3>
+                                <button
+                                    type="button"
+                                    onClick={() => { setPlayerMode('recent'); setPlayerBestSort('overall'); }}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
+                                    aria-pressed={playerMode === 'recent'}
+                                >
+                                    Recent
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => setPlayerMode('best')}
@@ -505,14 +516,6 @@ const PlayerSearch: React.FC = () => {
                                     aria-pressed={playerMode === 'random'}
                                 >
                                     Random
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => { setPlayerMode('recent'); setPlayerBestSort('overall'); }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={playerMode === 'recent'}
-                                >
-                                    Recent
                                 </button>
                             </div>
                             <div className="mt-1.5 min-h-7 pl-1" data-testid="player-best-sort-bar-shell">

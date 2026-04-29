@@ -180,11 +180,31 @@ const defaultPlayersByBestSort = {
     cb: [],
 };
 
+const defaultRecentPlayers = [
+    {
+        name: 'StubRecentDefault',
+        pvp_ratio: 53.0,
+        is_hidden: false,
+        is_streamer: false,
+        is_ranked_player: false,
+        is_pve_player: false,
+        is_sleepy_player: false,
+        is_clan_battle_player: false,
+        clan_battle_win_rate: null,
+        highest_ranked_league: null,
+        efficiency_rank_percentile: null,
+        efficiency_rank_tier: null,
+        has_efficiency_rank_icon: false,
+        efficiency_rank_population_size: null,
+        efficiency_rank_updated_at: null,
+    },
+];
+
 const installFetchMock = ({
     clans = defaultClans,
     clansByBestSort,
     recentClans = [],
-    recentPlayers = [],
+    recentPlayers = defaultRecentPlayers,
     recentPlayersResponses,
     recentClansResponse,
     playersByMode = defaultPlayersByMode,
@@ -322,6 +342,13 @@ describe('PlayerSearch landing efficiency icon', () => {
     const getClanRecentButton = async () => within(await getClanModeToolbar()).getByRole('button', { name: 'Recent' });
     const getPlayerRandomButton = async () => within(await getPlayerModeToolbar()).getByRole('button', { name: 'Random' });
     const getPlayerRecentButton = async () => within(await getPlayerModeToolbar()).getByRole('button', { name: 'Recent' });
+    const getPlayerBestButton = async () => within(await getPlayerModeToolbar()).getByRole('button', { name: 'Best' });
+    /** Most existing player tests were written when Best was the default mode.
+     * Recent is the default now, so call this to flip the toolbar before
+     * asserting Best-mode-only UI. */
+    const switchToBestMode = async () => {
+        fireEvent.click(await getPlayerBestButton());
+    };
 
     it('renders the sigma only for Expert landing rows while preserving existing landing icons', async () => {
         render(<PlayerSearch />);
@@ -329,8 +356,9 @@ describe('PlayerSearch landing efficiency icon', () => {
         await waitFor(() => {
             expect(screen.getByRole('heading', { name: 'Players' })).toBeInTheDocument();
         });
+        await switchToBestMode();
 
-        const expertRow = screen.getByRole('button', { name: /Show player BestPlayer/i });
+        const expertRow = await screen.findByRole('button', { name: /Show player BestPlayer/i });
         const nonExpertRow = screen.getByRole('button', { name: /Show player BestRunnerUp/i });
 
         expect(within(expertRow).getByText('Σ')).toBeInTheDocument();
@@ -342,21 +370,24 @@ describe('PlayerSearch landing efficiency icon', () => {
         expect(within(nonExpertRow).queryByText('Σ')).not.toBeInTheDocument();
     });
 
-    it('shows Best first by default and requests the backend overall sub-sort', async () => {
+    it('shows Recent first by default and fetches the recent endpoint, not the Best sub-sort', async () => {
         render(<PlayerSearch />);
 
-        await waitFor(() => {
-            expect(screen.getAllByRole('button', { name: 'Best' })[1]).toHaveAttribute('aria-pressed', 'true');
+        await waitFor(async () => {
+            expect(await getPlayerRecentButton()).toHaveAttribute('aria-pressed', 'true');
         });
 
         await waitFor(() => {
-            expect((global.fetch as jest.Mock).mock.calls.some(
-                ([url]) => url === '/api/landing/players?mode=best&limit=25&sort=overall&realm=na',
-            )).toBe(true);
+            const urls = (global.fetch as jest.Mock).mock.calls.map(([u]) => u.toString());
+            expect(urls.some((url) => /\/api\/landing\/recent(\/|\?)/.test(url) && !url.includes('recent-clans'))).toBe(true);
         });
 
-        expect(screen.getByTestId('player-best-sort-bar')).toHaveAttribute('aria-hidden', 'false');
-        expect(screen.queryByRole('button', { name: 'ABS' })).not.toBeInTheDocument();
+        // Best sort bar is hidden when the active mode is not 'best'.
+        expect(screen.getByTestId('player-best-sort-bar')).toHaveAttribute('aria-hidden', 'true');
+        // 'best' mode never auto-fetched the players endpoint on mount.
+        expect((global.fetch as jest.Mock).mock.calls.some(
+            ([url]) => typeof url === 'string' && url.startsWith('/api/landing/players') && url.includes('mode=best'),
+        )).toBe(false);
     });
 
     it('renders only the supported best-sort controls for players and clans', async () => {
@@ -373,6 +404,7 @@ describe('PlayerSearch landing efficiency icon', () => {
     it('moves Efficiency under Best and switches the landing request to the efficiency sub-sort', async () => {
         render(<PlayerSearch />);
 
+        await switchToBestMode();
         await waitFor(() => {
             expect(screen.getByRole('button', { name: 'Efficiency' })).toBeInTheDocument();
         });
@@ -452,6 +484,7 @@ describe('PlayerSearch landing efficiency icon', () => {
 
         render(<PlayerSearch />);
 
+        await switchToBestMode();
         await waitFor(() => {
             const playerButtons = screen.getAllByRole('button', { name: /Show player /i });
             expect(playerButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
@@ -466,7 +499,7 @@ describe('PlayerSearch landing efficiency icon', () => {
         )).toBe(true);
     });
 
-    it('orders the player mode switch as Best, Random, Recent', async () => {
+    it('orders the player mode switch as Recent, Best, Random with Recent rendered first and pre-selected', async () => {
         installFetchMock({
             recentPlayers: [
                 { name: 'RecentCaptain', pvp_ratio: 58.1, is_hidden: false },
@@ -479,11 +512,9 @@ describe('PlayerSearch landing efficiency icon', () => {
         const modeButtons = playerToolbar
             .getAllByRole('button')
             .filter((button) => ['Best', 'Random', 'Recent'].includes(button.textContent?.trim() || ''));
-        const recentButton = playerToolbar.getByRole('button', { name: 'Recent' });
-        expect(modeButtons.map((button) => button.textContent?.trim())).toEqual(['Best', 'Random', 'Recent']);
+        expect(modeButtons.map((button) => button.textContent?.trim())).toEqual(['Recent', 'Best', 'Random']);
 
-        fireEvent.click(recentButton);
-
+        // Recent is the default — its row should already be on screen.
         expect(await screen.findByRole('button', { name: /Show player RecentCaptain/i })).toBeInTheDocument();
         expect(screen.queryByText('Recently Viewed')).not.toBeInTheDocument();
         expect(await getPlayerRecentButton()).toHaveAttribute('aria-pressed', 'true');
@@ -502,14 +533,18 @@ describe('PlayerSearch landing efficiency icon', () => {
             )).toBe(true);
         });
 
-        expect((global.fetch as jest.Mock).mock.calls.some(
-            ([url]) => url === '/api/landing/players?mode=best&limit=25&sort=overall&realm=na',
-        )).toBe(true);
+        await switchToBestMode();
+        await waitFor(() => {
+            expect((global.fetch as jest.Mock).mock.calls.some(
+                ([url]) => url === '/api/landing/players?mode=best&limit=25&sort=overall&realm=na',
+            )).toBe(true);
+        });
     });
 
     it('keeps the player best sub-sort bar mounted to avoid header layout jumps', async () => {
         render(<PlayerSearch />);
 
+        await switchToBestMode();
         const sortBar = await screen.findByTestId('player-best-sort-bar');
         expect(sortBar).toHaveAttribute('aria-hidden', 'false');
 
@@ -924,6 +959,7 @@ describe('PlayerSearch landing efficiency icon', () => {
     it('shows the best formula tooltip without cache timing copy', async () => {
         render(<PlayerSearch />);
 
+        await switchToBestMode();
         const infoButton = await screen.findByRole('button', {
             name: 'Best player ranking formula details',
         });
