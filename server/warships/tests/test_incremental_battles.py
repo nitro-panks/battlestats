@@ -840,6 +840,143 @@ class RebuildManagementCommandTests(TestCase):
         self.assertIn("2026-04-28", out.getvalue())
 
 
+class EstablishBattleHistoryBaselineCommandTests(TestCase):
+    """`python manage.py establish_battle_history_baseline`.
+
+    Targets active visible players with no BattleObservation; bypasses the
+    15-min staleness gate that update_battle_data normally enforces."""
+
+    def setUp(self):
+        self.today = django_timezone.now().date()
+
+    def _make(self, name, *, days_idle, is_hidden=False, realm="na",
+              has_observation=False, **kwargs):
+        player = Player.objects.create(
+            name=name,
+            player_id=kwargs.pop("player_id", abs(hash(name)) % (10 ** 9)),
+            realm=realm,
+            is_hidden=is_hidden,
+            last_battle_date=self.today - timedelta(days=days_idle),
+            **kwargs,
+        )
+        if has_observation:
+            BattleObservation.objects.create(
+                player=player, pvp_battles=getattr(player, "pvp_battles", 0) or 0,
+            )
+        return player
+
+    def test_dry_run_reports_count_without_calling_wg(self):
+        self._make("ActiveNoBaseline", days_idle=2)
+        with mock.patch(
+            "warships.incremental_battles.record_observation_and_diff",
+        ) as wg_call:
+            out = StringIO()
+            call_command(
+                "establish_battle_history_baseline",
+                "--realm", "na", "--days", "7", "--dry-run",
+                stdout=out,
+            )
+        self.assertIn("1 candidates", out.getvalue())
+        wg_call.assert_not_called()
+
+    def test_skips_players_with_existing_baseline(self):
+        self._make("AlreadyBaselined", days_idle=2, has_observation=True)
+        out = StringIO()
+        call_command(
+            "establish_battle_history_baseline",
+            "--realm", "na", "--days", "7", "--dry-run",
+            stdout=out,
+        )
+        self.assertIn("0 candidates", out.getvalue())
+
+    def test_skips_hidden_players(self):
+        self._make("HiddenActive", days_idle=2, is_hidden=True)
+        out = StringIO()
+        call_command(
+            "establish_battle_history_baseline",
+            "--realm", "na", "--days", "7", "--dry-run",
+            stdout=out,
+        )
+        self.assertIn("0 candidates", out.getvalue())
+
+    def test_skips_players_outside_activity_window(self):
+        self._make("Idle60d", days_idle=60)
+        out = StringIO()
+        call_command(
+            "establish_battle_history_baseline",
+            "--realm", "na", "--days", "7", "--dry-run",
+            stdout=out,
+        )
+        self.assertIn("0 candidates", out.getvalue())
+
+    def test_skips_other_realms(self):
+        self._make("EuActive", days_idle=2, realm="eu")
+        out = StringIO()
+        call_command(
+            "establish_battle_history_baseline",
+            "--realm", "na", "--days", "7", "--dry-run",
+            stdout=out,
+        )
+        self.assertIn("0 candidates", out.getvalue())
+
+    def test_invokes_record_observation_and_diff_for_each_candidate(self):
+        self._make("Active1", days_idle=1)
+        self._make("Active2", days_idle=3)
+        with mock.patch(
+            "warships.incremental_battles.record_observation_and_diff",
+            return_value={"status": "completed", "events_created": 0,
+                          "reason": "baseline"},
+        ) as wg_call:
+            out = StringIO()
+            call_command(
+                "establish_battle_history_baseline",
+                "--realm", "na", "--days", "7", "--delay", "0",
+                stdout=out,
+            )
+        self.assertEqual(wg_call.call_count, 2)
+        # `realm=na` keyword is passed through.
+        for call in wg_call.call_args_list:
+            self.assertEqual(call.kwargs.get("realm"), "na")
+        self.assertIn("baseline=2", out.getvalue())
+
+    def test_limit_caps_processing(self):
+        for i in range(5):
+            self._make(f"ActivePlayer{i}", days_idle=i + 1)
+        with mock.patch(
+            "warships.incremental_battles.record_observation_and_diff",
+            return_value={"status": "completed", "reason": "baseline"},
+        ) as wg_call:
+            out = StringIO()
+            call_command(
+                "establish_battle_history_baseline",
+                "--realm", "na", "--days", "7",
+                "--limit", "2", "--delay", "0",
+                stdout=out,
+            )
+        self.assertEqual(wg_call.call_count, 2)
+        self.assertIn("limited to 2", out.getvalue())
+
+    def test_handles_wg_fetch_failure_without_aborting(self):
+        self._make("Active1", days_idle=1)
+        self._make("Active2", days_idle=2)
+        with mock.patch(
+            "warships.incremental_battles.record_observation_and_diff",
+            side_effect=[
+                {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"},
+                {"status": "completed", "reason": "baseline"},
+            ],
+        ) as wg_call:
+            out = StringIO()
+            call_command(
+                "establish_battle_history_baseline",
+                "--realm", "na", "--days", "7", "--delay", "0",
+                stdout=out,
+            )
+        self.assertEqual(wg_call.call_count, 2)
+        self.assertIn("wg_failed=1", out.getvalue())
+        self.assertIn("baseline=1", out.getvalue())
+
+
 class BattleHistoryEndpointTests(TestCase):
     """Phase 4 read-side API."""
 
