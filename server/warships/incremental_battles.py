@@ -153,10 +153,14 @@ def compute_battle_events(
     with stable keys: ship_id, battles_delta, wins_delta, losses_delta,
     frags_delta, damage_delta, xp_delta, planes_killed_delta, survived_delta,
     survived. Empty list when nothing advanced.
-    """
-    if current.pvp_battles <= previous.pvp_battles:
-        return []
 
+    Note: deliberately does NOT short-circuit on `current.pvp_battles <=
+    previous.pvp_battles`. WG's `account/info` (where pvp_battles comes
+    from) and `ships/stats` (where per-ship battles come from) don't
+    update in lockstep — ships can advance while account hasn't caught
+    up, and vice versa. Diffing per-ship is the authoritative path; the
+    per-ship loop below correctly returns [] when no ship advanced.
+    """
     events: List[Dict[str, Any]] = []
     for ship_id, current_ship in current.ships.items():
         previous_ship = previous.ships.get(ship_id)

@@ -128,6 +128,28 @@ class ComputeBattleEventsTests(TestCase):
         self.assertEqual(events[0]["battles_delta"], 1)
         self.assertTrue(events[0]["survived"])
 
+    def test_emits_event_when_ships_advance_but_account_pvp_battles_does_not(self):
+        """Regression: WG's account/info and ships/stats endpoints don't
+        update in lockstep. ships/stats can advance while pvp_battles
+        hasn't caught up yet — a per-ship advance must still produce an
+        event regardless of the player-aggregate count."""
+        before = _make_snapshot(pvp_battles=100, ships={
+            42: {"battles": 50, "wins": 25, "frags": 40,
+                 "damage_dealt": 1_000_000, "xp": 50_000,
+                 "survived_battles": 30},
+        })
+        # account/info pvp_battles stayed at 100 — pipeline lag — but the
+        # per-ship row already shows the next match.
+        after = _make_snapshot(pvp_battles=100, pvp_wins=50, ships={
+            42: {"battles": 51, "wins": 26, "frags": 42,
+                 "damage_dealt": 1_048_000, "xp": 51_500,
+                 "survived_battles": 31},
+        })
+        events = compute_battle_events(before, after)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["battles_delta"], 1)
+        self.assertEqual(events[0]["wins_delta"], 1)
+
     def test_multi_match_collapsed_event_has_null_survived(self):
         before = _make_snapshot(pvp_battles=100, ships={
             42: {"battles": 50, "survived_battles": 30},
