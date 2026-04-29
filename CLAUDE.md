@@ -149,7 +149,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Bulk entity cache loader**: Periodic task (every 12h) pre-loads top 50 players + members of 25 best-scored clans + top 25 clans into Redis. Uses `score_best_clans()` composite ranking (WR 30%, activity 25%, member score 20%, CB recency 15%, volume 10%). See `runbook-best-clan-eligibility.md`.
 - **Landing page warmer**: Periodic task (every 55 min) refreshes all landing payloads + population distributions + population correlations; Best clan mode also uses `score_best_clans()`. `queue_landing_page_warm()` short-circuits when the warm-task lock is already held, preventing the cache-fallback paths inside the warm itself from re-enqueueing duplicates while the parent task runs.
 - **Distribution & correlation warming**: Proactive warming of player population distributions (WR, battles, avg tier) and correlations (tier-type, ranked WR-battles, WR-survival) every 55 min via the landing page task and on startup. TTL is 2 hours. Eliminates cold-cache penalty (10-30s full table scans).
-- **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) dispatches `startup_warm_caches_task` to the Celery background queue — sequentially warms landing page, hot entities, bulk cache, distributions, and correlations. Runs inside an existing worker rather than spawning a subprocess. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `runbook-deploy-oom-startup-warmers.md`.
+- **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) dispatches `startup_warm_caches_task` to the Celery background queue — sequentially warms landing page, hot entities, bulk cache, distributions, and correlations. Runs inside an existing worker rather than spawning a subprocess. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `agents/runbooks/archive/runbook-deploy-oom-startup-warmers.md`.
 - **Player search suggestions**: Three-tier cache — client-side `Map` (instant, session-scoped, 200-entry cap) → Redis (10 min TTL, `suggest:<query>` keys) → Postgres with `pg_trgm` GIN index (`player_name_trgm_idx`). Minimum 3-character query. Raw `ILIKE` in `views.py` (Django's `icontains` generates `UPPER()` which bypasses trigram indexes).
 - **Clan search suggestions**: Same three-tier pattern as player suggestions. Endpoint: `/api/landing/clan-suggestions`. Matches on `Clan.name` OR `Clan.tag` via `ILIKE` with `pg_trgm` GIN indexes (`clan_name_trgm_idx`, `clan_tag_trgm_idx`). Redis key: `{realm}:clan-suggest:{query}`, 600s TTL. Ordered by prefix match → `members_count` DESC → name. Client-side cache is keyed separately per search mode.
 - **Clan battle seasons (clan-level)**: Request-driven — first visit queues `update_clan_battle_summary_task` which calls `refresh_clan_battle_seasons_cache()`. This fetches per-member CB stats from the WG API via ThreadPoolExecutor, aggregates by season, and writes to **Redis only** (TTL-based). Configured clans are pre-warmed by `warm_clan_battle_summaries_task` (env: `CLAN_BATTLE_WARM_CLAN_IDS`). Subsequent visits hit Redis until TTL expiry.
@@ -181,7 +181,7 @@ Player detail pages coordinate chart rendering vs hydration polling:
 - Tab warmup fires 4 parallel chart requests via `requestIdleCallback` (250ms timeout)
 - Clan member fetch is deferred until warmup settles (with 10s hard timeout fallback)
 - `sharedJsonFetch.ts` exposes a `chartFetchesInFlight` counter; `useClanMembers` backs off to 6s poll intervals while charts are in-flight
-- See `runbook-player-page-load-priority.md` for full diagnosis and architecture
+- See `agents/runbooks/archive/runbook-player-page-load-priority.md` for full diagnosis and architecture
 
 ### Database optimizations
 
@@ -281,6 +281,9 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `CLAN_CRAWL_SCHEDULE_HOUR` / `CLAN_CRAWL_SCHEDULE_MINUTE` — Base UTC hour/minute for the daily clan crawl cron; per-realm offsets come from `REALM_CRAWL_CRON_HOURS` in `signals.py` (defaults: hour=`3`, minute=`0`)
 - `CLAN_CRAWL_WATCHDOG_MINUTES` — Clan crawl watchdog poll interval in minutes (default: `5`)
 - `PLAYER_REFRESH_INTERVAL_MINUTES` — Incremental player refresh cadence per realm (default: `180`). Each cycle walks the graduated hot/active/warm tiers and takes ~35-78 min/realm at steady state, so the safe minimum is `cycle_time × num_realms / num_slots`.
+- `PLAYER_REFRESH_HOT_STALE_HOURS` — Hot-tier staleness threshold for incremental player refresh (default: `12`). Players whose `last_lookup` is within this window are visited every cycle.
+- `PLAYER_REFRESH_ACTIVE_STALE_HOURS` — Active-tier staleness threshold (default: `24`).
+- `PLAYER_REFRESH_WARM_STALE_HOURS` — Warm-tier staleness threshold (default: `72`). Outside this window players drop to occasional refreshes.
 - `RANKED_REFRESH_INTERVAL_MINUTES` — Incremental ranked refresh cadence per realm (default: `120`)
 - `CELERY_BROKER_HEARTBEAT` — amqp heartbeat in seconds; `0` disables (default: `0`). The default 60s heartbeat is starved by long-running tasks (`incremental_player_refresh_task`), causing `BrokenPipeError on stopping Hub` and systemd worker restarts. We rely on TCP keepalive instead.
 - `ENABLE_AGENTIC_RUNTIME` — Enable `/trace` and optional agentic runtime paths (default: `0` on the droplet)
@@ -295,6 +298,11 @@ The agentic memory layer plugs into the LangGraph `_retrieve_guidance` node only
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
 - `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)
 - `ENRICH_REALMS` — Comma-separated realm list for enrichment crawler (e.g. `na`, `na,eu`). Empty or unset means all realms
+- `ENRICH_BATCH_SIZE` — Players enriched per `enrich_player_data_task` invocation before the task self-chains (default: `500`).
+- `ENRICH_MIN_PVP_BATTLES` — Minimum `pvp_battles` for a player to be enrichment-eligible (default: `500`). Filters out low-activity / new accounts.
+- `ENRICH_MIN_WR` — Minimum `pvp_ratio` (win rate %) for enrichment eligibility (default: `48.0`). Skips clearly sub-average accounts to focus the crawler.
+- `ENRICH_DELAY` — Per-player delay (seconds) inside the enrichment loop, paced for the WG API rate budget (default: `0.2`).
+- `ENRICH_PAUSE_BETWEEN_BATCHES` — Cooldown (seconds) between self-chained enrichment batches (default: `10`). Backs off if upstream is hot.
 - `BATTLE_TRACKING_PLAYER_NAMES` — Comma-separated player names tracked by the incremental-battle PoC dispatcher. Empty/unset on production = no-op. Local dev sets it to `lil_boots`. See `agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md`
 - `BATTLE_TRACKING_POLL_SECONDS` — Beat tick interval for the PoC dispatcher (default: `60`)
 - `BATTLE_HISTORY_CAPTURE_ENABLED` — When `1`, the tail of `update_battle_data` writes a `BattleObservation` (and any resulting `BattleEvent` rows) for every refreshed player as a side-effect of the existing `ships/stats/` fetch. No new WG calls. Default `0`. See `agents/runbooks/runbook-battle-history-rollout-2026-04-28.md` (Phase 2)

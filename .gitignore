@@ -33,7 +33,6 @@ test-results/
 tests/load/results/
 
 # Development artifacts
-updated-landing
 *.har
 
 # Account deletion requests (contains PII)
