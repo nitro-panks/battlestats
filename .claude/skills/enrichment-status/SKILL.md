@@ -35,7 +35,7 @@ Walk the output sections and apply pattern-matching against known failure modes:
 **Worker Health**
 - `ActiveState=active`, `SubState=running` → healthy
 - `NRestarts > 5` in recent uptime → instability; check `runbook-incident-celery-zombie-worker-2026-04-12.md`
-- `MemoryCurrent` near systemd limit → OOM risk; cross-reference `runbook-droplet-memory-tuning-2026-04-02.md`
+- `MemoryCurrent` near systemd limit → OOM risk; cross-reference `archive/runbook-droplet-memory-tuning-2026-04-02.md`
 - High swap usage → memory pressure
 
 **Redis Lock**
@@ -71,7 +71,7 @@ If something is wrong, recommend the action with the specific command. Examples:
 
 - "Worker has 0 consumers despite ActiveState=active. Classic zombie pattern. Watchdog should fire within 5 min; if not, restart manually: `ssh root@battlestats.online systemctl restart battlestats-celery-background`"
 - "Stale Redis lock detected. Release: `ssh root@battlestats.online redis-cli DEL <lock_key>`"
-- "Memory near limit. Check `runbook-droplet-memory-tuning-2026-04-02.md` before restart."
+- "Memory near limit. Check `archive/runbook-droplet-memory-tuning-2026-04-02.md` before restart."
 
 **Never restart services or release locks automatically.** The user makes the call.
 

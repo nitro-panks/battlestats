@@ -32,13 +32,11 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 ## Evergreen Operational Guides
 
 - `runbook-celery-queue-strategy.md`: current queue assessment for crawlers, warmers, and request-driven refresh tasks.
-- `runbook-droplet-memory-tuning-2026-04-02.md`: current droplet memory sizing and worker tuning snapshot.
 - `runbook-enrichment-crawler-2026-04-03.md`: enrichment progress log. Enrichment runs on the droplet's Celery `background` worker via `enrich_player_data_task`, re-seeded by the `player-enrichment-kickstart` Beat schedule.
 - `runbook-deleted-account-purge.md`: purge flow and safety notes for deleted accounts.
 - `runbook-dependency-audit.md`: dependency hygiene policy and current audit posture.
 - `runbook-post-deploy-post-bounce-operations-2026-04-05.md`: required post-redeploy verification, post-bounce behavior, and bounded warm sequencing.
 - `runbook-daily-data-refresh-schedule-2026-04-05.md`: daily refresh cadences and periodic task windows (note: the DO Functions enrichment schedule referenced inside was reverted 2026-04-08 — see the status banner at the top of that runbook).
-- `runbook-abs-deprecation-2026-04-07.md`: implemented ABS and clan-CB best-sort retirement plan, plus remaining deploy-time artifact cleanup steps.
 
 ## Evergreen Architecture And Policy Guides
 
@@ -64,7 +62,6 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 
 - `runbook-client-test-hardening.md`: frontend regression and test harness guidance.
 - `runbook-codebase-improvement.md`: evergreen maintenance heuristics.
-- `runbook-efficiency-rank-qa-2026-04-02.md`: current QA posture for efficiency-rank behavior.
 - `runbook-mobile-player-detail-charts.md`: mobile chart rendering behavior on player detail.
 - `runbook-mobile-routing-bugs.md`: mobile route-loading regressions and known fixes.
 - `runbook-multi-realm-hardening.md`: recent multi-realm cleanup and remaining hardening notes.
@@ -74,12 +71,8 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 Open these only when the task matches them directly:
 
 - `runbook-agentic-next-steps-2026-04-02.md`
-- `runbook-clan-tier-distribution-recovery-2026-04-02.md`
-- `runbook-droplet-memory-tuning-2026-04-02.md`
-- `runbook-efficiency-rank-qa-2026-04-02.md`
 - `runbook-enrichment-crawler-2026-04-03.md`: progress log for the active enrichment crawl pass (batches, disruptions, check-ins)
 - `runbook-landing-best-player-subsort-materialization-2026-04-05.md`: current Best-player snapshot materialization and cache behavior
-- `runbook-abs-deprecation-2026-04-07.md`: implemented retirement of ABS and clan-CB best sorts, with deploy cleanup steps for stale snapshots and caches
 - `runbook-streamer-twitch-icon-2026-04-07.md`: static streamer flag and Twitch badge rollout plan
 - `runbook-streamer-submission-feature-2026-04-07.md`: streamer submission queue (footer modal + admin moderation), with deferred approval-side promotion
 - `runbook-security-audit-2026-04-05.md`: Wapiti production audit findings and remediation plan (nginx headers, input validation)

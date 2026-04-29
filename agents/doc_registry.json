@@ -673,10 +673,10 @@
                 "plan-superseded"
             ]
         },
-        "agents/runbooks/runbook-abs-deprecation-2026-04-07.md": {
+        "agents/runbooks/archive/runbook-abs-deprecation-2026-04-07.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "platform",
             "aliases": [
@@ -725,10 +725,10 @@
                 "feature-superseded"
             ]
         },
-        "agents/runbooks/runbook-clan-tier-distribution-recovery-2026-04-02.md": {
+        "agents/runbooks/archive/runbook-clan-tier-distribution-recovery-2026-04-02.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "frontend",
             "aliases": [
@@ -747,10 +747,10 @@
                 "recovery-plan-superseded"
             ]
         },
-        "agents/runbooks/runbook-droplet-memory-tuning-2026-04-02.md": {
+        "agents/runbooks/archive/runbook-droplet-memory-tuning-2026-04-02.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "backend",
             "aliases": [
@@ -769,10 +769,10 @@
                 "droplet-profile-changed"
             ]
         },
-        "agents/runbooks/runbook-efficiency-rank-qa-2026-04-02.md": {
+        "agents/runbooks/archive/runbook-efficiency-rank-qa-2026-04-02.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "qa",
             "aliases": [

@@ -15,7 +15,7 @@ Updated product direction:
 2. the main clan chart should remain KDR-based or use another non-tier stat
 3. the aggregate tier histogram should return later as a separate secondary chart only after the tier data lane is complete and operationally trusted
 
-Use `agents/runbooks/runbook-clan-tier-distribution-recovery-2026-04-02.md` as the current planning source of truth.
+Use `agents/runbooks/archive/runbook-clan-tier-distribution-recovery-2026-04-02.md` as the current planning source of truth.
 
 The remaining content in this runbook is retained as historical context for the earlier tier-based 3D exploration.
 
