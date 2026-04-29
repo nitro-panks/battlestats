@@ -88,6 +88,9 @@ def _attach_clan_battle_activity_badges(rows: list[dict], realm: str = DEFAULT_R
 LANDING_CACHE_TTL = 60 * 60 * 6
 LANDING_CLAN_CACHE_TTL = 60 * 60 * 6
 LANDING_PLAYER_CACHE_TTL = 60 * 60 * 6
+# Recent players churn quickly (driven by capture-hook battle detection),
+# so they get a tighter TTL than the broader landing surfaces.
+LANDING_RECENT_PLAYERS_CACHE_TTL = 60 * 15
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v4'
 LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v4:meta'
 LANDING_CLANS_PUBLISHED_CACHE_KEY = 'landing:clans:v4:published'
@@ -2309,7 +2312,7 @@ def get_landing_recent_players_payload(force_refresh: bool = False, realm: str =
     payload = None if force_refresh or is_dirty else cache.get(cache_key)
     if payload is None:
         payload = _build_recent_players(realm=realm)
-        cache.set(cache_key, payload, LANDING_CACHE_TTL)
+        cache.set(cache_key, payload, LANDING_RECENT_PLAYERS_CACHE_TTL)
         if is_dirty:
             cache.delete(dirty_key)
     return payload
