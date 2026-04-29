@@ -181,7 +181,11 @@ const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SHOW_PLAYER_EXPLORER = false;
-const LANDING_FETCH_TTL_MS = 1500;
+// Backend caches recent players for 15 min and best/random for 6 h, so a
+// 60-second client-side TTL lets SPA back-navigations to the landing page
+// hit the in-memory cache (no network, no empty-state flash) while still
+// catching meaningful churn within a single session.
+const LANDING_FETCH_TTL_MS = 60_000;
 
 type LandingClanMode = 'random' | 'best' | 'recent';
 type ClanBestSort = 'overall' | 'wr';
