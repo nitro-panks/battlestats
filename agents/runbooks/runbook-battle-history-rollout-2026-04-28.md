@@ -134,21 +134,21 @@ Two writers, both gated by `BATTLE_HISTORY_ROLLUP_ENABLED`, both idempotent on t
 
 Both writers share a helper `_apply_event_to_daily_summary(event)` so the math lives in one place.
 
-### Retention model — durable stream + rolling forensic window
+### Retention model — durable stream, no pruning ever
 
-The conceptual model is a **single unbounded stream of capture events per player**, of which the 7-day card is one bounded window. Daily / weekly / monthly / yearly rollups are progressively coarser windows over the same stream. Nothing in the analytical record gets thrown away.
+The conceptual model is a **single unbounded stream of capture events per player**, of which the 7-day card is one bounded window. Daily / weekly / monthly / yearly rollups are progressively coarser windows over the same stream. **Every tier is kept forever.** No data is ever deleted.
 
-Tier 1: **`PlayerDailyShipStats` is the durable artifact — kept forever.** This is the floor of displayed resolution and the source for all coarser rollups. Storage: ~10 K rows/day at playerbase scale, ~3.6 M rows/year, fine for Postgres for many years before any compression revisit.
+Tier 1: **`PlayerDailyShipStats`** — the analytical floor. Source for all coarser rollups. ~10 K rows/day at playerbase scale, ~3.6 M rows/year. Trivial Postgres scale.
 
-Tier 2: **`PlayerWeeklyShipStats` / `PlayerMonthlyShipStats` / `PlayerYearlyShipStats`** (Phase 6 below — not in the initial rollout) — also durable. Materialized rollups built from the daily layer, 1/7, 1/30, 1/365 the row count respectively.
+Tier 2: **`PlayerWeeklyShipStats` / `PlayerMonthlyShipStats` / `PlayerYearlyShipStats`** — materialized rollups, 1/7, 1/30, 1/365 the row count of tier 1.
 
-Tier 3 (forensic): **`BattleObservation`** — heavy JSON (~30–60 KB/row), only useful as the prior-state input to the next diff. Pruned on a rolling forensic window via `cleanup_old_battle_observations_task` (`BATTLE_OBSERVATION_RETENTION_DAYS`, default `14`).
+Tier 3: **`BattleObservation`** — heavy JSON (~30–60 KB/row), the prior-state input for each diff. **Also kept forever**, even though only the most-recent per player is needed for the next diff. The historical observations are the only path to rebuilding the rollup tables byte-for-byte from scratch if a bug ever invalidates them.
 
-Tier 4 (forensic): **`BattleEvent`** — small, one row per detected match per ship. Could keep forever; cheap. Default plan: keep 1 year, then prune. The daily rollup carries the analytical record forward.
+Tier 4: **`BattleEvent`** — small, one row per detected match per ship. **Also kept forever**, for the same reconstructibility reason: events let us rebuild any past day's `PlayerDailyShipStats` without having to re-poll WG (which can't return historical data anyway).
 
-Pruning runs only against tiers 3 and 4. **The analytical record (tiers 1 + 2) is permanent.**
+**No pruning task ships.** The earlier draft of this runbook included `cleanup_old_battle_observations_task` with a 14-day forensic window; that task is **explicitly out of scope**. If storage growth ever becomes a real cost, the response is compression (Phase 9 below), not deletion.
 
-The rolling forensic prune is enabled only **after 14 days of data exist** — otherwise the cleanup would target the only observations we have.
+Storage envelope (for planning, not for action): at full playerbase capture, ~10 K observations/day per realm × ~50 KB/row × 365 days × N years ≈ ~180 GB/year/realm. Postgres `jsonb` already does row-level compression; if the cost ever justifies it, Phase 9 compresses or columnar-stores the cold tail without losing data.
 
 ### API
 
@@ -267,18 +267,11 @@ SELECT SUM(battles), SUM(damage) FROM warships_playerdailyshipstats
 
 Flip the API flag. `GET /api/player/<name>/battle-history?days=N` goes live. Curl-verify against a known-active player; expect p95 < 50 ms warm, < 200 ms cold. Frontend deploy ships `BattleHistoryCard` in the same window — the card silently no-ops when `totals.battles=0`, so cold-start players see nothing extra on their detail page.
 
-### Day 14+ — pruning
+### Day 14+ — no pruning (data is durable)
 
-Once at least 14 days of capture data exist, enable retention:
+There is no pruning step. All four tiers (`PlayerDailyShipStats`, `Player{Weekly,Monthly,Yearly}ShipStats`, `BattleObservation`, `BattleEvent`) are retained forever per the retention model above. The only operational concern past day 14 is monitoring storage growth and considering Phase 9 (compression) if real measurements justify it.
 
-```bash
-# Dry-run first to confirm the row count targeted matches expectation.
-python manage.py rebuild_player_daily_ship_stats --since 2026-MM-DD --dry-run  # use as a similar-shape probe
-```
-
-Then set `BATTLE_OBSERVATION_RETENTION_DAYS=14` on the droplet env. Daily prune sweeps `BattleObservation` rows older than 14 days. `BattleEvent` and `PlayerDailyShipStats` rows are untouched.
-
-Reversibility: un-flip any flag at any stage and the system returns to its pre-rollout behavior. Tables remain (harmless). No production data is on the line until day 14.
+Reversibility: un-flip any flag at any stage and the system returns to its pre-rollout behavior. Tables remain — and that's the point. Captured data is durable.
 
 ## Scaling to all active players
 
@@ -316,7 +309,7 @@ The PoC's 60 s tracked-player loop continues to run for `lil_boots` and any othe
 
 ## Operational watchpoints
 
-- **Storage growth** in `warships_battleobservation`. Pruning at day-14 is non-negotiable. Watch `pg_total_relation_size` daily during the first two weeks; if it overshoots the ~7 GB/realm envelope before pruning enables, narrow the per-ship JSON shape (`incremental_battles.py:_serialize_ships_payload`) first rather than disabling capture.
+- **Storage growth** in `warships_battleobservation`. Data is kept forever; growth is unbounded by design. Watch `pg_total_relation_size` weekly. If growth tracks above the planning envelope (~180 GB/year/realm), narrow the per-ship JSON shape (`incremental_battles.py:_serialize_ships_payload`) or open Phase 9 (compression / columnar). Never disable capture and never delete rows.
 - **Worker queue depth.** Each `update_battle_data` now does an extra DB write + diff (negligible per call). Watch `celery -A battlestats inspect active` after the capture flip; if depth climbs unexpectedly the diff is hot-pathing somewhere it shouldn't.
 - **API p95 latency** on `/api/player/.../battle-history`. Should be sub-50 ms warm, sub-200 ms cold. The cold case for a player with thousands of `PlayerDailyShipStats` rows is the worst-case shape — load-test before flipping.
 - **Cache invalidation.** The 5-min Redis TTL is forgiving. If immediate freshness on the card after a player refresh is wanted, hook the existing `update_player_data` callsite to `cache.delete_pattern("...battle-history*")`. Optional, costs a few % of refresh latency.
@@ -350,17 +343,17 @@ Unset any of `BATTLE_HISTORY_CAPTURE_ENABLED`, `BATTLE_HISTORY_ROLLUP_ENABLED`, 
 3. **Idempotency.** Re-running the nightly sweeper twice produces identical row counts and values (the `update_or_create` path is the only writer per `(player, date, ship_id)`).
 4. **Read latency.** `/api/player/lil_boots/battle-history?days=7` returns p95 < 50 ms warm cache, < 200 ms cold.
 5. **Backfill rebuild.** Drop a day's `PlayerDailyShipStats` rows for one player; run `rebuild_player_daily_ship_stats --since <day>`; confirm rows return to identical state.
-6. **Pruning safety.** `cleanup_old_battle_observations_task` with retention=14 days, run with `--dry-run` first; verify it does not touch `BattleEvent` rows.
+6. **No pruning, ever.** There is no cleanup task in this rollout. All four tiers are durable. Never write a query or task that deletes rows from `BattleObservation`, `BattleEvent`, or any rollup table.
 
 ## WG API budget
 
 No new calls. Capture is a pure side-effect of fetches that already happen for `update_player_data` / `update_battle_data`. Rate budget is unchanged from the current site.
 
-The one cost is **storage and write amplification**: every refresh now writes a `BattleObservation` (~30–60 KB JSON). Mitigations:
+The one cost is **storage and write amplification**: every refresh writes a `BattleObservation` (~30–60 KB JSON). Per the retention model, none of this is ever pruned, so the responses are pure-shrink (not delete):
 
-- 14-day retention on `BattleObservation`.
-- `ships_stats_json` only includes ships where `pvp.battles > 0` (4–8× shrink).
-- Postgres `jsonb` is already efficient; if size becomes a problem, a follow-on can compress to `bytea` + zstd.
+- `ships_stats_json` only includes ships where `pvp.battles > 0` (4–8× shrink already in place).
+- Postgres `jsonb` does row-level compression by default.
+- Phase 9 (compression / columnar / cold-archive) opens if real storage measurements justify it. Until then, the cost of keeping everything is bounded and acceptable on Postgres.
 
 ## Out of scope (filed for future phases)
 
@@ -383,14 +376,14 @@ Filed here so a future engineer knows what got deliberately deferred and where t
 | `server/warships/models.py`                                              | Add `PlayerDailyShipStats`.                                                                                                                                                                                         |
 | `server/warships/migrations/00XX_player_daily_ship_stats.py`             | Generated.                                                                                                                                                                                                          |
 | `server/warships/data.py:2365`                                           | Call `record_observation_from_payloads` at tail of `update_battle_data`, gated by `BATTLE_HISTORY_CAPTURE_ENABLED`. Failures logged and swallowed.                                                                  |
-| `server/warships/tasks.py`                                               | Add `roll_up_player_daily_ship_stats_task`, `cleanup_old_battle_observations_task`.                                                                                                                                 |
+| `server/warships/tasks.py`                                               | Add `roll_up_player_daily_ship_stats_task`. (No cleanup task — data is kept forever.)                                                                                                                                 |
 | `server/warships/signals.py`                                             | Register nightly Beat schedules for both new tasks. Gate via env flags.                                                                                                                                             |
 | `server/warships/views.py`                                               | Add `@api_view` `battle_history` endpoint.                                                                                                                                                                          |
 | `server/warships/management/commands/rebuild_player_daily_ship_stats.py` | New.                                                                                                                                                                                                                |
 | `client/app/components/BattleHistoryCard.tsx`                            | New (deferrable).                                                                                                                                                                                                   |
 | `client/app/components/PlayerDetail.tsx`                                 | Mount `BattleHistoryCard` when totals.battles > 0 (deferrable).                                                                                                                                                     |
 | `client/app/lib/chartTheme.ts`, `client/app/lib/wrColor.ts`              | Reused as-is.                                                                                                                                                                                                       |
-| `CLAUDE.md` (env section)                                                | Document `BATTLE_HISTORY_CAPTURE_ENABLED`, `BATTLE_HISTORY_ROLLUP_ENABLED`, `BATTLE_HISTORY_API_ENABLED`, `BATTLE_OBSERVATION_RETENTION_DAYS`.                                                                      |
+| `CLAUDE.md` (env section)                                                | Document `BATTLE_HISTORY_CAPTURE_ENABLED`, `BATTLE_HISTORY_ROLLUP_ENABLED`, `BATTLE_HISTORY_API_ENABLED`. No retention env var — data is durable.                                                                      |
 
 ## References
 
