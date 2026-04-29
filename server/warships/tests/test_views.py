@@ -1092,6 +1092,41 @@ class ClanMembersEndpointTests(TestCase):
 
     @patch("warships.data.update_clan_members")
     @patch("warships.data.update_clan_data")
+    def test_clan_members_days_since_last_battle_derives_from_last_battle_date(
+        self,
+        mock_update_clan_data,
+        mock_update_clan_members,
+    ):
+        # Regression: the stored `days_since_last_battle` column is a
+        # snapshot taken at refresh time and drifts by 1 day per day
+        # without a refresh. The clan_members endpoint must surface a
+        # value derived from `last_battle_date` so the displayed
+        # "X days idle" label tracks the actual gap (and matches the
+        # row ordering).
+        today = timezone.now().date()
+        clan = Clan.objects.create(
+            clan_id=4243, name="Drift Clan", members_count=1)
+        Player.objects.create(
+            name="StaleSnapshot",
+            player_id=14,
+            clan=clan,
+            is_hidden=False,
+            last_battle_date=today - timedelta(days=5),
+            # Intentionally stale stored value — the response must NOT
+            # surface this; it should compute 5 from last_battle_date.
+            days_since_last_battle=1,
+        )
+
+        response = self.client.get("/api/fetch/clan_members/4243/")
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "StaleSnapshot")
+        self.assertEqual(rows[0]["days_since_last_battle"], 5)
+
+    @patch("warships.data.update_clan_members")
+    @patch("warships.data.update_clan_data")
     def test_clan_members_returns_data_when_members_exist(
         self,
         mock_update_clan_data,

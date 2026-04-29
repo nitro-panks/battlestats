@@ -989,11 +989,13 @@ def clan_members(request, clan_id: str) -> Response:
         )
 
     # B1: Check response cache before doing expensive member serialization.
-    # v2 of the cache key: ordering simplified to recently-played-first
-    # (with hidden players sinking to the bottom), so v1 entries served
-    # under the old player_score-primary ordering are skipped.
+    # v3 of the cache key: `days_since_last_battle` is now derived from
+    # `last_battle_date` at response-build time rather than read from the
+    # stored snapshot column (which goes stale by 1 day/day between
+    # refreshes). v2 entries served the stored, drifting value, so they
+    # are bypassed.
     CLAN_MEMBERS_CACHE_TTL = 300  # 5 minutes
-    cache_key = realm_cache_key(realm, f'clan:members:v2:{clan_id}')
+    cache_key = realm_cache_key(realm, f'clan:members:v3:{clan_id}')
     cached = cache.get(cache_key)
     if cached is not None:
         response = Response(cached)
@@ -1019,19 +1021,34 @@ def clan_members(request, clan_id: str) -> Response:
     pending_efficiency_player_ids = efficiency_hydration_state['pending_player_ids']
 
     leader_name = (clan.leader_name or '').strip().lower()
-    member_rows = [
-        {
+    today = timezone.now().date()
+
+    def _days_since_last_battle(member) -> int | None:
+        # Derive from `last_battle_date` rather than the stored
+        # `days_since_last_battle` field — the stored value is a snapshot
+        # taken at refresh time and goes stale by 1/day until the next
+        # refresh. The order column (`last_battle_date`) is the source of
+        # truth, and this keeps the displayed "X days idle" label
+        # consistent with the row order.
+        if not member.last_battle_date:
+            return None
+        return max(0, (today - member.last_battle_date).days)
+
+    member_rows = []
+    for member in members:
+        days_since = _days_since_last_battle(member)
+        member_rows.append({
             'name': member.name,
             'is_hidden': member.is_hidden,
             'is_streamer': member.is_streamer,
             'pvp_ratio': member.pvp_ratio,
-            'days_since_last_battle': member.days_since_last_battle,
+            'days_since_last_battle': days_since,
             'is_leader': (
                 (clan.leader_id is not None and member.player_id == clan.leader_id)
                 or (leader_name and member.name.strip().lower() == leader_name)
             ),
             'is_pve_player': is_pve_player(member.total_battles, member.pvp_battles),
-            'is_sleepy_player': is_sleepy_player(member.days_since_last_battle),
+            'is_sleepy_player': is_sleepy_player(days_since),
             'is_ranked_player': is_ranked_player(member.ranked_json),
             'is_clan_battle_player': is_clan_battle_enjoyer(
                 getattr(getattr(member, 'explorer_summary', None),
@@ -1045,9 +1062,7 @@ def clan_members(request, clan_id: str) -> Response:
             'ranked_hydration_pending': member.player_id in pending_player_ids,
             'ranked_updated_at': member.ranked_updated_at,
             **_get_published_efficiency_rank_payload(member),
-        }
-        for member in members
-    ]
+        })
 
     serializer = ClanMemberSerializer(member_rows, many=True)
     serialized_data = serializer.data
