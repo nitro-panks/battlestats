@@ -441,7 +441,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 : period === 'monthly' ? 'months' : 'years'}`}
                     </h2>
                     <div className="flex items-center gap-1 text-xs">
-                        {(['daily', 'weekly', 'monthly', 'yearly'] as Period[]).map((p) => (
+                        {/* Weekly/monthly/yearly hidden until rollup data is available. */}
+                        {(['daily'] as Period[]).map((p) => (
                             <button
                                 key={p}
                                 type="button"
