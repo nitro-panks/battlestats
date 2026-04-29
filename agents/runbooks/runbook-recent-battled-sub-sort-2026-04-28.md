@@ -2,7 +2,7 @@
 
 _Created: 2026-04-28_
 _Context: Repurpose the post-merge battle-history capture pipeline (`runbook-battle-history-rollout-2026-04-28.md`, migrations 0051–0054) to drive a new landing-page player sub-sort that orders by **most-recently-detected random battle** rather than by page-view recency. Existing `Recent` surface (page-view ordering) stays — this is a sibling pill, not a replacement._
-_Status: planned_
+_Status: tranche-2-shipped (2026-04-29 — both tranches live; surface returns 18 rows on NA, 0 on EU pending fill)_
 
 ## Purpose
 
@@ -98,13 +98,13 @@ ssh root@battlestats.online "grep BATTLE_HISTORY /etc/battlestats-server.env"
 
 ### Day 2+ — observe fill rate
 
-Wait until at least one realm shows `filled >= 1000`. At ~10 min hot-tier ticks, ~1 h active-tier ticks, and ~3 h warm-tier ticks, expect:
+The surface is a top-25 ordered list. Threshold for shipping Tranche 2 is **whether `_build_active_players(realm)` returns ≥25 rows for at least one realm**, not a population-fill heuristic. A handful of hot-tier observations after the capture flag is on is typically enough — single curl-and-decide is the right shape:
 
-- ~hundreds within 1 h (hot tier)
-- ~few thousand within 6 h (active + hot)
-- steady-state by 24 h (warm tier completes one full cycle)
+```bash
+curl -sf 'https://battlestats.online/api/landing/active/?realm=na' | jq 'length'
+```
 
-If fill is materially slower than this, suspect that capture is gated upstream — re-check `BATTLE_HISTORY_CAPTURE_ENABLED` and Celery `background` queue health (`./scripts/healthcheck.sh`).
+If it's <25 after one tier-tick, wait one tick and retry. If still 0 after two ticks, suspect that capture is gated upstream — re-check `BATTLE_HISTORY_CAPTURE_ENABLED` and Celery `background` queue health (`./scripts/healthcheck.sh`).
 
 ### Day 3 — Tranche 2 deploy
 
