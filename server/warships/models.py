@@ -486,6 +486,21 @@ class BattleEvent(models.Model):
     xp_delta = models.IntegerField(null=True, blank=True)
     planes_killed_delta = models.IntegerField(null=True, blank=True)
     survived = models.BooleanField(null=True, blank=True)
+    # Phase 7 widening — gunnery / torpedoes / spotting / caps deltas.
+    main_shots_delta = models.IntegerField(default=0)
+    main_hits_delta = models.IntegerField(default=0)
+    main_frags_delta = models.IntegerField(default=0)
+    secondary_shots_delta = models.IntegerField(default=0)
+    secondary_hits_delta = models.IntegerField(default=0)
+    secondary_frags_delta = models.IntegerField(default=0)
+    torpedo_shots_delta = models.IntegerField(default=0)
+    torpedo_hits_delta = models.IntegerField(default=0)
+    torpedo_frags_delta = models.IntegerField(default=0)
+    damage_scouting_delta = models.IntegerField(default=0)
+    ships_spotted_delta = models.IntegerField(default=0)
+    capture_points_delta = models.IntegerField(default=0)
+    dropped_capture_points_delta = models.IntegerField(default=0)
+    team_capture_points_delta = models.IntegerField(default=0)
     from_observation = models.ForeignKey(
         BattleObservation,
         on_delete=models.CASCADE,
@@ -527,6 +542,25 @@ class PlayerDailyShipStats(models.Model):
     xp = models.BigIntegerField(default=0)
     planes_killed = models.IntegerField(default=0)
     survived_battles = models.IntegerField(default=0)
+    # Phase 7 widening — gunnery / torpedoes / spotting / caps daily aggregates.
+    # The weekly/monthly/yearly tiers (`_PlayerPeriodShipStatsBase`) are
+    # intentionally NOT widened in this slice; they have no live data yet
+    # (period rollup writer is paused) and will be widened in lockstep when
+    # that tier is reactivated.
+    main_shots = models.IntegerField(default=0)
+    main_hits = models.IntegerField(default=0)
+    main_frags = models.IntegerField(default=0)
+    secondary_shots = models.IntegerField(default=0)
+    secondary_hits = models.IntegerField(default=0)
+    secondary_frags = models.IntegerField(default=0)
+    torpedo_shots = models.IntegerField(default=0)
+    torpedo_hits = models.IntegerField(default=0)
+    torpedo_frags = models.IntegerField(default=0)
+    damage_scouting = models.IntegerField(default=0)
+    ships_spotted = models.IntegerField(default=0)
+    capture_points = models.IntegerField(default=0)
+    dropped_capture_points = models.IntegerField(default=0)
+    team_capture_points = models.IntegerField(default=0)
     first_event_at = models.DateTimeField(null=True, blank=True)
     last_event_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)

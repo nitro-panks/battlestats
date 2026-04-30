@@ -21,6 +21,9 @@ from warships.incremental_battles import (
     PlayerSnapshot,
     ShipSnapshot,
     _apply_event_to_daily_summary,
+    _coerce_ship_snapshot,
+    _hydrate_previous_snapshot,
+    _serialize_ships_payload,
     _snapshot_from_player_row,
     coerce_observation_payload,
     compute_battle_events,
@@ -1224,3 +1227,261 @@ class BattleHistoryPeriodApiTests(TestCase):
         self.assertEqual(body["period"], "daily")
         self.assertEqual(body["windows"], 14)
         self.assertEqual(body["window_days"], 14)
+
+
+# Phase 7 — gunnery / torpedoes / spotting / caps capture widening.
+PHASE7_SHIP_PAYLOAD = {
+    "main_battery": {"shots": 320, "hits": 90, "frags": 4},
+    "second_battery": {"shots": 80, "hits": 20, "frags": 1},
+    "torpedoes": {"shots": 18, "hits": 6, "frags": 2},
+    "damage_scouting": 45_000,
+    "ships_spotted": 7,
+    "capture_points": 50,
+    "dropped_capture_points": 30,
+    "team_capture_points": 200,
+}
+
+
+class Phase7CoercionTests(TestCase):
+    """`_coerce_ship_snapshot` reads the widened pvp block defensively."""
+
+    def test_missing_nested_objects_default_to_zero(self):
+        # Ship has no torpedoes and no secondary battery (e.g. some BBs).
+        # `_coerce_ship_snapshot` must treat the missing nested objects as
+        # zeros, not raise.
+        ship = {"ship_id": 99, "pvp": {"battles": 10, "main_battery": None}}
+        snap = _coerce_ship_snapshot(ship)
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap.main_shots, 0)
+        self.assertEqual(snap.torpedo_hits, 0)
+        self.assertEqual(snap.secondary_frags, 0)
+        self.assertEqual(snap.damage_scouting, 0)
+        self.assertEqual(snap.capture_points, 0)
+
+    def test_full_nested_payload_extracted(self):
+        ship = {"ship_id": 99, "pvp": {"battles": 10, **PHASE7_SHIP_PAYLOAD}}
+        snap = _coerce_ship_snapshot(ship)
+        self.assertEqual(snap.main_shots, 320)
+        self.assertEqual(snap.main_hits, 90)
+        self.assertEqual(snap.main_frags, 4)
+        self.assertEqual(snap.secondary_shots, 80)
+        self.assertEqual(snap.torpedo_shots, 18)
+        self.assertEqual(snap.torpedo_hits, 6)
+        self.assertEqual(snap.torpedo_frags, 2)
+        self.assertEqual(snap.damage_scouting, 45_000)
+        self.assertEqual(snap.ships_spotted, 7)
+        self.assertEqual(snap.capture_points, 50)
+        self.assertEqual(snap.dropped_capture_points, 30)
+        self.assertEqual(snap.team_capture_points, 200)
+
+
+class Phase7ComputeBattleEventsTests(TestCase):
+    """`compute_battle_events` emits the 14 widened delta keys."""
+
+    def _phase7_snapshot(self, *, battles, ship_id=42, **kwargs):
+        ship = ShipSnapshot(
+            ship_id=ship_id,
+            battles=battles,
+            wins=kwargs.pop("wins", 0),
+            losses=kwargs.pop("losses", 0),
+            frags=kwargs.pop("frags", 0),
+            damage_dealt=kwargs.pop("damage_dealt", 0),
+            xp=kwargs.pop("xp", 0),
+            planes_killed=0,
+            survived_battles=kwargs.pop("survived_battles", 0),
+            **kwargs,
+        )
+        return PlayerSnapshot(
+            pvp_battles=battles, pvp_wins=0, pvp_losses=0, pvp_frags=0,
+            pvp_survived_battles=0,
+            last_battle_time=datetime(2026, 4, 30, 12, 0, tzinfo=timezone.utc),
+            ships={ship_id: ship},
+        )
+
+    def test_diff_computes_all_phase7_deltas(self):
+        before = self._phase7_snapshot(
+            battles=10,
+            main_shots=300, main_hits=80, main_frags=3,
+            secondary_shots=70, secondary_hits=15, secondary_frags=1,
+            torpedo_shots=12, torpedo_hits=4, torpedo_frags=1,
+            damage_scouting=40_000, ships_spotted=5,
+            capture_points=40, dropped_capture_points=20, team_capture_points=180,
+        )
+        after = self._phase7_snapshot(
+            battles=11,
+            main_shots=320, main_hits=90, main_frags=4,
+            secondary_shots=80, secondary_hits=20, secondary_frags=1,
+            torpedo_shots=18, torpedo_hits=6, torpedo_frags=2,
+            damage_scouting=45_000, ships_spotted=7,
+            capture_points=50, dropped_capture_points=30, team_capture_points=200,
+        )
+        events = compute_battle_events(before, after)
+        self.assertEqual(len(events), 1)
+        e = events[0]
+        self.assertEqual(e["main_shots_delta"], 20)
+        self.assertEqual(e["main_hits_delta"], 10)
+        self.assertEqual(e["main_frags_delta"], 1)
+        self.assertEqual(e["secondary_shots_delta"], 10)
+        self.assertEqual(e["secondary_hits_delta"], 5)
+        self.assertEqual(e["secondary_frags_delta"], 0)
+        self.assertEqual(e["torpedo_shots_delta"], 6)
+        self.assertEqual(e["torpedo_hits_delta"], 2)
+        self.assertEqual(e["torpedo_frags_delta"], 1)
+        self.assertEqual(e["damage_scouting_delta"], 5_000)
+        self.assertEqual(e["ships_spotted_delta"], 2)
+        self.assertEqual(e["capture_points_delta"], 10)
+        self.assertEqual(e["dropped_capture_points_delta"], 10)
+        self.assertEqual(e["team_capture_points_delta"], 20)
+
+    def test_no_battle_advance_emits_no_event_even_if_phase7_advances(self):
+        # WG occasionally publishes shot counts a tick before battle counts;
+        # we don't emit an event until `battles` actually advances. The
+        # `delta_battles <= 0` continue at the top of the loop guards this.
+        before = self._phase7_snapshot(battles=10, main_shots=300)
+        after = self._phase7_snapshot(battles=10, main_shots=320)
+        self.assertEqual(compute_battle_events(before, after), [])
+
+    def test_first_battle_baseline_attributes_full_phase7_value(self):
+        # New ship's first battle: previous=missing, deltas equal full current.
+        before = self._phase7_snapshot(battles=10, ship_id=42)
+        # Same ship 42 unchanged; new ship 999 makes its debut.
+        after_ship_42 = ShipSnapshot(
+            ship_id=42, battles=10, wins=0, losses=0, frags=0,
+            damage_dealt=0, xp=0, planes_killed=0, survived_battles=0,
+        )
+        after_ship_999 = ShipSnapshot(
+            ship_id=999, battles=1, wins=1, losses=0, frags=2, damage_dealt=30_000,
+            xp=1_500, planes_killed=0, survived_battles=1,
+            main_shots=12, main_hits=4, torpedo_shots=2, torpedo_hits=1,
+            damage_scouting=2_000, capture_points=10,
+        )
+        after = PlayerSnapshot(
+            pvp_battles=11, pvp_wins=0, pvp_losses=0, pvp_frags=0,
+            pvp_survived_battles=0,
+            last_battle_time=before.last_battle_time,
+            ships={42: after_ship_42, 999: after_ship_999},
+        )
+        events = compute_battle_events(before, after)
+        self.assertEqual(len(events), 1)
+        e = events[0]
+        self.assertEqual(e["ship_id"], 999)
+        self.assertEqual(e["main_shots_delta"], 12)
+        self.assertEqual(e["torpedo_hits_delta"], 1)
+        self.assertEqual(e["damage_scouting_delta"], 2_000)
+        self.assertEqual(e["capture_points_delta"], 10)
+
+
+class Phase7SerializationTests(TestCase):
+    """Phase-7 fields round-trip through `_serialize_ships_payload` →
+    `_hydrate_previous_snapshot`. Historical observations written before the
+    widening must hydrate as zeros (not raise) — covered in Coercion tests."""
+
+    def test_round_trip_preserves_phase7_fields(self):
+        snap = PlayerSnapshot(
+            pvp_battles=10, pvp_wins=0, pvp_losses=0, pvp_frags=0,
+            pvp_survived_battles=0,
+            last_battle_time=datetime(2026, 4, 30, 12, 0, tzinfo=timezone.utc),
+            ships={42: ShipSnapshot(
+                ship_id=42, battles=10, wins=5, losses=5, frags=8,
+                damage_dealt=1_000_000, xp=20_000, planes_killed=0,
+                survived_battles=6,
+                main_shots=320, main_hits=90, torpedo_shots=18, torpedo_hits=6,
+                damage_scouting=45_000, ships_spotted=7,
+                capture_points=50, dropped_capture_points=30,
+                team_capture_points=200,
+            )},
+        )
+        payload = _serialize_ships_payload(snap)
+        # Build a fake "previous" object the hydrator expects.
+        fake_prev = type("FakeObs", (), {"ships_stats_json": payload,
+                                          "pvp_battles": 10, "pvp_wins": 0,
+                                          "pvp_losses": 0, "pvp_frags": 0,
+                                          "pvp_survived_battles": 0,
+                                          "last_battle_time": snap.last_battle_time})()
+        rebuilt = _hydrate_previous_snapshot(fake_prev)
+        self.assertEqual(rebuilt.ships[42].main_shots, 320)
+        self.assertEqual(rebuilt.ships[42].torpedo_hits, 6)
+        self.assertEqual(rebuilt.ships[42].damage_scouting, 45_000)
+        self.assertEqual(rebuilt.ships[42].capture_points, 50)
+        self.assertEqual(rebuilt.ships[42].team_capture_points, 200)
+
+
+class Phase7DailyAggregateTests(TestCase):
+    """`_apply_event_to_daily_summary` accumulates Phase-7 deltas into
+    `PlayerDailyShipStats` columns under the rollup flag."""
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="phase7_rollup", player_id=22222, realm="na", pvp_battles=10,
+        )
+        self.from_obs = BattleObservation.objects.create(
+            player=self.player, pvp_battles=10,
+        )
+        self.to_obs = BattleObservation.objects.create(
+            player=self.player, pvp_battles=11,
+        )
+
+    def _make_event(self, **overrides):
+        defaults = dict(
+            player=self.player,
+            ship_id=42,
+            ship_name="Yamato",
+            battles_delta=1, wins_delta=1, losses_delta=0, frags_delta=2,
+            damage_delta=48_000, xp_delta=1_500, planes_killed_delta=0,
+            survived=True,
+            main_shots_delta=20, main_hits_delta=10, main_frags_delta=1,
+            secondary_shots_delta=10, secondary_hits_delta=5, secondary_frags_delta=0,
+            torpedo_shots_delta=6, torpedo_hits_delta=2, torpedo_frags_delta=1,
+            damage_scouting_delta=5_000, ships_spotted_delta=2,
+            capture_points_delta=10, dropped_capture_points_delta=10,
+            team_capture_points_delta=20,
+            from_observation=self.from_obs,
+            to_observation=self.to_obs,
+        )
+        defaults.update(overrides)
+        return BattleEvent.objects.create(**defaults)
+
+    def test_first_event_writes_phase7_columns(self):
+        event = self._make_event()
+        with mock.patch.dict("os.environ",
+                             {"BATTLE_HISTORY_ROLLUP_ENABLED": "1"}, clear=False):
+            _apply_event_to_daily_summary(event)
+        row = PlayerDailyShipStats.objects.get()
+        self.assertEqual(row.main_shots, 20)
+        self.assertEqual(row.main_hits, 10)
+        self.assertEqual(row.torpedo_hits, 2)
+        self.assertEqual(row.damage_scouting, 5_000)
+        self.assertEqual(row.ships_spotted, 2)
+        self.assertEqual(row.capture_points, 10)
+        self.assertEqual(row.dropped_capture_points, 10)
+        self.assertEqual(row.team_capture_points, 20)
+
+    def test_second_event_increments_phase7_columns(self):
+        third_obs = BattleObservation.objects.create(
+            player=self.player, pvp_battles=12,
+        )
+        first = self._make_event()
+        second = self._make_event(
+            battles_delta=1, wins_delta=0, losses_delta=1,
+            main_shots_delta=15, main_hits_delta=4,
+            torpedo_shots_delta=3, torpedo_hits_delta=1,
+            damage_scouting_delta=2_500, ships_spotted_delta=1,
+            capture_points_delta=5, dropped_capture_points_delta=0,
+            team_capture_points_delta=15,
+            survived=False,
+            from_observation=self.to_obs, to_observation=third_obs,
+        )
+        with mock.patch.dict("os.environ",
+                             {"BATTLE_HISTORY_ROLLUP_ENABLED": "1"}, clear=False):
+            _apply_event_to_daily_summary(first)
+            _apply_event_to_daily_summary(second)
+        row = PlayerDailyShipStats.objects.get()
+        self.assertEqual(row.main_shots, 35)
+        self.assertEqual(row.main_hits, 14)
+        self.assertEqual(row.torpedo_shots, 9)
+        self.assertEqual(row.torpedo_hits, 3)
+        self.assertEqual(row.damage_scouting, 7_500)
+        self.assertEqual(row.ships_spotted, 3)
+        self.assertEqual(row.capture_points, 15)
+        self.assertEqual(row.dropped_capture_points, 10)
+        self.assertEqual(row.team_capture_points, 35)

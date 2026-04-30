@@ -44,6 +44,23 @@ class ShipSnapshot:
     xp: int
     planes_killed: int
     survived_battles: int
+    # Phase 7 widening — gunnery / torpedoes / spotting / caps. All cumulative
+    # counters from the same ships/stats/ pvp block, default 0 when WG omits
+    # the nested object (e.g. ships with no torpedoes or no secondaries).
+    main_shots: int = 0
+    main_hits: int = 0
+    main_frags: int = 0
+    secondary_shots: int = 0
+    secondary_hits: int = 0
+    secondary_frags: int = 0
+    torpedo_shots: int = 0
+    torpedo_hits: int = 0
+    torpedo_frags: int = 0
+    damage_scouting: int = 0
+    ships_spotted: int = 0
+    capture_points: int = 0
+    dropped_capture_points: int = 0
+    team_capture_points: int = 0
 
 
 @dataclass(frozen=True)
@@ -63,6 +80,9 @@ def _coerce_ship_snapshot(ship_dict: Dict[str, Any]) -> Optional[ShipSnapshot]:
     except (KeyError, TypeError, ValueError):
         return None
     pvp = ship_dict.get("pvp") or {}
+    main = pvp.get("main_battery") or {}
+    secondary = pvp.get("second_battery") or {}
+    torpedoes = pvp.get("torpedoes") or {}
     try:
         return ShipSnapshot(
             ship_id=ship_id,
@@ -74,6 +94,20 @@ def _coerce_ship_snapshot(ship_dict: Dict[str, Any]) -> Optional[ShipSnapshot]:
             xp=int(pvp.get("xp", 0)),
             planes_killed=int(pvp.get("planes_killed", 0)),
             survived_battles=int(pvp.get("survived_battles", 0)),
+            main_shots=int(main.get("shots", 0)),
+            main_hits=int(main.get("hits", 0)),
+            main_frags=int(main.get("frags", 0)),
+            secondary_shots=int(secondary.get("shots", 0)),
+            secondary_hits=int(secondary.get("hits", 0)),
+            secondary_frags=int(secondary.get("frags", 0)),
+            torpedo_shots=int(torpedoes.get("shots", 0)),
+            torpedo_hits=int(torpedoes.get("hits", 0)),
+            torpedo_frags=int(torpedoes.get("frags", 0)),
+            damage_scouting=int(pvp.get("damage_scouting", 0)),
+            ships_spotted=int(pvp.get("ships_spotted", 0)),
+            capture_points=int(pvp.get("capture_points", 0)),
+            dropped_capture_points=int(pvp.get("dropped_capture_points", 0)),
+            team_capture_points=int(pvp.get("team_capture_points", 0)),
         )
     except (TypeError, ValueError):
         return None
@@ -161,6 +195,25 @@ def compute_battle_events(
     up, and vice versa. Diffing per-ship is the authoritative path; the
     per-ship loop below correctly returns [] when no ship advanced.
     """
+    # Phase 7 widened delta vocabulary. Each entry: (output key, attr name).
+    # All are simple `current.attr - previous.attr` cumulative diffs.
+    PHASE7_DELTA_FIELDS = (
+        ("main_shots_delta", "main_shots"),
+        ("main_hits_delta", "main_hits"),
+        ("main_frags_delta", "main_frags"),
+        ("secondary_shots_delta", "secondary_shots"),
+        ("secondary_hits_delta", "secondary_hits"),
+        ("secondary_frags_delta", "secondary_frags"),
+        ("torpedo_shots_delta", "torpedo_shots"),
+        ("torpedo_hits_delta", "torpedo_hits"),
+        ("torpedo_frags_delta", "torpedo_frags"),
+        ("damage_scouting_delta", "damage_scouting"),
+        ("ships_spotted_delta", "ships_spotted"),
+        ("capture_points_delta", "capture_points"),
+        ("dropped_capture_points_delta", "dropped_capture_points"),
+        ("team_capture_points_delta", "team_capture_points"),
+    )
+
     events: List[Dict[str, Any]] = []
     for ship_id, current_ship in current.ships.items():
         previous_ship = previous.ships.get(ship_id)
@@ -181,7 +234,7 @@ def compute_battle_events(
         survived: Optional[bool] = None
         if delta_battles == 1:
             survived = survived_delta == 1
-        events.append({
+        event = {
             "ship_id": ship_id,
             "battles_delta": delta_battles,
             "wins_delta": current_ship.wins - prev_wins,
@@ -192,7 +245,11 @@ def compute_battle_events(
             "planes_killed_delta": current_ship.planes_killed - prev_planes,
             "survived_delta": survived_delta,
             "survived": survived,
-        })
+        }
+        for delta_key, attr in PHASE7_DELTA_FIELDS:
+            prev_val = getattr(previous_ship, attr, 0) if previous_ship else 0
+            event[delta_key] = getattr(current_ship, attr) - prev_val
+        events.append(event)
     return events
 
 
@@ -235,6 +292,20 @@ def _serialize_ships_payload(snapshot: PlayerSnapshot) -> List[Dict[str, Any]]:
             "xp": ship.xp,
             "planes_killed": ship.planes_killed,
             "survived_battles": ship.survived_battles,
+            "main_shots": ship.main_shots,
+            "main_hits": ship.main_hits,
+            "main_frags": ship.main_frags,
+            "secondary_shots": ship.secondary_shots,
+            "secondary_hits": ship.secondary_hits,
+            "secondary_frags": ship.secondary_frags,
+            "torpedo_shots": ship.torpedo_shots,
+            "torpedo_hits": ship.torpedo_hits,
+            "torpedo_frags": ship.torpedo_frags,
+            "damage_scouting": ship.damage_scouting,
+            "ships_spotted": ship.ships_spotted,
+            "capture_points": ship.capture_points,
+            "dropped_capture_points": ship.dropped_capture_points,
+            "team_capture_points": ship.team_capture_points,
         }
         for ship in snapshot.ships.values()
     ]
@@ -259,6 +330,22 @@ def _hydrate_previous_snapshot(previous) -> PlayerSnapshot:
                 xp=int(row.get("xp", 0)),
                 planes_killed=int(row.get("planes_killed", 0)),
                 survived_battles=int(row.get("survived_battles", 0)),
+                # Phase 7 widening — historical observations written before
+                # the widening landed lack these keys, hence .get(..., 0).
+                main_shots=int(row.get("main_shots", 0)),
+                main_hits=int(row.get("main_hits", 0)),
+                main_frags=int(row.get("main_frags", 0)),
+                secondary_shots=int(row.get("secondary_shots", 0)),
+                secondary_hits=int(row.get("secondary_hits", 0)),
+                secondary_frags=int(row.get("secondary_frags", 0)),
+                torpedo_shots=int(row.get("torpedo_shots", 0)),
+                torpedo_hits=int(row.get("torpedo_hits", 0)),
+                torpedo_frags=int(row.get("torpedo_frags", 0)),
+                damage_scouting=int(row.get("damage_scouting", 0)),
+                ships_spotted=int(row.get("ships_spotted", 0)),
+                capture_points=int(row.get("capture_points", 0)),
+                dropped_capture_points=int(row.get("dropped_capture_points", 0)),
+                team_capture_points=int(row.get("team_capture_points", 0)),
             )
             for row in (previous.ships_stats_json or [])
             if row.get("ship_id") is not None
@@ -285,41 +372,68 @@ def _apply_event_to_daily_summary(event) -> None:
     event_date = event.detected_at.date()
     survived_battles_increment = 1 if event.survived else 0
 
+    # Phase 7 widening — fields that map straight from event delta column to
+    # daily aggregate column. (event_attr, daily_attr) pairs.
+    PHASE7_AGG_FIELDS = (
+        ("main_shots_delta", "main_shots"),
+        ("main_hits_delta", "main_hits"),
+        ("main_frags_delta", "main_frags"),
+        ("secondary_shots_delta", "secondary_shots"),
+        ("secondary_hits_delta", "secondary_hits"),
+        ("secondary_frags_delta", "secondary_frags"),
+        ("torpedo_shots_delta", "torpedo_shots"),
+        ("torpedo_hits_delta", "torpedo_hits"),
+        ("torpedo_frags_delta", "torpedo_frags"),
+        ("damage_scouting_delta", "damage_scouting"),
+        ("ships_spotted_delta", "ships_spotted"),
+        ("capture_points_delta", "capture_points"),
+        ("dropped_capture_points_delta", "dropped_capture_points"),
+        ("team_capture_points_delta", "team_capture_points"),
+    )
+
+    defaults = {
+        "ship_name": event.ship_name,
+        "battles": event.battles_delta,
+        "wins": event.wins_delta,
+        "losses": event.losses_delta,
+        "frags": event.frags_delta,
+        "damage": event.damage_delta or 0,
+        "xp": event.xp_delta or 0,
+        "planes_killed": event.planes_killed_delta or 0,
+        "survived_battles": survived_battles_increment,
+        "first_event_at": event.detected_at,
+        "last_event_at": event.detected_at,
+    }
+    for event_attr, daily_attr in PHASE7_AGG_FIELDS:
+        defaults[daily_attr] = getattr(event, event_attr, 0) or 0
+
     obj, created = PlayerDailyShipStats.objects.get_or_create(
         player_id=event.player_id,
         date=event_date,
         ship_id=event.ship_id,
-        defaults={
-            "ship_name": event.ship_name,
-            "battles": event.battles_delta,
-            "wins": event.wins_delta,
-            "losses": event.losses_delta,
-            "frags": event.frags_delta,
-            "damage": event.damage_delta or 0,
-            "xp": event.xp_delta or 0,
-            "planes_killed": event.planes_killed_delta or 0,
-            "survived_battles": survived_battles_increment,
-            "first_event_at": event.detected_at,
-            "last_event_at": event.detected_at,
-        },
+        defaults=defaults,
     )
     if created:
         return None
 
-    PlayerDailyShipStats.objects.filter(pk=obj.pk).update(
-        battles=F("battles") + event.battles_delta,
-        wins=F("wins") + event.wins_delta,
-        losses=F("losses") + event.losses_delta,
-        frags=F("frags") + event.frags_delta,
-        damage=F("damage") + (event.damage_delta or 0),
-        xp=F("xp") + (event.xp_delta or 0),
-        planes_killed=F("planes_killed") + (event.planes_killed_delta or 0),
-        survived_battles=F("survived_battles") + survived_battles_increment,
-        last_event_at=event.detected_at,
+    update_kwargs = {
+        "battles": F("battles") + event.battles_delta,
+        "wins": F("wins") + event.wins_delta,
+        "losses": F("losses") + event.losses_delta,
+        "frags": F("frags") + event.frags_delta,
+        "damage": F("damage") + (event.damage_delta or 0),
+        "xp": F("xp") + (event.xp_delta or 0),
+        "planes_killed": F("planes_killed") + (event.planes_killed_delta or 0),
+        "survived_battles": F("survived_battles") + survived_battles_increment,
+        "last_event_at": event.detected_at,
         # Re-stamp ship_name in case it was empty when the row was created
         # earlier in the day (e.g. Ship row hadn't been resolved yet).
-        ship_name=event.ship_name or obj.ship_name,
-    )
+        "ship_name": event.ship_name or obj.ship_name,
+    }
+    for event_attr, daily_attr in PHASE7_AGG_FIELDS:
+        update_kwargs[daily_attr] = F(daily_attr) + (getattr(event, event_attr, 0) or 0)
+
+    PlayerDailyShipStats.objects.filter(pk=obj.pk).update(**update_kwargs)
     return None
 
 
@@ -416,6 +530,20 @@ def record_observation_from_payloads(
                 xp_delta=event["xp_delta"],
                 planes_killed_delta=event["planes_killed_delta"],
                 survived=event["survived"],
+                main_shots_delta=event["main_shots_delta"],
+                main_hits_delta=event["main_hits_delta"],
+                main_frags_delta=event["main_frags_delta"],
+                secondary_shots_delta=event["secondary_shots_delta"],
+                secondary_hits_delta=event["secondary_hits_delta"],
+                secondary_frags_delta=event["secondary_frags_delta"],
+                torpedo_shots_delta=event["torpedo_shots_delta"],
+                torpedo_hits_delta=event["torpedo_hits_delta"],
+                torpedo_frags_delta=event["torpedo_frags_delta"],
+                damage_scouting_delta=event["damage_scouting_delta"],
+                ships_spotted_delta=event["ships_spotted_delta"],
+                capture_points_delta=event["capture_points_delta"],
+                dropped_capture_points_delta=event["dropped_capture_points_delta"],
+                team_capture_points_delta=event["team_capture_points_delta"],
                 from_observation=previous,
                 to_observation=observation,
             )
