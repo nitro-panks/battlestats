@@ -2,7 +2,15 @@
 
 _Created: 2026-04-29_
 _Context: Extends the battle-history capture pipeline (`runbook-battle-history-rollout-2026-04-28.md`) to record additional per-ship cumulative counters that already arrive in every `ships/stats/` response but are currently discarded by `incremental_battles._coerce_ship_snapshot`. Field inventory and definitions live in `agents/knowledge/wows-ships-stats-field-inventory.md`._
-_Status: planned_
+_Status: implemented; awaiting deploy (2026-04-30 — code + migration land on `feature/battle-history-phase7-data-widening`; release gate 294/294 green; migration `0056_battle_event_phase7_widening` ready to run on droplet)_
+
+## Implementation reconciliation
+
+Differences from the planned design that landed during implementation:
+
+1. **Single combined migration instead of two.** `makemigrations` produced `0056_battle_event_phase7_widening.py` covering both `BattleEvent` (14 fields) and `PlayerDailyShipStats` (14 fields) in one operation. Original plan had separate `0056` and `0057` files. Atomic migration is arguably an upgrade — no half-applied state possible. Total 28 `AddField` operations, all `IntegerField(default=0)`, both tables small enough (<10 K rows) that the rewrite is sub-second.
+2. **Period rollup tiers (`_PlayerPeriodShipStatsBase`) deliberately NOT widened.** The weekly/monthly/yearly tiers have no live data (period rollup writer is paused; pills are hidden on the BattleHistoryCard) so widening them now would only add 42 unused columns × 3 tables. Comment in `models.py` `PlayerDailyShipStats` notes this and ties widening of those tiers to whenever the period rollup writer is reactivated.
+3. **`max(0, delta)` clamp considered and rejected.** The Phase-7 deltas use plain `current.attr - prev.attr` (no clamp), matching the existing `wins_delta` / `frags_delta` pattern. Negative deltas should be impossible for these counters (shots/hits/frags/cap_points only increase) but if WG ever publishes a regression, the daily rollup will record it as-is rather than silently smoothing — easier to spot in the Day-7 coverage probe.
 
 ## Purpose
 
