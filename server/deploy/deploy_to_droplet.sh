@@ -586,6 +586,9 @@ WantedBy=timers.target
 EOF
 
 systemctl daemon-reload
+# Enable the new crawls unit on first install so it auto-starts on reboot.
+# Idempotent — `systemctl enable` is a no-op when the unit is already enabled.
+systemctl enable battlestats-celery-crawls 2>/dev/null || true
 systemctl enable --now battlestats-celery-watchdog.timer 2>/dev/null || true
 # configure_local_rabbitmq already ran before `manage.py migrate` above — the
 # env file and broker credentials are finalized at this point.
