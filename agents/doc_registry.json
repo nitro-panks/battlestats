@@ -111,6 +111,30 @@
                 "encyclopedia-surface-replaced"
             ]
         },
+        "agents/knowledge/wows-ships-stats-field-inventory.md": {
+            "kind": "knowledge",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "knowledge",
+            "owner": "backend",
+            "aliases": [
+                "ships stats inventory",
+                "ships/stats fields",
+                "wg ship pvp fields"
+            ],
+            "tags": [
+                "ships stats",
+                "wargaming",
+                "upstream",
+                "battle history",
+                "field inventory",
+                "capture pipeline"
+            ],
+            "archive_on": [
+                "ships-stats-shape-changes",
+                "all-fields-captured"
+            ]
+        },
         "agents/knowledge/wows-statsbydate-status.md": {
             "kind": "knowledge",
             "status": "active",
@@ -1678,6 +1702,32 @@
             "archive_on": [
                 "redesign-shipped",
                 "chart-design-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-battle-history-phase7-data-widening-2026-04-29.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "battle history phase 7",
+                "capture widening",
+                "battery torpedo spotting caps capture"
+            ],
+            "tags": [
+                "battle history",
+                "capture pipeline",
+                "ships stats",
+                "gunnery",
+                "torpedoes",
+                "spotting",
+                "caps",
+                "data widening",
+                "longitudinal stats"
+            ],
+            "archive_on": [
+                "phase7c-shipped-and-30-day-coverage-stable"
             ]
         },
         "agents/contracts/upstream/wows-ships-badges.yaml": {
