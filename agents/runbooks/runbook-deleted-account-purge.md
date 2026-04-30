@@ -1,7 +1,8 @@
 # Runbook: Deleted Account Purge (GDPR / WG Account Deletion Request)
 
 **Created**: 2026-03-30
-**Status**: Complete — deployed v1.2.13, executed 2026-03-30, response sent to Wargaming
+**Last executed**: 2026-04-30 (second batch — see "Execution Results" section)
+**Status**: Recurring — tooling deployed v1.2.13; executed 2026-03-30 (11,839 IDs / 0 found) and 2026-04-30 (9,723 IDs / 14 found), responses sent to Wargaming after each batch. Expect future batches at irregular cadence.
 
 ## Context
 
@@ -171,6 +172,50 @@ None of the 11,839 accounts had ever been indexed by BattleStats. All were block
 
 ---
 
+## Execution Results (2026-04-30)
+
+Source: `deleted_accounts.zip` arrived from WG data protection team on 2026-04-30. Same envelope as the 2026-03-30 batch (zip → `accounts.csv` with header `account_id`).
+
+**Pre-flight (read-only)**: Ran `purge_deleted_accounts --dry-run` locally against the cloud DB (env loaded from `.env.cloud` + `.env.secrets.cloud` in a sub-shell so the local target wasn't switched). Predicted 14/9,723 found, 9,723 to blocklist. Followed by an itemized read-only `Player.objects.filter(player_id__in=ids)` to capture names + realms + clan tags for the response.
+
+**Execution**: On the droplet (matching the 2026-03-30 invocation pattern):
+```bash
+scp /home/august/code/battlestats/deleted/deleted_accounts.zip root@battlestats.online:/tmp/deleted_accounts.zip
+ssh root@battlestats.online '/opt/battlestats-server/venv/bin/python /opt/battlestats-server/current/server/manage.py purge_deleted_accounts /tmp/deleted_accounts.zip --transcript /tmp/purge_transcript_20260430.jsonl'
+```
+
+```json
+{
+  "total_ids": 9723,
+  "found_in_db": 14,
+  "not_found": 9709,
+  "total_player_rows": 14,
+  "total_snapshot_rows": 0,
+  "total_achievement_rows": 59,
+  "total_explorer_rows": 13,
+  "total_visit_event_rows": 0,
+  "total_visit_daily_rows": 0,
+  "total_cache_keys_deleted": 0,
+  "total_clan_leaders_nulled": 0,
+  "blocked": 9723
+}
+```
+
+14 players were purged with full cascade: 14 `Player` rows, 59 `PlayerAchievementStat` rows, 13 `PlayerExplorerSummary` rows. No snapshots, visit events, or clan-leader rows were affected. Cache invalidation found no live keys (consistent with the 14 players' low recent traffic; their cache had already expired).
+
+Match distribution: 1 ASIA, 13 NA, 0 EU. All 14 were clan members; none were clan leaders. Battle volume bimodal — 7 of 14 had <250 lifetime PvP battles, 3 had >1,000.
+
+**Transcript**: `/tmp/purge_transcript_20260430.jsonl` on the droplet (9,724 lines: 9,723 per-account + 1 summary).
+
+### Lessons captured
+
+1. **Don't ship placeholder paths in command suggestions.** A `/path/to/...` placeholder in a prior run-book example caused a `FileNotFoundError` on the user's first attempt. Always substitute the real path before suggesting commands the user will paste.
+2. **Loading env in a sub-shell beats `switch_db_target.sh`.** For one-off cloud reads, `(set -a; . ./.env.cloud; . ./.env.secrets.cloud; set +a; python manage.py ...)` keeps the parens-scoped env from leaking into the user's shell. The `switch_db_target.sh` helper is heavier and rewrites `.env`, which we don't need for a single read.
+3. **Production read-only queries are still gated.** Even after a successful first dry-run, follow-up itemization queries against the cloud DB are individually rejected by the harness. Plan for the user to re-run via `!` prefix or pre-add a scoped permission rule before doing multi-step prod-read sessions.
+4. **Cache invalidation may legitimately count zero on a live run.** The dry-run reports the *number of templates it would try* (`len(CACHE_KEY_TEMPLATES) = 8` per player), the live run reports the *number of keys actually deleted*. If the matched accounts are cold (no recent visits), the live count will be lower than the dry-run prediction. This is not a bug.
+
+---
+
 ## Post-purge verification
 
 1. `SELECT COUNT(*) FROM warships_player WHERE player_id IN (...)` — must return 0
@@ -201,3 +246,38 @@ The blocklist (`DeletedAccount`) is permanent and should not be rolled back. Pla
 | `server/warships/migrations/0035_deletedaccount.py` | Auto-generated migration |
 | `server/warships/migrations/0036_deletedaccount_bigint.py` | IntegerField → BigIntegerField for account IDs > 2^31 |
 | `server/warships/tests/test_purge_deleted_accounts.py` | Tests for parsing, blocklist, gates, and full purge flow |
+
+---
+
+## Recurring-incident playbook
+
+For the next batch (and every batch after), follow this sequence — it captures every step that worked on 2026-04-30 and avoids the two stumbles from that run.
+
+1. **Receive zip from WG.** Drop into `deleted/deleted_accounts.zip` in the repo working tree (already in `.gitignore` if needed; the artifact is sensitive PII).
+2. **Inspect briefly.** `unzip -p deleted/deleted_accounts.zip accounts.csv | head -3 && unzip -p deleted/deleted_accounts.zip accounts.csv | wc -l` — confirm header is `account_id` and row count is sensible.
+3. **Read-only dry-run against cloud DB** (no env switch — sub-shell scope only):
+   ```bash
+   cd server && (set -a; . ./.env.cloud; . ./.env.secrets.cloud; set +a; \
+     python manage.py purge_deleted_accounts ../deleted/deleted_accounts.zip --dry-run)
+   ```
+   Expected: `[DRY RUN]` headers, summary JSON with `found_in_db` count.
+4. **Itemize matches** (only if `found_in_db > 0`) — same sub-shell pattern, `python manage.py shell -c "..."` querying `Player.objects.filter(player_id__in=ids).values('player_id','name','realm','clan__tag','pvp_battles','last_battle_date')`. Capture for the response email and operational record.
+5. **Real run on the droplet** (mirrors prior runs; transcript lives next to the prior one):
+   ```bash
+   scp deleted/deleted_accounts.zip root@battlestats.online:/tmp/deleted_accounts.zip
+   ssh root@battlestats.online '/opt/battlestats-server/venv/bin/python /opt/battlestats-server/current/server/manage.py purge_deleted_accounts /tmp/deleted_accounts.zip --transcript /tmp/purge_transcript_<YYYYMMDD>.jsonl'
+   ```
+6. **Reply email to WG** — template:
+   ```
+   Thank you for your email regarding the deletion of personal data for the account IDs listed in the attached file.
+
+   We have completed processing of this request. The details are as follows:
+
+   - IDs received: <N>
+   - IDs found in our system: <K> (all data associated with these accounts has been permanently purged, including player records, achievements, explorer summaries, and any related cached data)
+   - IDs blocklisted: <N> (all IDs have been permanently blocked from future ingestion via the Wargaming API, scheduled data refreshes, or any other ingestion pathway)
+
+   A full machine-generated transcript documenting the per-account processing result is available upon request.
+   ```
+7. **Archive artifacts.** Source zip and unzipped CSV in `deleted/` should not be committed. Either move to a private archive location or `rm` after the response is sent. Transcript stays on the droplet at `/tmp/purge_transcript_<YYYYMMDD>.jsonl` (alongside the prior batch).
+8. **Update this runbook.** Append a new `## Execution Results (<YYYY-MM-DD>)` section with the summary JSON, match distribution, and any new lessons. Bump the top-of-file `Last executed` line.
