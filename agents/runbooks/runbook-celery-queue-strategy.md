@@ -60,13 +60,16 @@ This keeps the current three-queue model intact while removing the highest-value
 
 ### Production queue model
 
-Production deploy scripts create three dedicated workers:
+Production deploy scripts create four dedicated workers:
 
 1. `default` queue, concurrency `3`
 2. `hydration` queue, concurrency `3`
 3. `background` queue, concurrency `2`
+4. `crawls` queue, concurrency `1` (added 2026-04-30 — multi-day `crawl_all_clans_task` only)
 
 Production also runs a dedicated Beat process.
+
+The `crawls` carve-out exists because `crawl_all_clans_task` runs for ~14 days end-to-end at steady state and was previously camping a `background` slot for its entire duration, blocking incremental refreshes and letting warmer-fanout duplicates pile up in the queue. The dedicated worker uses `--max-tasks-per-child=1` so the long-running fork is recycled between crawls. See `runbook-clan-crawl-blocker-2026-04-30.md` for the incident chain that motivated this split.
 
 The intended production mapping is visible in:
 
@@ -78,9 +81,10 @@ The intended production mapping is visible in:
 
 Current explicit task routing:
 
-1. `background`
+1. `crawls` (added 2026-04-30)
    - `crawl_all_clans_task`
    - `ensure_crawl_all_clans_running_task`
+2. `background`
    - `incremental_player_refresh_task`
    - `incremental_ranked_data_task`
    - `refresh_efficiency_rank_snapshot_task`
@@ -90,14 +94,14 @@ Current explicit task routing:
    - `enrich_player_data_task` — self-chaining player enrichment crawler. Re-seeded every 15 min by the `player-enrichment-kickstart` Beat schedule (no-op if a batch is already running). A DO Functions migration (2026-04-04) was reverted on 2026-04-08; see `archive/spec-serverless-background-workers-2026-04-04.md`.
    - `startup_warm_caches_task`
    - `warm_all_clan_tier_distributions_task`
-2. `hydration`
+3. `hydration`
    - `update_battle_data_task`
    - `update_clan_members_task`
    - `update_ranked_data_task`
    - `update_player_clan_battle_data_task`
    - `update_player_efficiency_data_task`
    - `update_clan_battle_summary_task`
-3. `default`
+4. `default`
    - lightweight request-adjacent entity refreshes that are still intentionally left on the general lane
 
 After the implementation slice, request-adjacent tasks still landing on `default` are primarily:

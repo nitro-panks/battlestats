@@ -231,6 +231,11 @@ check_queue_depth() {
 check_queue_depth "default"    100
 check_queue_depth "hydration"  100
 check_queue_depth "background" 2000
+# crawls runs the multi-day clan crawl on its own worker (-c 1). Steady-state
+# is 0 messages while the crawl is active, or 1 between Beat ticks. Anything
+# above 5 means the crawl is queueing instead of running — investigate.
+# See agents/runbooks/runbook-clan-crawl-blocker-2026-04-30.md.
+check_queue_depth "crawls"     5
 
 # ── summary ──────────────────────────────────────────────────────────────────
 

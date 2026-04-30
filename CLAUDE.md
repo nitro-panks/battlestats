@@ -158,11 +158,12 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 
 ### Celery queue architecture
 
-Three queues with dedicated workers:
+Four queues with dedicated workers:
 
 - **default** (`-c 3`) — lightweight API-triggered entity refreshes and general work
 - **hydration** (`-c 3`) — heavier request-driven upstream/data refreshes. Tasks include ranked, efficiency, battle-data, clan-members, clan-battle, and clan-battle-summary refreshes
-- **background** (`-c 2`) — long-running crawls, warmers, incremental refreshes, startup warmers, and enrichment
+- **background** (`-c 2`) — warmers, incremental refreshes, startup warmers, snapshots, and enrichment
+- **crawls** (`-c 1`) — multi-day clan crawl + its watchdog only. Carved out from `background` on 2026-04-30 so the days-long `crawl_all_clans_task` no longer camps a slot the rest of the workload needs. See `agents/runbooks/runbook-clan-crawl-blocker-2026-04-30.md`.
 
 Resilience mechanisms:
 - **`CELERY_TASK_ACKS_LATE = True`** — messages are not acknowledged until task completion, providing at-least-once delivery for crash recovery

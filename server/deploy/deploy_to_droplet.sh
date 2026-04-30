@@ -123,7 +123,7 @@ set -euo pipefail
 # that was missing CELERY_BROKER_URL and entered an infinite reconnect loop. Stopping
 # services up front eliminates the race — they are started cleanly at the end of the
 # remote block (line ~460) after all env writes are finalized.
-systemctl stop battlestats-beat battlestats-celery-background battlestats-celery-hydration battlestats-celery battlestats-gunicorn 2>/dev/null || true
+systemctl stop battlestats-beat battlestats-celery-crawls battlestats-celery-background battlestats-celery-hydration battlestats-celery battlestats-gunicorn 2>/dev/null || true
 
 cp "${REMOTE_TMP_ENV}" /etc/battlestats-server.env
 cp "${REMOTE_TMP_SECRETS}" /etc/battlestats-server.secrets.env
@@ -314,7 +314,7 @@ PY
   # and the worker will silently fall back to the settings.py default. Fail
   # the deploy hard — see the 2026-04-08 incident in
   # agents/runbooks/runbook-enrichment-crawler-2026-04-03.md.
-  for svc in battlestats-celery battlestats-celery-hydration battlestats-celery-background; do
+  for svc in battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls; do
     local pid
     pid="$(systemctl show -p MainPID --value "${svc}")"
     if [[ -z "${pid}" || "${pid}" == "0" ]]; then
@@ -489,7 +489,7 @@ EOF
 
 cat > /etc/systemd/system/battlestats-celery-background.service <<EOF
 [Unit]
-Description=Battlestats Celery worker (background queue — crawls, warmers, snapshots)
+Description=Battlestats Celery worker (background queue — warmers, snapshots, incrementals, enrichment)
 After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
 Wants=redis-server.service rabbitmq-server.service
 
@@ -501,6 +501,36 @@ WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
 ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q background -c "${CELERY_BACKGROUND_CONCURRENCY:-2}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_BACKGROUND_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n background@%%h'
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Dedicated worker for the multi-day clan crawl. Lives on its own queue so it
+# never camps a `background` slot that incrementals / warmers / enrichment need.
+# -c 1: only one crawl runs at a time (one realm per cron tick anyway).
+# --time-limit=1209600: 14 days, the upper bound on a single full-realm crawl.
+# --max-tasks-per-child=1: recycle the worker process between crawls so the
+#   long-running fork doesn't accumulate memory drift.
+# See agents/runbooks/runbook-clan-crawl-blocker-2026-04-30.md for the incident
+# chain that motivated this carve-out.
+cat > /etc/systemd/system/battlestats-celery-crawls.service <<EOF
+[Unit]
+Description=Battlestats Celery worker (crawls queue — multi-day clan crawl)
+After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
+Wants=redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q crawls -c 1 --time-limit=1209600 --prefetch-multiplier=1 --max-tasks-per-child=1 --without-gossip --without-mingle -n crawls@%%h'
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
@@ -528,6 +558,7 @@ check_worker() {
 check_worker default   battlestats-celery
 check_worker hydration battlestats-celery-hydration
 check_worker background battlestats-celery-background
+check_worker crawls    battlestats-celery-crawls
 WATCHDOG
 chmod +x /usr/local/bin/battlestats-celery-watchdog.sh
 
@@ -560,7 +591,7 @@ systemctl enable --now battlestats-celery-watchdog.timer 2>/dev/null || true
 # env file and broker credentials are finalized at this point.
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
 redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
-systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat
+systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls battlestats-beat
 verify_broker_connection
 materialize_best_player_snapshots
 active_release_after_restart="$(readlink -f "${APP_ROOT}/current")"

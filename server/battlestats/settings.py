@@ -294,8 +294,8 @@ CELERY_WORKER_MAX_TASKS_PER_CHILD = int(
 
 CELERY_TASK_DEFAULT_QUEUE = 'default'
 CELERY_TASK_ROUTES = {
-    'warships.tasks.crawl_all_clans_task': {'queue': 'background'},
-    'warships.tasks.ensure_crawl_all_clans_running_task': {'queue': 'background'},
+    'warships.tasks.crawl_all_clans_task': {'queue': 'crawls'},
+    'warships.tasks.ensure_crawl_all_clans_running_task': {'queue': 'crawls'},
     'warships.tasks.incremental_player_refresh_task': {'queue': 'background'},
     'warships.tasks.incremental_ranked_data_task': {'queue': 'background'},
     'warships.tasks.refresh_efficiency_rank_snapshot_task': {'queue': 'background'},
