@@ -1,6 +1,6 @@
 # WoWS `ships/stats/` Field Inventory
 
-Last verified: 2026-04-29
+Last verified: 2026-04-30 (Phase 7 widening shipped in v1.11.0 — 14 fields moved from "Discarded" to "Currently Captured")
 
 ## Why This Matters
 
@@ -15,7 +15,9 @@ The discarded fields cost zero additional WG API budget to capture — they are 
 - The cumulative counters we discard cover three large product surfaces we do not yet measure: **gunnery accuracy**, **torpedo accuracy**, and **vision/objective play** (spotting, caps).
 - Per-record bests (`max_*`) are not deltable but are useful as "career best" badges with no derivation logic.
 
-## Currently Captured (`incremental_battles.py:67-77`)
+## Currently Captured (`incremental_battles.py:_coerce_ship_snapshot`)
+
+### Original 8 (since rollout Phase 2)
 
 | Field | Type | Why we keep it |
 |---|---|---|
@@ -28,28 +30,30 @@ The discarded fields cost zero additional WG API budget to capture — they are 
 | `planes_killed` | counter | Air-defense signal, CV-aware |
 | `survived_battles` | counter | KDR denominator, survival-rate distribution |
 
-## Discarded — Cumulative Counters (Deltable)
+### Phase 7 widening (since v1.11.0, 2026-04-30)
 
-These are running totals just like `battles`. The diff machinery in `compute_battle_events` would handle them with no architectural change — just additional fields on `ShipSnapshot`, additional `*_delta` fields on the resulting `BattleEvent`, and additional columns on `PlayerDailyShipStats`.
+Captured per-event in `BattleEvent.<name>_delta` and aggregated daily in `PlayerDailyShipStats.<name>`. Migration `0056_battle_event_phase7_widening`. See `agents/runbooks/runbook-battle-history-phase7-data-widening-2026-04-29.md` for the rollout history.
 
-### Gunnery
-
-| Field | Definition | Useful for |
+| Family | Source field | Future surface motivation |
 |---|---|---|
-| `main_battery.shots` | Total main-battery shells fired | Denominator for accuracy |
-| `main_battery.hits` | Total main-battery shells that hit | Numerator for accuracy = `hits/shots` |
-| `main_battery.frags` | Frags scored by main battery | Frag-source breakdown |
-| `second_battery.shots` | Secondary shells fired | Brawl/AA-build signal |
-| `second_battery.hits` | Secondary hits | Secondary accuracy |
-| `second_battery.frags` | Secondary frags | Niche brawl metric |
+| Gunnery | `main_battery.shots` | Main-battery accuracy = hits/shots |
+| Gunnery | `main_battery.hits` | Same |
+| Gunnery | `main_battery.frags` | Frag-source breakdown |
+| Gunnery | `second_battery.shots` | Secondary accuracy (brawl identity) |
+| Gunnery | `second_battery.hits` | Same |
+| Gunnery | `second_battery.frags` | Niche brawl frag-source |
+| Torpedoes | `torpedoes.shots` | Torp accuracy = hits/shots; "top-quartile torp" identity icon |
+| Torpedoes | `torpedoes.hits` | Same |
+| Torpedoes | `torpedoes.frags` | Torp-frag share of total frags |
+| Spotting | `damage_scouting` | Vision-game contribution; "scout" identity icon |
+| Spotting | `ships_spotted` | Spotting volume |
+| Caps | `capture_points` | Objective play; "cap player" identity icon |
+| Caps | `dropped_capture_points` | Cap-defense signal |
+| Caps | `team_capture_points` | Indirect team-play index |
 
-### Torpedoes
+## Still Discarded — Cumulative Counters (Deltable)
 
-| Field | Definition | Useful for |
-|---|---|---|
-| `torpedoes.shots` | Torps launched | Denominator for torp accuracy |
-| `torpedoes.hits` | Torps that hit | Numerator for torp accuracy |
-| `torpedoes.frags` | Torp frags | DD/CA torp identity, frag-source breakdown |
+These are running totals just like `battles`. The diff machinery in `compute_battle_events` would handle them with no architectural change — just additional fields on `ShipSnapshot`, additional `*_delta` fields on the resulting `BattleEvent`, and additional columns on `PlayerDailyShipStats`. Phase 7 widening covered the high-value fields; what remains here is intentionally deferred.
 
 ### Frag-source breakdown (rounding out `frags`)
 
@@ -58,23 +62,13 @@ These are running totals just like `battles`. The diff machinery in `compute_bat
 | `ramming.frags` | Frags by ramming (cumulative; rare) |
 | `aircraft.frags` | Frags by carrier-launched aircraft (CV identity) |
 
-### Vision and objective play
+### Damage-taken / position-quality
 
-| Field | Definition | Useful for |
-|---|---|---|
-| `damage_scouting` | Damage dealt by ALLIES to ships YOU spotted | Spotting / vision contribution; DD signature stat |
-| `ships_spotted` | Total enemy ships you put on the minimap | Vision-game volume |
-| `art_agro` | Potential damage taken from enemy main batteries | "Tank rating" — how much fire you draw |
-| `torpedo_agro` (sometimes `torp_agro`) | Potential damage taken from enemy torpedoes | Map-positioning quality |
-| `damage_to_buildings` | Damage to forts/installations | Mostly Operations mode; low product value for randoms |
-
-### Caps and team contribution
-
-| Field | Definition | Useful for |
-|---|---|---|
-| `capture_points` | Points contributed to capping enemy bases | Objective play |
-| `dropped_capture_points` | Points removed from being capped (defense) | Cap defense signal |
-| `team_capture_points` | Cap points your team scored while you were alive | Indirect team-play index |
+| Field | Definition | Useful for | Why deferred |
+|---|---|---|---|
+| `art_agro` | Potential damage taken from enemy main batteries | "Tank rating" — how much fire you draw | Field-name uncertainty (`art_agro` vs alternatives in some live samples). Capture once a live sample confirms the name in production. |
+| `torpedo_agro` (sometimes `torp_agro`) | Potential damage taken from enemy torpedoes | Map-positioning quality | Same — name uncertainty. |
+| `damage_to_buildings` | Damage to forts/installations | Mostly Operations mode; low product value for randoms | Low ROI for randoms surface. |
 
 ### Outcome enrichment
 
