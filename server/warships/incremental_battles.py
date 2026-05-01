@@ -369,7 +369,16 @@ def _apply_event_to_daily_summary(event) -> None:
 
     from warships.models import PlayerDailyShipStats
 
-    event_date = event.detected_at.date()
+    # Attribute the rollup row to when the player actually played, not when
+    # we observed the delta. WG's `last_battle_time` (captured into
+    # BattleObservation) is the only per-account timestamp WG exposes — it
+    # is the end-time of the most recent battle in the to_observation. For
+    # multi-battle deltas this still folds them all into the most recent
+    # battle's day, which is closer to truth than "the day we noticed".
+    # Falls back to detected_at.date() when last_battle_time is missing
+    # (oldest observations from before the rollout).
+    last_battle_time = getattr(event.to_observation, "last_battle_time", None)
+    event_date = last_battle_time.date() if last_battle_time else event.detected_at.date()
     survived_battles_increment = 1 if event.survived else 0
 
     # Phase 7 widening — fields that map straight from event delta column to
@@ -625,14 +634,46 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
     """
     from warships.models import BattleEvent, PlayerDailyShipStats
 
+    # Phase 7 widening — same Phase-7 deltas the on-write writer accumulates.
+    PHASE7_AGG_FIELDS = (
+        ("main_shots_delta", "main_shots"),
+        ("main_hits_delta", "main_hits"),
+        ("main_frags_delta", "main_frags"),
+        ("secondary_shots_delta", "secondary_shots"),
+        ("secondary_hits_delta", "secondary_hits"),
+        ("secondary_frags_delta", "secondary_frags"),
+        ("torpedo_shots_delta", "torpedo_shots"),
+        ("torpedo_hits_delta", "torpedo_hits"),
+        ("torpedo_frags_delta", "torpedo_frags"),
+        ("damage_scouting_delta", "damage_scouting"),
+        ("ships_spotted_delta", "ships_spotted"),
+        ("capture_points_delta", "capture_points"),
+        ("dropped_capture_points_delta", "dropped_capture_points"),
+        ("team_capture_points_delta", "team_capture_points"),
+    )
+
+    # An event's "play date" is when the player actually played, not when our
+    # crawler observed the delta. We use BattleObservation.last_battle_time
+    # (the WG-supplied timestamp of the most recent battle in to_observation)
+    # whenever it's present; legacy events lacking it fall back to
+    # detected_at. Same logic as `_apply_event_to_daily_summary`.
+    play_date_filter = (
+        Q(to_observation__last_battle_time__date=target_date)
+        | Q(to_observation__last_battle_time__isnull=True,
+            detected_at__date=target_date)
+    )
+
     with transaction.atomic():
         deleted, _ = PlayerDailyShipStats.objects.filter(
             date=target_date,
         ).delete()
 
-        events = BattleEvent.objects.filter(
-            detected_at__date=target_date,
-        ).order_by("detected_at")
+        events = (
+            BattleEvent.objects
+            .filter(play_date_filter)
+            .select_related("to_observation")
+            .order_by("detected_at")
+        )
 
         rows: Dict[tuple, Dict[str, Any]] = {}
         for event in events:
@@ -650,6 +691,8 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
                     "first_event_at": event.detected_at,
                     "last_event_at": event.detected_at,
                 }
+                for _delta_attr, daily_attr in PHASE7_AGG_FIELDS:
+                    row[daily_attr] = 0
                 rows[key] = row
             row["battles"] += event.battles_delta or 0
             row["wins"] += event.wins_delta or 0
@@ -660,6 +703,8 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
             row["planes_killed"] += event.planes_killed_delta or 0
             if event.survived:
                 row["survived_battles"] += 1
+            for delta_attr, daily_attr in PHASE7_AGG_FIELDS:
+                row[daily_attr] += getattr(event, delta_attr, 0) or 0
             row["last_event_at"] = event.detected_at
             if event.ship_name and not row["ship_name"]:
                 row["ship_name"] = event.ship_name
@@ -674,9 +719,10 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
         "date": str(target_date),
         "rows_deleted": deleted,
         "rows_written": len(rows),
-        "events_seen": events.count() if rows else BattleEvent.objects.filter(
-            detected_at__date=target_date,
-        ).count(),
+        "events_seen": (
+            events.count() if rows
+            else BattleEvent.objects.filter(play_date_filter).count()
+        ),
     }
 
 

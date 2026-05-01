@@ -813,6 +813,48 @@ class RebuildDailyShipStatsTests(TestCase):
         canary.refresh_from_db()
         self.assertEqual(canary.battles, 99)
 
+    def test_rebuild_attributes_by_last_battle_time_not_detected_at(self):
+        """Late-detected events: a player who played 2026-04-29 but whose
+        delta was DETECTED 2026-05-01 must rebuild into the 2026-04-29
+        daily row, not the 2026-05-01 row. Mirrors the on-write fix.
+        Beltran90 regression."""
+        played_at = django_timezone.make_aware(
+            datetime(2026, 4, 29, 18, 0, 0),
+        )
+        detected_at = django_timezone.make_aware(
+            datetime(2026, 5, 1, 12, 0, 0),
+        )
+        late_obs_a = BattleObservation.objects.create(
+            player=self.player, pvp_battles=200, last_battle_time=played_at,
+        )
+        late_obs_b = BattleObservation.objects.create(
+            player=self.player, pvp_battles=204, last_battle_time=played_at,
+        )
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            battles_delta=4, wins_delta=4, frags_delta=3,
+            damage_delta=263_859, xp_delta=9_780, survived=None,
+            from_observation=late_obs_a, to_observation=late_obs_b,
+        )
+        BattleEvent.objects.filter(to_observation=late_obs_b).update(
+            detected_at=detected_at,
+        )
+        # Rebuild for the play date — should pick up the late-detected event.
+        result = rebuild_daily_ship_stats_for_date(played_at.date())
+        self.assertEqual(result["status"], "completed")
+        played_rows = PlayerDailyShipStats.objects.filter(
+            player=self.player, date=played_at.date(), ship_id=42,
+        )
+        self.assertEqual(played_rows.count(), 1)
+        self.assertEqual(played_rows.get().battles, 4)
+        # Rebuild for the detection date — should NOT have a row from this
+        # late event (it belongs to the play date).
+        rebuild_daily_ship_stats_for_date(detected_at.date())
+        detected_rows = PlayerDailyShipStats.objects.filter(
+            player=self.player, date=detected_at.date(), ship_id=42,
+        )
+        self.assertEqual(detected_rows.count(), 0)
+
 
 class RebuildManagementCommandTests(TestCase):
     """`python manage.py rebuild_player_daily_ship_stats --since ...`."""
@@ -1592,6 +1634,34 @@ class Phase7DailyAggregateTests(TestCase):
         self.assertEqual(row.capture_points, 10)
         self.assertEqual(row.dropped_capture_points, 10)
         self.assertEqual(row.team_capture_points, 20)
+
+    def test_uses_last_battle_time_date_when_present(self):
+        """Rollup row date should match WG's `last_battle_time` (when the
+        player actually played), not `detected_at` (when our crawler caught
+        up). Beltran90 regression: 4 battles ending 2026-04-29 detected
+        2026-05-01 must land in the 2026-04-29 daily row."""
+        played_at = datetime(2026, 4, 29, 18, 0, tzinfo=timezone.utc)
+        self.to_obs.last_battle_time = played_at
+        self.to_obs.save(update_fields=["last_battle_time"])
+        event = self._make_event()
+        with mock.patch.dict("os.environ",
+                             {"BATTLE_HISTORY_ROLLUP_ENABLED": "1"}, clear=False):
+            _apply_event_to_daily_summary(event)
+        row = PlayerDailyShipStats.objects.get()
+        self.assertEqual(row.date, played_at.date())
+        self.assertNotEqual(row.date, event.detected_at.date())
+
+    def test_falls_back_to_detected_at_when_last_battle_time_missing(self):
+        """Legacy BattleObservation rows from before the fix may lack
+        last_battle_time; rollup must still attribute somewhere (using
+        detected_at as the fallback) rather than crash."""
+        # to_obs.last_battle_time defaults to None — leave it that way.
+        event = self._make_event()
+        with mock.patch.dict("os.environ",
+                             {"BATTLE_HISTORY_ROLLUP_ENABLED": "1"}, clear=False):
+            _apply_event_to_daily_summary(event)
+        row = PlayerDailyShipStats.objects.get()
+        self.assertEqual(row.date, event.detected_at.date())
 
     def test_second_event_increments_phase7_columns(self):
         third_obs = BattleObservation.objects.create(
