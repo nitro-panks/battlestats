@@ -6,6 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${SERVER_DIR}/.." && pwd)"
 
+# Hard gate: local tree must be at or ahead of origin/main. Prevents a
+# stale worktree from rsync'ing older code over production and silently
+# reverting already-shipped fixes (see scripts/check_local_tree.sh).
+"${REPO_ROOT}/scripts/check_local_tree.sh"
+
 # Hard gate: CI must be passing before deploy
 "${REPO_ROOT}/scripts/check_ci_status.sh"
 
