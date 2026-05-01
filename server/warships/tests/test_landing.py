@@ -176,7 +176,14 @@ class LandingHelperTests(TestCase):
         self.assertNotEqual(original_key, rebuilt_key)
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
-    def test_invalidate_landing_recent_player_cache_still_marks_dirty_during_cooldown(self, mock_delay):
+    def test_invalidate_landing_recent_player_cache_is_noop_during_cooldown(self, mock_delay):
+        # First invalidate sets the dirty flag and dispatches one warmer.
+        # Subsequent invalidates within the cooldown window are full no-ops:
+        # the dirty flag is NOT re-set, and the warmer is NOT re-dispatched.
+        # This is the regression fix for the recent-players cache thrashing
+        # observed on 2026-05-01 — pre-fix, every BattleEvent capture set
+        # dirty=true (with no TTL), so the cache was effectively bypassed
+        # on every read.
         from warships.landing import invalidate_landing_recent_player_cache
         dirty_key = realm_cache_key('na', LANDING_RECENT_PLAYERS_DIRTY_KEY)
 
@@ -184,12 +191,48 @@ class LandingHelperTests(TestCase):
         self.assertIsNotNone(cache.get(dirty_key))
         mock_delay.assert_called_once_with(include_recent=True, realm='na')
 
+        # Simulate a downstream consumer (a page-load) clearing the dirty
+        # flag after rebuilding the cache. The cooldown still holds, so
+        # the next invalidate must NOT re-set dirty.
         cache.delete(dirty_key)
 
         invalidate_landing_recent_player_cache()
 
-        self.assertIsNotNone(cache.get(dirty_key))
+        self.assertIsNone(cache.get(dirty_key),
+                          'invalidate during cooldown must NOT re-set dirty')
         mock_delay.assert_called_once_with(include_recent=True, realm='na')
+
+    @patch('warships.tasks.warm_landing_page_content_task.delay')
+    def test_invalidate_landing_recent_player_cache_dirty_key_has_ttl(self, mock_delay):
+        # The dirty flag must self-clear within the cooldown window so a
+        # cooldown-skipped invalidate doesn't leave the cache permanently
+        # bypassed if no read comes in to clear it.
+        from warships.landing import (
+            RECENT_PLAYERS_INVALIDATE_COOLDOWN,
+            invalidate_landing_recent_player_cache,
+        )
+        from django.core.cache import caches
+
+        invalidate_landing_recent_player_cache()
+        dirty_key = realm_cache_key('na', LANDING_RECENT_PLAYERS_DIRTY_KEY)
+
+        backend = caches['default']
+        # LocMemCache stores entries as (value, expiry-as-monotonic-time).
+        # Best-effort introspection for the test backend; for Redis in prod
+        # the equivalent check is `redis-cli TTL <key>` returning > 0.
+        store = getattr(backend, '_cache', None)
+        if store is not None:
+            keyed = backend.make_key(dirty_key)
+            entry = store.get(keyed)
+            self.assertIsNotNone(entry, 'dirty key should be present')
+            # Sentinel: pre-fix, _mark_cache_family_dirty wrote with
+            # timeout=None and the LocMemCache expiry is set to None.
+            # Post-fix the entry must have a positive expiry.
+            expiry = backend._expire_info.get(keyed) if hasattr(backend, '_expire_info') else None
+            self.assertIsNotNone(expiry,
+                                 'dirty key must have an expiration')
+        # Sanity: the TTL constant itself is positive and reasonable.
+        self.assertGreater(RECENT_PLAYERS_INVALIDATE_COOLDOWN, 0)
 
     def test_best_player_payload_uses_materialized_snapshot_without_recomputing(self):
         LandingPlayerBestSnapshot.objects.update_or_create(

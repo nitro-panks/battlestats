@@ -768,16 +768,34 @@ def invalidate_landing_clan_caches(realm: str = DEFAULT_REALM, queue_republish: 
         _queue_landing_republish(realm=realm)
 
 
-RECENT_PLAYERS_INVALIDATE_COOLDOWN = 30  # seconds — coalesce rapid lookups
+# 5-minute cooldown coalesces the BattleEvent-capture invalidation flood.
+# With Recent now driven by play-activity, every captured event used to fire
+# this — at thousands of events/hour during a crawl, the previous 30-second
+# cooldown only gated the warmer dispatch but the dirty-flag was set
+# unconditionally on every call, with timeout=None. Net effect: dirty was
+# permanently on, every read bypassed the cache, the 15-minute TTL was
+# meaningless. The fix below puts the dirty-flag inside the cooldown gate
+# and gives it the same TTL as the gate, so even bursts of thousands of
+# captures produce at most one rebuild per cooldown window.
+RECENT_PLAYERS_INVALIDATE_COOLDOWN = 5 * 60  # seconds
 
 
 def invalidate_landing_recent_player_cache(realm: str = DEFAULT_REALM) -> None:
     cooldown_key = realm_cache_key(
         realm, 'landing:recent_players:invalidate_cooldown')
-    _mark_cache_family_dirty(realm_cache_key(
-        realm, LANDING_RECENT_PLAYERS_DIRTY_KEY))
+    # Cooldown gate: if we invalidated within the last cooldown window for
+    # this realm, both the dirty-flag set AND the warmer dispatch are no-ops.
     if not cache.add(cooldown_key, 1, timeout=RECENT_PLAYERS_INVALIDATE_COOLDOWN):
         return
+    # Dirty-flag with a matching TTL — self-clears even if no read picks it
+    # up to clear it. Bypassing _mark_cache_family_dirty (which uses
+    # timeout=None) deliberately; the no-expiration default is wrong for
+    # a cache that gets continuously invalidated.
+    cache.set(
+        realm_cache_key(realm, LANDING_RECENT_PLAYERS_DIRTY_KEY),
+        timezone.now().isoformat(),
+        timeout=RECENT_PLAYERS_INVALIDATE_COOLDOWN,
+    )
     _queue_landing_republish(realm=realm)
 
 
