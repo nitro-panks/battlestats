@@ -198,7 +198,9 @@ Player detail pages coordinate chart rendering vs hydration polling:
 
 ### Data models (server/warships/models.py)
 
-Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat.
+Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat, DeletedAccount (GDPR blocklist).
+
+Battle-history pipeline (rollout runbook): BattleObservation (raw `ships/stats/` payload snapshots, JSON), BattleEvent (per-event deltas — `battles_delta`/`damage_delta`/etc. plus the Phase 7 widening: `main_shots_delta`, `main_hits_delta`, `main_frags_delta`, `secondary_shots_delta`, `secondary_hits_delta`, `secondary_frags_delta`, `torpedo_shots_delta`, `torpedo_hits_delta`, `torpedo_frags_delta`, `damage_scouting_delta`, `ships_spotted_delta`, `capture_points_delta`, `dropped_capture_points_delta`, `team_capture_points_delta`), PlayerDailyShipStats (per-day per-ship aggregate of every BattleEvent column), PlayerWeeklyShipStats / PlayerMonthlyShipStats / PlayerYearlyShipStats (period rollup tiers; populated only when the period writer is reactivated).
 
 ## Team Doctrine (Pre-commit Requirements)
 

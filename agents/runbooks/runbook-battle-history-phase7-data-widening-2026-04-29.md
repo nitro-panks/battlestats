@@ -2,7 +2,7 @@
 
 _Created: 2026-04-29_
 _Context: Extends the battle-history capture pipeline (`runbook-battle-history-rollout-2026-04-28.md`) to record additional per-ship cumulative counters that already arrive in every `ships/stats/` response but are currently discarded by `incremental_battles._coerce_ship_snapshot`. Field inventory and definitions live in `agents/knowledge/wows-ships-stats-field-inventory.md`._
-_Status: implemented; awaiting deploy (2026-04-30 — code + migration land on `feature/battle-history-phase7-data-widening`; release gate 294/294 green; migration `0056_battle_event_phase7_widening` ready to run on droplet)_
+_Status: shipped (2026-04-30 v1.11.0 — release dir `/opt/battlestats-server/releases/20260430200704`; migration `0056_battle_event_phase7_widening` ran cleanly at deploy time; backend services bounced; healthcheck green. Day-7 coverage probe due 2026-05-07.)_
 
 ## Implementation reconciliation
 
