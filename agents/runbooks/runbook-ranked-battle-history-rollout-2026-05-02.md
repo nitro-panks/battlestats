@@ -2,7 +2,7 @@
 
 _Created: 2026-05-02_
 _Context: The randoms battle-history rollout (`runbook-battle-history-rollout-2026-04-28.md`) explicitly filed ranked-battles as Phase 7 / out-of-scope. The randoms pipeline is now stable in production (17K+ events captured across 2,400+ players as of 2026-05-01) and the orchestration is proven. This runbook scopes the parallel ranked rollout — same diff-and-aggregate shape against the WG `seasons/shipstats/` endpoint, with a `mode` discriminator on the existing capture/event/rollup tables._
-_Status: phase-3-shipped (pending live verification) — 2026-05-02. Phase 1+2 capture stable on NA (38/38 NA observations carry ranked_ships_stats_json since 04:53 UTC; 0 EU per realm allowlist; lil_boots forced refresh wrote 131 ship-entries across multiple seasons). Phase 3 lands the rollup writer mode-partitioning: PlayerDailyShipStats grew `mode` + `season_id` columns with partial unique constraints per mode (migration 0058), `_apply_event_to_daily_summary` no longer short-circuits ranked events, `rebuild_daily_ship_stats_for_date` keys on (player, ship, mode, season_id), and `_aggregate_into_period_table` filters to mode=random until the period tier is partitioned. RankedRollupWriteTests (4 cases) cover the partitioning. Lean release gate green (241/241). Phase 4 (read API mode param) shipping next._
+_Status: phase-4-shipped (pending live verification) — 2026-05-02. Phases 1–3 deployed: ranked capture on for NA, BattleObservation.ranked_ships_stats_json populated, BattleEvent + PlayerDailyShipStats partitioned by `mode` + `season_id`, rollup writer + rebuild keyed on the partition columns, period tier guarded to mode=random. Phase 4 extends GET /api/player/<name>/battle-history with `?mode=random|ranked|combined` (default `random` for back-compat), filters PlayerDailyShipStats accordingly for the daily layer, suppresses lifetime-delta fields for ranked/combined since the baseline (Player.battles_json / Player.pvp_*) is randoms-only, and namespaces the cache key on mode. 6 new endpoint tests + 4 RankedRollupWriteTests cover the partitioning + payload contract. Lean release gate green (241/241). Phase 5 (frontend mode pill) shipping next._
 
 ## Purpose
 
@@ -98,9 +98,14 @@ Flip on production after Phase 1 deploys cleanly. Watch:
 
 ### Phase 4 — read API
 
-Extend `GET /api/player/<name>/battle-history` to accept `?mode=random|ranked|combined` (default `combined`, returning both partitions side-by-side). Backwards-compatible: existing callers that don't pass `mode` get the combined view, which under the rollup is a `SUM` across modes.
+Extend `GET /api/player/<name>/battle-history` to accept `?mode=random|ranked|combined`. **Default is `random`** (not `combined` as originally drafted) to keep the existing payload contract byte-for-byte unchanged for callers that don't pass `mode` — the frontend pre-Phase-5 expects randoms-only and the lifetime-delta math relies on `Player.battles_json` / `Player.pvp_*` being randoms-only baselines.
 
-Implementation: extend `_battle_history_period_table` and the payload builder in `views.py:537-555` to filter on `mode`. Cache key extends with the `mode` segment.
+- `mode=random` (default): filters `PlayerDailyShipStats.mode='random'`. Lifetime + delta fields populated as before.
+- `mode=ranked`: filters `PlayerDailyShipStats.mode='ranked'` (sums across active seasons). Lifetime/delta fields are null since the baseline isn't ranked-aware.
+- `mode=combined`: no mode filter (sums random + ranked rows). Lifetime/delta fields also null for the same reason.
+- Period tables (weekly/monthly/yearly) are randoms-only by Phase 3 design — `mode=ranked` against a non-daily period returns empty.
+
+Implementation: `_battle_history_period_table` is unchanged; the payload builder in `views.py` filters the daily query by `mode` and short-circuits lifetime math when `mode != 'random'`. Cache key gains a `:mode` segment so the three views are isolated. Invalid `mode` values fall back silently to `random`. Echoed in the response payload as `"mode": "<resolved>"`.
 
 ### Phase 5 — frontend
 

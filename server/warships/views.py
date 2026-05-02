@@ -481,10 +481,21 @@ BATTLE_HISTORY_PERIODS = {
     "yearly": {"default_windows": 5, "max_windows": 20},
 }
 
+# Phase 4 of the ranked rollout (runbook-ranked-battle-history-rollout-2026-05-02.md).
+# `random` (default) preserves the pre-ranked contract exactly. `ranked`
+# filters PlayerDailyShipStats to ranked rows. `combined` sums both modes
+# but suppresses lifetime-delta fields since the lifetime baseline
+# (Player.battles_json / Player.pvp_*) is randoms-only.
+BATTLE_HISTORY_MODES = {"random", "ranked", "combined"}
+BATTLE_HISTORY_DEFAULT_MODE = "random"
 
-def _battle_history_cache_key(realm: str, player_name: str, period: str, windows: int) -> str:
+
+def _battle_history_cache_key(realm: str, player_name: str, period: str,
+                              windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    return realm_cache_key(realm, f"battle-history:{norm}:{period}:{windows}")
+    return realm_cache_key(
+        realm, f"battle-history:{norm}:{period}:{windows}:{mode}"
+    )
 
 
 def _period_window_start(today, period: str, windows: int):
@@ -526,7 +537,8 @@ def _battle_history_period_table(period: str):
     }[period]
 
 
-def _build_battle_history_payload(player, period: str, windows: int) -> dict:
+def _build_battle_history_payload(player, period: str, windows: int,
+                                  mode: str = BATTLE_HISTORY_DEFAULT_MODE) -> dict:
     """Read the period rollup table for `player` over the last `windows`
     periods and return the totals / by_ship / by_day shape.
 
@@ -552,11 +564,18 @@ def _build_battle_history_payload(player, period: str, windows: int) -> dict:
     else:
         date_field = "period_start"
 
-    rows = list(
-        table.objects
-        .filter(player=player, **{f"{date_field}__gte": since})
-        .order_by(date_field, "ship_id")
+    qs = table.objects.filter(
+        player=player, **{f"{date_field}__gte": since}
     )
+    # Phase 4 ranked rollout: only the daily layer carries the `mode`
+    # column. Period tables (weekly/monthly/yearly) are randoms-only by
+    # the Phase 3 period-rollup guard, so a `ranked` request against a
+    # period tier returns empty by construction.
+    if period == "daily" and mode in ("random", "ranked"):
+        qs = qs.filter(mode=mode)
+    elif period != "daily" and mode == "ranked":
+        qs = qs.none()
+    rows = list(qs.order_by(date_field, "ship_id"))
 
     # Lookup table for per-ship lifetime aggregates (Player.battles_json
     # is one row per ship the player has touched).
@@ -648,7 +667,11 @@ def _build_battle_history_payload(player, period: str, windows: int) -> dict:
         s["avg_damage"] = int(round(s["damage"] / s["battles"])) \
             if s["battles"] else 0
 
-        lifetime = lifetime_by_ship.get(s["ship_id"])
+        # Phase 4 ranked rollout: lifetime baseline (Player.battles_json)
+        # is randoms-only, so the delta math only makes sense for
+        # mode=random. For ranked/combined views, leave the lifetime
+        # fields null — the frontend already tolerates them.
+        lifetime = lifetime_by_ship.get(s["ship_id"]) if mode == "random" else None
         if lifetime and lifetime["battles"] >= s["battles"]:
             # The period rolls into lifetime — battles_json is the
             # latest snapshot, including the period's matches. Subtract
@@ -673,8 +696,15 @@ def _build_battle_history_payload(player, period: str, windows: int) -> dict:
     by_day = sorted(by_day_acc.values(), key=lambda d: d["date"])
 
     # Overall lifetime delta — uses Player aggregate columns directly.
-    lifetime_battles_overall = int(player.pvp_battles or 0)
-    lifetime_wins_overall = int(player.pvp_wins or 0)
+    # Same rationale as the per-ship lifetime: pvp_* are randoms-only, so
+    # only mode=random gets meaningful delta numbers; ranked/combined
+    # leave the lifetime fields null.
+    if mode == "random":
+        lifetime_battles_overall = int(player.pvp_battles or 0)
+        lifetime_wins_overall = int(player.pvp_wins or 0)
+    else:
+        lifetime_battles_overall = 0
+        lifetime_wins_overall = 0
     lifetime_overall_wr = round(
         100.0 * lifetime_wins_overall / lifetime_battles_overall, 1
     ) if lifetime_battles_overall else None
@@ -697,6 +727,7 @@ def _build_battle_history_payload(player, period: str, windows: int) -> dict:
         "period": period,
         "windows": windows,
         "window_days": windows if period == "daily" else None,
+        "mode": mode,
         "as_of": timezone.now().isoformat(),
         "totals": {
             **totals,
@@ -732,6 +763,10 @@ def battle_history(request, player_name: str) -> Response:
         period = "daily"
     period_cfg = BATTLE_HISTORY_PERIODS[period]
 
+    mode = request.query_params.get("mode", BATTLE_HISTORY_DEFAULT_MODE)
+    if mode not in BATTLE_HISTORY_MODES:
+        mode = BATTLE_HISTORY_DEFAULT_MODE
+
     # Accept the legacy `days` param when period=daily for back-compat;
     # otherwise prefer `windows`.
     raw_windows = request.query_params.get(
@@ -754,12 +789,14 @@ def battle_history(request, player_name: str) -> Response:
         return Response({"detail": "Player not found."},
                         status=status.HTTP_404_NOT_FOUND)
 
-    cache_key = _battle_history_cache_key(realm, player.name, period, windows)
+    cache_key = _battle_history_cache_key(
+        realm, player.name, period, windows, mode,
+    )
     cached = cache.get(cache_key)
     if cached is not None:
         return Response(cached)
 
-    payload = _build_battle_history_payload(player, period, windows)
+    payload = _build_battle_history_payload(player, period, windows, mode)
     cache.set(cache_key, payload, BATTLE_HISTORY_CACHE_TTL)
     return Response(payload)
 

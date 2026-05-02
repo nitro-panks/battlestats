@@ -1459,6 +1459,8 @@ class BattleHistoryEndpointTests(TestCase):
                 date=payload.get("date", today),
                 ship_id=ship_id,
                 ship_name=payload.get("ship_name", ""),
+                mode=payload.get("mode", PlayerDailyShipStats.MODE_RANDOM),
+                season_id=payload.get("season_id"),
                 battles=payload.get("battles", 0),
                 wins=payload.get("wins", 0),
                 losses=payload.get("losses", 0),
@@ -1642,6 +1644,158 @@ class BattleHistoryEndpointTests(TestCase):
             cache.clear()
             r3 = self.client.get("/api/player/api_test/battle-history/?days=7")
             self.assertEqual(r3.json()["totals"]["battles"], 99)
+
+    def test_default_mode_returns_only_random_rows(self):
+        # One random row + one ranked row for the same ship on the same
+        # day. Default mode (random) must hide the ranked row.
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=4, wins=3, damage=100_000,
+        )
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=10, wins=7, damage=400_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get("/api/player/api_test/battle-history/?days=7")
+        body = r.json()
+        self.assertEqual(body["mode"], "random")
+        self.assertEqual(body["totals"]["battles"], 4)
+        self.assertEqual(body["totals"]["damage"], 100_000)
+
+    def test_mode_ranked_returns_only_ranked_rows(self):
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=4, wins=3, damage=100_000,
+        )
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=10, wins=7, damage=400_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=ranked",
+            )
+        body = r.json()
+        self.assertEqual(body["mode"], "ranked")
+        self.assertEqual(body["totals"]["battles"], 10)
+        self.assertEqual(body["totals"]["damage"], 400_000)
+        # Lifetime suppression: ranked baseline isn't randoms-derived.
+        self.assertIsNone(body["totals"]["lifetime_battles"])
+        self.assertIsNone(body["totals"]["lifetime_win_rate"])
+        self.assertIsNone(body["totals"]["delta_win_rate"])
+
+    def test_mode_ranked_sums_across_seasons(self):
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=3, wins=2, damage=60_000,
+        )
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=22,
+            battles=5, wins=4, damage=120_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=ranked",
+            )
+        body = r.json()
+        self.assertEqual(body["totals"]["battles"], 8)
+        self.assertEqual(body["totals"]["damage"], 180_000)
+
+    def test_mode_combined_sums_random_and_ranked(self):
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=4, wins=3, damage=100_000,
+        )
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=10, wins=7, damage=400_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=combined",
+            )
+        body = r.json()
+        self.assertEqual(body["mode"], "combined")
+        self.assertEqual(body["totals"]["battles"], 14)
+        self.assertEqual(body["totals"]["damage"], 500_000)
+        # Combined view also suppresses lifetime delta — randoms-only baseline.
+        self.assertIsNone(body["totals"]["lifetime_win_rate"])
+
+    def test_invalid_mode_falls_back_to_default(self):
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=3,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=bogus",
+            )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["mode"], "random")
+        self.assertEqual(body["totals"]["battles"], 4)
+
+    def test_cache_key_isolates_modes(self):
+        from django.core.cache import cache
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=3,
+        )
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=10, wins=7,
+        )
+        cache.clear()
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            random_resp = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=random",
+            )
+            ranked_resp = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=ranked",
+            )
+        # Distinct cache keys → distinct totals served from cache.
+        self.assertEqual(random_resp.json()["totals"]["battles"], 4)
+        self.assertEqual(ranked_resp.json()["totals"]["battles"], 10)
 
 
 class PeriodRollupsTests(TestCase):
