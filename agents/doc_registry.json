@@ -334,6 +334,37 @@
                 "cache-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-cache-capacity-expansion-2026-05-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "platform",
+            "owner": "platform",
+            "aliases": [
+                "cache expansion",
+                "8gb optimization",
+                "redis maxmemory",
+                "celery concurrency bump",
+                "post-resize tuning"
+            ],
+            "tags": [
+                "cache",
+                "redis",
+                "lru",
+                "maxmemory",
+                "celery",
+                "concurrency",
+                "hydration",
+                "background",
+                "work_mem",
+                "droplet sizing",
+                "bootstrap gotcha"
+            ],
+            "archive_on": [
+                "droplet-resized-again",
+                "bootstrap-script-fixed-and-30-day-stable"
+            ]
+        },
         "agents/runbooks/runbook-contract-strategy-implementation.md": {
             "kind": "runbook",
             "status": "active",

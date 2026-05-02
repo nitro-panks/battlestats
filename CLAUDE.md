@@ -154,15 +154,15 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Clan search suggestions**: Same three-tier pattern as player suggestions. Endpoint: `/api/landing/clan-suggestions`. Matches on `Clan.name` OR `Clan.tag` via `ILIKE` with `pg_trgm` GIN indexes (`clan_name_trgm_idx`, `clan_tag_trgm_idx`). Redis key: `{realm}:clan-suggest:{query}`, 600s TTL. Ordered by prefix match → `members_count` DESC → name. Client-side cache is keyed separately per search mode.
 - **Clan battle seasons (clan-level)**: Request-driven — first visit queues `update_clan_battle_summary_task` which calls `refresh_clan_battle_seasons_cache()`. This fetches per-member CB stats from the WG API via ThreadPoolExecutor, aggregates by season, and writes to **Redis only** (TTL-based). Configured clans are pre-warmed by `warm_clan_battle_summaries_task` (env: `CLAN_BATTLE_WARM_CLAN_IDS`). Subsequent visits hit Redis until TTL expiry.
 - **Clan battle summary (per-player)**: Per-player CB stats (`clan_battle_total_battles`, `clan_battle_seasons_participated`, `clan_battle_overall_win_rate`) are persisted to **Postgres** on `PlayerExplorerSummary` via `_persist_player_clan_battle_summary()`. Populated by: enrichment pipeline (Phase 3e), player CB tab visits, and the `backfill_clan_battle_data` management command.
-- Redis-backed in production, LocMemCache in tests
+- Redis-backed in production (capped at **3 GB** with **`allkeys-lru`** eviction policy as of 2026-05-02 — see `runbook-cache-capacity-expansion-2026-05-02.md`), LocMemCache in tests
 
 ### Celery queue architecture
 
 Four queues with dedicated workers:
 
 - **default** (`-c 3`) — lightweight API-triggered entity refreshes and general work
-- **hydration** (`-c 3`) — heavier request-driven upstream/data refreshes. Tasks include ranked, efficiency, battle-data, clan-members, clan-battle, and clan-battle-summary refreshes
-- **background** (`-c 2`) — warmers, incremental refreshes, startup warmers, snapshots, and enrichment
+- **hydration** (`-c 5`) — heavier request-driven upstream/data refreshes. Tasks include ranked, efficiency, battle-data, clan-members, clan-battle, and clan-battle-summary refreshes. Bumped from `-c 3` on 2026-05-02 to reduce tail latency on cold-profile visits — see `runbook-cache-capacity-expansion-2026-05-02.md`.
+- **background** (`-c 3`) — warmers, incremental refreshes, startup warmers, snapshots, and enrichment. Bumped from `-c 2` on 2026-05-02.
 - **crawls** (`-c 1`) — multi-day clan crawl + its watchdog only. Carved out from `background` on 2026-04-30 so the days-long `crawl_all_clans_task` no longer camps a slot the rest of the workload needs. See `agents/runbooks/runbook-clan-crawl-blocker-2026-04-30.md`.
 
 Resilience mechanisms:
