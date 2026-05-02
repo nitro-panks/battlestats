@@ -179,6 +179,29 @@ def _ships_from_iterable(ship_data: Iterable[Dict[str, Any]]) -> Dict[int, ShipS
     return ships
 
 
+# WG `seasons/shipstats/` payload shape (per ship):
+#   {
+#     "ship_id": <int>,
+#     "seasons": {
+#       "<season_id>": {
+#         "<rank_tier>": {                    ← rank index, e.g. "0", "1"
+#           "rank_solo": {battles, wins, ...} ← may be NULL
+#           "rank_div2": {...} | NULL
+#           "rank_div3": {...} | NULL
+#         },
+#         ...
+#       }
+#     }
+#   }
+#
+# Per-ship per-season totals are aggregated by summing the leaf stat
+# dicts across all rank tiers and all three div_mode buckets. The
+# Phase-1 implementation read `seasons[id].get("battles")` directly,
+# which always returned None — the diff lane silently produced zero
+# events even when a player had real ranked play. Fixed 2026-05-02.
+_RANKED_DIV_MODES = ("rank_solo", "rank_div2", "rank_div3")
+
+
 def _coerce_ranked_season_stats(
     ship_id: int, season_id_raw: Any, stats: Dict[str, Any],
 ) -> Optional[RankedShipSeasonSnapshot]:
@@ -188,20 +211,48 @@ def _coerce_ranked_season_stats(
         season_id = int(season_id_raw)
     except (TypeError, ValueError):
         return None
-    try:
-        return RankedShipSeasonSnapshot(
-            ship_id=ship_id,
-            season_id=season_id,
-            battles=int(stats.get("battles", 0)),
-            wins=int(stats.get("wins", 0)),
-            losses=int(stats.get("losses", 0)),
-            frags=int(stats.get("frags", 0)),
-            damage_dealt=int(stats.get("damage_dealt", 0)),
-            xp=int(stats.get("xp", 0)),
-            survived_battles=int(stats.get("survived_battles", 0)),
-        )
-    except (TypeError, ValueError):
-        return None
+
+    totals = {
+        "battles": 0, "wins": 0, "losses": 0, "frags": 0,
+        "damage_dealt": 0, "xp": 0, "survived_battles": 0,
+    }
+
+    # Shape A (real WG payload): nested rank-tier × div_mode buckets.
+    # Walk the rank tiers, sum the leaf stat dicts across all div modes.
+    found_nested = False
+    for rank_tier_value in stats.values():
+        if not isinstance(rank_tier_value, dict):
+            continue
+        for div_key in _RANKED_DIV_MODES:
+            leaf = rank_tier_value.get(div_key)
+            if not isinstance(leaf, dict):
+                continue
+            found_nested = True
+            for k in totals:
+                v = leaf.get(k)
+                if isinstance(v, (int, float)):
+                    totals[k] += int(v)
+
+    # Shape B (legacy / test fixtures): flat stat keys directly on the
+    # season dict. Used by test fixtures and any future flattened source.
+    # Only consult Shape B when Shape A produced nothing — never mix.
+    if not found_nested:
+        for k in totals:
+            v = stats.get(k)
+            if isinstance(v, (int, float)):
+                totals[k] = int(v)
+
+    return RankedShipSeasonSnapshot(
+        ship_id=ship_id,
+        season_id=season_id,
+        battles=totals["battles"],
+        wins=totals["wins"],
+        losses=totals["losses"],
+        frags=totals["frags"],
+        damage_dealt=totals["damage_dealt"],
+        xp=totals["xp"],
+        survived_battles=totals["survived_battles"],
+    )
 
 
 def _ranked_ships_from_iterable(

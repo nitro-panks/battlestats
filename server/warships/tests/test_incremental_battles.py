@@ -509,6 +509,51 @@ class RankedIterableCoercionTests(TestCase):
         rebuilt = _ranked_ships_from_iterable(rows)
         self.assertEqual(rebuilt, snapshot)
 
+    def test_real_wg_payload_shape_aggregates_across_rank_and_div_modes(self):
+        """Real WG `seasons/shipstats/` nests stats as
+        seasons[id][rank_tier][rank_solo|rank_div2|rank_div3]. The Phase-1
+        parser silently read 0 from this shape; the fix aggregates across
+        all rank tiers and div modes."""
+        rows = [{
+            "ship_id": 42,
+            "seasons": {
+                "1020": {
+                    "0": {
+                        "rank_solo": {
+                            "battles": 3, "wins": 2, "losses": 1,
+                            "frags": 2, "damage_dealt": 158_014,
+                            "xp": 5_990, "survived_battles": 3,
+                        },
+                        "rank_div2": None,
+                        "rank_div3": None,
+                    },
+                    "1": {
+                        "rank_solo": {
+                            "battles": 2, "wins": 1, "losses": 1,
+                            "frags": 1, "damage_dealt": 80_000,
+                            "xp": 3_000, "survived_battles": 1,
+                        },
+                        "rank_div2": {
+                            "battles": 1, "wins": 1, "losses": 0,
+                            "frags": 0, "damage_dealt": 30_000,
+                            "xp": 2_000, "survived_battles": 1,
+                        },
+                        "rank_div3": None,
+                    },
+                },
+            },
+        }]
+        out = _ranked_ships_from_iterable(rows)
+        snap = out[(42, 1020)]
+        # Sums across rank_tier 0 + 1 and across rank_solo + rank_div2.
+        self.assertEqual(snap.battles, 6)
+        self.assertEqual(snap.wins, 4)
+        self.assertEqual(snap.losses, 2)
+        self.assertEqual(snap.frags, 3)
+        self.assertEqual(snap.damage_dealt, 268_014)
+        self.assertEqual(snap.xp, 10_990)
+        self.assertEqual(snap.survived_battles, 5)
+
 
 class RankedRecordObservationTests(TestCase):
     """End-to-end: ranked diff lane through record_observation_from_payloads."""
