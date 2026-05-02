@@ -305,12 +305,50 @@ def _serialize_ranked_ships_payload(
 
 def _hydrate_previous_ranked_snapshot(
     previous,
+    player=None,
 ) -> Dict[Tuple[int, int], RankedShipSeasonSnapshot]:
-    """Rebuild the previous observation's ranked map from
-    BattleObservation.ranked_ships_stats_json. Returns an empty map when the
-    column is NULL — that's the correct baseline for the next diff lane to
-    treat the current observation as fresh-from-zero per-season."""
-    return _ranked_ships_from_iterable(previous.ranked_ships_stats_json or [])
+    """Rebuild the prior ranked map for the diff lane.
+
+    Walk-back semantics: when the most recent observation's
+    `ranked_ships_stats_json` is NULL (fetch failed for that tick), step
+    back through earlier observations until we find one with a non-NULL
+    payload. NULL means "ranked state unknown for that tick" — using it
+    as the baseline would falsely attribute the player's entire ranked
+    history to whatever activity happens after the failed tick.
+
+    `[]` (empty list) is distinct from NULL: it means "fetched
+    successfully, player had no ranked rows in any active season" and IS
+    a legitimate zero-state baseline — treat as "no prior ranked play".
+
+    `player` is optional; when omitted the walk-back is skipped (legacy
+    callers that don't have the player handle keep the original behavior).
+    """
+    if previous is None:
+        return {}
+    if previous.ranked_ships_stats_json is not None:
+        return _ranked_ships_from_iterable(previous.ranked_ships_stats_json)
+
+    # Latest is NULL → walk back for the most recent non-NULL prior.
+    # Bound the walk to observations at-or-before `previous.observed_at`
+    # so we don't pick up the just-created current observation, which by
+    # definition is chronologically newer than `previous` inside the
+    # transaction.
+    if player is None:
+        return {}
+    from warships.models import BattleObservation
+    fallback = (
+        BattleObservation.objects
+        .filter(
+            player=player,
+            ranked_ships_stats_json__isnull=False,
+            observed_at__lte=previous.observed_at,
+        )
+        .order_by("-observed_at")
+        .first()
+    )
+    if fallback is None:
+        return {}
+    return _ranked_ships_from_iterable(fallback.ranked_ships_stats_json)
 
 
 def _snapshot_from_player_row(player, ship_data: Iterable[Dict[str, Any]]) -> Optional[PlayerSnapshot]:
@@ -688,7 +726,8 @@ def record_observation_from_payloads(
 
         previous_snapshot = _hydrate_previous_snapshot(previous)
         events = compute_battle_events(previous_snapshot, snapshot)
-        previous_ranked = _hydrate_previous_ranked_snapshot(previous)
+        previous_ranked = _hydrate_previous_ranked_snapshot(
+            previous, player=player)
         ranked_events = (
             compute_ranked_battle_events(previous_ranked, ranked_map)
             if ranked_ship_data is not None else []
@@ -1157,13 +1196,17 @@ def record_ranked_observation_and_diff(player_id: int, realm: str) -> Dict[str, 
         )
     except Exception:
         logger.exception(
-            "WG seasons/shipstats fetch failed for player_id=%s", player_id,
+            "WG seasons/shipstats fetch failed for player_id=%s — "
+            "writing observation with NULL ranked payload so the diff "
+            "lane falls back to the most recent successful prior",
+            player_id,
         )
-        # Fall back to an empty ranked payload — keeps the random
-        # baseline working even when ranked fetch hiccups.
-        ranked_ship_data = []
-    if ranked_ship_data is None:
-        ranked_ship_data = []
+        # Critical: do NOT write `[]` on fetch failure. `[]` is "fetched
+        # successfully, player has no ranked play" and is a legitimate
+        # zero-state baseline. NULL means "fetch failed, ranked state
+        # unknown for this tick" and the diff lane walks back to the
+        # most recent observation with non-NULL ranked data.
+        ranked_ship_data = None
 
     return record_observation_from_payloads(
         player,

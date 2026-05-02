@@ -943,7 +943,11 @@ class RecordRankedObservationAndDiffTests(TestCase):
         # "we asked WG and they had nothing" vs "we never asked".
         self.assertEqual(obs.ranked_ships_stats_json, [])
 
-    def test_seasons_shipstats_failure_falls_back_to_empty(self):
+    def test_seasons_shipstats_failure_writes_null_not_empty(self):
+        # When seasons/shipstats fetch raises (e.g. WG 407), the random
+        # baseline still writes but ranked is recorded as NULL — distinct
+        # from `[]` (a legitimate "fetched, player has no ranked play"
+        # baseline). NULL drives the diff lane's walk-back behavior.
         with mock.patch(
             "warships.api.players._fetch_player_personal_data",
             return_value=self.player_data,
@@ -957,10 +961,85 @@ class RecordRankedObservationAndDiffTests(TestCase):
             result = record_ranked_observation_and_diff(
                 player_id=self.player.player_id, realm="na",
             )
-        # The random baseline still writes; ranked falls back to empty.
         self.assertEqual(result["status"], "completed")
         obs = BattleObservation.objects.get(player=self.player)
-        self.assertEqual(obs.ranked_ships_stats_json, [])
+        self.assertIsNone(obs.ranked_ships_stats_json)
+
+    def test_walk_back_uses_last_nonnull_when_latest_obs_is_null(self):
+        # Seed three observations:
+        #   obs1 (oldest): non-empty ranked payload  → diff lane should
+        #                 land on this as the "previous"
+        #   obs2:          NULL ranked (fetch failed)
+        #   obs3:          NULL ranked (fetch failed)
+        # Then run a fourth ingestion with non-empty ranked payload that
+        # SHOULD diff against obs1 (most recent non-NULL), not obs3.
+        from warships.models import BattleObservation, BattleEvent
+        BattleObservation.objects.filter(player=self.player).delete()
+        # obs1 — earliest, with a baseline ranked payload (5 battles).
+        obs1 = BattleObservation.objects.create(
+            player=self.player, pvp_battles=99,
+            ships_stats_json=[],
+            ranked_ships_stats_json=[{
+                "ship_id": 4001,
+                "seasons": {
+                    "21": {"battles": 5, "wins": 3, "losses": 2,
+                           "damage_dealt": 100_000, "frags": 7, "xp": 1_500,
+                           "survived_battles": 3},
+                },
+            }],
+        )
+        # obs2 + obs3 — NULL ranked (failed fetches).
+        obs2 = BattleObservation.objects.create(
+            player=self.player, pvp_battles=100,
+            ships_stats_json=[], ranked_ships_stats_json=None,
+        )
+        obs3 = BattleObservation.objects.create(
+            player=self.player, pvp_battles=100,
+            ships_stats_json=[], ranked_ships_stats_json=None,
+        )
+        # Backdate observed_at so obs1 < obs2 < obs3 chronologically.
+        from datetime import timedelta
+        from django.utils import timezone as dj_tz
+        BattleObservation.objects.filter(pk=obs1.pk).update(
+            observed_at=dj_tz.now() - timedelta(hours=3))
+        BattleObservation.objects.filter(pk=obs2.pk).update(
+            observed_at=dj_tz.now() - timedelta(hours=2))
+        BattleObservation.objects.filter(pk=obs3.pk).update(
+            observed_at=dj_tz.now() - timedelta(hours=1))
+
+        # obs4: WG returns non-empty ranked with battles=8 — that's +3
+        # battles since the obs1 baseline (5).
+        ranked_data = [{
+            "ship_id": 4001,
+            "seasons": {
+                "21": {"battles": 8, "wins": 5, "losses": 3,
+                       "damage_dealt": 200_000, "frags": 11, "xp": 2_400,
+                       "survived_battles": 5},
+            },
+        }]
+        with mock.patch(
+            "warships.api.players._fetch_player_personal_data",
+            return_value=self.player_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ship_stats_for_player",
+            return_value=self.ship_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ranked_ship_stats_for_player",
+            return_value=ranked_data,
+        ):
+            result = record_ranked_observation_and_diff(
+                player_id=self.player.player_id, realm="na",
+            )
+        self.assertEqual(result["status"], "completed")
+        # Critical: the diff lane should attribute +3 battles, not +8.
+        # +8 would be the bug where NULL was treated as "no prior data".
+        self.assertEqual(result.get("ranked_events_created"), 1)
+        ev = BattleEvent.objects.filter(
+            player=self.player, mode="ranked",
+        ).order_by("-detected_at").first()
+        self.assertIsNotNone(ev)
+        self.assertEqual(ev.battles_delta, 3)
+        self.assertEqual(ev.season_id, 21)
 
 
 class UpdateBattleDataCaptureHookTests(TestCase):
