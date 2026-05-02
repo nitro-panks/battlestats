@@ -59,6 +59,12 @@ BULK_CACHE_LOAD_LOCK_TIMEOUT = 30 * 60
 RECENTLY_VIEWED_WARM_LOCK_TIMEOUT = 15 * 60
 CLAN_TIER_DIST_WARM_LOCK_TIMEOUT = 3 * 60 * 60  # 3h — iterates all clans
 ENRICH_PLAYER_DATA_LOCK_TIMEOUT = 6 * 60 * 60
+# Daily floor for BattleObservation coverage. Walks active-7d players in a
+# realm and fills any whose latest observation is older than the staleness
+# threshold. Sits alongside the tiered incremental crawler — that's
+# best-effort, this is a guaranteed daily floor so the diff lane never
+# collapses 3+ days of activity into a single huge event.
+DAILY_OBSERVATION_FLOOR_LOCK_TIMEOUT = 3 * 60 * 60
 
 
 MAX_CONCURRENT_REALM_CRAWLS = int(
@@ -83,6 +89,10 @@ def _ranked_incremental_lock_key(realm: str = DEFAULT_REALM) -> str:
 
 def _player_refresh_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:incremental_player_refresh:{realm}:lock"
+
+
+def _daily_observation_floor_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:daily_observation_floor:{realm}:lock"
 
 
 def _landing_page_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -1300,6 +1310,56 @@ def incremental_player_refresh_task(self, realm=DEFAULT_REALM):
                 os.getenv('PLAYER_REFRESH_WARM_LOOKBACK_DAYS', '90')),
             max_errors=int(os.getenv('PLAYER_REFRESH_MAX_ERRORS', '25')),
             realm=realm,
+        )
+        return {"status": "completed"}
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, **CRAWL_TASK_OPTS)
+def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
+    """Daily floor for BattleObservation coverage on active-7d players.
+
+    Walks `Player.objects.filter(realm=..., is_hidden=False,
+    last_battle_date >= today - DAYS)` and dispatches a fresh observation
+    for any whose latest BattleObservation is older than
+    `BATTLE_OBSERVATION_FLOOR_HOURS` (default 22h). The intent is to
+    guarantee at-most-24h spacing between observations for the active
+    population — sitting alongside the tiered incremental crawler which
+    is best-effort.
+
+    Issues 2 WG calls/player when ranked capture is off for the realm,
+    3 calls when it's on (random + ranked baseline rolled into the same
+    observation).
+
+    Defers when a clan crawl is running (same convention as the tiered
+    crawler) so we don't pile WG calls on top of the long-running batch.
+    """
+    if cache.get(_clan_crawl_lock_key(realm)) is not None:
+        logger.info(
+            "Skipping ensure_daily_battle_observations_task because clan crawl is currently running"
+        )
+        return {"status": "skipped", "reason": "crawl-running"}
+
+    lock_key = _daily_observation_floor_lock_key(realm)
+    if not cache.add(
+        lock_key, self.request.id,
+        timeout=DAILY_OBSERVATION_FLOOR_LOCK_TIMEOUT,
+    ):
+        logger.info(
+            "Skipping ensure_daily_battle_observations_task because another floor sweep is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        from django.core.management import call_command
+        call_command(
+            "ensure_daily_battle_observations",
+            realm=realm,
+            days=int(os.getenv("BATTLE_OBSERVATION_FLOOR_DAYS", "7")),
+            stale_hours=int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOURS", "22")),
+            limit=int(os.getenv("BATTLE_OBSERVATION_FLOOR_LIMIT", "3000")),
+            delay=float(os.getenv("BATTLE_OBSERVATION_FLOOR_DELAY", "0.3")),
         )
         return {"status": "completed"}
     finally:

@@ -362,6 +362,41 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
+    # -- Daily BattleObservation Floor (per realm) --
+    # Sits alongside the tiered incremental crawler as a guaranteed
+    # daily floor — fills any active-7d player whose latest
+    # BattleObservation is older than ~22h. Prevents the diff lane from
+    # collapsing multi-day activity into a single huge event.
+    # Runbook: agents/runbooks/runbook-battle-observation-floor-2026-05-02.md
+    obs_floor_hour = int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOUR", "1"))
+    for realm in sorted(VALID_REALMS):
+        realm_hour = (obs_floor_hour
+                      + REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+        obs_floor_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute="15",
+            hour=str(realm_hour),
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"daily-observation-floor-{realm}",
+            defaults={
+                "task": "warships.tasks.ensure_daily_battle_observations_task",
+                "crontab": obs_floor_schedule,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": (
+                    f"Daily floor for BattleObservation coverage "
+                    f"({realm.upper()}). Walks active-7d players whose "
+                    f"latest observation is >22h old. Defers while a "
+                    f"clan crawl holds its realm lock."
+                ),
+            },
+        )
+
     # -- Daily Clan Tier Distribution Warmer --
     # Recalculates tier distribution cache for every clan with members.
     # Staggered by realm to avoid concurrent DB pressure.
