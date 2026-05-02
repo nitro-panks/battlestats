@@ -111,9 +111,11 @@ Implementation: `_battle_history_period_table` is unchanged; the payload builder
 
 `BattleHistoryCard.tsx` adds a small mode pill (`Random | Ranked | All`, defaulting to **Random** — same back-compat reasoning as Phase 4). Re-fetches on toggle by passing the `mode` param. Reuses existing card layout — only the data binding changes, with one wrinkle: when the user has switched off the default mode, the card stays mounted with an empty-state line ("No <mode> battles in this window.") so the pill row stays reachable. Default-mode empty continues to return `null`, matching the pre-Phase-5 contract.
 
-### Phase 6 — backfill (optional)
+### Phase 6 — backfill
 
-Mirror `establish_battle_history_baseline` to seed observations for active-ranked-7d players who have ranked battles registered in `Player.ranked_json` but no `BattleObservation.ranked_ships_stats_json` yet. New command: `establish_ranked_baseline --realm na --days 7`. Rate-budget caveat from the randoms baseline-fill applies (~1% 407 retries on the next regular crawl).
+Mirror `establish_battle_history_baseline` to seed observations for active-ranked-N-day players who have no `BattleObservation.ranked_ships_stats_json` yet. New command: `establish_ranked_baseline --realm na --days 14 --min-ranked-battles 100`. Rate-budget caveat from the randoms baseline-fill applies (~1% 407 retries on the next regular crawl).
+
+**Scoped to its own runbook**: see `agents/runbooks/runbook-ranked-baseline-fill-2026-05-02.md`. The helper + command + tests shipped 2026-05-02; the live fill is operator-gated.
 
 ## Operational watchpoints
 

@@ -36,6 +36,7 @@ from warships.incremental_battles import (
     rebuild_period_rollups_for_date,
     record_observation_and_diff,
     record_observation_from_payloads,
+    record_ranked_observation_and_diff,
 )
 from warships.models import (
     BattleEvent,
@@ -785,6 +786,95 @@ class RecordObservationAndDiffTests(TestCase):
             )
         self.assertEqual(result["status"], "skipped")
         self.assertEqual(result["reason"], "wg-fetch-failed-or-hidden")
+
+
+class RecordRankedObservationAndDiffTests(TestCase):
+    """Phase 6: 3-call wrapper used by `establish_ranked_baseline`."""
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="ranked_seed_player", player_id=20002000, realm="na",
+            pvp_battles=100, pvp_wins=50, pvp_losses=50, pvp_frags=80,
+            pvp_survived_battles=60,
+        )
+        self.player_data = {
+            "hidden_profile": False,
+            "statistics": {"pvp": {
+                "battles": 100, "wins": 50, "losses": 50, "frags": 80,
+                "survived_battles": 60,
+            }},
+        }
+        self.ship_data = [{"ship_id": 99, "pvp": {"battles": 100}}]
+
+    def test_writes_observation_with_both_random_and_ranked_payloads(self):
+        ranked_data = [{
+            "ship_id": 4_182_799_888,
+            "seasons": {
+                "21": {"battles": 12, "wins": 7, "losses": 5,
+                       "damage_dealt": 360_000, "frags": 14, "xp": 8_400,
+                       "survived_battles": 6},
+            },
+        }]
+        with mock.patch(
+            "warships.api.players._fetch_player_personal_data",
+            return_value=self.player_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ship_stats_for_player",
+            return_value=self.ship_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ranked_ship_stats_for_player",
+            return_value=ranked_data,
+        ):
+            result = record_ranked_observation_and_diff(
+                player_id=self.player.player_id, realm="na",
+            )
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["reason"], "baseline")
+        obs = BattleObservation.objects.get(player=self.player)
+        self.assertTrue(obs.ships_stats_json)
+        self.assertTrue(obs.ranked_ships_stats_json)
+        self.assertEqual(len(obs.ranked_ships_stats_json), 1)
+
+    def test_writes_observation_when_seasons_shipstats_returns_empty(self):
+        # Off-season case: WG returns []. The observation still writes
+        # so a future visit can diff against a known-empty prior.
+        with mock.patch(
+            "warships.api.players._fetch_player_personal_data",
+            return_value=self.player_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ship_stats_for_player",
+            return_value=self.ship_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ranked_ship_stats_for_player",
+            return_value=[],
+        ):
+            result = record_ranked_observation_and_diff(
+                player_id=self.player.player_id, realm="na",
+            )
+        self.assertEqual(result["status"], "completed")
+        obs = BattleObservation.objects.get(player=self.player)
+        # Empty (not None) ranked payload — so the next diff knows
+        # "we asked WG and they had nothing" vs "we never asked".
+        self.assertEqual(obs.ranked_ships_stats_json, [])
+
+    def test_seasons_shipstats_failure_falls_back_to_empty(self):
+        with mock.patch(
+            "warships.api.players._fetch_player_personal_data",
+            return_value=self.player_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ship_stats_for_player",
+            return_value=self.ship_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ranked_ship_stats_for_player",
+            side_effect=RuntimeError("wg ranked flaked"),
+        ):
+            result = record_ranked_observation_and_diff(
+                player_id=self.player.player_id, realm="na",
+            )
+        # The random baseline still writes; ranked falls back to empty.
+        self.assertEqual(result["status"], "completed")
+        obs = BattleObservation.objects.get(player=self.player)
+        self.assertEqual(obs.ranked_ships_stats_json, [])
 
 
 class UpdateBattleDataCaptureHookTests(TestCase):

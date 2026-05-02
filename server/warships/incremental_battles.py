@@ -1102,3 +1102,72 @@ def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
         player_data=player_data,
         ship_data=ship_data,
     )
+
+
+def record_ranked_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
+    """Like `record_observation_and_diff` but also fetches `seasons/shipstats/`.
+
+    Used by the `establish_ranked_baseline` management command and any
+    future ranked-PoC dispatchers. Issues three WG calls
+    (`account/info/` + `ships/stats/` + `seasons/shipstats/`) and routes
+    all three payloads into `record_observation_from_payloads`.
+
+    The ranked payload may legitimately come back empty (off-season,
+    player hasn't played ranked this season). In that case we still
+    write a `BattleObservation` with `ranked_ships_stats_json=[]` so the
+    next observation can diff against a known-empty prior — without
+    that, the diff lane treats "missing" and "empty" identically and
+    wouldn't emit an event when the player first plays ranked.
+    """
+    from warships.api.players import _fetch_player_personal_data
+    from warships.api.ships import (
+        _fetch_ranked_ship_stats_for_player,
+        _fetch_ship_stats_for_player,
+    )
+    from warships.models import Player
+
+    try:
+        player = Player.objects.get(player_id=player_id, realm=realm)
+    except Player.DoesNotExist:
+        logger.warning("Tracked player not found locally: player_id=%s realm=%s",
+                       player_id, realm)
+        return {"status": "skipped", "reason": "player-not-found"}
+
+    try:
+        player_data = _fetch_player_personal_data(player_id, realm=realm)
+    except Exception:
+        logger.exception("WG account/info fetch failed for player_id=%s", player_id)
+        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+    if not player_data:
+        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+
+    try:
+        ship_data = _fetch_ship_stats_for_player(player_id, realm=realm)
+    except Exception:
+        logger.exception("WG ships/stats fetch failed for player_id=%s", player_id)
+        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+    if ship_data is None:
+        return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+    if isinstance(ship_data, dict):
+        ship_data = []
+
+    try:
+        ranked_ship_data = _fetch_ranked_ship_stats_for_player(
+            player_id, realm=realm,
+        )
+    except Exception:
+        logger.exception(
+            "WG seasons/shipstats fetch failed for player_id=%s", player_id,
+        )
+        # Fall back to an empty ranked payload — keeps the random
+        # baseline working even when ranked fetch hiccups.
+        ranked_ship_data = []
+    if ranked_ship_data is None:
+        ranked_ship_data = []
+
+    return record_observation_from_payloads(
+        player,
+        player_data=player_data,
+        ship_data=ship_data,
+        ranked_ship_data=ranked_ship_data,
+    )
