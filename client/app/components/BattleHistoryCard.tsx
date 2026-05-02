@@ -118,19 +118,21 @@ interface SortableThProps {
     direction: SortDirection;
     onSortClick: (key: SortKey) => void;
     children: React.ReactNode;
+    tooltip?: string;
 }
 
 const SortableTh: React.FC<SortableThProps> = ({
-    sortKey, activeKey, direction, onSortClick, children,
+    sortKey, activeKey, direction, onSortClick, children, tooltip,
 }) => {
     const active = activeKey === sortKey;
     const arrow = active ? (direction === 'asc' ? '▲' : '▼') : '';
     return (
         <th
             scope="col"
-            className="py-1 px-2 cursor-pointer select-none hover:text-[var(--text-strong)] text-center"
+            className="py-1 px-2 cursor-help select-none hover:text-[var(--text-strong)] text-center"
             onClick={() => onSortClick(sortKey)}
             aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+            title={tooltip}
         >
             <span>{children}</span>
             <span className="ml-1 text-[10px]" aria-hidden="true">{arrow || '↕'}</span>
@@ -535,13 +537,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 <table className="w-full text-left text-sm">
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                            <SortableTh sortKey="ship_name" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Ship</SortableTh>
-                            <SortableTh sortKey="ship_tier" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Tier</SortableTh>
-                            <SortableTh sortKey="ship_type" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Type</SortableTh>
-                            <SortableTh sortKey="battles" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>#</SortableTh>
-                            <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Win Rate</SortableTh>
-                            <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>Avg dmg</SortableTh>
-                            <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick}>KDR</SortableTh>
+                            <SortableTh sortKey="ship_name" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship played in the period. Click to sort A–Z.">Ship</SortableTh>
+                            <SortableTh sortKey="ship_tier" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship tier (1–10, with the lowest tier ships being the smallest, less powerful, with the highest tier ships being the largest, most powerful). Click to sort by tier.">Tier</SortableTh>
+                            <SortableTh sortKey="ship_type" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Hull type — DD = Destroyer, CL/CA = Cruiser, BB = Battleship, CV = Carrier, SS = Submarine. Click to sort by type.">Type</SortableTh>
+                            <SortableTh sortKey="battles" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Battles played on this ship in the selected period. Click to sort by volume.">#</SortableTh>
+                            <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Win rate this period · lifetime win rate · delta vs lifetime. Color codes use Wargaming community thresholds. Click to sort by period WR.">Win Rate</SortableTh>
+                            <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average damage dealt per battle on this ship in the selected period. Click to sort.">Avg dmg</SortableTh>
+                            <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Kill/Death ratio — frags ÷ deaths this period. Hover a row to see raw frag and death counts. Click to sort.">KDR</SortableTh>
                         </tr>
                     </thead>
                     <tbody>
