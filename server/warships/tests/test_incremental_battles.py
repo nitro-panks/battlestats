@@ -19,14 +19,19 @@ from django.utils import timezone as django_timezone
 
 from warships.incremental_battles import (
     PlayerSnapshot,
+    RankedShipSeasonSnapshot,
     ShipSnapshot,
     _apply_event_to_daily_summary,
     _coerce_ship_snapshot,
+    _hydrate_previous_ranked_snapshot,
     _hydrate_previous_snapshot,
+    _ranked_ships_from_iterable,
+    _serialize_ranked_ships_payload,
     _serialize_ships_payload,
     _snapshot_from_player_row,
     coerce_observation_payload,
     compute_battle_events,
+    compute_ranked_battle_events,
     rebuild_daily_ship_stats_for_date,
     rebuild_period_rollups_for_date,
     record_observation_and_diff,
@@ -345,6 +350,279 @@ class RecordObservationFromPayloadsTests(TestCase):
             clear=False,
         ):
             self.assertIsNone(_apply_event_to_daily_summary(object()))
+
+
+class RankedDiffTests(TestCase):
+    """Pure ranked diff: keyed on (ship_id, season_id), no DB."""
+
+    def test_empty_payloads_produce_no_events(self):
+        self.assertEqual(
+            compute_ranked_battle_events({}, {}),
+            [],
+        )
+
+    def test_no_advance_produces_no_events(self):
+        snap = {
+            (42, 22): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=22, battles=5, wins=3, losses=2,
+                frags=4, damage_dealt=400_000, xp=20_000, survived_battles=3,
+            ),
+        }
+        self.assertEqual(compute_ranked_battle_events(snap, snap), [])
+
+    def test_single_match_advance_emits_event_with_season(self):
+        prev = {
+            (42, 22): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=22, battles=5, wins=3, losses=2,
+                frags=4, damage_dealt=400_000, xp=20_000, survived_battles=3,
+            ),
+        }
+        curr = {
+            (42, 22): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=22, battles=6, wins=4, losses=2,
+                frags=5, damage_dealt=448_000, xp=21_500, survived_battles=4,
+            ),
+        }
+        events = compute_ranked_battle_events(prev, curr)
+        self.assertEqual(len(events), 1)
+        e = events[0]
+        self.assertEqual(e["ship_id"], 42)
+        self.assertEqual(e["season_id"], 22)
+        self.assertEqual(e["battles_delta"], 1)
+        self.assertEqual(e["wins_delta"], 1)
+        self.assertEqual(e["frags_delta"], 1)
+        self.assertEqual(e["damage_delta"], 48_000)
+        self.assertEqual(e["xp_delta"], 1_500)
+        self.assertTrue(e["survived"])
+
+    def test_new_season_ship_attributes_full_battles_as_baseline(self):
+        # Player wasn't in season 22 before; new (42, 22) row appears in
+        # current. Treated as baseline: delta = current.
+        prev = {}
+        curr = {
+            (42, 22): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=22, battles=3, wins=2, losses=1,
+                frags=4, damage_dealt=200_000, xp=15_000, survived_battles=2,
+            ),
+        }
+        events = compute_ranked_battle_events(prev, curr)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["battles_delta"], 3)
+        self.assertEqual(events[0]["season_id"], 22)
+        self.assertIsNone(
+            events[0]["survived"],
+            'multi-match deltas (>1) leave survived attribution NULL',
+        )
+
+    def test_off_season_empty_current_yields_no_events(self):
+        # Operational watchpoint #1 in the runbook: off-season weeks
+        # produce sparse / empty payloads. The diff lane must not crash.
+        prev = {
+            (42, 22): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=22, battles=5, wins=3, losses=2,
+                frags=4, damage_dealt=400_000, xp=20_000, survived_battles=3,
+            ),
+        }
+        curr = {}
+        # No (42, 22) in curr — the diff walks curr keys, so it produces
+        # no events. Pre-season ranked stats are not "lost" — they live
+        # in the prior observation row and could resurface if the player
+        # plays that season-ship pair again later.
+        self.assertEqual(compute_ranked_battle_events(prev, curr), [])
+
+    def test_multi_season_concurrent_ships_emit_separate_events(self):
+        # Single observation can span multiple active seasons (sprint
+        # series, season transitions). Each (ship_id, season_id) pair
+        # diffed independently.
+        prev = {
+            (42, 22): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=22, battles=5, wins=3, losses=2,
+                frags=4, damage_dealt=400_000, xp=20_000, survived_battles=3,
+            ),
+            (42, 23): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=23, battles=2, wins=1, losses=1,
+                frags=1, damage_dealt=100_000, xp=8_000, survived_battles=1,
+            ),
+        }
+        curr = {
+            (42, 22): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=22, battles=6, wins=4, losses=2,
+                frags=5, damage_dealt=448_000, xp=21_500, survived_battles=4,
+            ),
+            (42, 23): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=23, battles=2, wins=1, losses=1,
+                frags=1, damage_dealt=100_000, xp=8_000, survived_battles=1,
+            ),
+        }
+        events = compute_ranked_battle_events(prev, curr)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["season_id"], 22)
+
+
+class RankedIterableCoercionTests(TestCase):
+    """_ranked_ships_from_iterable handles raw WG seasons/shipstats rows."""
+
+    def test_single_ship_multi_season_round_trip(self):
+        rows = [{
+            "ship_id": 42,
+            "seasons": {
+                "22": {
+                    "battles": 5, "wins": 3, "losses": 2, "frags": 4,
+                    "damage_dealt": 400_000, "xp": 20_000,
+                    "survived_battles": 3,
+                },
+                "23": {
+                    "battles": 2, "wins": 1, "losses": 1, "frags": 1,
+                    "damage_dealt": 100_000, "xp": 8_000,
+                    "survived_battles": 1,
+                },
+            },
+        }]
+        out = _ranked_ships_from_iterable(rows)
+        self.assertEqual(set(out.keys()), {(42, 22), (42, 23)})
+        self.assertEqual(out[(42, 22)].battles, 5)
+        self.assertEqual(out[(42, 23)].xp, 8_000)
+
+    def test_drops_malformed_rows(self):
+        rows = [
+            {"ship_id": "not-a-number"},
+            {"missing_ship_id": True},
+            "not-a-dict",
+            {"ship_id": 42, "seasons": "not-a-dict"},
+            {"ship_id": 42, "seasons": {"22": "not-a-dict"}},
+        ]
+        self.assertEqual(_ranked_ships_from_iterable(rows), {})
+
+    def test_empty_input_returns_empty(self):
+        self.assertEqual(_ranked_ships_from_iterable([]), {})
+        self.assertEqual(_ranked_ships_from_iterable(None), {})
+
+    def test_serialize_round_trip(self):
+        snapshot = {
+            (42, 22): RankedShipSeasonSnapshot(
+                ship_id=42, season_id=22, battles=5, wins=3, losses=2,
+                frags=4, damage_dealt=400_000, xp=20_000, survived_battles=3,
+            ),
+        }
+        rows = _serialize_ranked_ships_payload(snapshot)
+        rebuilt = _ranked_ships_from_iterable(rows)
+        self.assertEqual(rebuilt, snapshot)
+
+
+class RankedRecordObservationTests(TestCase):
+    """End-to-end: ranked diff lane through record_observation_from_payloads."""
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="ranked_bench", player_id=4242424244, realm="na",
+            pvp_battles=100, pvp_wins=50, pvp_losses=50, pvp_frags=80,
+            pvp_survived_battles=60,
+        )
+        Ship.objects.create(
+            ship_id=99, name="Petropavlovsk", nation="ussr",
+            ship_type="Cruiser", tier=10,
+        )
+
+    def _baseline_random(self):
+        # Establish a baseline so subsequent observations exercise the diff
+        # rather than the baseline-skip path.
+        record_observation_from_payloads(
+            self.player,
+            ship_data=[{"ship_id": 99, "pvp": {"battles": 100}}],
+        )
+
+    def test_ranked_payload_persists_to_observation(self):
+        self._baseline_random()
+        ranked_rows = [{
+            "ship_id": 99,
+            "seasons": {"22": {"battles": 1, "wins": 1, "frags": 1,
+                                "damage_dealt": 80_000, "xp": 4_000,
+                                "survived_battles": 1}},
+        }]
+        result = record_observation_from_payloads(
+            self.player,
+            ship_data=[{"ship_id": 99, "pvp": {"battles": 100}}],
+            ranked_ship_data=ranked_rows,
+        )
+        self.assertEqual(result["status"], "completed")
+        # Should have written a ranked observation payload + 1 ranked event
+        # (baseline-from-zero per (99, 22) since prior had no ranked).
+        latest_obs = BattleObservation.objects.filter(
+            player=self.player).latest("observed_at")
+        self.assertIsNotNone(latest_obs.ranked_ships_stats_json)
+        ranked_evts = BattleEvent.objects.filter(
+            player=self.player, mode=BattleEvent.MODE_RANKED)
+        self.assertEqual(ranked_evts.count(), 1)
+        e = ranked_evts.get()
+        self.assertEqual(e.season_id, 22)
+        self.assertEqual(e.battles_delta, 1)
+        self.assertEqual(result["random_events_created"], 0)
+        self.assertEqual(result["ranked_events_created"], 1)
+
+    def test_ranked_no_advance_produces_no_event_but_persists_payload(self):
+        self._baseline_random()
+        ranked_rows = [{
+            "ship_id": 99,
+            "seasons": {"22": {"battles": 5, "wins": 3, "frags": 4,
+                                "damage_dealt": 400_000, "xp": 20_000,
+                                "survived_battles": 3}},
+        }]
+        # First observation with ranked: creates baseline event.
+        record_observation_from_payloads(
+            self.player,
+            ship_data=[{"ship_id": 99, "pvp": {"battles": 100}}],
+            ranked_ship_data=ranked_rows,
+        )
+        BattleEvent.objects.filter(
+            player=self.player, mode=BattleEvent.MODE_RANKED).delete()
+        # Second with identical ranked totals — no advance, no event.
+        result = record_observation_from_payloads(
+            self.player,
+            ship_data=[{"ship_id": 99, "pvp": {"battles": 100}}],
+            ranked_ship_data=ranked_rows,
+        )
+        self.assertEqual(result["ranked_events_created"], 0)
+        # Ranked payload must still be persisted on the new observation
+        # so it can serve as the prior for the next diff.
+        latest_obs = BattleObservation.objects.filter(
+            player=self.player).latest("observed_at")
+        self.assertIsNotNone(latest_obs.ranked_ships_stats_json)
+
+    def test_ranked_capture_omitted_leaves_column_null(self):
+        self._baseline_random()
+        # Caller passes nothing for ranked — must NOT default to []; column
+        # stays NULL so we can distinguish "ranked capture off" from
+        # "ranked capture on but player has no ranked rows".
+        record_observation_from_payloads(
+            self.player,
+            ship_data=[{"ship_id": 99, "pvp": {"battles": 101}}],
+        )
+        self.player.pvp_battles = 101
+        self.player.save()
+        latest_obs = BattleObservation.objects.filter(
+            player=self.player).latest("observed_at")
+        self.assertIsNone(latest_obs.ranked_ships_stats_json)
+
+    def test_ranked_event_does_not_advance_last_random_battle_at(self):
+        # Operational watchpoint #4: Active landing pill stays randoms-only.
+        self._baseline_random()
+        self.player.refresh_from_db()
+        prior_lrb = self.player.last_random_battle_at
+        ranked_rows = [{
+            "ship_id": 99,
+            "seasons": {"22": {"battles": 5, "wins": 3,
+                                "damage_dealt": 400_000,
+                                "survived_battles": 3}},
+        }]
+        record_observation_from_payloads(
+            self.player,
+            ship_data=[{"ship_id": 99, "pvp": {"battles": 100}}],
+            ranked_ship_data=ranked_rows,
+        )
+        self.player.refresh_from_db()
+        self.assertEqual(self.player.last_random_battle_at, prior_lrb,
+                         'ranked-only events must not bump '
+                         'last_random_battle_at')
 
 
 class LastRandomBattleAtTests(TestCase):

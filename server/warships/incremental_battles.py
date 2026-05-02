@@ -24,7 +24,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from django.db import transaction
 from django.db.models import F, Q
@@ -72,6 +72,28 @@ class PlayerSnapshot:
     pvp_survived_battles: int
     last_battle_time: Optional[datetime]
     ships: Dict[int, ShipSnapshot]
+
+
+@dataclass(frozen=True)
+class RankedShipSeasonSnapshot:
+    """Per-ship per-season ranked snapshot from WG `seasons/shipstats/`.
+
+    Phase 1 of the ranked battle-history rollout
+    (runbook-ranked-battle-history-rollout-2026-05-02.md). Smaller field set
+    than ShipSnapshot — the ranked endpoint doesn't carry the gunnery /
+    torpedo / spotting / caps nested objects (Phase 7 widening only applies
+    to randoms today). Diff key is the (ship_id, season_id) tuple so
+    multiple active seasons coexist within a single observation.
+    """
+    ship_id: int
+    season_id: int
+    battles: int
+    wins: int
+    losses: int
+    frags: int
+    damage_dealt: int
+    xp: int
+    survived_battles: int
 
 
 def _coerce_ship_snapshot(ship_dict: Dict[str, Any]) -> Optional[ShipSnapshot]:
@@ -155,6 +177,140 @@ def _ships_from_iterable(ship_data: Iterable[Dict[str, Any]]) -> Dict[int, ShipS
             continue
         ships[ship_snapshot.ship_id] = ship_snapshot
     return ships
+
+
+def _coerce_ranked_season_stats(
+    ship_id: int, season_id_raw: Any, stats: Dict[str, Any],
+) -> Optional[RankedShipSeasonSnapshot]:
+    if not isinstance(stats, dict):
+        return None
+    try:
+        season_id = int(season_id_raw)
+    except (TypeError, ValueError):
+        return None
+    try:
+        return RankedShipSeasonSnapshot(
+            ship_id=ship_id,
+            season_id=season_id,
+            battles=int(stats.get("battles", 0)),
+            wins=int(stats.get("wins", 0)),
+            losses=int(stats.get("losses", 0)),
+            frags=int(stats.get("frags", 0)),
+            damage_dealt=int(stats.get("damage_dealt", 0)),
+            xp=int(stats.get("xp", 0)),
+            survived_battles=int(stats.get("survived_battles", 0)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _ranked_ships_from_iterable(
+    ranked_rows: Iterable[Dict[str, Any]],
+) -> Dict[Tuple[int, int], RankedShipSeasonSnapshot]:
+    """Coerce raw `seasons/shipstats/` rows into a (ship_id, season_id) map.
+
+    Each row from WG looks like {ship_id: ..., seasons: {"22": {...},
+    "21": {...}}}. We capture every (ship_id, season_id) the player has
+    rows for so the diff covers ALL active seasons in one observation.
+    Empty / malformed rows are silently dropped.
+    """
+    out: Dict[Tuple[int, int], RankedShipSeasonSnapshot] = {}
+    for row in ranked_rows or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            ship_id = int(row["ship_id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        seasons_payload = row.get("seasons")
+        if not isinstance(seasons_payload, dict):
+            continue
+        for season_id_raw, season_stats in seasons_payload.items():
+            snap = _coerce_ranked_season_stats(
+                ship_id, season_id_raw, season_stats)
+            if snap is None:
+                continue
+            out[(snap.ship_id, snap.season_id)] = snap
+    return out
+
+
+def compute_ranked_battle_events(
+    previous_ranked: Dict[Tuple[int, int], RankedShipSeasonSnapshot],
+    current_ranked: Dict[Tuple[int, int], RankedShipSeasonSnapshot],
+) -> List[Dict[str, Any]]:
+    """Return one delta row per (ship_id, season_id) that advanced.
+
+    Mirrors compute_battle_events but keyed on (ship_id, season_id) instead
+    of just ship_id. A new (ship_id, season_id) appearing in the current
+    observation but absent from the previous one is treated as a baseline:
+    the prior snapshot is implicitly zero, so the delta IS the current
+    value. That correctly attributes all of the player's activity in that
+    season-ship pair since the start of the season (we have no earlier
+    observation to attribute against).
+    """
+    events: List[Dict[str, Any]] = []
+    for key, current_ship in current_ranked.items():
+        previous_ship = previous_ranked.get(key)
+        prev_battles = previous_ship.battles if previous_ship else 0
+        delta_battles = current_ship.battles - prev_battles
+        if delta_battles <= 0:
+            continue
+        prev_survived = (
+            previous_ship.survived_battles if previous_ship else 0)
+        survived_delta = current_ship.survived_battles - prev_survived
+        survived: Optional[bool] = None
+        if delta_battles == 1:
+            survived = survived_delta == 1
+        events.append({
+            "ship_id": current_ship.ship_id,
+            "season_id": current_ship.season_id,
+            "battles_delta": delta_battles,
+            "wins_delta": current_ship.wins - (
+                previous_ship.wins if previous_ship else 0),
+            "losses_delta": current_ship.losses - (
+                previous_ship.losses if previous_ship else 0),
+            "frags_delta": current_ship.frags - (
+                previous_ship.frags if previous_ship else 0),
+            "damage_delta": current_ship.damage_dealt - (
+                previous_ship.damage_dealt if previous_ship else 0),
+            "xp_delta": current_ship.xp - (
+                previous_ship.xp if previous_ship else 0),
+            "survived_delta": survived_delta,
+            "survived": survived,
+        })
+    return events
+
+
+def _serialize_ranked_ships_payload(
+    ranked_map: Dict[Tuple[int, int], RankedShipSeasonSnapshot],
+) -> List[Dict[str, Any]]:
+    """Encode a ranked snapshot map back into the WG row shape so it can be
+    persisted in BattleObservation.ranked_ships_stats_json and re-hydrated
+    by the next observation's diff lane."""
+    by_ship: Dict[int, Dict[str, Any]] = {}
+    for (ship_id, _season_id), snap in ranked_map.items():
+        ship_entry = by_ship.setdefault(
+            ship_id, {"ship_id": ship_id, "seasons": {}})
+        ship_entry["seasons"][str(snap.season_id)] = {
+            "battles": snap.battles,
+            "wins": snap.wins,
+            "losses": snap.losses,
+            "frags": snap.frags,
+            "damage_dealt": snap.damage_dealt,
+            "xp": snap.xp,
+            "survived_battles": snap.survived_battles,
+        }
+    return list(by_ship.values())
+
+
+def _hydrate_previous_ranked_snapshot(
+    previous,
+) -> Dict[Tuple[int, int], RankedShipSeasonSnapshot]:
+    """Rebuild the previous observation's ranked map from
+    BattleObservation.ranked_ships_stats_json. Returns an empty map when the
+    column is NULL — that's the correct baseline for the next diff lane to
+    treat the current observation as fresh-from-zero per-season."""
+    return _ranked_ships_from_iterable(previous.ranked_ships_stats_json or [])
 
 
 def _snapshot_from_player_row(player, ship_data: Iterable[Dict[str, Any]]) -> Optional[PlayerSnapshot]:
@@ -367,7 +523,17 @@ def _apply_event_to_daily_summary(event) -> None:
     if os.getenv("BATTLE_HISTORY_ROLLUP_ENABLED", "0") != "1":
         return None
 
-    from warships.models import PlayerDailyShipStats
+    from warships.models import BattleEvent, PlayerDailyShipStats
+
+    # Phase 1 of the ranked rollout shipped the BattleEvent.mode column
+    # but defers the per-mode PlayerDailyShipStats partitioning to a later
+    # phase. Until that lands, ranked events accumulate as raw BattleEvent
+    # rows without rolling up — keeping the daily-rollup table strictly
+    # randoms-only avoids the unique-key collision that would otherwise
+    # mix random and ranked counters under the same (player, date,
+    # ship_id) row.
+    if getattr(event, "mode", BattleEvent.MODE_RANDOM) != BattleEvent.MODE_RANDOM:
+        return None
 
     event_date = event.detected_at.date()
     survived_battles_increment = 1 if event.survived else 0
@@ -442,11 +608,12 @@ def record_observation_from_payloads(
     *,
     player_data: Optional[Dict[str, Any]] = None,
     ship_data: Iterable[Dict[str, Any]],
+    ranked_ship_data: Optional[Iterable[Dict[str, Any]]] = None,
     source: str = None,
 ) -> Dict[str, Any]:
     """Persist a `BattleObservation` for `player` and emit `BattleEvent` rows.
 
-    Issues no WG calls — caller supplies the payloads. The two valid input
+    Issues no WG calls — caller supplies the payloads. The valid input
     shapes are:
 
     * `player_data` is the raw `account/info/` dict, `ship_data` is the
@@ -455,6 +622,15 @@ def record_observation_from_payloads(
       list, and `player.pvp_*` columns are already up to date. Rollout
       piggyback hook in `update_battle_data` uses this — `update_player_data`
       has just refreshed those columns.
+
+    `ranked_ship_data` (Phase 1 of the ranked rollout) is the optional
+    `seasons/shipstats/` list. When provided AND the env flag
+    `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=1` is on at the call site, the
+    payload is persisted to `BattleObservation.ranked_ships_stats_json` and
+    diffed against the prior observation's ranked map to emit
+    `mode='ranked'` BattleEvent rows per (ship_id, season_id) that
+    advanced. NULL ranked payload means "no ranked capture this tick" —
+    matches the pre-Phase-1 behavior exactly.
 
     Returns a status dict matching `record_observation_and_diff`.
     """
@@ -469,6 +645,14 @@ def record_observation_from_payloads(
         return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
 
     ships_payload = _serialize_ships_payload(snapshot)
+    ranked_map = (
+        _ranked_ships_from_iterable(ranked_ship_data)
+        if ranked_ship_data is not None else {}
+    )
+    ranked_payload = (
+        _serialize_ranked_ships_payload(ranked_map)
+        if ranked_ship_data is not None else None
+    )
     if source is None:
         source = BattleObservation.SOURCE_POLL
 
@@ -489,6 +673,7 @@ def record_observation_from_payloads(
             pvp_survived_battles=snapshot.pvp_survived_battles,
             last_battle_time=snapshot.last_battle_time,
             ships_stats_json=ships_payload,
+            ranked_ships_stats_json=ranked_payload,
             source=source,
         )
 
@@ -497,21 +682,34 @@ def record_observation_from_payloads(
                 "status": "completed",
                 "observation_id": observation.id,
                 "events_created": 0,
+                "random_events_created": 0,
+                "ranked_events_created": 0,
                 "reason": "baseline",
             }
 
         previous_snapshot = _hydrate_previous_snapshot(previous)
         events = compute_battle_events(previous_snapshot, snapshot)
-        if not events:
+        previous_ranked = _hydrate_previous_ranked_snapshot(previous)
+        ranked_events = (
+            compute_ranked_battle_events(previous_ranked, ranked_map)
+            if ranked_ship_data is not None else []
+        )
+
+        if not events and not ranked_events:
             return {
                 "status": "completed",
                 "observation_id": observation.id,
                 "events_created": 0,
+                "random_events_created": 0,
+                "ranked_events_created": 0,
             }
 
-        ship_ids = [event["ship_id"] for event in events]
+        all_ship_ids = (
+            [event["ship_id"] for event in events]
+            + [event["ship_id"] for event in ranked_events]
+        )
         ship_names = dict(
-            Ship.objects.filter(ship_id__in=ship_ids)
+            Ship.objects.filter(ship_id__in=all_ship_ids)
             .values_list("ship_id", "name")
         )
 
@@ -520,6 +718,7 @@ def record_observation_from_payloads(
         for event in events:
             event_row = BattleEvent.objects.create(
                 player=player,
+                mode=BattleEvent.MODE_RANDOM,
                 ship_id=event["ship_id"],
                 ship_name=ship_names.get(event["ship_id"], ""),
                 battles_delta=event["battles_delta"],
@@ -552,25 +751,63 @@ def record_observation_from_payloads(
                 latest_detected_at = event_row.detected_at
             created += 1
 
+        # Ranked events. Phase-7-widening fields aren't carried by the WG
+        # `seasons/shipstats/` endpoint so they default to 0 on the row;
+        # `planes_killed_delta` is also defaulted because ranked rarely
+        # involves carriers. The model's mode-aware partial unique
+        # constraints keep these from colliding with random rows.
+        ranked_created = 0
+        for event in ranked_events:
+            event_row = BattleEvent.objects.create(
+                player=player,
+                mode=BattleEvent.MODE_RANKED,
+                season_id=event["season_id"],
+                ship_id=event["ship_id"],
+                ship_name=ship_names.get(event["ship_id"], ""),
+                battles_delta=event["battles_delta"],
+                wins_delta=event["wins_delta"],
+                losses_delta=event["losses_delta"],
+                frags_delta=event["frags_delta"],
+                damage_delta=event["damage_delta"],
+                xp_delta=event["xp_delta"],
+                planes_killed_delta=None,
+                survived=event["survived"],
+                from_observation=previous,
+                to_observation=observation,
+            )
+            _apply_event_to_daily_summary(event_row)
+            ranked_created += 1
+
         if created > 0 and latest_detected_at is not None:
             # Drives the landing "Active" sub-sort. The conditional UPDATE
             # only advances the column forward — if a concurrent writer
             # already set a later value, the WHERE clause excludes us and
             # the UPDATE is a no-op. Single atomic statement, portable
             # across SQLite (tests) and Postgres (prod).
+            #
+            # Note: ranked events do NOT advance last_random_battle_at —
+            # the column name is literal. The Active landing pill stays
+            # randoms-only by design (per
+            # runbook-ranked-battle-history-rollout-2026-05-02.md
+            # Operational watchpoint #4).
             Player.objects.filter(pk=player.pk).filter(
                 Q(last_random_battle_at__isnull=True)
                 | Q(last_random_battle_at__lt=latest_detected_at)
             ).update(last_random_battle_at=latest_detected_at)
 
-    if created > 0:
+    total_created = created + ranked_created
+    if total_created > 0:
         _invalidate_battle_history_cache(player)
-        _invalidate_landing_recent_players_cache(player)
+        if created > 0:
+            # Only randoms invalidate the recently-battled landing surface.
+            _invalidate_landing_recent_players_cache(player)
 
     return {
         "status": "completed",
         "observation_id": observation.id,
-        "events_created": created,
+        "events_created": total_created,
+        "random_events_created": created,
+        "ranked_events_created": ranked_created,
     }
 
 

@@ -453,6 +453,12 @@ class BattleObservation(models.Model):
     pvp_survived_battles = models.IntegerField(default=0)
     last_battle_time = models.DateTimeField(null=True, blank=True)
     ships_stats_json = models.JSONField(null=True, blank=True)
+    # Ranked per-season per-ship payload from WG `seasons/shipstats/`. Parallel
+    # to `ships_stats_json` (which holds randoms). NULL when ranked capture is
+    # disabled (BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=0) or when the player has
+    # no ranked activity. Populated by the Phase 1 ranked rollout
+    # (runbook-ranked-battle-history-rollout-2026-05-02.md).
+    ranked_ships_stats_json = models.JSONField(null=True, blank=True)
     source = models.CharField(
         max_length=12, choices=SOURCE_CHOICES, default=SOURCE_POLL)
 
@@ -473,11 +479,24 @@ class BattleObservation(models.Model):
 
 
 class BattleEvent(models.Model):
+    MODE_RANDOM = 'random'
+    MODE_RANKED = 'ranked'
+    MODE_CHOICES = [(MODE_RANDOM, 'Random'), (MODE_RANKED, 'Ranked')]
+
     player = models.ForeignKey(
         Player, on_delete=models.CASCADE, related_name='battle_events')
     detected_at = models.DateTimeField(auto_now_add=True)
     ship_id = models.BigIntegerField()
     ship_name = models.CharField(max_length=200, blank=True, default='')
+    # Phase 1 of the ranked-battles rollout
+    # (runbook-ranked-battle-history-rollout-2026-05-02.md). `mode` partitions
+    # randoms from ranked across the same per-ship per-day rollup chokepoint.
+    # `season_id` is populated only for `mode='ranked'` (NULL for randoms),
+    # and the unique constraint below has separate partial indexes per mode
+    # so randoms keeps its existing dedup semantics.
+    mode = models.CharField(
+        max_length=8, choices=MODE_CHOICES, default=MODE_RANDOM, db_index=True)
+    season_id = models.IntegerField(null=True, blank=True, db_index=True)
     battles_delta = models.IntegerField(default=0)
     wins_delta = models.IntegerField(default=0)
     losses_delta = models.IntegerField(default=0)
@@ -514,9 +533,22 @@ class BattleEvent(models.Model):
 
     class Meta:
         constraints = [
+            # Random mode: dedup on (from, to, ship_id) — season_id is NULL
+            # and would split uniqueness incorrectly if included literally.
             models.UniqueConstraint(
                 fields=['from_observation', 'to_observation', 'ship_id'],
-                name='unique_battle_event_per_observation_pair',
+                condition=models.Q(mode='random'),
+                name='unique_random_battle_event_per_observation_pair',
+            ),
+            # Ranked mode: a single observation pair can carry multiple
+            # ranked events for the same ship across different active
+            # seasons, so include season_id in the dedup key.
+            models.UniqueConstraint(
+                fields=[
+                    'from_observation', 'to_observation', 'ship_id', 'season_id',
+                ],
+                condition=models.Q(mode='ranked'),
+                name='unique_ranked_battle_event_per_obs_pair_per_season',
             ),
         ]
         indexes = [
@@ -525,7 +557,10 @@ class BattleEvent(models.Model):
         ]
 
     def __str__(self):
-        return f"BattleEvent({self.player_id} ship={self.ship_id} +{self.battles_delta})"
+        return (
+            f"BattleEvent({self.player_id} {self.mode} ship={self.ship_id} "
+            f"+{self.battles_delta})"
+        )
 
 
 class PlayerDailyShipStats(models.Model):

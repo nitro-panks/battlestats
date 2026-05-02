@@ -2455,14 +2455,46 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     # Battle-history capture hook (Phase 2 of the playerbase rollout).
     # Runbook: agents/runbooks/runbook-battle-history-rollout-2026-04-28.md
     # Off in production until BATTLE_HISTORY_CAPTURE_ENABLED=1 is set.
+    #
+    # Ranked extension (Phase 1, runbook-ranked-battle-history-rollout-2026-05-02.md):
+    # When BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=1 AND this realm is in the
+    # comma-separated BATTLE_HISTORY_RANKED_CAPTURE_REALMS list (default
+    # empty = no ranked capture anywhere), one extra `seasons/shipstats/`
+    # WG call is made per refresh and the result is passed through to the
+    # capture orchestrator so the diff lane can emit ranked BattleEvents.
+    # The ranked fetch failing (or returning [] for ranked-inactive
+    # players) is benign — the orchestrator just records ranked_payload
+    # as [] and emits no ranked events.
     if os.getenv("BATTLE_HISTORY_CAPTURE_ENABLED", "0") == "1":
         try:
             from warships.incremental_battles import record_observation_from_payloads
             from warships.models import BattleObservation
+
+            ranked_ship_data = None
+            ranked_enabled = os.getenv(
+                "BATTLE_HISTORY_RANKED_CAPTURE_ENABLED", "0") == "1"
+            ranked_realms = {
+                r.strip() for r in os.getenv(
+                    "BATTLE_HISTORY_RANKED_CAPTURE_REALMS", ""
+                ).split(",") if r.strip()
+            }
+            if ranked_enabled and realm in ranked_realms:
+                try:
+                    ranked_ship_data = _fetch_ranked_ship_stats_for_player(
+                        int(player.player_id), realm=realm)
+                except Exception:
+                    logging.exception(
+                        "ranked seasons/shipstats fetch failed for "
+                        "player_id=%s realm=%s — falling back to randoms-only",
+                        player.player_id, realm,
+                    )
+                    ranked_ship_data = None
+
             record_observation_from_payloads(
                 player,
                 player_data=None,
                 ship_data=ship_data,
+                ranked_ship_data=ranked_ship_data,
                 source=BattleObservation.SOURCE_POLL,
             )
         except Exception:
