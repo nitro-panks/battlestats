@@ -55,11 +55,18 @@ export interface BattleHistoryPayload {
     window_days?: number | null;
     windows?: number;
     period?: 'daily' | 'weekly' | 'monthly' | 'yearly';
+    mode?: 'random' | 'ranked' | 'combined';
     as_of: string;
     totals: BattleHistoryTotals;
     by_ship: BattleHistoryByShip[];
     by_day: BattleHistoryByDay[];
 }
+
+type Mode = 'random' | 'ranked' | 'combined';
+const MODE_LABEL: Record<Mode, string> = {
+    random: 'Random', ranked: 'Ranked', combined: 'All',
+};
+const MODES: Mode[] = ['random', 'ranked', 'combined'];
 
 interface BattleHistoryCardProps {
     playerName: string;
@@ -344,6 +351,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const [error, setError] = useState<Error | null>(null);
     const [loading, setLoading] = useState(true);
     const [period, setPeriod] = useState<Period>('daily');
+    const [mode, setMode] = useState<Mode>('random');
     const { theme } = useTheme();
     const palette = chartColors[theme];
 
@@ -365,9 +373,10 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             ? days
             : PERIOD_DEFAULT_WINDOWS[period];
         const url = `/api/player/${encodeURIComponent(playerName)}/battle-history/`
-            + `?period=${period}&windows=${windows}&realm=${encodeURIComponent(realm)}`;
+            + `?period=${period}&windows=${windows}&mode=${mode}`
+            + `&realm=${encodeURIComponent(realm)}`;
         fetchSharedJson<BattleHistoryPayload>(url, {
-            label: `BattleHistoryCard:${period}`,
+            label: `BattleHistoryCard:${period}:${mode}`,
             ttlMs: 60_000,
         })
             .then(({ data }) => {
@@ -388,7 +397,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [playerName, realm, days, period]);
+    }, [playerName, realm, days, period, mode]);
 
     const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
         key: 'battles', direction: 'desc',
@@ -424,7 +433,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         return null;
     }
     const totals = payload?.totals;
-    if (!payload || !totals || typeof totals.battles !== 'number' || totals.battles <= 0) {
+    const hasBattles = !!(totals && typeof totals.battles === 'number'
+        && totals.battles > 0);
+    // When the user has actively switched off the default `random` mode,
+    // keep the card visible even with zero rows so the pill stays
+    // reachable. Default-mode empty stays null to preserve the
+    // pre-Phase-5 contract: cards never appear for players with no
+    // recent random battles.
+    if (!payload || (!hasBattles && mode === 'random')) {
         return null;
     }
 
@@ -460,38 +476,71 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             </button>
                         ))}
                     </div>
+                    <div
+                        className="flex items-center gap-1 text-xs"
+                        role="group"
+                        aria-label="Battle mode"
+                    >
+                        {MODES.map((m) => (
+                            <button
+                                key={m}
+                                type="button"
+                                onClick={() => setMode(m)}
+                                className={`rounded px-2 py-0.5 transition-colors ${
+                                    mode === m
+                                        ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
+                                        : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
+                                }`}
+                                aria-pressed={mode === m}
+                                title={m === 'random'
+                                    ? 'Random battles only'
+                                    : m === 'ranked'
+                                        ? 'Ranked battles only (sums across active seasons)'
+                                        : 'Random + ranked combined (lifetime delta unavailable)'}
+                            >
+                                {MODE_LABEL[m]}
+                            </button>
+                        ))}
+                    </div>
                 </div>
-                <span className="text-xs text-[var(--text-muted)]">
-                    {formatInt(totals.battles)} battles · {formatPercent(totals.win_rate)} WR · {formatInt(totals.avg_damage)} avg dmg
-                </span>
+                {hasBattles && (
+                    <span className="text-xs text-[var(--text-muted)]">
+                        {formatInt(totals!.battles)} battles · {formatPercent(totals!.win_rate)} WR · {formatInt(totals!.avg_damage)} avg dmg
+                    </span>
+                )}
             </header>
-            {(() => {
-                const deaths = Math.max(0, totals.battles - totals.survived_battles);
-                const kdr = deaths > 0 ? totals.frags / deaths : totals.frags;
+            {!hasBattles && (
+                <p className="mt-3 text-sm text-[var(--text-muted)]">
+                    No {MODE_LABEL[mode].toLowerCase()} battles in this window.
+                </p>
+            )}
+            {hasBattles && (() => {
+                const deaths = Math.max(0, totals!.battles - totals!.survived_battles);
+                const kdr = deaths > 0 ? totals!.frags / deaths : totals!.frags;
                 return (
                     <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals.battles)}</div>
+                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
                         </div>
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Win rate</div>
                             <div className="text-lg">
                                 <WrCell
-                                    periodWinRate={totals.win_rate}
-                                    lifetimeWinRate={totals.lifetime_win_rate}
-                                    deltaWinRate={totals.delta_win_rate}
+                                    periodWinRate={totals!.win_rate}
+                                    lifetimeWinRate={totals!.lifetime_win_rate}
+                                    deltaWinRate={totals!.delta_win_rate}
                                     stacked
                                 />
                             </div>
                         </div>
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals.avg_damage)}</div>
+                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
                         </div>
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Frags</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals.frags)}</div>
+                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.frags)}</div>
                         </div>
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">KDR</div>
@@ -500,6 +549,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     </div>
                 );
             })()}
+            {hasBattles && (
             <div className="mt-4">
                 {(() => {
                     // Only pad with zero days for the daily period — for
@@ -511,7 +561,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             payload.window_days ?? payload.windows ?? 7,
                         )
                         : payload.by_day;
-                    const wrSeries = buildOverallWrSeries(windowed, totals);
+                    const wrSeries = buildOverallWrSeries(windowed, totals!);
                     if (wrSeries) {
                         return (
                             <Sparkline
@@ -533,6 +583,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     return <Sparkline points={fallback} ariaLabel="Battles per day sparkline" />;
                 })()}
             </div>
+            )}
+            {hasBattles && (
             <div className="mt-4 overflow-x-auto">
                 <table className="w-full text-left text-sm">
                     <thead>
@@ -585,6 +637,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     </tbody>
                 </table>
             </div>
+            )}
         </section>
     );
 };

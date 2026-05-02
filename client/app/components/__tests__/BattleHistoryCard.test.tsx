@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import BattleHistoryCard, { type BattleHistoryPayload } from '../BattleHistoryCard';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 
@@ -142,5 +142,76 @@ describe('BattleHistoryCard', () => {
         expect(url).toContain('period=daily');
         expect(url).toContain('windows=14');
         expect(url).toContain('realm=eu');
+    });
+
+    test('initial fetch uses mode=random (default)', () => {
+        mockFetchSharedJson.mockReturnValueOnce(new Promise(() => {}));
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        const [url] = mockFetchSharedJson.mock.calls[0];
+        expect(url).toContain('mode=random');
+    });
+
+    test('renders mode pill row with three options', async () => {
+        resolveWith(buildPayload());
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        const group = screen.getByRole('group', { name: /battle mode/i });
+        expect(group).toBeInTheDocument();
+        const random = screen.getByRole('button', { name: /^Random$/ });
+        const ranked = screen.getByRole('button', { name: /^Ranked$/ });
+        const all = screen.getByRole('button', { name: /^All$/ });
+        expect(random).toHaveAttribute('aria-pressed', 'true');
+        expect(ranked).toHaveAttribute('aria-pressed', 'false');
+        expect(all).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    test('clicking ranked pill refetches with mode=ranked', async () => {
+        resolveWith(buildPayload());
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        const initialCalls = mockFetchSharedJson.mock.calls.length;
+        // Queue the ranked-mode response.
+        resolveWith(buildPayload({ mode: 'ranked' }));
+        await act(async () => {
+            screen.getByRole('button', { name: /^Ranked$/ }).click();
+        });
+        await waitFor(() => {
+            expect(mockFetchSharedJson.mock.calls.length).toBe(initialCalls + 1);
+        });
+        const lastUrl = mockFetchSharedJson.mock.calls[initialCalls][0] as string;
+        expect(lastUrl).toContain('mode=ranked');
+    });
+
+    test('renders empty state with pill row when ranked mode has zero data', async () => {
+        // Initial random fetch with data.
+        resolveWith(buildPayload());
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        // Switch to ranked: zero battles → card stays visible with pill so
+        // user can switch back.
+        resolveWith(buildPayload({
+            mode: 'ranked',
+            totals: {
+                battles: 0, wins: 0, losses: 0, win_rate: 0,
+                damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                planes_killed: 0, survived_battles: 0, survival_rate: 0,
+            },
+            by_ship: [],
+            by_day: [],
+        }));
+        await act(async () => {
+            screen.getByRole('button', { name: /^Ranked$/ }).click();
+        });
+        await waitFor(() => {
+            expect(screen.getByText(/No ranked battles in this window/i)).toBeInTheDocument();
+        });
+        // Pills still reachable.
+        expect(screen.getByRole('button', { name: /^Random$/ })).toBeInTheDocument();
     });
 });

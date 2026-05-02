@@ -2,7 +2,7 @@
 
 _Created: 2026-05-02_
 _Context: The randoms battle-history rollout (`runbook-battle-history-rollout-2026-04-28.md`) explicitly filed ranked-battles as Phase 7 / out-of-scope. The randoms pipeline is now stable in production (17K+ events captured across 2,400+ players as of 2026-05-01) and the orchestration is proven. This runbook scopes the parallel ranked rollout — same diff-and-aggregate shape against the WG `seasons/shipstats/` endpoint, with a `mode` discriminator on the existing capture/event/rollup tables._
-_Status: phase-4-shipped (pending live verification) — 2026-05-02. Phases 1–3 deployed: ranked capture on for NA, BattleObservation.ranked_ships_stats_json populated, BattleEvent + PlayerDailyShipStats partitioned by `mode` + `season_id`, rollup writer + rebuild keyed on the partition columns, period tier guarded to mode=random. Phase 4 extends GET /api/player/<name>/battle-history with `?mode=random|ranked|combined` (default `random` for back-compat), filters PlayerDailyShipStats accordingly for the daily layer, suppresses lifetime-delta fields for ranked/combined since the baseline (Player.battles_json / Player.pvp_*) is randoms-only, and namespaces the cache key on mode. 6 new endpoint tests + 4 RankedRollupWriteTests cover the partitioning + payload contract. Lean release gate green (241/241). Phase 5 (frontend mode pill) shipping next._
+_Status: phase-5-shipped (pending live verification) — 2026-05-02. Phases 1–4 deployed: ranked capture on for NA; BattleEvent + PlayerDailyShipStats partitioned by `mode` + `season_id`; rollup writer + rebuild keyed on partition columns; period tier guarded to mode=random; battle-history API accepts `?mode=random|ranked|combined` (default `random`) with isolated cache keys + lifetime-delta suppression for non-random views. Phase 5 adds a `Random|Ranked|All` pill to BattleHistoryCard that refetches with the `mode` param; default-mode empty stays null (preserves pre-Phase-5 contract for players with no recent randoms), but a user-selected non-default mode renders an empty state with the pill row visible so they can switch back. 4 new component tests cover initial-mode default, pill-row presence, refetch-on-toggle, and the user-selected empty state. Frontend release suite 92/92 green; lint clean; prod build succeeds. Phase 6 (optional ranked baseline backfill) is the only remaining phase — held until ranked capture has accumulated enough data to motivate the seed cost._
 
 ## Purpose
 
@@ -109,7 +109,7 @@ Implementation: `_battle_history_period_table` is unchanged; the payload builder
 
 ### Phase 5 — frontend
 
-`BattleHistoryCard.tsx` adds a small mode pill (`Random | Ranked | Combined`, defaulting to Combined). Re-fetches on toggle. Reuses existing card layout — only the data binding changes.
+`BattleHistoryCard.tsx` adds a small mode pill (`Random | Ranked | All`, defaulting to **Random** — same back-compat reasoning as Phase 4). Re-fetches on toggle by passing the `mode` param. Reuses existing card layout — only the data binding changes, with one wrinkle: when the user has switched off the default mode, the card stays mounted with an empty-state line ("No <mode> battles in this window.") so the pill row stays reachable. Default-mode empty continues to return `null`, matching the pre-Phase-5 contract.
 
 ### Phase 6 — backfill (optional)
 
