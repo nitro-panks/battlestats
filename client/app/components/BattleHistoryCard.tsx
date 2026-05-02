@@ -56,6 +56,7 @@ export interface BattleHistoryPayload {
     windows?: number;
     period?: 'daily' | 'weekly' | 'monthly' | 'yearly';
     mode?: 'random' | 'ranked' | 'combined';
+    available_modes?: ('random' | 'ranked')[];
     as_of: string;
     totals: BattleHistoryTotals;
     by_ship: BattleHistoryByShip[];
@@ -249,33 +250,28 @@ interface SparklinePoint {
     tooltip: string;
 }
 
-const Sparkline: React.FC<{ points: SparklinePoint[]; ariaLabel: string }> = ({
-    points, ariaLabel,
+// Inline sparkline that lives inside the totals tile (between Win rate
+// and Avg damage). No hover values, no day markers — just a continuous
+// polyline scaled to the window's value range.
+const InlineSparkline: React.FC<{ values: number[]; ariaLabel: string }> = ({
+    values, ariaLabel,
 }) => {
-    if (points.length === 0) return null;
-    const width = 240;
-    const height = 36;
+    if (values.length < 2) return null;
+    const width = 100;
+    const height = 28;
     const pad = 2;
-    const values = points.map((p) => p.value);
     const minV = Math.min(...values);
     const maxV = Math.max(...values);
-    // Auto-scale: pad the range so a flat line still has visual room.
     const range = Math.max(maxV - minV, 0.0001);
     const padding = range * 0.15 + 0.0001;
     const yMin = minV - padding;
     const yMax = maxV + padding;
     const span = yMax - yMin;
-    const xy = (idx: number, value: number): [number, number] => {
-        const x = pad + (idx * (width - 2 * pad)) / Math.max(1, points.length - 1);
-        const y = height - pad - ((value - yMin) / span) * (height - 2 * pad);
-        return [x, y];
-    };
-    const polyline = points
-        .map((p, i) => {
-            const [x, y] = xy(i, p.value);
-            return `${x.toFixed(1)},${y.toFixed(1)}`;
-        })
-        .join(' ');
+    const points = values.map((v, i) => {
+        const x = pad + (i * (width - 2 * pad)) / Math.max(1, values.length - 1);
+        const y = height - pad - ((v - yMin) / span) * (height - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
     return (
         <svg
             viewBox={`0 0 ${width} ${height}`}
@@ -290,16 +286,10 @@ const Sparkline: React.FC<{ points: SparklinePoint[]; ariaLabel: string }> = ({
                 fill="none"
                 stroke="var(--accent-mid)"
                 strokeWidth="1.5"
-                points={polyline}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                points={points}
             />
-            {points.map((p, i) => {
-                const [x, y] = xy(i, p.value);
-                return (
-                    <circle key={p.date} cx={x} cy={y} r={2.5} fill={p.color}>
-                        <title>{p.tooltip}</title>
-                    </circle>
-                );
-            })}
         </svg>
     );
 };
@@ -307,7 +297,7 @@ const Sparkline: React.FC<{ points: SparklinePoint[]; ariaLabel: string }> = ({
 const buildOverallWrSeries = (
     days: BattleHistoryByDay[],
     totals: BattleHistoryTotals,
-): SparklinePoint[] | null => {
+): number[] | null => {
     // Need lifetime baseline to anchor the running overall WR.
     const lifetimeBattles = totals.lifetime_battles ?? null;
     const lifetimeWr = totals.lifetime_win_rate ?? null;
@@ -315,9 +305,6 @@ const buildOverallWrSeries = (
         return null;
     }
     const lifetimeWins = Math.round(lifetimeBattles * (lifetimeWr / 100));
-    // Walk forward through the window: cumulative includes everything up
-    // to and including day i. Resulting overall WR at end of day i =
-    // (priorWins + cumWins) / (priorBattles + cumBattles).
     const periodBattles = totals.battles;
     const periodWins = totals.wins;
     const priorBattles = Math.max(0, lifetimeBattles - periodBattles);
@@ -329,17 +316,15 @@ const buildOverallWrSeries = (
         cumBattles += d.battles;
         cumWins += d.wins;
         const denom = priorBattles + cumBattles;
-        const overall = denom > 0 ? (100 * (priorWins + cumWins)) / denom : 0;
-        const dayWr = d.battles ? (100 * d.wins) / d.battles : null;
-        const dayWrText = dayWr == null ? 'no battles' : `${dayWr.toFixed(1)}% WR (${d.wins}/${d.battles})`;
-        return {
-            date: d.date,
-            value: overall,
-            color: wrColor(d.battles ? dayWr : overall),
-            tooltip: `${d.date} — ${dayWrText} → overall ${overall.toFixed(2)}%`,
-        };
+        return denom > 0 ? (100 * (priorWins + cumWins)) / denom : 0;
     });
 };
+
+// Fallback when no lifetime baseline is available — plot battles-per-day
+// as the value series. Same visual contract as the WR series; just a line.
+const buildBattlesPerDaySeries = (days: BattleHistoryByDay[]): number[] => (
+    days.map((d) => d.battles)
+);
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 const PERIOD_DEFAULT_WINDOWS: Record<Period, number> = {
@@ -359,6 +344,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const [loading, setLoading] = useState(true);
     const [period, setPeriod] = useState<Period>('daily');
     const [mode, setMode] = useState<Mode>('random');
+    const [userPickedMode, setUserPickedMode] = useState(false);
     const { theme } = useTheme();
     const palette = chartColors[theme];
 
@@ -427,6 +413,18 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         };
     }, [playerName, realm, days, period, mode]);
 
+    // Auto-select the only available mode when the player has data in
+    // exactly one mode (e.g. only ranked battles → default to Ranked).
+    // Skipped once the user has explicitly clicked a pill.
+    useEffect(() => {
+        if (userPickedMode) return;
+        const available = payload?.available_modes;
+        if (!available) return;
+        if (available.length === 1 && available[0] !== mode) {
+            setMode(available[0]);
+        }
+    }, [payload?.available_modes, mode, userPickedMode]);
+
     const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
         key: 'battles', direction: 'desc',
     });
@@ -463,6 +461,18 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const totals = payload?.totals;
     const hasBattles = !!(totals && typeof totals.battles === 'number'
         && totals.battles > 0);
+    // Pill visibility derives from `available_modes`:
+    //   only random → no pills (single mode is implicit)
+    //   only ranked → just Ranked (no Random, no All)
+    //   both        → Random | Ranked | All
+    const availableModes = payload?.available_modes ?? ['random'];
+    const hasRandom = availableModes.includes('random');
+    const hasRanked = availableModes.includes('ranked');
+    const visibleModes: Mode[] = hasRandom && hasRanked
+        ? ['random', 'ranked', 'combined']
+        : hasRanked
+            ? ['ranked']
+            : [];
     // When the user has actively switched off the default `random` mode,
     // keep the card visible even with zero rows so the pill stays
     // reachable. Default-mode empty stays null to preserve the
@@ -504,32 +514,37 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             </button>
                         ))}
                     </div>
-                    <div
-                        className="flex items-center gap-1 text-xs"
-                        role="group"
-                        aria-label="Battle mode"
-                    >
-                        {MODES.map((m) => (
-                            <button
-                                key={m}
-                                type="button"
-                                onClick={() => setMode(m)}
-                                className={`rounded px-2 py-0.5 transition-colors ${
-                                    mode === m
-                                        ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
-                                        : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
-                                }`}
-                                aria-pressed={mode === m}
-                                title={m === 'random'
-                                    ? 'Random battles only'
-                                    : m === 'ranked'
-                                        ? 'Ranked battles only (sums across active seasons)'
-                                        : 'Random + ranked combined (lifetime delta unavailable)'}
-                            >
-                                {MODE_LABEL[m]}
-                            </button>
-                        ))}
-                    </div>
+                    {visibleModes.length >= 2 && (
+                        <div
+                            className="flex items-center gap-1 text-xs"
+                            role="group"
+                            aria-label="Battle mode"
+                        >
+                            {visibleModes.map((m) => (
+                                <button
+                                    key={m}
+                                    type="button"
+                                    onClick={() => {
+                                        setMode(m);
+                                        setUserPickedMode(true);
+                                    }}
+                                    className={`rounded px-2 py-0.5 transition-colors ${
+                                        mode === m
+                                            ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
+                                            : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
+                                    }`}
+                                    aria-pressed={mode === m}
+                                    title={m === 'random'
+                                        ? 'Random battles only'
+                                        : m === 'ranked'
+                                            ? 'Ranked battles only (sums across active seasons)'
+                                            : 'Random + ranked combined (lifetime delta unavailable)'}
+                                >
+                                    {MODE_LABEL[m]}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
                 {hasBattles && (
                     <span className="text-xs text-[var(--text-muted)]">
@@ -545,8 +560,20 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             {hasBattles && (() => {
                 const deaths = Math.max(0, totals!.battles - totals!.survived_battles);
                 const kdr = deaths > 0 ? totals!.frags / deaths : totals!.frags;
+                // Pad daily windows with zero days; period rollups already
+                // have one entry per bucket so no padding needed.
+                const windowed = (payload.period ?? 'daily') === 'daily'
+                    ? buildWindowedDays(
+                        payload.by_day,
+                        payload.window_days ?? payload.windows ?? 7,
+                    )
+                    : payload.by_day;
+                const sparkValues = (
+                    buildOverallWrSeries(windowed, totals!)
+                    ?? buildBattlesPerDaySeries(windowed)
+                );
                 return (
-                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-6 sm:items-end">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
@@ -561,6 +588,12 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                     stacked
                                 />
                             </div>
+                        </div>
+                        <div className="pb-1">
+                            <InlineSparkline
+                                values={sparkValues}
+                                ariaLabel="Win-rate trend across the period"
+                            />
                         </div>
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
@@ -577,41 +610,6 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     </div>
                 );
             })()}
-            {hasBattles && (
-            <div className="mt-4">
-                {(() => {
-                    // Only pad with zero days for the daily period — for
-                    // weekly/monthly/yearly, by_day already contains one
-                    // entry per period bucket, no padding needed.
-                    const windowed = (payload.period ?? 'daily') === 'daily'
-                        ? buildWindowedDays(
-                            payload.by_day,
-                            payload.window_days ?? payload.windows ?? 7,
-                        )
-                        : payload.by_day;
-                    const wrSeries = buildOverallWrSeries(windowed, totals!);
-                    if (wrSeries) {
-                        return (
-                            <Sparkline
-                                points={wrSeries}
-                                ariaLabel="Overall win rate over the period"
-                            />
-                        );
-                    }
-                    // Fallback: battles-per-day shape when lifetime baseline is absent.
-                    const fallback: SparklinePoint[] = windowed.map((d) => {
-                        const dayWr = d.battles ? (100 * d.wins) / d.battles : null;
-                        return {
-                            date: d.date,
-                            value: d.battles,
-                            color: wrColor(d.battles ? dayWr : null),
-                            tooltip: `${d.date}: ${d.battles} battles${dayWr != null ? `, ${dayWr.toFixed(1)}% WR` : ''}`,
-                        };
-                    });
-                    return <Sparkline points={fallback} ariaLabel="Battles per day sparkline" />;
-                })()}
-            </div>
-            )}
             {hasBattles && (
             <div className="mt-4 overflow-x-auto">
                 <table className="w-full text-left text-sm">

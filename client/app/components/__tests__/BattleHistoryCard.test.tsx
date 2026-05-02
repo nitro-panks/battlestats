@@ -11,6 +11,7 @@ const mockFetchSharedJson = fetchSharedJson as jest.MockedFunction<typeof fetchS
 
 const buildPayload = (overrides: Partial<BattleHistoryPayload> = {}): BattleHistoryPayload => ({
     window_days: 7,
+    available_modes: ['random', 'ranked'],
     as_of: '2026-04-28T18:30:00Z',
     totals: {
         battles: 8,
@@ -93,8 +94,8 @@ describe('BattleHistoryCard', () => {
         // Win-rate cell renders the percentage with one decimal.
         expect(screen.getByText('66.7%')).toBeInTheDocument();
         expect(screen.getByText('50.0%')).toBeInTheDocument();
-        // Sparkline svg is present.
-        expect(screen.getByLabelText('Battles per day sparkline')).toBeInTheDocument();
+        // Inline sparkline is present (sits between Win rate and Avg damage).
+        expect(screen.getByLabelText(/Win-rate trend across the period/i)).toBeInTheDocument();
     });
 
     test('renders nothing while loading', () => {
@@ -149,6 +150,60 @@ describe('BattleHistoryCard', () => {
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         const [url] = mockFetchSharedJson.mock.calls[0];
         expect(url).toContain('mode=random');
+    });
+
+    test('hides mode pills when player has only random data', async () => {
+        resolveWith(buildPayload({ available_modes: ['random'] }));
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        // No mode pill row at all — single available mode is implicit.
+        expect(screen.queryByRole('group', { name: /battle mode/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^Ranked$/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^All$/ })).not.toBeInTheDocument();
+    });
+
+    test('defaults to Ranked + hides Random/All when player has only ranked data', async () => {
+        // Initial fetch returns mode=random with available_modes=['ranked'].
+        // The card auto-switches mode and refetches; second response is ranked.
+        mockFetchSharedJson.mockResolvedValueOnce({
+            data: buildPayload({
+                mode: 'random',
+                available_modes: ['ranked'],
+                totals: {
+                    battles: 0, wins: 0, losses: 0, win_rate: 0,
+                    damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                    planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                },
+                by_ship: [], by_day: [],
+            }),
+            headers: {},
+        });
+        mockFetchSharedJson.mockResolvedValueOnce({
+            data: buildPayload({
+                mode: 'ranked',
+                available_modes: ['ranked'],
+                totals: {
+                    battles: 12, wins: 8, losses: 4, win_rate: 66.7,
+                    damage: 480_000, avg_damage: 40_000, frags: 18,
+                    xp: 7_200, planes_killed: 0, survived_battles: 8,
+                    survival_rate: 66.7,
+                },
+            }),
+            headers: {},
+        });
+        render(<BattleHistoryCard playerName="ranked_only" realm="na" />);
+        // Wait for the second fetch (auto-mode-switch) to land.
+        await waitFor(() => {
+            expect(mockFetchSharedJson.mock.calls.length).toBeGreaterThanOrEqual(2);
+        });
+        const lastUrl = mockFetchSharedJson.mock.calls[1][0] as string;
+        expect(lastUrl).toContain('mode=ranked');
+        // No pill row (single visible mode → group hidden).
+        expect(screen.queryByRole('group', { name: /battle mode/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^Random$/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^All$/ })).not.toBeInTheDocument();
     });
 
     test('renders mode pill row with three options', async () => {

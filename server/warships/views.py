@@ -564,6 +564,16 @@ def _build_battle_history_payload(player, period: str, windows: int,
     else:
         date_field = "period_start"
 
+    # Availability probe: which modes have ANY rollup rows for this player
+    # (across all dates, not just the current window). Drives the
+    # frontend's mode-pill visibility — we hide pills for modes the
+    # player has never had data in.
+    from warships.models import PlayerDailyShipStats as _PDSS
+    available_modes = list(
+        _PDSS.objects.filter(player=player)
+        .values_list("mode", flat=True).distinct().order_by("mode")
+    )
+
     qs = table.objects.filter(
         player=player, **{f"{date_field}__gte": since}
     )
@@ -728,6 +738,7 @@ def _build_battle_history_payload(player, period: str, windows: int,
         "windows": windows,
         "window_days": windows if period == "daily" else None,
         "mode": mode,
+        "available_modes": available_modes,
         "as_of": timezone.now().isoformat(),
         "totals": {
             **totals,
