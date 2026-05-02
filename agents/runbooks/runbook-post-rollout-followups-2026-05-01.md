@@ -15,6 +15,7 @@ Five phases, ordered by value × urgency. Phase 1 is the highest-value follow-up
 | 3 | Extend baseline coverage to EU + Asia | management cmd | low (WG-budget) | ~10 min × 2 realms | on-demand |
 | 4 | Reconcile two runbook statuses | docs | none | ~5 min | next docs sweep |
 | 5 | Storage growth check on `BattleObservation` | read-only | none | ~2 min | weekly until day-14 prune |
+| 6 | Ranked battle-history rollout — see `runbook-ranked-battle-history-rollout-2026-05-02.md` | code (multi-phase) | low (additive, env-gated) | days, multi-phase | scoped separately |
 
 ---
 
