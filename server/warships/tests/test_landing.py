@@ -1586,3 +1586,66 @@ class QueueLandingPageWarmGateTests(TestCase):
             result, {'status': 'skipped', 'reason': 'enqueue-failed'})
         self.assertIsNone(cache.get(_landing_page_warm_dispatch_key('na')))
         mock_delay.assert_called_once()
+
+
+class QueueWarmPlayerCorrelationsGateTests(TestCase):
+    """Regression coverage for the dispatch gate that prevents cold-cache
+    fanout on the player-correlation path (server/warships/data.py:3400 →
+    fetch_player_tier_type_correlation). Same bug class as the landing
+    warmer fix in commit f0e51d8 — a request-driven .delay() with no
+    dedup unbounded the queue under traffic.
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    @patch('warships.tasks.warm_player_correlations_task.delay')
+    def test_enqueues_when_no_lock_or_dispatch_key(self, mock_delay):
+        from warships.tasks import queue_warm_player_correlations
+
+        result = queue_warm_player_correlations(realm='na')
+
+        self.assertEqual(result, {'status': 'queued'})
+        mock_delay.assert_called_once_with(realm='na')
+
+    @patch('warships.tasks.warm_player_correlations_task.delay')
+    def test_skips_when_warm_lock_is_held(self, mock_delay):
+        from warships.tasks import (
+            _correlation_warm_lock_key, queue_warm_player_correlations,
+        )
+
+        cache.set(_correlation_warm_lock_key('na'), 'in-flight', 60)
+
+        result = queue_warm_player_correlations(realm='na')
+
+        self.assertEqual(
+            result, {'status': 'skipped', 'reason': 'already-running'})
+        mock_delay.assert_not_called()
+
+    @patch('warships.tasks.warm_player_correlations_task.delay')
+    def test_skips_when_dispatch_key_is_held(self, mock_delay):
+        from warships.tasks import (
+            _correlation_warm_dispatch_key, queue_warm_player_correlations,
+        )
+
+        cache.set(_correlation_warm_dispatch_key('na'), 'queued', 30)
+
+        result = queue_warm_player_correlations(realm='na')
+
+        self.assertEqual(
+            result, {'status': 'skipped', 'reason': 'already-queued'})
+        mock_delay.assert_not_called()
+
+    @patch('warships.tasks.warm_player_correlations_task.delay',
+           side_effect=RuntimeError('broker down'))
+    def test_cleans_dispatch_key_on_enqueue_failure(self, mock_delay):
+        from warships.tasks import (
+            _correlation_warm_dispatch_key, queue_warm_player_correlations,
+        )
+
+        result = queue_warm_player_correlations(realm='na')
+
+        self.assertEqual(
+            result, {'status': 'skipped', 'reason': 'enqueue-failed'})
+        self.assertIsNone(cache.get(_correlation_warm_dispatch_key('na')))
+        mock_delay.assert_called_once()

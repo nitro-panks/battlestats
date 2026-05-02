@@ -138,8 +138,11 @@ def _dispatch_async_refresh(task, *args, **kwargs) -> None:
 
 
 def _dispatch_async_correlation_warm(realm: str = DEFAULT_REALM) -> None:
-    from warships.tasks import warm_player_correlations_task
-    _dispatch_async_refresh(warm_player_correlations_task, realm=realm)
+    # Routes through the lock-aware gate so cold-cache page-load bursts
+    # don't fan out one warm task per request. See
+    # agents/runbooks/runbook-post-rollout-followups-2026-05-01.md Phase 1.
+    from warships.tasks import queue_warm_player_correlations
+    queue_warm_player_correlations(realm=realm)
 
 
 def player_detail_needs_refresh(

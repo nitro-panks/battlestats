@@ -41,6 +41,7 @@ LANDING_PAGE_WARM_DISPATCH_TIMEOUT = 30
 LANDING_PLAYER_BEST_SNAPSHOT_REFRESH_LOCK_TIMEOUT = 2 * 60 * 60
 DISTRIBUTION_WARM_LOCK_TIMEOUT = 15 * 60
 CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60
+CORRELATION_WARM_DISPATCH_TIMEOUT = 30  # Matches landing — coalesces cold-cache fanout
 HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_DISPATCH_TIMEOUT = 5 * 60
@@ -95,6 +96,10 @@ def _landing_player_best_snapshot_refresh_lock_key(realm: str = DEFAULT_REALM) -
 
 def _correlation_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_player_correlations:{realm}:lock"
+
+
+def _correlation_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_player_correlations:{realm}:dispatch"
 
 
 def _hot_entity_cache_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -287,6 +292,36 @@ def queue_landing_page_warm(realm: str = DEFAULT_REALM):
         cache.delete(dispatch_key)
         logger.warning(
             "Skipping landing page warm enqueue because broker dispatch failed: %s",
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def queue_warm_player_correlations(realm: str = DEFAULT_REALM):
+    # Lock-aware gate for the cold-cache user-traffic dispatch path
+    # (server/warships/data.py:3400 fetch_player_tier_type_correlation).
+    # Without this gate, every player-page load on a cold correlation cache
+    # enqueues another full warm task — the same request-driven fanout that
+    # caused the 4581-message landing-warmer pileup on 2026-04-27 (fixed
+    # in commit f0e51d8 for landing). See agents/runbooks/runbook-post-rollout-followups-2026-05-01.md.
+    if cache.get(_correlation_warm_lock_key(realm)):
+        return {"status": "skipped", "reason": "already-running"}
+
+    dispatch_key = _correlation_warm_dispatch_key(realm)
+    if not cache.add(
+        dispatch_key,
+        "queued",
+        timeout=CORRELATION_WARM_DISPATCH_TIMEOUT,
+    ):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        warm_player_correlations_task.delay(realm=realm)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        logger.warning(
+            "Skipping correlation warm enqueue because broker dispatch failed: %s",
             error,
         )
         return {"status": "skipped", "reason": "enqueue-failed"}
