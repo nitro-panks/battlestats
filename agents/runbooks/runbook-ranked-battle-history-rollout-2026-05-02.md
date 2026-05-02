@@ -2,7 +2,7 @@
 
 _Created: 2026-05-02_
 _Context: The randoms battle-history rollout (`runbook-battle-history-rollout-2026-04-28.md`) explicitly filed ranked-battles as Phase 7 / out-of-scope. The randoms pipeline is now stable in production (17K+ events captured across 2,400+ players as of 2026-05-01) and the orchestration is proven. This runbook scopes the parallel ranked rollout — same diff-and-aggregate shape against the WG `seasons/shipstats/` endpoint, with a `mode` discriminator on the existing capture/event/rollup tables._
-_Status: planned_
+_Status: phase-3-shipped (pending live verification) — 2026-05-02. Phase 1+2 capture stable on NA (38/38 NA observations carry ranked_ships_stats_json since 04:53 UTC; 0 EU per realm allowlist; lil_boots forced refresh wrote 131 ship-entries across multiple seasons). Phase 3 lands the rollup writer mode-partitioning: PlayerDailyShipStats grew `mode` + `season_id` columns with partial unique constraints per mode (migration 0058), `_apply_event_to_daily_summary` no longer short-circuits ranked events, `rebuild_daily_ship_stats_for_date` keys on (player, ship, mode, season_id), and `_aggregate_into_period_table` filters to mode=random until the period tier is partitioned. RankedRollupWriteTests (4 cases) cover the partitioning. Lean release gate green (241/241). Phase 4 (read API mode param) shipping next._
 
 ## Purpose
 
@@ -74,9 +74,27 @@ Flip on production after Phase 1 deploys cleanly. Watch:
 - `BattleEvent.mode='ranked'` rows appear when known-active ranked players play.
 - WG API budget — extra `seasons/shipstats/` call per refresh adds ~1 call per active-tier player per crawl tick. Roughly +2K calls/hour at NA steady-state. Stays well under the application_id rate budget.
 
-### Phase 3 — rollup writer (`BATTLE_HISTORY_RANKED_ROLLUP_ENABLED=1`)
+### Phase 3 — rollup writer mode-partitioning
 
-Extend `_apply_event_to_daily_summary` to partition by `mode`. Daily ranked rows accumulate alongside random rows in `PlayerDailyShipStats` keyed on `(player, date, ship_id, mode)`. Backfill via a `rebuild_ranked_daily_ship_stats --since <date>` management command mirroring `rebuild_player_daily_ship_stats`.
+**QA refinements (2026-05-02) — three corrections to the original design:**
+
+1. **No separate `BATTLE_HISTORY_RANKED_ROLLUP_ENABLED` flag.** The existing `BATTLE_HISTORY_ROLLUP_ENABLED=1` is already on in production and gates all rollup writes. Adding a second flag for the ranked path adds operational complexity without buying anything — once the schema + writer support `mode`, the existing flag covers both modes uniformly.
+
+2. **Extend the existing `rebuild_daily_ship_stats_for_date` rather than a new `rebuild_ranked_daily_ship_stats` command.** The current rebuild is randoms-only by accident: it deletes all rows for the date and re-aggregates `BattleEvent` keyed on `(player_id, ship_id)`. After mode-partitioning lands, the rebuild must key on `(player_id, ship_id, mode, season_id)` so ranked rows for different seasons stay distinct and don't collapse into the random row.
+
+3. **Period rollup writer must be guarded to stay randoms-only.** `_aggregate_into_period_table` (`server/warships/incremental_battles.py:939`) reads `PlayerDailyShipStats` without filtering by mode. Once daily has ranked rows, the weekly/monthly/yearly tiers would over-count by mixing modes. Add `.filter(mode=PlayerDailyShipStats.MODE_RANDOM)` to keep period rollups strictly random until the period-tier mode-partitioning lands as a separate phase. The weekly/monthly/yearly UI pills are currently hidden (`7dc7e86`) so this deferral has no user-visible impact.
+
+**Files to edit:**
+
+| File | Change |
+|---|---|
+| `server/warships/models.py` (`PlayerDailyShipStats` class) | Add `MODE_RANDOM`/`MODE_RANKED`/`MODE_CHOICES` constants; add `mode` (default `'random'`, indexed) + `season_id` (nullable, indexed) fields; replace the existing single `unique_player_daily_ship_stats` constraint with two partial constraints (one per mode) mirroring the BattleEvent shape from migration 0057. |
+| `server/warships/migrations/0058_*.py` | Generated additive migration. |
+| `server/warships/incremental_battles.py:367-368` | Remove the `event.mode != BattleEvent.MODE_RANDOM` early-return guard added in Phase 1 (no longer needed). |
+| `server/warships/incremental_battles.py:_apply_event_to_daily_summary` | Include `mode=event.mode, season_id=event.season_id` in the `get_or_create` lookup kwargs and the `defaults` dict. |
+| `server/warships/incremental_battles.py:rebuild_daily_ship_stats_for_date` | Change row key from `(player_id, ship_id)` to `(player_id, ship_id, mode, season_id)`; include those fields in the row dict and bulk_create. |
+| `server/warships/incremental_battles.py:_aggregate_into_period_table` | Add `.filter(mode=PlayerDailyShipStats.MODE_RANDOM)` to the daily query so period rollups stay randoms-only. |
+| `server/warships/tests/test_incremental_battles.py` | Add `RankedRollupWriteTests`: random + ranked events for the same (player, date, ship_id) write to separate rows; multi-season ranked writes to separate rows per season; rebuild for a date with both modes preserves both partitions; period rollup query ignores ranked rows. |
 
 ### Phase 4 — read API
 

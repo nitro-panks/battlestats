@@ -564,11 +564,24 @@ class BattleEvent(models.Model):
 
 
 class PlayerDailyShipStats(models.Model):
+    MODE_RANDOM = 'random'
+    MODE_RANKED = 'ranked'
+    MODE_CHOICES = [(MODE_RANDOM, 'Random'), (MODE_RANKED, 'Ranked')]
+
     player = models.ForeignKey(
         Player, on_delete=models.CASCADE, related_name='daily_ship_stats')
     date = models.DateField(db_index=True)
     ship_id = models.BigIntegerField(db_index=True)
     ship_name = models.CharField(max_length=200, blank=True, default='')
+    # Phase 3 of the ranked rollout (runbook-ranked-battle-history-rollout-2026-05-02.md).
+    # `mode` partitions random vs ranked aggregates so a single (player,
+    # date, ship_id) can carry separate rollup rows per mode without
+    # collision. `season_id` is populated only for `mode='ranked'`
+    # (NULL for randoms), with partial unique constraints below mirroring
+    # the BattleEvent shape from migration 0057.
+    mode = models.CharField(
+        max_length=8, choices=MODE_CHOICES, default=MODE_RANDOM, db_index=True)
+    season_id = models.IntegerField(null=True, blank=True, db_index=True)
     battles = models.IntegerField(default=0)
     wins = models.IntegerField(default=0)
     losses = models.IntegerField(default=0)
@@ -602,9 +615,20 @@ class PlayerDailyShipStats(models.Model):
 
     class Meta:
         constraints = [
+            # Random mode: dedup on (player, date, ship_id) — same as
+            # pre-Phase-3, season_id stays NULL.
             models.UniqueConstraint(
                 fields=['player', 'date', 'ship_id'],
-                name='unique_player_daily_ship_stats',
+                condition=models.Q(mode='random'),
+                name='unique_random_player_daily_ship_stats',
+            ),
+            # Ranked mode: include season_id so a single (player, date,
+            # ship_id) can carry separate rows for different active
+            # seasons within the same calendar day.
+            models.UniqueConstraint(
+                fields=['player', 'date', 'ship_id', 'season_id'],
+                condition=models.Q(mode='ranked'),
+                name='unique_ranked_player_daily_ship_stats',
             ),
         ]
         indexes = [
@@ -617,7 +641,10 @@ class PlayerDailyShipStats(models.Model):
         ]
 
     def __str__(self):
-        return f"PlayerDailyShipStats({self.player_id} {self.date} ship={self.ship_id} battles={self.battles})"
+        return (
+            f"PlayerDailyShipStats({self.player_id} {self.date} {self.mode} "
+            f"ship={self.ship_id} battles={self.battles})"
+        )
 
 
 class _PlayerPeriodShipStatsBase(models.Model):

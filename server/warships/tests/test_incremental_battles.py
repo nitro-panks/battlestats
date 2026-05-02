@@ -1092,6 +1092,179 @@ class RebuildDailyShipStatsTests(TestCase):
         self.assertEqual(canary.battles, 99)
 
 
+class RankedRollupWriteTests(TestCase):
+    """Phase 3 ranked rollout: random + ranked partitions in `PlayerDailyShipStats`.
+
+    Covers the on-write incremental writer, the rebuild sweeper, and the
+    period-table aggregator under the new mode + season_id partitioning.
+    """
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="ranked_rollup_test", player_id=55555, realm="na",
+            pvp_battles=100,
+        )
+        Ship.objects.create(
+            ship_id=42, name="Yamato", nation="japan", ship_type="Battleship",
+            tier=10,
+        )
+        # Use today's date so `BattleEvent.detected_at` (auto_now_add)
+        # naturally lands on the target without a manual update — sidesteps
+        # the SQLite USE_TZ=False adaptation gap that the existing
+        # `RebuildDailyShipStatsTests` runs into.
+        self.target_date = django_timezone.now().date()
+
+    def _make_obs_pair(self, *, base_battles):
+        a = BattleObservation.objects.create(
+            player=self.player, pvp_battles=base_battles,
+        )
+        b = BattleObservation.objects.create(
+            player=self.player, pvp_battles=base_battles + 1,
+        )
+        return a, b
+
+    def test_random_and_ranked_events_same_day_same_ship_write_separate_rows(self):
+        obs_r1, obs_r2 = self._make_obs_pair(base_battles=100)
+        obs_k1, obs_k2 = self._make_obs_pair(base_battles=200)
+        random_event = BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANDOM,
+            battles_delta=1, wins_delta=1, frags_delta=2,
+            damage_delta=48_000, xp_delta=1_500, survived=True,
+            from_observation=obs_r1, to_observation=obs_r2,
+        )
+        ranked_event = BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANKED, season_id=21,
+            battles_delta=2, wins_delta=2, frags_delta=3,
+            damage_delta=80_000, xp_delta=2_400, survived=False,
+            from_observation=obs_k1, to_observation=obs_k2,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_ROLLUP_ENABLED": "1"},
+            clear=False,
+        ):
+            _apply_event_to_daily_summary(random_event)
+            _apply_event_to_daily_summary(ranked_event)
+
+        rows = PlayerDailyShipStats.objects.filter(
+            player=self.player, ship_id=42,
+        )
+        self.assertEqual(rows.count(), 2)
+        random_row = rows.get(mode=PlayerDailyShipStats.MODE_RANDOM)
+        ranked_row = rows.get(mode=PlayerDailyShipStats.MODE_RANKED)
+        self.assertIsNone(random_row.season_id)
+        self.assertEqual(random_row.battles, 1)
+        self.assertEqual(random_row.frags, 2)
+        self.assertEqual(random_row.damage, 48_000)
+        self.assertEqual(random_row.survived_battles, 1)
+        self.assertEqual(ranked_row.season_id, 21)
+        self.assertEqual(ranked_row.battles, 2)
+        self.assertEqual(ranked_row.frags, 3)
+        self.assertEqual(ranked_row.damage, 80_000)
+        self.assertEqual(ranked_row.survived_battles, 0)
+
+    def test_multi_season_ranked_writes_separate_rows_per_season(self):
+        obs_a, obs_b = self._make_obs_pair(base_battles=300)
+        obs_c, obs_d = self._make_obs_pair(base_battles=400)
+        season21 = BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANKED, season_id=21,
+            battles_delta=1, wins_delta=1, damage_delta=20_000,
+            xp_delta=600, survived=True,
+            from_observation=obs_a, to_observation=obs_b,
+        )
+        season22 = BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANKED, season_id=22,
+            battles_delta=3, wins_delta=2, damage_delta=72_000,
+            xp_delta=2_100, survived=False,
+            from_observation=obs_c, to_observation=obs_d,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_ROLLUP_ENABLED": "1"},
+            clear=False,
+        ):
+            _apply_event_to_daily_summary(season21)
+            _apply_event_to_daily_summary(season22)
+
+        rows = PlayerDailyShipStats.objects.filter(
+            player=self.player, ship_id=42,
+            mode=PlayerDailyShipStats.MODE_RANKED,
+        ).order_by("season_id")
+        self.assertEqual(rows.count(), 2)
+        self.assertEqual([r.season_id for r in rows], [21, 22])
+        self.assertEqual([r.battles for r in rows], [1, 3])
+        self.assertEqual([r.damage for r in rows], [20_000, 72_000])
+
+    def test_rebuild_preserves_random_and_ranked_partitions(self):
+        obs_r1, obs_r2 = self._make_obs_pair(base_battles=100)
+        obs_k1, obs_k2 = self._make_obs_pair(base_battles=200)
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANDOM,
+            battles_delta=1, wins_delta=1, frags_delta=2,
+            damage_delta=48_000, xp_delta=1_500, survived=True,
+            from_observation=obs_r1, to_observation=obs_r2,
+        )
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANKED, season_id=21,
+            battles_delta=3, wins_delta=2, frags_delta=4,
+            damage_delta=99_000, xp_delta=2_700, survived=False,
+            from_observation=obs_k1, to_observation=obs_k2,
+        )
+
+        rebuild_daily_ship_stats_for_date(self.target_date)
+
+        rows = PlayerDailyShipStats.objects.filter(
+            player=self.player, date=self.target_date, ship_id=42,
+        )
+        self.assertEqual(rows.count(), 2)
+        random_row = rows.get(mode=PlayerDailyShipStats.MODE_RANDOM)
+        ranked_row = rows.get(mode=PlayerDailyShipStats.MODE_RANKED)
+        self.assertIsNone(random_row.season_id)
+        self.assertEqual(random_row.battles, 1)
+        self.assertEqual(random_row.damage, 48_000)
+        self.assertEqual(ranked_row.season_id, 21)
+        self.assertEqual(ranked_row.battles, 3)
+        self.assertEqual(ranked_row.damage, 99_000)
+
+    def test_period_rollup_query_ignores_ranked_rows(self):
+        # Pre-seed daily rows: one random + one ranked on the same date,
+        # then rebuild the period tier and confirm only the random row
+        # contributed to the weekly aggregate.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=self.target_date,
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=5, wins=3, losses=2, frags=7,
+            damage=200_000, xp=4_000, survived_battles=3,
+        )
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=self.target_date,
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=10, wins=8, losses=2, frags=14,
+            damage=400_000, xp=9_000, survived_battles=8,
+        )
+
+        rebuild_period_rollups_for_date(self.target_date)
+
+        weekly = PlayerWeeklyShipStats.objects.filter(
+            player=self.player, ship_id=42,
+        )
+        self.assertEqual(weekly.count(), 1)
+        wk = weekly.get()
+        self.assertEqual(wk.battles, 5)
+        self.assertEqual(wk.wins, 3)
+        self.assertEqual(wk.frags, 7)
+        self.assertEqual(wk.damage, 200_000)
+        self.assertEqual(wk.survived_battles, 3)
+
+
 class RebuildManagementCommandTests(TestCase):
     """`python manage.py rebuild_player_daily_ship_stats --since ...`."""
 

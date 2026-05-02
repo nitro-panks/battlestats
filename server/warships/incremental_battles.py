@@ -525,16 +525,13 @@ def _apply_event_to_daily_summary(event) -> None:
 
     from warships.models import BattleEvent, PlayerDailyShipStats
 
-    # Phase 1 of the ranked rollout shipped the BattleEvent.mode column
-    # but defers the per-mode PlayerDailyShipStats partitioning to a later
-    # phase. Until that lands, ranked events accumulate as raw BattleEvent
-    # rows without rolling up — keeping the daily-rollup table strictly
-    # randoms-only avoids the unique-key collision that would otherwise
-    # mix random and ranked counters under the same (player, date,
-    # ship_id) row.
-    if getattr(event, "mode", BattleEvent.MODE_RANDOM) != BattleEvent.MODE_RANDOM:
-        return None
-
+    # Phase 3 of the ranked rollout: PlayerDailyShipStats now has
+    # mode + season_id columns with partial unique constraints per mode,
+    # so ranked events roll up to their own (player, date, ship_id, mode,
+    # season_id) rows without colliding with random rows. The partial
+    # unique constraints in the model Meta enforce dedup correctly.
+    event_mode = getattr(event, "mode", BattleEvent.MODE_RANDOM)
+    event_season_id = getattr(event, "season_id", None)
     event_date = event.detected_at.date()
     survived_battles_increment = 1 if event.survived else 0
 
@@ -577,6 +574,8 @@ def _apply_event_to_daily_summary(event) -> None:
         player_id=event.player_id,
         date=event_date,
         ship_id=event.ship_id,
+        mode=event_mode,
+        season_id=event_season_id,
         defaults=defaults,
     )
     if created:
@@ -873,7 +872,14 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
 
         rows: Dict[tuple, Dict[str, Any]] = {}
         for event in events:
-            key = (event.player_id, event.ship_id)
+            # Phase 3 ranked rollup: key by (player, ship, mode, season_id)
+            # so a single (player, date, ship_id) can carry separate
+            # rollup rows for random-mode AND ranked-mode in different
+            # active seasons. season_id is NULL for randoms — Python's
+            # tuple equality treats None as a distinct key correctly.
+            event_mode = getattr(event, "mode", "random")
+            event_season_id = getattr(event, "season_id", None)
+            key = (event.player_id, event.ship_id, event_mode, event_season_id)
             row = rows.get(key)
             if row is None:
                 row = {
@@ -881,6 +887,8 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
                     "date": target_date,
                     "ship_id": event.ship_id,
                     "ship_name": event.ship_name or "",
+                    "mode": event_mode,
+                    "season_id": event_season_id,
                     "battles": 0, "wins": 0, "losses": 0, "frags": 0,
                     "damage": 0, "xp": 0, "planes_killed": 0,
                     "survived_battles": 0,
@@ -953,8 +961,15 @@ def _aggregate_into_period_table(
     with transaction.atomic():
         period_table.objects.filter(period_start=target_period_start).delete()
 
+        # Phase 3 ranked rollout deferral: weekly/monthly/yearly tiers stay
+        # randoms-only until period-tier mode-partitioning ships as a
+        # separate phase. Without this filter, period rollups would
+        # over-count by summing random + ranked rows together. The
+        # weekly/monthly/yearly UI pills are currently hidden (commit
+        # 7dc7e86) so this deferral has no user-visible impact.
         daily_qs = PlayerDailyShipStats.objects.filter(
             date__gte=target_period_start, date__lte=period_end_inclusive,
+            mode=PlayerDailyShipStats.MODE_RANDOM,
         ).order_by("date")
 
         rows: Dict[tuple, Dict[str, Any]] = {}
