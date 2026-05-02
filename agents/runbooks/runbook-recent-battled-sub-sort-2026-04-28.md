@@ -2,7 +2,7 @@
 
 _Created: 2026-04-28_
 _Context: Repurpose the post-merge battle-history capture pipeline (`runbook-battle-history-rollout-2026-04-28.md`, migrations 0051–0054) to drive a new landing-page player sub-sort that orders by **most-recently-detected random battle** rather than by page-view recency. Existing `Recent` surface (page-view ordering) stays — this is a sibling pill, not a replacement._
-_Status: tranche-2-shipped (2026-04-29 — both tranches live; surface returns 18 rows on NA, 0 on EU pending fill)_
+_Status: resolved (2026-05-01 — both tranches live + cache-coalescing fix `d381551` shipped; `Player.last_random_battle_at` populates organically via the capture pipeline; surface served from a 15-min Redis cache with verified 5-min cooldown coalescing on invalidations; production live verification 2026-05-02 confirms `dirty_ttl=-2` across all three realms — the fix is holding under sustained capture load)_
 
 ## Purpose
 

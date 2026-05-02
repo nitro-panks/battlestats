@@ -2,7 +2,7 @@
 
 _Created: 2026-05-01_
 _Context: After the battle-history rollout (Tranches 1+2 + cache fix), the dedicated `crawls` queue carve-out, the recent-players cache coalescing fix, and the dead-code cleanup pass, several follow-ups remain. This runbook captures them in priority order so the next operator (human or agent) sees the intended sequence and can pick up any phase independently._
-_Status: phase-1-planned_
+_Status: phase-1-shipped + phase-2-soaked + phase-4-reconciled + phase-5-checked (2026-05-02). Phase 3 (EU+Asia baseline fill) and Phase 6 (ranked-battles rollout, scoped separately in `runbook-ranked-battle-history-rollout-2026-05-02.md`) remain. See "Closing notes" at bottom for verification snapshots._
 
 ## Purpose
 
@@ -191,6 +191,28 @@ Run weekly until Day-14 prune lands. If size projects past 7 GB/realm before May
 - **Runbook archiving:** Phase 4 reconciles two existing runbooks. Archive THIS runbook only after all five phases close out.
 - **Contract safety:** no API or payload changes in any phase.
 - **Runbook reconciliation:** update **Status** between phases — `phase-1-planned` → `phase-1-shipped` → `phase-2-soaked` → `phase-3-extended` → `phase-4-reconciled` → `resolved`.
+
+## Closing notes (verification snapshots, 2026-05-02)
+
+**Phase 2 sample 1 — recent-players cache state:**
+```
+na    dirty_ttl=-2 cache_ttl=793 cooldown_ttl=-2
+eu    dirty_ttl=-2 cache_ttl=691 cooldown_ttl=-2
+asia  dirty_ttl=-2 cache_ttl=-2 cooldown_ttl=-2
+```
+All realms show `dirty_ttl=-2` (key gone, no recent invalidation pressure) — none stuck at `-1`. The 5-min cooldown coalescing from commit `d381551` is holding under sustained capture load. Sample 2 + 3 across the rest of the 30-min soak window confirmed the same pattern.
+
+**Phase 5 — storage growth on Day 5 of capture:**
+| Table | Rows | Total size |
+|---|---:|---:|
+| `warships_battleobservation` | 108,949 | **1,186 MB** |
+| `warships_battleevent` | 23,573 | 7.8 MB |
+| `warships_playerdailyshipstats` | 23,376 | 9.4 MB |
+| `warships_player{weekly,monthly,yearly}shipstats` | 14.5K + 8.8K + 14.5K | <14 MB combined |
+
+Linear projection to Day-14 prune (May 12): ~3 GB total / ~1 GB per realm. **Comfortably under the 7 GB/realm envelope** the rollout runbook projected. No early-prune intervention needed.
+
+**Phase 1 follow-up — correlation-warm gate:** all realms show `dispatch_key=0 lock_key=0` at observation time (correlation cache currently warm; no fanout pressure to test against). Gate is in place and will engage organically on the next cold-cache traffic burst; verify by tailing `journalctl -u battlestats-celery-background | grep 'Skipping correlation warm enqueue'`.
 
 ## References
 

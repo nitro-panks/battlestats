@@ -2,7 +2,7 @@
 
 _Created: 2026-04-30_
 _Context: `crawl_all_clans_task` runs for days end-to-end and shares the `background` Celery queue (`-c 2`) with `incremental_player_refresh_task`, all warmers, and enrichment. Once a clan crawl starts, it occupies 50% of the available concurrency for its full multi-day runtime, blocking incrementals and letting warmer-fanout duplicates accumulate in the queue. Mitigation today is a manual revoke + lock clear — fired three times in the past 24 hours._
-_Status: planned (operational kill-switch documented; structural fix pending implementation)_
+_Status: routed (2026-05-01 — structural fix shipped via commit `8b139ce` + enable-on-install patch `779cdde`; dedicated `crawls` worker has been stable for 24h+, no operational kills needed since 2026-04-30 13:47 UTC; the daily clan-crawl Beat tick now runs on `crawls@battlestats-droplet` without ever touching the `background` slot pool that incremental refreshes need)_
 
 ## Purpose
 
