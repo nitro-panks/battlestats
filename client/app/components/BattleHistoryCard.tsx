@@ -68,6 +68,13 @@ const MODE_LABEL: Record<Mode, string> = {
 };
 const MODES: Mode[] = ['random', 'ranked', 'combined'];
 
+// On-render ranked-observation refresh: when the API responds with
+// `X-Ranked-Observation-Pending: true`, a 3-WG-call refresh is in
+// flight. Poll the endpoint up to N times so the card rehydrates with
+// fresh ranked deltas as soon as the task completes.
+const RANKED_PENDING_RETRY_DELAY_MS = 2000;
+const RANKED_PENDING_RETRY_LIMIT = 6;
+
 interface BattleHistoryCardProps {
     playerName: string;
     realm: string;
@@ -368,34 +375,55 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
 
     useEffect(() => {
         let cancelled = false;
+        let pollTimer: ReturnType<typeof setTimeout> | null = null;
+        let pendingAttempts = 0;
         setLoading(true);
         const windows = period === 'daily'
             ? days
             : PERIOD_DEFAULT_WINDOWS[period];
-        const url = `/api/player/${encodeURIComponent(playerName)}/battle-history/`
-            + `?period=${period}&windows=${windows}&mode=${mode}`
-            + `&realm=${encodeURIComponent(realm)}`;
-        fetchSharedJson<BattleHistoryPayload>(url, {
-            label: `BattleHistoryCard:${period}:${mode}`,
-            ttlMs: 60_000,
-        })
-            .then(({ data }) => {
-                if (!cancelled) {
+
+        const fetchOnce = (cacheBust: number = 0) => {
+            const url = `/api/player/${encodeURIComponent(playerName)}/battle-history/`
+                + `?period=${period}&windows=${windows}&mode=${mode}`
+                + `&realm=${encodeURIComponent(realm)}`;
+            fetchSharedJson<BattleHistoryPayload>(url, {
+                label: `BattleHistoryCard:${period}:${mode}`,
+                ttlMs: 60_000,
+                cacheKey: `battle-history:${playerName}:${realm}:${period}:${windows}:${mode}:${cacheBust}`,
+                responseHeaders: ['X-Ranked-Observation-Pending'],
+            })
+                .then(({ data, headers }) => {
+                    if (cancelled) return;
                     setPayload(data);
                     setError(null);
-                }
-            })
-            .catch((e: unknown) => {
-                if (!cancelled) {
-                    setError(e instanceof Error ? e : new Error(String(e)));
-                    setPayload(null);
-                }
-            })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
-            });
+                    const pending = headers['X-Ranked-Observation-Pending'] === 'true';
+                    if (
+                        pending
+                        && (mode === 'ranked' || mode === 'combined')
+                        && pendingAttempts < RANKED_PENDING_RETRY_LIMIT
+                    ) {
+                        pendingAttempts += 1;
+                        pollTimer = setTimeout(
+                            () => fetchOnce(pendingAttempts),
+                            RANKED_PENDING_RETRY_DELAY_MS,
+                        );
+                    }
+                })
+                .catch((e: unknown) => {
+                    if (!cancelled) {
+                        setError(e instanceof Error ? e : new Error(String(e)));
+                        setPayload(null);
+                    }
+                })
+                .finally(() => {
+                    if (!cancelled && pollTimer === null) setLoading(false);
+                });
+        };
+
+        fetchOnce();
         return () => {
             cancelled = true;
+            if (pollTimer !== null) clearTimeout(pollTimer);
         };
     }, [playerName, realm, days, period, mode]);
 

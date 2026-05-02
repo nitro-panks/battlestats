@@ -788,6 +788,92 @@ class RecordObservationAndDiffTests(TestCase):
         self.assertEqual(result["reason"], "wg-fetch-failed-or-hidden")
 
 
+class QueueRankedObservationRefreshTests(TestCase):
+    """Lock-aware-gate dispatcher for the on-render ranked refresh."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.player = Player.objects.create(
+            name="dispatcher_test", player_id=30003000, realm="na",
+        )
+
+    def test_queues_when_not_pending(self):
+        from warships.tasks import (
+            is_ranked_observation_refresh_pending,
+            queue_ranked_observation_refresh,
+        )
+        with mock.patch(
+            "warships.tasks.refresh_ranked_observation_task.delay",
+        ) as fake_delay:
+            result = queue_ranked_observation_refresh(
+                self.player.player_id, realm="na")
+        self.assertEqual(result["status"], "queued")
+        fake_delay.assert_called_once_with(
+            player_id=self.player.player_id, realm="na")
+        self.assertTrue(is_ranked_observation_refresh_pending(
+            self.player.player_id, realm="na"))
+
+    def test_dedup_short_circuits_subsequent_dispatches(self):
+        from warships.tasks import queue_ranked_observation_refresh
+        with mock.patch(
+            "warships.tasks.refresh_ranked_observation_task.delay",
+        ) as fake_delay:
+            first = queue_ranked_observation_refresh(
+                self.player.player_id, realm="na")
+            second = queue_ranked_observation_refresh(
+                self.player.player_id, realm="na")
+        self.assertEqual(first["status"], "queued")
+        self.assertEqual(second["status"], "skipped")
+        self.assertEqual(second["reason"], "already-queued")
+        # Only the first call enqueued.
+        self.assertEqual(fake_delay.call_count, 1)
+
+    def test_broker_failure_puts_dispatch_in_cooldown_and_clears_dedup(self):
+        from django.core.cache import cache
+        from warships.tasks import (
+            _ranked_observation_refresh_dispatch_key,
+            _ranked_observation_refresh_failure_key,
+            queue_ranked_observation_refresh,
+        )
+        with mock.patch(
+            "warships.tasks.refresh_ranked_observation_task.delay",
+            side_effect=RuntimeError("broker down"),
+        ):
+            result = queue_ranked_observation_refresh(
+                self.player.player_id, realm="na")
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "enqueue-failed")
+        # Dedup cleared so a future dispatch (post-cooldown) can retry.
+        self.assertIsNone(cache.get(
+            _ranked_observation_refresh_dispatch_key(
+                self.player.player_id, realm="na"),
+        ))
+        # Cooldown set so subsequent dispatchers short-circuit fast.
+        self.assertTrue(cache.get(
+            _ranked_observation_refresh_failure_key(realm="na"),
+        ))
+
+    def test_skipped_during_broker_cooldown(self):
+        from django.core.cache import cache
+        from warships.tasks import (
+            _ranked_observation_refresh_failure_key,
+            queue_ranked_observation_refresh,
+        )
+        cache.set(
+            _ranked_observation_refresh_failure_key(realm="na"),
+            True, timeout=60,
+        )
+        with mock.patch(
+            "warships.tasks.refresh_ranked_observation_task.delay",
+        ) as fake_delay:
+            result = queue_ranked_observation_refresh(
+                self.player.player_id, realm="na")
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "broker-unavailable")
+        fake_delay.assert_not_called()
+
+
 class RecordRankedObservationAndDiffTests(TestCase):
     """Phase 6: 3-call wrapper used by `establish_ranked_baseline`."""
 
@@ -1886,6 +1972,59 @@ class BattleHistoryEndpointTests(TestCase):
         # Distinct cache keys → distinct totals served from cache.
         self.assertEqual(random_resp.json()["totals"]["battles"], 4)
         self.assertEqual(ranked_resp.json()["totals"]["battles"], 10)
+
+    def test_pending_header_set_when_ranked_observation_refresh_in_flight(self):
+        from django.core.cache import cache
+        from warships.tasks import _ranked_observation_refresh_dispatch_key
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=10, wins=7,
+        )
+        # Simulate a refresh just dispatched for this player.
+        cache.set(
+            _ranked_observation_refresh_dispatch_key(
+                self.player.player_id, realm="na",
+            ),
+            "queued", timeout=300,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=ranked",
+            )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["X-Ranked-Observation-Pending"], "true")
+
+    def test_pending_header_absent_for_random_mode(self):
+        from django.core.cache import cache
+        from warships.tasks import _ranked_observation_refresh_dispatch_key
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=3,
+        )
+        cache.set(
+            _ranked_observation_refresh_dispatch_key(
+                self.player.player_id, realm="na",
+            ),
+            "queued", timeout=300,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=random",
+            )
+        # mode=random is randoms-only and unaffected by ranked refresh —
+        # no pending header so the frontend doesn't poll unnecessarily.
+        self.assertNotIn("X-Ranked-Observation-Pending", r)
 
 
 class PeriodRollupsTests(TestCase):

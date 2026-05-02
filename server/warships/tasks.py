@@ -31,6 +31,13 @@ RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
 RANKED_INCREMENTAL_LOCK_TIMEOUT = 6 * 60 * 60
 PLAYER_REFRESH_LOCK_TIMEOUT = 6 * 60 * 60
 RANKED_REFRESH_DISPATCH_TIMEOUT = 15 * 60
+# Ranked-observation refresh fires on profile render to capture a fresh
+# `BattleObservation.ranked_ships_stats_json` (3-WG-call path). Tighter
+# dedup (5 min) than `RANKED_REFRESH_DISPATCH_TIMEOUT` so a user revisiting
+# their own page after a few minutes still sees fresh ranked deltas;
+# the staleness floor in the dispatcher itself prevents spamming WG.
+RANKED_OBSERVATION_REFRESH_DISPATCH_TIMEOUT = 5 * 60
+RANKED_OBSERVATION_REFRESH_STALE_AFTER_SECONDS = 5 * 60
 CLAN_BATTLE_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_SNAPSHOT_REFRESH_DISPATCH_TIMEOUT = 15 * 60
@@ -154,6 +161,14 @@ def _task_lock_key(task_name: str, resource_id: object) -> str:
 
 def _ranked_refresh_dispatch_key(player_id: object, realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:update_ranked_data_dispatch:{realm}:{player_id}"
+
+
+def _ranked_observation_refresh_dispatch_key(player_id: object, realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:refresh_ranked_observation_dispatch:{realm}:{player_id}"
+
+
+def _ranked_observation_refresh_failure_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:refresh_ranked_observation_dispatch:{realm}:cooldown"
 
 
 def _clan_battle_refresh_dispatch_key(player_id: object, realm: str = DEFAULT_REALM) -> str:
@@ -391,6 +406,61 @@ def _run_locked_task(task_name: str, resource_id: object, request_id: str, callb
 
 def is_ranked_data_refresh_pending(player_id: object, realm: str = DEFAULT_REALM) -> bool:
     return bool(cache.get(_ranked_refresh_dispatch_key(player_id, realm=realm)))
+
+
+def is_ranked_observation_refresh_pending(
+    player_id: object, realm: str = DEFAULT_REALM,
+) -> bool:
+    return bool(cache.get(
+        _ranked_observation_refresh_dispatch_key(player_id, realm=realm)
+    ))
+
+
+def queue_ranked_observation_refresh(
+    player_id: object, realm: str = DEFAULT_REALM,
+):
+    """Dispatch a fresh BattleObservation + ranked capture for `player_id`.
+
+    Lock-aware-gate pattern (mirrors `queue_ranked_data_refresh`):
+      * Short-circuits when broker dispatch is in cooldown.
+      * Dedup `cache.add` so a profile render burst (multiple endpoints
+        firing within seconds of each other) coalesces into a single
+        Celery enqueue.
+      * Cleans up the dispatch key on enqueue failure so the next
+        render can retry.
+
+    The dispatcher itself is unconditionally fired by callers — the
+    caller is responsible for the staleness check (typically: skip if
+    the latest BattleObservation has a non-empty ranked payload less
+    than RANKED_OBSERVATION_REFRESH_STALE_AFTER_SECONDS old).
+    """
+    if cache.get(_ranked_observation_refresh_failure_key(realm=realm)):
+        return {"status": "skipped", "reason": "broker-unavailable"}
+
+    dispatch_key = _ranked_observation_refresh_dispatch_key(
+        player_id, realm=realm)
+    if not cache.add(
+        dispatch_key, "queued",
+        timeout=RANKED_OBSERVATION_REFRESH_DISPATCH_TIMEOUT,
+    ):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        refresh_ranked_observation_task.delay(
+            player_id=player_id, realm=realm)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        cache.set(
+            _ranked_observation_refresh_failure_key(realm=realm),
+            True, timeout=BROKER_DISPATCH_FAILURE_COOLDOWN,
+        )
+        logger.warning(
+            "Skipping ranked-observation refresh enqueue for "
+            "player_id=%s because broker dispatch failed: %s",
+            player_id, error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
 
 
 def queue_ranked_data_refresh(player_id: object, realm: str = DEFAULT_REALM):
@@ -657,6 +727,33 @@ def update_ranked_data_task(self, player_id, realm=DEFAULT_REALM):
         )
     finally:
         cache.delete(_ranked_refresh_dispatch_key(player_id, realm=realm))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def refresh_ranked_observation_task(self, player_id, realm=DEFAULT_REALM):
+    """Force a fresh BattleObservation + ranked capture for `player_id`.
+
+    Direct path to `record_ranked_observation_and_diff` (3 WG calls).
+    Used by the on-render dispatch in `fetch_player_summary` so the
+    BattleHistoryCard's Ranked / All views always reflect the latest
+    state without waiting for the next regular crawl tick.
+
+    The dispatcher (`queue_ranked_observation_refresh`) coalesces bursts
+    via cache.add dedup, so a profile-render fanout dispatches once.
+    """
+    from warships.incremental_battles import record_ranked_observation_and_diff
+
+    logger.info(
+        "Starting refresh_ranked_observation_task for player_id=%s realm=%s",
+        player_id, realm,
+    )
+    try:
+        return record_ranked_observation_and_diff(
+            int(player_id), realm=realm)
+    finally:
+        cache.delete(_ranked_observation_refresh_dispatch_key(
+            player_id, realm=realm,
+        ))
 
 
 @app.task(bind=True, **TASK_OPTS)

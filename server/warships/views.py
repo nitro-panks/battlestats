@@ -794,11 +794,23 @@ def battle_history(request, player_name: str) -> Response:
     )
     cached = cache.get(cache_key)
     if cached is not None:
-        return Response(cached)
+        response = Response(cached)
+    else:
+        payload = _build_battle_history_payload(player, period, windows, mode)
+        cache.set(cache_key, payload, BATTLE_HISTORY_CACHE_TTL)
+        response = Response(payload)
 
-    payload = _build_battle_history_payload(player, period, windows, mode)
-    cache.set(cache_key, payload, BATTLE_HISTORY_CACHE_TTL)
-    return Response(payload)
+    # On-render ranked-observation refresh signal: when a fresh ranked
+    # observation is in flight (dispatched by fetch_player_summary on the
+    # current profile render), tell the frontend to poll for fresh data.
+    # The dispatch dedup key is set the moment queue_ranked_observation_refresh
+    # accepts the enqueue and is cleared by the task on completion or failure.
+    from warships.tasks import is_ranked_observation_refresh_pending
+    if mode in ("ranked", "combined") and is_ranked_observation_refresh_pending(
+        player.player_id, realm=realm,
+    ):
+        response["X-Ranked-Observation-Pending"] = "true"
+    return response
 
 
 @api_view(["GET"])

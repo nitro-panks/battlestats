@@ -265,6 +265,39 @@ def player_ranked_data_needs_refresh(
     )
 
 
+# Profile-render trigger threshold for the per-render ranked-observation
+# refresh. Tighter than PLAYER_RANKED_DATA_STALE_AFTER (1h) so a user
+# revisiting a profile picks up freshly-played ranked deltas, but still
+# loose enough that a reload-burst doesn't fan out to WG every time.
+RANKED_OBSERVATION_RENDER_STALE_AFTER = timedelta(minutes=5)
+
+
+def _ranked_observation_is_stale(
+    player: Player,
+    stale_after: timedelta = RANKED_OBSERVATION_RENDER_STALE_AFTER,
+) -> bool:
+    """Return True if the player's most recent BattleObservation is missing
+    a ranked payload OR is older than `stale_after`.
+
+    Drives the on-render dispatch: when this returns True, we enqueue a
+    fresh 3-WG-call observation so the BattleHistoryCard's Ranked / All
+    views reflect the player's latest state. Hidden players are excluded
+    upstream by the surrounding `if not player.is_hidden:` guard.
+    """
+    from warships.models import BattleObservation
+
+    latest = (
+        BattleObservation.objects.filter(player=player)
+        .order_by("-observed_at")
+        .first()
+    )
+    if latest is None:
+        return True
+    if not latest.ranked_ships_stats_json:
+        return True
+    return (django_timezone.now() - latest.observed_at) >= stale_after
+
+
 def clan_detail_needs_refresh(
     clan: Clan,
     stale_after: timedelta = CLAN_DETAIL_STALE_AFTER,
@@ -2080,6 +2113,29 @@ def fetch_player_summary(player_id: str, realm: str = DEFAULT_REALM) -> dict:
             elif player_ranked_data_needs_refresh(player):
                 from warships.tasks import queue_ranked_data_refresh
                 queue_ranked_data_refresh(player_id, realm=realm)
+
+            # On-render ranked-observation refresh: dispatch a fresh
+            # BattleObservation + ranked capture so the BattleHistoryCard's
+            # Ranked / All views always reflect the latest state without
+            # waiting for the next regular crawl tick. Gated on the same
+            # env flags as the capture seam in update_battle_data so we
+            # don't spend the third WG call on realms where ranked
+            # capture is disabled.
+            ranked_capture_on = (
+                os.getenv("BATTLE_HISTORY_RANKED_CAPTURE_ENABLED", "0") == "1"
+            )
+            ranked_realms = {
+                r.strip() for r in os.getenv(
+                    "BATTLE_HISTORY_RANKED_CAPTURE_REALMS", ""
+                ).split(",") if r.strip()
+            }
+            if ranked_capture_on and realm in ranked_realms:
+                if _ranked_observation_is_stale(player):
+                    from warships.tasks import (
+                        queue_ranked_observation_refresh,
+                    )
+                    queue_ranked_observation_refresh(
+                        player_id, realm=realm)
 
     if getattr(player, 'explorer_summary', None) is None and (
         player.battles_json is not None or player.activity_json is not None or player.ranked_json is not None

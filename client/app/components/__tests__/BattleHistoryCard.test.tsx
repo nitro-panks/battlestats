@@ -186,6 +186,56 @@ describe('BattleHistoryCard', () => {
         expect(lastUrl).toContain('mode=ranked');
     });
 
+    test('polls when X-Ranked-Observation-Pending is true on a ranked-mode response', async () => {
+        jest.useFakeTimers();
+        try {
+            // Initial fetch in random mode → no pending header relevant.
+            mockFetchSharedJson.mockResolvedValueOnce({
+                data: buildPayload(),
+                headers: {},
+            });
+            render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+            await waitFor(() => {
+                expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+            });
+
+            // Switch to ranked: first response is pending; second is fresh.
+            mockFetchSharedJson.mockResolvedValueOnce({
+                data: buildPayload({ mode: 'ranked' }),
+                headers: { 'X-Ranked-Observation-Pending': 'true' },
+            });
+            mockFetchSharedJson.mockResolvedValueOnce({
+                data: buildPayload({
+                    mode: 'ranked',
+                    totals: {
+                        battles: 25, wins: 18, losses: 7, win_rate: 72.0,
+                        damage: 900_000, avg_damage: 36_000, frags: 30,
+                        xp: 11_000, planes_killed: 0, survived_battles: 18,
+                        survival_rate: 72.0,
+                    },
+                }),
+                headers: {},
+            });
+            const callsBefore = mockFetchSharedJson.mock.calls.length;
+            await act(async () => {
+                screen.getByRole('button', { name: /^Ranked$/ }).click();
+            });
+            // First ranked fetch landed (pending header set).
+            await waitFor(() => {
+                expect(mockFetchSharedJson.mock.calls.length).toBe(callsBefore + 1);
+            });
+            // Advance the polling delay; the second fetch fires.
+            await act(async () => {
+                jest.advanceTimersByTime(2100);
+            });
+            await waitFor(() => {
+                expect(mockFetchSharedJson.mock.calls.length).toBe(callsBefore + 2);
+            });
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
     test('renders empty state with pill row when ranked mode has zero data', async () => {
         // Initial random fetch with data.
         resolveWith(buildPayload());
