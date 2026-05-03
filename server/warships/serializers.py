@@ -3,7 +3,7 @@ import time
 
 from rest_framework import serializers
 from .models import Player, Clan, Ship, StreamerSubmission
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, _get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player
 
 
 TWITCH_URL_RE = re.compile(
@@ -143,7 +143,7 @@ class PlayerSerializer(serializers.ModelSerializer):
 
         cache_key = getattr(obj, 'pk', id(obj))
         if cache_key not in payload_cache:
-            payload_cache[cache_key] = _get_published_efficiency_rank_payload(
+            payload_cache[cache_key] = get_published_efficiency_rank_payload(
                 obj)
 
         return payload_cache[cache_key]

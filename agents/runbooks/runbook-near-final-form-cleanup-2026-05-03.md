@@ -1,6 +1,6 @@
 # Runbook: Near-final-form refactor & dead code pass (2026-05-03)
 
-_Status: planned (drafted in plan session 2026-05-03; QA pass already applied below)_
+_Status: tranche-1-shipped (in flight)_
 _Builds on: `agents/runbooks/runbook-dead-code-cleanup-2026-04-28.md` (Tranches A–C shipped commits `2219562`, `a4c51ab`, `7a3b7b0` per `git log`). Picks up the explicitly deferred items + new findings._
 
 ## Context
