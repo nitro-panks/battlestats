@@ -19,7 +19,6 @@ DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"
 APP_USER="${APP_USER:-battlestats}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
-DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME:-0}"
 AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS:-0}"
 MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS:-}"
 MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS:-}"
@@ -31,15 +30,6 @@ REMOTE_TMP_CERT="/tmp/battlestats-do-ca.${RELEASE_ID}.crt"
 EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:-}"
 DEFAULT_PUBLIC_ALLOWED_HOSTS="${DEFAULT_PUBLIC_ALLOWED_HOSTS:-battlestats.online,www.battlestats.online}"
 POST_DEPLOY_VERIFY_REALMS="${POST_DEPLOY_VERIFY_REALMS:-na,eu}"
-
-case "${DEPLOY_AGENTIC_RUNTIME,,}" in
-  1|true|yes|on)
-    DEPLOY_AGENTIC_RUNTIME=1
-    ;;
-  *)
-    DEPLOY_AGENTIC_RUNTIME=0
-    ;;
-esac
 
 case "${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS,,}" in
   1|true|yes|on)
@@ -63,7 +53,6 @@ fi
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \
   APP_USER="${APP_USER}" \
-  DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME}" \
   REMOTE_RELEASE="${REMOTE_RELEASE}" \
   'bash -s' <<'REMOTE'
 set -euo pipefail
@@ -71,9 +60,6 @@ set -euo pipefail
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/releases"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/server"
-if [[ "${DEPLOY_AGENTIC_RUNTIME}" == "1" ]]; then
-  install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/agents"
-fi
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/logs"
 touch "${APP_ROOT}/shared/logs/django.log"
 chown "${APP_USER}:${APP_USER}" "${APP_ROOT}/shared/logs/django.log"
@@ -98,13 +84,6 @@ rsync -az --delete \
   --exclude 'staticfiles' \
   --exclude 'deploy' \
   "${SERVER_DIR}/" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/server/"
-
-if [[ "${DEPLOY_AGENTIC_RUNTIME}" == "1" ]]; then
-  rsync -az --delete \
-    --exclude '.git' \
-    --exclude '.DS_Store' \
-    "${REPO_ROOT}/agents/" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/agents/"
-fi
 
 scp "${REPO_ROOT}/docker-compose.yml" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/docker-compose.yml"
 
@@ -418,7 +397,6 @@ set_env_value ENRICH_MIN_PVP_BATTLES 500
 set_env_value ENRICH_MIN_WR 48.0
 set_env_value ENRICH_DELAY 0.2
 set_env_value ENRICH_PAUSE_BETWEEN_BATCHES 10
-set_env_value ENABLE_AGENTIC_RUNTIME "${DEPLOY_AGENTIC_RUNTIME}"
 set_env_value PLAYER_REFRESH_INTERVAL_MINUTES 180
 set_env_value RANKED_REFRESH_INTERVAL_MINUTES 120
 set_env_value CELERY_BROKER_HEARTBEAT 0
@@ -429,9 +407,6 @@ ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secre
 
 "${APP_ROOT}/venv/bin/python" -m pip install --upgrade pip
 "${APP_ROOT}/venv/bin/pip" install --no-cache-dir -r "${REMOTE_RELEASE}/server/requirements.txt"
-if [[ "${DEPLOY_AGENTIC_RUNTIME}" == "1" ]]; then
-  "${APP_ROOT}/venv/bin/pip" install --no-cache-dir -r "${REMOTE_RELEASE}/server/requirements-agentic.txt"
-fi
 
 cd "${REMOTE_RELEASE}/server"
 # Ensure CELERY_BROKER_URL is populated in /etc/battlestats-server.env before
@@ -619,7 +594,6 @@ REMOTE
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \
   APP_USER="${APP_USER}" \
-  DEPLOY_AGENTIC_RUNTIME="${DEPLOY_AGENTIC_RUNTIME}" \
   AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS}" \
   MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS}" \
   MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS}" \
