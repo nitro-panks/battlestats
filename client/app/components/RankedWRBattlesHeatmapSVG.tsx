@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import wrColor from '../lib/wrColor';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
@@ -47,16 +48,6 @@ interface RankedWRBattlesPayload {
     player_point?: CorrelationPoint | null;
 }
 
-const selectColorByWR = (winRate: number): string => {
-    if (winRate > 65) return '#810c9e';
-    if (winRate >= 60) return '#D042F3';
-    if (winRate >= 56) return '#3182bd';
-    if (winRate >= 54) return '#74c476';
-    if (winRate >= 52) return '#a1d99b';
-    if (winRate >= 50) return '#fed976';
-    if (winRate >= 45) return '#fd8d3c';
-    return '#a50f15';
-};
 
 type Colors = typeof chartColors['light'];
 
@@ -169,7 +160,7 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
             .attr('cx', x(clampedX))
             .attr('cy', y(clampedY))
             .attr('r', 8)
-            .attr('fill', selectColorByWR(point.y))
+            .attr('fill', wrColor(point.y))
             .attr('fill-opacity', 0.95)
             .attr('stroke', colors.barStroke)
             .attr('stroke-width', 2);
@@ -239,7 +230,7 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
             .attr('x', summaryX)
             .style('font-size', axisFontSize)
             .style('font-weight', '600')
-            .style('fill', selectColorByWR(payload.player_point.y))
+            .style('fill', wrColor(payload.player_point.y))
             .text(`${Math.round(payload.player_point.x).toLocaleString()} games @ ${payload.player_point.y.toFixed(1)}%`);
     } else {
         summary.append('text')
