@@ -97,10 +97,13 @@ const tierBlue = (tier: number | null | undefined): string => {
 type SortKey = 'ship_name' | 'ship_tier' | 'ship_type' | 'battles' | 'win_rate'
     | 'avg_damage' | 'kdr';
 
-const computeKdr = (frags: number, battles: number, survived: number): number => {
-    const deaths = Math.max(0, battles - survived);
-    if (deaths <= 0) return frags;
-    return frags / deaths;
+// Average kills per battle for the period (frags / battles).
+// Renamed semantically from K/D — the BattleHistory table reports
+// per-session frag rate, not lifetime K/D-ratio. Example: 3 games,
+// 6 frags, 0 deaths → 2.00 (was 6.00 under the old kills/deaths math).
+const computeKdr = (frags: number, battles: number): number => {
+    if (battles <= 0) return 0;
+    return frags / battles;
 };
 
 // Format KDR for the per-ship table: trim trailing zeros so 1.50 → "1.5"
@@ -452,7 +455,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const visibleByShip = useMemo(() => {
         const rows = (payload?.by_ship ?? []).map((r) => ({
             ...r,
-            kdr: computeKdr(r.frags, r.battles, r.survived_battles),
+            kdr: computeKdr(r.frags, r.battles),
         }));
         const sortVal = (row: typeof rows[number]): string | number => {
             const v = (row as Record<string, unknown>)[sort.key];
@@ -466,7 +469,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             if (av > bv) return sort.direction === 'asc' ? 1 : -1;
             return 0;
         });
-        return rows.slice(0, 12);
+        return rows;
     }, [payload?.by_ship, sort]);
 
     if (loading || error) {
@@ -557,8 +560,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 </p>
             )}
             {hasBattles && (() => {
-                const deaths = Math.max(0, totals!.battles - totals!.survived_battles);
-                const kdr = deaths > 0 ? totals!.frags / deaths : totals!.frags;
+                const kdr = totals!.battles > 0 ? totals!.frags / totals!.battles : 0;
                 // Sparkline + helpers (InlineSparkline, buildOverallWrSeries,
                 // buildBattlesPerDaySeries, buildWindowedDays) intentionally
                 // kept in the file — disabled here to declutter the totals
@@ -608,14 +610,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.frags)}</div>
                         </div>
                         <div>
-                            <div className="text-xs text-[var(--text-muted)]">KDR</div>
+                            <div className="text-xs text-[var(--text-muted)]">Avg KDR</div>
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{kdr.toFixed(2)}</div>
                         </div>
                     </div>
                 );
             })()}
             {hasBattles && (
-            <div className="mt-6 overflow-x-auto border-t border-[var(--accent-faint)] pt-4">
+            <div className="mt-6 max-h-[60vh] overflow-auto border-t border-[var(--accent-faint)] pt-4">
                 <table className="w-full text-left text-sm">
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
@@ -625,7 +627,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             <SortableTh sortKey="battles" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Battles played on this ship in the selected period. Click to sort by volume.">#</SortableTh>
                             <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Win rate this period · lifetime win rate · delta vs lifetime. Color codes use Wargaming community thresholds. Click to sort by period WR.">Win Rate</SortableTh>
                             <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average damage dealt per battle on this ship in the selected period. Click to sort.">Avg dmg</SortableTh>
-                            <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Kill/Death ratio — frags ÷ deaths this period. Hover a row to see raw frag and death counts. Click to sort.">KDR</SortableTh>
+                            <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average kills per battle this period (frags ÷ battles). Hover a row to see raw frag + battle counts. Click to sort.">Avg KDR</SortableTh>
                         </tr>
                     </thead>
                     <tbody>
@@ -658,7 +660,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 <td className="py-1.5 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.avg_damage)}</td>
                                 <td
                                     className="py-1.5 px-2 text-center tabular-nums text-[var(--text-strong)]"
-                                    title={`${row.frags} frags / ${Math.max(0, row.battles - row.survived_battles)} deaths`}
+                                    title={`${row.frags} frags / ${row.battles} battles`}
                                 >
                                     {formatTableKdr(row.kdr)}
                                 </td>

@@ -408,12 +408,6 @@ def _player_explorer_response_cache_key(params: dict[str, object]) -> str:
     return f'players:explorer:response:v1:{digest}'
 
 
-def _get_agentic_trace_dashboard_data(limit: int = 12) -> dict:
-    from warships.agentic.dashboard import get_agentic_trace_dashboard
-
-    return get_agentic_trace_dashboard(limit=limit)
-
-
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def tier_data(request, player_id: str) -> Response:
@@ -1583,23 +1577,6 @@ def db_stats(request) -> Response:
             'clans': Clan.objects.filter(realm=realm).count(),
         }
     data = cache.get_or_set(f'{realm}:db:stats', _fetch_db_stats, 300)
-    return Response(data)
-
-
-@api_view(["GET"])
-@throttle_classes(PUBLIC_API_THROTTLES)
-def agentic_trace_dashboard(request) -> Response:
-    if not settings.ENABLE_AGENTIC_RUNTIME:
-        return Response(
-            {'detail': 'Agentic runtime is not enabled.'},
-            status=status.HTTP_404_NOT_FOUND,
-        )
-
-    data = cache.get_or_set(
-        'agentic:trace_dashboard:v2',
-        partial(_get_agentic_trace_dashboard_data, limit=12),
-        15,
-    )
     return Response(data)
 
 
