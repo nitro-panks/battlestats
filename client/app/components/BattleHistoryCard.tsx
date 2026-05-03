@@ -466,7 +466,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             if (av > bv) return sort.direction === 'asc' ? 1 : -1;
             return 0;
         });
-        return rows.slice(0, 12);
+        return rows;
     }, [payload?.by_ship, sort]);
 
     if (loading || error) {
@@ -615,7 +615,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 );
             })()}
             {hasBattles && (
-            <div className="mt-6 overflow-x-auto border-t border-[var(--accent-faint)] pt-4">
+            <div className="mt-6 max-h-[60vh] overflow-auto border-t border-[var(--accent-faint)] pt-4">
                 <table className="w-full text-left text-sm">
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
