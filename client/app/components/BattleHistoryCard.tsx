@@ -144,7 +144,7 @@ const SortableTh: React.FC<SortableThProps> = ({
     return (
         <th
             scope="col"
-            className="py-1 px-2 cursor-help select-none hover:text-[var(--text-strong)] text-center"
+            className="py-2 px-2 cursor-help select-none hover:text-[var(--text-strong)] text-center"
             onClick={() => onSortClick(sortKey)}
             aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
             title={tooltip}
@@ -485,7 +485,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     return (
         <section
             data-testid="battle-history-card"
-            className="mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-4"
+            className="mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5"
             aria-label="Recent battles"
         >
             <header className="flex flex-wrap items-baseline justify-between gap-2">
@@ -553,7 +553,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 )}
             </header>
             {!hasBattles && (
-                <p className="mt-3 text-sm text-[var(--text-muted)]">
+                <p className="mt-4 text-sm text-[var(--text-muted)]">
                     No {MODE_LABEL[mode].toLowerCase()} battles in this window.
                 </p>
             )}
@@ -567,7 +567,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 // uncomment the InlineSparkline cell below and bump the grid
                 // back to sm:grid-cols-6.
                 return (
-                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5 sm:items-end">
+                    <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5 sm:items-end">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
@@ -616,7 +616,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 );
             })()}
             {hasBattles && (
-            <div className="mt-4 overflow-x-auto">
+            <div className="mt-6 overflow-x-auto border-t border-[var(--accent-faint)] pt-4">
                 <table className="w-full text-left text-sm">
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
@@ -635,30 +635,30 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 key={row.ship_id}
                                 className="border-b border-[var(--accent-faint)] last:border-b-0"
                             >
-                                <td className="py-1 pr-2 text-[var(--text-strong)]">
+                                <td className="py-1.5 pr-2 text-[var(--text-strong)]">
                                     {row.ship_name || `Ship ${row.ship_id}`}
                                 </td>
-                                <td className="py-1 px-2 text-center tabular-nums text-[var(--text-muted)]">
+                                <td className="py-1.5 px-2 text-center tabular-nums text-[var(--text-muted)]">
                                     {row.ship_tier ?? '—'}
                                 </td>
                                 <td
-                                    className="py-1 px-2 text-center font-semibold"
+                                    className="py-1.5 px-2 text-center font-semibold"
                                     style={{ color: shipTypeColor(row.ship_type) }}
                                     title={row.ship_type ?? ''}
                                 >
                                     {shipTypeShort(row.ship_type)}
                                 </td>
-                                <td className="py-1 px-2 text-center tabular-nums text-[var(--text-strong)]">{formatInt(row.battles)}</td>
-                                <td className="py-1 pr-2 text-right">
+                                <td className="py-1.5 px-2 text-center tabular-nums text-[var(--text-strong)]">{formatInt(row.battles)}</td>
+                                <td className="py-1.5 pr-2 text-right">
                                     <WrCell
                                         periodWinRate={row.win_rate}
                                         lifetimeWinRate={row.lifetime_win_rate}
                                         deltaWinRate={row.delta_win_rate}
                                     />
                                 </td>
-                                <td className="py-1 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.avg_damage)}</td>
+                                <td className="py-1.5 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.avg_damage)}</td>
                                 <td
-                                    className="py-1 px-2 text-center tabular-nums text-[var(--text-strong)]"
+                                    className="py-1.5 px-2 text-center tabular-nums text-[var(--text-strong)]"
                                     title={`${row.frags} frags / ${Math.max(0, row.battles - row.survived_battles)} deaths`}
                                 >
                                     {formatTableKdr(row.kdr)}
