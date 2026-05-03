@@ -6,8 +6,6 @@ const mockUseClanMembers = jest.fn();
 const mockClipboardWriteText = jest.fn();
 const onSelectMemberSpy = jest.fn();
 
-jest.mock('../ClanTierDistributionSVG', () => { return function MockClanTierDistributionSVG() { return <div data-testid="clan-tier-distribution" />; }; });
-
 jest.mock('next/dynamic', () => {
     return () => function MockDynamicComponent(props: {
         clanId?: number;

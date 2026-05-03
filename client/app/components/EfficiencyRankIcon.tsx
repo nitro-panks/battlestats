@@ -61,7 +61,7 @@ export const resolveEfficiencyRankTier = (
     hasEfficiencyRankIcon: boolean | null | undefined,
 ): EfficiencyRankTier | null => tier ?? (hasEfficiencyRankIcon ? 'III' : null);
 
-export const buildEfficiencyRankDescription = (
+const buildEfficiencyRankDescription = (
     tier: EfficiencyRankTier,
     percentile: number | null | undefined,
     populationSize: number | null | undefined,
