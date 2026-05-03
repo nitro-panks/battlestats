@@ -275,7 +275,7 @@ const InlineSparkline: React.FC<{ values: number[]; ariaLabel: string }> = ({
     return (
         <svg
             viewBox={`0 0 ${width} ${height}`}
-            width="100%"
+            width="30%"
             height={height}
             preserveAspectRatio="none"
             className="block"
