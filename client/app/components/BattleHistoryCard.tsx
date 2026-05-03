@@ -510,24 +510,12 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             : `Last ${payload.windows} ${period === 'weekly' ? 'weeks'
                                 : period === 'monthly' ? 'months' : 'years'}`}
                     </h2>
-                    <div className="flex items-center gap-1 text-xs">
-                        {/* Weekly/monthly/yearly hidden until rollup data is available. */}
-                        {(['daily'] as Period[]).map((p) => (
-                            <button
-                                key={p}
-                                type="button"
-                                onClick={() => setPeriod(p)}
-                                className={`rounded px-2 py-0.5 transition-colors ${
-                                    period === p
-                                        ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
-                                        : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
-                                }`}
-                                aria-pressed={period === p}
-                            >
-                                {PERIOD_LABEL[p]}
-                            </button>
-                        ))}
-                    </div>
+                    {/* Period pill row hidden — only Daily exists today
+                        and a single-option pill is just visual noise.
+                        Weekly/monthly/yearly will reappear here when the
+                        period rollups ship. To restore: render the
+                        ['daily'] map back as a pill row, or expand to
+                        ['daily','weekly','monthly','yearly']. */}
                     {visibleModes.length >= 2 && (
                         <div
                             className="flex items-center gap-1 text-xs"
