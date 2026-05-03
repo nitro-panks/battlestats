@@ -8,8 +8,7 @@ Battlestats is a World of Warships player and clan statistics platform.
 
 - Frontend: Next.js 16 App Router + React 18 + D3 charts in `client/`
 - Backend: Django 5 + DRF + Celery + PostgreSQL in `server/`
-- Product realms: `na` and `eu`
-- Agentic runtime: optional on the droplet, implemented in `server/warships/agentic/`
+- Product realms: `na` and `eu` (Asia capacity in flight)
 
 ## Documentation Start Here
 
@@ -27,10 +26,24 @@ Do not scan every markdown file by default. Open `agents/reviews/`, `agents/work
 - The browser never calls the Wargaming API directly. The frontend only talks to `/api/*`, which Next.js rewrites to Django.
 - The product is cache-first with background hydration. Reads should prefer cached or published payloads and queue refresh work rather than blocking on upstream fetches.
 - Realm-aware behavior is part of the current architecture. Player and clan pages, landing endpoints, and crawl/warming flows must remain correct for both `na` and `eu`.
-- Production background work is split across three Celery lanes: `default`, `hydration`, and `background`.
-- The production droplet defaults to the non-agentic backend path. Base backend deps live in `server/requirements.txt`; optional LangGraph and CrewAI deps live in `server/requirements-agentic.txt` and are deployed only when `DEPLOY_AGENTIC_RUNTIME=1`.
-- Optional SuperLocalMemory-backed local RAG over the `agents/` markdown corpus also lives in the agentic dependency lane. Enable it with `BATTLESTATS_SLM_ENABLED=1`. It runs in Mode A (math-only, zero LLM, local SQLite) and is droplet-safe. See `agents/runbooks/runbook-memory-layering-2026-04-10.md`.
+- Production background work is split across four Celery lanes: `default`, `hydration`, `background`, and `crawls` (dedicated to multi-day clan crawls).
+- Backend deps live in `server/requirements.txt`. The experimental agentic LangGraph/CrewAI runtime + LangSmith trace dashboard were retired in v1.12.1 (`f0fbbe3`) — the pilot did not graduate.
 - Homepage, hot entity, and distribution behavior relies on scheduled warming. Cold-path regressions usually show up as cache misses, stale locks, or queue pressure rather than missing UI wiring alone.
+
+## Next steps
+
+Two threads are in flight as of v1.12.4:
+
+1. **Finish bringing in ranked battles.** Random-battle capture + diff + rollup is fully wired and validated. Ranked is shipped end-to-end on NA (~2,787 active ranked players baselined; on-render refresh, daily floor sweep, and BattleHistoryCard mode pills all live). Outstanding:
+   - Period-tier rollups (weekly/monthly/yearly) for `mode='ranked'` — currently randoms-only by design.
+   - Ranked baseline backfill for NA's long tail beyond the top 2,500.
+   - Heatmap chart `selectColorByWR` consolidation for the ranked-WR heatmap (decimal-fraction unit + extra color band needs a `wrColor()` extension first).
+2. **Bring other realms to parity.** NA leads on every battle-history surface. Outstanding for EU + Asia:
+   - Ranked capture flag rollout (`BATTLE_HISTORY_RANKED_CAPTURE_REALMS` currently `na` only).
+   - Ranked baseline fills (mirror of the NA top-2,500 / top-1,000 sweeps).
+   - Daily floor sweeper coverage (Beat schedule already creates per-realm jobs; verify they're not deferring under load).
+
+See `agents/runbooks/` for the per-thread playbooks.
 
 ## Common Commands
 
