@@ -413,15 +413,29 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         };
     }, [playerName, realm, days, period, mode]);
 
-    // Auto-select the only available mode when the player has data in
-    // exactly one mode (e.g. only ranked battles → default to Ranked).
-    // Skipped once the user has explicitly clicked a pill.
+    // Auto-select the right default mode based on what the player actually
+    // has data in. Skipped once the user has explicitly clicked a pill.
+    //   - only one mode available → switch to that one (e.g. ranked-only
+    //     player gets defaulted to Ranked)
+    //   - both modes available → switch to Combined ("All") so the user
+    //     sees their full activity by default
+    //   - default initial state is 'random' so the first fetch matches the
+    //     pre-Phase-5 contract; the auto-switch may then fire one refetch
     useEffect(() => {
         if (userPickedMode) return;
         const available = payload?.available_modes;
         if (!available) return;
         if (available.length === 1 && available[0] !== mode) {
             setMode(available[0]);
+            return;
+        }
+        if (
+            available.length >= 2
+            && available.includes('random')
+            && available.includes('ranked')
+            && mode !== 'combined'
+        ) {
+            setMode('combined');
         }
     }, [payload?.available_modes, mode, userPickedMode]);
 
