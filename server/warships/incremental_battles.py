@@ -776,13 +776,50 @@ def record_observation_from_payloads(
             }
 
         previous_snapshot = _hydrate_previous_snapshot(previous)
-        events = compute_battle_events(previous_snapshot, snapshot)
+        # Random-side broken-prior guard: if the previous observation's
+        # per-ship snapshot is empty BUT the previous account aggregate
+        # (pvp_battles) shows the player had random history, the prior is
+        # broken (e.g. ships_stats_json was [] from a flaked fetch). Emitting
+        # diffs against a zero per-ship map would attribute the player's
+        # entire random career to the current observation. Treat as baseline.
+        random_prior_broken = (
+            len(previous_snapshot.ships) == 0
+            and (previous.pvp_battles or 0) > 0
+        )
+        if random_prior_broken:
+            logger.warning(
+                "random prior broken for player_id=%s — previous obs has "
+                "pvp_battles=%s but empty ships_stats_json; treating current "
+                "observation as random baseline (no events).",
+                player.player_id, previous.pvp_battles,
+            )
+            events = []
+        else:
+            events = compute_battle_events(previous_snapshot, snapshot)
+
         previous_ranked = _hydrate_previous_ranked_snapshot(
             previous, player=player)
-        ranked_events = (
-            compute_ranked_battle_events(previous_ranked, ranked_map)
-            if ranked_ship_data is not None else []
+        # Ranked-side broken-prior guard: if walk-back found no non-NULL
+        # ranked observation in the chain (previous_ranked is empty), AND
+        # the current ranked map has data, treat as baseline. The next
+        # observation will diff against the now-correct baseline.
+        ranked_prior_broken = (
+            ranked_ship_data is not None
+            and len(previous_ranked) == 0
+            and len(ranked_map) > 0
         )
+        if ranked_prior_broken:
+            logger.info(
+                "ranked prior empty for player_id=%s — treating current "
+                "observation as ranked baseline (no events).",
+                player.player_id,
+            )
+            ranked_events = []
+        else:
+            ranked_events = (
+                compute_ranked_battle_events(previous_ranked, ranked_map)
+                if ranked_ship_data is not None else []
+            )
 
         if not events and not ranked_events:
             return {

@@ -591,19 +591,19 @@ class RankedRecordObservationTests(TestCase):
             ranked_ship_data=ranked_rows,
         )
         self.assertEqual(result["status"], "completed")
-        # Should have written a ranked observation payload + 1 ranked event
-        # (baseline-from-zero per (99, 22) since prior had no ranked).
+        # Ranked payload persists to the observation column.
         latest_obs = BattleObservation.objects.filter(
             player=self.player).latest("observed_at")
         self.assertIsNotNone(latest_obs.ranked_ships_stats_json)
+        # Broken-prior guard: prior observation had no ranked data
+        # (only the random baseline). The current observation is treated
+        # as the ranked baseline — no events emitted. The next observation
+        # will diff cleanly against this one.
         ranked_evts = BattleEvent.objects.filter(
             player=self.player, mode=BattleEvent.MODE_RANKED)
-        self.assertEqual(ranked_evts.count(), 1)
-        e = ranked_evts.get()
-        self.assertEqual(e.season_id, 22)
-        self.assertEqual(e.battles_delta, 1)
+        self.assertEqual(ranked_evts.count(), 0)
         self.assertEqual(result["random_events_created"], 0)
-        self.assertEqual(result["ranked_events_created"], 1)
+        self.assertEqual(result["ranked_events_created"], 0)
 
     def test_ranked_no_advance_produces_no_event_but_persists_payload(self):
         self._baseline_random()
@@ -1009,6 +1009,84 @@ class RecordRankedObservationAndDiffTests(TestCase):
         self.assertEqual(result["status"], "completed")
         obs = BattleObservation.objects.get(player=self.player)
         self.assertIsNone(obs.ranked_ships_stats_json)
+
+    def test_broken_ranked_prior_treats_current_as_baseline_no_events(self):
+        # Player has only NULL ranked observations in their history.
+        # Current observation has substantial ranked data. Without the
+        # broken-prior guard, the diff lane would attribute the entire
+        # ranked career as today's events. With the guard, current obs
+        # is treated as a baseline and no ranked events emit.
+        from warships.models import BattleObservation, BattleEvent
+        BattleObservation.objects.filter(player=self.player).delete()
+        # Pre-existing observation with NULL ranked.
+        BattleObservation.objects.create(
+            player=self.player, pvp_battles=99,
+            ships_stats_json=[], ranked_ships_stats_json=None,
+        )
+        ranked_data = [{
+            "ship_id": 4001,
+            "seasons": {
+                "21": {"battles": 50, "wins": 30, "losses": 20,
+                       "damage_dealt": 1_000_000, "frags": 70, "xp": 15_000,
+                       "survived_battles": 30},
+            },
+        }]
+        with mock.patch(
+            "warships.api.players._fetch_player_personal_data",
+            return_value=self.player_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ship_stats_for_player",
+            return_value=self.ship_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ranked_ship_stats_for_player",
+            return_value=ranked_data,
+        ):
+            result = record_ranked_observation_and_diff(
+                player_id=self.player.player_id, realm="na",
+            )
+        self.assertEqual(result["status"], "completed")
+        # Critical: 0 events even though current ranked has 50 battles —
+        # broken prior guard kicks in.
+        self.assertEqual(result.get("ranked_events_created"), 0)
+        self.assertEqual(
+            BattleEvent.objects.filter(
+                player=self.player, mode="ranked").count(), 0)
+
+    def test_broken_random_prior_treats_current_as_baseline_no_events(self):
+        # Player has a previous observation with pvp_battles>0 but
+        # ships_stats_json=[] (e.g. a flaked ships/stats fetch). Current
+        # observation has full per-ship data. Without the guard, the diff
+        # lane would attribute every ship's lifetime battles as today's
+        # events. With the guard, treated as baseline; no events.
+        from warships.models import BattleObservation, BattleEvent
+        BattleObservation.objects.filter(player=self.player).delete()
+        BattleObservation.objects.create(
+            player=self.player, pvp_battles=100, pvp_wins=50, pvp_losses=50,
+            pvp_frags=80, pvp_survived_battles=60,
+            ships_stats_json=[],  # broken — empty per-ship snapshot
+            ranked_ships_stats_json=None,
+        )
+        with mock.patch(
+            "warships.api.players._fetch_player_personal_data",
+            return_value=self.player_data,
+        ), mock.patch(
+            "warships.api.ships._fetch_ship_stats_for_player",
+            return_value=[{"ship_id": 99, "pvp": {"battles": 100, "wins": 50,
+                                                  "frags": 80,
+                                                  "survived_battles": 60}}],
+        ), mock.patch(
+            "warships.api.ships._fetch_ranked_ship_stats_for_player",
+            return_value=[],
+        ):
+            result = record_ranked_observation_and_diff(
+                player_id=self.player.player_id, realm="na",
+            )
+        self.assertEqual(result["status"], "completed")
+        # Random side suppressed by broken-prior guard.
+        self.assertEqual(result.get("random_events_created"), 0)
+        self.assertEqual(
+            BattleEvent.objects.filter(
+                player=self.player, mode="random").count(), 0)
 
     def test_walk_back_uses_last_nonnull_when_latest_obs_is_null(self):
         # Seed three observations:
