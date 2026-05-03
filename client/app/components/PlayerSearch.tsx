@@ -186,6 +186,10 @@ const SHOW_PLAYER_EXPLORER = false;
 // hit the in-memory cache (no network, no empty-state flash) while still
 // catching meaningful churn within a single session.
 const LANDING_FETCH_TTL_MS = 60_000;
+// Recent players/clans are server-cached for 15 min; mirror that on the
+// client so focus/visibilitychange events don't refetch (and rerender) the
+// landing card every minute while the user tabs around.
+const LANDING_RECENT_FETCH_TTL_MS = 15 * 60_000;
 
 type LandingClanMode = 'random' | 'best' | 'recent';
 type ClanBestSort = 'overall' | 'wr';
@@ -262,11 +266,11 @@ const PlayerSearch: React.FC = () => {
             const [{ data: recentClansPayload }, { data: recentPlayersPayload }] = await Promise.all([
                 fetchSharedJson<LandingClan[]>(withRealm('/api/landing/recent-clans/', realm), {
                     label: 'Recent clans',
-                    ttlMs: LANDING_FETCH_TTL_MS,
+                    ttlMs: LANDING_RECENT_FETCH_TTL_MS,
                 }),
                 fetchSharedJson<LandingPlayer[]>(withRealm('/api/landing/recent/', realm), {
                     label: 'Recent players',
-                    ttlMs: LANDING_FETCH_TTL_MS,
+                    ttlMs: LANDING_RECENT_FETCH_TTL_MS,
                 }),
             ]);
             setRecentClans(Array.isArray(recentClansPayload) ? recentClansPayload : []);
