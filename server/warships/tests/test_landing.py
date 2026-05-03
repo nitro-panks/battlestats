@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, score_best_clans, summarize_clan_battle_activity_badge, warm_landing_best_entity_caches
-from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_DIRTY_KEY, _calculate_landing_best_score, _ranked_quality_score, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_cache_metadata_key, landing_best_clan_published_cache_key, landing_best_clan_published_metadata_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
+from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_LOOKBACK_DAYS, _calculate_landing_best_score, _ranked_quality_score, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_cache_metadata_key, landing_best_clan_published_cache_key, landing_best_clan_published_metadata_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
 from warships.models import Clan, LandingPlayerBestSnapshot, Player, PlayerExplorerSummary, realm_cache_key
 
 
@@ -108,6 +108,10 @@ class LandingHelperTests(TestCase):
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_marks_dirty_and_preserves_recent_key(self, mock_delay):
+        # Recent is now a 7-day rollup rebuilt by a dedicated 3h periodic
+        # warmer, so per-row invalidations leave it untouched. The
+        # `include_recent` kwarg is preserved as a no-op for callsite
+        # compatibility.
         original_random_key = landing_player_cache_key(
             'random', LANDING_PLAYER_LIMIT)
         original_best_key = landing_player_cache_key(
@@ -125,8 +129,6 @@ class LandingHelperTests(TestCase):
             cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)), ['recent'])
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
-        self.assertIsNotNone(cache.get(realm_cache_key(
-            'na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
         mock_delay.assert_called_once_with(include_recent=True, realm='na')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
@@ -144,8 +146,6 @@ class LandingHelperTests(TestCase):
             cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)), ['recent'])
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
-        self.assertIsNone(cache.get(realm_cache_key(
-            'na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
         mock_delay.assert_called_once_with(include_recent=True, realm='na')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
@@ -174,69 +174,6 @@ class LandingHelperTests(TestCase):
         invalidate_landing_player_caches(bump_namespace=True)
         rebuilt_key = landing_player_cache_key('best', 5, sort='ranked')
         self.assertNotEqual(original_key, rebuilt_key)
-
-    @patch('warships.tasks.warm_landing_page_content_task.delay')
-    def test_invalidate_landing_recent_player_cache_is_noop_during_cooldown(self, mock_delay):
-        # First invalidate sets the dirty flag and dispatches one warmer.
-        # Subsequent invalidates within the cooldown window are full no-ops:
-        # the dirty flag is NOT re-set, and the warmer is NOT re-dispatched.
-        # This is the regression fix for the recent-players cache thrashing
-        # observed on 2026-05-01 — pre-fix, every BattleEvent capture set
-        # dirty=true (with no TTL), so the cache was effectively bypassed
-        # on every read.
-        from warships.landing import invalidate_landing_recent_player_cache
-        dirty_key = realm_cache_key('na', LANDING_RECENT_PLAYERS_DIRTY_KEY)
-
-        invalidate_landing_recent_player_cache()
-        self.assertIsNotNone(cache.get(dirty_key))
-        mock_delay.assert_called_once_with(include_recent=True, realm='na')
-
-        # Simulate a downstream consumer (a page-load) clearing the dirty
-        # flag after rebuilding the cache. The cooldown still holds, so
-        # the next invalidate must NOT re-set dirty.
-        cache.delete(dirty_key)
-
-        invalidate_landing_recent_player_cache()
-
-        self.assertIsNone(cache.get(dirty_key),
-                          'invalidate during cooldown must NOT re-set dirty')
-        mock_delay.assert_called_once_with(include_recent=True, realm='na')
-
-    @patch('warships.tasks.warm_landing_page_content_task.delay')
-    def test_invalidate_landing_recent_player_cache_dirty_key_has_ttl(self, mock_delay):
-        # The dirty flag must self-clear within the cooldown window so a
-        # cooldown-skipped invalidate doesn't leave the cache permanently
-        # bypassed if no read comes in to clear it.
-        from warships.landing import (
-            RECENT_PLAYERS_INVALIDATE_COOLDOWN,
-            invalidate_landing_recent_player_cache,
-        )
-        from django.core.cache import caches
-
-        invalidate_landing_recent_player_cache()
-        dirty_key = realm_cache_key('na', LANDING_RECENT_PLAYERS_DIRTY_KEY)
-
-        backend = caches['default']
-        # LocMemCache stores entries as (value, expiry-as-monotonic-time).
-        # Best-effort introspection for the test backend; for Redis in prod
-        # the equivalent check is `redis-cli TTL <key>` returning > 0.
-        store = getattr(backend, '_cache', None)
-        if store is not None:
-            keyed = backend.make_key(dirty_key)
-            # `default=None` arg is required by django-redis 5.x's
-            # RedisCacheClient.get() (CI uses Redis); LocMemCache's
-            # backing dict.get() accepts it the same way. Pass it
-            # explicitly so the test runs portably across both.
-            entry = store.get(keyed, None)
-            self.assertIsNotNone(entry, 'dirty key should be present')
-            # Sentinel: pre-fix, _mark_cache_family_dirty wrote with
-            # timeout=None and the LocMemCache expiry is set to None.
-            # Post-fix the entry must have a positive expiry.
-            expiry = backend._expire_info.get(keyed) if hasattr(backend, '_expire_info') else None
-            self.assertIsNotNone(expiry,
-                                 'dirty key must have an expiration')
-        # Sanity: the TTL constant itself is positive and reasonable.
-        self.assertGreater(RECENT_PLAYERS_INVALIDATE_COOLDOWN, 0)
 
     def test_best_player_payload_uses_materialized_snapshot_without_recomputing(self):
         LandingPlayerBestSnapshot.objects.update_or_create(
@@ -1080,8 +1017,6 @@ class LandingHelperTests(TestCase):
                   'dirty', timeout=None)
         cache.set(realm_cache_key(
             'na', LANDING_RECENT_CLANS_DIRTY_KEY), 'dirty', timeout=None)
-        cache.set(realm_cache_key(
-            'na', LANDING_RECENT_PLAYERS_DIRTY_KEY), 'dirty', timeout=None)
 
         with patch('warships.landing.get_landing_clans_payload', return_value=[]), patch('warships.landing.get_landing_best_clans_payload', return_value=[]), patch('warships.landing.get_landing_players_payload', return_value=[]), patch('warships.landing._build_recent_clans', return_value=[{'name': 'new-clan'}]), patch('warships.landing._build_recent_players', return_value=[{'name': 'new-player'}]):
             from warships.landing import warm_landing_page_content
@@ -1100,26 +1035,40 @@ class LandingHelperTests(TestCase):
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
         self.assertIsNone(cache.get(realm_cache_key(
             'na', LANDING_RECENT_CLANS_DIRTY_KEY)))
-        self.assertIsNone(cache.get(realm_cache_key(
-            'na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
 
-    def test_get_landing_recent_players_payload_rebuilds_when_dirty(self):
+    def test_get_landing_recent_players_payload_serves_cache_without_rebuild(self):
+        # The 7-day rollup is rebuilt out-of-band by
+        # `warm_landing_recent_players_task`; reads must be pure cache
+        # lookups so a rebuild never adds latency to a request.
         cache.set(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY), [
-                  {'name': 'old-player'}], LANDING_CACHE_TTL)
-        cache.set(realm_cache_key(
-            'na', LANDING_RECENT_PLAYERS_DIRTY_KEY), 'dirty', timeout=None)
+                  {'name': 'cached-player'}], None)
 
-        with patch('warships.landing._build_recent_players', return_value=[{'name': 'new-player'}]) as mock_build_recent_players:
+        with patch('warships.landing._build_recent_players') as mock_build:
             from warships.landing import get_landing_recent_players_payload
-
             payload = get_landing_recent_players_payload()
 
-        self.assertEqual(payload, [{'name': 'new-player'}])
+        self.assertEqual(payload, [{'name': 'cached-player'}])
+        mock_build.assert_not_called()
+
+    def test_get_landing_recent_players_payload_force_refresh_rebuilds_and_publishes(self):
+        with patch('warships.landing._build_recent_players', return_value=[{'name': 'fresh-player'}]) as mock_build:
+            from warships.landing import get_landing_recent_players_payload
+            payload = get_landing_recent_players_payload(force_refresh=True)
+
+        self.assertEqual(payload, [{'name': 'fresh-player'}])
         self.assertEqual(cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)), [
-                         {'name': 'new-player'}])
-        self.assertIsNone(cache.get(realm_cache_key(
-            'na', LANDING_RECENT_PLAYERS_DIRTY_KEY)))
-        mock_build_recent_players.assert_called_once_with(realm='na')
+                         {'name': 'fresh-player'}])
+        mock_build.assert_called_once_with(realm='na')
+
+    def test_get_landing_recent_players_payload_cold_cache_builds_inline(self):
+        # First-ever read after a Redis flush: no cache, no warmer tick yet.
+        # Build inline so the surface isn't empty until the next 3h tick.
+        with patch('warships.landing._build_recent_players', return_value=[{'name': 'cold-player'}]) as mock_build:
+            from warships.landing import get_landing_recent_players_payload
+            payload = get_landing_recent_players_payload()
+
+        self.assertEqual(payload, [{'name': 'cold-player'}])
+        mock_build.assert_called_once_with(realm='na')
 
     def test_get_landing_players_payload_rebuilds_when_dirty_instead_of_serving_published(self):
         cache_key = landing_player_cache_key('best', 5, sort='ranked')
@@ -1463,17 +1412,17 @@ class LandingHelperTests(TestCase):
             [201, 202, 203, 204], force_refresh=False, realm='eu')
 
 
-class LandingRecentPlayersBattleOrderingTests(TestCase):
-    """Recent sub-sort orders by Player.last_random_battle_at, populated
-    by the BattleEvent capture hook. Replaces the prior last_lookup
-    ordering as of 2026-04-29.
+class LandingRecentPlayersWeekActivityTests(TestCase):
+    """Recent sub-sort surfaces players who played the most random battles
+    in the trailing LANDING_RECENT_PLAYERS_LOOKBACK_DAYS-day window. Sourced
+    from PlayerDailyShipStats. Replaces the prior `last_random_battle_at`
+    ordering as of 2026-05-03.
     """
 
     def setUp(self):
         cache.clear()
 
-    def _make_player(self, *, name, player_id, last_random_battle_at, realm='na',
-                     pvp_battles=500):
+    def _make_player(self, *, name, player_id, realm='na', pvp_battles=500):
         return Player.objects.create(
             name=name,
             player_id=player_id,
@@ -1481,60 +1430,93 @@ class LandingRecentPlayersBattleOrderingTests(TestCase):
             pvp_battles=pvp_battles,
             pvp_ratio=55.0,
             is_hidden=False,
-            last_random_battle_at=last_random_battle_at,
         )
 
-    def test_empty_when_no_players_have_column_set(self):
+    def _add_daily(self, player, *, date, battles, ship_id=1, mode=None):
+        from warships.models import PlayerDailyShipStats
+        return PlayerDailyShipStats.objects.create(
+            player=player,
+            date=date,
+            ship_id=ship_id,
+            mode=mode or PlayerDailyShipStats.MODE_RANDOM,
+            battles=battles,
+        )
+
+    def test_empty_when_no_daily_rollups_exist(self):
         from warships.landing import _build_recent_players
 
-        Player.objects.create(
-            name='no_battle_player', player_id=1, realm='na',
-            last_random_battle_at=None,
-        )
+        self._make_player(name='no_rollups', player_id=1)
         self.assertEqual(_build_recent_players(realm='na'), [])
 
-    def test_orders_by_last_random_battle_at_descending(self):
+    def test_orders_by_total_battles_in_lookback_window_descending(self):
         from warships.landing import _build_recent_players
 
-        now = timezone.now()
-        self._make_player(name='oldest', player_id=10,
-                          last_random_battle_at=now - timedelta(hours=3))
-        self._make_player(name='newest', player_id=11,
-                          last_random_battle_at=now)
-        self._make_player(name='middle', player_id=12,
-                          last_random_battle_at=now - timedelta(hours=1))
+        today = timezone.now().date()
+        light = self._make_player(name='light', player_id=10)
+        middle = self._make_player(name='middle', player_id=11)
+        heavy = self._make_player(name='heavy', player_id=12)
+
+        # heavy: 30 battles spread across two days inside the window.
+        self._add_daily(heavy, date=today, battles=20, ship_id=1)
+        self._add_daily(heavy, date=today - timedelta(days=2),
+                        battles=10, ship_id=2)
+        # middle: 12 battles, one ship, inside the window.
+        self._add_daily(middle, date=today - timedelta(days=1), battles=12)
+        # light: 4 battles, edge of the window.
+        self._add_daily(light, date=today - timedelta(days=6), battles=4)
 
         rows = _build_recent_players(realm='na')
-        self.assertEqual([r['name'] for r in rows], ['newest', 'middle', 'oldest'])
+        self.assertEqual([r['name'] for r in rows], ['heavy', 'middle', 'light'])
+        self.assertEqual(rows[0]['week_battles'], 30)
+        self.assertEqual(rows[1]['week_battles'], 12)
+
+    def test_excludes_rollups_outside_lookback_window(self):
+        from warships.landing import _build_recent_players
+
+        today = timezone.now().date()
+        stale = self._make_player(name='stale', player_id=20)
+        fresh = self._make_player(name='fresh', player_id=21)
+
+        self._add_daily(stale, date=today - timedelta(days=10), battles=99)
+        self._add_daily(fresh, date=today - timedelta(days=1), battles=3)
+
+        rows = _build_recent_players(realm='na')
+        self.assertEqual([r['name'] for r in rows], ['fresh'])
+
+    def test_excludes_ranked_mode_rollups(self):
+        from warships.landing import _build_recent_players
+        from warships.models import PlayerDailyShipStats
+
+        today = timezone.now().date()
+        ranked_only = self._make_player(name='ranked_only', player_id=30)
+        random_player = self._make_player(name='random_player', player_id=31)
+
+        self._add_daily(ranked_only, date=today, battles=50,
+                        mode=PlayerDailyShipStats.MODE_RANKED)
+        self._add_daily(random_player, date=today, battles=5)
+
+        rows = _build_recent_players(realm='na')
+        self.assertEqual([r['name'] for r in rows], ['random_player'])
 
     def test_realm_isolation(self):
         from warships.landing import _build_recent_players
 
-        now = timezone.now()
-        self._make_player(name='na_player', player_id=20,
-                          last_random_battle_at=now, realm='na')
-        self._make_player(name='eu_player', player_id=21,
-                          last_random_battle_at=now, realm='eu')
+        today = timezone.now().date()
+        na_player = self._make_player(name='na_player', player_id=40, realm='na')
+        eu_player = self._make_player(name='eu_player', player_id=41, realm='eu')
 
-        na_rows = _build_recent_players(realm='na')
-        eu_rows = _build_recent_players(realm='eu')
-        self.assertEqual([r['name'] for r in na_rows], ['na_player'])
-        self.assertEqual([r['name'] for r in eu_rows], ['eu_player'])
+        self._add_daily(na_player, date=today, battles=8)
+        self._add_daily(eu_player, date=today, battles=12)
 
-    def test_excludes_players_with_null_last_random_battle_at(self):
-        from warships.landing import _build_recent_players
+        self.assertEqual([r['name']
+                          for r in _build_recent_players(realm='na')], ['na_player'])
+        self.assertEqual([r['name']
+                          for r in _build_recent_players(realm='eu')], ['eu_player'])
 
-        now = timezone.now()
-        # Page-viewed only — no battle detected — must not appear.
-        Player.objects.create(
-            name='only_viewed', player_id=40, realm='na',
-            last_lookup=now, last_random_battle_at=None,
-        )
-        self._make_player(name='battled', player_id=41,
-                          last_random_battle_at=now)
-
-        rows = _build_recent_players(realm='na')
-        self.assertEqual([r['name'] for r in rows], ['battled'])
+    def test_lookback_window_constant_is_one_week(self):
+        # Sanity: the constant we expose stays at the documented 7-day
+        # window so downstream surfaces don't silently drift off-spec.
+        self.assertEqual(LANDING_RECENT_PLAYERS_LOOKBACK_DAYS, 7)
 
 
 class QueueLandingPageWarmGateTests(TestCase):

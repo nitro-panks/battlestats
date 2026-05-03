@@ -45,6 +45,7 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 LANDING_PAGE_WARM_LOCK_TIMEOUT = 20 * 60
 LANDING_PAGE_WARM_DISPATCH_TIMEOUT = 30
+LANDING_RECENT_PLAYERS_WARM_LOCK_TIMEOUT = 15 * 60
 LANDING_PLAYER_BEST_SNAPSHOT_REFRESH_LOCK_TIMEOUT = 2 * 60 * 60
 DISTRIBUTION_WARM_LOCK_TIMEOUT = 15 * 60
 CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60
@@ -101,6 +102,10 @@ def _landing_page_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
 
 def _landing_page_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_landing_page_content:{realm}:dispatch"
+
+
+def _landing_recent_players_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_landing_recent_players:{realm}:lock"
 
 
 def _distribution_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -935,6 +940,34 @@ def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REAL
     finally:
         cache.delete(lock_key)
         cache.delete(_landing_page_warm_dispatch_key(realm))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_landing_recent_players_task(self, realm=DEFAULT_REALM):
+    # Rebuilds the landing "recent players" rollup (top 7-day random-battles
+    # leaders) and atomically overwrites the durable Redis payload. Reads
+    # never block on this — `get_landing_recent_players_payload` always
+    # returns the previously-published payload until this task's `cache.set`
+    # completes. Scheduled every 3h via `recent-players-warmer-{realm}`.
+    from warships.landing import get_landing_recent_players_payload
+
+    logger.info("Starting warm_landing_recent_players_task realm=%s", realm)
+
+    lock_key = _landing_recent_players_warm_lock_key(realm)
+    if not cache.add(lock_key, self.request.id, timeout=LANDING_RECENT_PLAYERS_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_landing_recent_players_task because another rebuild is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        payload = get_landing_recent_players_payload(
+            force_refresh=True, realm=realm)
+        result = {"status": "completed", "rows": len(payload), "realm": realm}
+        logger.info("Finished warm_landing_recent_players_task: %s", result)
+        return result
+    finally:
+        cache.delete(lock_key)
 
 
 @app.task(bind=True, **TASK_OPTS)

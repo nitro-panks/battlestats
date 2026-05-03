@@ -58,7 +58,7 @@ from warships.data import (
     refresh_player_explorer_summary,
     update_battle_data,
 )
-from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
 from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, queue_landing_best_entity_warm, update_clan_data_task, update_player_data_task, update_clan_members_task
 
@@ -1395,11 +1395,11 @@ def landing_players(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_recent_players(request) -> Response:
-    """Players ordered by most-recently-detected random battle.
+    """Players who played the most random battles over the last 7 days.
 
-    Source of truth: Player.last_random_battle_at, populated by the
-    BattleEvent capture hook. Empty list when capture hasn't fired yet
-    or when no players in the realm have triggered events.
+    Sourced from PlayerDailyShipStats and rebuilt every 3h by
+    `warm_landing_recent_players_task`. Reads are pure cache lookups —
+    rebuilds happen out-of-band so this endpoint never blocks on them.
     """
     realm = _get_realm(request)
     return Response(get_landing_recent_players_payload(realm=realm))

@@ -924,9 +924,6 @@ def record_observation_from_payloads(
     total_created = created + ranked_created
     if total_created > 0:
         _invalidate_battle_history_cache(player)
-        if created > 0:
-            # Only randoms invalidate the recently-battled landing surface.
-            _invalidate_landing_recent_players_cache(player)
 
     return {
         "status": "completed",
@@ -960,20 +957,6 @@ def _invalidate_battle_history_cache(player) -> None:
         for windows in range(1, cap + 1):
             keys.append(realm_cache_key(realm, f"battle-history:{name}:{period}:{windows}"))
     cache.delete_many(keys)
-
-
-def _invalidate_landing_recent_players_cache(player) -> None:
-    """Mark the landing Recent sub-sort cache dirty for this player's
-    realm so the next read rebuilds with the fresh ordering. Coalesced
-    via a 30-second cooldown inside the invalidator.
-
-    Recent now means recently-battled (driven by Player.last_random_battle_at),
-    so the BattleEvent capture path is the authoritative invalidation point.
-    """
-    from warships.landing import invalidate_landing_recent_player_cache
-
-    realm = player.realm or "na"
-    invalidate_landing_recent_player_cache(realm=realm)
 
 
 def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:

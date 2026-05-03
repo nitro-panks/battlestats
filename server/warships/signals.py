@@ -112,6 +112,28 @@ def register_periodic_schedules(sender, **kwargs):
 
     PeriodicTask.objects.filter(name="landing-page-warmer").delete()
 
+    # -- Recent-players warmer (7-day random-battle leaders) --
+    # Pure-cache read path on the landing endpoint, rebuilt every 3h
+    # out-of-band so a rebuild never adds latency to a request.
+    recent_players_warm_minutes = int(
+        os.getenv("LANDING_RECENT_PLAYERS_WARM_MINUTES", "180"))
+    recent_players_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=recent_players_warm_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+    for realm in sorted(VALID_REALMS):
+        PeriodicTask.objects.update_or_create(
+            name=f"recent-players-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_landing_recent_players_task",
+                "interval": recent_players_warm_schedule,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Rebuilds the landing recent-players 7-day rollup ({realm.upper()}).",
+            },
+        )
+
     landing_best_snapshot_hour = int(
         os.getenv("LANDING_BEST_PLAYER_SNAPSHOT_HOUR", "1"))
     for realm in sorted(VALID_REALMS):

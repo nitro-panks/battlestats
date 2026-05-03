@@ -66,10 +66,8 @@ def _sync_recent_player_surface(entity_type: str, entity_id: int, occurred_at, r
         return
 
     from warships.data import push_recently_viewed_player
-    from warships.landing import invalidate_landing_recent_player_cache
 
     push_recently_viewed_player(entity_id, realm=realm)
-    invalidate_landing_recent_player_cache(realm=realm)
 
 
 def record_entity_visit(payload: dict, user_agent: str = '') -> dict:
