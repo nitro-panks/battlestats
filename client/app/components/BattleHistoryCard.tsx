@@ -560,20 +560,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             {hasBattles && (() => {
                 const deaths = Math.max(0, totals!.battles - totals!.survived_battles);
                 const kdr = deaths > 0 ? totals!.frags / deaths : totals!.frags;
-                // Pad daily windows with zero days; period rollups already
-                // have one entry per bucket so no padding needed.
-                const windowed = (payload.period ?? 'daily') === 'daily'
-                    ? buildWindowedDays(
-                        payload.by_day,
-                        payload.window_days ?? payload.windows ?? 7,
-                    )
-                    : payload.by_day;
-                const sparkValues = (
-                    buildOverallWrSeries(windowed, totals!)
-                    ?? buildBattlesPerDaySeries(windowed)
-                );
+                // Sparkline + helpers (InlineSparkline, buildOverallWrSeries,
+                // buildBattlesPerDaySeries, buildWindowedDays) intentionally
+                // kept in the file — disabled here to declutter the totals
+                // tile but available if we want to re-enable. To restore,
+                // uncomment the InlineSparkline cell below and bump the grid
+                // back to sm:grid-cols-6.
                 return (
-                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-6 sm:items-end">
+                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-5 sm:items-end">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
@@ -589,12 +583,23 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 />
                             </div>
                         </div>
-                        <div className="pb-1">
+                        {/* <div className="pb-1">
                             <InlineSparkline
-                                values={sparkValues}
+                                values={
+                                    buildOverallWrSeries(
+                                        (payload.period ?? 'daily') === 'daily'
+                                            ? buildWindowedDays(payload.by_day, payload.window_days ?? payload.windows ?? 7)
+                                            : payload.by_day,
+                                        totals!,
+                                    ) ?? buildBattlesPerDaySeries(
+                                        (payload.period ?? 'daily') === 'daily'
+                                            ? buildWindowedDays(payload.by_day, payload.window_days ?? payload.windows ?? 7)
+                                            : payload.by_day,
+                                    )
+                                }
                                 ariaLabel="Win-rate trend across the period"
                             />
-                        </div>
+                        </div> */}
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>

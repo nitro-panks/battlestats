@@ -94,8 +94,9 @@ describe('BattleHistoryCard', () => {
         // Win-rate cell renders the percentage with one decimal.
         expect(screen.getByText('66.7%')).toBeInTheDocument();
         expect(screen.getByText('50.0%')).toBeInTheDocument();
-        // Inline sparkline is present (sits between Win rate and Avg damage).
-        expect(screen.getByLabelText(/Win-rate trend across the period/i)).toBeInTheDocument();
+        // Sparkline is intentionally hidden (kept in component code for future
+        // re-enable). Confirm it is NOT rendered.
+        expect(screen.queryByLabelText(/Win-rate trend across the period/i)).not.toBeInTheDocument();
     });
 
     test('renders nothing while loading', () => {
