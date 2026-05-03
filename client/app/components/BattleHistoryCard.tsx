@@ -548,11 +548,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         </div>
                     )}
                 </div>
-                {hasBattles && (
-                    <span className="text-xs text-[var(--text-muted)]">
-                        {formatInt(totals!.battles)} battles · {formatPercent(totals!.win_rate)} WR · {formatInt(totals!.avg_damage)} avg dmg
-                    </span>
-                )}
+                {/* Header summary text removed — duplicates the totals tile
+                    cells (Battles, Win rate, Avg damage) directly below. */}
             </header>
             {!hasBattles && (
                 <p className="mt-4 text-sm text-[var(--text-muted)]">
