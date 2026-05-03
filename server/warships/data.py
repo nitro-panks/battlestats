@@ -1873,6 +1873,21 @@ def _explorer_summary_needs_refresh(player: Player) -> bool:
     return False
 
 
+def derive_days_since_last_battle(last_battle_date) -> Optional[int]:
+    """Return days from `last_battle_date` to today (UTC). None if missing.
+
+    The single source of truth for "X days ago" displays. Computed at
+    READ time so the value is always current — the stored
+    `Player.days_since_last_battle` column drifts +1/day between
+    refreshes and should not be surfaced directly to users. The clan
+    member list (`views.py:_days_since_last_battle`) uses the same
+    derivation so player-detail and clan-member surfaces agree.
+    """
+    if last_battle_date is None:
+        return None
+    return max(0, (datetime.now(timezone.utc).date() - last_battle_date).days)
+
+
 def build_player_summary(
     player: Player,
     activity_rows: Any = None,
@@ -1889,7 +1904,10 @@ def build_player_summary(
         'player_id': player.player_id,
         'name': player.name,
         'is_hidden': player.is_hidden,
-        'days_since_last_battle': player.days_since_last_battle,
+        # Derive at read time so the displayed "X days ago" is always
+        # current — the stored column is stale by 1/day until the next
+        # refresh of this player.
+        'days_since_last_battle': derive_days_since_last_battle(player.last_battle_date),
         'last_battle_date': player.last_battle_date.isoformat() if player.last_battle_date else None,
         'account_age_days': account_age_days,
         'pvp_ratio': player.pvp_ratio,

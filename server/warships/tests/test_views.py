@@ -3639,6 +3639,27 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["latest_ranked_battles"], 21)
         self.assertEqual(payload["highest_ranked_league_recent"], "Silver")
 
+    def test_player_summary_days_since_last_battle_is_derived_at_read_time(self):
+        # Simulates the real bug: stored days_since_last_battle is stale
+        # (snapshotted at last refresh), but last_battle_date is current.
+        # The API should always return the freshly-computed value derived
+        # from last_battle_date — never the stored stale snapshot.
+        now = timezone.now()
+        Player.objects.create(
+            name="StaleDaysPlayer",
+            player_id=8183,
+            is_hidden=False,
+            pvp_battles=100,
+            last_battle_date=now.date() - timedelta(days=2),
+            # Stored value is stale (e.g. computed 5 days ago when player
+            # was 7 days idle and 5 more days have passed without refresh).
+            days_since_last_battle=7,
+        )
+        response = self.client.get("/api/fetch/player_summary/8183/")
+        self.assertEqual(response.status_code, 200)
+        # Derived from last_battle_date (now - 2 days) — not the stored 7.
+        self.assertEqual(response.json()["days_since_last_battle"], 2)
+
     def test_player_detail_includes_kill_ratio(self):
         now = timezone.now()
         Player.objects.create(
