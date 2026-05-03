@@ -1410,9 +1410,10 @@ class RebuildDailyShipStatsTests(TestCase):
         self.obs_c = BattleObservation.objects.create(
             player=self.player, pvp_battles=102,
         )
-        midday = django_timezone.make_aware(
-            datetime(2026, 4, 28, 12, 0, 0),
-        )
+        # USE_TZ=False project — pass naive datetimes; the SQLite adapter
+        # rejects tz-aware values (which a stray make_aware() wrapper used
+        # to silently produce, breaking the test under SQLite).
+        midday = datetime(2026, 4, 28, 12, 0, 0)
         BattleEvent.objects.create(
             player=self.player, ship_id=42, ship_name="Yamato",
             battles_delta=1, wins_delta=1, frags_delta=2,
@@ -2252,8 +2253,8 @@ class PeriodRollupsTests(TestCase):
             battles=3, wins=2, losses=1, frags=5,
             damage=180_000, xp=4_500, planes_killed=0,
             survived_battles=1,
-            first_event_at=django_timezone.make_aware(datetime(2026, 4, 27, 12, 0)),
-            last_event_at=django_timezone.make_aware(datetime(2026, 4, 27, 18, 0)),
+            first_event_at=datetime(2026, 4, 27, 12, 0),
+            last_event_at=datetime(2026, 4, 27, 18, 0),
         )
         PlayerDailyShipStats.objects.create(
             player=self.player, date=self.day_b, ship_id=42,
@@ -2261,8 +2262,8 @@ class PeriodRollupsTests(TestCase):
             battles=4, wins=3, losses=1, frags=7,
             damage=240_000, xp=6_200, planes_killed=0,
             survived_battles=2,
-            first_event_at=django_timezone.make_aware(datetime(2026, 4, 30, 9, 0)),
-            last_event_at=django_timezone.make_aware(datetime(2026, 4, 30, 21, 0)),
+            first_event_at=datetime(2026, 4, 30, 9, 0),
+            last_event_at=datetime(2026, 4, 30, 21, 0),
         )
 
     def test_rebuild_period_rollups_writes_weekly_monthly_yearly(self):
