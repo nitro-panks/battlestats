@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import wrColor from '../lib/wrColor';
 import { useRealm } from '../context/RealmContext';
 import { useTheme } from '../context/ThemeContext';
 import { withRealm } from '../lib/realmParams';
@@ -38,16 +39,6 @@ const formatTierRange = (minTier: number | null, maxTier: number | null): string
     return `Tiers ${minTier}-${maxTier}`;
 };
 
-const selectColorByWR = (winRatio: number): string => {
-    if (winRatio > 65) return '#810c9e';
-    if (winRatio >= 60) return '#D042F3';
-    if (winRatio >= 56) return '#3182bd';
-    if (winRatio >= 54) return '#74c476';
-    if (winRatio >= 52) return '#a1d99b';
-    if (winRatio >= 50) return '#fed976';
-    if (winRatio >= 45) return '#fd8d3c';
-    return '#a50f15';
-};
 
 const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCount }) => {
     const { realm } = useRealm();
@@ -242,7 +233,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
                                     <td className="py-2 pr-4 text-left text-[var(--text-secondary)]">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
                                     <td className="py-2 pr-4 text-right">{season.participants.toLocaleString()}</td>
                                     <td className="py-2 pr-4 text-right">{memberCount > 0 ? `${((season.participants / memberCount) * 100).toFixed(0)}%` : '—'}</td>
-                                    <td className="py-2 pr-3 text-right font-medium" style={{ color: selectColorByWR(season.roster_win_rate) }}>{season.roster_win_rate.toFixed(1)}%</td>
+                                    <td className="py-2 pr-3 text-right font-medium" style={{ color: wrColor(season.roster_win_rate) }}>{season.roster_win_rate.toFixed(1)}%</td>
                                 </tr>
                             ))}
                         </tbody>

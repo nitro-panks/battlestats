@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import wrColor from '../lib/wrColor';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
@@ -48,16 +49,6 @@ interface CorrelationPayload {
     trend: CorrelationTrendPoint[];
 }
 
-const selectColorByWR = (winRatio: number): string => {
-    if (winRatio > 65) return '#810c9e';
-    if (winRatio >= 60) return '#D042F3';
-    if (winRatio >= 56) return '#3182bd';
-    if (winRatio >= 54) return '#74c476';
-    if (winRatio >= 52) return '#a1d99b';
-    if (winRatio >= 50) return '#fed976';
-    if (winRatio >= 45) return '#fd8d3c';
-    return '#a50f15';
-};
 
 const formatPercent = (value: number): string => `${value.toFixed(1)}%`;
 
@@ -299,7 +290,7 @@ const drawChart = (
     // Axes flipped: x = survival rate, y = win rate
     const expectedWR = interpolateTrendValue(payload.trend, payload.x_domain, playerSurvivalRate);
     const wrDelta = expectedWR == null ? null : playerWR - expectedWR;
-    const playerColor = selectColorByWR(playerWR);
+    const playerColor = wrColor(playerWR);
     const plottedPlayerSurvivalRate = clampToDomain(playerSurvivalRate, payload.x_domain);
     const plottedPlayerWR = clampToDomain(playerWR, payload.y_domain);
     const playerX = x(plottedPlayerSurvivalRate);
