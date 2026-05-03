@@ -204,7 +204,7 @@ def _process_player_ship_data(player, ship_data_list):
     from warships.api.ships import _fetch_ship_info
     from warships.data import (
         _build_ship_row_metadata,
-        _extract_randoms_rows,
+        extract_randoms_rows,
         _aggregate_battles_by_key,
     )
 
@@ -282,7 +282,7 @@ def _process_player_ship_data(player, ship_data_list):
     player.tiers_updated_at = now
     player.type_json = _aggregate_battles_by_key(battles_rows, 'ship_type')
     player.type_updated_at = now
-    player.randoms_json = _extract_randoms_rows(battles_rows, limit=20)
+    player.randoms_json = extract_randoms_rows(battles_rows, limit=20)
     player.randoms_updated_at = now
     player.enrichment_status = Player.ENRICHMENT_ENRICHED
     player.save(update_fields=[

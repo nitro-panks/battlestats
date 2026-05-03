@@ -223,7 +223,11 @@ class LandingHelperTests(TestCase):
         store = getattr(backend, '_cache', None)
         if store is not None:
             keyed = backend.make_key(dirty_key)
-            entry = store.get(keyed)
+            # `default=None` arg is required by django-redis 5.x's
+            # RedisCacheClient.get() (CI uses Redis); LocMemCache's
+            # backing dict.get() accepts it the same way. Pass it
+            # explicitly so the test runs portably across both.
+            entry = store.get(keyed, None)
             self.assertIsNotNone(entry, 'dirty key should be present')
             # Sentinel: pre-fix, _mark_cache_family_dirty wrote with
             # timeout=None and the LocMemCache expiry is set to None.

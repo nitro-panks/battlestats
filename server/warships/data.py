@@ -5,7 +5,7 @@ from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_da
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, _fetch_efficiency_badges_for_player, build_ship_chart_name
 from warships.achievements_catalog import get_achievement_catalog_entry
 from warships.player_analytics import compute_player_verdict
-from warships.data_support import _coerce_activity_rows, _coerce_battle_rows, _coerce_efficiency_rows, _coerce_ranked_rows, _has_newer_source_timestamp, _is_stale_timestamp, _queue_limited_player_hydration, _timestamped_payload_needs_refresh
+from warships.data_support import _coerce_activity_rows, _coerce_battle_rows, _coerce_efficiency_rows, _coerce_ranked_rows, _has_newer_source_timestamp, _is_stale_timestamp, _queue_limited_player_hydration, _timestamped_payload_needs_refresh, clamp
 from warships.player_records import BlockedAccountError, get_or_create_canonical_player
 from warships.models import PlayerAchievementStat, MvPlayerDistributionStats
 from warships.models import DEFAULT_REALM, realm_cache_key, Player, Snapshot, Clan, PlayerExplorerSummary, Ship
@@ -852,7 +852,7 @@ def _efficiency_rank_snapshot_is_fresh(
     return True
 
 
-def _get_published_efficiency_rank_payload(player: Player) -> dict[str, Any]:
+def get_published_efficiency_rank_payload(player: Player) -> dict[str, Any]:
     # Serve the last-known snapshot whenever one exists. We intentionally do
     # NOT call _efficiency_rank_snapshot_is_fresh() here because that helper
     # also returns False when the player's efficiency_updated_at or
@@ -1390,7 +1390,7 @@ def _calculate_player_kill_ratio(battle_rows: list[dict]) -> Optional[float]:
     return round(weighted_sum / total_weight, 2)
 
 
-def _calculate_tier_filtered_pvp_record(
+def calculate_tier_filtered_pvp_record(
     battles_rows: Any,
     minimum_tier: int = 5,
 ) -> tuple[int, Optional[float]]:
@@ -1586,29 +1586,25 @@ def _build_ship_row_metadata(ship_id: Any, ship_model: Optional[Ship]) -> dict[s
     }
 
 
-def _clamp(value: float, lower: float, upper: float) -> float:
-    return max(lower, min(upper, value))
-
-
 def _normalize_wr_score(pvp_ratio: Optional[float]) -> Optional[float]:
     if pvp_ratio is None:
         return None
 
-    return _clamp((float(pvp_ratio) - 45.0) / 20.0, 0.0, 1.0)
+    return clamp((float(pvp_ratio) - 45.0) / 20.0, 0.0, 1.0)
 
 
 def _normalize_kdr_score(kill_ratio: Optional[float]) -> Optional[float]:
     if kill_ratio is None:
         return None
 
-    return _clamp((float(kill_ratio) - 0.4) / 1.6, 0.0, 1.0)
+    return clamp((float(kill_ratio) - 0.4) / 1.6, 0.0, 1.0)
 
 
 def _normalize_survival_score(pvp_survival_rate: Optional[float]) -> Optional[float]:
     if pvp_survival_rate is None:
         return None
 
-    return _clamp((float(pvp_survival_rate) - 25.0) / 25.0, 0.0, 1.0)
+    return clamp((float(pvp_survival_rate) - 25.0) / 25.0, 0.0, 1.0)
 
 
 def _calculate_effective_battle_volume(battle_rows: list[dict], fallback_battles: Optional[int]) -> Optional[float]:
@@ -1625,7 +1621,7 @@ def _calculate_effective_battle_volume(battle_rows: list[dict], fallback_battles
             _player_score_tier_weight(row.get('ship_tier'))
 
     if total_battles > 0:
-        competitive_share = _clamp(weighted_battles / total_battles, 0.0, 1.0)
+        competitive_share = clamp(weighted_battles / total_battles, 0.0, 1.0)
         baseline_battles = max(int(fallback_battles or 0), total_battles)
         return float(baseline_battles) * competitive_share
 
@@ -1645,7 +1641,7 @@ def _normalize_battle_volume_score(total_battles: Optional[int], battle_rows: li
     if battles <= 0:
         return 0.0
 
-    return _clamp(math.log10(battles + 1) / 4.0, 0.0, 1.0)
+    return clamp(math.log10(battles + 1) / 4.0, 0.0, 1.0)
 
 
 def _calculate_competitive_tier_factor(battle_rows: list[dict], fallback_battles: Optional[int]) -> float:
@@ -1665,9 +1661,9 @@ def _calculate_competitive_tier_factor(battle_rows: list[dict], fallback_battles
         fallback_total = max(int(fallback_battles or 0), 0)
         return 1.0 if fallback_total > 0 else 1.0
 
-    competitive_share = _clamp(weighted_battles / total_battles, 0.0, 1.0)
+    competitive_share = clamp(weighted_battles / total_battles, 0.0, 1.0)
     return round(
-        _clamp(
+        clamp(
             PLAYER_SCORE_LOW_TIER_FLOOR +
                 ((1.0 - PLAYER_SCORE_LOW_TIER_FLOOR)
                  * math.sqrt(competitive_share)),
@@ -1705,7 +1701,7 @@ def _fibonacci_activity_weight(day_age: int) -> float:
 
 
 def _smoothstep(progress: float) -> float:
-    normalized = _clamp(progress, 0.0, 1.0)
+    normalized = clamp(progress, 0.0, 1.0)
     return normalized * normalized * (3.0 - (2.0 * normalized))
 
 
@@ -1788,7 +1784,7 @@ def _calculate_recent_activity_score(activity_rows: Any, days_since_last_battle:
         if battles <= 0:
             continue
 
-        day_intensity = _clamp(
+        day_intensity = clamp(
             math.log1p(battles) /
             math.log1p(PLAYER_SCORE_ACTIVITY_SATURATION_BATTLES),
             0.0,
@@ -1801,7 +1797,7 @@ def _calculate_recent_activity_score(activity_rows: Any, days_since_last_battle:
                             for day_age in range(29))
     recent_score = weighted_intensity / \
         max_recent_weight if max_recent_weight > 0 else 0.0
-    return round(_clamp(recent_score, 0.0, 1.0) * _inactivity_activity_multiplier(days_since_last_battle), 4)
+    return round(clamp(recent_score, 0.0, 1.0) * _inactivity_activity_multiplier(days_since_last_battle), 4)
 
 
 def _calculate_player_score(
@@ -1835,7 +1831,7 @@ def _calculate_player_score(
     return score
 
 
-def _explorer_summary_needs_refresh(player: Player) -> bool:
+def explorer_summary_needs_refresh(player: Player) -> bool:
     explorer_summary = getattr(player, 'explorer_summary', None)
     if explorer_summary is None:
         return True
@@ -2379,7 +2375,7 @@ def fetch_player_explorer_page(
     return total_count, rows
 
 
-def _extract_randoms_rows(battles_json: Any, limit: Optional[int] = 20) -> list[dict]:
+def extract_randoms_rows(battles_json: Any, limit: Optional[int] = 20) -> list[dict]:
     if not isinstance(battles_json, list):
         return []
 
@@ -4442,7 +4438,7 @@ def fetch_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
         if not player.battles_json:
             _dispatch_async_refresh(
                 update_battle_data_task, player_id=player_id, realm=realm)
-            return _extract_randoms_rows(player.randoms_json, limit=20)
+            return extract_randoms_rows(player.randoms_json, limit=20)
     except Player.DoesNotExist:
         return []
 
@@ -4460,9 +4456,9 @@ def fetch_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
         if player_battle_data_needs_refresh(player):
             _dispatch_async_refresh(
                 update_battle_data_task, player_id=player_id, realm=realm)
-        return _extract_randoms_rows(player.randoms_json, limit=20)
+        return extract_randoms_rows(player.randoms_json, limit=20)
 
-    extracted_battle_rows = _extract_randoms_rows(
+    extracted_battle_rows = extract_randoms_rows(
         player.battles_json, limit=20)
     if extracted_battle_rows:
         _dispatch_async_refresh(
@@ -4694,7 +4690,7 @@ def warm_all_clan_tier_distributions(realm: str = DEFAULT_REALM, batch_size: int
 
 def update_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     player = Player.objects.get(player_id=player_id, realm=realm)
-    player.randoms_json = _extract_randoms_rows(player.battles_json, limit=20)
+    player.randoms_json = extract_randoms_rows(player.battles_json, limit=20)
     player.randoms_updated_at = datetime.now()
     player.save()
 

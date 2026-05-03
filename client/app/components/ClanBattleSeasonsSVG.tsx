@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import wrColor from '../lib/wrColor';
 import * as d3 from 'd3';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 
@@ -24,16 +25,6 @@ interface ClanBattleSeasonsSVGProps {
 
 type Colors = typeof chartColors['light'];
 
-const selectColorByWR = (wr: number): string => {
-    if (wr > 65) return '#810c9e';
-    if (wr >= 60) return '#D042F3';
-    if (wr >= 56) return '#3182bd';
-    if (wr >= 54) return '#74c476';
-    if (wr >= 52) return '#a1d99b';
-    if (wr >= 50) return '#fed976';
-    if (wr >= 45) return '#fd8d3c';
-    return '#a50f15';
-};
 
 interface SeasonRow {
     index: number;
@@ -205,9 +196,9 @@ const drawChart = (
             const by = yScale(d.wins);
             return roundedTopBar(bx, by, winsBarWidth, height - by, cornerR);
         })
-        .attr('fill', (d: SeasonRow) => selectColorByWR(d.wr))
+        .attr('fill', (d: SeasonRow) => wrColor(d.wr))
         .attr('fill-opacity', 0.85)
-        .attr('stroke', (d: SeasonRow) => selectColorByWR(d.wr))
+        .attr('stroke', (d: SeasonRow) => wrColor(d.wr))
         .attr('stroke-width', 0.5)
         .attr('stroke-opacity', 0.9);
 
@@ -273,7 +264,7 @@ const drawChart = (
                     .html(
                         `<strong>${d.season.season_name}</strong><br/>` +
                         `Battles: ${d.battles.toLocaleString()}<br/>` +
-                        `<span style="color:${selectColorByWR(d.wr)}">Wins: ${d.wins.toLocaleString()} (${d.wr.toFixed(1)}%)</span>`
+                        `<span style="color:${wrColor(d.wr)}">Wins: ${d.wins.toLocaleString()} (${d.wr.toFixed(1)}%)</span>`
                     )
                     .style('opacity', 1);
             }

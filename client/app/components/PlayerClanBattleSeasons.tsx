@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import wrColor from '../lib/wrColor';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useRealm } from '../context/RealmContext';
@@ -41,16 +42,6 @@ const formatTierRange = (minTier: number | null, maxTier: number | null): string
     return `T${minTier}-${maxTier}`;
 };
 
-const selectColorByWR = (winRatio: number): string => {
-    if (winRatio > 65) return '#810c9e';
-    if (winRatio >= 60) return '#D042F3';
-    if (winRatio >= 56) return '#3182bd';
-    if (winRatio >= 54) return '#74c476';
-    if (winRatio >= 52) return '#a1d99b';
-    if (winRatio >= 50) return '#fed976';
-    if (winRatio >= 45) return '#fd8d3c';
-    return '#a50f15';
-};
 
 const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playerId, onSummaryChange }) => {
     const { realm } = useRealm();
@@ -133,7 +124,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                         </div>
                         <div className="rounded-md bg-[var(--accent-faint)] px-3 py-2">
                             <p className="text-[10px] uppercase tracking-wide text-[var(--accent-light)]">WR</p>
-                            <p className="mt-1 text-lg font-semibold" style={{ color: selectColorByWR(summary.overallWinRate) }}>
+                            <p className="mt-1 text-lg font-semibold" style={{ color: wrColor(summary.overallWinRate) }}>
                                 {summary.overallWinRate.toFixed(1)}%
                             </p>
                         </div>
@@ -164,7 +155,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                             </td>
                                             <td className="py-2 pr-3 text-left text-[var(--text-secondary)]">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
                                             <td className="py-2 pr-3 text-right">{season.battles.toLocaleString()}</td>
-                                            <td className="py-2 pr-3 text-right font-medium" style={{ color: selectColorByWR(season.win_rate) }}>
+                                            <td className="py-2 pr-3 text-right font-medium" style={{ color: wrColor(season.win_rate) }}>
                                                 {season.win_rate.toFixed(1)}%
                                             </td>
                                         </tr>

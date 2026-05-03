@@ -6,6 +6,12 @@ from typing import Any, Callable, Iterable, Optional
 from django.utils import timezone as django_timezone
 
 
+def clamp(value: float, lower: float, upper: float) -> float:
+    """Clamp `value` into `[lower, upper]`. Canonical home for what was
+    previously duplicated as `_clamp` in both `data.py` and `landing.py`."""
+    return max(lower, min(upper, value))
+
+
 def _coerce_dict_rows(rows: Any) -> list[dict]:
     if not isinstance(rows, list):
         return []

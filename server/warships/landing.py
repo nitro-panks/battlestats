@@ -13,7 +13,8 @@ from django.db.models.functions import Cast, Coalesce
 from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 
-from warships.data import _calculate_tier_filtered_pvp_record, get_clan_battle_activity_badge, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
+from warships.data import calculate_tier_filtered_pvp_record, get_clan_battle_activity_badge, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
+from warships.data_support import clamp
 from warships.models import Clan, DEFAULT_REALM, LandingPlayerBestSnapshot, Player, realm_cache_key
 from warships.visit_analytics import get_top_entities
 
@@ -177,27 +178,23 @@ def _player_score_ordering(secondary_field: str):
     )
 
 
-def _clamp(value: float, lower: float, upper: float) -> float:
-    return max(lower, min(value, upper))
-
-
 def _normalize_best_wr_score(value: float | None) -> float:
     if value is None:
         return 0.0
-    return _clamp((float(value) - 45.0) / 20.0, 0.0, 1.0)
+    return clamp((float(value) - 45.0) / 20.0, 0.0, 1.0)
 
 
 def _normalize_best_player_score(value: float | None) -> float:
     if value is None:
         return 0.0
-    return _clamp(float(value) / 10.0, 0.0, 1.0)
+    return clamp(float(value) / 10.0, 0.0, 1.0)
 
 
 def _normalize_best_efficiency_score(percentile: float | None, shrunken_strength: float | None) -> float:
     if percentile is not None:
-        return _clamp(float(percentile), 0.0, 1.0)
+        return clamp(float(percentile), 0.0, 1.0)
     if shrunken_strength is not None:
-        return _clamp(float(shrunken_strength), 0.0, 1.0)
+        return clamp(float(shrunken_strength), 0.0, 1.0)
     return LANDING_PLAYER_BEST_EFFICIENCY_NEUTRAL
 
 
@@ -205,7 +202,7 @@ def _normalize_best_volume_score(high_tier_battles: int | None) -> float:
     battles = max(int(high_tier_battles or 0), 0)
     if battles <= 0:
         return 0.0
-    return _clamp(
+    return clamp(
         math.log10(battles + 1) /
         math.log10(LANDING_PLAYER_BEST_TARGET_HIGH_TIER_PVP_BATTLES + 1),
         0.0,
@@ -226,7 +223,7 @@ def _normalize_ranked_volume_score(latest_ranked_battles: int | None) -> float:
     if battles <= 0:
         return 0.0
 
-    return round(_clamp(math.log1p(battles) / math.log1p(40), 0.0, 1.0), 4)
+    return round(clamp(math.log1p(battles) / math.log1p(40), 0.0, 1.0), 4)
 
 
 def _summarize_ranked_medal_history(ranked_rows) -> dict[str, int | float | None]:
@@ -282,7 +279,7 @@ def _ranked_freshness_multiplier(ranked_updated_at) -> float:
     if age_days >= LANDING_PLAYER_RANKED_SORT_FRESHNESS_STALE_DAYS:
         return LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR
 
-    decay_progress = _clamp(
+    decay_progress = clamp(
         (
             age_days - LANDING_PLAYER_RANKED_SORT_FRESHNESS_GRACE_DAYS
         ) /
@@ -329,9 +326,9 @@ def _ranked_quality_score(row: dict) -> float:
     league_score = _ranked_league_score(league)
     wr_score = _normalize_best_wr_score(
         ranked_wr) if ranked_wr is not None else 0.0
-    depth_score = _clamp(
+    depth_score = clamp(
         seasons / LANDING_PLAYER_BEST_RANKED_QUALITY_MAX_SEASONS, 0.0, 1.0)
-    volume_score = _clamp(
+    volume_score = clamp(
         math.log1p(latest_battles) / math.log1p(
             LANDING_PLAYER_BEST_RANKED_QUALITY_MAX_BATTLES),
         0.0, 1.0,
@@ -352,7 +349,7 @@ def _competitive_share_multiplier(pvp_battles: int | None, high_tier_battles: in
     if total_battles <= 0:
         return LANDING_PLAYER_BEST_COMPETITIVE_SHARE_FLOOR
 
-    share = _clamp(competitive_battles / total_battles, 0.0, 1.0)
+    share = clamp(competitive_battles / total_battles, 0.0, 1.0)
     if share <= 0.2:
         return LANDING_PLAYER_BEST_COMPETITIVE_SHARE_FLOOR
     if share >= 0.8:
@@ -362,7 +359,7 @@ def _competitive_share_multiplier(pvp_battles: int | None, high_tier_battles: in
     return round(
         LANDING_PLAYER_BEST_COMPETITIVE_SHARE_FLOOR +
         ((1.0 - LANDING_PLAYER_BEST_COMPETITIVE_SHARE_FLOOR)
-         * math.sqrt(_clamp(normalized_share, 0.0, 1.0))),
+         * math.sqrt(clamp(normalized_share, 0.0, 1.0))),
         4,
     )
 
@@ -408,7 +405,7 @@ def _calculate_wilson_lower_bound(success_rate: float | None, sample_size: int |
     if battles <= 0 or success_rate is None:
         return 0.0
 
-    proportion = _clamp(float(success_rate) / 100.0, 0.0, 1.0)
+    proportion = clamp(float(success_rate) / 100.0, 0.0, 1.0)
     z_squared = z_score * z_score
     denominator = 1.0 + (z_squared / battles)
     center = proportion + (z_squared / (2.0 * battles))
@@ -417,7 +414,7 @@ def _calculate_wilson_lower_bound(success_rate: float | None, sample_size: int |
          (z_squared / (4.0 * battles))) / battles
     )
     lower_bound = (center - margin) / denominator
-    return round(_clamp(lower_bound, 0.0, 1.0), 6)
+    return round(clamp(lower_bound, 0.0, 1.0), 6)
 
 
 def _calculate_landing_cb_sort_score(row: dict) -> float:
@@ -426,12 +423,12 @@ def _calculate_landing_cb_sort_score(row: dict) -> float:
         row.get('clan_battle_win_rate'),
         battles,
     )
-    volume_score = _clamp(
+    volume_score = clamp(
         battles / LANDING_PLAYER_CB_SORT_MAX_BATTLES,
         0.0,
         1.0,
     )
-    season_depth_score = _clamp(
+    season_depth_score = clamp(
         max(int(row.get('clan_battle_seasons_participated') or 0), 0) /
         LANDING_PLAYER_CB_SORT_MAX_SEASONS,
         0.0,
@@ -1488,7 +1485,7 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
 
     for row in rows:
         player_id = int(row.get('player_id') or 0)
-        high_tier_battles, high_tier_ratio = _calculate_tier_filtered_pvp_record(
+        high_tier_battles, high_tier_ratio = calculate_tier_filtered_pvp_record(
             row.pop('battles_json', None),
             minimum_tier=5,
         )
@@ -1535,7 +1532,7 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             player_obj, 'ranked_updated_at', None)
         # Use stored percentile directly — landing surfaces tolerate minor
         # input-data drift (unlike player detail, which uses the stricter
-        # _get_published_efficiency_rank_payload freshness gate).
+        # get_published_efficiency_rank_payload freshness gate).
         if player_obj and not player_obj.is_hidden and es and es.efficiency_rank_percentile is not None:
             row['efficiency_rank_percentile'] = es.efficiency_rank_percentile
             row['efficiency_rank_tier'] = es.efficiency_rank_tier
