@@ -32,12 +32,12 @@ RANKED_INCREMENTAL_LOCK_TIMEOUT = 6 * 60 * 60
 PLAYER_REFRESH_LOCK_TIMEOUT = 6 * 60 * 60
 RANKED_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 # Ranked-observation refresh fires on profile render to capture a fresh
-# `BattleObservation.ranked_ships_stats_json` (3-WG-call path). Tighter
-# dedup (5 min) than `RANKED_REFRESH_DISPATCH_TIMEOUT` so a user revisiting
-# their own page after a few minutes still sees fresh ranked deltas;
-# the staleness floor in the dispatcher itself prevents spamming WG.
-RANKED_OBSERVATION_REFRESH_DISPATCH_TIMEOUT = 5 * 60
-RANKED_OBSERVATION_REFRESH_STALE_AFTER_SECONDS = 5 * 60
+# `BattleObservation.ranked_ships_stats_json` (3-WG-call path). Dedup
+# matches the random-side 15-min cooldown
+# (data.RANKED_OBSERVATION_RENDER_STALE_AFTER) so both modes refresh on
+# the same cadence when a user visits a profile.
+RANKED_OBSERVATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
+RANKED_OBSERVATION_REFRESH_STALE_AFTER_SECONDS = 15 * 60
 CLAN_BATTLE_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_SNAPSHOT_REFRESH_DISPATCH_TIMEOUT = 15 * 60

@@ -266,10 +266,11 @@ def player_ranked_data_needs_refresh(
 
 
 # Profile-render trigger threshold for the per-render ranked-observation
-# refresh. Tighter than PLAYER_RANKED_DATA_STALE_AFTER (1h) so a user
-# revisiting a profile picks up freshly-played ranked deltas, but still
-# loose enough that a reload-burst doesn't fan out to WG every time.
-RANKED_OBSERVATION_RENDER_STALE_AFTER = timedelta(minutes=5)
+# refresh. Matches PLAYER_BATTLE_DATA_STALE_AFTER (random side) so both
+# random and ranked refresh on the same 15-min cooldown when a user
+# visits a profile — uniform "freshen on visit, but cap to one fetch
+# per quarter-hour per player" behavior.
+RANKED_OBSERVATION_RENDER_STALE_AFTER = timedelta(minutes=15)
 
 
 def _ranked_observation_is_stale(
