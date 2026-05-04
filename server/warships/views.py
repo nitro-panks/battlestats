@@ -518,11 +518,11 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    # v5: NEW-badge also fires when lifetime_by_ship is missing but the
-    # period has random activity — covers the battles_json snapshot lag
-    # case where the rollup is ahead of the cumulative WG snapshot.
+    # v6: rows now carry `is_ranked_only_period` so combined mode can
+    # render a RANKED badge on rows that have no random play in the
+    # window (no random lifetime baseline to anchor a delta against).
     return realm_cache_key(
-        realm, f"battle-history:v5:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v6:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -742,6 +742,15 @@ def _build_battle_history_payload(player, period: str, windows: int,
         )
         period_random_battles = s.pop("_random_battles", 0)
         period_random_wins = s.pop("_random_wins", 0)
+        # In combined mode, a row can be entirely ranked-played (no random
+        # in the period). Without a random lifetime baseline the cell
+        # would render bare period-only, which reads as missing data.
+        # Surface "ranked-only-in-period" as a distinct badge.
+        s["is_ranked_only_period"] = (
+            mode == "combined"
+            and s["battles"] > 0
+            and period_random_battles == 0
+        )
         # `lifetime["battles"] > 0` guards the ranked-only-ship case in
         # combined mode: a ship the player rented for ranked may have a
         # battles_json entry with pvp_battles=0, which would otherwise

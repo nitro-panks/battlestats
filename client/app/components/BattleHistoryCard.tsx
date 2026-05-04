@@ -25,6 +25,7 @@ export interface BattleHistoryByShip {
     lifetime_win_rate?: number | null;
     delta_win_rate?: number | null;
     is_new_ship?: boolean;
+    is_ranked_only_period?: boolean;
 }
 
 export interface BattleHistoryByDay {
@@ -164,11 +165,13 @@ interface WrCellProps {
     lifetimeWinRate: number | null | undefined;
     deltaWinRate: number | null | undefined;
     isNewShip?: boolean;
+    isRankedOnlyPeriod?: boolean;
     stacked?: boolean;
 }
 
 const WrCell: React.FC<WrCellProps> = ({
-    periodWinRate, lifetimeWinRate, deltaWinRate, isNewShip = false, stacked = false,
+    periodWinRate, lifetimeWinRate, deltaWinRate,
+    isNewShip = false, isRankedOnlyPeriod = false, stacked = false,
 }) => {
     const tone = deltaWinRate == null
         ? 'var(--text-muted)'
@@ -211,17 +214,31 @@ const WrCell: React.FC<WrCellProps> = ({
         >
             NEW
         </span>
+    ) : isRankedOnlyPeriod ? (
+        <span
+            className="text-[10px] font-bold uppercase tracking-wider rounded-sm px-1.5 py-[1px]"
+            style={{
+                color: 'var(--text-muted)',
+                backgroundColor: 'var(--accent-faint)',
+            }}
+            title="All this ship's battles in the window were ranked — no random lifetime to anchor a delta against."
+        >
+            RANKED
+        </span>
     ) : (
         <span className="text-xs text-[var(--text-muted)]">—</span>
     );
 
-    // Three render shapes:
-    //  * NEW ship with no priors  → <period%> / <NEW badge>          (zero-prior collapse)
-    //  * NEW ship with sparse priors → <period%> / <lifetime%> / NEW (delta noise hidden)
-    //  * Ranked-only / no-baseline → <period%>                       (full collapse)
-    //  * Default                  → <period%> / <lifetime%> / Δsigned (full row)
-    const periodOnlyCollapse = lifetimeMissing && signedDelta == null && !isNewShip;
+    // Render shapes:
+    //  * NEW ship, no priors        → <period%> / <NEW badge>
+    //  * NEW ship, sparse priors    → <period%> / <lifetime%> / NEW
+    //  * Ranked-only-in-period      → <period%> / <RANKED badge>
+    //  * Other (no baseline at all) → <period%>
+    //  * Default                    → <period%> / <lifetime%> / Δsigned
     const newWithoutLifetime = lifetimeMissing && isNewShip;
+    const rankedOnlyBadge = lifetimeMissing && !isNewShip && isRankedOnlyPeriod;
+    const periodOnlyCollapse = lifetimeMissing && signedDelta == null
+        && !isNewShip && !isRankedOnlyPeriod;
 
     if (stacked) {
         if (periodOnlyCollapse) {
@@ -231,7 +248,7 @@ const WrCell: React.FC<WrCellProps> = ({
                 </span>
             );
         }
-        if (newWithoutLifetime) {
+        if (newWithoutLifetime || rankedOnlyBadge) {
             return (
                 <span className="tabular-nums flex flex-col items-start" title={tooltip}>
                     {periodEl}
@@ -259,7 +276,7 @@ const WrCell: React.FC<WrCellProps> = ({
             </span>
         );
     }
-    if (newWithoutLifetime) {
+    if (newWithoutLifetime || rankedOnlyBadge) {
         return (
             <span
                 className="tabular-nums inline-grid grid-cols-[3.5rem_4rem] gap-2 items-baseline whitespace-nowrap"
@@ -713,6 +730,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                         lifetimeWinRate={row.lifetime_win_rate}
                                         deltaWinRate={row.delta_win_rate}
                                         isNewShip={row.is_new_ship}
+                                        isRankedOnlyPeriod={row.is_ranked_only_period}
                                     />
                                 </td>
                                 <td className="py-1.5 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.avg_damage)}</td>
