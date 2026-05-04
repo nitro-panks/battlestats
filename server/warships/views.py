@@ -518,10 +518,11 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    # v3: ship rows now carry `is_new_ship` (true when prior_battles==0,
-    # surfacing first-time-in-this-ship state instead of an em-dash).
+    # v4: NEW-badge semantics extended to cover sparse-prior rows
+    # (prior_battles < 3) where the delta math is statistical noise.
+    # NEW rows with zero priors also drop the redundant lifetime row.
     return realm_cache_key(
-        realm, f"battle-history:v3:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v4:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -547,6 +548,14 @@ def _period_window_start(today, period: str, windows: int):
     if period == "yearly":
         return today.replace(year=today.year - (windows - 1), month=1, day=1)
     raise ValueError(f"Unknown period: {period}")
+
+
+# Minimum prior-battles count required for a meaningful lifetime delta.
+# With fewer priors than this, a single win/loss in the prior bucket can
+# move the delta by 33–100 percentage points, so the value is statistical
+# noise rather than signal. Rows below the threshold get treated like
+# zero-prior rows and surface a NEW badge instead.
+_MIN_PRIOR_BATTLES_FOR_DELTA = 3
 
 
 def _battle_history_period_table(period: str):
@@ -744,18 +753,31 @@ def _build_battle_history_payload(player, period: str, windows: int,
             prior_wins = lifetime["wins"] - period_random_wins
             lifetime_wr_now = round(
                 100.0 * lifetime["wins"] / lifetime["battles"], 1)
-            prior_wr = round(
-                100.0 * prior_wins / prior_battles, 1) if prior_battles > 0 else None
-            s["lifetime_battles"] = lifetime["battles"]
-            s["lifetime_win_rate"] = lifetime_wr_now
-            s["delta_win_rate"] = round(
-                lifetime_wr_now - prior_wr, 1) if prior_wr is not None else None
-            # `prior_battles == 0` means every random battle this player
-            # has ever played in this ship fell inside the lookback window
-            # — there is no prior state to compute a delta against. Surface
-            # that as a "new ship" signal so the frontend can render a
-            # NEW badge instead of an em-dash for the missing delta.
-            s["is_new_ship"] = prior_battles == 0
+            # Delta math is statistically meaningful only with a real
+            # prior sample — fewer than _MIN_PRIOR_BATTLES_FOR_DELTA
+            # priors makes the delta a coin-flip artifact (a single
+            # win/loss can swing it 50pp). Treat sparse-prior the same as
+            # zero-prior: hide the delta and surface NEW.
+            if prior_battles < _MIN_PRIOR_BATTLES_FOR_DELTA:
+                s["delta_win_rate"] = None
+                s["is_new_ship"] = True
+                # When period covers the entire lifetime, the lifetime
+                # row is redundant with period — suppress it so the WR
+                # cell collapses cleanly to "<period%> / NEW". When some
+                # priors exist (1–2 battles), keep lifetime visible since
+                # it carries different info (slightly larger sample).
+                if prior_battles == 0:
+                    s["lifetime_battles"] = None
+                    s["lifetime_win_rate"] = None
+                else:
+                    s["lifetime_battles"] = lifetime["battles"]
+                    s["lifetime_win_rate"] = lifetime_wr_now
+            else:
+                prior_wr = round(100.0 * prior_wins / prior_battles, 1)
+                s["lifetime_battles"] = lifetime["battles"]
+                s["lifetime_win_rate"] = lifetime_wr_now
+                s["delta_win_rate"] = round(lifetime_wr_now - prior_wr, 1)
+                s["is_new_ship"] = False
         else:
             # No lifetime row, zero lifetime battles, or sync skew between
             # battles_json and the rollup — leave lifetime fields null and

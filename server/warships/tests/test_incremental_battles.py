@@ -2137,8 +2137,8 @@ class BattleHistoryEndpointTests(TestCase):
     def test_is_new_ship_flag_set_when_period_equals_lifetime(self):
         """When the player's entire random-battle history in a ship falls
         inside the lookback window, prior_battles=0 and the delta math is
-        undefined. Surface that with `is_new_ship=True` so the frontend can
-        render a NEW badge instead of an em-dash for the missing delta.
+        undefined. Surface that with `is_new_ship=True` and suppress the
+        redundant lifetime cell (period_wr == lifetime_wr by construction).
         """
         self.player.battles_json = [
             {"ship_id": 42, "pvp_battles": 5, "wins": 3, "losses": 2},
@@ -2164,11 +2164,45 @@ class BattleHistoryEndpointTests(TestCase):
         ships = {s["ship_id"]: s for s in body["by_ship"]}
         yamato = ships[42]
         self.assertTrue(yamato["is_new_ship"])
-        # lifetime_wr stays populated (it equals period_wr by construction
-        # when all battles are in the window) — frontend uses it for the
-        # tooltip, but renders a NEW badge in place of the delta.
-        self.assertEqual(yamato["lifetime_win_rate"], 60.0)
+        # Lifetime row is redundant (period == lifetime) — suppressed so
+        # the cell collapses to <period%> / NEW.
+        self.assertIsNone(yamato["lifetime_battles"])
+        self.assertIsNone(yamato["lifetime_win_rate"])
         self.assertIsNone(yamato["delta_win_rate"])
+
+    def test_is_new_ship_flag_set_when_prior_sample_too_small(self):
+        """A 1- or 2-battle prior sample makes the delta a coin-flip
+        artifact (one win/loss swings it 50–100pp). Treat the row as NEW
+        and hide the meaningless delta. Lifetime stays visible since it
+        carries marginally more info than the period alone.
+        """
+        # 14 lifetime, 12 in the period → prior_battles=2 (< threshold 3).
+        self.player.battles_json = [
+            {"ship_id": 42, "pvp_battles": 14, "wins": 7, "losses": 7},
+        ]
+        self.player.save()
+
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=12, wins=7, damage=400_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=random",
+            )
+        ships = {s["ship_id"]: s for s in r.json()["by_ship"]}
+        yamato = ships[42]
+        self.assertTrue(yamato["is_new_ship"])
+        self.assertIsNone(yamato["delta_win_rate"])
+        # Lifetime kept visible (slightly larger sample than period).
+        self.assertEqual(yamato["lifetime_battles"], 14)
+        self.assertEqual(yamato["lifetime_win_rate"], 50.0)
 
     def test_is_new_ship_flag_false_when_prior_history_exists(self):
         self.player.battles_json = [
