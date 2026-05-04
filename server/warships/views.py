@@ -733,7 +733,13 @@ def _build_battle_history_payload(player, period: str, windows: int,
         )
         period_random_battles = s.pop("_random_battles", 0)
         period_random_wins = s.pop("_random_wins", 0)
-        if lifetime and lifetime["battles"] >= period_random_battles:
+        # `lifetime["battles"] > 0` guards the ranked-only-ship case in
+        # combined mode: a ship the player rented for ranked may have a
+        # battles_json entry with pvp_battles=0, which would otherwise
+        # divide-by-zero when computing lifetime_wr.
+        if (lifetime
+                and lifetime["battles"] > 0
+                and lifetime["battles"] >= period_random_battles):
             prior_battles = lifetime["battles"] - period_random_battles
             prior_wins = lifetime["wins"] - period_random_wins
             lifetime_wr_now = round(
@@ -745,9 +751,9 @@ def _build_battle_history_payload(player, period: str, windows: int,
             s["delta_win_rate"] = round(
                 lifetime_wr_now - prior_wr, 1) if prior_wr is not None else None
         else:
-            # Lifetime row is missing or stale (period_random_battles
-            # somehow exceeded lifetime — guard for sync skew between
-            # battles_json and the rollup).
+            # No lifetime row, zero lifetime battles, or sync skew between
+            # battles_json and the rollup — leave lifetime fields null and
+            # let the frontend fall back to period-only display.
             s["lifetime_battles"] = None
             s["lifetime_win_rate"] = None
             s["delta_win_rate"] = None

@@ -2134,6 +2134,45 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(body["totals"]["lifetime_battles"], 200)
         self.assertEqual(body["totals"]["lifetime_win_rate"], 0.0)
 
+    def test_mode_combined_handles_ranked_only_ship_with_zero_random_lifetime(self):
+        """Regression for the GHOSTTUNDERBOLT 500 (Chung Mu / Mogador):
+        a ship played only in ranked, with a battles_json entry carrying
+        pvp_battles=0 (rented for ranked, never played random), used to
+        ZeroDivisionError when computing combined-mode lifetime_wr.
+        """
+        # Lifetime row exists but with zero random battles — typical of
+        # ranked rentals.
+        self.player.battles_json = [
+            {"ship_id": 42, "pvp_battles": 0, "wins": 0, "losses": 0},
+        ]
+        self.player.save()
+
+        today = django_timezone.now().date()
+        # Period has only ranked play of this ship.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=1, wins=1, damage=80_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=combined",
+            )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        ships = {s["ship_id"]: s for s in body["by_ship"]}
+        yamato = ships[42]
+        self.assertEqual(yamato["battles"], 1)
+        # No random lifetime → lifetime fields stay null; frontend
+        # collapses to period-only.
+        self.assertIsNone(yamato["lifetime_battles"])
+        self.assertIsNone(yamato["lifetime_win_rate"])
+        self.assertIsNone(yamato["delta_win_rate"])
+
     def test_mode_combined_per_ship_lifetime_uses_random_period_subset(self):
         """Regression: ships with mixed random+ranked play in the period
         should still get a populated `lifetime_*` field set in combined
