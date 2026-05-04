@@ -215,18 +215,27 @@ const WrCell: React.FC<WrCellProps> = ({
         <span className="text-xs text-[var(--text-muted)]">—</span>
     );
 
-    // Ranked mode has no per-ship lifetime baseline (battles_json/pvp_* are
-    // randoms-only on the Player model), so every row would otherwise render
-    // "N/A" + "—" beneath the period WR. Collapse to a period-only cell
-    // when both fall back to null — drops the noise without changing the
-    // contract for random mode.
-    const periodOnly = lifetimeMissing && signedDelta == null;
+    // Three render shapes:
+    //  * NEW ship with no priors  → <period%> / <NEW badge>          (zero-prior collapse)
+    //  * NEW ship with sparse priors → <period%> / <lifetime%> / NEW (delta noise hidden)
+    //  * Ranked-only / no-baseline → <period%>                       (full collapse)
+    //  * Default                  → <period%> / <lifetime%> / Δsigned (full row)
+    const periodOnlyCollapse = lifetimeMissing && signedDelta == null && !isNewShip;
+    const newWithoutLifetime = lifetimeMissing && isNewShip;
 
     if (stacked) {
-        if (periodOnly) {
+        if (periodOnlyCollapse) {
             return (
                 <span className="tabular-nums flex flex-col items-start" title={tooltip}>
                     {periodEl}
+                </span>
+            );
+        }
+        if (newWithoutLifetime) {
+            return (
+                <span className="tabular-nums flex flex-col items-start" title={tooltip}>
+                    {periodEl}
+                    {deltaEl}
                 </span>
             );
         }
@@ -240,13 +249,24 @@ const WrCell: React.FC<WrCellProps> = ({
             </span>
         );
     }
-    if (periodOnly) {
+    if (periodOnlyCollapse) {
         return (
             <span
                 className="tabular-nums inline-grid grid-cols-[3.5rem] items-baseline whitespace-nowrap"
                 title={tooltip}
             >
                 <span className="text-right">{periodEl}</span>
+            </span>
+        );
+    }
+    if (newWithoutLifetime) {
+        return (
+            <span
+                className="tabular-nums inline-grid grid-cols-[3.5rem_4rem] gap-2 items-baseline whitespace-nowrap"
+                title={tooltip}
+            >
+                <span className="text-right">{periodEl}</span>
+                <span className="text-right">{deltaEl}</span>
             </span>
         );
     }
