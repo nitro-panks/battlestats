@@ -1518,6 +1518,65 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
         # window so downstream surfaces don't silently drift off-spec.
         self.assertEqual(LANDING_RECENT_PLAYERS_LOOKBACK_DAYS, 7)
 
+    def test_excludes_rows_above_absolute_max_week_battles(self):
+        # Phantom first-observation deltas can dump a player's lifetime
+        # battles into a single day's PlayerDailyShipStats row. Any
+        # week_battles above the max-plausible cap is dropped to keep the
+        # surface honest.
+        from warships.landing import (
+            LANDING_RECENT_PLAYERS_MAX_WEEK_BATTLES,
+            _build_recent_players,
+        )
+
+        today = timezone.now().date()
+        phantom = self._make_player(
+            name='phantom', player_id=50, pvp_battles=20000)
+        normal = self._make_player(
+            name='normal', player_id=51, pvp_battles=20000)
+
+        self._add_daily(phantom, date=today,
+                        battles=LANDING_RECENT_PLAYERS_MAX_WEEK_BATTLES + 100)
+        self._add_daily(normal, date=today, battles=40)
+
+        rows = _build_recent_players(realm='na')
+        self.assertEqual([r['name'] for r in rows], ['normal'])
+
+    def test_excludes_rows_exceeding_lifetime_pvp_battles(self):
+        # Definitional bound: you can't play more random battles in a week
+        # than you've ever played. Drop rows that violate this.
+        from warships.landing import _build_recent_players
+
+        today = timezone.now().date()
+        impossible = self._make_player(
+            name='impossible', player_id=60, pvp_battles=300)
+        plausible = self._make_player(
+            name='plausible', player_id=61, pvp_battles=5000)
+
+        # 1200 < absolute cap of 1500 so it survives that filter, but
+        # exceeds the player's 300 lifetime battles → must be dropped.
+        self._add_daily(impossible, date=today, battles=1200)
+        self._add_daily(plausible, date=today, battles=80)
+
+        rows = _build_recent_players(realm='na')
+        self.assertEqual([r['name'] for r in rows], ['plausible'])
+
+    def test_pvp_slack_keeps_borderline_rows_visible(self):
+        # The cached pvp_battles can lag the rollup briefly. A small slack
+        # window keeps real active players visible while still rejecting
+        # the phantom first-observation case.
+        from warships.landing import _build_recent_players
+
+        today = timezone.now().date()
+        borderline = self._make_player(
+            name='borderline', player_id=70, pvp_battles=200)
+
+        # week_battles=210 vs pvp_battles=200 → 10 over, well within the
+        # 50-battle slack.
+        self._add_daily(borderline, date=today, battles=210)
+
+        rows = _build_recent_players(realm='na')
+        self.assertEqual([r['name'] for r in rows], ['borderline'])
+
 
 class QueueLandingPageWarmGateTests(TestCase):
     """Regression coverage for the dispatch gate that prevents the

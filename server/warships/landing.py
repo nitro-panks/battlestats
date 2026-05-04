@@ -96,6 +96,19 @@ LANDING_PLAYER_CACHE_TTL = 60 * 60 * 6
 LANDING_RECENT_PLAYERS_CACHE_TTL = None
 LANDING_RECENT_PLAYERS_LOOKBACK_DAYS = 7
 LANDING_RECENT_PLAYERS_LIMIT = 40
+# Sanity ceiling for the trailing 7-day random-battle tally. Even the most
+# committed grinders rarely exceed ~60 randoms/day, so anything above this
+# cap is almost certainly a "first-observation phantom" emitted by the
+# BattleEvent diff lane (where a first observation pair can dump the
+# player's lifetime totals into a single huge delta). Filter these out so
+# the surface doesn't surface implausible counts to users.
+LANDING_RECENT_PLAYERS_MAX_WEEK_BATTLES = 1500
+# Tolerance band: a small lag between `pvp_battles` (refreshed by the
+# tiered crawler) and the rollup's running sum is expected, so accept
+# `week_battles` up to `pvp_battles + slack`. Beyond that the row is
+# definitionally bogus (you can't play more battles in a week than you've
+# played in your entire account history).
+LANDING_RECENT_PLAYERS_PVP_SLACK = 50
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v4'
 LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v4:meta'
 LANDING_CLANS_PUBLISHED_CACHE_KEY = 'landing:clans:v4:published'
@@ -2287,6 +2300,10 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
     lookback_floor = (
         timezone.now().date() - timedelta(days=LANDING_RECENT_PLAYERS_LOOKBACK_DAYS)
     )
+    # Over-fetch so the implausible-row filter below can drop phantom
+    # first-observation rows without shrinking the final list below
+    # LANDING_RECENT_PLAYERS_LIMIT.
+    overfetch_cap = LANDING_RECENT_PLAYERS_LIMIT * 4
     aggregated = (
         PlayerDailyShipStats.objects
         .filter(
@@ -2296,8 +2313,9 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
         )
         .values('player')
         .annotate(week_battles=Sum('battles'))
-        .filter(week_battles__gt=0)
-        .order_by('-week_battles', 'player')[:LANDING_RECENT_PLAYERS_LIMIT]
+        .filter(week_battles__gt=0,
+                week_battles__lte=LANDING_RECENT_PLAYERS_MAX_WEEK_BATTLES)
+        .order_by('-week_battles', 'player')[:overfetch_cap]
     )
     rows = list(aggregated)
     if not rows:
@@ -2318,9 +2336,18 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
         player_obj = players_by_pk.get(pk)
         if player_obj is None:
             continue
+        week_battles = int(battle_counts.get(pk, 0))
+        # Definitional bound: a 7-day count cannot exceed lifetime battles.
+        # Allow a small slack so a refresh-lag mismatch doesn't drop a real
+        # active player.
+        pvp_battles = int(getattr(player_obj, 'pvp_battles', 0) or 0)
+        if week_battles > pvp_battles + LANDING_RECENT_PLAYERS_PVP_SLACK:
+            continue
         row = _serialize_landing_player_row(player_obj)
-        row['week_battles'] = int(battle_counts.get(pk, 0))
+        row['week_battles'] = week_battles
         payload.append(row)
+        if len(payload) >= LANDING_RECENT_PLAYERS_LIMIT:
+            break
     return payload
 
 

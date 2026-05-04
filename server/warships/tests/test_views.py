@@ -4660,11 +4660,13 @@ class ApiThrottleTests(TestCase):
         # 45 players seeded with descending battle counts so RecentPlayer0
         # has the most random battles in the trailing 7-day window and
         # RecentPlayer44 has the fewest. The top-40 cut should drop the
-        # lowest five.
+        # lowest five. pvp_battles is set well above the seeded weekly
+        # count so the implausible-row filter doesn't drop them.
         for index in range(45):
             player = Player.objects.create(
                 name=f"RecentPlayer{index}",
                 player_id=10000 + index,
+                pvp_battles=5000,
             )
             _seed_recent_active(player, battles=100 - index, ship_id=1)
 
