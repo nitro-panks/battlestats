@@ -12,9 +12,11 @@ from warships.models import Player, Clan, PlayerDailyShipStats, PlayerExplorerSu
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
-def _seed_recent_active(player, *, battles=10, day_offset=0, ship_id=1):
+def _seed_recent_active(player, *, battles=15, day_offset=0, ship_id=1):
     """Test helper: stamp a PlayerDailyShipStats row so `player` shows up in
-    the landing recent-players surface (top random-battles in trailing 7d).
+    the landing recent-players surface (the >10 random-battles-in-7d floor
+    is part of the surface contract; default is 15 to clear it). Caller must
+    set `last_random_battle_at` on the Player for the row to be ordered.
     """
     return PlayerDailyShipStats.objects.create(
         player=player,
@@ -3148,29 +3150,41 @@ class ApiContractTests(TestCase):
         self.assertIn("LandingActivePlayer", names)
         self.assertNotIn("LandingInactivePlayer", names)
 
-    def test_landing_recent_players_orders_by_week_battles_desc(self):
+    def test_landing_recent_players_orders_by_recency_with_battles_floor(self):
         cache.clear()
-        light = Player.objects.create(
-            name="RecentLowVolume", player_id=4401, pvp_ratio=58.0)
-        heavy = Player.objects.create(
-            name="RecentHighVolume", player_id=4402, pvp_ratio=51.0)
+        now = timezone.now()
+        # All three pass the >10 battles floor; ordering is by
+        # last_random_battle_at desc.
+        oldest = Player.objects.create(
+            name="RecentOldest", player_id=4401, pvp_ratio=58.0,
+            last_random_battle_at=now - timedelta(hours=3))
         middle = Player.objects.create(
-            name="RecentMidVolume", player_id=4403, pvp_ratio=54.0)
+            name="RecentMiddle", player_id=4402, pvp_ratio=51.0,
+            last_random_battle_at=now - timedelta(hours=1))
+        newest = Player.objects.create(
+            name="RecentNewest", player_id=4403, pvp_ratio=54.0,
+            last_random_battle_at=now)
+        # Quiet player (5 battles) sits below the >10 floor — must not appear.
+        quiet = Player.objects.create(
+            name="QuietPlayer", player_id=4404, pvp_ratio=60.0,
+            last_random_battle_at=now - timedelta(minutes=2))
         Player.objects.create(
-            name="NeverPlayedRandoms", player_id=4404, pvp_ratio=60.0,
-            last_lookup=timezone.now(),
+            name="NeverPlayedRandoms", player_id=4405, pvp_ratio=60.0,
+            last_lookup=now,
         )
 
-        _seed_recent_active(light, battles=2)
-        _seed_recent_active(heavy, battles=25)
-        _seed_recent_active(middle, battles=10)
+        _seed_recent_active(oldest, battles=15)
+        _seed_recent_active(middle, battles=20)
+        _seed_recent_active(newest, battles=25)
+        _seed_recent_active(quiet, battles=5)
 
         response = self.client.get("/api/landing/recent/")
 
         self.assertEqual(response.status_code, 200)
         names = [row["name"] for row in response.json()]
         self.assertEqual(
-            names[:3], ["RecentHighVolume", "RecentMidVolume", "RecentLowVolume"])
+            names[:3], ["RecentNewest", "RecentMiddle", "RecentOldest"])
+        self.assertNotIn("QuietPlayer", names)
         self.assertNotIn("NeverPlayedRandoms", names)
 
     def test_landing_players_and_recent_players_expose_clan_battle_enjoyer_from_cache(self):
@@ -3289,8 +3303,8 @@ class ApiContractTests(TestCase):
             last_lookup=looked_up_at - timedelta(minutes=1),
             last_random_battle_at=looked_up_at - timedelta(minutes=1),
         )
-        _seed_recent_active(pve_yes, battles=8)
-        _seed_recent_active(pve_no, battles=12)
+        _seed_recent_active(pve_yes, battles=14)
+        _seed_recent_active(pve_no, battles=18)
 
         landing_response = self.client.get(
             "/api/landing/players/?mode=random&limit=40")
@@ -3487,7 +3501,7 @@ class ApiContractTests(TestCase):
             last_lookup=now - timedelta(minutes=2),
             last_random_battle_at=now - timedelta(minutes=2),
         )
-        _seed_recent_active(sleeper, battles=6)
+        _seed_recent_active(sleeper, battles=14)
 
         response = self.client.get("/api/landing/recent/")
 
@@ -4647,29 +4661,30 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(landing_players.cls.throttle_classes,
                          PUBLIC_API_THROTTLES)
 
-    def test_landing_recent_players_orders_by_week_battles_desc_and_limits_to_40(self):
+    def test_landing_recent_players_orders_by_recency_and_limits_to_25(self):
         cache.delete(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY))
 
-        # 45 players seeded with descending battle counts so RecentPlayer0
-        # has the most random battles in the trailing 7-day window and
-        # RecentPlayer44 has the fewest. The top-40 cut should drop the
-        # lowest five. pvp_battles is set well above the seeded weekly
-        # count so the implausible-row filter doesn't drop them.
-        for index in range(45):
+        # 30 players seeded with descending last_random_battle_at — index 0
+        # is the newest, 29 the oldest. All have 25 battles in the window
+        # so they pass the >10 floor and stay clear of the implausibility
+        # cap. The top-25 cut should drop the 5 oldest.
+        now = timezone.now()
+        for index in range(30):
             player = Player.objects.create(
                 name=f"RecentPlayer{index}",
                 player_id=10000 + index,
                 pvp_battles=5000,
+                last_random_battle_at=now - timedelta(minutes=index),
             )
-            _seed_recent_active(player, battles=100 - index, ship_id=1)
+            _seed_recent_active(player, battles=25, ship_id=1)
 
         response = self.client.get("/api/landing/recent/")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(len(payload), 40)
+        self.assertEqual(len(payload), 25)
         self.assertEqual(payload[0]["name"], "RecentPlayer0")
-        self.assertEqual(payload[39]["name"], "RecentPlayer39")
+        self.assertEqual(payload[24]["name"], "RecentPlayer24")
 
     def test_landing_recent_clans_orders_by_last_lookup_desc_and_limits_to_40(self):
         cache.delete(LANDING_RECENT_CLANS_CACHE_KEY)

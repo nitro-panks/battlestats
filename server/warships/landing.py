@@ -95,7 +95,13 @@ LANDING_PLAYER_CACHE_TTL = 60 * 60 * 6
 # flat even while the warmer is computing the next snapshot.
 LANDING_RECENT_PLAYERS_CACHE_TTL = None
 LANDING_RECENT_PLAYERS_LOOKBACK_DAYS = 7
-LANDING_RECENT_PLAYERS_LIMIT = 40
+LANDING_RECENT_PLAYERS_LIMIT = 25
+# Activity floor: a player must have played strictly more than this many
+# random battles in the trailing lookback window to qualify. Filters out
+# "logged in for 3 matches" sessions while keeping anyone who had a real
+# session in the last 7 days. See
+# `agents/runbooks/runbook-recent-players-recency-filter-2026-05-04.md`.
+LANDING_RECENT_PLAYERS_MIN_WEEK_BATTLES = 10
 # Sanity ceiling for the trailing 7-day random-battle tally. Even the most
 # committed grinders rarely exceed ~60 randoms/day, so anything above this
 # cap is almost certainly a "first-observation phantom" emitted by the
@@ -118,7 +124,7 @@ LANDING_CLANS_BEST_CACHE_METADATA_KEY = 'landing:clans:best:v2:overall:meta'
 LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY = 'landing:clans:best:v2:overall:published'
 LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY = 'landing:clans:best:v2:overall:published:meta'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
-LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:active7d:v3'
+LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:recent25:v1'
 LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v13:namespace'
 LANDING_CLANS_DIRTY_KEY = 'landing:clans:dirty:v1'
 LANDING_PLAYERS_DIRTY_KEY = 'landing:players:dirty:v1'
@@ -2290,21 +2296,20 @@ def _serialize_landing_player_row(player_obj) -> dict:
 
 
 def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
-    # Top players by random-battle volume over the last
-    # LANDING_RECENT_PLAYERS_LOOKBACK_DAYS days, sourced from the
-    # PlayerDailyShipStats rollup. Random mode only — ranked has its own
-    # surfaces. The query leans on the (date, -battles) index for the date
-    # filter and aggregates per player_id.
+    # Surface contract: the LANDING_RECENT_PLAYERS_LIMIT most-recently-active
+    # random-battle players who have crossed the >MIN_WEEK_BATTLES floor over
+    # the trailing LANDING_RECENT_PLAYERS_LOOKBACK_DAYS-day window. Eligibility
+    # is computed against the PlayerDailyShipStats rollup (random mode); the
+    # final order is `Player.last_random_battle_at` desc — that column is
+    # maintained by the BattleEvent capture hook so it tracks "really played
+    # most recently" rather than "polled most recently". See
+    # `agents/runbooks/runbook-recent-players-recency-filter-2026-05-04.md`.
     from warships.models import PlayerDailyShipStats
 
     lookback_floor = (
         timezone.now().date() - timedelta(days=LANDING_RECENT_PLAYERS_LOOKBACK_DAYS)
     )
-    # Over-fetch so the implausible-row filter below can drop phantom
-    # first-observation rows without shrinking the final list below
-    # LANDING_RECENT_PLAYERS_LIMIT.
-    overfetch_cap = LANDING_RECENT_PLAYERS_LIMIT * 4
-    aggregated = (
+    eligibility = (
         PlayerDailyShipStats.objects
         .filter(
             mode=PlayerDailyShipStats.MODE_RANDOM,
@@ -2314,30 +2319,36 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
         )
         .values('player')
         .annotate(week_battles=Sum('battles'))
-        .filter(week_battles__gt=0,
+        .filter(week_battles__gt=LANDING_RECENT_PLAYERS_MIN_WEEK_BATTLES,
                 week_battles__lte=LANDING_RECENT_PLAYERS_MAX_WEEK_BATTLES)
-        .order_by('-week_battles', 'player')[:overfetch_cap]
     )
-    rows = list(aggregated)
-    if not rows:
+    eligibility_rows = list(eligibility)
+    if not eligibility_rows:
         return []
 
-    player_pks = [r['player'] for r in rows]
-    battle_counts = {r['player']: r['week_battles'] for r in rows}
-    players_by_pk = {
-        p.pk: p
-        for p in Player.objects.filter(pk__in=player_pks, realm=realm, is_hidden=False)
+    battle_counts = {r['player']: r['week_battles'] for r in eligibility_rows}
+    eligible_pks = list(battle_counts.keys())
+
+    # Over-fetch so the implausible-row filter below can drop phantom
+    # first-observation rows without shrinking the final list below LIMIT.
+    overfetch_cap = LANDING_RECENT_PLAYERS_LIMIT * 4
+    candidates = list(
+        Player.objects
+        .filter(
+            pk__in=eligible_pks,
+            realm=realm,
+            is_hidden=False,
+            last_random_battle_at__isnull=False,
+        )
         .exclude(name='')
         .select_related('explorer_summary')
-        .only(*_LANDING_PLAYER_ROW_ONLY_FIELDS)
-    }
+        .only(*_LANDING_PLAYER_ROW_ONLY_FIELDS, 'last_random_battle_at')
+        .order_by(F('last_random_battle_at').desc(nulls_last=True), 'name')[:overfetch_cap]
+    )
 
     payload = []
-    for pk in player_pks:
-        player_obj = players_by_pk.get(pk)
-        if player_obj is None:
-            continue
-        week_battles = int(battle_counts.get(pk, 0))
+    for player_obj in candidates:
+        week_battles = int(battle_counts.get(player_obj.pk, 0))
         # Definitional bound: a 7-day count cannot exceed lifetime battles.
         # Allow a small slack so a refresh-lag mismatch doesn't drop a real
         # active player.

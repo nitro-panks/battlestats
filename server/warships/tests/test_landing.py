@@ -1412,17 +1412,20 @@ class LandingHelperTests(TestCase):
             [201, 202, 203, 204], force_refresh=False, realm='eu')
 
 
-class LandingRecentPlayersWeekActivityTests(TestCase):
-    """Recent sub-sort surfaces players who played the most random battles
-    in the trailing LANDING_RECENT_PLAYERS_LOOKBACK_DAYS-day window. Sourced
-    from PlayerDailyShipStats. Replaces the prior `last_random_battle_at`
-    ordering as of 2026-05-03.
+class LandingRecentPlayersRecencyFilterTests(TestCase):
+    """Recent sub-sort surfaces the LANDING_RECENT_PLAYERS_LIMIT players who
+    have played > MIN_WEEK_BATTLES random battles in the trailing
+    LOOKBACK_DAYS-day window, ordered by `Player.last_random_battle_at` desc.
+    Eligibility comes from PlayerDailyShipStats; ordering comes from the
+    BattleEvent capture hook's `last_random_battle_at`. See
+    `agents/runbooks/runbook-recent-players-recency-filter-2026-05-04.md`.
     """
 
     def setUp(self):
         cache.clear()
 
-    def _make_player(self, *, name, player_id, realm='na', pvp_battles=500):
+    def _make_player(self, *, name, player_id, realm='na', pvp_battles=500,
+                     last_random_battle_at=None):
         return Player.objects.create(
             name=name,
             player_id=player_id,
@@ -1430,6 +1433,7 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
             pvp_battles=pvp_battles,
             pvp_ratio=55.0,
             is_hidden=False,
+            last_random_battle_at=last_random_battle_at,
         )
 
     def _add_daily(self, player, *, date, battles, ship_id=1, mode=None):
@@ -1448,37 +1452,61 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
         self._make_player(name='no_rollups', player_id=1)
         self.assertEqual(_build_recent_players(realm='na'), [])
 
-    def test_orders_by_total_battles_in_lookback_window_descending(self):
+    def test_orders_by_last_random_battle_at_descending(self):
         from warships.landing import _build_recent_players
 
         today = timezone.now().date()
-        light = self._make_player(name='light', player_id=10)
-        middle = self._make_player(name='middle', player_id=11)
-        heavy = self._make_player(name='heavy', player_id=12)
+        now = timezone.now()
+        oldest = self._make_player(name='oldest', player_id=10,
+                                   last_random_battle_at=now - timedelta(hours=3))
+        middle = self._make_player(name='middle', player_id=11,
+                                   last_random_battle_at=now - timedelta(hours=1))
+        newest = self._make_player(name='newest', player_id=12,
+                                   last_random_battle_at=now)
 
-        # heavy: 30 battles spread across two days inside the window.
-        self._add_daily(heavy, date=today, battles=20, ship_id=1)
-        self._add_daily(heavy, date=today - timedelta(days=2),
-                        battles=10, ship_id=2)
-        # middle: 12 battles, one ship, inside the window.
-        self._add_daily(middle, date=today - timedelta(days=1), battles=12)
-        # light: 4 battles, edge of the window.
-        self._add_daily(light, date=today - timedelta(days=6), battles=4)
+        # All clear the >10-battles floor inside the window.
+        self._add_daily(oldest, date=today, battles=15)
+        self._add_daily(middle, date=today, battles=20)
+        self._add_daily(newest, date=today, battles=25)
 
         rows = _build_recent_players(realm='na')
-        self.assertEqual([r['name'] for r in rows], ['heavy', 'middle', 'light'])
-        self.assertEqual(rows[0]['week_battles'], 30)
-        self.assertEqual(rows[1]['week_battles'], 12)
+        self.assertEqual([r['name'] for r in rows], ['newest', 'middle', 'oldest'])
+
+    def test_excludes_players_at_or_below_min_battles_floor(self):
+        from warships.landing import (
+            LANDING_RECENT_PLAYERS_MIN_WEEK_BATTLES, _build_recent_players,
+        )
+
+        today = timezone.now().date()
+        now = timezone.now()
+        floor = LANDING_RECENT_PLAYERS_MIN_WEEK_BATTLES
+        too_quiet = self._make_player(name='too_quiet', player_id=20,
+                                      last_random_battle_at=now)
+        on_floor = self._make_player(name='on_floor', player_id=21,
+                                     last_random_battle_at=now - timedelta(minutes=1))
+        passes = self._make_player(name='passes', player_id=22,
+                                   last_random_battle_at=now - timedelta(minutes=2))
+
+        self._add_daily(too_quiet, date=today, battles=floor - 5)
+        self._add_daily(on_floor, date=today, battles=floor)  # strict-gt: dropped
+        self._add_daily(passes, date=today, battles=floor + 1)
+
+        rows = _build_recent_players(realm='na')
+        self.assertEqual([r['name'] for r in rows], ['passes'])
 
     def test_excludes_rollups_outside_lookback_window(self):
         from warships.landing import _build_recent_players
 
         today = timezone.now().date()
-        stale = self._make_player(name='stale', player_id=20)
-        fresh = self._make_player(name='fresh', player_id=21)
+        now = timezone.now()
+        stale = self._make_player(name='stale', player_id=30,
+                                  last_random_battle_at=now)
+        fresh = self._make_player(name='fresh', player_id=31,
+                                  last_random_battle_at=now - timedelta(hours=2))
 
-        self._add_daily(stale, date=today - timedelta(days=10), battles=99)
-        self._add_daily(fresh, date=today - timedelta(days=1), battles=3)
+        # Stale's 50 battles fell outside the 7d window.
+        self._add_daily(stale, date=today - timedelta(days=10), battles=50)
+        self._add_daily(fresh, date=today - timedelta(days=1), battles=15)
 
         rows = _build_recent_players(realm='na')
         self.assertEqual([r['name'] for r in rows], ['fresh'])
@@ -1488,12 +1516,15 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
         from warships.models import PlayerDailyShipStats
 
         today = timezone.now().date()
-        ranked_only = self._make_player(name='ranked_only', player_id=30)
-        random_player = self._make_player(name='random_player', player_id=31)
+        now = timezone.now()
+        ranked_only = self._make_player(name='ranked_only', player_id=40,
+                                        last_random_battle_at=now)
+        random_player = self._make_player(name='random_player', player_id=41,
+                                          last_random_battle_at=now - timedelta(minutes=5))
 
         self._add_daily(ranked_only, date=today, battles=50,
                         mode=PlayerDailyShipStats.MODE_RANKED)
-        self._add_daily(random_player, date=today, battles=5)
+        self._add_daily(random_player, date=today, battles=15)
 
         rows = _build_recent_players(realm='na')
         self.assertEqual([r['name'] for r in rows], ['random_player'])
@@ -1502,11 +1533,14 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
         from warships.landing import _build_recent_players
 
         today = timezone.now().date()
-        na_player = self._make_player(name='na_player', player_id=40, realm='na')
-        eu_player = self._make_player(name='eu_player', player_id=41, realm='eu')
+        now = timezone.now()
+        na_player = self._make_player(name='na_player', player_id=50, realm='na',
+                                      last_random_battle_at=now)
+        eu_player = self._make_player(name='eu_player', player_id=51, realm='eu',
+                                      last_random_battle_at=now)
 
-        self._add_daily(na_player, date=today, battles=8)
-        self._add_daily(eu_player, date=today, battles=12)
+        self._add_daily(na_player, date=today, battles=15)
+        self._add_daily(eu_player, date=today, battles=20)
 
         self.assertEqual([r['name']
                           for r in _build_recent_players(realm='na')], ['na_player'])
@@ -1514,9 +1548,26 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
                           for r in _build_recent_players(realm='eu')], ['eu_player'])
 
     def test_lookback_window_constant_is_one_week(self):
-        # Sanity: the constant we expose stays at the documented 7-day
-        # window so downstream surfaces don't silently drift off-spec.
         self.assertEqual(LANDING_RECENT_PLAYERS_LOOKBACK_DAYS, 7)
+
+    def test_excludes_players_without_last_random_battle_at(self):
+        # If the capture hook never wrote `last_random_battle_at` (rare —
+        # it's set on every random BattleEvent emission), the row can't be
+        # ordered, so it drops out of the recency-anchored surface.
+        from warships.landing import _build_recent_players
+
+        today = timezone.now().date()
+        now = timezone.now()
+        ordered = self._make_player(name='ordered', player_id=60,
+                                    last_random_battle_at=now)
+        no_anchor = self._make_player(name='no_anchor', player_id=61,
+                                      last_random_battle_at=None)
+
+        self._add_daily(ordered, date=today, battles=15)
+        self._add_daily(no_anchor, date=today, battles=15)
+
+        rows = _build_recent_players(realm='na')
+        self.assertEqual([r['name'] for r in rows], ['ordered'])
 
     def test_excludes_rows_above_absolute_max_week_battles(self):
         # Phantom first-observation deltas can dump a player's lifetime
@@ -1529,10 +1580,13 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
         )
 
         today = timezone.now().date()
+        now = timezone.now()
         phantom = self._make_player(
-            name='phantom', player_id=50, pvp_battles=20000)
+            name='phantom', player_id=50, pvp_battles=20000,
+            last_random_battle_at=now)
         normal = self._make_player(
-            name='normal', player_id=51, pvp_battles=20000)
+            name='normal', player_id=51, pvp_battles=20000,
+            last_random_battle_at=now - timedelta(minutes=1))
 
         self._add_daily(phantom, date=today,
                         battles=LANDING_RECENT_PLAYERS_MAX_WEEK_BATTLES + 100)
@@ -1547,10 +1601,13 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
         from warships.landing import _build_recent_players
 
         today = timezone.now().date()
+        now = timezone.now()
         impossible = self._make_player(
-            name='impossible', player_id=60, pvp_battles=300)
+            name='impossible', player_id=60, pvp_battles=300,
+            last_random_battle_at=now)
         plausible = self._make_player(
-            name='plausible', player_id=61, pvp_battles=5000)
+            name='plausible', player_id=61, pvp_battles=5000,
+            last_random_battle_at=now - timedelta(minutes=1))
 
         # 1200 < absolute cap of 1500 so it survives that filter, but
         # exceeds the player's 300 lifetime battles → must be dropped.
@@ -1567,10 +1624,13 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
         from warships.landing import _build_recent_players
 
         today = timezone.now().date()
-        hidden = self._make_player(name='hidden_top', player_id=80)
+        now = timezone.now()
+        hidden = self._make_player(name='hidden_top', player_id=80,
+                                   last_random_battle_at=now)
         hidden.is_hidden = True
         hidden.save(update_fields=['is_hidden'])
-        visible = self._make_player(name='visible_player', player_id=81)
+        visible = self._make_player(name='visible_player', player_id=81,
+                                    last_random_battle_at=now - timedelta(minutes=1))
 
         self._add_daily(hidden, date=today, battles=200)
         self._add_daily(visible, date=today, battles=20)
@@ -1585,8 +1645,10 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
         from warships.landing import _build_recent_players
 
         today = timezone.now().date()
+        now = timezone.now()
         borderline = self._make_player(
-            name='borderline', player_id=70, pvp_battles=200)
+            name='borderline', player_id=70, pvp_battles=200,
+            last_random_battle_at=now)
 
         # week_battles=210 vs pvp_battles=200 → 10 over, well within the
         # 50-battle slack.
