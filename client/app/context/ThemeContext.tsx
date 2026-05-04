@@ -10,21 +10,24 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-    theme: 'light',
+    theme: 'dark',
     setTheme: () => undefined,
 });
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [theme, setThemeState] = useState<Theme>('light');
+    const [theme, setThemeState] = useState<Theme>('dark');
 
     useEffect(() => {
-        let initial: Theme = 'light';
+        // Dark is the implicit default. Users who explicitly toggle to
+        // light persist that choice in localStorage; everyone else gets
+        // dark, regardless of `prefers-color-scheme` (the OS-preference
+        // fallback was removed because it surprised users whose OS was
+        // light but who expected the site's branded dark look).
+        let initial: Theme = 'dark';
         try {
             const stored = localStorage.getItem('bs-theme');
             if (stored === 'light' || stored === 'dark') {
                 initial = stored;
-            } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                initial = 'dark';
             }
         } catch {
             // localStorage unavailable
