@@ -2,7 +2,7 @@
 
 _Created: 2026-05-01_
 _Context: After the battle-history rollout (Tranches 1+2 + cache fix), the dedicated `crawls` queue carve-out, the recent-players cache coalescing fix, and the dead-code cleanup pass, several follow-ups remain. This runbook captures them in priority order so the next operator (human or agent) sees the intended sequence and can pick up any phase independently._
-_Status: phase-1-shipped + phase-2-soaked + phase-4-reconciled + phase-5-checked (2026-05-02). Phase 3 (EU+Asia baseline fill) and Phase 6 (ranked-battles rollout, scoped separately in `runbook-ranked-battle-history-rollout-2026-05-02.md`) remain. See "Closing notes" at bottom for verification snapshots._
+_Status: phase-1-shipped + phase-2-soaked + phase-4-reconciled + phase-5-checked (2026-05-02). 2026-05-04 update: Phase 6 (ranked-battles rollout) is na-verified end-to-end; awaiting operator-approved baseline fill via `establish_ranked_baseline`. Phase 3 (EU+Asia randoms baseline fill) remains and will piggyback on the ranked EU+ASIA fill in the same SSH session once NA fill executes. See "Closing notes" at bottom for verification snapshots._
 
 ## Purpose
 
@@ -15,7 +15,7 @@ Five phases, ordered by value × urgency. Phase 1 is the highest-value follow-up
 | 3 | Extend baseline coverage to EU + Asia | management cmd | low (WG-budget) | ~10 min × 2 realms | on-demand |
 | 4 | Reconcile two runbook statuses | docs | none | ~5 min | next docs sweep |
 | 5 | Storage growth check on `BattleObservation` | read-only | none | ~2 min | weekly until day-14 prune |
-| 6 | Ranked battle-history rollout — see `runbook-ranked-battle-history-rollout-2026-05-02.md` | code (multi-phase) | low (additive, env-gated) | days, multi-phase | scoped separately |
+| 6 | Ranked battle-history rollout — see `runbook-ranked-battle-history-rollout-2026-05-02.md` | code (multi-phase) | low (additive, env-gated) | days, multi-phase | na-verified (2026-05-04); awaiting operator-approved baseline fill |
 
 ---
 
