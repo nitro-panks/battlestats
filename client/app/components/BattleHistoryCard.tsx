@@ -202,7 +202,21 @@ const WrCell: React.FC<WrCellProps> = ({
         <span className="text-xs text-[var(--text-muted)]">—</span>
     );
 
+    // Ranked mode has no per-ship lifetime baseline (battles_json/pvp_* are
+    // randoms-only on the Player model), so every row would otherwise render
+    // "N/A" + "—" beneath the period WR. Collapse to a period-only cell
+    // when both fall back to null — drops the noise without changing the
+    // contract for random mode.
+    const periodOnly = lifetimeMissing && signedDelta == null;
+
     if (stacked) {
+        if (periodOnly) {
+            return (
+                <span className="tabular-nums flex flex-col items-start" title={tooltip}>
+                    {periodEl}
+                </span>
+            );
+        }
         return (
             <span className="tabular-nums flex flex-col items-start" title={tooltip}>
                 {periodEl}
@@ -210,6 +224,16 @@ const WrCell: React.FC<WrCellProps> = ({
                     <span className="text-left">{lifetimeEl}</span>
                     <span className="text-left">{deltaEl}</span>
                 </span>
+            </span>
+        );
+    }
+    if (periodOnly) {
+        return (
+            <span
+                className="tabular-nums inline-grid grid-cols-[3.5rem] items-baseline whitespace-nowrap"
+                title={tooltip}
+            >
+                <span className="text-right">{periodEl}</span>
             </span>
         );
     }
