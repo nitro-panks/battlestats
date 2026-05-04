@@ -2134,6 +2134,66 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(body["totals"]["lifetime_battles"], 200)
         self.assertEqual(body["totals"]["lifetime_win_rate"], 0.0)
 
+    def test_is_new_ship_flag_set_when_period_equals_lifetime(self):
+        """When the player's entire random-battle history in a ship falls
+        inside the lookback window, prior_battles=0 and the delta math is
+        undefined. Surface that with `is_new_ship=True` so the frontend can
+        render a NEW badge instead of an em-dash for the missing delta.
+        """
+        self.player.battles_json = [
+            {"ship_id": 42, "pvp_battles": 5, "wins": 3, "losses": 2},
+        ]
+        self.player.save()
+
+        today = django_timezone.now().date()
+        # Period: 5 random battles, 3 wins — exactly matches lifetime.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=5, wins=3, damage=200_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=random",
+            )
+        body = r.json()
+        ships = {s["ship_id"]: s for s in body["by_ship"]}
+        yamato = ships[42]
+        self.assertTrue(yamato["is_new_ship"])
+        # lifetime_wr stays populated (it equals period_wr by construction
+        # when all battles are in the window) — frontend uses it for the
+        # tooltip, but renders a NEW badge in place of the delta.
+        self.assertEqual(yamato["lifetime_win_rate"], 60.0)
+        self.assertIsNone(yamato["delta_win_rate"])
+
+    def test_is_new_ship_flag_false_when_prior_history_exists(self):
+        self.player.battles_json = [
+            {"ship_id": 42, "pvp_battles": 50, "wins": 30, "losses": 20},
+        ]
+        self.player.save()
+
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=5, wins=3,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=random",
+            )
+        ships = {s["ship_id"]: s for s in r.json()["by_ship"]}
+        self.assertFalse(ships[42]["is_new_ship"])
+        self.assertIsNotNone(ships[42]["delta_win_rate"])
+
     def test_mode_combined_handles_ranked_only_ship_with_zero_random_lifetime(self):
         """Regression for the GHOSTTUNDERBOLT 500 (Chung Mu / Mogador):
         a ship played only in ranked, with a battles_json entry carrying

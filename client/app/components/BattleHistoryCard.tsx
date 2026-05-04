@@ -24,6 +24,7 @@ export interface BattleHistoryByShip {
     lifetime_battles?: number | null;
     lifetime_win_rate?: number | null;
     delta_win_rate?: number | null;
+    is_new_ship?: boolean;
 }
 
 export interface BattleHistoryByDay {
@@ -162,11 +163,12 @@ interface WrCellProps {
     periodWinRate: number;
     lifetimeWinRate: number | null | undefined;
     deltaWinRate: number | null | undefined;
+    isNewShip?: boolean;
     stacked?: boolean;
 }
 
 const WrCell: React.FC<WrCellProps> = ({
-    periodWinRate, lifetimeWinRate, deltaWinRate, stacked = false,
+    periodWinRate, lifetimeWinRate, deltaWinRate, isNewShip = false, stacked = false,
 }) => {
     const tone = deltaWinRate == null
         ? 'var(--text-muted)'
@@ -197,6 +199,17 @@ const WrCell: React.FC<WrCellProps> = ({
     const deltaEl = signedDelta != null ? (
         <span className="text-xs font-medium" style={{ color: tone }}>
             Δ{signedDelta}
+        </span>
+    ) : isNewShip ? (
+        <span
+            className="text-[10px] font-bold uppercase tracking-wider rounded-sm px-1.5 py-[1px]"
+            style={{
+                color: 'var(--accent-mid)',
+                backgroundColor: 'var(--accent-faint)',
+            }}
+            title="First-time random battles in this ship — no prior state to compute a delta against."
+        >
+            NEW
         </span>
     ) : (
         <span className="text-xs text-[var(--text-muted)]">—</span>
@@ -679,6 +692,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                         periodWinRate={row.win_rate}
                                         lifetimeWinRate={row.lifetime_win_rate}
                                         deltaWinRate={row.delta_win_rate}
+                                        isNewShip={row.is_new_ship}
                                     />
                                 </td>
                                 <td className="py-1.5 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.avg_damage)}</td>

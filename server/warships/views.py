@@ -518,10 +518,10 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    # v2: combined mode now carries lifetime/delta (using random-only
-    # baseline as approximation); old payloads had null lifetime fields.
+    # v3: ship rows now carry `is_new_ship` (true when prior_battles==0,
+    # surfacing first-time-in-this-ship state instead of an em-dash).
     return realm_cache_key(
-        realm, f"battle-history:v2:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v3:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -750,6 +750,12 @@ def _build_battle_history_payload(player, period: str, windows: int,
             s["lifetime_win_rate"] = lifetime_wr_now
             s["delta_win_rate"] = round(
                 lifetime_wr_now - prior_wr, 1) if prior_wr is not None else None
+            # `prior_battles == 0` means every random battle this player
+            # has ever played in this ship fell inside the lookback window
+            # — there is no prior state to compute a delta against. Surface
+            # that as a "new ship" signal so the frontend can render a
+            # NEW badge instead of an em-dash for the missing delta.
+            s["is_new_ship"] = prior_battles == 0
         else:
             # No lifetime row, zero lifetime battles, or sync skew between
             # battles_json and the rollup — leave lifetime fields null and
@@ -757,6 +763,7 @@ def _build_battle_history_payload(player, period: str, windows: int,
             s["lifetime_battles"] = None
             s["lifetime_win_rate"] = None
             s["delta_win_rate"] = None
+            s["is_new_ship"] = False
 
     by_day = sorted(by_day_acc.values(), key=lambda d: d["date"])
 
