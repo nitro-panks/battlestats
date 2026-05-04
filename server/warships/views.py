@@ -518,11 +518,11 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    # v4: NEW-badge semantics extended to cover sparse-prior rows
-    # (prior_battles < 3) where the delta math is statistical noise.
-    # NEW rows with zero priors also drop the redundant lifetime row.
+    # v5: NEW-badge also fires when lifetime_by_ship is missing but the
+    # period has random activity — covers the battles_json snapshot lag
+    # case where the rollup is ahead of the cumulative WG snapshot.
     return realm_cache_key(
-        realm, f"battle-history:v4:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v5:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -780,12 +780,23 @@ def _build_battle_history_payload(player, period: str, windows: int,
                 s["is_new_ship"] = False
         else:
             # No lifetime row, zero lifetime battles, or sync skew between
-            # battles_json and the rollup — leave lifetime fields null and
-            # let the frontend fall back to period-only display.
+            # battles_json (a refresh-cadence snapshot) and the rollup
+            # (live). When the rollup says the player has period activity
+            # but battles_json hasn't caught up yet, the row would
+            # otherwise render as bare period-only with no context. Tag
+            # `is_new_ship=True` (only when `mode in (random, combined)`,
+            # where lifetime data is even possible) so the frontend
+            # surfaces NEW. Once battles_json refreshes, the row
+            # auto-promotes to a normal delta on the next request. For
+            # `mode=ranked` we keep the bare period display because there
+            # is no lifetime baseline anywhere in the data model — NEW
+            # would be misleading.
             s["lifetime_battles"] = None
             s["lifetime_win_rate"] = None
             s["delta_win_rate"] = None
-            s["is_new_ship"] = False
+            s["is_new_ship"] = (
+                mode in ("random", "combined") and period_random_battles > 0
+            )
 
     by_day = sorted(by_day_acc.values(), key=lambda d: d["date"])
 

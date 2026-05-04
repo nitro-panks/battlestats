@@ -2170,6 +2170,61 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertIsNone(yamato["lifetime_win_rate"])
         self.assertIsNone(yamato["delta_win_rate"])
 
+    def test_is_new_ship_flag_set_when_lifetime_snapshot_lags(self):
+        """Real-world case: a player plays a ship recently, the rollup
+        records period activity, but battles_json (refreshed less often)
+        hasn't caught up yet — `lifetime_by_ship.get(ship_id)` returns
+        None. Pre-fix the row rendered as bare period-only with no
+        explanation; post-fix it surfaces NEW so the user sees context.
+        """
+        # battles_json deliberately empty — simulates the snapshot lag.
+        self.player.battles_json = []
+        self.player.save()
+
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=9, wins=5, damage=300_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=random",
+            )
+        ships = {s["ship_id"]: s for s in r.json()["by_ship"]}
+        yamato = ships[42]
+        self.assertTrue(yamato["is_new_ship"])
+        self.assertIsNone(yamato["lifetime_battles"])
+        self.assertIsNone(yamato["delta_win_rate"])
+
+    def test_is_new_ship_flag_NOT_set_in_ranked_mode_with_missing_lifetime(self):
+        """Mode=ranked has no lifetime baseline anywhere in the data model,
+        so NEW would be misleading. Bare period-only is correct there.
+        """
+        self.player.battles_json = []
+        self.player.save()
+
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=5, wins=3,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=ranked",
+            )
+        ships = {s["ship_id"]: s for s in r.json()["by_ship"]}
+        self.assertFalse(ships[42]["is_new_ship"])
+
     def test_is_new_ship_flag_set_when_prior_sample_too_small(self):
         """A 1- or 2-battle prior sample makes the delta a coin-flip
         artifact (one win/loss swings it 50–100pp). Treat the row as NEW
