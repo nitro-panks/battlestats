@@ -518,8 +518,10 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
+    # v2: combined mode now carries lifetime/delta (using random-only
+    # baseline as approximation); old payloads had null lifetime fields.
     return realm_cache_key(
-        realm, f"battle-history:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v2:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -635,6 +637,11 @@ def _build_battle_history_payload(player, period: str, windows: int,
         "damage": 0, "frags": 0, "xp": 0, "planes_killed": 0,
         "survived_battles": 0,
     }
+    # Track random-only sub-totals so the lifetime delta math (which
+    # anchors on the randoms-only Player.battles_json baseline) stays
+    # mathematically consistent even in `mode=combined` views.
+    totals_random_battles = 0
+    totals_random_wins = 0
     by_ship_acc: dict = {}
     by_day_acc: dict = {}
 
@@ -652,6 +659,11 @@ def _build_battle_history_payload(player, period: str, windows: int,
         totals["xp"] += row.xp
         totals["planes_killed"] += row.planes_killed
         totals["survived_battles"] += row.survived_battles
+        # Period rollup tables (weekly/monthly/yearly) are randoms-only and
+        # have no `mode` column — fall back to MODE_RANDOM for those rows.
+        if getattr(row, 'mode', _PDSS.MODE_RANDOM) == _PDSS.MODE_RANDOM:
+            totals_random_battles += row.battles
+            totals_random_wins += row.wins
 
         ship_entry = by_ship_acc.setdefault(row.ship_id, {
             "ship_id": row.ship_id,
@@ -665,6 +677,7 @@ def _build_battle_history_payload(player, period: str, windows: int,
             "battles": 0, "wins": 0, "losses": 0, "frags": 0,
             "damage": 0, "xp": 0, "planes_killed": 0,
             "survived_battles": 0,
+            "_random_battles": 0, "_random_wins": 0,
         })
         ship_entry["battles"] += row.battles
         ship_entry["wins"] += row.wins
@@ -674,6 +687,11 @@ def _build_battle_history_payload(player, period: str, windows: int,
         ship_entry["xp"] += row.xp
         ship_entry["planes_killed"] += row.planes_killed
         ship_entry["survived_battles"] += row.survived_battles
+        # Period rollup tables (weekly/monthly/yearly) are randoms-only and
+        # have no `mode` column — fall back to MODE_RANDOM for those rows.
+        if getattr(row, 'mode', _PDSS.MODE_RANDOM) == _PDSS.MODE_RANDOM:
+            ship_entry["_random_battles"] += row.battles
+            ship_entry["_random_wins"] += row.wins
 
         bucket_date = row.date if period == "daily" else row.period_start
         day_iso = bucket_date.isoformat()
@@ -702,17 +720,22 @@ def _build_battle_history_payload(player, period: str, windows: int,
         s["avg_damage"] = int(round(s["damage"] / s["battles"])) \
             if s["battles"] else 0
 
-        # Phase 4 ranked rollout: lifetime baseline (Player.battles_json)
-        # is randoms-only, so the delta math only makes sense for
-        # mode=random. For ranked/combined views, leave the lifetime
-        # fields null — the frontend already tolerates them.
-        lifetime = lifetime_by_ship.get(s["ship_id"]) if mode == "random" else None
-        if lifetime and lifetime["battles"] >= s["battles"]:
-            # The period rolls into lifetime — battles_json is the
-            # latest snapshot, including the period's matches. Subtract
-            # to get the "prior" state.
-            prior_battles = lifetime["battles"] - s["battles"]
-            prior_wins = lifetime["wins"] - s["wins"]
+        # Lifetime baseline (Player.battles_json) is randoms-only. For
+        # mode=random and mode=combined we subtract the period's RANDOM
+        # subset from the lifetime so the prior-state math stays
+        # consistent even when the displayed period includes ranked
+        # battles. For mode=ranked there's no per-ship lifetime baseline
+        # anywhere in the data model, so leave the fields null.
+        lifetime = (
+            lifetime_by_ship.get(s["ship_id"])
+            if mode in ("random", "combined")
+            else None
+        )
+        period_random_battles = s.pop("_random_battles", 0)
+        period_random_wins = s.pop("_random_wins", 0)
+        if lifetime and lifetime["battles"] >= period_random_battles:
+            prior_battles = lifetime["battles"] - period_random_battles
+            prior_wins = lifetime["wins"] - period_random_wins
             lifetime_wr_now = round(
                 100.0 * lifetime["wins"] / lifetime["battles"], 1)
             prior_wr = round(
@@ -722,8 +745,9 @@ def _build_battle_history_payload(player, period: str, windows: int,
             s["delta_win_rate"] = round(
                 lifetime_wr_now - prior_wr, 1) if prior_wr is not None else None
         else:
-            # Lifetime row is missing or stale (period > lifetime, which
-            # shouldn't happen in practice — guard for sync skew).
+            # Lifetime row is missing or stale (period_random_battles
+            # somehow exceeded lifetime — guard for sync skew between
+            # battles_json and the rollup).
             s["lifetime_battles"] = None
             s["lifetime_win_rate"] = None
             s["delta_win_rate"] = None
@@ -731,10 +755,11 @@ def _build_battle_history_payload(player, period: str, windows: int,
     by_day = sorted(by_day_acc.values(), key=lambda d: d["date"])
 
     # Overall lifetime delta — uses Player aggregate columns directly.
-    # Same rationale as the per-ship lifetime: pvp_* are randoms-only, so
-    # only mode=random gets meaningful delta numbers; ranked/combined
-    # leave the lifetime fields null.
-    if mode == "random":
+    # pvp_* are randoms-only. For combined mode we anchor delta math on
+    # the random subset of the period so the comparison is apples-to-
+    # apples against the random-only lifetime. mode=ranked stays null
+    # because there's no aggregate ranked-battles counter on Player.
+    if mode in ("random", "combined"):
         lifetime_battles_overall = int(player.pvp_battles or 0)
         lifetime_wins_overall = int(player.pvp_wins or 0)
     else:
@@ -744,17 +769,17 @@ def _build_battle_history_payload(player, period: str, windows: int,
         100.0 * lifetime_wins_overall / lifetime_battles_overall, 1
     ) if lifetime_battles_overall else None
     if (
-        lifetime_battles_overall >= totals["battles"]
-        and totals["battles"] > 0
+        lifetime_battles_overall >= totals_random_battles
+        and totals_random_battles > 0
     ):
-        prior_battles_overall = lifetime_battles_overall - totals["battles"]
-        prior_wins_overall = lifetime_wins_overall - totals["wins"]
+        prior_battles_overall = lifetime_battles_overall - totals_random_battles
+        prior_wins_overall = lifetime_wins_overall - totals_random_wins
         prior_overall_wr = round(
             100.0 * prior_wins_overall / prior_battles_overall, 1
         ) if prior_battles_overall > 0 else None
         delta_overall_wr = round(
             lifetime_overall_wr - prior_overall_wr, 1
-        ) if prior_overall_wr is not None else None
+        ) if prior_overall_wr is not None and lifetime_overall_wr is not None else None
     else:
         delta_overall_wr = None
 

@@ -2126,8 +2126,55 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(body["mode"], "combined")
         self.assertEqual(body["totals"]["battles"], 14)
         self.assertEqual(body["totals"]["damage"], 500_000)
-        # Combined view also suppresses lifetime delta — randoms-only baseline.
-        self.assertIsNone(body["totals"]["lifetime_win_rate"])
+        # Combined mode now anchors lifetime delta math on the period's
+        # random subset (since the randoms-only Player.battles_json baseline
+        # only supports apples-to-apples comparison against random battles).
+        # The test player has pvp_battles=200 and pvp_wins=0, so lifetime
+        # WR is 0.0 — the value is populated, not suppressed.
+        self.assertEqual(body["totals"]["lifetime_battles"], 200)
+        self.assertEqual(body["totals"]["lifetime_win_rate"], 0.0)
+
+    def test_mode_combined_per_ship_lifetime_uses_random_period_subset(self):
+        """Regression: ships with mixed random+ranked play in the period
+        should still get a populated `lifetime_*` field set in combined
+        mode, anchored on the random subset for the prior-state math.
+        Pre-fix, combined mode left lifetime fields null on every ship row.
+        """
+        from warships.models import Player as _Player
+        # Stamp battles_json with a per-ship lifetime baseline for the
+        # ship Yamato (id=42): 13 random battles, 5 random wins → 38.5%.
+        self.player.battles_json = [
+            {"ship_id": 42, "pvp_battles": 13, "wins": 5, "losses": 8},
+        ]
+        self.player.pvp_battles = 13
+        self.player.pvp_wins = 5
+        self.player.save()
+
+        today = django_timezone.now().date()
+        # Period: 8 random battles + 0 ranked, mirroring the GHOSTTUNDERBOLT
+        # Kléber case that surfaced this bug (random has lifetime/delta;
+        # combined was incorrectly stripping it).
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=8, wins=2, damage=400_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=combined",
+            )
+        body = r.json()
+        ships = {s["ship_id"]: s for s in body["by_ship"]}
+        yamato = ships[42]
+        self.assertEqual(yamato["battles"], 8)
+        self.assertEqual(yamato["lifetime_battles"], 13)
+        self.assertEqual(yamato["lifetime_win_rate"], 38.5)
+        # prior_battles=5, prior_wins=3, prior_wr=60.0 → delta=-21.5.
+        self.assertEqual(yamato["delta_win_rate"], -21.5)
 
     def test_invalid_mode_falls_back_to_default(self):
         today = django_timezone.now().date()
