@@ -518,11 +518,13 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    # v6: rows now carry `is_ranked_only_period` so combined mode can
-    # render a RANKED badge on rows that have no random play in the
-    # window (no random lifetime baseline to anchor a delta against).
+    # v7: ranked-only-in-period rows now suppress lifetime/delta even when
+    # `battles_json` has random history for the ship — pre-fix these rows
+    # rendered a structurally-zero Δ0.0% (period_random=0 → prior_wr ==
+    # lifetime_wr by construction), which read as misleading data instead
+    # of the RANKED badge.
     return realm_cache_key(
-        realm, f"battle-history:v6:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v7:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -757,6 +759,7 @@ def _build_battle_history_payload(player, period: str, windows: int,
         # divide-by-zero when computing lifetime_wr.
         if (lifetime
                 and lifetime["battles"] > 0
+                and period_random_battles > 0
                 and lifetime["battles"] >= period_random_battles):
             prior_battles = lifetime["battles"] - period_random_battles
             prior_wins = lifetime["wins"] - period_random_wins

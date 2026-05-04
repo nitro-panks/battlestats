@@ -2170,6 +2170,45 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertIsNone(yamato["lifetime_win_rate"])
         self.assertIsNone(yamato["delta_win_rate"])
 
+    def test_ranked_only_in_period_row_suppresses_random_lifetime(self):
+        """Regression for /player/lordPOWARFULL007: ships played only in
+        ranked during the window had a structurally-zero Δ0.0% leak
+        through, because prior_random_battles==lifetime_random_battles by
+        construction. Now those rows null out lifetime/delta and surface
+        only the RANKED badge.
+        """
+        # Lifetime row exists with real random history.
+        self.player.battles_json = [
+            {"ship_id": 42, "pvp_battles": 158, "wins": 65, "losses": 93},
+        ]
+        self.player.save()
+
+        today = django_timezone.now().date()
+        # Period: 2 RANKED battles, 0 random.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=2, wins=1, damage=120_000,
+        )
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=combined",
+            )
+        ships = {s["ship_id"]: s for s in r.json()["by_ship"]}
+        yamato = ships[42]
+        self.assertTrue(yamato["is_ranked_only_period"])
+        # No leaky Δ0.0% — lifetime/delta suppressed entirely.
+        self.assertIsNone(yamato["lifetime_battles"])
+        self.assertIsNone(yamato["lifetime_win_rate"])
+        self.assertIsNone(yamato["delta_win_rate"])
+        # Not NEW — the player has random history for this ship; the
+        # window just happened to be ranked-only.
+        self.assertFalse(yamato["is_new_ship"])
+
     def test_is_new_ship_flag_set_when_lifetime_snapshot_lags(self):
         """Real-world case: a player plays a ship recently, the rollup
         records period activity, but battles_json (refreshed less often)
