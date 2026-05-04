@@ -3466,16 +3466,9 @@ class ApiContractTests(TestCase):
             recent_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
         self.assertEqual(
             recent_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_tier"], "II")
-        self.assertIsNone(
-            recent_rows["LandingEfficiencyHidden"]["efficiency_rank_percentile"])
-        self.assertIsNone(
-            recent_rows["LandingEfficiencyHidden"]["efficiency_rank_tier"])
-        self.assertFalse(
-            recent_rows["LandingEfficiencyHidden"]["has_efficiency_rank_icon"])
-        self.assertIsNone(
-            recent_rows["LandingEfficiencyHidden"]["efficiency_rank_population_size"])
-        self.assertIsNone(
-            recent_rows["LandingEfficiencyHidden"]["efficiency_rank_updated_at"])
+        # Hidden players are excluded from the recent-players surface
+        # entirely — they opted out of public discovery.
+        self.assertNotIn("LandingEfficiencyHidden", recent_rows)
 
     def test_landing_players_reject_invalid_mode(self):
         response = self.client.get("/api/landing/players/?mode=invalid")

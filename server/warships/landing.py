@@ -118,7 +118,7 @@ LANDING_CLANS_BEST_CACHE_METADATA_KEY = 'landing:clans:best:v2:overall:meta'
 LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY = 'landing:clans:best:v2:overall:published'
 LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY = 'landing:clans:best:v2:overall:published:meta'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
-LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:active7d:v2'
+LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:active7d:v3'
 LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v13:namespace'
 LANDING_CLANS_DIRTY_KEY = 'landing:clans:dirty:v1'
 LANDING_PLAYERS_DIRTY_KEY = 'landing:players:dirty:v1'
@@ -2310,6 +2310,7 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
             mode=PlayerDailyShipStats.MODE_RANDOM,
             date__gte=lookback_floor,
             player__realm=realm,
+            player__is_hidden=False,
         )
         .values('player')
         .annotate(week_battles=Sum('battles'))
@@ -2325,7 +2326,7 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
     battle_counts = {r['player']: r['week_battles'] for r in rows}
     players_by_pk = {
         p.pk: p
-        for p in Player.objects.filter(pk__in=player_pks, realm=realm)
+        for p in Player.objects.filter(pk__in=player_pks, realm=realm, is_hidden=False)
         .exclude(name='')
         .select_related('explorer_summary')
         .only(*_LANDING_PLAYER_ROW_ONLY_FIELDS)

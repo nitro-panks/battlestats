@@ -1560,6 +1560,24 @@ class LandingRecentPlayersWeekActivityTests(TestCase):
         rows = _build_recent_players(realm='na')
         self.assertEqual([r['name'] for r in rows], ['plausible'])
 
+    def test_excludes_hidden_players(self):
+        # Players with hidden stats opt out of public discovery surfaces;
+        # the recent-players list must skip them even when they topped the
+        # 7-day battles ranking.
+        from warships.landing import _build_recent_players
+
+        today = timezone.now().date()
+        hidden = self._make_player(name='hidden_top', player_id=80)
+        hidden.is_hidden = True
+        hidden.save(update_fields=['is_hidden'])
+        visible = self._make_player(name='visible_player', player_id=81)
+
+        self._add_daily(hidden, date=today, battles=200)
+        self._add_daily(visible, date=today, battles=20)
+
+        rows = _build_recent_players(realm='na')
+        self.assertEqual([r['name'] for r in rows], ['visible_player'])
+
     def test_pvp_slack_keeps_borderline_rows_visible(self):
         # The cached pvp_battles can lag the rollup briefly. A small slack
         # window keeps real active players visible while still rejecting
