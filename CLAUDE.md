@@ -266,6 +266,10 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `patch` releases may skip the release gate.
 - `minor` and `major` releases run the curated release gate before bumping the version.
 
+### MANDATORY: Rebuild client after every version bump
+
+`NEXT_PUBLIC_APP_VERSION` is captured at frontend **build time**, so a `release.sh` bump alone leaves the production footer pinned to the previous version. After **every** version bump (patch, minor, or major), run `./client/deploy/deploy_to_droplet.sh battlestats.online` so the new version propagates to the web. This is non-negotiable — even backend-only changes must rebuild the client.
+
 ## Environment
 
 ### Server env files (in `server/`)
