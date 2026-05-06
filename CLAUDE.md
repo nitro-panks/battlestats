@@ -22,8 +22,7 @@ Battlestats is a World of Warships player and clan statistics platform. Live at 
 
 - **Frontend**: Next.js 16 (App Router) + React 18 + Tailwind CSS + D3 charts — in `client/`
 - **Backend**: Django 5 + DRF + Celery (RabbitMQ + Redis) + PostgreSQL — in `server/`
-- **Agentic system**: LangGraph + CrewAI workflows live in `server/warships/agentic/`, but the production droplet keeps this runtime opt-in via `DEPLOY_AGENTIC_RUNTIME=1` and `ENABLE_AGENTIC_RUNTIME=1`
-- **Agent personas & runbooks**: Role definitions, knowledge base, and operational runbooks — in `agents/`
+- **Agent personas & runbooks**: Role definitions, knowledge base, and operational runbooks — in `agents/` (these are markdown briefs for Claude Code subagents, not a runtime — the experimental in-process LangGraph/CrewAI runtime was retired in v1.12.1 / `f0fbbe3`)
 
 ## Common Commands
 
@@ -68,11 +67,10 @@ npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single release-gat
 ```bash
 ./client/deploy/deploy_to_droplet.sh battlestats.online   # Deploy frontend
 ./server/deploy/deploy_to_droplet.sh battlestats.online   # Deploy backend
-DEPLOY_AGENTIC_RUNTIME=1 ./server/deploy/deploy_to_droplet.sh battlestats.online  # Deploy backend with LangGraph/CrewAI extras
 ./umami/deploy/bootstrap_umami.sh battlestats.online       # Bootstrap/update Umami analytics
 ```
 
-Backend deploy defaults to the core site runtime only. Base dependencies install from `server/requirements.txt`; agentic extras install from `server/requirements-agentic.txt` only when `DEPLOY_AGENTIC_RUNTIME=1`.
+Backend dependencies install from `server/requirements.txt`. (The experimental `requirements-agentic.txt` and `DEPLOY_AGENTIC_RUNTIME=1` deploy path were removed in v1.12.1 / `f0fbbe3` along with the in-process agentic runtime.)
 
 ### Operations
 
@@ -111,7 +109,6 @@ Player enrichment runs on the droplet's Celery `background` worker via `warships
 - `/` — Landing page with search, featured players/clans, discovery charts
 - `/player/[playerName]` — Player detail (URL-encoded name, reload-safe)
 - `/clan/[clanSlug]` — Clan detail (`<clan_id>-<optional-slug>`, reload-safe)
-- `/trace` — Agentic workflow trace dashboard when `ENABLE_AGENTIC_RUNTIME=1`
 - `/umami` — Umami analytics dashboard (admin login required)
 
 ### API proxy
@@ -231,7 +228,7 @@ Project-scoped skills live in `.claude/skills/<name>/SKILL.md` and are auto-load
 - **`release-gate`** — "run the release gate", "ready to release". Runs the curated lean release gate (4 backend pytest files + frontend `npm test`) in parallel and reports pass/fail. Read-only.
 - **`runbook-author`** — "write a runbook for X", "document this incident". Creates a new runbook with the project's naming + structural conventions; pre-populates from conversation context. Stages, does not commit.
 - **`runbook-archive`** — "archive this runbook", "this runbook is superseded". `git mv`'s a runbook to `agents/runbooks/archive/` and updates `doc_registry.json` if registered. Stages, does not commit.
-- **`deploy-droplet`** — "deploy frontend", "deploy backend", "ship to prod". Runs the deploy script (with optional `DEPLOY_AGENTIC_RUNTIME=1`), then post-deploy verify + healthcheck. Mutates production.
+- **`deploy-droplet`** — "deploy frontend", "deploy backend", "ship to prod". Runs the deploy script, then post-deploy verify + healthcheck. Mutates production.
 - **`enrichment-status`** — "how's enrichment", "check the crawler". Runs `check_enrichment_crawler.sh` and interprets output against the enrichment + celery-zombie runbooks. Read-only.
 
 Rollout context and design rationale: `agents/runbooks/runbook-claude-skills-rollout-2026-04-26.md`.
@@ -293,14 +290,6 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `PLAYER_REFRESH_WARM_STALE_HOURS` — Warm-tier staleness threshold (default: `72`). Outside this window players drop to occasional refreshes.
 - `RANKED_REFRESH_INTERVAL_MINUTES` — Incremental ranked refresh cadence per realm (default: `120`)
 - `CELERY_BROKER_HEARTBEAT` — amqp heartbeat in seconds; `0` disables (default: `0`). The default 60s heartbeat is starved by long-running tasks (`incremental_player_refresh_task`), causing `BrokenPipeError on stopping Hub` and systemd worker restarts. We rely on TCP keepalive instead.
-- `ENABLE_AGENTIC_RUNTIME` — Enable `/trace` and optional agentic runtime paths (default: `0` on the droplet)
-- `BATTLESTATS_SLM_ENABLED` — Enable the optional SuperLocalMemory layer at the `_retrieve_guidance` seam (default: `0`)
-- `BATTLESTATS_SLM_MODE` — SuperLocalMemory operating mode: `A` (math-only, zero LLM, droplet-safe), `B` (Ollama), `C` (cloud LLM). Only Mode A is wired up today (default: `A`)
-- `BATTLESTATS_SLM_DB_PATH` — SQLite location for the SuperLocalMemory corpus index (default: `server/logs/agentic/slm/corpus.db`)
-- `BATTLESTATS_SLM_REINDEX_ON_BOOT` — Force a full reindex of the `agents/` corpus on next call (default: `0`)
-
-The agentic memory layer plugs into the LangGraph `_retrieve_guidance` node only: SuperLocalMemory reranks the deterministic `retrieve_doctrine_guidance` output against a semantic recall over the `agents/` markdown corpus, which is indexed lazily on first call. The layer is additive — if SLM is disabled or returns no hits, the existing behavior is byte-for-byte identical. See `agents/runbooks/runbook-memory-layering-2026-04-10.md`.
-
 - `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
 - `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)

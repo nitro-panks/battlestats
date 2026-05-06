@@ -75,7 +75,6 @@ npm test -- --runInBand
 ```bash
 ./client/deploy/deploy_to_droplet.sh battlestats.online
 ./server/deploy/deploy_to_droplet.sh battlestats.online
-DEPLOY_AGENTIC_RUNTIME=1 ./server/deploy/deploy_to_droplet.sh battlestats.online
 ```
 
 ## Documentation Map
@@ -115,42 +114,3 @@ Local service defaults:
 - backend: `http://localhost:8888`
 - RabbitMQ UI: `http://localhost:15672`
 
-## Agentic Entry Points
-
-### LangGraph
-
-```bash
-cd server
-python scripts/run_agent_graph.py "fix clan hydration bug" --json
-```
-
-For local agentic memory with SuperLocalMemory, set the env vars below before running the workflow. The first call lazily indexes the `agents/` markdown corpus into a local SQLite database, and subsequent calls only ingest files whose mtime has changed.
-
-```bash
-ENABLE_AGENTIC_RUNTIME=1
-BATTLESTATS_SLM_ENABLED=1
-```
-
-### CrewAI
-
-```bash
-cd server
-python scripts/run_agent_crew.py "plan CrewAI integration" --dry-run --json
-```
-
-### Hybrid router
-
-```bash
-cd server
-python scripts/run_agent_workflow.py "plan and implement a ranked player workflow" --engine hybrid --json
-```
-
-Use `agents/runbooks/runbook-agent-orchestrator-selection.md` and `agents/runbooks/runbook-langgraph-opinionated-workflow.md` for the current behavior and routing rules.
-
-When `BATTLESTATS_SLM_ENABLED=1`, the LangGraph `_retrieve_guidance` node reranks the deterministic doctrine matches against a SuperLocalMemory recall over the `agents/` corpus. Optional knobs:
-
-```bash
-BATTLESTATS_SLM_MODE=A
-BATTLESTATS_SLM_DB_PATH=server/logs/agentic/slm/corpus.db
-BATTLESTATS_SLM_REINDEX_ON_BOOT=0
-```
