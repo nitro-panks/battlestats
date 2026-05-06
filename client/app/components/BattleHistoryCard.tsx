@@ -568,8 +568,11 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // keep the card visible even with zero rows so the pill stays
     // reachable. Default-mode empty stays null to preserve the
     // pre-Phase-5 contract: cards never appear for players with no
-    // recent random battles.
-    if (!payload || (!hasBattles && mode === 'random')) {
+    // recent random battles. The `userPickedMode` guard makes this
+    // respect a user's explicit click — without it, clicking Random on
+    // a player whose only random battle is outside the lookback window
+    // (e.g. lil_boots in the 7d window) collapses the whole card.
+    if (!payload || (!hasBattles && mode === 'random' && !userPickedMode)) {
         return null;
     }
 
