@@ -135,14 +135,13 @@ describe('BattleHistoryCard', () => {
         expect(container).toBeEmptyDOMElement();
     });
 
-    test('passes period + windows + realm to the URL on initial daily fetch', () => {
+    test('initial fetch uses window=week (default) + realm', () => {
         mockFetchSharedJson.mockReturnValueOnce(new Promise(() => {}));
-        render(<BattleHistoryCard playerName="lil_boots" realm="eu" days={14} />);
+        render(<BattleHistoryCard playerName="lil_boots" realm="eu" />);
         expect(mockFetchSharedJson).toHaveBeenCalledTimes(1);
         const [url] = mockFetchSharedJson.mock.calls[0];
         expect(url).toContain('/api/player/lil_boots/battle-history/');
-        expect(url).toContain('period=daily');
-        expect(url).toContain('windows=14');
+        expect(url).toContain('window=week');
         expect(url).toContain('realm=eu');
     });
 
@@ -255,6 +254,29 @@ describe('BattleHistoryCard', () => {
         });
         const lastUrl = mockFetchSharedJson.mock.calls[initialCalls][0] as string;
         expect(lastUrl).toContain('mode=ranked');
+    });
+
+    test('clicking each window pill refetches with the matching ?window= param', async () => {
+        resolveWith(buildPayload({}));
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        for (const w of ['day', 'week', 'month', 'year'] as const) {
+            const beforeCount = mockFetchSharedJson.mock.calls.length;
+            resolveWith(buildPayload({}));
+            await act(async () => {
+                const labelMatch = new RegExp(
+                    `^${w[0].toUpperCase()}${w.slice(1)}$`,
+                );
+                screen.getByRole('button', { name: labelMatch }).click();
+            });
+            await waitFor(() => {
+                expect(mockFetchSharedJson.mock.calls.length).toBe(beforeCount + 1);
+            });
+            const lastUrl = mockFetchSharedJson.mock.calls[beforeCount][0] as string;
+            expect(lastUrl).toContain(`window=${w}`);
+        }
     });
 
     test('polls when X-Ranked-Observation-Pending is true on a ranked-mode response', async () => {

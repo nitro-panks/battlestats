@@ -1918,14 +1918,16 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_clamps_days_to_max(self):
+        # MAX_DAYS=365 since the year window picker shipped — was 30
+        # pre-2026-05-06.
         with mock.patch.dict(
             "os.environ",
             {"BATTLE_HISTORY_API_ENABLED": "1"},
             clear=False,
         ):
-            response = self.client.get("/api/player/api_test/battle-history/?days=999")
+            response = self.client.get("/api/player/api_test/battle-history/?days=9999")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["window_days"], 30)
+        self.assertEqual(response.json()["window_days"], 365)
 
     def test_lifetime_delta_per_ship_uses_battles_json(self):
         """Phase 4.6: per-ship lifetime + delta come from Player.battles_json."""
@@ -2449,6 +2451,151 @@ class BattleHistoryEndpointTests(TestCase):
         # Distinct cache keys → distinct totals served from cache.
         self.assertEqual(random_resp.json()["totals"]["battles"], 4)
         self.assertEqual(ranked_resp.json()["totals"]["battles"], 10)
+
+    def test_window_day_aggregates_battle_events_in_last_24h(self):
+        """The `day` window queries BattleEvent.detected_at directly (true
+        rolling 24h, hour-precise) rather than the calendar-bucketed daily
+        rollup. Events older than 24h must be excluded.
+        """
+        from warships.models import BattleEvent, BattleObservation
+        now = django_timezone.now()
+        # Two sentinel observations for the from/to FK requirement.
+        obs_a = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=30))
+        obs_b = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=23))
+        obs_c = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=2))
+        # Old event (30h ago) — outside window
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANDOM, battles_delta=10, wins_delta=3,
+            damage_delta=100_000, frags_delta=2,
+            from_observation=obs_a, to_observation=obs_b,
+        )
+        # Recent event (2h ago) — inside window
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANDOM, battles_delta=4, wins_delta=3,
+            damage_delta=80_000, frags_delta=5,
+            from_observation=obs_b, to_observation=obs_c,
+        )
+        # Override detected_at (auto_now_add otherwise pins them to now)
+        BattleEvent.objects.filter(
+            from_observation=obs_a, to_observation=obs_b,
+        ).update(detected_at=now - timedelta(hours=30))
+        BattleEvent.objects.filter(
+            from_observation=obs_b, to_observation=obs_c,
+        ).update(detected_at=now - timedelta(hours=2))
+
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?window=day&mode=random",
+            )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["period"], "day")
+        # Only the 2h-old event counts: battles=4, wins=3, frags=5.
+        self.assertEqual(body["totals"]["battles"], 4)
+        self.assertEqual(body["totals"]["wins"], 3)
+        self.assertEqual(body["totals"]["frags"], 5)
+        self.assertEqual(len(body["by_ship"]), 1)
+        self.assertEqual(body["by_ship"][0]["ship_id"], 42)
+        self.assertEqual(body["by_ship"][0]["battles"], 4)
+
+    def test_window_day_separates_random_and_ranked(self):
+        """In the `day` window, mode=random/ranked filters by BattleEvent.mode
+        and combined returns both summed.
+        """
+        from warships.models import BattleEvent, BattleObservation
+        now = django_timezone.now()
+        oa = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=3))
+        ob = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=2))
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANDOM, battles_delta=4, wins_delta=3,
+            damage_delta=80_000, frags_delta=2,
+            from_observation=oa, to_observation=ob,
+        )
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANKED, season_id=21,
+            battles_delta=10, wins_delta=7, damage_delta=400_000, frags_delta=8,
+            from_observation=oa, to_observation=ob,
+        )
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            for mode, expected in [("random", 4), ("ranked", 10), ("combined", 14)]:
+                r = self.client.get(
+                    f"/api/player/api_test/battle-history/?window=day&mode={mode}",
+                )
+                self.assertEqual(r.status_code, 200, f"mode={mode}")
+                self.assertEqual(
+                    r.json()["totals"]["battles"], expected,
+                    f"mode={mode} battles mismatch",
+                )
+
+    def test_window_month_returns_30_days_of_daily_rollups(self):
+        """The `month` window reads PlayerDailyShipStats with windows=30.
+        Rows older than 30 days must be excluded.
+        """
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=5, wins=3,
+        )
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today - timedelta(days=29),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=2,
+        )
+        # 31 days old — outside the 30-day window
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today - timedelta(days=31),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=99, wins=99,
+        )
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?window=month&mode=random",
+            )
+        body = r.json()
+        # Includes the 0d and 29d rows; excludes the 31d row.
+        self.assertEqual(body["totals"]["battles"], 9)
+        self.assertEqual(body["totals"]["wins"], 5)
+
+    def test_window_year_does_not_trip_legacy_30d_cap(self):
+        """Pre-fix `BATTLE_HISTORY_MAX_DAYS=30` would have capped a 365-day
+        request at 30. The `year` window must request 365 windows fully.
+        """
+        today = django_timezone.now().date()
+        # Row 364 days old — inside year window, outside any pre-fix cap.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today - timedelta(days=364),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=2, wins=1,
+        )
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=3, wins=2,
+        )
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?window=year&mode=random",
+            )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body["totals"]["battles"], 5)
+        self.assertEqual(body["totals"]["wins"], 3)
 
     def test_pending_header_set_when_ranked_observation_refresh_in_flight(self):
         from django.core.cache import cache

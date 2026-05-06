@@ -404,11 +404,22 @@ const buildBattlesPerDaySeries = (days: BattleHistoryByDay[]): number[] => (
 );
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
-const PERIOD_DEFAULT_WINDOWS: Record<Period, number> = {
-    daily: 7, weekly: 12, monthly: 12, yearly: 5,
+
+type BattleHistoryWindow = 'day' | 'week' | 'month' | 'year';
+const WINDOW_LABEL: Record<BattleHistoryWindow, string> = {
+    day: 'Day', week: 'Week', month: 'Month', year: 'Year',
 };
-const PERIOD_LABEL: Record<Period, string> = {
-    daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly',
+const WINDOW_TITLE: Record<BattleHistoryWindow, string> = {
+    day: 'Last 24 hours from now (rolling, not today\'s calendar date)',
+    week: 'Last 7 days',
+    month: 'Last 30 days',
+    year: 'Last 365 days',
+};
+const WINDOW_HEADER: Record<BattleHistoryWindow, string> = {
+    day: 'Last 24 hours',
+    week: 'Last 7 days',
+    month: 'Last 30 days',
+    year: 'Last 365 days',
 };
 
 const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
@@ -419,7 +430,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
     const [error, setError] = useState<Error | null>(null);
     const [loading, setLoading] = useState(true);
-    const [period, setPeriod] = useState<Period>('daily');
+    const [window, setWindow] = useState<BattleHistoryWindow>('week');
+    const [userPickedWindow, setUserPickedWindow] = useState(false);
     const [mode, setMode] = useState<Mode>('random');
     const [userPickedMode, setUserPickedMode] = useState(false);
     const { theme } = useTheme();
@@ -441,18 +453,15 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         let pollTimer: ReturnType<typeof setTimeout> | null = null;
         let pendingAttempts = 0;
         setLoading(true);
-        const windows = period === 'daily'
-            ? days
-            : PERIOD_DEFAULT_WINDOWS[period];
 
         const fetchOnce = (cacheBust: number = 0) => {
             const url = `/api/player/${encodeURIComponent(playerName)}/battle-history/`
-                + `?period=${period}&windows=${windows}&mode=${mode}`
+                + `?window=${window}&mode=${mode}`
                 + `&realm=${encodeURIComponent(realm)}`;
             fetchSharedJson<BattleHistoryPayload>(url, {
-                label: `BattleHistoryCard:${period}:${mode}`,
+                label: `BattleHistoryCard:${window}:${mode}`,
                 ttlMs: 60_000,
-                cacheKey: `battle-history:${playerName}:${realm}:${period}:${windows}:${mode}:${cacheBust}`,
+                cacheKey: `battle-history:${playerName}:${realm}:${window}:${mode}:${cacheBust}`,
                 responseHeaders: ['X-Ranked-Observation-Pending'],
             })
                 .then(({ data, headers }) => {
@@ -488,7 +497,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             cancelled = true;
             if (pollTimer !== null) clearTimeout(pollTimer);
         };
-    }, [playerName, realm, days, period, mode]);
+    }, [playerName, realm, window, mode]);
 
     // Auto-select the right default mode based on what the player actually
     // has data in. Skipped once the user has explicitly clicked a pill.
@@ -564,15 +573,17 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         : hasRanked
             ? ['ranked']
             : [];
-    // When the user has actively switched off the default `random` mode,
-    // keep the card visible even with zero rows so the pill stays
-    // reachable. Default-mode empty stays null to preserve the
-    // pre-Phase-5 contract: cards never appear for players with no
-    // recent random battles. The `userPickedMode` guard makes this
-    // respect a user's explicit click — without it, clicking Random on
-    // a player whose only random battle is outside the lookback window
-    // (e.g. lil_boots in the 7d window) collapses the whole card.
-    if (!payload || (!hasBattles && mode === 'random' && !userPickedMode)) {
+    // Hide the card only when the user is at the implicit defaults
+    // (mode=random, window=week) AND there's no data — preserves the
+    // pre-Phase-5 contract that the card never appears for players with
+    // no recent random battles in the default 7d window. Any explicit
+    // user pick (different mode or different window) keeps the card
+    // visible so the pill row stays reachable.
+    if (!payload || (
+        !hasBattles
+        && mode === 'random' && !userPickedMode
+        && window === 'week' && !userPickedWindow
+    )) {
         return null;
     }
 
@@ -585,17 +596,33 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             <header className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex flex-wrap items-baseline gap-3">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                        {period === 'daily'
-                            ? `Last ${payload.windows ?? payload.window_days} days`
-                            : `Last ${payload.windows} ${period === 'weekly' ? 'weeks'
-                                : period === 'monthly' ? 'months' : 'years'}`}
+                        {WINDOW_HEADER[window]}
                     </h2>
-                    {/* Period pill row hidden — only Daily exists today
-                        and a single-option pill is just visual noise.
-                        Weekly/monthly/yearly will reappear here when the
-                        period rollups ship. To restore: render the
-                        ['daily'] map back as a pill row, or expand to
-                        ['daily','weekly','monthly','yearly']. */}
+                    <div
+                        className="flex items-center gap-1 text-xs"
+                        role="group"
+                        aria-label="Lookback window"
+                    >
+                        {(['day', 'week', 'month', 'year'] as const).map((w) => (
+                            <button
+                                key={w}
+                                type="button"
+                                onClick={() => {
+                                    setWindow(w);
+                                    setUserPickedWindow(true);
+                                }}
+                                aria-pressed={window === w}
+                                title={WINDOW_TITLE[w]}
+                                className={`rounded px-2 py-0.5 transition-colors ${
+                                    window === w
+                                        ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
+                                        : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
+                                }`}
+                            >
+                                {WINDOW_LABEL[w]}
+                            </button>
+                        ))}
+                    </div>
                     {visibleModes.length >= 2 && (
                         <div
                             className="flex items-center gap-1 text-xs"

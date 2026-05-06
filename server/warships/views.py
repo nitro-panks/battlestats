@@ -494,17 +494,31 @@ def player_summary(request, player_id: str) -> Response:
 
 
 BATTLE_HISTORY_DEFAULT_DAYS = 7
-BATTLE_HISTORY_MAX_DAYS = 30
+BATTLE_HISTORY_MAX_DAYS = 365
 BATTLE_HISTORY_CACHE_TTL = 5 * 60  # 5 minutes
 
 # Phase 6: period switcher. Each period maps to a backing model + a default
 # window count + a cap.
 BATTLE_HISTORY_PERIODS = {
-    "daily": {"default_windows": 7, "max_windows": 30},
+    "daily": {"default_windows": 7, "max_windows": 365},
     "weekly": {"default_windows": 12, "max_windows": 52},
     "monthly": {"default_windows": 12, "max_windows": 36},
     "yearly": {"default_windows": 5, "max_windows": 20},
 }
+
+# Rolling-window picker (`?window=...`) — the user-facing API the frontend
+# pill row drives. Each entry maps to a (period, windows) pair the
+# existing daily-rollup query path can handle, except `day` which routes
+# through `_build_battle_history_payload_24h()` (BattleEvent-direct,
+# hour-precise — bypasses the calendar-bucketed daily rollup so the
+# 24h window is true-rolling rather than "today's calendar date").
+BATTLE_HISTORY_WINDOWS = {
+    "day":   {"period": "daily", "windows": 1, "hours": 24},
+    "week":  {"period": "daily", "windows": 7},
+    "month": {"period": "daily", "windows": 30},
+    "year":  {"period": "daily", "windows": 365},
+}
+BATTLE_HISTORY_DEFAULT_WINDOW = "week"
 
 # Phase 4 of the ranked rollout (runbook-ranked-battle-history-rollout-2026-05-02.md).
 # `random` (default) preserves the pre-ranked contract exactly. `ranked`
@@ -518,13 +532,13 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    # v7: ranked-only-in-period rows now suppress lifetime/delta even when
-    # `battles_json` has random history for the ship — pre-fix these rows
-    # rendered a structurally-zero Δ0.0% (period_random=0 → prior_wr ==
-    # lifetime_wr by construction), which read as misleading data instead
-    # of the RANKED badge.
+    # v8: rolling-window picker. The `day` window routes through a
+    # BattleEvent-direct path (24h rolling, hour-precise) and namespaces
+    # itself as `period=day` so it doesn't collide with the daily-rollup
+    # cache from week/month/year (which all use period=daily with
+    # windows=7/30/365).
     return realm_cache_key(
-        realm, f"battle-history:v7:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v8:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -573,6 +587,224 @@ def _battle_history_period_table(period: str):
         "monthly": PlayerMonthlyShipStats,
         "yearly": PlayerYearlyShipStats,
     }[period]
+
+
+def _build_battle_history_payload_24h(player, mode: str) -> dict:
+    """Build the battle-history payload for the rolling 24h `day` window.
+
+    The calendar-bucketed daily rollup (`PlayerDailyShipStats.date`) can't
+    serve a true rolling 24h view — a `date >= today` filter only catches
+    today's row, missing the 12+h of yesterday that's still inside the
+    window. So this path queries `BattleEvent.detected_at` directly,
+    aggregates per (ship_id, mode) in Python, and emits the same payload
+    shape `_build_battle_history_payload()` produces.
+    """
+    from warships.models import (
+        BattleEvent, PlayerDailyShipStats as _PDSS, Ship,
+    )
+
+    now = timezone.now()
+    since = now - timedelta(hours=24)
+
+    available_modes = list(
+        _PDSS.objects.filter(player=player)
+        .values_list("mode", flat=True).distinct().order_by("mode")
+    )
+
+    qs = BattleEvent.objects.filter(player=player, detected_at__gte=since)
+    if mode in ("random", "ranked"):
+        qs = qs.filter(mode=mode)
+    rows = list(qs.order_by("detected_at", "ship_id"))
+
+    lifetime_by_ship: dict = {}
+    for entry in (player.battles_json or []):
+        if not isinstance(entry, dict):
+            continue
+        ship_id = entry.get("ship_id")
+        if ship_id is None:
+            continue
+        try:
+            lifetime_by_ship[int(ship_id)] = {
+                "battles": int(entry.get("pvp_battles", 0) or 0),
+                "wins": int(entry.get("wins", 0) or 0),
+                "losses": int(entry.get("losses", 0) or 0),
+            }
+        except (TypeError, ValueError):
+            continue
+
+    totals = {
+        "battles": 0, "wins": 0, "losses": 0,
+        "damage": 0, "frags": 0, "xp": 0, "planes_killed": 0,
+        "survived_battles": 0,
+    }
+    totals_random_battles = 0
+    totals_random_wins = 0
+    by_ship_acc: dict = {}
+
+    ship_ids = {row.ship_id for row in rows}
+    ship_meta = {
+        s.ship_id: s for s in Ship.objects.filter(ship_id__in=ship_ids)
+    }
+
+    for row in rows:
+        b = row.battles_delta or 0
+        w = row.wins_delta or 0
+        l = row.losses_delta or 0
+        f = row.frags_delta or 0
+        dmg = row.damage_delta or 0
+        xp = row.xp_delta or 0
+        planes = row.planes_killed_delta or 0
+        survived_inc = 1 if row.survived else 0
+
+        totals["battles"] += b
+        totals["wins"] += w
+        totals["losses"] += l
+        totals["damage"] += dmg
+        totals["frags"] += f
+        totals["xp"] += xp
+        totals["planes_killed"] += planes
+        totals["survived_battles"] += survived_inc
+        if row.mode == _PDSS.MODE_RANDOM:
+            totals_random_battles += b
+            totals_random_wins += w
+
+        ship_entry = by_ship_acc.setdefault(row.ship_id, {
+            "ship_id": row.ship_id,
+            "ship_name": row.ship_name or (ship_meta.get(row.ship_id).name
+                                           if ship_meta.get(row.ship_id)
+                                           else ""),
+            "ship_tier": ship_meta.get(row.ship_id).tier
+            if ship_meta.get(row.ship_id) else None,
+            "ship_type": ship_meta.get(row.ship_id).ship_type
+            if ship_meta.get(row.ship_id) else None,
+            "battles": 0, "wins": 0, "losses": 0, "frags": 0,
+            "damage": 0, "xp": 0, "planes_killed": 0,
+            "survived_battles": 0,
+            "_random_battles": 0, "_random_wins": 0,
+        })
+        ship_entry["battles"] += b
+        ship_entry["wins"] += w
+        ship_entry["losses"] += l
+        ship_entry["frags"] += f
+        ship_entry["damage"] += dmg
+        ship_entry["xp"] += xp
+        ship_entry["planes_killed"] += planes
+        ship_entry["survived_battles"] += survived_inc
+        if row.mode == _PDSS.MODE_RANDOM:
+            ship_entry["_random_battles"] += b
+            ship_entry["_random_wins"] += w
+
+    win_rate = round(
+        100.0 * totals["wins"] / totals["battles"], 1
+    ) if totals["battles"] else 0.0
+    avg_damage = int(round(totals["damage"] / totals["battles"])) \
+        if totals["battles"] else 0
+    survival_rate = round(
+        100.0 * totals["survived_battles"] / totals["battles"], 1
+    ) if totals["battles"] else 0.0
+
+    by_ship = sorted(by_ship_acc.values(),
+                     key=lambda s: s["battles"], reverse=True)
+    for s in by_ship:
+        s["win_rate"] = round(
+            100.0 * s["wins"] / s["battles"], 1) if s["battles"] else 0.0
+        s["avg_damage"] = int(round(s["damage"] / s["battles"])) \
+            if s["battles"] else 0
+        lifetime = (
+            lifetime_by_ship.get(s["ship_id"])
+            if mode in ("random", "combined")
+            else None
+        )
+        period_random_battles = s.pop("_random_battles", 0)
+        period_random_wins = s.pop("_random_wins", 0)
+        s["is_ranked_only_period"] = (
+            mode == "combined"
+            and s["battles"] > 0
+            and period_random_battles == 0
+        )
+        if (lifetime
+                and lifetime["battles"] > 0
+                and period_random_battles > 0
+                and lifetime["battles"] >= period_random_battles):
+            prior_battles = lifetime["battles"] - period_random_battles
+            prior_wins = lifetime["wins"] - period_random_wins
+            lifetime_wr_now = round(
+                100.0 * lifetime["wins"] / lifetime["battles"], 1)
+            if prior_battles < _MIN_PRIOR_BATTLES_FOR_DELTA:
+                s["delta_win_rate"] = None
+                s["is_new_ship"] = True
+                if prior_battles == 0:
+                    s["lifetime_battles"] = None
+                    s["lifetime_win_rate"] = None
+                else:
+                    s["lifetime_battles"] = lifetime["battles"]
+                    s["lifetime_win_rate"] = lifetime_wr_now
+            else:
+                prior_wr = round(100.0 * prior_wins / prior_battles, 1)
+                s["lifetime_battles"] = lifetime["battles"]
+                s["lifetime_win_rate"] = lifetime_wr_now
+                s["delta_win_rate"] = round(lifetime_wr_now - prior_wr, 1)
+                s["is_new_ship"] = False
+        else:
+            s["lifetime_battles"] = None
+            s["lifetime_win_rate"] = None
+            s["delta_win_rate"] = None
+            s["is_new_ship"] = (
+                mode in ("random", "combined") and period_random_battles > 0
+            )
+
+    # Single 24h-aggregate bar in by_day. The frontend chart treats this
+    # as one wide bar — a per-hour breakdown is a separate runbook.
+    by_day = ([{
+        "date": now.date().isoformat(),
+        "battles": totals["battles"],
+        "wins": totals["wins"],
+        "damage": totals["damage"],
+        "frags": totals["frags"],
+    }] if totals["battles"] else [])
+
+    if mode in ("random", "combined"):
+        lifetime_battles_overall = int(player.pvp_battles or 0)
+        lifetime_wins_overall = int(player.pvp_wins or 0)
+    else:
+        lifetime_battles_overall = 0
+        lifetime_wins_overall = 0
+    lifetime_overall_wr = round(
+        100.0 * lifetime_wins_overall / lifetime_battles_overall, 1
+    ) if lifetime_battles_overall else None
+    if (lifetime_battles_overall >= totals_random_battles
+            and totals_random_battles > 0):
+        prior_battles_overall = lifetime_battles_overall - totals_random_battles
+        prior_wins_overall = lifetime_wins_overall - totals_random_wins
+        prior_overall_wr = round(
+            100.0 * prior_wins_overall / prior_battles_overall, 1
+        ) if prior_battles_overall > 0 else None
+        delta_overall_wr = round(
+            lifetime_overall_wr - prior_overall_wr, 1
+        ) if prior_overall_wr is not None and lifetime_overall_wr is not None else None
+    else:
+        delta_overall_wr = None
+
+    return {
+        "period": "day",
+        "windows": 1,
+        "window_days": None,
+        "window_hours": 24,
+        "mode": mode,
+        "available_modes": available_modes,
+        "as_of": now.isoformat(),
+        "totals": {
+            **totals,
+            "win_rate": win_rate,
+            "avg_damage": avg_damage,
+            "survival_rate": survival_rate,
+            "lifetime_battles": lifetime_battles_overall or None,
+            "lifetime_win_rate": lifetime_overall_wr,
+            "delta_win_rate": delta_overall_wr,
+        },
+        "by_ship": by_ship,
+        "by_day": by_day,
+    }
 
 
 def _build_battle_history_payload(player, period: str, windows: int,
@@ -877,26 +1109,40 @@ def battle_history(request, player_name: str) -> Response:
         return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
     realm = _get_realm(request)
-    period = request.query_params.get("period", "daily")
-    if period not in BATTLE_HISTORY_PERIODS:
-        period = "daily"
-    period_cfg = BATTLE_HISTORY_PERIODS[period]
 
     mode = request.query_params.get("mode", BATTLE_HISTORY_DEFAULT_MODE)
     if mode not in BATTLE_HISTORY_MODES:
         mode = BATTLE_HISTORY_DEFAULT_MODE
 
-    # Accept the legacy `days` param when period=daily for back-compat;
-    # otherwise prefer `windows`.
-    raw_windows = request.query_params.get(
-        "windows",
-        request.query_params.get("days") if period == "daily" else None,
-    )
-    try:
-        windows = int(raw_windows) if raw_windows is not None else period_cfg["default_windows"]
-    except (TypeError, ValueError):
-        windows = period_cfg["default_windows"]
-    windows = max(1, min(period_cfg["max_windows"], windows))
+    # `?window=day|week|month|year` is the user-facing API; `?period=` +
+    # `?windows=` is the legacy escape hatch (kept for any external caller
+    # — frontend has stopped passing these). When `window` is present it
+    # wins.
+    window_arg = request.query_params.get("window")
+    if window_arg in BATTLE_HISTORY_WINDOWS:
+        cfg = BATTLE_HISTORY_WINDOWS[window_arg]
+        period = cfg["period"]
+        windows = cfg["windows"]
+        is_24h_window = "hours" in cfg
+        cache_period_key = window_arg if is_24h_window else period
+    else:
+        period = request.query_params.get("period", "daily")
+        if period not in BATTLE_HISTORY_PERIODS:
+            period = "daily"
+        period_cfg = BATTLE_HISTORY_PERIODS[period]
+        # Accept the legacy `days` param when period=daily for back-compat;
+        # otherwise prefer `windows`.
+        raw_windows = request.query_params.get(
+            "windows",
+            request.query_params.get("days") if period == "daily" else None,
+        )
+        try:
+            windows = int(raw_windows) if raw_windows is not None else period_cfg["default_windows"]
+        except (TypeError, ValueError):
+            windows = period_cfg["default_windows"]
+        windows = max(1, min(period_cfg["max_windows"], windows))
+        is_24h_window = False
+        cache_period_key = period
 
     player = (
         Player.objects
@@ -909,13 +1155,16 @@ def battle_history(request, player_name: str) -> Response:
                         status=status.HTTP_404_NOT_FOUND)
 
     cache_key = _battle_history_cache_key(
-        realm, player.name, period, windows, mode,
+        realm, player.name, cache_period_key, windows, mode,
     )
     cached = cache.get(cache_key)
     if cached is not None:
         response = Response(cached)
     else:
-        payload = _build_battle_history_payload(player, period, windows, mode)
+        if is_24h_window:
+            payload = _build_battle_history_payload_24h(player, mode)
+        else:
+            payload = _build_battle_history_payload(player, period, windows, mode)
         cache.set(cache_key, payload, BATTLE_HISTORY_CACHE_TTL)
         response = Response(payload)
 
