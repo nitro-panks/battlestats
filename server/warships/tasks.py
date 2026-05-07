@@ -945,11 +945,13 @@ def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REAL
 @app.task(bind=True, **TASK_OPTS)
 def warm_landing_recent_players_task(self, realm=DEFAULT_REALM):
     # Rebuilds the landing "recent players" rollup (top 7-day random-battles
-    # leaders) and atomically overwrites the durable Redis payload. Reads
-    # never block on this — `get_landing_recent_players_payload` always
-    # returns the previously-published payload until this task's `cache.set`
-    # completes. Scheduled every 3h via `recent-players-warmer-{realm}`.
-    from warships.landing import get_landing_recent_players_payload
+    # leaders) and writes BOTH the durable DB snapshot
+    # (`LandingRecentPlayersSnapshot`) and the Redis cache. Reads never
+    # block on this — they hit Redis (Tier 1), fall back to the DB
+    # snapshot (Tier 2) if Redis was evicted, and only run an inline
+    # rebuild (Tier 3) when both stores are cold. Scheduled every 3h via
+    # `recent-players-warmer-{realm}`.
+    from warships.landing import materialize_landing_recent_players_snapshot
 
     logger.info("Starting warm_landing_recent_players_task realm=%s", realm)
 
@@ -961,9 +963,13 @@ def warm_landing_recent_players_task(self, realm=DEFAULT_REALM):
         return {"status": "skipped", "reason": "already-running"}
 
     try:
-        payload = get_landing_recent_players_payload(
-            force_refresh=True, realm=realm)
-        result = {"status": "completed", "rows": len(payload), "realm": realm}
+        meta = materialize_landing_recent_players_snapshot(realm=realm)
+        result = {
+            "status": "completed",
+            "rows": meta["count"],
+            "realm": realm,
+            "generated_at": meta["generated_at"],
+        }
         logger.info("Finished warm_landing_recent_players_task: %s", result)
         return result
     finally:

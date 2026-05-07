@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from warships.data import calculate_tier_filtered_pvp_record, get_clan_battle_activity_badge, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
 from warships.data_support import clamp
-from warships.models import Clan, DEFAULT_REALM, LandingPlayerBestSnapshot, Player, realm_cache_key
+from warships.models import Clan, DEFAULT_REALM, LandingPlayerBestSnapshot, LandingRecentPlayersSnapshot, Player, realm_cache_key
 from warships.visit_analytics import get_top_entities
 
 
@@ -2363,19 +2363,88 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
     return payload
 
 
+def _get_landing_recent_players_snapshot(
+    realm: str = DEFAULT_REALM,
+) -> LandingRecentPlayersSnapshot | None:
+    """Read the durable Tier-2 fallback row for the recent-players surface."""
+    return (
+        LandingRecentPlayersSnapshot.objects
+        .filter(realm=realm)
+        .only('payload_json', 'generated_at')
+        .first()
+    )
+
+
+def materialize_landing_recent_players_snapshot(realm: str = DEFAULT_REALM) -> dict:
+    """Rebuild the recent-players payload from PlayerDailyShipStats and write
+    it to BOTH the durable DB snapshot AND the Redis cache.
+
+    Write order is DB-first, Redis-second by design — if the Redis write
+    fails after the DB write succeeds, the next read still finds Tier 2
+    intact. The reverse ordering would silently degrade subsequent
+    eviction-triggered reads to Tier 3 (slow inline rebuild) until the
+    next warmer tick.
+
+    Returns metadata + the freshly-built payload so `force_refresh=True`
+    callers can avoid an immediate re-read.
+    """
+    # Normalize datetimes → ISO strings before the JSONField write
+    # (mirrors `materialize_landing_player_best_snapshot`). Without this,
+    # rows like `efficiency_rank_updated_at` blow up the JSON encoder.
+    payload = _normalize_landing_player_snapshot_payload(
+        _build_recent_players(realm=realm)
+    )
+    snapshot, _created = LandingRecentPlayersSnapshot.objects.update_or_create(
+        realm=realm,
+        defaults={'payload_json': payload},
+    )
+    cache.set(
+        realm_cache_key(realm, LANDING_RECENT_PLAYERS_CACHE_KEY),
+        payload,
+        LANDING_RECENT_PLAYERS_CACHE_TTL,
+    )
+    return {
+        'realm': realm,
+        'count': len(payload),
+        'generated_at': snapshot.generated_at.isoformat(),
+        'payload': payload,
+    }
+
+
 def get_landing_recent_players_payload(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict]:
-    # Pure cache read by default — the 7-day rollup is rebuilt every 3h by
-    # `warm_landing_recent_players_task`, so reads never block on a rebuild.
-    # `force_refresh=True` is used by the periodic warmer (and the broader
-    # landing warm at startup) to recompute and re-publish the cache.
+    """3-tier fallback for the landing recent-players surface:
+
+      Tier 1: Redis cache (`cache.get`) — steady-state ~5 ms.
+      Tier 2: DB snapshot (`LandingRecentPlayersSnapshot`) — Redis evicted
+              but the durable copy is intact (~10 ms). Re-warms Redis on
+              the way out.
+      Tier 3: Inline rebuild (`_build_recent_players`) — both stores
+              empty (cold start, post-deploy first touch). Logs a warning
+              because steady-state should never hit this.
+
+    `force_refresh=True` (used by the periodic warmer) bypasses Tiers 1+2
+    and runs the materializer, which writes BOTH stores.
+    """
     cache_key = realm_cache_key(realm, LANDING_RECENT_PLAYERS_CACHE_KEY)
-    if not force_refresh:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-    payload = _build_recent_players(realm=realm)
-    cache.set(cache_key, payload, LANDING_RECENT_PLAYERS_CACHE_TTL)
-    return payload
+    if force_refresh:
+        return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    snapshot = _get_landing_recent_players_snapshot(realm=realm)
+    if snapshot is not None:
+        # Re-warm Redis with the same TTL=None as the materializer so the
+        # next reader hits Tier 1.
+        cache.set(cache_key, snapshot.payload_json,
+                  LANDING_RECENT_PLAYERS_CACHE_TTL)
+        # Defensive copy — JSONField returns the live model attribute
+        # reference; downstream callers must not mutate it.
+        return list(snapshot.payload_json)
+    logger.warning(
+        "recent_players: cold-start fallback to inline rebuild (realm=%s)",
+        realm,
+    )
+    return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
 
 
 def warm_landing_page_content(force_refresh: bool = False, include_recent: bool = True, realm: str = DEFAULT_REALM) -> dict:

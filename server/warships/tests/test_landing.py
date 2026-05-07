@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, score_best_clans, summarize_clan_battle_activity_badge, warm_landing_best_entity_caches
 from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_LOOKBACK_DAYS, _calculate_landing_best_score, _ranked_quality_score, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_cache_metadata_key, landing_best_clan_published_cache_key, landing_best_clan_published_metadata_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
-from warships.models import Clan, LandingPlayerBestSnapshot, Player, PlayerExplorerSummary, realm_cache_key
+from warships.models import Clan, LandingPlayerBestSnapshot, LandingRecentPlayersSnapshot, Player, PlayerExplorerSummary, realm_cache_key
 
 
 class LandingHelperTests(TestCase):
@@ -1656,6 +1656,116 @@ class LandingRecentPlayersRecencyFilterTests(TestCase):
 
         rows = _build_recent_players(realm='na')
         self.assertEqual([r['name'] for r in rows], ['borderline'])
+
+
+class LandingRecentPlayersSnapshotTests(TestCase):
+    """Three-tier read fallback for the landing recent-players surface:
+    Redis → LandingRecentPlayersSnapshot → inline rebuild. Eviction-
+    resilience pattern mirrors LandingPlayerBestSnapshot.
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    def test_redis_hit_does_not_query_db_or_rebuild(self):
+        # Pre-populate Redis. The DB snapshot does NOT exist. A read should
+        # serve from Redis and never touch the DB or the inline builder.
+        cache.set(
+            realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY),
+            [{'name': 'cached-row'}],
+            None,
+        )
+        with patch('warships.landing._build_recent_players') as mock_build, \
+                patch('warships.landing._get_landing_recent_players_snapshot') as mock_snapshot:
+            from warships.landing import get_landing_recent_players_payload
+            payload = get_landing_recent_players_payload(realm='na')
+
+        self.assertEqual(payload, [{'name': 'cached-row'}])
+        mock_build.assert_not_called()
+        mock_snapshot.assert_not_called()
+
+    def test_redis_miss_falls_back_to_db_snapshot_and_rewarms_redis(self):
+        # Redis is empty; DB snapshot has data. Read should serve the DB
+        # snapshot AND re-warm Redis on the way out so the next reader
+        # hits Tier 1.
+        sentinel = [{'name': 'db-snapshot-row', 'week_battles': 42}]
+        LandingRecentPlayersSnapshot.objects.create(
+            realm='na', payload_json=sentinel,
+        )
+        cache.delete(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY))
+
+        with patch('warships.landing._build_recent_players') as mock_build:
+            from warships.landing import get_landing_recent_players_payload
+            payload = get_landing_recent_players_payload(realm='na')
+
+        self.assertEqual(payload, sentinel)
+        mock_build.assert_not_called()
+        # Redis re-warmed with the DB payload.
+        self.assertEqual(
+            cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)),
+            sentinel,
+        )
+
+    def test_cold_start_materializes_inline_and_writes_both_stores(self):
+        # Both stores empty (post-deploy first touch). Read should rebuild
+        # inline AND populate both Redis and the DB snapshot so subsequent
+        # reads hit Tier 1/2.
+        cache.clear()
+        self.assertFalse(LandingRecentPlayersSnapshot.objects.filter(realm='na').exists())
+
+        fresh = [{'name': 'fresh-build', 'week_battles': 99}]
+        with patch('warships.landing._build_recent_players',
+                   return_value=fresh) as mock_build:
+            from warships.landing import get_landing_recent_players_payload
+            payload = get_landing_recent_players_payload(realm='na')
+
+        self.assertEqual(payload, fresh)
+        mock_build.assert_called_once_with(realm='na')
+        # DB row created.
+        snap = LandingRecentPlayersSnapshot.objects.get(realm='na')
+        self.assertEqual(snap.payload_json, fresh)
+        # Redis populated.
+        self.assertEqual(
+            cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)),
+            fresh,
+        )
+
+    def test_warmer_writes_both_redis_and_db(self):
+        from warships.tasks import warm_landing_recent_players_task
+
+        warm_payload = [{'name': 'warmer-row', 'week_battles': 77}]
+        with patch('warships.landing._build_recent_players',
+                   return_value=warm_payload):
+            result = warm_landing_recent_players_task(realm='na')
+
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(result['rows'], 1)
+        # DB row materialized by the warmer.
+        snap = LandingRecentPlayersSnapshot.objects.get(realm='na')
+        self.assertEqual(snap.payload_json, warm_payload)
+        # Redis populated.
+        self.assertEqual(
+            cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)),
+            warm_payload,
+        )
+
+    def test_realm_isolation_per_snapshot_row(self):
+        # A snapshot for NA must not satisfy an EU read.
+        LandingRecentPlayersSnapshot.objects.create(
+            realm='na', payload_json=[{'name': 'na-only'}],
+        )
+
+        with patch('warships.landing._build_recent_players',
+                   return_value=[{'name': 'eu-built'}]) as mock_build:
+            from warships.landing import get_landing_recent_players_payload
+            na_payload = get_landing_recent_players_payload(realm='na')
+            eu_payload = get_landing_recent_players_payload(realm='eu')
+
+        self.assertEqual(na_payload, [{'name': 'na-only'}])
+        self.assertEqual(eu_payload, [{'name': 'eu-built'}])
+        # Inline builder fired exactly once — for EU.
+        self.assertEqual(mock_build.call_count, 1)
+        mock_build.assert_called_with(realm='eu')
 
 
 class QueueLandingPageWarmGateTests(TestCase):

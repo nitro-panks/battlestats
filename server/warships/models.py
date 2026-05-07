@@ -261,6 +261,36 @@ class LandingPlayerBestSnapshot(models.Model):
         return f"Landing best snapshot {self.realm}:{self.sort}"
 
 
+class LandingRecentPlayersSnapshot(models.Model):
+    """Durable per-realm snapshot of the landing recent-players surface.
+
+    Acts as the Tier-2 fallback for `get_landing_recent_players_payload()`:
+    when Redis is evicted under `allkeys-lru` pressure, the read path
+    serves from this row (≤3 h stale via the periodic warmer) instead of
+    triggering an inline rebuild. Mirrors `LandingPlayerBestSnapshot` but
+    is keyed on realm only — recent-players has no `sort` dimension.
+    """
+    realm = models.CharField(
+        max_length=4,
+        choices=REALM_CHOICES,
+        default=DEFAULT_REALM,
+        db_index=True,
+    )
+    payload_json = models.JSONField(default=list, blank=True)
+    generated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['realm'],
+                name='unique_landing_recent_players_snapshot_per_realm',
+            ),
+        ]
+
+    def __str__(self):
+        return f"Landing recent-players snapshot {self.realm}"
+
+
 class EntityVisitEvent(models.Model):
     ENTITY_TYPE_PLAYER = 'player'
     ENTITY_TYPE_CLAN = 'clan'
