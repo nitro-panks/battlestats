@@ -13,6 +13,13 @@
   --accent-mid: #2171b5;
   --accent-light: #4292c6;
   --accent-faint: #eff3ff;
+  /* Secondary categorical accent for the lookback-window pill group on
+     BattleHistoryCard. ColorBrewer 9-class Purples color 7 — same
+     perceptual depth as `--accent-mid` (Blues color 7) but a distinct
+     hue family, so the window pills don't read as the same control as
+     the mode pills. */
+  --accent-secondary-mid: #6a51a3;
+  --accent-secondary-faint: #efedf5;
 }
 
 [data-theme="dark"] {
@@ -26,6 +33,10 @@
   --accent-mid: #58a6ff;
   --accent-light: #79c0ff;
   --accent-faint: #0c2a4a;
+  /* Dark-mode purple — Purples color 5 is bright enough to read on the
+     dark surface, parallel to how `--accent-mid` lightens for dark. */
+  --accent-secondary-mid: #b8a4dd;
+  --accent-secondary-faint: #2a1e4a;
 }
 
 html {

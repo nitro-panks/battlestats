@@ -635,47 +635,47 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                         dayDisabled
                                             ? 'text-[var(--text-muted)] opacity-40 cursor-not-allowed'
                                             : isActive
-                                                ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
-                                                : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
+                                                ? 'bg-[var(--accent-secondary-mid)] text-[var(--bg-card)] font-semibold'
+                                                : 'text-[var(--accent-secondary-mid)] hover:text-[var(--text-strong)]'
                                     }`}
                                 >
                                     {WINDOW_LABEL[w]}
                                 </button>
                             );
                         })}
-                    </div>
-                    {visibleModes.length >= 2 && (
-                        <div
-                            className="flex items-center gap-1 text-xs"
-                            role="group"
-                            aria-label="Battle mode"
-                        >
-                            {visibleModes.map((m) => (
-                                <button
-                                    key={m}
-                                    type="button"
-                                    onClick={() => {
-                                        setMode(m);
-                                        setUserPickedMode(true);
-                                    }}
-                                    className={`rounded px-2 py-0.5 transition-colors ${
-                                        mode === m
-                                            ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
-                                            : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
-                                    }`}
-                                    aria-pressed={mode === m}
-                                    title={m === 'random'
-                                        ? 'Random battles only'
-                                        : m === 'ranked'
-                                            ? 'Ranked battles only (sums across active seasons)'
-                                            : 'Random + ranked combined (lifetime delta unavailable)'}
-                                >
-                                    {MODE_LABEL[m]}
-                                </button>
-                            ))}
-                        </div>
-                    )}
                 </div>
+                </div>
+                {visibleModes.length >= 2 && (
+                    <div
+                        className="flex items-center gap-1 text-xs ml-auto"
+                        role="group"
+                        aria-label="Battle mode"
+                    >
+                        {visibleModes.map((m) => (
+                            <button
+                                key={m}
+                                type="button"
+                                onClick={() => {
+                                    setMode(m);
+                                    setUserPickedMode(true);
+                                }}
+                                className={`rounded px-2 py-0.5 transition-colors ${
+                                    mode === m
+                                        ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
+                                        : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
+                                }`}
+                                aria-pressed={mode === m}
+                                title={m === 'random'
+                                    ? 'Random battles only'
+                                    : m === 'ranked'
+                                        ? 'Ranked battles only (sums across active seasons)'
+                                        : 'Random + ranked combined (lifetime delta unavailable)'}
+                            >
+                                {MODE_LABEL[m]}
+                            </button>
+                        ))}
+                    </div>
+                )}
                 {/* Header summary text removed — duplicates the totals tile
                     cells (Battles, Win rate, Avg damage) directly below. */}
             </header>
