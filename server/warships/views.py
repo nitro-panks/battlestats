@@ -532,13 +532,11 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    # v8: rolling-window picker. The `day` window routes through a
-    # BattleEvent-direct path (24h rolling, hour-precise) and namespaces
-    # itself as `period=day` so it doesn't collide with the daily-rollup
-    # cache from week/month/year (which all use period=daily with
-    # windows=7/30/365).
+    # v9: payload now carries `has_recent_24h_activity` so the frontend
+    # can gray out the Day pill when it would be empty without an extra
+    # round-trip.
     return realm_cache_key(
-        realm, f"battle-history:v8:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v9:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -564,6 +562,18 @@ def _period_window_start(today, period: str, windows: int):
     if period == "yearly":
         return today.replace(year=today.year - (windows - 1), month=1, day=1)
     raise ValueError(f"Unknown period: {period}")
+
+
+def _has_recent_24h_activity(player) -> bool:
+    """Whether a player has any BattleEvent in the trailing 24h. Drives the
+    frontend's gray-out of the Day pill so the user doesn't click into an
+    empty window.
+    """
+    from warships.models import BattleEvent
+    return BattleEvent.objects.filter(
+        player=player,
+        detected_at__gte=timezone.now() - timedelta(hours=24),
+    ).exists()
 
 
 # Minimum prior-battles count required for a meaningful lifetime delta.
@@ -792,6 +802,7 @@ def _build_battle_history_payload_24h(player, mode: str) -> dict:
         "window_hours": 24,
         "mode": mode,
         "available_modes": available_modes,
+        "has_recent_24h_activity": totals["battles"] > 0,
         "as_of": now.isoformat(),
         "totals": {
             **totals,
@@ -1079,6 +1090,7 @@ def _build_battle_history_payload(player, period: str, windows: int,
         "window_days": windows if period == "daily" else None,
         "mode": mode,
         "available_modes": available_modes,
+        "has_recent_24h_activity": _has_recent_24h_activity(player),
         "as_of": timezone.now().isoformat(),
         "totals": {
             **totals,

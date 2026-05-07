@@ -2452,6 +2452,65 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(random_resp.json()["totals"]["battles"], 4)
         self.assertEqual(ranked_resp.json()["totals"]["battles"], 10)
 
+    def test_has_recent_24h_activity_flag_reflects_battle_events(self):
+        """Frontend grays out the Day pill when this flag is false. Backend
+        sets it from a BattleEvent.detected_at >= now-24h existence probe.
+        """
+        from warships.models import BattleEvent, BattleObservation
+        now = django_timezone.now()
+        # Seed an old event (30h ago) and a daily rollup (so Week has data
+        # to render). The flag should still be False because the BattleEvent
+        # is outside the 24h window.
+        oa = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=32))
+        ob = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=30))
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANDOM, battles_delta=4, wins_delta=2,
+            from_observation=oa, to_observation=ob,
+        )
+        BattleEvent.objects.filter(
+            from_observation=oa, to_observation=ob,
+        ).update(detected_at=now - timedelta(hours=30))
+        PlayerDailyShipStats.objects.create(
+            player=self.player,
+            date=(now - timedelta(hours=30)).date(),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=2,
+        )
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?window=week&mode=random",
+            )
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["has_recent_24h_activity"])
+
+        # Add a fresh event (2h ago) → flag flips to True.
+        oc = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=3))
+        od = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=2))
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANDOM, battles_delta=2, wins_delta=2,
+            from_observation=oc, to_observation=od,
+        )
+        BattleEvent.objects.filter(
+            from_observation=oc, to_observation=od,
+        ).update(detected_at=now - timedelta(hours=2))
+        from django.core.cache import cache
+        cache.clear()
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?window=week&mode=random",
+            )
+        self.assertTrue(r.json()["has_recent_24h_activity"])
+
     def test_window_day_aggregates_battle_events_in_last_24h(self):
         """The `day` window queries BattleEvent.detected_at directly (true
         rolling 24h, hour-precise) rather than the calendar-bucketed daily

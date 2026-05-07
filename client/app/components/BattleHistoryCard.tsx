@@ -59,6 +59,7 @@ export interface BattleHistoryPayload {
     period?: 'daily' | 'weekly' | 'monthly' | 'yearly';
     mode?: 'random' | 'ranked' | 'combined';
     available_modes?: ('random' | 'ranked')[];
+    has_recent_24h_activity?: boolean;
     as_of: string;
     totals: BattleHistoryTotals;
     by_ship: BattleHistoryByShip[];
@@ -405,7 +406,13 @@ const buildBattlesPerDaySeries = (days: BattleHistoryByDay[]): number[] => (
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
+// `year` is intentionally excluded from VISIBLE_WINDOWS — capture started
+// 2026-04-28 so a 365-day view won't carry meaningful additional context
+// for the next ~12 months. The backend still accepts ?window=year for
+// back-compat, but no pill exposes it. Re-add to VISIBLE_WINDOWS once
+// >180 days of capture have accumulated.
 type BattleHistoryWindow = 'day' | 'week' | 'month' | 'year';
+const VISIBLE_WINDOWS: ReadonlyArray<BattleHistoryWindow> = ['day', 'week', 'month'];
 const WINDOW_LABEL: Record<BattleHistoryWindow, string> = {
     day: 'Day', week: 'Week', month: 'Month', year: 'Year',
 };
@@ -415,6 +422,7 @@ const WINDOW_TITLE: Record<BattleHistoryWindow, string> = {
     month: 'Last 30 days',
     year: 'Last 365 days',
 };
+const WINDOW_TITLE_DAY_DISABLED = 'No battles in the last 24 hours';
 const WINDOW_HEADER: Record<BattleHistoryWindow, string> = {
     day: 'Last 24 hours',
     week: 'Last 7 days',
@@ -603,25 +611,38 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         role="group"
                         aria-label="Lookback window"
                     >
-                        {(['day', 'week', 'month', 'year'] as const).map((w) => (
-                            <button
-                                key={w}
-                                type="button"
-                                onClick={() => {
-                                    setWindow(w);
-                                    setUserPickedWindow(true);
-                                }}
-                                aria-pressed={window === w}
-                                title={WINDOW_TITLE[w]}
-                                className={`rounded px-2 py-0.5 transition-colors ${
-                                    window === w
-                                        ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
-                                        : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
-                                }`}
-                            >
-                                {WINDOW_LABEL[w]}
-                            </button>
-                        ))}
+                        {VISIBLE_WINDOWS.map((w) => {
+                            // Only Day is conditionally disabled — Week/Month
+                            // always have something useful to render (even if
+                            // it's an empty-state with the pill row reachable).
+                            const dayDisabled = w === 'day'
+                                && payload?.has_recent_24h_activity === false;
+                            const isActive = window === w;
+                            return (
+                                <button
+                                    key={w}
+                                    type="button"
+                                    onClick={() => {
+                                        if (dayDisabled) return;
+                                        setWindow(w);
+                                        setUserPickedWindow(true);
+                                    }}
+                                    aria-pressed={isActive}
+                                    aria-disabled={dayDisabled}
+                                    disabled={dayDisabled}
+                                    title={dayDisabled ? WINDOW_TITLE_DAY_DISABLED : WINDOW_TITLE[w]}
+                                    className={`rounded px-2 py-0.5 transition-colors ${
+                                        dayDisabled
+                                            ? 'text-[var(--text-muted)] opacity-40 cursor-not-allowed'
+                                            : isActive
+                                                ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
+                                                : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
+                                    }`}
+                                >
+                                    {WINDOW_LABEL[w]}
+                                </button>
+                            );
+                        })}
                     </div>
                     {visibleModes.length >= 2 && (
                         <div

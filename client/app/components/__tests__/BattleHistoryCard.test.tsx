@@ -256,15 +256,19 @@ describe('BattleHistoryCard', () => {
         expect(lastUrl).toContain('mode=ranked');
     });
 
-    test('clicking each window pill refetches with the matching ?window= param', async () => {
-        resolveWith(buildPayload({}));
+    test('clicking each visible window pill refetches with the matching ?window= param', async () => {
+        // Year is intentionally not in the visible pill row (capture started
+        // 2026-04-28 — won't have meaningful 365-day data for ~12 months).
+        resolveWith(buildPayload({ has_recent_24h_activity: true }));
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        for (const w of ['day', 'week', 'month', 'year'] as const) {
+        // Year pill must NOT be in the DOM.
+        expect(screen.queryByRole('button', { name: /^Year$/ })).toBeNull();
+        for (const w of ['day', 'week', 'month'] as const) {
             const beforeCount = mockFetchSharedJson.mock.calls.length;
-            resolveWith(buildPayload({}));
+            resolveWith(buildPayload({ has_recent_24h_activity: true }));
             await act(async () => {
                 const labelMatch = new RegExp(
                     `^${w[0].toUpperCase()}${w.slice(1)}$`,
@@ -277,6 +281,24 @@ describe('BattleHistoryCard', () => {
             const lastUrl = mockFetchSharedJson.mock.calls[beforeCount][0] as string;
             expect(lastUrl).toContain(`window=${w}`);
         }
+    });
+
+    test('Day pill is disabled when has_recent_24h_activity is false', async () => {
+        resolveWith(buildPayload({ has_recent_24h_activity: false }));
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        const dayBtn = screen.getByRole('button', { name: /^Day$/ });
+        expect(dayBtn).toBeDisabled();
+        expect(dayBtn.getAttribute('aria-disabled')).toBe('true');
+        expect(dayBtn.getAttribute('title'))
+            .toBe('No battles in the last 24 hours');
+
+        // Clicking the disabled pill does NOT trigger a refetch.
+        const beforeCount = mockFetchSharedJson.mock.calls.length;
+        await act(async () => { dayBtn.click(); });
+        expect(mockFetchSharedJson.mock.calls.length).toBe(beforeCount);
     });
 
     test('polls when X-Ranked-Observation-Pending is true on a ranked-mode response', async () => {
