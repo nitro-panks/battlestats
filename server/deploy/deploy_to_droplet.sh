@@ -152,6 +152,27 @@ else
   echo 'REDIS_URL="redis://127.0.0.1:6379/0"' >> /etc/battlestats-server.env
 fi
 
+# Ranked-capture seam (BATTLE_HISTORY_RANKED_*) — must be re-asserted on
+# every deploy because .env.cloud is gitignored (droplet-specific) and
+# any manual edit to /etc/battlestats-server.env gets overwritten by the
+# `cp ${REMOTE_TMP_ENV} ...` step at the top of this remote block.
+# Without these set, the third WG call to seasons/shipstats/ in
+# update_battle_data is silently skipped and the ranked diff lane stays
+# dark. Caught 2026-05-07: five consecutive deploys (v1.12.21 through
+# v1.12.25) wiped the live-droplet manual edits and lil_boots' tonight
+# games never captured. Runbook:
+# agents/runbooks/runbook-ranked-battle-history-rollout-2026-05-02.md.
+if grep -q '^BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=' /etc/battlestats-server.env; then
+  sed -i 's|^BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=.*|BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=1|' /etc/battlestats-server.env
+else
+  echo 'BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=1' >> /etc/battlestats-server.env
+fi
+if grep -q '^BATTLE_HISTORY_RANKED_CAPTURE_REALMS=' /etc/battlestats-server.env; then
+  sed -i 's|^BATTLE_HISTORY_RANKED_CAPTURE_REALMS=.*|BATTLE_HISTORY_RANKED_CAPTURE_REALMS=na,eu,asia|' /etc/battlestats-server.env
+else
+  echo 'BATTLE_HISTORY_RANKED_CAPTURE_REALMS=na,eu,asia' >> /etc/battlestats-server.env
+fi
+
 get_env_value() {
   local key="$1"
   local raw
