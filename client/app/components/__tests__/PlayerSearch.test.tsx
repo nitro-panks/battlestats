@@ -231,7 +231,7 @@ const installFetchMock = ({
 
         if (url.startsWith('/api/landing/clans/') || url.startsWith('/api/landing/clans?')) {
             const params = new URL(url, 'http://localhost').searchParams;
-            const mode = params.get('mode') || 'random';
+            const mode = params.get('mode') || 'best';
             const sort = params.get('sort') || 'overall';
             const payload = mode === 'best' && clansByBestSort ? (clansByBestSort[sort] ?? []) : clans;
             return Promise.resolve(buildJsonResponse(payload));
@@ -257,7 +257,7 @@ const installFetchMock = ({
 
         if (url.startsWith('/api/landing/players/') || url.startsWith('/api/landing/players?')) {
             const params = new URL(url, 'http://localhost').searchParams;
-            const mode = params.get('mode') || 'random';
+            const mode = params.get('mode') || 'best';
             const sort = params.get('sort') || 'overall';
             if (mode === 'best') {
                 return Promise.resolve(buildJsonResponse((playersByBestSort ?? defaultPlayersByBestSort)[sort] ?? []));
@@ -340,7 +340,6 @@ describe('PlayerSearch landing efficiency icon', () => {
         return heading.parentElement as HTMLElement;
     };
     const getClanRecentButton = async () => within(await getClanModeToolbar()).getByRole('button', { name: 'Recent' });
-    const getPlayerRandomButton = async () => within(await getPlayerModeToolbar()).getByRole('button', { name: 'Random' });
     const getPlayerRecentButton = async () => within(await getPlayerModeToolbar()).getByRole('button', { name: 'Recent' });
     const getPlayerBestButton = async () => within(await getPlayerModeToolbar()).getByRole('button', { name: 'Best' });
     /** Most existing player tests were written when Best was the default mode.
@@ -499,7 +498,7 @@ describe('PlayerSearch landing efficiency icon', () => {
         )).toBe(true);
     });
 
-    it('orders the player mode switch as Recent, Best, Random with Recent rendered first and pre-selected', async () => {
+    it('orders the player mode switch as Recent then Best with Recent pre-selected', async () => {
         installFetchMock({
             recentPlayers: [
                 { name: 'RecentCaptain', pvp_ratio: 58.1, is_hidden: false },
@@ -511,8 +510,8 @@ describe('PlayerSearch landing efficiency icon', () => {
         const playerToolbar = within(await getPlayerModeToolbar());
         const modeButtons = playerToolbar
             .getAllByRole('button')
-            .filter((button) => ['Best', 'Random', 'Recent'].includes(button.textContent?.trim() || ''));
-        expect(modeButtons.map((button) => button.textContent?.trim())).toEqual(['Recent', 'Best', 'Random']);
+            .filter((button) => ['Best', 'Recent'].includes(button.textContent?.trim() || ''));
+        expect(modeButtons.map((button) => button.textContent?.trim())).toEqual(['Recent', 'Best']);
 
         // Recent is the default — its row should already be on screen.
         expect(await screen.findByRole('button', { name: /Show player RecentCaptain/i })).toBeInTheDocument();
@@ -619,34 +618,30 @@ describe('PlayerSearch landing efficiency icon', () => {
 
     it('routes visible landing rows to canonical routes while keeping hidden rows non-interactive', async () => {
         installFetchMock({
-            playersByMode: {
-                ...defaultPlayersByMode,
-                random: [
-                    ...defaultPlayersByMode.random,
-                    {
-                        name: 'HiddenSkipper',
-                        pvp_ratio: 48.4,
-                        is_hidden: true,
-                        is_ranked_player: false,
-                        is_pve_player: false,
-                        is_sleepy_player: true,
-                        is_clan_battle_player: false,
-                        clan_battle_win_rate: null,
-                        highest_ranked_league: null,
-                        efficiency_rank_percentile: null,
-                        efficiency_rank_tier: null,
-                        has_efficiency_rank_icon: false,
-                        efficiency_rank_population_size: null,
-                        efficiency_rank_updated_at: null,
-                    },
-                ],
-            },
+            recentPlayers: [
+                ...defaultPlayersByMode.random,
+                {
+                    name: 'HiddenSkipper',
+                    pvp_ratio: 48.4,
+                    is_hidden: true,
+                    is_ranked_player: false,
+                    is_pve_player: false,
+                    is_sleepy_player: true,
+                    is_clan_battle_player: false,
+                    clan_battle_win_rate: null,
+                    highest_ranked_league: null,
+                    efficiency_rank_percentile: null,
+                    efficiency_rank_tier: null,
+                    has_efficiency_rank_icon: false,
+                    efficiency_rank_population_size: null,
+                    efficiency_rank_updated_at: null,
+                },
+            ],
         });
 
         render(<PlayerSearch />);
 
-        fireEvent.click(await getPlayerRandomButton());
-
+        // Recent is the default — no toolbar click needed to load these rows.
         const playerButton = await screen.findByRole('button', { name: /Show player AcePlayer/i });
         fireEvent.click(playerButton);
         fireEvent.click(screen.getByRole('button', { name: /Show clan ClanAlpha/i }));

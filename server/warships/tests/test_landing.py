@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import BEST_CLAN_WR_MIN_CB_BATTLES, score_best_clans, summarize_clan_battle_activity_badge, warm_landing_best_entity_caches
-from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RANDOM_CLAN_QUEUE_KEY, LANDING_RANDOM_PLAYER_QUEUE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_LOOKBACK_DAYS, _calculate_landing_best_score, _ranked_quality_score, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, get_random_landing_clan_queue_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_cache_metadata_key, landing_best_clan_published_cache_key, landing_best_clan_published_metadata_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode, refill_random_landing_clan_queue, refill_random_landing_player_queue
+from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_CLAN_FEATURED_COUNT, LANDING_CLAN_MIN_TOTAL_BATTLES, LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_CACHE_METADATA_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_CLANS_DIRTY_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_CLANS_PUBLISHED_METADATA_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_PLAYERS_DIRTY_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_DIRTY_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, LANDING_RECENT_PLAYERS_LOOKBACK_DAYS, _calculate_landing_best_score, _ranked_quality_score, get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_best_clan_cache_key, landing_best_clan_cache_metadata_key, landing_best_clan_published_cache_key, landing_best_clan_published_metadata_key, landing_player_cache_key, landing_player_cache_metadata_key, landing_player_published_cache_key, landing_player_published_metadata_key, materialize_landing_player_best_snapshot, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.models import Clan, LandingPlayerBestSnapshot, LandingRecentPlayersSnapshot, Player, PlayerExplorerSummary, realm_cache_key
 
 
@@ -15,14 +15,17 @@ class LandingHelperTests(TestCase):
         cache.clear()
 
     def test_normalize_landing_player_mode_accepts_known_modes(self):
-        self.assertEqual(normalize_landing_player_mode('random'), 'random')
+        self.assertEqual(normalize_landing_player_mode('best'), 'best')
         self.assertEqual(normalize_landing_player_mode(' BEST '), 'best')
         self.assertEqual(normalize_landing_player_mode(' sigma '), 'sigma')
-        self.assertEqual(normalize_landing_player_mode(None), 'random')
+        self.assertEqual(normalize_landing_player_mode(None), 'best')
 
     def test_normalize_landing_player_mode_rejects_unknown_mode(self):
-        with self.assertRaisesMessage(ValueError, 'mode must be one of: random, best, sigma, popular'):
+        # 'random' was retired alongside the Random pill on 2026-05-07.
+        with self.assertRaisesMessage(ValueError, 'mode must be one of: best, sigma, popular'):
             normalize_landing_player_mode('hot')
+        with self.assertRaisesMessage(ValueError, 'mode must be one of: best, sigma, popular'):
+            normalize_landing_player_mode('random')
 
     def test_normalize_landing_player_best_sort_accepts_known_modes(self):
         self.assertEqual(
@@ -113,7 +116,7 @@ class LandingHelperTests(TestCase):
         # `include_recent` kwarg is preserved as a no-op for callsite
         # compatibility.
         original_random_key = landing_player_cache_key(
-            'random', LANDING_PLAYER_LIMIT)
+            'popular', LANDING_PLAYER_LIMIT)
         original_best_key = landing_player_cache_key(
             'best', LANDING_PLAYER_LIMIT)
         cache.set(original_random_key, ['random'], 60)
@@ -134,7 +137,7 @@ class LandingHelperTests(TestCase):
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_preserves_recent_key_by_default(self, mock_delay):
         original_random_key = landing_player_cache_key(
-            'random', LANDING_PLAYER_LIMIT)
+            'popular', LANDING_PLAYER_LIMIT)
         cache.set(original_random_key, ['random'], 60)
         cache.set(realm_cache_key(
             'na', LANDING_RECENT_PLAYERS_CACHE_KEY), ['recent'], 60)
@@ -814,20 +817,6 @@ class LandingHelperTests(TestCase):
             landing_player_cache_key('best', LANDING_PLAYER_LIMIT, sort='wr'),
         )
 
-    def test_random_landing_player_queue_payload_uses_zero_ttl_metadata(self):
-        with patch('warships.landing.peek_random_landing_player_ids', return_value=([11, 12], 55)), patch('warships.landing.resolve_landing_players_by_id_order', return_value=[{'name': 'Player A'}, {'name': 'Player B'}]), patch('warships.tasks.queue_random_landing_player_queue_refill', return_value={'status': 'queued'}):
-            payload, metadata = get_random_landing_player_queue_payload(
-                LANDING_PLAYER_LIMIT,
-                pop=False,
-                schedule_refill=True,
-            )
-
-        self.assertEqual(payload, [{'name': 'Player A'}, {'name': 'Player B'}])
-        self.assertEqual(metadata['ttl_seconds'], 0)
-        self.assertEqual(metadata['queue_remaining'], 55)
-        self.assertEqual(metadata['served_count'], 2)
-        self.assertTrue(metadata['refill_scheduled'])
-
     def test_landing_clan_metadata_is_rebuilt_when_payload_exists_without_metadata(self):
         cache.set(realm_cache_key('na', LANDING_CLANS_CACHE_KEY),
                   [{'name': 'cached'}], 60)
@@ -864,11 +853,11 @@ class LandingHelperTests(TestCase):
 
     def test_landing_players_metadata_is_rebuilt_when_payload_exists_without_metadata(self):
         player_cache_key = landing_player_cache_key(
-            'random', LANDING_PLAYER_LIMIT)
+            'popular', LANDING_PLAYER_LIMIT)
         cache.set(player_cache_key, [{'name': 'cached-player'}], 60)
 
         payload, metadata = get_landing_players_payload_with_cache_metadata(
-            'random', LANDING_PLAYER_LIMIT)
+            'popular', LANDING_PLAYER_LIMIT)
 
         self.assertEqual(payload, [{'name': 'cached-player'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_PLAYER_CACHE_TTL)
@@ -895,18 +884,18 @@ class LandingHelperTests(TestCase):
 
     @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
     def test_landing_players_use_published_fallback_when_primary_cache_is_missing(self, mock_queue_warm):
-        cache.set(landing_player_published_cache_key('random', LANDING_PLAYER_LIMIT), [
+        cache.set(landing_player_published_cache_key('popular', LANDING_PLAYER_LIMIT), [
             {'name': 'published-player'}
         ], timeout=None)
-        cache.set(landing_player_published_metadata_key('random', LANDING_PLAYER_LIMIT), {
+        cache.set(landing_player_published_metadata_key('popular', LANDING_PLAYER_LIMIT), {
             'ttl_seconds': LANDING_PLAYER_CACHE_TTL,
             'cached_at': '2026-03-25T00:00:00+00:00',
             'expires_at': '2026-03-25T12:00:00+00:00',
         }, timeout=None)
 
-        with patch('warships.landing._build_random_landing_players') as mock_builder:
+        with patch('warships.landing._build_popular_landing_players') as mock_builder:
             payload, metadata = get_landing_players_payload_with_cache_metadata(
-                'random', LANDING_PLAYER_LIMIT)
+                'popular', LANDING_PLAYER_LIMIT)
 
         self.assertEqual(payload, [{'name': 'published-player'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_PLAYER_CACHE_TTL)
@@ -933,7 +922,7 @@ class LandingHelperTests(TestCase):
 
     def test_landing_player_primary_cache_hit_backfills_published_fallback(self):
         player_cache_key = landing_player_cache_key(
-            'random', LANDING_PLAYER_LIMIT)
+            'popular', LANDING_PLAYER_LIMIT)
         player_metadata_key = f'{player_cache_key}:meta'
         cache.set(player_cache_key, [{'name': 'cached-player'}], 60)
         cache.set(player_metadata_key, {
@@ -943,14 +932,14 @@ class LandingHelperTests(TestCase):
         }, 60)
 
         payload, metadata = get_landing_players_payload_with_cache_metadata(
-            'random', LANDING_PLAYER_LIMIT)
+            'popular', LANDING_PLAYER_LIMIT)
 
         self.assertEqual(payload, [{'name': 'cached-player'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_PLAYER_CACHE_TTL)
         self.assertEqual(cache.get(landing_player_published_cache_key(
-            'random', LANDING_PLAYER_LIMIT)), [{'name': 'cached-player'}])
+            'popular', LANDING_PLAYER_LIMIT)), [{'name': 'cached-player'}])
         self.assertIsNotNone(cache.get(
-            landing_player_published_metadata_key('random', LANDING_PLAYER_LIMIT)))
+            landing_player_published_metadata_key('popular', LANDING_PLAYER_LIMIT)))
 
     @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
     def test_best_landing_clans_use_published_fallback_while_dirty(self, mock_queue_warm):
@@ -1125,12 +1114,16 @@ class LandingHelperTests(TestCase):
         mock_build_recent_clans.assert_called_once_with(realm='na')
 
     def test_normalize_landing_clan_mode_accepts_known_modes(self):
-        self.assertEqual(normalize_landing_clan_mode('random'), 'random')
+        self.assertEqual(normalize_landing_clan_mode('best'), 'best')
         self.assertEqual(normalize_landing_clan_mode(' BEST '), 'best')
+        self.assertEqual(normalize_landing_clan_mode(None), 'best')
 
     def test_normalize_landing_clan_mode_rejects_unknown_mode(self):
-        with self.assertRaisesMessage(ValueError, 'mode must be one of: random, best'):
+        with self.assertRaisesMessage(ValueError, 'mode must be one of: best'):
             normalize_landing_clan_mode('sigma')
+        # 'random' was retired alongside the Random pill on 2026-05-07.
+        with self.assertRaisesMessage(ValueError, 'mode must be one of: best'):
+            normalize_landing_clan_mode('random')
 
     def test_force_refresh_rebuilds_cached_landing_clans_payload(self):
         with patch('warships.landing._build_landing_clans', side_effect=[[{'name': 'old'}], [{'name': 'new'}]]) as mock_builder:
@@ -1144,114 +1137,18 @@ class LandingHelperTests(TestCase):
             'na', LANDING_CLANS_CACHE_KEY)), [{'name': 'new'}])
 
     def test_force_refresh_rebuilds_cached_landing_players_payload(self):
-        with patch('warships.landing._build_random_landing_players', side_effect=[[{'name': 'old'}], [{'name': 'new'}]]) as mock_builder:
+        with patch('warships.landing._build_popular_landing_players', side_effect=[[{'name': 'old'}], [{'name': 'new'}]]) as mock_builder:
             first_payload = get_landing_players_payload(
-                'random', LANDING_PLAYER_LIMIT)
+                'popular', LANDING_PLAYER_LIMIT)
             refreshed_payload = get_landing_players_payload(
-                'random', LANDING_PLAYER_LIMIT, force_refresh=True)
+                'popular', LANDING_PLAYER_LIMIT, force_refresh=True)
 
         self.assertEqual(first_payload, [{'name': 'old'}])
         self.assertEqual(refreshed_payload, [{'name': 'new'}])
         self.assertEqual(mock_builder.call_count, 2)
         self.assertEqual(cache.get(landing_player_cache_key(
-            'random', LANDING_PLAYER_LIMIT)), [{'name': 'new'}])
+            'popular', LANDING_PLAYER_LIMIT)), [{'name': 'new'}])
 
-    def test_random_landing_player_queue_payload_pops_ids_in_order(self):
-        cache.set(realm_cache_key('na', LANDING_RANDOM_PLAYER_QUEUE_KEY),
-                  [101, 102, 103], timeout=None)
-
-        with patch('warships.landing.resolve_landing_players_by_id_order', return_value=[{'name': 'P1'}, {'name': 'P2'}]), patch('warships.tasks.queue_random_landing_player_queue_refill', return_value={'status': 'queued'}):
-            payload, metadata = get_random_landing_player_queue_payload(
-                2,
-                pop=True,
-                schedule_refill=True,
-            )
-
-        self.assertEqual(payload, [{'name': 'P1'}, {'name': 'P2'}])
-        self.assertEqual(cache.get(realm_cache_key(
-            'na', LANDING_RANDOM_PLAYER_QUEUE_KEY)), [103])
-        self.assertEqual(metadata['queue_remaining'], 1)
-        self.assertTrue(metadata['refill_scheduled'])
-
-    def test_random_landing_clan_queue_payload_uses_zero_ttl_metadata(self):
-        with patch('warships.landing.peek_random_landing_clan_ids', return_value=([21, 22], 55)), patch('warships.landing.resolve_landing_clans_by_id_order', return_value=[{'name': 'Clan A'}, {'name': 'Clan B'}]), patch('warships.tasks.queue_random_landing_clan_queue_refill', return_value={'status': 'queued'}):
-            payload, metadata = get_random_landing_clan_queue_payload(
-                LANDING_CLAN_FEATURED_COUNT,
-                pop=False,
-                schedule_refill=True,
-            )
-
-        self.assertEqual(payload, [{'name': 'Clan A'}, {'name': 'Clan B'}])
-        self.assertEqual(metadata['ttl_seconds'], 0)
-        self.assertEqual(metadata['queue_remaining'], 55)
-        self.assertEqual(metadata['served_count'], 2)
-        self.assertTrue(metadata['refill_scheduled'])
-
-    def test_random_landing_clan_queue_payload_pops_ids_in_order(self):
-        cache.set(realm_cache_key('na', LANDING_RANDOM_CLAN_QUEUE_KEY),
-                  [201, 202, 203], timeout=None)
-
-        with patch('warships.landing.resolve_landing_clans_by_id_order', return_value=[{'name': 'C1'}, {'name': 'C2'}]), patch('warships.tasks.queue_random_landing_clan_queue_refill', return_value={'status': 'queued'}):
-            payload, metadata = get_random_landing_clan_queue_payload(
-                2,
-                pop=True,
-                schedule_refill=True,
-            )
-
-        self.assertEqual(payload, [{'name': 'C1'}, {'name': 'C2'}])
-        self.assertEqual(cache.get(realm_cache_key(
-            'na', LANDING_RANDOM_CLAN_QUEUE_KEY)), [203])
-        self.assertEqual(metadata['queue_remaining'], 1)
-        self.assertTrue(metadata['refill_scheduled'])
-
-    def test_landing_players_endpoint_uses_cached_payload_for_random_mode(self):
-        with patch('warships.views.get_landing_players_payload_with_cache_metadata', return_value=(
-            [{'name': 'QueuePlayer'}],
-            {
-                'ttl_seconds': LANDING_PLAYER_CACHE_TTL,
-                'cached_at': 'now',
-                'expires_at': 'later',
-            },
-        )) as mock_cached_payload:
-            response = self.client.get('/api/landing/players/?mode=random')
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), [{'name': 'QueuePlayer'}])
-        self.assertEqual(response['X-Landing-Players-Cache-Mode'], 'random')
-        self.assertEqual(
-            response['X-Landing-Players-Cache-TTL-Seconds'], str(LANDING_PLAYER_CACHE_TTL))
-        self.assertEqual(response['X-Landing-Players-Cache-Cached-At'], 'now')
-        self.assertEqual(
-            response['X-Landing-Players-Cache-Expires-At'], 'later')
-        self.assertNotIn('X-Landing-Queue-Type', response)
-        mock_cached_payload.assert_called_once_with(
-            mode='random',
-            limit=LANDING_PLAYER_LIMIT,
-            realm='na',
-        )
-
-    def test_landing_clans_endpoint_uses_cached_payload_for_random_mode(self):
-        with patch('warships.views.get_landing_clans_payload_with_cache_metadata', return_value=(
-            [{'name': 'CachedClan'}],
-            {
-                'ttl_seconds': 21600,
-                'cached_at': 'now',
-                'expires_at': 'later',
-            },
-        )) as mock_cached_payload:
-            response = self.client.get('/api/landing/clans/?mode=random')
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), [{'name': 'CachedClan'}])
-        self.assertEqual(response['X-Landing-Clans-Cache-Mode'], 'random')
-        self.assertEqual(
-            response['X-Landing-Clans-Cache-TTL-Seconds'], '21600')
-        self.assertEqual(response['X-Landing-Clans-Cache-Cached-At'], 'now')
-        self.assertEqual(response['X-Landing-Clans-Cache-Expires-At'], 'later')
-        self.assertNotIn('X-Landing-Queue-Type', response)
-        mock_cached_payload.assert_called_once_with(realm='na')
-
-    def test_landing_recent_clans_endpoint_accepts_no_trailing_slash(self):
         with patch('warships.views.get_landing_recent_clans_payload', return_value=[{'name': 'Recent Clan'}]) as mock_recent_clans:
             response = self.client.get('/api/landing/recent-clans')
 
@@ -1259,45 +1156,7 @@ class LandingHelperTests(TestCase):
         self.assertEqual(response.json(), [{'name': 'Recent Clan'}])
         mock_recent_clans.assert_called_once_with(realm='na')
 
-    def test_refill_random_landing_player_queue_appends_unique_ids(self):
-        cache.set(realm_cache_key('na', LANDING_RANDOM_PLAYER_QUEUE_KEY), [
-                  101, 102], timeout=None)
-
-        with patch('warships.landing._get_cached_random_landing_player_eligible_ids', return_value=[101, 102, 103, 104, 105]):
-            result = refill_random_landing_player_queue(
-                batch_size=2, target_size=5)
-
-        self.assertEqual(result['status'], 'completed')
-        self.assertEqual(result['added'], 2)
-        queue_ids = cache.get(realm_cache_key(
-            'na', LANDING_RANDOM_PLAYER_QUEUE_KEY))
-        self.assertEqual(queue_ids[:2], [101, 102])
-        self.assertEqual(len(queue_ids), 4)
-        self.assertEqual(len(set(queue_ids)), 4)
-        self.assertTrue(set(queue_ids[2:]).issubset({103, 104, 105}))
-
-    def test_refill_random_landing_clan_queue_appends_unique_ids(self):
-        cache.set(realm_cache_key('na', LANDING_RANDOM_CLAN_QUEUE_KEY), [
-                  301, 302], timeout=None)
-
-        with patch('warships.landing._get_cached_random_landing_clan_eligible_ids', return_value=[301, 302, 303, 304, 305]):
-            result = refill_random_landing_clan_queue(
-                batch_size=2, target_size=5)
-
-        self.assertEqual(result['status'], 'completed')
-        self.assertEqual(result['added'], 2)
-        queue_ids = cache.get(realm_cache_key(
-            'na', LANDING_RANDOM_CLAN_QUEUE_KEY))
-        self.assertEqual(queue_ids[:2], [301, 302])
-        self.assertEqual(len(queue_ids), 4)
-        self.assertEqual(len(set(queue_ids)), 4)
-        self.assertTrue(set(queue_ids[2:]).issubset({303, 304, 305}))
-
-    def test_warm_landing_page_content_warms_each_surface_once(self):
-        with patch('warships.landing.get_landing_clans_payload', return_value=[
-            {'name': 'Random Clan'}
-        ]) as mock_random_clans, \
-                patch('warships.landing.get_landing_best_clans_payload', return_value=[{'name': 'Best Clan'}]) as mock_best_clans, \
+        with patch('warships.landing.get_landing_best_clans_payload', return_value=[{'name': 'Best Clan'}]) as mock_best_clans, \
                 patch('warships.landing.get_landing_recent_clans_payload', return_value=[{'name': 'Recent Clan'}]) as mock_recent_clans, \
                 patch('warships.landing.get_landing_players_payload', side_effect=lambda mode, *a, **kw: [
                     {'name': mode.capitalize()}
@@ -1310,11 +1169,9 @@ class LandingHelperTests(TestCase):
         self.assertEqual(result, {
             'status': 'completed',
             'warmed': {
-                'clans': 1,
                 'clans_best_overall': 1,
                 'clans_best_wr': 1,
                 'recent_clans': 1,
-                'players_random': 1,
                 'players_best_overall': 1,
                 'players_best_ranked': 1,
                 'players_best_efficiency': 1,
@@ -1324,8 +1181,6 @@ class LandingHelperTests(TestCase):
                 'recent_players': 1,
             },
         })
-        mock_random_clans.assert_called_once_with(
-            force_refresh=True, realm='na')
         best_clan_sorts = [call.kwargs.get('sort')
                            for call in mock_best_clans.call_args_list]
         self.assertCountEqual(best_clan_sorts, ['overall', 'wr'])
@@ -1334,16 +1189,15 @@ class LandingHelperTests(TestCase):
             self.assertEqual(call.kwargs.get('realm'), 'na')
         mock_recent_clans.assert_called_once_with(
             force_refresh=True, realm='na')
-        # Surfaces are warmed concurrently so call order is non-deterministic
+        # Surfaces are warmed concurrently so call order is non-deterministic.
+        # `random` was retired on 2026-05-07; only `best` (5 sub-sorts) and
+        # `popular` remain in the warmed-surfaces dict.
         player_calls = {
             call.args[0]: call
             for call in mock_players.call_args_list
         }
-        self.assertEqual(len(player_calls), 3)
-        self.assertCountEqual(player_calls.keys(), [
-                              'random', 'best', 'popular'])
-        self.assertEqual(player_calls['random'].args,
-                         ('random', LANDING_PLAYER_LIMIT))
+        self.assertEqual(len(player_calls), 2)
+        self.assertCountEqual(player_calls.keys(), ['best', 'popular'])
         self.assertEqual(player_calls['popular'].args,
                          ('popular', LANDING_PLAYER_LIMIT))
         best_calls = [
@@ -1358,10 +1212,6 @@ class LandingHelperTests(TestCase):
             self.assertEqual(call.kwargs.get('force_refresh'), True)
             self.assertEqual(call.kwargs.get('realm'), 'na')
         self.assertEqual(player_calls['popular'].kwargs, {
-            'force_refresh': True,
-            'realm': 'na',
-        })
-        self.assertEqual(player_calls['random'].kwargs, {
             'force_refresh': True,
             'realm': 'na',
         })

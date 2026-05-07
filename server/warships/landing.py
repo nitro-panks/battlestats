@@ -131,19 +131,18 @@ LANDING_PLAYERS_DIRTY_KEY = 'landing:players:dirty:v1'
 LANDING_RECENT_CLANS_DIRTY_KEY = 'landing:recent_clans:dirty:v1'
 LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
-LANDING_CLAN_MODES = ('random', 'best')
+LANDING_CLAN_MODES = ('best',)
 LANDING_CLAN_BEST_SORTS = ('overall', 'wr')
 LANDING_PLAYER_LIMIT = 25
 LANDING_PLAYER_BEST_SORTS = (
     'overall', 'ranked', 'efficiency', 'wr', 'cb')
 LANDING_PLAYER_BEST_SNAPSHOT_LIMIT = LANDING_PLAYER_LIMIT
-LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 LANDING_PLAYER_BEST_MIN_HIGH_TIER_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_TARGET_HIGH_TIER_PVP_BATTLES = 5000
 LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 1200
 LANDING_PLAYER_SIGMA_MIN_PVP_BATTLES = 500
-LANDING_PLAYER_MODES = ('random', 'best', 'sigma', 'popular')
+LANDING_PLAYER_MODES = ('best', 'sigma', 'popular')
 LANDING_PLAYER_BEST_WR_WEIGHT = 0.40
 LANDING_PLAYER_BEST_PLAYER_SCORE_WEIGHT = 0.22
 LANDING_PLAYER_BEST_EFFICIENCY_WEIGHT = 0.18
@@ -173,23 +172,6 @@ LANDING_PLAYER_CB_SORT_VOLUME_WEIGHT = 0.15
 LANDING_PLAYER_CB_SORT_SEASON_DEPTH_WEIGHT = 0.05
 LANDING_PLAYER_CB_SORT_MAX_BATTLES = 4000
 LANDING_PLAYER_CB_SORT_MAX_SEASONS = 10
-LANDING_RANDOM_PLAYER_QUEUE_KEY = 'landing:queue:players:random:v1'
-LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_KEY = 'landing:queue:players:random:eligible:v1'
-LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY = 'landing:queue:players:random:lock:v1'
-LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE = 100
-LANDING_RANDOM_PLAYER_QUEUE_REFILL_SIZE = 25
-LANDING_RANDOM_PLAYER_QUEUE_REFILL_THRESHOLD = 60
-LANDING_RANDOM_PLAYER_QUEUE_LOCK_TIMEOUT = 30
-LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_TTL = 10 * 60
-LANDING_RANDOM_CLAN_QUEUE_KEY = 'landing:queue:clans:random:v1'
-LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_KEY = 'landing:queue:clans:random:eligible:v1'
-LANDING_RANDOM_CLAN_QUEUE_LOCK_KEY = 'landing:queue:clans:random:lock:v1'
-LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY = 'landing:queue:clans:random:preview:v1'
-LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE = 100
-LANDING_RANDOM_CLAN_QUEUE_REFILL_SIZE = 30
-LANDING_RANDOM_CLAN_QUEUE_REFILL_THRESHOLD = 60
-LANDING_RANDOM_CLAN_QUEUE_LOCK_TIMEOUT = 30
-LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_TTL = 10 * 60
 
 
 def _player_score_ordering(secondary_field: str):
@@ -712,9 +694,9 @@ def get_landing_clans_payload_with_cache_metadata(force_refresh: bool = False, r
 
 
 def normalize_landing_player_mode(mode: str | None) -> str:
-    normalized_mode = (mode or 'random').strip().lower()
+    normalized_mode = (mode or 'best').strip().lower()
     if normalized_mode not in LANDING_PLAYER_MODES:
-        raise ValueError('mode must be one of: random, best, sigma, popular')
+        raise ValueError('mode must be one of: best, sigma, popular')
     return normalized_mode
 
 
@@ -727,9 +709,9 @@ def normalize_landing_player_best_sort(sort: str | None) -> str:
 
 
 def normalize_landing_clan_mode(mode: str | None) -> str:
-    normalized_mode = (mode or 'random').strip().lower()
+    normalized_mode = (mode or 'best').strip().lower()
     if normalized_mode not in LANDING_CLAN_MODES:
-        raise ValueError('mode must be one of: random, best')
+        raise ValueError('mode must be one of: best')
     return normalized_mode
 
 
@@ -825,279 +807,6 @@ def _normalize_cached_id_list(raw_value) -> list[int]:
     return normalized_ids
 
 
-def _get_random_landing_player_queue(realm: str = DEFAULT_REALM) -> list[int]:
-    return _normalize_cached_id_list(cache.get(realm_cache_key(realm, LANDING_RANDOM_PLAYER_QUEUE_KEY)))
-
-
-def _set_random_landing_player_queue(player_ids: list[int], realm: str = DEFAULT_REALM) -> None:
-    cache.set(
-        realm_cache_key(realm, LANDING_RANDOM_PLAYER_QUEUE_KEY),
-        _normalize_cached_id_list(player_ids),
-        timeout=None,
-    )
-
-
-def _build_random_landing_player_eligible_ids(realm: str = DEFAULT_REALM) -> list[int]:
-    return list(
-        Player.objects.exclude(name='').filter(
-            realm=realm,
-            is_hidden=False,
-            days_since_last_battle__lte=180,
-            pvp_battles__gt=LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES,
-        ).exclude(
-            last_battle_date__isnull=True,
-        ).values_list('player_id', flat=True)
-    )
-
-
-def _get_cached_random_landing_player_eligible_ids(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[int]:
-    eligible_key = realm_cache_key(
-        realm, LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_KEY)
-    cached_ids = None if force_refresh else cache.get(eligible_key)
-    normalized_ids = _normalize_cached_id_list(cached_ids)
-    if normalized_ids:
-        return normalized_ids
-
-    eligible_ids = _build_random_landing_player_eligible_ids(realm=realm)
-    cache.set(
-        eligible_key,
-        eligible_ids,
-        LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_TTL,
-    )
-    return eligible_ids
-
-
-def _acquire_random_landing_player_queue_lock(attempts: int = 5, sleep_seconds: float = 0.02, realm: str = DEFAULT_REALM) -> bool:
-    lock_key = realm_cache_key(realm, LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY)
-    for attempt in range(attempts):
-        if cache.add(lock_key, 'locked', timeout=LANDING_RANDOM_PLAYER_QUEUE_LOCK_TIMEOUT):
-            return True
-        if attempt < attempts - 1:
-            time.sleep(sleep_seconds)
-    return False
-
-
-def _release_random_landing_player_queue_lock(realm: str = DEFAULT_REALM) -> None:
-    cache.delete(realm_cache_key(realm, LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY))
-
-
-def _get_random_landing_clan_queue(realm: str = DEFAULT_REALM) -> list[int]:
-    return _normalize_cached_id_list(cache.get(realm_cache_key(realm, LANDING_RANDOM_CLAN_QUEUE_KEY)))
-
-
-def _set_random_landing_clan_queue(clan_ids: list[int], realm: str = DEFAULT_REALM) -> None:
-    cache.set(
-        realm_cache_key(realm, LANDING_RANDOM_CLAN_QUEUE_KEY),
-        _normalize_cached_id_list(clan_ids),
-        timeout=None,
-    )
-
-
-def _build_random_landing_clan_eligible_ids(realm: str = DEFAULT_REALM) -> list[int]:
-    return list(
-        Clan.objects.exclude(name__isnull=True).exclude(name='').filter(
-            realm=realm,
-        ).annotate(
-            **_clan_agg_annotations(),
-        ).annotate(
-            **_clan_wr_annotation(),
-        ).filter(
-            total_battles__gte=LANDING_CLAN_MIN_TOTAL_BATTLES,
-            clan_wr__isnull=False,
-        ).values_list('clan_id', flat=True)
-    )
-
-
-def _get_cached_random_landing_clan_eligible_ids(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[int]:
-    eligible_key = realm_cache_key(
-        realm, LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_KEY)
-    cached_ids = None if force_refresh else cache.get(eligible_key)
-    normalized_ids = _normalize_cached_id_list(cached_ids)
-    if normalized_ids:
-        return normalized_ids
-
-    eligible_ids = _build_random_landing_clan_eligible_ids(realm=realm)
-    cache.set(
-        eligible_key,
-        eligible_ids,
-        LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_TTL,
-    )
-    return eligible_ids
-
-
-def _acquire_random_landing_clan_queue_lock(attempts: int = 5, sleep_seconds: float = 0.02, realm: str = DEFAULT_REALM) -> bool:
-    lock_key = realm_cache_key(realm, LANDING_RANDOM_CLAN_QUEUE_LOCK_KEY)
-    for attempt in range(attempts):
-        if cache.add(lock_key, 'locked', timeout=LANDING_RANDOM_CLAN_QUEUE_LOCK_TIMEOUT):
-            return True
-        if attempt < attempts - 1:
-            time.sleep(sleep_seconds)
-    return False
-
-
-def _release_random_landing_clan_queue_lock(realm: str = DEFAULT_REALM) -> None:
-    cache.delete(realm_cache_key(realm, LANDING_RANDOM_CLAN_QUEUE_LOCK_KEY))
-
-
-def _extend_random_landing_clan_queue(
-    queue_ids: list[int],
-    *,
-    batch_size: int,
-    target_size: int,
-    force_eligible_refresh: bool = False,
-    realm: str = DEFAULT_REALM,
-) -> tuple[list[int], int]:
-    normalized_queue = _normalize_cached_id_list(queue_ids)
-    max_additions = min(batch_size, max(
-        target_size - len(normalized_queue), 0))
-    if max_additions <= 0:
-        return normalized_queue, 0
-
-    eligible_ids = _get_cached_random_landing_clan_eligible_ids(
-        force_refresh=force_eligible_refresh, realm=realm)
-    queued_ids = set(normalized_queue)
-    available_ids = [
-        clan_id for clan_id in eligible_ids if clan_id not in queued_ids]
-
-    if not available_ids and not force_eligible_refresh:
-        eligible_ids = _get_cached_random_landing_clan_eligible_ids(
-            force_refresh=True, realm=realm)
-        available_ids = [
-            clan_id for clan_id in eligible_ids if clan_id not in queued_ids]
-
-    if not available_ids:
-        return normalized_queue, 0
-
-    random.shuffle(available_ids)
-    additions = available_ids[:max_additions]
-    normalized_queue.extend(additions)
-    return normalized_queue, len(additions)
-
-
-def ensure_random_landing_clan_queue_ready(
-    minimum_size: int = LANDING_CLAN_FEATURED_COUNT,
-    target_size: int = LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE,
-    realm: str = DEFAULT_REALM,
-) -> int:
-    current_queue = _get_random_landing_clan_queue(realm=realm)
-    if len(current_queue) >= minimum_size:
-        return len(current_queue)
-
-    if not _acquire_random_landing_clan_queue_lock(realm=realm):
-        return len(_get_random_landing_clan_queue(realm=realm))
-
-    try:
-        current_queue = _get_random_landing_clan_queue(realm=realm)
-        if len(current_queue) < minimum_size:
-            current_queue, _ = _extend_random_landing_clan_queue(
-                current_queue,
-                batch_size=target_size,
-                target_size=target_size,
-                force_eligible_refresh=not current_queue,
-                realm=realm,
-            )
-            _set_random_landing_clan_queue(current_queue, realm=realm)
-        return len(current_queue)
-    finally:
-        _release_random_landing_clan_queue_lock(realm=realm)
-
-
-def peek_random_landing_clan_ids(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: str = DEFAULT_REALM) -> tuple[list[int], int]:
-    normalized_limit = normalize_landing_clan_limit(limit)
-    ensure_random_landing_clan_queue_ready(
-        minimum_size=normalized_limit, realm=realm)
-    queue_ids = _get_random_landing_clan_queue(realm=realm)
-    return queue_ids[:normalized_limit], len(queue_ids)
-
-
-def pop_random_landing_clan_ids(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: str = DEFAULT_REALM) -> tuple[list[int], int]:
-    normalized_limit = normalize_landing_clan_limit(limit)
-    ensure_random_landing_clan_queue_ready(
-        minimum_size=normalized_limit, realm=realm)
-
-    if not _acquire_random_landing_clan_queue_lock(realm=realm):
-        queue_ids = _get_random_landing_clan_queue(realm=realm)
-        served_ids = queue_ids[:normalized_limit]
-        remaining_count = max(len(queue_ids) - len(served_ids), 0)
-        return served_ids, remaining_count
-
-    try:
-        queue_ids = _get_random_landing_clan_queue(realm=realm)
-        if len(queue_ids) < normalized_limit:
-            queue_ids, _ = _extend_random_landing_clan_queue(
-                queue_ids,
-                batch_size=LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE,
-                target_size=LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE,
-                force_eligible_refresh=not queue_ids,
-                realm=realm,
-            )
-
-        served_ids = queue_ids[:normalized_limit]
-        remaining_ids = queue_ids[normalized_limit:]
-        _set_random_landing_clan_queue(remaining_ids, realm=realm)
-        return served_ids, len(remaining_ids)
-    finally:
-        _release_random_landing_clan_queue_lock(realm=realm)
-
-
-def refill_random_landing_clan_queue(
-    batch_size: int = LANDING_RANDOM_CLAN_QUEUE_REFILL_SIZE,
-    target_size: int = LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE,
-    realm: str = DEFAULT_REALM,
-) -> dict[str, int | str]:
-    lock_key = realm_cache_key(realm, LANDING_RANDOM_CLAN_QUEUE_LOCK_KEY)
-    if not cache.add(lock_key, 'locked', timeout=LANDING_RANDOM_CLAN_QUEUE_LOCK_TIMEOUT):
-        return {
-            'status': 'skipped',
-            'reason': 'already-running',
-            'added': 0,
-            'queue_depth': len(_get_random_landing_clan_queue(realm=realm)),
-        }
-
-    try:
-        queue_ids = _get_random_landing_clan_queue(realm=realm)
-        queue_ids, added_count = _extend_random_landing_clan_queue(
-            queue_ids,
-            batch_size=batch_size,
-            target_size=target_size,
-            realm=realm,
-        )
-        _set_random_landing_clan_queue(queue_ids, realm=realm)
-        return {
-            'status': 'completed',
-            'added': added_count,
-            'queue_depth': len(queue_ids),
-        }
-    finally:
-        _release_random_landing_clan_queue_lock(realm=realm)
-
-
-def resolve_landing_clans_by_id_order(clan_ids: list[int], realm: str = DEFAULT_REALM) -> list[dict]:
-    normalized_ids = _normalize_cached_id_list(clan_ids)
-    if not normalized_ids:
-        return []
-
-    selected_order = {
-        clan_id: index for index, clan_id in enumerate(normalized_ids)
-    }
-    rows = list(
-        Clan.objects.exclude(name__isnull=True).exclude(name='').filter(
-            realm=realm,
-            clan_id__in=normalized_ids,
-        ).annotate(
-            **_clan_agg_annotations(),
-        ).annotate(
-            **_clan_wr_annotation(),
-        ).filter(
-            total_battles__gte=LANDING_CLAN_MIN_TOTAL_BATTLES,
-            clan_wr__isnull=False,
-        ).values(
-            'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles', 'active_members'
-        )
-    )
-    rows.sort(key=lambda row: selected_order.get(
-        int(row.get('clan_id') or 0), len(selected_order)))
-    return _attach_clan_battle_activity_badges(rows, realm=realm)
 
 
 def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
@@ -1174,219 +883,6 @@ def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = Fal
     return payload, metadata
 
 
-def _get_random_landing_clan_preview(realm: str = DEFAULT_REALM) -> dict | None:
-    preview = cache.get(realm_cache_key(
-        realm, LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY))
-    if not isinstance(preview, dict):
-        return None
-    return preview
-
-
-def warm_random_landing_clan_queue_preview(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: str = DEFAULT_REALM) -> tuple[list[dict], dict[str, str | int | bool]]:
-    clan_ids, queue_remaining = peek_random_landing_clan_ids(
-        limit, realm=realm)
-    payload = resolve_landing_clans_by_id_order(clan_ids, realm=realm)
-    metadata = _build_landing_player_cache_metadata(0)
-    metadata.update({
-        'queue_remaining': queue_remaining,
-        'served_count': len(payload),
-        'refill_scheduled': False,
-    })
-    cache.set(
-        realm_cache_key(realm, LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY),
-        {
-            'ids': clan_ids,
-            'payload': payload,
-            'metadata': metadata,
-        },
-        LANDING_CACHE_TTL,
-    )
-    return payload, metadata
-
-
-def get_random_landing_clan_queue_payload(
-    limit: int = LANDING_CLAN_FEATURED_COUNT,
-    *,
-    pop: bool,
-    schedule_refill: bool = True,
-    warm_preview: bool = False,
-    realm: str = DEFAULT_REALM,
-) -> tuple[list[dict], dict[str, str | int | bool]]:
-    normalized_limit = normalize_landing_clan_limit(limit)
-    if pop:
-        clan_ids, queue_remaining = pop_random_landing_clan_ids(
-            normalized_limit, realm=realm)
-    else:
-        clan_ids, queue_remaining = peek_random_landing_clan_ids(
-            normalized_limit, realm=realm)
-
-    refill_scheduled = False
-    if schedule_refill and queue_remaining < LANDING_RANDOM_CLAN_QUEUE_REFILL_THRESHOLD:
-        from warships.tasks import queue_random_landing_clan_queue_refill
-
-        refill_result = queue_random_landing_clan_queue_refill(realm=realm)
-        refill_scheduled = refill_result.get('status') == 'queued'
-
-    payload = None
-    preview = _get_random_landing_clan_preview(realm=realm)
-    if preview and _normalize_cached_id_list(preview.get('ids')) == clan_ids:
-        payload = preview.get('payload')
-
-    if not isinstance(payload, list):
-        payload = resolve_landing_clans_by_id_order(clan_ids, realm=realm)
-
-    metadata = _build_landing_player_cache_metadata(0)
-    metadata.update({
-        'queue_remaining': queue_remaining,
-        'served_count': len(payload),
-        'refill_scheduled': refill_scheduled,
-    })
-
-    if warm_preview and not pop:
-        cache.set(
-            realm_cache_key(realm, LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY),
-            {
-                'ids': clan_ids,
-                'payload': payload,
-                'metadata': metadata,
-            },
-            LANDING_CACHE_TTL,
-        )
-
-    return payload, metadata
-
-
-def _extend_random_landing_player_queue(
-    queue_ids: list[int],
-    *,
-    batch_size: int,
-    target_size: int,
-    force_eligible_refresh: bool = False,
-    realm: str = DEFAULT_REALM,
-) -> tuple[list[int], int]:
-    normalized_queue = _normalize_cached_id_list(queue_ids)
-    max_additions = min(batch_size, max(
-        target_size - len(normalized_queue), 0))
-    if max_additions <= 0:
-        return normalized_queue, 0
-
-    eligible_ids = _get_cached_random_landing_player_eligible_ids(
-        force_refresh=force_eligible_refresh, realm=realm)
-    queued_ids = set(normalized_queue)
-    available_ids = [
-        player_id for player_id in eligible_ids if player_id not in queued_ids]
-
-    if not available_ids and not force_eligible_refresh:
-        eligible_ids = _get_cached_random_landing_player_eligible_ids(
-            force_refresh=True, realm=realm)
-        available_ids = [
-            player_id for player_id in eligible_ids if player_id not in queued_ids]
-
-    if not available_ids:
-        return normalized_queue, 0
-
-    random.shuffle(available_ids)
-    additions = available_ids[:max_additions]
-    normalized_queue.extend(additions)
-    return normalized_queue, len(additions)
-
-
-def ensure_random_landing_player_queue_ready(
-    minimum_size: int = LANDING_PLAYER_LIMIT,
-    target_size: int = LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE,
-    realm: str = DEFAULT_REALM,
-) -> int:
-    current_queue = _get_random_landing_player_queue(realm=realm)
-    if len(current_queue) >= minimum_size:
-        return len(current_queue)
-
-    if not _acquire_random_landing_player_queue_lock(realm=realm):
-        return len(_get_random_landing_player_queue(realm=realm))
-
-    try:
-        current_queue = _get_random_landing_player_queue(realm=realm)
-        if len(current_queue) < minimum_size:
-            current_queue, _ = _extend_random_landing_player_queue(
-                current_queue,
-                batch_size=target_size,
-                target_size=target_size,
-                force_eligible_refresh=not current_queue,
-                realm=realm,
-            )
-            _set_random_landing_player_queue(current_queue, realm=realm)
-        return len(current_queue)
-    finally:
-        _release_random_landing_player_queue_lock(realm=realm)
-
-
-def peek_random_landing_player_ids(limit: int = LANDING_PLAYER_LIMIT, realm: str = DEFAULT_REALM) -> tuple[list[int], int]:
-    normalized_limit = normalize_landing_player_limit(limit)
-    ensure_random_landing_player_queue_ready(
-        minimum_size=normalized_limit, realm=realm)
-    queue_ids = _get_random_landing_player_queue(realm=realm)
-    return queue_ids[:normalized_limit], len(queue_ids)
-
-
-def pop_random_landing_player_ids(limit: int = LANDING_PLAYER_LIMIT, realm: str = DEFAULT_REALM) -> tuple[list[int], int]:
-    normalized_limit = normalize_landing_player_limit(limit)
-    ensure_random_landing_player_queue_ready(
-        minimum_size=normalized_limit, realm=realm)
-
-    if not _acquire_random_landing_player_queue_lock(realm=realm):
-        queue_ids = _get_random_landing_player_queue(realm=realm)
-        served_ids = queue_ids[:normalized_limit]
-        remaining_count = max(len(queue_ids) - len(served_ids), 0)
-        return served_ids, remaining_count
-
-    try:
-        queue_ids = _get_random_landing_player_queue(realm=realm)
-        if len(queue_ids) < normalized_limit:
-            queue_ids, _ = _extend_random_landing_player_queue(
-                queue_ids,
-                batch_size=LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE,
-                target_size=LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE,
-                force_eligible_refresh=not queue_ids,
-                realm=realm,
-            )
-
-        served_ids = queue_ids[:normalized_limit]
-        remaining_ids = queue_ids[normalized_limit:]
-        _set_random_landing_player_queue(remaining_ids, realm=realm)
-        return served_ids, len(remaining_ids)
-    finally:
-        _release_random_landing_player_queue_lock(realm=realm)
-
-
-def refill_random_landing_player_queue(
-    batch_size: int = LANDING_RANDOM_PLAYER_QUEUE_REFILL_SIZE,
-    target_size: int = LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE,
-    realm: str = DEFAULT_REALM,
-) -> dict[str, int | str]:
-    lock_key = realm_cache_key(realm, LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY)
-    if not cache.add(lock_key, 'locked', timeout=LANDING_RANDOM_PLAYER_QUEUE_LOCK_TIMEOUT):
-        return {
-            'status': 'skipped',
-            'reason': 'already-running',
-            'added': 0,
-            'queue_depth': len(_get_random_landing_player_queue(realm=realm)),
-        }
-
-    try:
-        queue_ids = _get_random_landing_player_queue(realm=realm)
-        queue_ids, added_count = _extend_random_landing_player_queue(
-            queue_ids,
-            batch_size=batch_size,
-            target_size=target_size,
-            realm=realm,
-        )
-        _set_random_landing_player_queue(queue_ids, realm=realm)
-        return {
-            'status': 'completed',
-            'added': added_count,
-            'queue_depth': len(queue_ids),
-        }
-    finally:
-        _release_random_landing_player_queue_lock(realm=realm)
 
 
 def resolve_landing_players_by_id_order(player_ids: list[int], realm: str = DEFAULT_REALM) -> list[dict]:
@@ -1414,37 +910,6 @@ def resolve_landing_players_by_id_order(player_ids: list[int], realm: str = DEFA
         int(row.get('player_id') or 0), len(selected_order)))
     return _serialize_landing_player_rows(rows)
 
-
-def get_random_landing_player_queue_payload(
-    limit: int = LANDING_PLAYER_LIMIT,
-    *,
-    pop: bool,
-    schedule_refill: bool = True,
-    realm: str = DEFAULT_REALM,
-) -> tuple[list[dict], dict[str, str | int | bool]]:
-    normalized_limit = normalize_landing_player_limit(limit)
-    if pop:
-        player_ids, queue_remaining = pop_random_landing_player_ids(
-            normalized_limit, realm=realm)
-    else:
-        player_ids, queue_remaining = peek_random_landing_player_ids(
-            normalized_limit, realm=realm)
-
-    refill_scheduled = False
-    if schedule_refill and queue_remaining < LANDING_RANDOM_PLAYER_QUEUE_REFILL_THRESHOLD:
-        from warships.tasks import queue_random_landing_player_queue_refill
-
-        refill_result = queue_random_landing_player_queue_refill(realm=realm)
-        refill_scheduled = refill_result.get('status') == 'queued'
-
-    payload = resolve_landing_players_by_id_order(player_ids, realm=realm)
-    metadata = _build_landing_player_cache_metadata(0)
-    metadata.update({
-        'queue_remaining': queue_remaining,
-        'served_count': len(payload),
-        'refill_scheduled': refill_scheduled,
-    })
-    return payload, metadata
 
 
 def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
@@ -1623,32 +1088,6 @@ def _build_landing_payload_with_lock(cache_key, builder, normalized_limit, realm
         "Landing build lock wait expired for %s; building inline", cache_key)
     return builder(normalized_limit)
 
-
-def _build_random_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
-    # Postgres-side sampling: ORDER BY random() LIMIT N keeps the work in the
-    # database and returns only N rows over the wire, instead of materializing
-    # ~200K eligible player_ids in Python before random.sample. This is the
-    # hot path for /api/landing/players?mode=random and must stay fast even
-    # when the cache is cold (see runbook-landing-random-cold-queue-2026-04-07).
-    sql = """
-        SELECT name, player_id, pvp_ratio, is_hidden, days_since_last_battle,
-               total_battles, pvp_battles, battles_json, ranked_json
-        FROM warships_player
-        WHERE realm = %s
-          AND is_hidden = false
-          AND name <> ''
-          AND days_since_last_battle <= 180
-          AND pvp_battles > %s
-          AND last_battle_date IS NOT NULL
-        ORDER BY random()
-        LIMIT %s
-    """
-    with connection.cursor() as cursor:
-        cursor.execute(
-            sql, [realm, LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES, limit])
-        columns = [col[0] for col in cursor.description]
-        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
-    return _serialize_landing_player_rows(rows)
 
 
 def _best_landing_player_candidate_rows(
@@ -2166,7 +1605,7 @@ def _build_popular_landing_players(limit: int, realm: str = DEFAULT_REALM) -> li
     return resolve_landing_players_by_id_order(ordered_player_ids, realm=realm)[:limit]
 
 
-def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str | None = None) -> tuple[list[dict], dict[str, str | int]]:
+def get_landing_players_payload_with_cache_metadata(mode: str = 'best', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str | None = None) -> tuple[list[dict], dict[str, str | int]]:
     normalized_mode = normalize_landing_player_mode(mode)
     normalized_limit = normalize_landing_player_limit(limit)
     canonical_mode, canonical_sort = _canonical_landing_player_mode_and_sort(
@@ -2183,15 +1622,14 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
         normalized_mode, normalized_limit, realm=realm, sort=sort)
     ttl_seconds = landing_player_cache_ttl(canonical_mode)
 
-    if canonical_mode == 'best':
-        def builder(lim): return _build_best_landing_players(
-            lim, realm=realm, sort=canonical_sort or 'overall')
-    elif canonical_mode == 'popular':
+    # 'sigma' canonicalizes to 'best' and 'best' is the default; only 'popular'
+    # branches separately. The pre-2026-05-07 'random' fallback is gone.
+    if canonical_mode == 'popular':
         def builder(lim): return _build_popular_landing_players(
             lim, realm=realm)
     else:
-        def builder(lim): return _build_random_landing_players(
-            lim, realm=realm)
+        def builder(lim): return _build_best_landing_players(
+            lim, realm=realm, sort=canonical_sort or 'overall')
 
     payload, metadata = _get_cached_landing_payload_with_fallback(
         cache_key,
@@ -2202,9 +1640,6 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
         force_refresh,
         realm=realm,
         dirty_keys=(realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY),),
-        # Random has no canonical "correct" answer, so a slightly stale published
-        # sample is preferable to forcing a slow synchronous rebuild on the user.
-        use_published_fallback_when_dirty=(canonical_mode == 'random'),
     )
 
     if payload is None:
@@ -2226,7 +1661,7 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit:
     return payload, metadata
 
 
-def get_landing_players_payload(mode: str = 'random', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str | None = None) -> list[dict]:
+def get_landing_players_payload(mode: str = 'best', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str | None = None) -> list[dict]:
     payload, _ = get_landing_players_payload_with_cache_metadata(
         mode=mode,
         limit=limit,
@@ -2450,15 +1885,17 @@ def get_landing_recent_players_payload(force_refresh: bool = False, realm: str =
 def warm_landing_page_content(force_refresh: bool = False, include_recent: bool = True, realm: str = DEFAULT_REALM) -> dict:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    # 'players_random' + 'clans' (the random-clan cache) were retired
+    # alongside the Random landing pills on 2026-05-07; their warmers are
+    # gone here so the periodic landing-page warm doesn't waste cycles
+    # rebuilding caches no surface reads.
     surfaces = {
-        'players_random': lambda: len(get_landing_players_payload('random', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
         'players_best_overall': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='overall')),
         'players_best_ranked': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='ranked')),
         'players_best_efficiency': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='efficiency')),
         'players_best_wr': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='wr')),
         'players_best_cb': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='cb')),
         'players_popular': lambda: len(get_landing_players_payload('popular', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
-        'clans': lambda: len(get_landing_clans_payload(force_refresh=force_refresh, realm=realm)),
         'clans_best_overall': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='overall')),
         'clans_best_wr': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='wr')),
         'recent_clans': lambda: len(get_landing_recent_clans_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),

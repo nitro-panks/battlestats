@@ -54,8 +54,6 @@ HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_DISPATCH_TIMEOUT = 5 * 60
 CLAN_BATTLE_SUMMARY_REFRESH_DISPATCH_TIMEOUT = 10 * 60
-LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
-LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
 BULK_CACHE_LOAD_LOCK_TIMEOUT = 30 * 60
 RECENTLY_VIEWED_WARM_LOCK_TIMEOUT = 15 * 60
 CLAN_TIER_DIST_WARM_LOCK_TIMEOUT = 3 * 60 * 60  # 3h — iterates all clans
@@ -134,14 +132,6 @@ def _landing_best_entity_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
 
 def _landing_best_entity_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_landing_best_entity_caches:{realm}:dispatch"
-
-
-def _landing_random_player_queue_refill_dispatch_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:landing_random_player_queue_refill:{realm}:dispatch"
-
-
-def _landing_random_clan_queue_refill_dispatch_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:landing_random_clan_queue_refill:{realm}:dispatch"
 
 
 def _bulk_cache_load_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -229,48 +219,6 @@ def _clan_battle_summary_refresh_dispatch_key(clan_id: object, realm: str = DEFA
 # ---------------------------------------------------------------------------
 # Queue / dispatch helpers
 # ---------------------------------------------------------------------------
-
-def queue_random_landing_player_queue_refill(realm: str = DEFAULT_REALM):
-    dispatch_key = _landing_random_player_queue_refill_dispatch_key(realm)
-    if not cache.add(
-        dispatch_key,
-        "queued",
-        timeout=LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_TIMEOUT,
-    ):
-        return {"status": "skipped", "reason": "already-queued"}
-
-    try:
-        refill_landing_random_players_queue_task.delay(realm=realm)
-        return {"status": "queued"}
-    except Exception as error:
-        cache.delete(dispatch_key)
-        logger.warning(
-            "Skipping random landing player queue refill enqueue because broker dispatch failed: %s",
-            error,
-        )
-        return {"status": "skipped", "reason": "enqueue-failed"}
-
-
-def queue_random_landing_clan_queue_refill(realm: str = DEFAULT_REALM):
-    dispatch_key = _landing_random_clan_queue_refill_dispatch_key(realm)
-    if not cache.add(
-        dispatch_key,
-        "queued",
-        timeout=LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_TIMEOUT,
-    ):
-        return {"status": "skipped", "reason": "already-queued"}
-
-    try:
-        refill_landing_random_clans_queue_task.delay(realm=realm)
-        return {"status": "queued"}
-    except Exception as error:
-        cache.delete(dispatch_key)
-        logger.warning(
-            "Skipping random landing clan queue refill enqueue because broker dispatch failed: %s",
-            error,
-        )
-        return {"status": "skipped", "reason": "enqueue-failed"}
-
 
 def queue_clan_battle_summary_refresh(clan_id: object, realm: str = DEFAULT_REALM):
     dispatch_key = _clan_battle_summary_refresh_dispatch_key(
@@ -1119,48 +1067,6 @@ def warm_landing_best_entity_caches_task(self, player_limit=25, clan_limit=25, f
     finally:
         cache.delete(lock_key)
         cache.delete(_landing_best_entity_warm_dispatch_key(realm))
-
-
-@app.task(bind=True, **TASK_OPTS)
-def refill_landing_random_players_queue_task(self, realm=DEFAULT_REALM):
-    from warships.landing import refill_random_landing_player_queue
-
-    logger.info(
-        "Starting refill_landing_random_players_queue_task realm=%s", realm)
-    try:
-        result = refill_random_landing_player_queue(realm=realm)
-        logger.info(
-            "Finished refill_landing_random_players_queue_task: %s",
-            result,
-        )
-        return result
-    finally:
-        cache.delete(_landing_random_player_queue_refill_dispatch_key(realm))
-
-
-@app.task(bind=True, **TASK_OPTS)
-def refill_landing_random_clans_queue_task(self, realm=DEFAULT_REALM):
-    from warships.landing import refill_random_landing_clan_queue, warm_random_landing_clan_queue_preview
-
-    logger.info(
-        "Starting refill_landing_random_clans_queue_task realm=%s", realm)
-    try:
-        result = refill_random_landing_clan_queue(realm=realm)
-        if result.get("status") == "completed":
-            preview_payload, preview_metadata = warm_random_landing_clan_queue_preview(
-                realm=realm)
-            result = {
-                **result,
-                "preview_count": len(preview_payload),
-                "preview_queue_remaining": int(preview_metadata.get("queue_remaining", 0)),
-            }
-        logger.info(
-            "Finished refill_landing_random_clans_queue_task: %s",
-            result,
-        )
-        return result
-    finally:
-        cache.delete(_landing_random_clan_queue_refill_dispatch_key(realm))
 
 
 @app.task(bind=True, **TASK_OPTS)

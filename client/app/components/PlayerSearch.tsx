@@ -192,9 +192,9 @@ const LANDING_FETCH_TTL_MS = 60_000;
 // landing card while the user tabs around.
 const LANDING_RECENT_FETCH_TTL_MS = 3 * 60 * 60_000;
 
-type LandingClanMode = 'random' | 'best' | 'recent';
+type LandingClanMode = 'best' | 'recent';
 type ClanBestSort = 'overall' | 'wr';
-type LandingPlayerMode = 'best' | 'random' | 'recent';
+type LandingPlayerMode = 'best' | 'recent';
 type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
 
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
@@ -518,14 +518,6 @@ const PlayerSearch: React.FC = () => {
                                 >
                                     Best
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={() => { setPlayerMode('random'); setPlayerBestSort('overall'); }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={playerMode === 'random'}
-                                >
-                                    Random
-                                </button>
                             </div>
                             <div className="mt-1.5 min-h-7 pl-1" data-testid="player-best-sort-bar-shell">
                                 <div
@@ -611,14 +603,6 @@ const PlayerSearch: React.FC = () => {
                                     aria-pressed={clanMode === 'best'}
                                 >
                                     Best
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => { setClanMode('random'); setClanBestSort('overall'); }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'random' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={clanMode === 'random'}
-                                >
-                                    Random
                                 </button>
                                 <button
                                     type="button"

@@ -55,6 +55,19 @@ _RETIRED_SCHEDULE_NAMES = [
     "daily-ranked-incrementals",
     "daily-ranked-incrementals-eu",
     "daily-ranked-incrementals-na",
+    # Random landing-player + landing-clan queue refill schedules
+    # retired 2026-05-07 alongside the Random pill removal. The
+    # corresponding tasks (refill_landing_random_*_queue_task) were
+    # also deleted; any lingering PeriodicTask rows must be purged so
+    # celery-beat doesn't try to dispatch a non-existent task name.
+    "landing-random-player-queue-refill",
+    "landing-random-player-queue-refill-na",
+    "landing-random-player-queue-refill-eu",
+    "landing-random-player-queue-refill-asia",
+    "landing-random-clan-queue-refill",
+    "landing-random-clan-queue-refill-na",
+    "landing-random-clan-queue-refill-eu",
+    "landing-random-clan-queue-refill-asia",
 ]
 
 

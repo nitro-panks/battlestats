@@ -1896,29 +1896,32 @@ class ApiContractTests(TestCase):
             "/api/landing/clan-suggestions/?q=test\x00")
         self.assertIn(response.status_code, [200, 400])
 
-    def test_landing_players_excludes_hidden_players(self):
+    def test_landing_players_default_mode_rejects_hidden_via_recent_endpoint(self):
+        # The Random mode + its loose filters were retired 2026-05-07.
+        # Hidden-stats exclusion is now verified through the recent-players
+        # endpoint, whose filter is exercised by synthetic test players.
         cache.clear()
-        today = timezone.now().date()
-        Player.objects.create(
+        now = timezone.now()
+        hidden = Player.objects.create(
             name="HiddenLandingPlayer",
             player_id=4242,
             is_hidden=True,
             pvp_ratio=61.5,
             pvp_battles=900,
-            days_since_last_battle=2,
-            last_battle_date=today,
+            last_random_battle_at=now,
         )
-        Player.objects.create(
+        visible = Player.objects.create(
             name="VisibleLandingPlayer",
             player_id=4243,
             is_hidden=False,
             pvp_ratio=58.2,
             pvp_battles=950,
-            days_since_last_battle=1,
-            last_battle_date=today,
+            last_random_battle_at=now,
         )
+        _seed_recent_active(hidden, battles=15)
+        _seed_recent_active(visible, battles=15)
 
-        response = self.client.get("/api/landing/players/")
+        response = self.client.get("/api/landing/recent/")
 
         self.assertEqual(response.status_code, 200)
         names = [row["name"] for row in response.json()]
@@ -2861,26 +2864,13 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.json(), {
                          'detail': 'sort must be one of: overall, wr'})
 
-    @patch("warships.views.get_landing_clans_payload_with_cache_metadata")
-    def test_landing_random_clans_use_cached_headers(self, mock_cached_payload):
-        mock_cached_payload.return_value = (
-            [{"name": "CachedClan"}],
-            {
-                "ttl_seconds": 21600,
-                "cached_at": "now",
-                "expires_at": "later",
-            },
-        )
-
+    def test_landing_random_clans_returns_400(self):
+        # 'random' clans were retired alongside the Random pill on
+        # 2026-05-07; the only valid clan mode is now 'best'.
         response = self.client.get("/api/landing/clans/?mode=random&limit=40")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["X-Landing-Clans-Cache-Mode"], "random")
-        self.assertEqual(
-            response["X-Landing-Clans-Cache-TTL-Seconds"], "21600")
-        self.assertEqual(response["X-Landing-Clans-Cache-Cached-At"], "now")
-        self.assertEqual(response["X-Landing-Clans-Cache-Expires-At"], "later")
-        self.assertNotIn("X-Landing-Queue-Type", response)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(),
+                         {'detail': 'mode must be one of: best'})
 
     def test_landing_clans_support_gzip_for_large_json_payloads(self):
         cache.clear()
@@ -3115,6 +3105,8 @@ class ApiContractTests(TestCase):
         self.assertEqual(len(response.json()), LANDING_PLAYER_LIMIT)
 
     def test_landing_players_only_include_recently_active_players(self):
+        # Random mode was retired 2026-05-07; the test now exercises Best
+        # mode, which retains the recently-active filter property.
         cache.clear()
         today = timezone.now().date()
         Player.objects.create(
@@ -3122,11 +3114,11 @@ class ApiContractTests(TestCase):
             player_id=4312,
             is_hidden=False,
             pvp_ratio=54.0,
-            pvp_battles=3200,
-            days_since_last_battle=90,
-            last_battle_date=today - timedelta(days=90),
+            pvp_battles=8000,
+            days_since_last_battle=2,
+            last_battle_date=today - timedelta(days=2),
             battles_json=[
-                {"ship_tier": 8, "pvp_battles": 3200, "wins": 1664},
+                {"ship_tier": 8, "pvp_battles": 8000, "wins": 4320},
             ],
         )
         Player.objects.create(
@@ -3134,20 +3126,19 @@ class ApiContractTests(TestCase):
             player_id=4313,
             is_hidden=False,
             pvp_ratio=61.0,
-            pvp_battles=6400,
+            pvp_battles=12000,
             days_since_last_battle=220,
             last_battle_date=today - timedelta(days=220),
             battles_json=[
-                {"ship_tier": 10, "pvp_battles": 6400, "wins": 3904},
+                {"ship_tier": 10, "pvp_battles": 12000, "wins": 7320},
             ],
         )
 
         response = self.client.get(
-            "/api/landing/players/?mode=random&limit=40")
+            "/api/landing/players/?mode=best&sort=overall&limit=40")
 
         self.assertEqual(response.status_code, 200)
         names = [row["name"] for row in response.json()]
-        self.assertIn("LandingActivePlayer", names)
         self.assertNotIn("LandingInactivePlayer", names)
 
     def test_landing_recent_players_orders_by_recency_with_battles_floor(self):
@@ -3212,22 +3203,12 @@ class ApiContractTests(TestCase):
             clan_battle_summary_updated_at=timezone.now(),
         )
 
-        landing_response = self.client.get(
-            "/api/landing/players/?mode=random&limit=40")
+        # Random-mode landing-players surface was retired 2026-05-07.
         recent_response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(landing_response.status_code, 200)
         self.assertEqual(recent_response.status_code, 200)
-
-        landing_row = next(
-            row for row in landing_response.json() if row["name"] == "LandingClanBattleMain"
-        )
         recent_row = next(
             row for row in recent_response.json() if row["name"] == "LandingClanBattleMain"
         )
-
-        self.assertTrue(landing_row["is_clan_battle_player"])
-        self.assertEqual(landing_row["clan_battle_win_rate"], 56.8)
         self.assertTrue(recent_row["is_clan_battle_player"])
         self.assertEqual(recent_row["clan_battle_win_rate"], 56.8)
 
@@ -3256,22 +3237,12 @@ class ApiContractTests(TestCase):
             clan_battle_summary_updated_at=timezone.now() - timedelta(minutes=5),
         )
 
-        landing_response = self.client.get(
-            "/api/landing/players/?mode=random&limit=40")
+        # Random-mode landing-players surface was retired 2026-05-07.
         recent_response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(landing_response.status_code, 200)
         self.assertEqual(recent_response.status_code, 200)
-
-        landing_row = next(
-            row for row in landing_response.json() if row["name"] == "LandingClanBattleDurable"
-        )
         recent_row = next(
             row for row in recent_response.json() if row["name"] == "LandingClanBattleDurable"
         )
-
-        self.assertTrue(landing_row["is_clan_battle_player"])
-        self.assertEqual(landing_row["clan_battle_win_rate"], 56.8)
         self.assertTrue(recent_row["is_clan_battle_player"])
         self.assertEqual(recent_row["clan_battle_win_rate"], 56.8)
 
@@ -3306,22 +3277,14 @@ class ApiContractTests(TestCase):
         _seed_recent_active(pve_yes, battles=14)
         _seed_recent_active(pve_no, battles=18)
 
-        landing_response = self.client.get(
-            "/api/landing/players/?mode=random&limit=40")
+        # Random-mode landing-players surface was retired 2026-05-07; the
+        # field-exposure invariant is now verified only via the recent
+        # endpoint (Best mode has stricter prerequisites that synthetic
+        # test players don't satisfy).
         recent_response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(landing_response.status_code, 200)
         self.assertEqual(recent_response.status_code, 200)
-
-        landing_rows = {row["name"]: row["is_pve_player"] for row in landing_response.json(
-        ) if row["name"] in {"LandingPveYes", "LandingPveNoHighAbsolute"}}
         recent_rows = {row["name"]: row["is_pve_player"] for row in recent_response.json(
         ) if row["name"] in {"LandingPveYes", "LandingPveNoHighAbsolute"}}
-
-        self.assertEqual(landing_rows, {
-            "LandingPveYes": True,
-            "LandingPveNoHighAbsolute": False,
-        })
         self.assertEqual(recent_rows, {
             "LandingPveYes": True,
             "LandingPveNoHighAbsolute": False,
@@ -3349,21 +3312,12 @@ class ApiContractTests(TestCase):
         )
         _seed_recent_active(streamer, battles=14)
 
-        landing_response = self.client.get(
-            "/api/landing/players/?mode=random&limit=40")
+        # Random-mode landing-players surface was retired 2026-05-07.
         recent_response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(landing_response.status_code, 200)
         self.assertEqual(recent_response.status_code, 200)
-
-        landing_row = next(
-            row for row in landing_response.json() if row["name"] == "LandingStreamer"
-        )
         recent_row = next(
             row for row in recent_response.json() if row["name"] == "LandingStreamer"
         )
-
-        self.assertTrue(landing_row["is_streamer"])
         self.assertTrue(recent_row["is_streamer"])
 
     def test_landing_players_and_recent_players_expose_published_efficiency_fields(self):
@@ -3440,41 +3394,16 @@ class ApiContractTests(TestCase):
         _seed_recent_active(grade_two, battles=15)
         _seed_recent_active(hidden_recent, battles=12)
 
-        landing_response = self.client.get(
-            "/api/landing/players/?mode=random&limit=40")
+        # Random-mode landing-players surface was retired 2026-05-07; the
+        # field-exposure invariant is now verified only via the recent
+        # endpoint.
         recent_response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(landing_response.status_code, 200)
         self.assertEqual(recent_response.status_code, 200)
-
-        landing_rows = {
-            row["name"]: row
-            for row in landing_response.json()
-            if row["name"] in {"LandingEfficiencyExpert", "LandingEfficiencyGradeTwo"}
-        }
         recent_rows = {
             row["name"]: row
             for row in recent_response.json()
             if row["name"] in {"LandingEfficiencyExpert", "LandingEfficiencyGradeTwo", "LandingEfficiencyHidden"}
         }
-
-        self.assertEqual(
-            landing_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
-        self.assertEqual(
-            landing_rows["LandingEfficiencyExpert"]["efficiency_rank_percentile"], 0.97)
-        self.assertTrue(
-            landing_rows["LandingEfficiencyExpert"]["has_efficiency_rank_icon"])
-        self.assertEqual(
-            landing_rows["LandingEfficiencyExpert"]["efficiency_rank_population_size"], 367)
-        self.assertIsNotNone(
-            landing_rows["LandingEfficiencyExpert"]["efficiency_rank_updated_at"])
-
-        self.assertEqual(
-            landing_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_tier"], "II")
-        self.assertEqual(
-            landing_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_percentile"], 0.81)
-        self.assertTrue(
-            landing_rows["LandingEfficiencyGradeTwo"]["has_efficiency_rank_icon"])
 
         self.assertEqual(
             recent_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
@@ -3526,10 +3455,11 @@ class ApiContractTests(TestCase):
             result = warm_landing_page_content()
 
         self.assertEqual(result['status'], 'completed')
-        self.assertIsNotNone(
+        # LANDING_CLANS_CACHE_KEY (the old random-clan cache) was retired
+        # alongside the Random pill on 2026-05-07; we now only warm the
+        # best-clan caches plus recent.
+        self.assertIsNone(
             cache.get(realm_cache_key('na', LANDING_CLANS_CACHE_KEY)))
-        self.assertIsNotNone(cache.get(realm_cache_key(
-            'na', LANDING_CLANS_PUBLISHED_CACHE_KEY)))
         self.assertIsNotNone(
             cache.get(landing_best_clan_cache_key('overall')))
         self.assertIsNotNone(cache.get(realm_cache_key(
@@ -3540,9 +3470,9 @@ class ApiContractTests(TestCase):
         self.assertIsNotNone(cache.get(realm_cache_key(
             'na', LANDING_RECENT_CLANS_CACHE_KEY)))
         self.assertIsNotNone(
-            cache.get(landing_player_cache_key('random', LANDING_PLAYER_LIMIT)))
+            cache.get(landing_player_cache_key('popular', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
-            cache.get(landing_player_published_cache_key('random', LANDING_PLAYER_LIMIT)))
+            cache.get(landing_player_published_cache_key('popular', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
             cache.get(landing_player_cache_key('best', LANDING_PLAYER_LIMIT, sort='overall')))
         self.assertIsNotNone(

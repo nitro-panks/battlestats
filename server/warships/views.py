@@ -58,7 +58,7 @@ from warships.data import (
     refresh_player_explorer_summary,
     update_battle_data,
 )
-from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, get_random_landing_player_queue_payload, invalidate_landing_clan_caches, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, invalidate_landing_clan_caches, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
 from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, queue_landing_best_entity_warm, update_clan_data_task, update_player_data_task, update_clan_members_task
 
@@ -1658,7 +1658,7 @@ def landing_clans(request) -> Response:
     try:
         mode = normalize_landing_clan_mode(request.query_params.get('mode'))
     except ValueError:
-        return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'mode must be one of: best'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         best_sort = normalize_landing_clan_best_sort(
@@ -1668,21 +1668,16 @@ def landing_clans(request) -> Response:
 
     realm = _get_realm(request)
     limit = normalize_landing_clan_limit(request.query_params.get('limit'))
-    if mode == 'random':
-        payload, cache_metadata = get_landing_clans_payload_with_cache_metadata(
-            realm=realm)
-    else:
-        payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata(
-            realm=realm,
-            sort=best_sort,
-        )
+    payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata(
+        realm=realm,
+        sort=best_sort,
+    )
 
     payload = payload[:limit]
 
     response = Response(payload)
     response['X-Landing-Clans-Cache-Mode'] = mode
-    if mode == 'best':
-        response['X-Landing-Clans-Cache-Sort'] = best_sort
+    response['X-Landing-Clans-Cache-Sort'] = best_sort
     response['X-Landing-Clans-Cache-TTL-Seconds'] = str(
         cache_metadata['ttl_seconds'])
     response['X-Landing-Clans-Cache-Cached-At'] = str(
@@ -1705,7 +1700,7 @@ def landing_players(request) -> Response:
     try:
         mode = normalize_landing_player_mode(request.query_params.get('mode'))
     except ValueError:
-        return Response({'detail': 'mode must be one of: random, best, sigma, popular'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'mode must be one of: best, sigma, popular'}, status=status.HTTP_400_BAD_REQUEST)
     best_sort = 'overall'
     payload_kwargs = {}
     if mode == 'best':
