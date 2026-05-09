@@ -1,0 +1,217 @@
+"""Periodic schedule topology tests.
+
+Pins the contract for `register_periodic_schedules` in `signals.py`:
+
+1. All expected schedule names exist after post_migrate.
+2. Per-realm interval-style families are crontab schedules, not
+   IntervalSchedules — they're striped per realm via
+   `REALM_INTERVAL_OFFSETS` so at most one realm fires at a time.
+3. Realm offsets are pairwise distinct.
+4. Rolling observation floor fires 4× per day per realm.
+5. Retired schedule names get deleted on each registration.
+
+This file addresses the open follow-up from
+`agents/runbooks/runbook-periodic-task-topology-2026-04-11.md` (#3) and
+catches the most common regressions: forgetting to clear `interval`
+when transitioning a row from interval → crontab, and forgetting to
+add an old name to `_RETIRED_SCHEDULE_NAMES` after a rename.
+"""
+from __future__ import annotations
+
+from django.apps import apps
+from django.test import TestCase
+from django_celery_beat.models import PeriodicTask
+
+from warships.models import VALID_REALMS
+from warships.signals import (
+    REALM_INTERVAL_OFFSETS,
+    _realm_crontab_for_cycle,
+    register_periodic_schedules,
+)
+
+
+# Schedule families that get a per-realm row with a striped crontab.
+# Tuples are (name_prefix, cycle_env_default_minutes).
+STRIPED_PER_REALM_FAMILIES = [
+    ("landing-page-warmer", 120),
+    ("recent-players-warmer", 180),
+    ("player-distribution-warmer", 360),
+    ("player-correlation-warmer", 360),
+    ("hot-entity-cache-warmer", 30),
+    ("recently-viewed-player-warmer", 10),
+    ("incremental-player-refresh", 180),
+    ("incremental-ranked-refresh", 120),
+]
+
+
+class ExpectedScheduleNamesTests(TestCase):
+    """Test 1: full expected schedule set exists after post_migrate."""
+
+    def test_all_per_realm_schedules_registered(self):
+        # post_migrate runs during the per-test DB build, so the rows
+        # exist at the start of the test. We just need to verify they
+        # all show up.
+        for prefix, _cycle in STRIPED_PER_REALM_FAMILIES:
+            for realm in VALID_REALMS:
+                name = f"{prefix}-{realm}"
+                self.assertTrue(
+                    PeriodicTask.objects.filter(name=name).exists(),
+                    f"Missing PeriodicTask row: {name}",
+                )
+
+    def test_observation_floor_per_realm(self):
+        for realm in VALID_REALMS:
+            self.assertTrue(
+                PeriodicTask.objects.filter(
+                    name=f"observation-floor-{realm}").exists(),
+                f"Missing observation-floor-{realm}",
+            )
+
+    def test_singleton_schedules_present(self):
+        for name in (
+            "player-enrichment-kickstart",
+            "battle-history-daily-rollup",
+            "poll-tracked-player-battles",
+        ):
+            self.assertTrue(
+                PeriodicTask.objects.filter(name=name).exists(),
+                f"Missing singleton PeriodicTask row: {name}",
+            )
+
+
+class StripedSchedulesAreCrontabTests(TestCase):
+    """Test 2: striped families use crontab, not interval."""
+
+    def test_striped_families_use_crontab(self):
+        for prefix, _cycle in STRIPED_PER_REALM_FAMILIES:
+            for realm in VALID_REALMS:
+                name = f"{prefix}-{realm}"
+                row = PeriodicTask.objects.get(name=name)
+                self.assertIsNotNone(
+                    row.crontab,
+                    f"{name} should be on a CrontabSchedule",
+                )
+                self.assertIsNone(
+                    row.interval,
+                    f"{name} should not also have an IntervalSchedule attached",
+                )
+
+
+class RealmOffsetsDistinctTests(TestCase):
+    """Test 3: per-realm crontab offsets are pairwise distinct."""
+
+    def _crontab_signature(self, name):
+        row = PeriodicTask.objects.get(name=name)
+        return (row.crontab.minute, row.crontab.hour)
+
+    def test_player_refresh_offsets_distinct(self):
+        sigs = {
+            realm: self._crontab_signature(f"incremental-player-refresh-{realm}")
+            for realm in VALID_REALMS
+        }
+        self.assertEqual(
+            len(set(sigs.values())), len(VALID_REALMS),
+            f"Player refresh schedules collide: {sigs}",
+        )
+
+    def test_observation_floor_offsets_distinct(self):
+        sigs = {
+            realm: self._crontab_signature(f"observation-floor-{realm}")
+            for realm in VALID_REALMS
+        }
+        self.assertEqual(
+            len(set(sigs.values())), len(VALID_REALMS),
+            f"Observation floor schedules collide: {sigs}",
+        )
+
+
+class ObservationFloorRunsFourTimesADayTests(TestCase):
+    """Test 4: rolling 6-hourly floor fires 4× per day per realm."""
+
+    def test_observation_floor_fires_four_times_per_day(self):
+        for realm in VALID_REALMS:
+            row = PeriodicTask.objects.get(name=f"observation-floor-{realm}")
+            hour_segments = row.crontab.hour.split(",")
+            self.assertEqual(
+                len(hour_segments), 4,
+                f"observation-floor-{realm} should fire 4×/day, "
+                f"got hour='{row.crontab.hour}'",
+            )
+
+
+class RetirementListPrunesOldRowsTests(TestCase):
+    """Test 5: re-running registration deletes retired names."""
+
+    def test_daily_observation_floor_legacy_name_is_pruned(self):
+        # Pre-create the legacy row that the 2026-05-09 promotion retired.
+        # `register_periodic_schedules` deletes any name in
+        # `_RETIRED_SCHEDULE_NAMES` at the top of its run.
+        from django_celery_beat.models import IntervalSchedule
+        legacy_schedule, _ = IntervalSchedule.objects.get_or_create(
+            every=1440, period=IntervalSchedule.MINUTES,
+        )
+        PeriodicTask.objects.create(
+            name="daily-observation-floor-na",
+            task="warships.tasks.ensure_daily_battle_observations_task",
+            interval=legacy_schedule,
+        )
+        self.assertTrue(
+            PeriodicTask.objects.filter(
+                name="daily-observation-floor-na").exists(),
+        )
+
+        register_periodic_schedules(sender=apps.get_app_config("warships"))
+
+        self.assertFalse(
+            PeriodicTask.objects.filter(
+                name="daily-observation-floor-na").exists(),
+            "Retired name daily-observation-floor-na should have been deleted",
+        )
+
+
+class RealmCrontabHelperTests(TestCase):
+    """Direct unit coverage of the striping helper."""
+
+    def test_180min_cycle_3_realms(self):
+        # NA hour=0,3,6,…; EU hour=1,4,7,…; ASIA hour=2,5,8,…
+        na_min, na_hr = _realm_crontab_for_cycle("na", 180)
+        eu_min, eu_hr = _realm_crontab_for_cycle("eu", 180)
+        as_min, as_hr = _realm_crontab_for_cycle("asia", 180)
+
+        self.assertEqual(na_min, "0")
+        self.assertEqual(na_hr, "0,3,6,9,12,15,18,21")
+        self.assertEqual(eu_min, "0")
+        self.assertEqual(eu_hr, "1,4,7,10,13,16,19,22")
+        self.assertEqual(as_min, "0")
+        self.assertEqual(as_hr, "2,5,8,11,14,17,20,23")
+
+    def test_30min_cycle_uses_minute_list_with_wildcard_hour(self):
+        # NA fires every 30min at :00 :30; EU at :10 :40; ASIA at :20 :50
+        na_min, na_hr = _realm_crontab_for_cycle("na", 30)
+        eu_min, eu_hr = _realm_crontab_for_cycle("eu", 30)
+        as_min, as_hr = _realm_crontab_for_cycle("asia", 30)
+
+        self.assertEqual(na_min, "0,30")
+        self.assertEqual(eu_min, "10,40")
+        self.assertEqual(as_min, "20,50")
+        for hr in (na_hr, eu_hr, as_hr):
+            self.assertEqual(hr, "*")
+
+    def test_120min_cycle_3_realms(self):
+        # stride = 40min: NA min=0 hr even, EU min=40 hr even, ASIA min=20 hr odd
+        na_min, na_hr = _realm_crontab_for_cycle("na", 120)
+        eu_min, eu_hr = _realm_crontab_for_cycle("eu", 120)
+        as_min, as_hr = _realm_crontab_for_cycle("asia", 120)
+
+        self.assertEqual(na_min, "0")
+        self.assertEqual(na_hr, "0,2,4,6,8,10,12,14,16,18,20,22")
+        self.assertEqual(eu_min, "40")
+        self.assertEqual(eu_hr, "0,2,4,6,8,10,12,14,16,18,20,22")
+        self.assertEqual(as_min, "20")
+        self.assertEqual(as_hr, "1,3,5,7,9,11,13,15,17,19,21,23")
+
+    def test_offsets_dictionary_covers_all_realms(self):
+        # Catches forgetting to register a new realm in the offset map.
+        for realm in VALID_REALMS:
+            self.assertIn(realm, REALM_INTERVAL_OFFSETS,
+                          f"REALM_INTERVAL_OFFSETS missing realm {realm}")

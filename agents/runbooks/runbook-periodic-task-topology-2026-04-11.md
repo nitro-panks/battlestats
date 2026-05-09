@@ -462,3 +462,15 @@ Per CLAUDE.md "Runbook reconciliation": this runbook is the authoritative descri
 - Any of the `ENABLE_CRAWLER_SCHEDULES` / `CLAN_CRAWL_*` / `PLAYER_REFRESH_INTERVAL_MINUTES` / `RANKED_REFRESH_INTERVAL_MINUTES` env vars
 
 When superseded by a broader refactor, move to `agents/runbooks/archive/`.
+
+---
+
+## Update 2026-05-09 — Per-realm striping + rolling observation floor
+
+Two changes to the topology, both inside `signals.py`. No new tasks, no migrations:
+
+1. **Per-realm interval schedules are now crontab-striped.** The `IntervalSchedule(every=N)` rows that fired all 3 realms in lockstep on every tick have been replaced with `CrontabSchedule` rows striped via a new `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` map. The new `_realm_crontab_for_cycle(realm, cycle_minutes, base_minute=0)` helper translates `(realm, cycle_minutes)` into `(minute_str, hour_str)` so each realm's stripe sits inside the cycle without overlap. Affected families: `landing-page-warmer`, `recent-players-warmer`, `player-distribution-warmer`, `player-correlation-warmer`, `hot-entity-cache-warmer`, `recently-viewed-player-warmer`, `incremental-player-refresh`, `incremental-ranked-refresh`. With cycle=180 the player refresh fires NA at hours `0,3,6,…,21`, EU at `1,4,7,…,22`, ASIA at `2,5,8,…,23`, all at minute 0. The serialising `cache.add` realm lock still acts as a safety net.
+
+2. **Daily observation floor → rolling 6-hourly floor.** `daily-observation-floor-{realm}` was renamed to `observation-floor-{realm}` and promoted to fire 4× per day per realm with a 2h stride (NA at base, EU at base+2h, ASIA at base+4h). `BATTLE_OBSERVATION_FLOOR_HOURS` default tightened from 22h → 8h alongside the cadence change. The legacy `daily-observation-floor-{realm}` rows are added to `_RETIRED_SCHEDULE_NAMES` so they get pruned on next post_migrate.
+
+The active schedule reference list above is now stale — see `signals.py` for the current set; the canonical inventory is mirrored in `CLAUDE.md` under "Per-realm schedule striping". Cycle-time analysis from this runbook (35-78 min wall clock per realm refresh) still holds — striping smooths the load curve but doesn't change per-cycle cost. Test coverage now lives in `server/warships/tests/test_periodic_schedule_topology.py` (12 tests covering registration, crontab vs interval, offset distinctness, observation floor cadence, and retirement pruning).
