@@ -118,3 +118,15 @@ Should return ≤0 rows shortly after the daily floor task completes (with the n
 - Replacing the tiered crawler — different responsibilities. Tiered crawler keeps hot players warm at 12h cadence. Floor task guarantees nobody falls past 24h. They cooperate.
 - Sub-hour resolution for hot players — not needed; the on-render refresh path (`queue_ranked_observation_refresh` in `tasks.py`) already covers visit-driven freshness with a 5-min staleness gate.
 - Backfilling historical gaps — out of scope for the floor task. The diff lane attributes the gap activity to the next-observed date and the user can read the spike for what it is.
+
+## Update 2026-05-09 — Promotion to rolling 6-hourly floor
+
+The original `daily-observation-floor-{realm}` schedule fired once per day per realm at `01:15 + REALM_CRAWL_CRON_HOURS[realm]` UTC with `BATTLE_OBSERVATION_FLOOR_HOURS=22`. As of 2026-05-09 this is replaced with a rolling 6-hourly floor:
+
+- Schedule renamed to `observation-floor-{realm}` (the legacy `daily-` name is in `_RETIRED_SCHEDULE_NAMES` so old rows are pruned).
+- Per-realm stripe via `REALM_INTERVAL_OFFSETS` with a 2h stride: NA fires at `BATTLE_OBSERVATION_FLOOR_HOUR` (default 1) UTC and every 6h thereafter, EU at base+2h, ASIA at base+4h, each at `BATTLE_OBSERVATION_FLOOR_MINUTE` (default 15).
+- `BATTLE_OBSERVATION_FLOOR_HOURS` default tightened from 22 → 8.
+- Worst-case "battle landed in DB" lag for any active-7d player is now ~8h (down from ~24h).
+- Per-cycle candidate count drops because the tightened staleness threshold is also a tighter window — most cycles return <100 candidates instead of the original ~200-500/day budget. The active-7d population is unchanged, so total daily WG-call volume is comparable.
+
+The single command + `ensure_daily_battle_observations_task` body is unchanged — the 8h default lives in the management command's `DEFAULT_STALE_HOURS`. CLI overrides (`--stale-hours 22`) continue to work for manual ops.

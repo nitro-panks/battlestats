@@ -1268,10 +1268,10 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
     Walks `Player.objects.filter(realm=..., is_hidden=False,
     last_battle_date >= today - DAYS)` and dispatches a fresh observation
     for any whose latest BattleObservation is older than
-    `BATTLE_OBSERVATION_FLOOR_HOURS` (default 22h). The intent is to
-    guarantee at-most-24h spacing between observations for the active
-    population — sitting alongside the tiered incremental crawler which
-    is best-effort.
+    `BATTLE_OBSERVATION_FLOOR_HOURS` (default 8h, tightened from 22h on
+    2026-05-09 alongside the promotion to a rolling 6-hourly Beat
+    schedule). Sits alongside the tiered incremental crawler which is
+    best-effort.
 
     Issues 2 WG calls/player when ranked capture is off for the realm,
     3 calls when it's on (random + ranked baseline rolled into the same
@@ -1302,7 +1302,7 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
             "ensure_daily_battle_observations",
             realm=realm,
             days=int(os.getenv("BATTLE_OBSERVATION_FLOOR_DAYS", "7")),
-            stale_hours=int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOURS", "22")),
+            stale_hours=int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOURS", "8")),
             limit=int(os.getenv("BATTLE_OBSERVATION_FLOOR_LIMIT", "3000")),
             delay=float(os.getenv("BATTLE_OBSERVATION_FLOOR_DELAY", "0.3")),
         )

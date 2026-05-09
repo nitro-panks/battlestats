@@ -8,18 +8,18 @@ command targets that gap directly.
 
 Walks active visible players in `--realm` whose `last_battle_date` is
 within `--days` (default 7) and whose most recent `BattleObservation`
-is older than `--stale-hours` (default 22, leaving ~2h of slack vs.
-the 24h floor target). For each candidate, dispatches a fresh WG
-fetch + observation via `record_observation_and_diff`, OR
-`record_ranked_observation_and_diff` when ranked capture is on for
-the realm.
+is older than `--stale-hours` (default 8, tightened from 22h alongside
+the 2026-05-09 promotion to a 6-hourly Beat schedule). For each
+candidate, dispatches a fresh WG fetch + observation via
+`record_observation_and_diff`, OR `record_ranked_observation_and_diff`
+when ranked capture is on for the realm.
 
 Usage (manual):
     python manage.py ensure_daily_battle_observations --realm na --dry-run
     python manage.py ensure_daily_battle_observations --realm na
     python manage.py ensure_daily_battle_observations --realm na --stale-hours 12 --limit 500
 
-Beat-scheduled daily by `signals.py` so the floor is automatic.
+Beat-scheduled every 6h per realm by `signals.py` so the floor is automatic.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from warships.models import BattleObservation, DEFAULT_REALM, Player, VALID_REAL
 log = logging.getLogger("battle_observation_floor")
 
 DEFAULT_DAYS = 7
-DEFAULT_STALE_HOURS = 22
+DEFAULT_STALE_HOURS = 8
 DEFAULT_LIMIT = 3000
 DEFAULT_DELAY = 0.3
 

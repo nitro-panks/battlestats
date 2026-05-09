@@ -168,6 +168,12 @@ Resilience mechanisms:
 - **Consumer watchdog** — systemd timer (`battlestats-celery-watchdog.timer`) checks consumer counts every 5 min via `rabbitmqctl list_queues` and restarts zombie workers (process alive, 0 consumers)
 - **Soft systemd dependencies** — service units use `Wants=` (not `Requires=`) for Redis/RabbitMQ to prevent cascading stops during dependency restarts
 
+### Per-realm schedule striping
+
+Periodic tasks that run per realm (NA, EU, ASIA) are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` in `signals.py` so at most one realm is mid-cycle at any moment on the `background` worker. Striped families: landing/recent-players/distribution/correlation/hot-entity/recently-viewed warmers, incremental player refresh, incremental ranked refresh, and the rolling BattleObservation floor. The `_realm_crontab_for_cycle(realm, cycle_minutes, base_minute=0)` helper computes per-realm crontab `(minute_str, hour_str)` from the cycle length and offset index. Daily-cron families that already had hour offsets (clan crawl, clan-tier-dist warmer, best-player snapshot) continue to use `REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}`.
+
+Battle pickup latency: the rolling 6-hourly observation floor (active-7d players whose latest observation > `BATTLE_OBSERVATION_FLOOR_HOURS` = 8h) guarantees no active player goes >8h without a fresh `BattleObservation`, regardless of whether the tiered crawler reached them. Combined with the page-load 15-min staleness check on visited players, the worst-case "battle landed in DB" lag for any active player on any realm is roughly 8h.
+
 ### Nginx / HTTP
 
 - **HTTP/2** enabled on the production nginx 443 listeners. Eliminates the browser's 6-connection-per-origin limit under HTTP/1.1, allowing all concurrent chart and hydration requests to proceed without slot contention.
@@ -284,11 +290,13 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `ENABLE_CRAWLER_SCHEDULES` — Master kill switch for the daily clan crawl, clan-crawl watchdog, incremental player refresh, and incremental ranked refresh schedules (set `1` in production)
 - `CLAN_CRAWL_SCHEDULE_HOUR` / `CLAN_CRAWL_SCHEDULE_MINUTE` — Base UTC hour/minute for the daily clan crawl cron; per-realm offsets come from `REALM_CRAWL_CRON_HOURS` in `signals.py` (defaults: hour=`3`, minute=`0`)
 - `CLAN_CRAWL_WATCHDOG_MINUTES` — Clan crawl watchdog poll interval in minutes (default: `5`)
-- `PLAYER_REFRESH_INTERVAL_MINUTES` — Incremental player refresh cadence per realm (default: `180`). Each cycle walks the graduated hot/active/warm tiers and takes ~35-78 min/realm at steady state, so the safe minimum is `cycle_time × num_realms / num_slots`.
+- `PLAYER_REFRESH_INTERVAL_MINUTES` — Incremental player refresh cycle length in minutes per realm (default: `180`). Realms are striped via `REALM_INTERVAL_OFFSETS` so NA fires at minute 0 of hours `0,3,6,9,12,15,18,21`, EU at `1,4,7,…`, ASIA at `2,5,8,…`. Each cycle walks the graduated hot/active/warm tiers and takes ~35-78 min/realm at steady state.
 - `PLAYER_REFRESH_HOT_STALE_HOURS` — Hot-tier staleness threshold for incremental player refresh (default: `12`). Players whose `last_lookup` is within this window are visited every cycle.
 - `PLAYER_REFRESH_ACTIVE_STALE_HOURS` — Active-tier staleness threshold (default: `24`).
 - `PLAYER_REFRESH_WARM_STALE_HOURS` — Warm-tier staleness threshold (default: `72`). Outside this window players drop to occasional refreshes.
-- `RANKED_REFRESH_INTERVAL_MINUTES` — Incremental ranked refresh cadence per realm (default: `120`)
+- `RANKED_REFRESH_INTERVAL_MINUTES` — Incremental ranked refresh cycle length in minutes per realm (default: `120`). Striped per realm via `REALM_INTERVAL_OFFSETS` (40-min stride) so NA, EU, and ASIA never fire concurrently.
+- `BATTLE_OBSERVATION_FLOOR_HOUR` / `BATTLE_OBSERVATION_FLOOR_MINUTE` — Base UTC hour/minute for the rolling 6-hourly BattleObservation floor (defaults: `1` / `15`). Each realm fires 4×/day with a 2h stride: NA at base, EU at base+2h, ASIA at base+4h.
+- `BATTLE_OBSERVATION_FLOOR_HOURS` — Active-7d staleness threshold for the floor sweep (default: `8`, tightened from `22h` on 2026-05-09 alongside the cadence promotion). Active players whose latest observation is older than this get a fresh fetch.
 - `CELERY_BROKER_HEARTBEAT` — amqp heartbeat in seconds; `0` disables (default: `0`). The default 60s heartbeat is starved by long-running tasks (`incremental_player_refresh_task`), causing `BrokenPipeError on stopping Hub` and systemd worker restarts. We rely on TCP keepalive instead.
 - `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)

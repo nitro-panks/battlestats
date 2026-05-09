@@ -8,8 +8,50 @@ from django.dispatch import receiver
 
 from warships.models import VALID_REALMS
 
-# Per-realm cron hour offsets for staggering heavy tasks.
+# Per-realm cron hour offsets for staggering heavy daily tasks.
 REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}
+
+# Per-realm minute-offset *index* used to stripe interval-style schedules
+# across a common cycle so at most one realm is mid-cycle at any moment
+# on the background worker. The actual stride within a cycle is
+# `cycle_minutes // len(REALM_INTERVAL_OFFSETS)` (e.g. 60min for a 180min
+# cycle, 40min for 120min, 10min for 30min). See
+# `_realm_crontab_for_cycle` below.
+REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}
+
+
+def _realm_crontab_for_cycle(
+    realm: str, cycle_minutes: int, base_minute: int = 0
+) -> tuple[str, str]:
+    """Return ``(minute_str, hour_str)`` for a striped per-realm crontab.
+
+    Each realm's task fires every ``cycle_minutes`` starting at
+    ``base_minute + offset_index * stride`` minutes-of-day, where
+    ``stride = cycle_minutes // num_realms``. The returned strings are
+    already in crontab list form (e.g. ``"0,30"`` or ``"0,3,6,9,12,15,18,21"``)
+    or the wildcard ``"*"`` when every minute / hour is covered.
+
+    Works for cycles that divide 60 (10, 30) or are multiples of an hour
+    aligned with 1440 (60, 120, 180, 360, 720). Other values are rounded
+    down at the stride and may produce a slightly off-pattern stripe.
+    """
+    realm_count = max(len(REALM_INTERVAL_OFFSETS), 1)
+    stride = max(cycle_minutes // realm_count, 1)
+    offset_idx = REALM_INTERVAL_OFFSETS.get(realm, 0)
+    start_minute_of_day = (base_minute + offset_idx * stride) % 1440
+
+    fire_times = []
+    t = start_minute_of_day
+    while t < 1440:
+        fire_times.append(t)
+        t += cycle_minutes
+
+    minutes = sorted({t % 60 for t in fire_times})
+    hours = sorted({t // 60 for t in fire_times})
+
+    minute_str = '*' if len(minutes) == 60 else ','.join(str(m) for m in minutes)
+    hour_str = '*' if len(hours) == 24 else ','.join(str(h) for h in hours)
+    return minute_str, hour_str
 
 
 def _configured_clan_battle_warm_ids():
@@ -68,6 +110,13 @@ _RETIRED_SCHEDULE_NAMES = [
     "landing-random-clan-queue-refill-na",
     "landing-random-clan-queue-refill-eu",
     "landing-random-clan-queue-refill-asia",
+    # Daily observation floor (2026-05-02) was promoted to a 6-hourly
+    # rolling floor on 2026-05-09 and renamed to drop the `daily-` prefix.
+    # The 4 daily-* rows must be deleted so beat doesn't keep firing the
+    # old daily schedule alongside the new 6-hourly one.
+    "daily-observation-floor-na",
+    "daily-observation-floor-eu",
+    "daily-observation-floor-asia",
 ]
 
 
@@ -105,17 +154,23 @@ def register_periodic_schedules(sender, **kwargs):
             name="clan-battle-summary-warmer").update(enabled=False)
 
     landing_warm_minutes = int(os.getenv("LANDING_PAGE_WARM_MINUTES", "120"))
-    landing_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=landing_warm_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
-
     for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, landing_warm_minutes)
+        landing_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"landing-page-warmer-{realm}",
             defaults={
                 "task": "warships.tasks.warm_landing_page_content_task",
-                "interval": landing_warm_schedule,
+                "crontab": landing_warm_schedule,
+                "interval": None,
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"include_recent": True, "realm": realm}),
@@ -130,16 +185,23 @@ def register_periodic_schedules(sender, **kwargs):
     # out-of-band so a rebuild never adds latency to a request.
     recent_players_warm_minutes = int(
         os.getenv("LANDING_RECENT_PLAYERS_WARM_MINUTES", "180"))
-    recent_players_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=recent_players_warm_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
     for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, recent_players_warm_minutes)
+        recent_players_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"recent-players-warmer-{realm}",
             defaults={
                 "task": "warships.tasks.warm_landing_recent_players_task",
-                "interval": recent_players_warm_schedule,
+                "crontab": recent_players_warm_schedule,
+                "interval": None,
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
@@ -174,17 +236,23 @@ def register_periodic_schedules(sender, **kwargs):
 
     # -- Player Distribution Warmer (split from landing warmer) --
     dist_warm_minutes = int(os.getenv("DISTRIBUTION_WARM_MINUTES", "360"))
-    dist_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=dist_warm_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
-
     for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, dist_warm_minutes)
+        dist_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"player-distribution-warmer-{realm}",
             defaults={
                 "task": "warships.tasks.warm_player_distributions_task",
-                "interval": dist_warm_schedule,
+                "crontab": dist_warm_schedule,
+                "interval": None,
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
@@ -194,17 +262,23 @@ def register_periodic_schedules(sender, **kwargs):
 
     # -- Player Correlation Warmer (split from landing warmer) --
     corr_warm_minutes = int(os.getenv("CORRELATION_WARM_MINUTES", "360"))
-    corr_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=corr_warm_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
-
     for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, corr_warm_minutes)
+        corr_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"player-correlation-warmer-{realm}",
             defaults={
                 "task": "warships.tasks.warm_player_correlations_task",
-                "interval": corr_warm_schedule,
+                "crontab": corr_warm_schedule,
+                "interval": None,
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
@@ -214,17 +288,23 @@ def register_periodic_schedules(sender, **kwargs):
 
     hot_entity_warm_minutes = int(
         os.getenv("HOT_ENTITY_CACHE_WARM_MINUTES", "30"))
-    hot_entity_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=hot_entity_warm_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
-
     for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, hot_entity_warm_minutes)
+        hot_entity_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"hot-entity-cache-warmer-{realm}",
             defaults={
                 "task": "warships.tasks.warm_hot_entity_caches_task",
-                "interval": hot_entity_warm_schedule,
+                "crontab": hot_entity_warm_schedule,
+                "interval": None,
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
@@ -257,17 +337,23 @@ def register_periodic_schedules(sender, **kwargs):
 
     recently_viewed_warm_minutes = int(
         os.getenv("RECENTLY_VIEWED_WARM_MINUTES", "10"))
-    recently_viewed_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=recently_viewed_warm_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
-
     for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, recently_viewed_warm_minutes)
+        recently_viewed_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"recently-viewed-player-warmer-{realm}",
             defaults={
                 "task": "warships.tasks.warm_recently_viewed_players_task",
-                "interval": recently_viewed_warm_schedule,
+                "crontab": recently_viewed_warm_schedule,
+                "interval": None,
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
@@ -355,21 +441,30 @@ def register_periodic_schedules(sender, **kwargs):
         )
 
     # -- Incremental Player Refresh (per realm) --
-    # Default 180 min: each cycle walks ~1200 players × 6 WG API calls + DB
-    # writes and takes 35-78 min/realm. With -c 2 worker slots the safe minimum
-    # interval is cycle_time × num_realms / num_slots ≈ 117 min.
+    # Default 180 min cycle, striped per realm via REALM_INTERVAL_OFFSETS so
+    # NA fires at minute 0 of hours 0,3,6,…, EU at hours 1,4,7,…, ASIA at
+    # hours 2,5,8,…. Each cycle walks ~1200 players × 6 WG API calls + DB
+    # writes and takes 35-78 min/realm. Striping keeps at most one realm
+    # mid-cycle so the background worker stays utilised but not stacked.
     player_refresh_minutes = int(
         os.getenv("PLAYER_REFRESH_INTERVAL_MINUTES", "180"))
-    player_refresh_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=player_refresh_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
     for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, player_refresh_minutes)
+        player_refresh_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"incremental-player-refresh-{realm}",
             defaults={
                 "task": "warships.tasks.incremental_player_refresh_task",
-                "interval": player_refresh_schedule,
+                "crontab": player_refresh_schedule,
+                "interval": None,
                 "enabled": crawler_schedules_enabled,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
@@ -378,18 +473,28 @@ def register_periodic_schedules(sender, **kwargs):
         )
 
     # -- Incremental Ranked Refresh (per realm) --
+    # Default 120 min cycle, striped per realm. With 3 realms the stride is
+    # 40 min: NA at minute 0 of even hours, EU at minute 40 of even hours,
+    # ASIA at minute 20 of odd hours.
     ranked_refresh_minutes = int(
         os.getenv("RANKED_REFRESH_INTERVAL_MINUTES", "120"))
-    ranked_refresh_schedule, _ = IntervalSchedule.objects.get_or_create(
-        every=ranked_refresh_minutes,
-        period=IntervalSchedule.MINUTES,
-    )
     for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, ranked_refresh_minutes)
+        ranked_refresh_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
         PeriodicTask.objects.update_or_create(
             name=f"incremental-ranked-refresh-{realm}",
             defaults={
                 "task": "warships.tasks.incremental_ranked_data_task",
-                "interval": ranked_refresh_schedule,
+                "crontab": ranked_refresh_schedule,
+                "interval": None,
                 "enabled": crawler_schedules_enabled,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
@@ -397,37 +502,47 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
-    # -- Daily BattleObservation Floor (per realm) --
-    # Sits alongside the tiered incremental crawler as a guaranteed
-    # daily floor — fills any active-7d player whose latest
-    # BattleObservation is older than ~22h. Prevents the diff lane from
-    # collapsing multi-day activity into a single huge event.
+    # -- Rolling BattleObservation Floor (per realm, every 6h) --
+    # Promoted from a daily cron to a 6-hourly cron on 2026-05-09 to tighten
+    # battle pickup. Each realm fires 4× per day, striped via
+    # REALM_INTERVAL_OFFSETS (2h stride within the 6h cycle) so NA, EU,
+    # and ASIA never run concurrently. The floor walks active-7d players
+    # whose latest BattleObservation is older than
+    # BATTLE_OBSERVATION_FLOOR_HOURS (default tightened to 8h alongside the
+    # cadence change). Most cycles return <100 candidates because the
+    # tiered crawler covers hot players within 12h.
     # Runbook: agents/runbooks/runbook-battle-observation-floor-2026-05-02.md
-    obs_floor_hour = int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOUR", "1"))
+    obs_floor_minute_str = os.getenv("BATTLE_OBSERVATION_FLOOR_MINUTE", "15")
+    obs_floor_base_hour = int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOUR", "1"))
+    obs_floor_base_minute = (
+        obs_floor_base_hour * 60 + int(obs_floor_minute_str))
     for realm in sorted(VALID_REALMS):
-        realm_hour = (obs_floor_hour
-                      + REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+        # 6h cycle = 360 minutes. Striped offsets: NA at base, EU at
+        # base+2h, ASIA at base+4h.
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, 360, base_minute=obs_floor_base_minute)
         obs_floor_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute="15",
-            hour=str(realm_hour),
+            minute=minute_str,
+            hour=hour_str,
             day_of_week="*",
             day_of_month="*",
             month_of_year="*",
             timezone="UTC",
         )
         PeriodicTask.objects.update_or_create(
-            name=f"daily-observation-floor-{realm}",
+            name=f"observation-floor-{realm}",
             defaults={
                 "task": "warships.tasks.ensure_daily_battle_observations_task",
                 "crontab": obs_floor_schedule,
+                "interval": None,
                 "enabled": crawler_schedules_enabled,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
                 "description": (
-                    f"Daily floor for BattleObservation coverage "
+                    f"Rolling 6-hourly floor for BattleObservation coverage "
                     f"({realm.upper()}). Walks active-7d players whose "
-                    f"latest observation is >22h old. Defers while a "
-                    f"clan crawl holds its realm lock."
+                    f"latest observation exceeds BATTLE_OBSERVATION_FLOOR_HOURS. "
+                    f"Defers while a clan crawl holds its realm lock."
                 ),
             },
         )
