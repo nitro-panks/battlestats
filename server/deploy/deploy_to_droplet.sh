@@ -173,6 +173,16 @@ else
   echo 'BATTLE_HISTORY_RANKED_CAPTURE_REALMS=na,eu,asia' >> /etc/battlestats-server.env
 fi
 
+# Pin the rolling-6h BattleObservation floor staleness threshold to 8h
+# (tightened from 22h on 2026-05-09 alongside the cadence promotion).
+# Code defaults to 8h too; setting it explicitly here makes the live
+# value visible and overrideable without a redeploy.
+if grep -q '^BATTLE_OBSERVATION_FLOOR_HOURS=' /etc/battlestats-server.env; then
+  sed -i 's|^BATTLE_OBSERVATION_FLOOR_HOURS=.*|BATTLE_OBSERVATION_FLOOR_HOURS=8|' /etc/battlestats-server.env
+else
+  echo 'BATTLE_OBSERVATION_FLOOR_HOURS=8' >> /etc/battlestats-server.env
+fi
+
 get_env_value() {
   local key="$1"
   local raw
