@@ -410,7 +410,7 @@ migrate_env_value CACHE_WARMUP_START_DELAY_SECONDS LANDING_WARMUP_START_DELAY_SE
 
 set_env_value CELERY_DEFAULT_CONCURRENCY 3
 set_env_value CELERY_HYDRATION_CONCURRENCY 3
-set_env_value CELERY_BACKGROUND_CONCURRENCY 2
+set_env_value CELERY_BACKGROUND_CONCURRENCY 3
 set_env_value MAX_CONCURRENT_REALM_CRAWLS 1
 set_env_value CLAN_CRAWL_RATE_LIMIT_DELAY 0.25
 set_env_value CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY 0.10
@@ -511,7 +511,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q background -c "${CELERY_BACKGROUND_CONCURRENCY:-2}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_BACKGROUND_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n background@%%h'
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q background -c "${CELERY_BACKGROUND_CONCURRENCY:-3}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_BACKGROUND_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n background@%%h'
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
