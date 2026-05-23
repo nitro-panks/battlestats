@@ -830,6 +830,23 @@ def record_observation_from_payloads(
                 "ranked_events_created": 0,
             }
 
+        # Primary-source signal: the diff just proved the player played
+        # between `previous.observed_at` and now. Bump the shared field that
+        # powers "Last played N days ago" so the player-detail header and
+        # clan-member rail stop lagging the battle-history chart.
+        # See: agents/runbooks/runbook-last-battle-date-from-observation-2026-05-23.md
+        today_utc = datetime.now(timezone.utc).date()
+        Player.objects.filter(pk=player.pk).update(
+            last_battle_date=today_utc,
+            days_since_last_battle=0,
+        )
+
+        def _invalidate_player_detail_cache():
+            from warships.data import invalidate_player_detail_cache
+            invalidate_player_detail_cache(
+                player.player_id, realm=player.realm)
+        transaction.on_commit(_invalidate_player_detail_cache)
+
         all_ship_ids = (
             [event["ship_id"] for event in events]
             + [event["ship_id"] for event in ranked_events]

@@ -352,6 +352,97 @@ class RecordObservationFromPayloadsTests(TestCase):
         ):
             self.assertIsNone(_apply_event_to_daily_summary(object()))
 
+    # ---- last_battle_date piggyback (runbook 2026-05-23) ----------------
+
+    def _stale_player_date(self):
+        # 10 days ago — matches the lil_boots bug report scenario.
+        self.player.last_battle_date = (
+            django_timezone.now().date() - timedelta(days=10))
+        self.player.days_since_last_battle = 10
+        self.player.save(
+            update_fields=["last_battle_date", "days_since_last_battle"])
+
+    def test_advance_bumps_player_last_battle_date_to_today(self):
+        self._stale_player_date()
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.pvp_battles = 101
+        self.player.save(update_fields=["pvp_battles"])
+        record_observation_from_payloads(
+            self.player,
+            ship_data=self._ship_payload(battles=101, wins=1, survived=1),
+        )
+        self.player.refresh_from_db()
+        self.assertEqual(
+            self.player.last_battle_date, django_timezone.now().date())
+        self.assertEqual(self.player.days_since_last_battle, 0)
+
+    def test_advance_invalidates_player_detail_cache_on_commit(self):
+        self._stale_player_date()
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.pvp_battles = 101
+        self.player.save(update_fields=["pvp_battles"])
+        with mock.patch(
+            "warships.data.invalidate_player_detail_cache",
+        ) as invalidator:
+            with self.captureOnCommitCallbacks(execute=True):
+                record_observation_from_payloads(
+                    self.player,
+                    ship_data=self._ship_payload(
+                        battles=101, wins=1, survived=1),
+                )
+        invalidator.assert_called_once_with(
+            self.player.player_id, realm=self.player.realm)
+
+    def test_no_event_does_not_bump_last_battle_date(self):
+        self._stale_player_date()
+        baseline_date = self.player.last_battle_date
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        # No advance — battles count unchanged. Should produce zero events
+        # and leave Player.last_battle_date untouched.
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.refresh_from_db()
+        self.assertEqual(self.player.last_battle_date, baseline_date)
+        self.assertEqual(self.player.days_since_last_battle, 10)
+
+    def test_baseline_observation_does_not_bump_last_battle_date(self):
+        # The first observation for a player has no prior to diff against.
+        # We do not have evidence of recent activity from the diff lane,
+        # so last_battle_date must remain whatever account/info set.
+        self._stale_player_date()
+        baseline_date = self.player.last_battle_date
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.refresh_from_db()
+        self.assertEqual(self.player.last_battle_date, baseline_date)
+        self.assertEqual(self.player.days_since_last_battle, 10)
+
+    def test_random_prior_broken_does_not_bump_last_battle_date(self):
+        # Construct a previous observation whose ships_stats_json is empty
+        # but whose pvp_battles claims history existed. The orchestrator
+        # treats this as a baseline (no events), so last_battle_date must
+        # not be bumped from this artifact.
+        self._stale_player_date()
+        BattleObservation.objects.create(
+            player=self.player, pvp_battles=100, pvp_wins=50, pvp_losses=50,
+            pvp_frags=80, pvp_survived_battles=60, ships_stats_json=[],
+        )
+        baseline_date = self.player.last_battle_date
+        record_observation_from_payloads(
+            self.player,
+            ship_data=self._ship_payload(battles=101, wins=1, survived=1),
+        )
+        self.player.refresh_from_db()
+        self.assertEqual(self.player.last_battle_date, baseline_date)
+
 
 class RankedDiffTests(TestCase):
     """Pure ranked diff: keyed on (ship_id, season_id), no DB."""
