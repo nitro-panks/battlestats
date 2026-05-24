@@ -1609,6 +1609,8 @@ def prune_battle_observations_task(self):
                 os.getenv("BATTLE_OBSERVATION_COMPACT_MAX_ROWS", "0")),
             sleep_between_batches=float(
                 os.getenv("BATTLE_OBSERVATION_COMPACT_SLEEP", "0.5")),
+            statement_timeout_s=int(
+                os.getenv("BATTLE_OBSERVATION_COMPACT_STATEMENT_TIMEOUT", "180")),
             dry_run=False,
         )
         logger.info("prune_battle_observations_task: %s", result)

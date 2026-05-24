@@ -31,6 +31,7 @@ from django.core.management.base import BaseCommand, CommandError
 from warships.incremental_battles import (
     COMPACT_BATCH_SIZE_DEFAULT,
     COMPACT_KEEP_PER_PLAYER_DEFAULT,
+    COMPACT_STATEMENT_TIMEOUT_DEFAULT,
     compact_battle_observation_payloads,
 )
 
@@ -85,6 +86,15 @@ class Command(BaseCommand):
             help="Seconds to pause between batches. Default: 0.",
         )
         parser.add_argument(
+            "--statement-timeout", type=int,
+            default=COMPACT_STATEMENT_TIMEOUT_DEFAULT,
+            dest="statement_timeout",
+            help=(
+                "Postgres per-query timeout in seconds (0 = none). Bounds the "
+                f"scan so it fails fast. Default: {COMPACT_STATEMENT_TIMEOUT_DEFAULT}."
+            ),
+        )
+        parser.add_argument(
             "--dry-run", action="store_true",
             help="Report candidates + reclaimable bytes without writing.",
         )
@@ -99,6 +109,8 @@ class Command(BaseCommand):
             raise CommandError("--batch-size must be >= 1")
         if options["sleep"] < 0:
             raise CommandError("--sleep must be >= 0")
+        if options["statement_timeout"] < 0:
+            raise CommandError("--statement-timeout must be >= 0")
 
         result = compact_battle_observation_payloads(
             keep_per_player=keep_per_player,
@@ -107,6 +119,7 @@ class Command(BaseCommand):
             max_rows=options["max_rows"],
             dry_run=options["dry_run"],
             sleep_between_batches=options["sleep"],
+            statement_timeout_s=options["statement_timeout"],
         )
 
         if result["dry_run"]:

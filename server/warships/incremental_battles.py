@@ -1065,37 +1065,62 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
 
 COMPACT_KEEP_PER_PLAYER_DEFAULT = 3
 COMPACT_BATCH_SIZE_DEFAULT = 2000
+COMPACT_STATEMENT_TIMEOUT_DEFAULT = 180
 
-# Selects the ids (+ player_id) of observations whose heavy JSON payloads are
-# safe to clear: they still carry a payload, are older than the age cutoff,
-# and are NOT in the per-player keep set — the latest `keep` observations
-# (random diff baseline) plus the single latest non-NULL-ranked observation
-# (ranked walk-back baseline). Window functions are available on both
-# Postgres and the sqlite used in tests.
-_COMPACT_CANDIDATE_SQL = """
-    SELECT bo.id AS id, bo.player_id AS player_id
-    FROM warships_battleobservation bo
-    WHERE (bo.ships_stats_json IS NOT NULL
-           OR bo.ranked_ships_stats_json IS NOT NULL)
-      AND bo.observed_at < %(cutoff)s
-      AND bo.id NOT IN (
-          SELECT id FROM (
-              SELECT id, ROW_NUMBER() OVER (
-                  PARTITION BY player_id ORDER BY observed_at DESC, id DESC
-              ) AS rn
-              FROM warships_battleobservation
-          ) recent WHERE recent.rn <= %(keep)s
-      )
-      AND bo.id NOT IN (
-          SELECT id FROM (
-              SELECT id, ROW_NUMBER() OVER (
-                  PARTITION BY player_id ORDER BY observed_at DESC, id DESC
-              ) AS rrn
-              FROM warships_battleobservation
-              WHERE ranked_ships_stats_json IS NOT NULL
-          ) lastranked WHERE lastranked.rrn = 1
-      )
-"""
+
+def _compact_candidate_sql(*, include_bytes: bool) -> str:
+    """SQL selecting observations whose JSON payloads are safe to clear.
+
+    A single table scan with two window functions — deliberately NOT the
+    ``id NOT IN (SELECT … window …)`` anti-join shape (that degenerated into
+    a multi-scan query that ran 40+ min on the production table on
+    2026-05-24). One ``ROW_NUMBER()`` ranks each player's observations newest
+    first (the ``rn > keep`` rows fall outside the random diff baseline); a
+    second, partitioned by ``(player_id, ranked-payload-present)``, finds the
+    latest non-NULL-ranked observation (``rrn = 1`` within the has-ranked
+    group) so the ranked walk-back baseline is preserved. ``pg_column_size``
+    is computed in the inner scan so the window sort carries only a small
+    int, never the JSON blob. Window functions work on both Postgres and the
+    sqlite used in tests; the byte column is Postgres-only.
+    """
+    byte_select = (
+        ", COALESCE(pg_column_size(ships_stats_json), 0) "
+        "+ COALESCE(pg_column_size(ranked_ships_stats_json), 0) AS payload_bytes"
+        if include_bytes else ""
+    )
+    outer_cols = "id, player_id" + (", payload_bytes" if include_bytes else "")
+    return f"""
+        SELECT {outer_cols}
+        FROM (
+            SELECT
+                id,
+                player_id,
+                (ships_stats_json IS NOT NULL) AS has_ships,
+                (ranked_ships_stats_json IS NOT NULL) AS has_ranked,
+                observed_at{byte_select},
+                ROW_NUMBER() OVER (
+                    PARTITION BY player_id ORDER BY observed_at DESC, id DESC
+                ) AS rn,
+                ROW_NUMBER() OVER (
+                    PARTITION BY player_id, (ranked_ships_stats_json IS NOT NULL)
+                    ORDER BY observed_at DESC, id DESC
+                ) AS rrn
+            FROM warships_battleobservation
+        ) w
+        WHERE (w.has_ships OR w.has_ranked)
+          AND w.observed_at < %(cutoff)s
+          AND w.rn > %(keep)s
+          AND NOT (w.has_ranked AND w.rrn = 1)
+    """
+
+
+def _apply_statement_timeout(cur, seconds, is_pg) -> None:
+    """Bound a query so it can never run unbounded on prod again (PG only).
+
+    Must be called inside a transaction (SET LOCAL scopes to the txn).
+    """
+    if is_pg and seconds and seconds > 0:
+        cur.execute("SET LOCAL statement_timeout = %s", [int(seconds * 1000)])
 
 
 def compact_battle_observation_payloads(
@@ -1106,6 +1131,7 @@ def compact_battle_observation_payloads(
     max_rows: int = 0,
     dry_run: bool = False,
     sleep_between_batches: float = 0.0,
+    statement_timeout_s: int = COMPACT_STATEMENT_TIMEOUT_DEFAULT,
 ) -> Dict[str, Any]:
     """Reclaim disk by NULLing stale BattleObservation JSON payloads.
 
@@ -1133,69 +1159,75 @@ def compact_battle_observation_payloads(
     observations) is unaffected.
 
     ``dry_run=True`` reports the candidate count + affected players (and a
-    reclaimable-bytes estimate on Postgres) without writing anything — run it
-    first. Live runs clear in ``batch_size`` chunks, each its own
-    transaction, optionally capped by ``max_rows`` and paced by
-    ``sleep_between_batches`` so a large first compaction stays gentle on the
-    cluster.
+    reclaimable-bytes estimate on Postgres) in a single scan, without writing
+    — run it first. Live runs collect candidate ids in one scan (capped by
+    ``max_rows``), then clear by primary key in ``batch_size`` chunks — so the
+    table is scanned once, not once per batch. ``statement_timeout_s`` bounds
+    every query (Postgres) so a pathological plan fails fast instead of
+    hanging.
     """
     keep = max(1, int(keep_per_player))
     cutoff = datetime.now(timezone.utc) - timedelta(
         hours=max(0, int(min_age_hours)))
     params = {"cutoff": cutoff, "keep": keep}
+    is_pg = connection.vendor == "postgresql"
 
     if dry_run:
-        with connection.cursor() as cur:
-            cur.execute(
-                f"SELECT COUNT(*), COUNT(DISTINCT player_id) "
-                f"FROM ({_COMPACT_CANDIDATE_SQL}) c",
-                params,
-            )
-            count, players = cur.fetchone()
-            reclaimable_bytes = None
-            if connection.vendor == "postgresql" and count:
+        candidate_sql = _compact_candidate_sql(include_bytes=is_pg)
+        byte_select = ", COALESCE(SUM(payload_bytes), 0)" if is_pg else ""
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                _apply_statement_timeout(cur, statement_timeout_s, is_pg)
                 cur.execute(
-                    f"SELECT COALESCE(SUM("
-                    f"  COALESCE(pg_column_size(ships_stats_json), 0) "
-                    f"  + COALESCE(pg_column_size(ranked_ships_stats_json), 0)"
-                    f"), 0) FROM warships_battleobservation "
-                    f"WHERE id IN (SELECT id FROM ({_COMPACT_CANDIDATE_SQL}) c)",
+                    f"SELECT COUNT(*), COUNT(DISTINCT player_id){byte_select} "
+                    f"FROM ({candidate_sql}) c",
                     params,
                 )
-                reclaimable_bytes = int(cur.fetchone()[0] or 0)
+                row = cur.fetchone()
+        count, players = int(row[0] or 0), int(row[1] or 0)
+        reclaimable_bytes = int(row[2] or 0) if is_pg else None
         return {
             "status": "completed",
             "dry_run": True,
             "keep_per_player": keep,
             "min_age_hours": int(min_age_hours),
-            "candidates": int(count or 0),
-            "players_affected": int(players or 0),
+            "candidates": count,
+            "players_affected": players,
             "reclaimable_bytes": reclaimable_bytes,
             "cleared": 0,
             "batches": 0,
         }
 
-    update_sql = f"""
-        UPDATE warships_battleobservation
-        SET ships_stats_json = NULL, ranked_ships_stats_json = NULL
-        WHERE id IN (SELECT id FROM ({_COMPACT_CANDIDATE_SQL}) c LIMIT %(batch)s)
-    """
+    # One scan to collect candidate ids (capped by max_rows), then clear by
+    # primary key in chunks. Avoids re-scanning the whole table per batch.
+    candidate_sql = _compact_candidate_sql(include_bytes=False)
+    if max_rows and max_rows > 0:
+        candidate_sql += " LIMIT %(maxrows)s"
+        params["maxrows"] = int(max_rows)
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            _apply_statement_timeout(cur, statement_timeout_s, is_pg)
+            cur.execute(f"SELECT id FROM ({candidate_sql}) c", params)
+            ids = [r[0] for r in cur.fetchall()]
+
     cleared = 0
     batches = 0
-    while True:
-        if max_rows and cleared >= max_rows:
-            break
-        this_batch = batch_size
-        if max_rows:
-            this_batch = min(batch_size, max_rows - cleared)
+    for start in range(0, len(ids), batch_size):
+        chunk = ids[start:start + batch_size]
+        placeholders = ",".join(["%s"] * len(chunk))
         with transaction.atomic():
             with connection.cursor() as cur:
-                cur.execute(update_sql, {**params, "batch": this_batch})
+                _apply_statement_timeout(cur, statement_timeout_s, is_pg)
+                cur.execute(
+                    f"UPDATE warships_battleobservation "
+                    f"SET ships_stats_json = NULL, "
+                    f"ranked_ships_stats_json = NULL "
+                    f"WHERE id IN ({placeholders})",
+                    chunk,
+                )
                 affected = cur.rowcount
-        batches += 1
         cleared += max(affected, 0)
-        if not affected:
-            break
+        batches += 1
         if sleep_between_batches:
             time.sleep(sleep_between_batches)
 
