@@ -2117,6 +2117,57 @@ class BattleHistoryEndpointTests(TestCase):
             r3 = self.client.get("/api/player/api_test/battle-history/?days=7")
             self.assertEqual(r3.json()["totals"]["battles"], 99)
 
+    def test_capture_invalidates_empty_cached_window(self):
+        # Read-before-write race: a page-load fetch for the week window
+        # caches an empty payload, then the same visit's capture writes new
+        # events. The empty cache entry must be dropped so the next fetch
+        # surfaces the battles instead of waiting out the 5-min TTL.
+        from django.core.cache import cache
+        from warships.views import _battle_history_cache_key
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            # 1) Empty read for the default frontend window (?window=week).
+            r1 = self.client.get(
+                "/api/player/api_test/battle-history/?window=week")
+            self.assertEqual(r1.status_code, 200)
+            self.assertEqual(r1.json()["totals"]["battles"], 0)
+            week_key = _battle_history_cache_key(
+                "na", "api_test", "daily", 7, "random")
+            self.assertIsNotNone(
+                cache.get(week_key), "empty week payload should be cached")
+
+            # 2) A capture writes events for this player. The on_commit hook
+            #    must invalidate the battle-history cache.
+            self._seed_daily_rows({
+                42: {"battles": 3, "wins": 2, "ship_name": "Yamato"},
+            })
+            with self.captureOnCommitCallbacks(execute=True):
+                record_observation_from_payloads(
+                    self.player,
+                    ship_data=[{"ship_id": 42, "pvp": {"battles": 200}}],
+                )
+                self.player.pvp_battles = 203
+                self.player.save(update_fields=["pvp_battles"])
+                record_observation_from_payloads(
+                    self.player,
+                    ship_data=[{"ship_id": 42, "pvp": {
+                        "battles": 203, "wins": 2, "survived_battles": 0}}],
+                )
+
+            # Guard against a tautology: the invalidation only fires when the
+            # capture actually produced an event. Confirm it did.
+            self.assertEqual(
+                BattleEvent.objects.filter(player=self.player).count(), 1)
+            self.assertIsNone(
+                cache.get(week_key),
+                "capture should have invalidated the stale empty payload")
+
+            # 3) Next fetch now reflects the written battles.
+            r2 = self.client.get(
+                "/api/player/api_test/battle-history/?window=week")
+            self.assertEqual(r2.json()["totals"]["battles"], 3)
+
     def test_default_mode_returns_only_random_rows(self):
         # One random row + one ranked row for the same ship on the same
         # day. Default mode (random) must hide the ranked row.

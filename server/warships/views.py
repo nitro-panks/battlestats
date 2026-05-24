@@ -540,6 +540,27 @@ def _battle_history_cache_key(realm: str, player_name: str, period: str,
     )
 
 
+def invalidate_battle_history_cache(realm: str, player_name: str) -> None:
+    """Drop every frontend battle-history cache entry for a player.
+
+    Called when a capture writes new BattleEvents (see
+    `record_observation_from_payloads`). Without this, a page-load read that
+    races ahead of the same visit's capture write can cache an empty-window
+    payload for the full BATTLE_HISTORY_CACHE_TTL, so a freshly-played
+    session sees an empty card until the TTL lapses. Enumerating the
+    `BATTLE_HISTORY_WINDOWS × BATTLE_HISTORY_MODES` key space here keeps the
+    invalidator self-maintaining: a new window or mode is covered the moment
+    it's added to those constants.
+    """
+    keys = []
+    for window_arg, cfg in BATTLE_HISTORY_WINDOWS.items():
+        cache_period_key = window_arg if "hours" in cfg else cfg["period"]
+        for mode in BATTLE_HISTORY_MODES:
+            keys.append(_battle_history_cache_key(
+                realm, player_name, cache_period_key, cfg["windows"], mode))
+    cache.delete_many(keys)
+
+
 def _period_window_start(today, period: str, windows: int):
     """Return the inclusive lower bound for `windows` periods ending today."""
     from datetime import timedelta as _td

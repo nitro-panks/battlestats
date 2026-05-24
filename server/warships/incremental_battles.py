@@ -841,11 +841,17 @@ def record_observation_from_payloads(
             days_since_last_battle=0,
         )
 
-        def _invalidate_player_detail_cache():
+        def _invalidate_caches():
             from warships.data import invalidate_player_detail_cache
+            from warships.views import invalidate_battle_history_cache
             invalidate_player_detail_cache(
                 player.player_id, realm=player.realm)
-        transaction.on_commit(_invalidate_player_detail_cache)
+            # Drop any empty-window battle-history payload a page-load read
+            # cached just before this capture committed, so the freshly
+            # written events surface on the next fetch instead of after the
+            # 5-min TTL.
+            invalidate_battle_history_cache(player.realm, player.name)
+        transaction.on_commit(_invalidate_caches)
 
         all_ship_ids = (
             [event["ship_id"] for event in events]
