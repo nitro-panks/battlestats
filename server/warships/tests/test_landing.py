@@ -540,6 +540,47 @@ class LandingHelperTests(TestCase):
         self.assertEqual(wr_payload[0]['name'], 'WRLeader')
         self.assertIn('avg_cb_battles', wr_payload[0])
 
+    def test_score_best_clans_caches_full_ranking_until_ttl(self):
+        # Regression guard for the DB-CPU fix: score_best_clans() must serve a
+        # cached ranking on repeat calls instead of rescanning the player /
+        # playerexplorersummary tables on every landing warm.
+        # See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=8201, name='CacheClan', tag='CC', members_count=12,
+            cached_clan_wr=58.0, cached_total_battles=300000,
+            cached_active_member_count=10,
+        )
+        for index in range(5):
+            player = Player.objects.create(
+                name=f'CacheClanP{index}', player_id=820100 + index, clan=clan,
+                pvp_battles=5000, pvp_wins=2700, days_since_last_battle=3,
+            )
+            PlayerExplorerSummary.objects.create(
+                player=player, player_score=8.0,
+                clan_battle_total_battles=15, clan_battle_overall_win_rate=55.0,
+                clan_battle_summary_updated_at=now - timedelta(days=30),
+            )
+
+        first_ids, _ = score_best_clans(sort='overall')
+        self.assertIn(8201, first_ids)
+
+        # A smaller limit reuses the same cached computation (sliced).
+        one_id, _ = score_best_clans(sort='overall', limit=1)
+        self.assertEqual(one_id, first_ids[:1])
+
+        # Disqualify the clan; within the TTL the cache still returns it,
+        # proving the second call did not recompute.
+        clan.cached_total_battles = 1
+        clan.save(update_fields=['cached_total_battles'])
+        cached_ids, _ = score_best_clans(sort='overall')
+        self.assertEqual(cached_ids, first_ids)
+
+        # Clearing the cache forces a fresh compute that reflects the change.
+        cache.clear()
+        fresh_ids, _ = score_best_clans(sort='overall')
+        self.assertNotIn(8201, fresh_ids)
+
     def test_best_clan_wr_sort_ignores_tiny_cb_samples(self):
         now = timezone.now()
 
