@@ -22,11 +22,12 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import F, Q
 
 
@@ -1055,6 +1056,156 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
         "events_seen": events.count() if rows else BattleEvent.objects.filter(
             detected_at__date=target_date,
         ).count(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# BattleObservation payload compaction (disk retention)
+# ---------------------------------------------------------------------------
+
+COMPACT_KEEP_PER_PLAYER_DEFAULT = 3
+COMPACT_BATCH_SIZE_DEFAULT = 2000
+
+# Selects the ids (+ player_id) of observations whose heavy JSON payloads are
+# safe to clear: they still carry a payload, are older than the age cutoff,
+# and are NOT in the per-player keep set — the latest `keep` observations
+# (random diff baseline) plus the single latest non-NULL-ranked observation
+# (ranked walk-back baseline). Window functions are available on both
+# Postgres and the sqlite used in tests.
+_COMPACT_CANDIDATE_SQL = """
+    SELECT bo.id AS id, bo.player_id AS player_id
+    FROM warships_battleobservation bo
+    WHERE (bo.ships_stats_json IS NOT NULL
+           OR bo.ranked_ships_stats_json IS NOT NULL)
+      AND bo.observed_at < %(cutoff)s
+      AND bo.id NOT IN (
+          SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (
+                  PARTITION BY player_id ORDER BY observed_at DESC, id DESC
+              ) AS rn
+              FROM warships_battleobservation
+          ) recent WHERE recent.rn <= %(keep)s
+      )
+      AND bo.id NOT IN (
+          SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (
+                  PARTITION BY player_id ORDER BY observed_at DESC, id DESC
+              ) AS rrn
+              FROM warships_battleobservation
+              WHERE ranked_ships_stats_json IS NOT NULL
+          ) lastranked WHERE lastranked.rrn = 1
+      )
+"""
+
+
+def compact_battle_observation_payloads(
+    *,
+    keep_per_player: int = COMPACT_KEEP_PER_PLAYER_DEFAULT,
+    min_age_hours: int = 0,
+    batch_size: int = COMPACT_BATCH_SIZE_DEFAULT,
+    max_rows: int = 0,
+    dry_run: bool = False,
+    sleep_between_batches: float = 0.0,
+) -> Dict[str, Any]:
+    """Reclaim disk by NULLing stale BattleObservation JSON payloads.
+
+    The battle-history rollout (2026-05-01/02) made observation capture
+    append-only: every visit / crawl / floor refresh writes a row carrying a
+    full per-ship ``ships_stats_json`` (and, with ranked capture on, a
+    ``ranked_ships_stats_json``) blob. With no retention this table is the
+    primary disk consumer behind the cluster's read-only / disk alerts — see
+    ``agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md``.
+
+    We deliberately do **not** delete observation rows:
+    ``BattleEvent.from_observation`` and ``to_observation`` are CASCADE FKs,
+    so deleting a row would destroy the durable per-battle event record that
+    powers the charts. Instead we NULL the heavy JSON columns on observations
+    no longer needed as a diff baseline. Per player we keep full JSON on:
+
+      * the latest ``keep_per_player`` observations — the random diff baseline
+        (``record_observation_from_payloads`` diffs the next capture against
+        ``previous.ships_stats_json``), and
+      * the latest observation with a non-NULL ``ranked_ships_stats_json`` —
+        the ranked walk-back baseline (``_hydrate_previous_ranked_snapshot``).
+
+    Everything older has BOTH JSON columns set to NULL. Rows survive, so the
+    BattleEvent FKs stay intact and the rollup (which reads BattleEvent, not
+    observations) is unaffected.
+
+    ``dry_run=True`` reports the candidate count + affected players (and a
+    reclaimable-bytes estimate on Postgres) without writing anything — run it
+    first. Live runs clear in ``batch_size`` chunks, each its own
+    transaction, optionally capped by ``max_rows`` and paced by
+    ``sleep_between_batches`` so a large first compaction stays gentle on the
+    cluster.
+    """
+    keep = max(1, int(keep_per_player))
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        hours=max(0, int(min_age_hours)))
+    params = {"cutoff": cutoff, "keep": keep}
+
+    if dry_run:
+        with connection.cursor() as cur:
+            cur.execute(
+                f"SELECT COUNT(*), COUNT(DISTINCT player_id) "
+                f"FROM ({_COMPACT_CANDIDATE_SQL}) c",
+                params,
+            )
+            count, players = cur.fetchone()
+            reclaimable_bytes = None
+            if connection.vendor == "postgresql" and count:
+                cur.execute(
+                    f"SELECT COALESCE(SUM("
+                    f"  COALESCE(pg_column_size(ships_stats_json), 0) "
+                    f"  + COALESCE(pg_column_size(ranked_ships_stats_json), 0)"
+                    f"), 0) FROM warships_battleobservation "
+                    f"WHERE id IN (SELECT id FROM ({_COMPACT_CANDIDATE_SQL}) c)",
+                    params,
+                )
+                reclaimable_bytes = int(cur.fetchone()[0] or 0)
+        return {
+            "status": "completed",
+            "dry_run": True,
+            "keep_per_player": keep,
+            "min_age_hours": int(min_age_hours),
+            "candidates": int(count or 0),
+            "players_affected": int(players or 0),
+            "reclaimable_bytes": reclaimable_bytes,
+            "cleared": 0,
+            "batches": 0,
+        }
+
+    update_sql = f"""
+        UPDATE warships_battleobservation
+        SET ships_stats_json = NULL, ranked_ships_stats_json = NULL
+        WHERE id IN (SELECT id FROM ({_COMPACT_CANDIDATE_SQL}) c LIMIT %(batch)s)
+    """
+    cleared = 0
+    batches = 0
+    while True:
+        if max_rows and cleared >= max_rows:
+            break
+        this_batch = batch_size
+        if max_rows:
+            this_batch = min(batch_size, max_rows - cleared)
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                cur.execute(update_sql, {**params, "batch": this_batch})
+                affected = cur.rowcount
+        batches += 1
+        cleared += max(affected, 0)
+        if not affected:
+            break
+        if sleep_between_batches:
+            time.sleep(sleep_between_batches)
+
+    return {
+        "status": "completed",
+        "dry_run": False,
+        "keep_per_player": keep,
+        "min_age_hours": int(min_age_hours),
+        "cleared": cleared,
+        "batches": batches,
     }
 
 

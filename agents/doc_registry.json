@@ -1782,6 +1782,31 @@
                 "endpoint-retired",
                 "contract-replaced"
             ]
+        },
+        "agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db cpu alerts",
+                "postgres cpu saturation",
+                "digitalocean cpu high",
+                "db-postgresql-nyc3-11231"
+            ],
+            "tags": [
+                "postgres",
+                "cpu",
+                "digitalocean",
+                "monitoring",
+                "celery",
+                "incident",
+                "performance"
+            ],
+            "archive_on": [
+                "cpu-saturation-root-caused-and-resolved"
+            ]
         }
     }
 }

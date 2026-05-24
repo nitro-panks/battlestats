@@ -1569,6 +1569,54 @@ def roll_up_player_daily_ship_stats_task(target_date_iso=None):
     }
 
 
+@app.task(bind=True, queue='background', **TASK_OPTS)
+def prune_battle_observations_task(self):
+    """Reclaim disk by compacting stale BattleObservation JSON payloads.
+
+    NULLs `ships_stats_json` / `ranked_ships_stats_json` on observations no
+    longer needed as a diff baseline (keeps the latest N per player + the
+    latest non-NULL-ranked one), without deleting rows — see
+    `warships.incremental_battles.compact_battle_observation_payloads` and
+    `agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md`.
+
+    Gated by `BATTLE_OBSERVATION_COMPACT_ENABLED` (default off) so the
+    schedule is wired but inert until an operator has dry-run and run it
+    manually once. Single-run lock prevents overlap. Params come from env so
+    they can be tuned without a redeploy.
+    """
+    if os.getenv("BATTLE_OBSERVATION_COMPACT_ENABLED", "0") != "1":
+        return {"status": "skipped", "reason": "compaction-disabled"}
+
+    lock_key = _task_lock_key("prune_battle_observations", "global")
+    if not cache.add(lock_key, self.request.id,
+                     timeout=DAILY_OBSERVATION_FLOOR_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping prune_battle_observations_task — another run is active")
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        from warships.incremental_battles import (
+            compact_battle_observation_payloads,
+        )
+        result = compact_battle_observation_payloads(
+            keep_per_player=int(
+                os.getenv("BATTLE_OBSERVATION_COMPACT_KEEP", "3")),
+            min_age_hours=int(
+                os.getenv("BATTLE_OBSERVATION_COMPACT_MIN_AGE_HOURS", "0")),
+            batch_size=int(
+                os.getenv("BATTLE_OBSERVATION_COMPACT_BATCH_SIZE", "2000")),
+            max_rows=int(
+                os.getenv("BATTLE_OBSERVATION_COMPACT_MAX_ROWS", "0")),
+            sleep_between_batches=float(
+                os.getenv("BATTLE_OBSERVATION_COMPACT_SLEEP", "0.5")),
+            dry_run=False,
+        )
+        logger.info("prune_battle_observations_task: %s", result)
+        return result
+    finally:
+        cache.delete(lock_key)
+
+
 @app.task(
     queue='background',
     time_limit=600,

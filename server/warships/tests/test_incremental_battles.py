@@ -3281,3 +3281,196 @@ class Phase7DailyAggregateTests(TestCase):
         self.assertEqual(row.capture_points, 15)
         self.assertEqual(row.dropped_capture_points, 10)
         self.assertEqual(row.team_capture_points, 35)
+
+
+class CompactBattleObservationPayloadsTests(TestCase):
+    """Disk-retention compaction of BattleObservation JSON payloads.
+
+    Verifies the keep-set (latest N per player + latest non-NULL-ranked) is
+    preserved, older payloads are NULLed, rows are never deleted (so
+    BattleEvent CASCADE FKs stay intact), and dry-run writes nothing.
+    Runbook: agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md
+    """
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="compact_test", player_id=77777, realm="na", pvp_battles=500,
+        )
+
+    def _obs(self, *, days_ago, ranked=False, ships=True):
+        from warships.models import BattleObservation
+        obs = BattleObservation.objects.create(
+            player=self.player,
+            pvp_battles=500,
+            ships_stats_json=(
+                [{"ship_id": 1, "pvp": {"battles": 1}}] if ships else None),
+            ranked_ships_stats_json=(
+                [{"ship_id": 1, "season_id": 1, "battles": 1}]
+                if ranked else None),
+        )
+        # observed_at is auto_now_add; override via queryset update to place
+        # the row at a controlled point in the timeline.
+        ts = django_timezone.now() - timedelta(days=days_ago)
+        BattleObservation.objects.filter(pk=obs.pk).update(observed_at=ts)
+        obs.refresh_from_db()
+        return obs
+
+    def test_keeps_latest_n_clears_older(self):
+        from warships.models import BattleObservation
+        from warships.incremental_battles import (
+            compact_battle_observation_payloads,
+        )
+        obs = [self._obs(days_ago=d) for d in (5, 4, 3, 2, 1)]  # oldest→newest
+        result = compact_battle_observation_payloads(keep_per_player=2)
+        self.assertEqual(result["cleared"], 3)
+        # No rows deleted.
+        self.assertEqual(
+            BattleObservation.objects.filter(player=self.player).count(), 5)
+        for o in obs:
+            o.refresh_from_db()
+        # Two newest keep their JSON; three oldest are cleared.
+        self.assertIsNotNone(obs[4].ships_stats_json)  # days_ago=1
+        self.assertIsNotNone(obs[3].ships_stats_json)  # days_ago=2
+        self.assertIsNone(obs[2].ships_stats_json)     # days_ago=3
+        self.assertIsNone(obs[1].ships_stats_json)     # days_ago=4
+        self.assertIsNone(obs[0].ships_stats_json)     # days_ago=5
+
+    def test_preserves_latest_nonnull_ranked_even_if_old(self):
+        from warships.incremental_battles import (
+            compact_battle_observation_payloads,
+        )
+        # day4 is the only ranked observation and sits outside keep=2.
+        old_ranked = self._obs(days_ago=4, ranked=True)
+        self._obs(days_ago=3)
+        self._obs(days_ago=2)
+        self._obs(days_ago=1)
+        compact_battle_observation_payloads(keep_per_player=2)
+        old_ranked.refresh_from_db()
+        # The ranked walk-back baseline must survive (both columns kept, since
+        # the keep-set excludes it from clearing entirely).
+        self.assertIsNotNone(old_ranked.ranked_ships_stats_json)
+        self.assertIsNotNone(old_ranked.ships_stats_json)
+
+    def test_dry_run_writes_nothing(self):
+        from warships.models import BattleObservation
+        from warships.incremental_battles import (
+            compact_battle_observation_payloads,
+        )
+        for d in (5, 4, 3, 2, 1):
+            self._obs(days_ago=d)
+        result = compact_battle_observation_payloads(
+            keep_per_player=2, dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["candidates"], 3)
+        self.assertEqual(result["players_affected"], 1)
+        # Nothing cleared.
+        self.assertEqual(
+            BattleObservation.objects.filter(
+                player=self.player,
+                ships_stats_json__isnull=False,
+            ).count(),
+            5,
+        )
+
+    def test_does_not_delete_rows_or_cascade_events(self):
+        from warships.models import BattleEvent, BattleObservation
+        from warships.incremental_battles import (
+            compact_battle_observation_payloads,
+        )
+        old = self._obs(days_ago=5)
+        mid = self._obs(days_ago=4)
+        self._obs(days_ago=2)
+        self._obs(days_ago=1)
+        # Event diffed between two observations that will both be compacted.
+        event = BattleEvent.objects.create(
+            player=self.player,
+            mode=BattleEvent.MODE_RANDOM,
+            ship_id=1,
+            from_observation=old,
+            to_observation=mid,
+            battles_delta=1,
+        )
+        compact_battle_observation_payloads(keep_per_player=2)
+        # Rows survive (no CASCADE), so the event survives.
+        self.assertTrue(
+            BattleObservation.objects.filter(pk=old.pk).exists())
+        self.assertTrue(
+            BattleObservation.objects.filter(pk=mid.pk).exists())
+        self.assertTrue(BattleEvent.objects.filter(pk=event.pk).exists())
+        # But their payloads were cleared.
+        old.refresh_from_db()
+        self.assertIsNone(old.ships_stats_json)
+
+    def test_min_age_hours_floor_protects_recent(self):
+        from warships.models import BattleObservation
+        from warships.incremental_battles import (
+            compact_battle_observation_payloads,
+        )
+        # Three observations all within the last few hours.
+        from warships.models import BattleObservation as _BO
+        for hours in (3, 2, 1):
+            o = _BO.objects.create(
+                player=self.player, pvp_battles=500,
+                ships_stats_json=[{"ship_id": 1, "pvp": {"battles": 1}}],
+            )
+            _BO.objects.filter(pk=o.pk).update(
+                observed_at=django_timezone.now() - timedelta(hours=hours))
+        # keep=1 would normally clear 2, but min_age_hours=48 protects all.
+        result = compact_battle_observation_payloads(
+            keep_per_player=1, min_age_hours=48, dry_run=True)
+        self.assertEqual(result["candidates"], 0)
+        # With no floor, the 2 beyond keep=1 become candidates.
+        result2 = compact_battle_observation_payloads(
+            keep_per_player=1, min_age_hours=0, dry_run=True)
+        self.assertEqual(result2["candidates"], 2)
+
+    def test_management_command_dry_run_reports_and_writes_nothing(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from warships.models import BattleObservation
+        for d in (5, 4, 3, 2, 1):
+            self._obs(days_ago=d)
+        out = StringIO()
+        call_command(
+            "prune_battle_observations",
+            "--keep-per-player", "2", "--dry-run", stdout=out,
+        )
+        output = out.getvalue()
+        self.assertIn("DRY-RUN", output)
+        self.assertIn("3 observation payloads", output)
+        self.assertIn("no rows written", output)
+        # Confirm truly no writes.
+        self.assertEqual(
+            BattleObservation.objects.filter(
+                player=self.player, ships_stats_json__isnull=False).count(),
+            5,
+        )
+
+    def test_preserves_oldest_ranked_when_it_is_the_only_baseline(self):
+        # Broadest walk-back case: the latest non-NULL-ranked observation is
+        # the OLDEST row in the table, and every newer observation has NULL
+        # ranked (repeated ranked-fetch failures). It must survive so
+        # _hydrate_previous_ranked_snapshot's walk-back still finds a baseline.
+        from warships.incremental_battles import (
+            compact_battle_observation_payloads,
+        )
+        oldest_ranked = self._obs(days_ago=5, ranked=True)
+        for d in (4, 3, 2, 1):
+            self._obs(days_ago=d)  # random-only, NULL ranked
+        compact_battle_observation_payloads(keep_per_player=2)
+        oldest_ranked.refresh_from_db()
+        self.assertIsNotNone(oldest_ranked.ranked_ships_stats_json)
+
+    def test_batched_loop_clears_across_multiple_batches(self):
+        # batch_size=1 with 4 candidates exercises the loop's termination and
+        # rowcount accounting across multiple batches (guards against an
+        # affected=None / off-by-one regression on either DB backend).
+        from warships.incremental_battles import (
+            compact_battle_observation_payloads,
+        )
+        for d in (5, 4, 3, 2, 1):
+            self._obs(days_ago=d)
+        result = compact_battle_observation_payloads(
+            keep_per_player=1, batch_size=1)
+        self.assertEqual(result["cleared"], 4)
+        self.assertGreaterEqual(result["batches"], 4)

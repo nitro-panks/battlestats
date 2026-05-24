@@ -547,6 +547,44 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
+    # -- Daily BattleObservation payload compaction (disk retention) --
+    # NULLs stale ships_stats_json / ranked_ships_stats_json blobs so the
+    # append-only observation capture stops filling the cluster disk. Does
+    # NOT delete rows (BattleEvent FKs cascade). Disabled by default —
+    # BATTLE_OBSERVATION_COMPACT_ENABLED=1 flips it on after an operator has
+    # dry-run + run it manually once. Scheduled at the histogram's quietest
+    # UTC hour (12:30) to stay clear of the 03:00 / 23:00 CPU peaks.
+    # Runbook: agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md
+    compact_enabled = os.getenv(
+        "BATTLE_OBSERVATION_COMPACT_ENABLED", "0") == "1"
+    compact_hour = os.getenv("BATTLE_OBSERVATION_COMPACT_HOUR", "12")
+    compact_minute = os.getenv("BATTLE_OBSERVATION_COMPACT_MINUTE", "30")
+    compact_schedule, _ = CrontabSchedule.objects.get_or_create(
+        minute=compact_minute,
+        hour=compact_hour,
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        timezone="UTC",
+    )
+    PeriodicTask.objects.update_or_create(
+        name="prune-battle-observations",
+        defaults={
+            "task": "warships.tasks.prune_battle_observations_task",
+            "crontab": compact_schedule,
+            "interval": None,
+            "enabled": compact_enabled,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": (
+                "Daily compaction of stale BattleObservation JSON payloads "
+                "to reclaim disk. Keeps the latest N observations + latest "
+                "non-NULL-ranked per player; clears older payloads without "
+                "deleting rows. Gated by BATTLE_OBSERVATION_COMPACT_ENABLED."
+            ),
+        },
+    )
+
     # -- Daily Clan Tier Distribution Warmer --
     # Recalculates tier distribution cache for every clan with members.
     # Staggered by realm to avoid concurrent DB pressure.
