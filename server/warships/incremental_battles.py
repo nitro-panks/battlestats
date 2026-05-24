@@ -1068,7 +1068,7 @@ COMPACT_BATCH_SIZE_DEFAULT = 2000
 COMPACT_STATEMENT_TIMEOUT_DEFAULT = 180
 
 
-def _compact_candidate_sql(*, include_bytes: bool) -> str:
+def _compact_candidate_sql() -> str:
     """SQL selecting observations whose JSON payloads are safe to clear.
 
     A single table scan with two window functions — deliberately NOT the
@@ -1078,26 +1078,24 @@ def _compact_candidate_sql(*, include_bytes: bool) -> str:
     first (the ``rn > keep`` rows fall outside the random diff baseline); a
     second, partitioned by ``(player_id, ranked-payload-present)``, finds the
     latest non-NULL-ranked observation (``rrn = 1`` within the has-ranked
-    group) so the ranked walk-back baseline is preserved. ``pg_column_size``
-    is computed in the inner scan so the window sort carries only a small
-    int, never the JSON blob. Window functions work on both Postgres and the
-    sqlite used in tests; the byte column is Postgres-only.
+    group) so the ranked walk-back baseline is preserved.
+
+    Critically this touches **only heap columns**: ``IS NOT NULL`` reads the
+    tuple null-bitmap, never the value, so the 21 GB of TOASTed JSON is never
+    read. (An earlier version computed ``pg_column_size(ships_stats_json)``
+    inline for a reclaim estimate — that detoasted every row and blew the
+    statement timeout. Reclaim is now estimated from catalog stats instead.)
+    Window functions work on both Postgres and the sqlite used in tests.
     """
-    byte_select = (
-        ", COALESCE(pg_column_size(ships_stats_json), 0) "
-        "+ COALESCE(pg_column_size(ranked_ships_stats_json), 0) AS payload_bytes"
-        if include_bytes else ""
-    )
-    outer_cols = "id, player_id" + (", payload_bytes" if include_bytes else "")
-    return f"""
-        SELECT {outer_cols}
+    return """
+        SELECT id, player_id
         FROM (
             SELECT
                 id,
                 player_id,
                 (ships_stats_json IS NOT NULL) AS has_ships,
                 (ranked_ships_stats_json IS NOT NULL) AS has_ranked,
-                observed_at{byte_select},
+                observed_at,
                 ROW_NUMBER() OVER (
                     PARTITION BY player_id ORDER BY observed_at DESC, id DESC
                 ) AS rn,
@@ -1112,6 +1110,26 @@ def _compact_candidate_sql(*, include_bytes: bool) -> str:
           AND w.rn > %(keep)s
           AND NOT (w.has_ranked AND w.rrn = 1)
     """
+
+
+def _estimate_avg_observation_payload_bytes() -> Optional[float]:
+    """Mean TOASTed-JSON bytes per observation, from catalog stats (instant).
+
+    Used to estimate compaction reclaim without reading the 21 GB of TOAST.
+    Postgres-only; returns None elsewhere or when stats are unavailable.
+    """
+    if connection.vendor != "postgresql":
+        return None
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT pg_total_relation_size(reltoastrelid), reltuples "
+            "FROM pg_class WHERE relname = 'warships_battleobservation' "
+            "AND reltoastrelid <> 0"
+        )
+        row = cur.fetchone()
+    if not row or not row[1] or row[1] <= 0:
+        return None
+    return float(row[0]) / float(row[1])
 
 
 def _apply_statement_timeout(cur, seconds, is_pg) -> None:
@@ -1158,13 +1176,13 @@ def compact_battle_observation_payloads(
     BattleEvent FKs stay intact and the rollup (which reads BattleEvent, not
     observations) is unaffected.
 
-    ``dry_run=True`` reports the candidate count + affected players (and a
-    reclaimable-bytes estimate on Postgres) in a single scan, without writing
-    — run it first. Live runs collect candidate ids in one scan (capped by
-    ``max_rows``), then clear by primary key in ``batch_size`` chunks — so the
-    table is scanned once, not once per batch. ``statement_timeout_s`` bounds
-    every query (Postgres) so a pathological plan fails fast instead of
-    hanging.
+    ``dry_run=True`` reports the candidate count + affected players in a
+    single heap-only scan (reclaim is estimated from catalog stats, not by
+    reading the JSON) — run it first. Live runs collect candidate ids in one
+    scan (capped by ``max_rows``), then clear by primary key in ``batch_size``
+    chunks — so the table is scanned once, not once per batch.
+    ``statement_timeout_s`` bounds every query (Postgres) so a pathological
+    plan fails fast instead of hanging.
     """
     keep = max(1, int(keep_per_player))
     cutoff = datetime.now(timezone.utc) - timedelta(
@@ -1173,19 +1191,20 @@ def compact_battle_observation_payloads(
     is_pg = connection.vendor == "postgresql"
 
     if dry_run:
-        candidate_sql = _compact_candidate_sql(include_bytes=is_pg)
-        byte_select = ", COALESCE(SUM(payload_bytes), 0)" if is_pg else ""
+        candidate_sql = _compact_candidate_sql()
         with transaction.atomic():
             with connection.cursor() as cur:
                 _apply_statement_timeout(cur, statement_timeout_s, is_pg)
                 cur.execute(
-                    f"SELECT COUNT(*), COUNT(DISTINCT player_id){byte_select} "
+                    f"SELECT COUNT(*), COUNT(DISTINCT player_id) "
                     f"FROM ({candidate_sql}) c",
                     params,
                 )
                 row = cur.fetchone()
         count, players = int(row[0] or 0), int(row[1] or 0)
-        reclaimable_bytes = int(row[2] or 0) if is_pg else None
+        avg_bytes = _estimate_avg_observation_payload_bytes()
+        reclaimable_bytes = (
+            int(avg_bytes * count) if avg_bytes is not None else None)
         return {
             "status": "completed",
             "dry_run": True,
@@ -1200,7 +1219,7 @@ def compact_battle_observation_payloads(
 
     # One scan to collect candidate ids (capped by max_rows), then clear by
     # primary key in chunks. Avoids re-scanning the whole table per batch.
-    candidate_sql = _compact_candidate_sql(include_bytes=False)
+    candidate_sql = _compact_candidate_sql()
     if max_rows and max_rows > 0:
         candidate_sql += " LIMIT %(maxrows)s"
         params["maxrows"] = int(max_rows)
