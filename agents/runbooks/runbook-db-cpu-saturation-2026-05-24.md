@@ -2,7 +2,11 @@
 
 _Created: 2026-05-24_
 _Context: The DigitalOcean managed Postgres cluster backing battlestats has been firing CPU-high monitoring alerts continuously since 2026-05-01. This runbook is the evidence log assembled from every DO alert email (April 1 → May 24), so the investigation can start from data rather than re-reading the inbox. The alert mail was being auto-trashed by the personal mail-tidy rules, so it is logged here before it ages out of Trash._
-_Status: **IN PROGRESS.** Disk axis: root cause confirmed from code (unbounded, JSON-heavy `BattleObservation` capture with no retention — see [Findings](#findings-2026-05-24)). A compaction tool has been built (disabled by default) to reclaim the disk. CPU axis: still correlational — the same write workload is the prime suspect but the expensive-query confirmation (`pg_stat_statements`) is pending DB access. **Acute:** on 2026-05-24 the cluster went read-only (disk full), which broke a backend deploy mid-flight; services were restarted on the prior release but write paths 500 until storage is resized._
+_Status: **IN PROGRESS.** Disk axis: root cause confirmed from code (unbounded, JSON-heavy `BattleObservation` capture with no retention — see [Findings](#findings-2026-05-24)). A compaction tool has been built and the manual prune ran on prod (~563K payloads cleared, ~15 GB freed to reusable space); the daily compaction Beat job is now **ENABLED on prod**, and a one-time `VACUUM FULL` reclaimed ~15 GB to the OS (see updates below). CPU axis: **root cause confirmed via `pg_stat_statements`** — NOT the same as the disk axis. The CPU hog is `score_best_clans()` (3 heavy aggregates) recomputed ~2,180×/day from **request-driven landing Best-mode cache misses with no single-flight lock**, not the observation writes. See [Findings — CPU axis](#findings--cpu-axis-2026-05-24-later--confirmed-via-pg_stat_statements). **Acute (resolved):** on 2026-05-24 the cluster went read-only (disk full), which broke a backend deploy mid-flight; storage was resized 40 GB → 60 GB to clear the read-only lock and restore writes._
+
+_**Update 2026-05-24 (21:10 UTC):** Step 4 of the operating sequence executed — `BATTLE_OBSERVATION_COMPACT_ENABLED=1` appended to `/etc/battlestats-server.env` (backup `.bak.2026-05-24`), `migrate` re-registered the Beat entry as `enabled=True` (cron 12:30 UTC daily), `battlestats-beat` + `battlestats-celery-background` restarted and confirmed carrying the env var. First scheduled fire: next 12:30 UTC._
+
+_**Update 2026-05-24 (21:40 UTC) — on-disk reclaim done via `VACUUM FULL`, not `pg_repack`:** After compaction, `warships_battleobservation` was **22 GB total / 416 MB live heap** — i.e. ~22 GB of dead TOAST pages that autovacuum had already cleaned to `n_dead_tup=0` but couldn't return to the OS. Because the **live** data was tiny, the long-online-lock rationale for `pg_repack` didn't apply (and the server is **PG 18.3**, so the apt `postgresql-16-repack` 1.5.0 client wouldn't match the 1.5.2 extension anyway). Ran `SET lock_timeout='2min'; SET statement_timeout='20min'; VACUUM (FULL, VERBOSE) warships_battleobservation;` as `doadmin` — completed in **9m 10s**, table **22 GB → 7.0 GB** (heap 179 MB + ~6.85 GB live TOAST for kept observations), **`defaultdb` 37 GB → 22 GB (~15 GB returned to the OS)**. Captures resumed immediately after the brief `ACCESS EXCLUSIVE` lock released (no lost work — `acks_late=True`). Note: DO managed Postgres **cannot shrink storage** (scale-up only), so this is OS-headroom hygiene, not a path to a 60→40 GB downsize. **Still pending:** investigate `warships_player` (~11 GB, 8.4 GB TOAST, ~80k dead tuples) as the next compaction target — needs its own analysis of which JSON columns are the culprit._
 
 ## Findings (2026-05-24)
 
@@ -18,6 +22,38 @@ That is the disk filler, and the onset (2026-05-01) + the scheduled-hour CPU pea
 
 **Hard constraint discovered — compact, do not delete:** `BattleEvent.from_observation` and `to_observation` are **`on_delete=CASCADE`** FKs (`server/warships/models.py`), and the event uniqueness constraints are keyed on the observation pair. Deleting observation rows would cascade-delete the durable per-battle `BattleEvent` record that powers the charts. So the reclaim strategy is to **NULL the JSON payloads** on stale observations while keeping the rows.
 
+## Findings — CPU axis (2026-05-24, later — confirmed via `pg_stat_statements`)
+
+Enabled `pg_stat_statements` (`CREATE EXTENSION`; the library was already in DO's `shared_preload_libraries`, so counters span back to `stats_reset = 2026-05-19`, a **5.7-day window**). Live `pg_stat_activity` during an episode showed **multiple concurrent copies** of the same clan-scoring queries, each `active` 25–35s on `DataFileRead` (cold-buffer scans).
+
+**Top queries by `total_exec_time` (5.7-day window):**
+
+| calls | total | mean | source |
+|---|---|---|---|
+| 12,443 | 64 h | **18.5 s** | `score_best_clans()` candidate hard-filter (`data.py:5564`) — `clan LEFT JOIN player`, `COUNT(player) FILTER` grouped per clan |
+| 12,439 | 58 h | **16.8 s** | `score_best_clans()` `member_stats` `AVG(player_score…)` (`data.py:5600`) |
+| 12,432 | 49 h | **14 s** | `score_best_clans()` `cb_recency` `MAX(clan_battle_summary_updated_at)` (`data.py:5618`) |
+| 6,531 | 54 h | **30 s** | `PlayerDailyShipStats` SUM — battle-history feature (separate; set aside) |
+
+**Root cause (CPU axis ≠ disk axis — answers Open question #3: they are TWO different problems):**
+
+- The three `score_best_clans()` queries run **~12,440 times in 5.7 days ≈ 2,180/day (~1.5/min)** each — an order of magnitude above the warmer-only baseline (~170–300/day from the 55-min landing warmer + 12-h bulk loader). **So the load is request-driven, not periodic warmers.**
+- `_build_best_landing_clans()` (`landing.py:812`) calls `score_best_clans()` **live on every landing Best-mode cache miss** (`landing.py:867`) with **no single-flight lock** — concurrent homepage visits during a cold/dirty cache window each recompute the full ~49s-of-CPU trio over the 11 GB `player` + `playerexplorersummary` tables. Classic cache stampede on an expensive uncached computation, across 2 sorts × 3 realms = 6 keys.
+- `EXPLAIN (ANALYZE)` of the worst query (#1) shows it is **already index-driven** (bitmap scan on `clan.realm`, nested-loop index scan on `warships_player(clan_id)`), reading ~573 MB buffers. **No missing index** — the 18.5s mean is contention + cold reads from being run constantly, not a bad plan. So the fix is **frequency reduction (cache/lock the scoring), not indexing.**
+- Onset (2026-05-01) aligns with the best-clan landing / cache-capacity rollout that put `score_best_clans()` on the request path.
+
+**Primary driver — CONFIRMED `LANDING_CLANS_DIRTY_KEY` thrashing (not user traffic):**
+
+- Every clan write calls `invalidate_landing_clan_caches()` → `_mark_cache_family_dirty()` (sets the dirty key with **`timeout=None`** — no expiry, cleared only when a warm publishes, `landing.py:603`) **and** `_queue_landing_republish()` → `queue_landing_page_warm()`. Both clan-write paths do this: `update_clan_data()` (`data.py:4733`) and `refresh_clan_cached_aggregates()` (`data.py:4781`), driven by the multi-day clan crawl + per-clan refreshes.
+- While dirty, every landing Best-mode request serves the published fallback but **re-queues a republish warm** (`_get_cached_landing_payload_with_fallback`, `landing.py:649`). Each warm recomputes `score_best_clans()` from scratch (×2 sorts per realm).
+- **Live confirmation (2026-05-24 ~21:40 UTC):** NA dirty key present with `ttl=-1`; **8 `warm_landing_page_content_task` receipts in 60 min** (≈ every 7.5 min vs the nominal 55-min cadence); **two warms ran concurrently** (received 16s apart, both completed) — the dedup lock is **not** effectively throttling; each warm took **346–423 s** (vs 66 s when uncontended) — a self-reinforcing feedback loop (saturation → slow warms → dirty stays set → more warms queued → more overlap).
+
+**Fix direction, in leverage order:**
+1. ✅ **DONE + DEPLOYED (2026-05-24 22:03 UTC, release `20260524180220`, branch `perf/best-clans-scoring-cache-2026-05-24` / commit `6f5f45f`): Cache `score_best_clans()` output under its own multi-hour TTL.** Read-through cache keyed on `(realm, sort)` (independent of `limit` — it only slices the tail, so all callers share one computation), `SCORE_BEST_CLANS_CACHE_TTL` env-configurable (default 3h), in `data.py`. **Intentionally NOT wired to the dirty-key invalidation** (that was the storm). Even with warms firing every few minutes, they now reuse the cached ranking instead of rescanning the 11 GB tables. Test: `test_score_best_clans_caches_full_ranking_until_ttl` in `test_landing.py`; full 244-test backend release gate passes. **Prod verification (immediately post-deploy):** invoking `score_best_clans(realm='na', sort='overall')` twice measured **31.03 s (cold) → 0.002 s (cached)**, identical results — confirms the cache is live and effective. **Still watch over ~24h:** (a) the three `score_best_clans` `calls` counters in `pg_stat_statements` stop accelerating; (b) `warm_landing_page_content_task` durations drop from 346–423s toward 10–30s; (c) DO CPU alert volume falls. If a new query (e.g. `_attach_clan_battle_activity_badges`, `landing.py:839`, not yet profiled) bubbles to the top, that's the next target.
+2. **Stop per-clan-write invalidation of the Best-clan payload (or debounce it).** A single clan refresh barely moves the realm-wide ranking; the 6 h TTL + 55-min warmer already keep it fresh. Either drop the `invalidate_landing_clan_caches()` call from the hot clan-write paths, or give the dirty key a short TTL so a burst of crawl writes coalesces into one warm instead of keeping it perpetually dirty.
+3. **Fix the warm dedup** so `warm_landing_page_content_task` can't run concurrently / pile up (observed 8/hr, overlapping). A working single-flight lock here caps the warm cost regardless of how often republish is queued.
+4. (Separate) the `PlayerDailyShipStats` SUM (#3, mean 30s) is battle-history — its own analysis later.
+
 ## Remediation built (disabled by default)
 
 A compaction tool ships alongside this runbook (does **not** auto-run):
@@ -31,7 +67,7 @@ A compaction tool ships alongside this runbook (does **not** auto-run):
 1. **Resize storage first.** The prune is a write; it cannot run while the DB is read-only. Bump the managed-DB disk (DO dashboard or `doctl databases resize`) to clear the read-only lock and restore the API.
 2. **Dry-run:** `python manage.py prune_battle_observations --dry-run` — confirm candidate count + reclaim estimate.
 3. **Live, gently:** `python manage.py prune_battle_observations --batch-size 2000 --sleep 0.5 --max-rows 200000`, repeat until the dry-run reports ~0 candidates. (`VACUUM`/autovacuum then returns the space to reusable; growth halts because new rows reuse it.)
-4. **Enable the schedule:** set `BATTLE_OBSERVATION_COMPACT_ENABLED=1` so the daily job keeps it compacted.
+4. **Enable the schedule:** set `BATTLE_OBSERVATION_COMPACT_ENABLED=1` so the daily job keeps it compacted. ✅ **Done 2026-05-24 21:10 UTC** — env var added, `migrate` flipped the Beat entry to `enabled=True`, beat + background worker restarted and verified. Daily fire at 12:30 UTC.
 
 ### Caveat
 
@@ -217,6 +253,7 @@ Architecture: Django + Celery, Postgres + Redis + RabbitMQ, three Celery workers
 
 ## Open questions
 
-- Which specific periodic task (if any) owns the 03:00 and 23:00 UTC peaks?
+- ~~Are CPU and the new disk-utilization alerts the same root cause or two?~~ **ANSWERED: two.** Disk = unbounded `BattleObservation` JSON (fixed: compaction + VACUUM FULL). CPU = `score_best_clans()` request-driven cache-miss stampede (fix not yet implemented — see [Findings — CPU axis](#findings--cpu-axis-2026-05-24-later--confirmed-via-pg_stat_statements)).
+- **Still open:** does `score_best_clans()`'s ~2,180/day call rate trace to genuine user traffic on the Best-clan homepage, or to `LANDING_CLANS_DIRTY_KEY` thrashing forcing recompute on most requests? Confirm before/while implementing the cache fix.
+- Which specific periodic task (if any) owns the 03:00 and 23:00 UTC peaks? (The crawl at `CLAN_CRAWL_SCHEDULE_HOUR=3` and overnight rollups remain candidates for a *second* CPU contributor distinct from the score_best_clans daytime load — verify by sampling `pg_stat_activity` during a 03:00 episode.)
 - Is the 770-min May 3 episode a stuck/zombie worker (cf. `runbook-incident-celery-zombie-worker-2026-04-12.md`) rather than steady load?
-- Are CPU and the new disk-utilization alerts the same root cause or two?
