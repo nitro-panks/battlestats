@@ -23,8 +23,6 @@ def test_long_running_maintenance_tasks_route_to_background():
     routes = settings.CELERY_TASK_ROUTES
 
     expected_tasks = {
-        "warships.tasks.crawl_all_clans_task",
-        "warships.tasks.ensure_crawl_all_clans_running_task",
         "warships.tasks.incremental_player_refresh_task",
         "warships.tasks.incremental_ranked_data_task",
         "warships.tasks.warm_all_clan_tier_distributions_task",
@@ -33,6 +31,21 @@ def test_long_running_maintenance_tasks_route_to_background():
 
     for task_name in expected_tasks:
         assert routes[task_name]["queue"] == "background"
+
+
+def test_clan_crawl_routes_to_crawls_but_watchdog_routes_to_default():
+    # The days-long crawl_all_clans_task owns the single-slot `crawls` queue.
+    # Its watchdog must live on a different queue so it isn't camped behind the
+    # crawl (a ~269-deep backlog of no-op checks was observed 2026-05-25) and
+    # can still run to detect a zombie crawl holding that slot.
+    # See runbook-clan-crawl-blocker-2026-04-30.md.
+    routes = settings.CELERY_TASK_ROUTES
+
+    assert routes["warships.tasks.crawl_all_clans_task"]["queue"] == "crawls"
+    assert (
+        routes["warships.tasks.ensure_crawl_all_clans_running_task"]["queue"]
+        == "default"
+    )
 
 
 def test_startup_cache_warm_task_declares_background_queue():
