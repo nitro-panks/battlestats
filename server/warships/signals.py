@@ -615,7 +615,13 @@ def register_periodic_schedules(sender, **kwargs):
     # -- Incremental Battle Capture PoC dispatcher --
     # Runbook: agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md
     # The dispatcher reads BATTLE_TRACKING_PLAYER_NAMES at runtime; if unset it
-    # short-circuits with no work. Production droplet leaves it unset.
+    # short-circuits with no work. Production leaves it unset — so only enable
+    # the every-60s beat entry when names are configured. Otherwise the no-op
+    # task was being dispatched 1440x/day and, while the worker was saturated,
+    # piled up in the background queue (it was ~48% of a 1.6K-message backlog
+    # on 2026-05-24). See runbook-db-cpu-saturation-2026-05-24.md.
+    poll_tracking_enabled = bool(
+        os.getenv("BATTLE_TRACKING_PLAYER_NAMES", "").strip())
     poll_interval_seconds = int(
         os.getenv("BATTLE_TRACKING_POLL_SECONDS", "60"))
     poll_schedule, _ = IntervalSchedule.objects.get_or_create(
@@ -627,10 +633,10 @@ def register_periodic_schedules(sender, **kwargs):
         defaults={
             "task": "warships.tasks.dispatch_tracked_player_polls_task",
             "interval": poll_schedule,
-            "enabled": True,
+            "enabled": poll_tracking_enabled,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
-            "description": "Incremental battle capture PoC dispatcher. No-op unless BATTLE_TRACKING_PLAYER_NAMES is set.",
+            "description": "Incremental battle capture PoC dispatcher. No-op unless BATTLE_TRACKING_PLAYER_NAMES is set; beat entry disabled when unset.",
         },
     )
 
