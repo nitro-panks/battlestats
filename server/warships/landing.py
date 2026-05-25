@@ -1,6 +1,7 @@
 import gc
 import json
 import logging
+import os
 import random
 import time
 from datetime import timedelta
@@ -129,6 +130,18 @@ LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v13:namespace'
 LANDING_CLANS_DIRTY_KEY = 'landing:clans:dirty:v1'
 LANDING_PLAYERS_DIRTY_KEY = 'landing:players:dirty:v1'
 LANDING_RECENT_CLANS_DIRTY_KEY = 'landing:recent_clans:dirty:v1'
+
+# Debounce window for invalidation-driven landing republishes. Every clan/
+# player write calls _queue_landing_republish, as does the published-fallback
+# path on every request while the cache is dirty — so under the clan crawl +
+# landing traffic, a warm was enqueued on essentially every event, flooding
+# the background queue. This coalesces those triggers into at most one warm
+# per window per realm. The scheduled beat warmer (LANDING_PAGE_WARM_MINUTES)
+# is unaffected — it dispatches the task directly, not via this path.
+# See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
+LANDING_REPUBLISH_COOLDOWN_SECONDS = int(
+    os.environ.get('LANDING_REPUBLISH_COOLDOWN_SECONDS', '120'))
+LANDING_REPUBLISH_COOLDOWN_KEY = 'landing:republish:cooldown:v1'
 LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_CLAN_MODES = ('best',)
@@ -580,6 +593,18 @@ def _clear_cache_family_dirty(*dirty_keys: str) -> None:
 
 def _queue_landing_republish(realm: str = DEFAULT_REALM) -> None:
     from warships.tasks import queue_landing_page_warm
+
+    # Debounce: coalesce bursts of invalidations into at most one warm per
+    # LANDING_REPUBLISH_COOLDOWN_SECONDS per realm. cache.add only succeeds
+    # when no cooldown key exists; the key expires on its own and is NOT
+    # cleared by the warm task (unlike queue_landing_page_warm's dispatch
+    # key, which the task deletes on completion — that let republishes
+    # re-fire immediately after every warm). See
+    # agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
+    if LANDING_REPUBLISH_COOLDOWN_SECONDS > 0:
+        cooldown_key = realm_cache_key(realm, LANDING_REPUBLISH_COOLDOWN_KEY)
+        if not cache.add(cooldown_key, '1', LANDING_REPUBLISH_COOLDOWN_SECONDS):
+            return
 
     queue_landing_page_warm(realm=realm)
 

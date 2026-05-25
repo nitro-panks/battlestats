@@ -593,6 +593,20 @@ class LandingHelperTests(TestCase):
         fresh_ids, _ = score_best_clans(sort='overall')
         self.assertNotIn(8201, fresh_ids)
 
+    def test_queue_landing_republish_debounces_within_cooldown(self):
+        # Regression guard for the background-queue flood: bursts of clan/player
+        # invalidations must coalesce into at most one warm per realm within the
+        # cooldown window. See runbook-db-cpu-saturation-2026-05-24.md.
+        from warships import landing as landing_mod
+        with patch('warships.tasks.queue_landing_page_warm') as mock_warm:
+            landing_mod._queue_landing_republish(realm='na')
+            landing_mod._queue_landing_republish(realm='na')  # within cooldown
+            landing_mod._queue_landing_republish(realm='na')  # within cooldown
+            self.assertEqual(mock_warm.call_count, 1)
+            # A different realm is gated independently.
+            landing_mod._queue_landing_republish(realm='eu')
+            self.assertEqual(mock_warm.call_count, 2)
+
     def test_best_clan_wr_sort_ignores_tiny_cb_samples(self):
         now = timezone.now()
 
