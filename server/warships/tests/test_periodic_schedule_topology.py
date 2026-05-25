@@ -18,6 +18,9 @@ add an old name to `_RETIRED_SCHEDULE_NAMES` after a rename.
 """
 from __future__ import annotations
 
+import os
+from unittest import mock
+
 from django.apps import apps
 from django.test import TestCase
 from django_celery_beat.models import PeriodicTask
@@ -215,3 +218,23 @@ class RealmCrontabHelperTests(TestCase):
         for realm in VALID_REALMS:
             self.assertIn(realm, REALM_INTERVAL_OFFSETS,
                           f"REALM_INTERVAL_OFFSETS missing realm {realm}")
+
+
+class TrackedPlayerPollGateTests(TestCase):
+    """The every-60s PoC poll dispatcher must only be ENABLED when
+    BATTLE_TRACKING_PLAYER_NAMES is set. On prod (unset) it is a no-op that
+    was being dispatched 1440x/day and piling up in the background queue.
+    See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
+    """
+
+    def _registered_poll_task(self):
+        register_periodic_schedules(sender=apps.get_app_config("warships"))
+        return PeriodicTask.objects.get(name="poll-tracked-player-battles")
+
+    def test_poll_dispatcher_disabled_when_no_tracked_players(self):
+        with mock.patch.dict(os.environ, {"BATTLE_TRACKING_PLAYER_NAMES": ""}, clear=False):
+            self.assertFalse(self._registered_poll_task().enabled)
+
+    def test_poll_dispatcher_enabled_when_tracking_configured(self):
+        with mock.patch.dict(os.environ, {"BATTLE_TRACKING_PLAYER_NAMES": "lil_boots"}, clear=False):
+            self.assertTrue(self._registered_poll_task().enabled)
