@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
-from warships.models import Player, Clan, PlayerDailyShipStats, PlayerExplorerSummary, realm_cache_key
+from warships.models import Player, Clan, PlayerDailyShipStats, PlayerExplorerSummary, realm_cache_key, LandingRecentPlayersSnapshot, LandingPlayerBestSnapshot
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
@@ -4587,6 +4587,20 @@ class ApiContractTests(TestCase):
 
 
 class ApiThrottleTests(TestCase):
+    def setUp(self):
+        # Cross-test leakage cleanup. Two stores survive a TestCase rollback:
+        #   1. Redis (the CI cache) is not transactional — clear it.
+        #   2. Landing snapshot rows: warm_landing_page_content uses a
+        #      ThreadPoolExecutor, and those threads write the durable
+        #      Landing*Snapshot rows on separate DB connections that COMMIT
+        #      outside this test's transaction. An earlier warm test thus
+        #      leaves an empty recent-players snapshot that the endpoint serves
+        #      as the Tier-2 fallback here — making the surface return 0 rows
+        #      (only under the full suite; passes in isolation). Delete them.
+        cache.clear()
+        LandingRecentPlayersSnapshot.objects.all().delete()
+        LandingPlayerBestSnapshot.objects.all().delete()
+
     def test_landing_players_endpoint_declares_public_api_throttles(self):
         self.assertEqual(landing_players.cls.throttle_classes,
                          PUBLIC_API_THROTTLES)

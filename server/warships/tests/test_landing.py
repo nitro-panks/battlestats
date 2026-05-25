@@ -10,6 +10,18 @@ from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_
 from warships.models import Clan, LandingPlayerBestSnapshot, LandingRecentPlayersSnapshot, Player, PlayerExplorerSummary, realm_cache_key
 
 
+def _clear_landing_snapshots():
+    # warm_landing_page_content materializes the Landing*Snapshot rows via a
+    # ThreadPoolExecutor; those threads commit on separate DB connections
+    # OUTSIDE the test transaction, so the rows survive a TestCase rollback
+    # and leak across tests. The recent-players surface then serves the stale
+    # Tier-2 snapshot instead of rebuilding inline, breaking tests that expect
+    # a fresh build (only under the full suite; passes in isolation). Delete
+    # the leaked rows at the start of each test that reads the surface.
+    LandingRecentPlayersSnapshot.objects.all().delete()
+    LandingPlayerBestSnapshot.objects.all().delete()
+
+
 class LandingHelperTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -1093,6 +1105,11 @@ class LandingHelperTests(TestCase):
     def test_get_landing_recent_players_payload_cold_cache_builds_inline(self):
         # First-ever read after a Redis flush: no cache, no warmer tick yet.
         # Build inline so the surface isn't empty until the next 3h tick.
+        # Clear any snapshot leaked by an earlier threaded warm test (committed
+        # outside the test transaction) so the Tier-2 fallback doesn't
+        # short-circuit the inline build. Safe here — this test spawns no
+        # threads, so the delete can't deadlock a concurrent threaded warm.
+        _clear_landing_snapshots()
         with patch('warships.landing._build_recent_players', return_value=[{'name': 'cold-player'}]) as mock_build:
             from warships.landing import get_landing_recent_players_payload
             payload = get_landing_recent_players_payload()
@@ -1557,6 +1574,7 @@ class LandingRecentPlayersSnapshotTests(TestCase):
 
     def setUp(self):
         cache.clear()
+        _clear_landing_snapshots()
 
     def test_redis_hit_does_not_query_db_or_rebuild(self):
         # Pre-populate Redis. The DB snapshot does NOT exist. A read should
