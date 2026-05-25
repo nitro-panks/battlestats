@@ -5372,6 +5372,15 @@ CLAN_BATTLE_ACTIVITY_BADGE_RECENCY_WEIGHTS = (
 )
 BEST_CLAN_SORTS = ('overall', 'wr')
 
+# Read-through cache TTL for the full scored Best-clan ranking (see
+# score_best_clans). The three aggregate queries it runs scan the full
+# player/playerexplorersummary tables (~14-18s each) and dominate DB CPU;
+# caching the ranking lets frequent landing warms reuse it instead of
+# rescanning. Default 3h — the ranking changes slowly, well within tolerance.
+# See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md (CPU axis).
+SCORE_BEST_CLANS_CACHE_TTL = int(
+    os.environ.get('SCORE_BEST_CLANS_CACHE_TTL', 3 * 60 * 60))
+
 
 def _minmax_normalize(values: list[float]) -> list[float]:
     """Min-max normalize a list of floats to [0, 1]. Returns 0.5 for constant lists."""
@@ -5557,6 +5566,22 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     normalized_sort = (sort or 'overall').strip().lower()
     if normalized_sort not in BEST_CLAN_SORTS:
         raise ValueError(f"sort must be one of: {', '.join(BEST_CLAN_SORTS)}")
+
+    # Read-through cache of the full scored ranking, keyed on (realm, sort)
+    # independent of `limit` (limit only slices the tail below, so all callers
+    # share one computation). TTL-only — intentionally NOT invalidated by the
+    # landing dirty-key path: per-clan-write invalidation forcing a recompute
+    # on every warm was the DB-CPU saturation root cause. The ranking changes
+    # slowly; SCORE_BEST_CLANS_CACHE_TTL bounds staleness.
+    # See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
+    # Bump the `v1` key version if the scoring formula/weights change, so a
+    # deploy serves freshly-scored rankings instead of up to TTL of old ones.
+    cache_key = realm_cache_key(
+        realm, f'best-clans:scored:v1:{normalized_sort}')
+    cached = cache.get(cache_key)
+    if cached is not None:
+        cached_ids, cached_metrics = cached
+        return list(cached_ids[:limit]), cached_metrics
 
     now = django_timezone.now()
 
@@ -5774,15 +5799,20 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     else:
         raise ValueError(f"sort must be one of: {', '.join(BEST_CLAN_SORTS)}")
 
-    top = ranked_rows[:limit]
+    all_clan_ids = [int(row['clan_id']) for row in ranked_rows]
 
-    if top:
+    # Cache the full ranking (all candidates, sorted) so every caller — across
+    # limits — reuses this computation until the TTL lapses.
+    cache.set(cache_key, (all_clan_ids, cb_metrics_by_clan),
+              SCORE_BEST_CLANS_CACHE_TTL)
+
+    if all_clan_ids:
         logging.info(
             "score_best_clans: top %d clans for sort=%s from %d candidates",
-            len(top), normalized_sort, len(candidates),
+            min(limit, len(all_clan_ids)), normalized_sort, len(candidates),
         )
 
-    return [int(row['clan_id']) for row in top], cb_metrics_by_clan
+    return all_clan_ids[:limit], cb_metrics_by_clan
 
 
 def bulk_load_player_cache(

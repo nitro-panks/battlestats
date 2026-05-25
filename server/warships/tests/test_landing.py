@@ -10,6 +10,18 @@ from warships.landing import LANDING_CACHE_TTL, LANDING_CLAN_CACHE_TTL, LANDING_
 from warships.models import Clan, LandingPlayerBestSnapshot, LandingRecentPlayersSnapshot, Player, PlayerExplorerSummary, realm_cache_key
 
 
+def _clear_landing_snapshots():
+    # warm_landing_page_content materializes the Landing*Snapshot rows via a
+    # ThreadPoolExecutor; those threads commit on separate DB connections
+    # OUTSIDE the test transaction, so the rows survive a TestCase rollback
+    # and leak across tests. The recent-players surface then serves the stale
+    # Tier-2 snapshot instead of rebuilding inline, breaking tests that expect
+    # a fresh build (only under the full suite; passes in isolation). Delete
+    # the leaked rows at the start of each test that reads the surface.
+    LandingRecentPlayersSnapshot.objects.all().delete()
+    LandingPlayerBestSnapshot.objects.all().delete()
+
+
 class LandingHelperTests(TestCase):
     def setUp(self):
         cache.clear()
@@ -540,6 +552,47 @@ class LandingHelperTests(TestCase):
         self.assertEqual(wr_payload[0]['name'], 'WRLeader')
         self.assertIn('avg_cb_battles', wr_payload[0])
 
+    def test_score_best_clans_caches_full_ranking_until_ttl(self):
+        # Regression guard for the DB-CPU fix: score_best_clans() must serve a
+        # cached ranking on repeat calls instead of rescanning the player /
+        # playerexplorersummary tables on every landing warm.
+        # See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=8201, name='CacheClan', tag='CC', members_count=12,
+            cached_clan_wr=58.0, cached_total_battles=300000,
+            cached_active_member_count=10,
+        )
+        for index in range(5):
+            player = Player.objects.create(
+                name=f'CacheClanP{index}', player_id=820100 + index, clan=clan,
+                pvp_battles=5000, pvp_wins=2700, days_since_last_battle=3,
+            )
+            PlayerExplorerSummary.objects.create(
+                player=player, player_score=8.0,
+                clan_battle_total_battles=15, clan_battle_overall_win_rate=55.0,
+                clan_battle_summary_updated_at=now - timedelta(days=30),
+            )
+
+        first_ids, _ = score_best_clans(sort='overall')
+        self.assertIn(8201, first_ids)
+
+        # A smaller limit reuses the same cached computation (sliced).
+        one_id, _ = score_best_clans(sort='overall', limit=1)
+        self.assertEqual(one_id, first_ids[:1])
+
+        # Disqualify the clan; within the TTL the cache still returns it,
+        # proving the second call did not recompute.
+        clan.cached_total_battles = 1
+        clan.save(update_fields=['cached_total_battles'])
+        cached_ids, _ = score_best_clans(sort='overall')
+        self.assertEqual(cached_ids, first_ids)
+
+        # Clearing the cache forces a fresh compute that reflects the change.
+        cache.clear()
+        fresh_ids, _ = score_best_clans(sort='overall')
+        self.assertNotIn(8201, fresh_ids)
+
     def test_best_clan_wr_sort_ignores_tiny_cb_samples(self):
         now = timezone.now()
 
@@ -1052,6 +1105,11 @@ class LandingHelperTests(TestCase):
     def test_get_landing_recent_players_payload_cold_cache_builds_inline(self):
         # First-ever read after a Redis flush: no cache, no warmer tick yet.
         # Build inline so the surface isn't empty until the next 3h tick.
+        # Clear any snapshot leaked by an earlier threaded warm test (committed
+        # outside the test transaction) so the Tier-2 fallback doesn't
+        # short-circuit the inline build. Safe here — this test spawns no
+        # threads, so the delete can't deadlock a concurrent threaded warm.
+        _clear_landing_snapshots()
         with patch('warships.landing._build_recent_players', return_value=[{'name': 'cold-player'}]) as mock_build:
             from warships.landing import get_landing_recent_players_payload
             payload = get_landing_recent_players_payload()
@@ -1516,6 +1574,7 @@ class LandingRecentPlayersSnapshotTests(TestCase):
 
     def setUp(self):
         cache.clear()
+        _clear_landing_snapshots()
 
     def test_redis_hit_does_not_query_db_or_rebuild(self):
         # Pre-populate Redis. The DB snapshot does NOT exist. A read should
