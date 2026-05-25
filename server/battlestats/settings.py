@@ -292,7 +292,14 @@ CELERY_WORKER_MAX_TASKS_PER_CHILD = int(
 CELERY_TASK_DEFAULT_QUEUE = 'default'
 CELERY_TASK_ROUTES = {
     'warships.tasks.crawl_all_clans_task': {'queue': 'crawls'},
-    'warships.tasks.ensure_crawl_all_clans_running_task': {'queue': 'crawls'},
+    # The crawl watchdog must NOT share the single-slot `crawls` queue with
+    # the days-long crawl_all_clans_task: it would queue up behind the crawl
+    # (a ~269-deep backlog of no-op checks was observed 2026-05-25) and, worse,
+    # could never run to detect a *zombie* crawl that is camping that slot.
+    # Route it to `default` so it runs promptly every 5 min, self-gates when a
+    # crawl is healthy (lock held + fresh heartbeat → no-op), and can still
+    # clear a stale lock + restart. See runbook-clan-crawl-blocker-2026-04-30.md.
+    'warships.tasks.ensure_crawl_all_clans_running_task': {'queue': 'default'},
     'warships.tasks.incremental_player_refresh_task': {'queue': 'background'},
     'warships.tasks.incremental_ranked_data_task': {'queue': 'background'},
     'warships.tasks.refresh_efficiency_rank_snapshot_task': {'queue': 'background'},
