@@ -1000,6 +1000,15 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
             date=target_date,
         ).delete()
 
+        # NOTE: this loads one calendar day of BattleEvent rows into Python
+        # (~40K today — safe). It is the SAME unbounded-Python-load anti-pattern
+        # that OOM-killed _aggregate_into_period_table on full periods
+        # (rewritten to DB-side aggregation 2026-05-26). A single day stays
+        # small, but a multi-day backfill via rebuild_player_daily_ship_stats
+        # would hit the same wall. TODO(2026-Q3): if BattleEvent grows past
+        # ~200K/day or backfills span many days, rewrite this as a DB-side
+        # values().annotate() group-by (Count(filter=survived) for survived,
+        # grouped by player/ship/mode/season_id) like the period aggregator.
         events = BattleEvent.objects.filter(
             detected_at__date=target_date,
         ).order_by("detected_at")
@@ -1291,6 +1300,8 @@ def _aggregate_into_period_table(
     `PlayerMonthlyShipStats`, `PlayerYearlyShipStats` — they share the
     same column shape via the abstract base.
     """
+    from django.db.models import Max, Min, Sum
+
     from warships.models import PlayerDailyShipStats
 
     with transaction.atomic():
@@ -1302,52 +1313,68 @@ def _aggregate_into_period_table(
         # over-count by summing random + ranked rows together. The
         # weekly/monthly/yearly UI pills are currently hidden (commit
         # 7dc7e86) so this deferral has no user-visible impact.
-        daily_qs = PlayerDailyShipStats.objects.filter(
-            date__gte=target_period_start, date__lte=period_end_inclusive,
-            mode=PlayerDailyShipStats.MODE_RANDOM,
-        ).order_by("date")
+        #
+        # Aggregate in the DATABASE (GROUP BY player_id, ship_id) and stream
+        # the grouped rows in batches. The earlier version pulled every daily
+        # row in the window into a Python dict — for a month/year that is
+        # ~1.1-1.2M rows and OOM-killed the worker on 2026-05-26 (7.2 GB RSS),
+        # silently breaking the nightly monthly/yearly rollup. Now only the
+        # grouped result is materialised, bounded by the bulk_create batch.
+        # `ship_name=Max(...)` returns a non-empty name when one exists ('' < any).
+        aggregated = (
+            PlayerDailyShipStats.objects
+            .filter(
+                date__gte=target_period_start,
+                date__lte=period_end_inclusive,
+                mode=PlayerDailyShipStats.MODE_RANDOM,
+            )
+            .values("player_id", "ship_id")
+            .annotate(
+                t_battles=Sum("battles"),
+                t_wins=Sum("wins"),
+                t_losses=Sum("losses"),
+                t_frags=Sum("frags"),
+                t_damage=Sum("damage"),
+                t_xp=Sum("xp"),
+                t_planes_killed=Sum("planes_killed"),
+                t_survived_battles=Sum("survived_battles"),
+                t_first_event_at=Min("first_event_at"),
+                t_last_event_at=Max("last_event_at"),
+                t_ship_name=Max("ship_name"),
+            )
+            .order_by()
+        )
 
-        rows: Dict[tuple, Dict[str, Any]] = {}
-        for d in daily_qs:
-            key = (d.player_id, d.ship_id)
-            row = rows.get(key)
-            if row is None:
-                row = {
-                    "player_id": d.player_id,
-                    "period_start": target_period_start,
-                    "ship_id": d.ship_id,
-                    "ship_name": d.ship_name or "",
-                    "battles": 0, "wins": 0, "losses": 0, "frags": 0,
-                    "damage": 0, "xp": 0, "planes_killed": 0,
-                    "survived_battles": 0,
-                    "first_event_at": d.first_event_at,
-                    "last_event_at": d.last_event_at,
-                }
-                rows[key] = row
-            row["battles"] += d.battles
-            row["wins"] += d.wins
-            row["losses"] += d.losses
-            row["frags"] += d.frags
-            row["damage"] += d.damage
-            row["xp"] += d.xp
-            row["planes_killed"] += d.planes_killed
-            row["survived_battles"] += d.survived_battles
-            if d.first_event_at and (row["first_event_at"] is None
-                                     or d.first_event_at < row["first_event_at"]):
-                row["first_event_at"] = d.first_event_at
-            if d.last_event_at and (row["last_event_at"] is None
-                                    or d.last_event_at > row["last_event_at"]):
-                row["last_event_at"] = d.last_event_at
-            if d.ship_name and not row["ship_name"]:
-                row["ship_name"] = d.ship_name
-
-        if rows:
-            period_table.objects.bulk_create([
-                period_table(**row) for row in rows.values()
-            ])
+        batch_size = 5000
+        batch: list = []
+        written = 0
+        for r in aggregated.iterator(chunk_size=batch_size):
+            batch.append(period_table(
+                player_id=r["player_id"],
+                period_start=target_period_start,
+                ship_id=r["ship_id"],
+                ship_name=r["t_ship_name"] or "",
+                battles=r["t_battles"] or 0,
+                wins=r["t_wins"] or 0,
+                losses=r["t_losses"] or 0,
+                frags=r["t_frags"] or 0,
+                damage=r["t_damage"] or 0,
+                xp=r["t_xp"] or 0,
+                planes_killed=r["t_planes_killed"] or 0,
+                survived_battles=r["t_survived_battles"] or 0,
+                first_event_at=r["t_first_event_at"],
+                last_event_at=r["t_last_event_at"],
+            ))
+            if len(batch) >= batch_size:
+                period_table.objects.bulk_create(batch)
+                written += len(batch)
+                batch = []
+        if batch:
+            period_table.objects.bulk_create(batch)
+            written += len(batch)
 
     return {
-        "rows_written": len(rows),
+        "rows_written": written,
         "period_start": str(target_period_start),
     }
 
