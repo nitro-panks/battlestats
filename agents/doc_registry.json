@@ -1807,6 +1807,32 @@
             "archive_on": [
                 "cpu-saturation-root-caused-and-resolved"
             ]
+        },
+        "agents/runbooks/runbook-db-size-optimization-2026-05-26.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db size optimization",
+                "postgres disk bloat",
+                "battles_json bloat",
+                "battleobservation toast reclaim",
+                "db storage headroom"
+            ],
+            "tags": [
+                "postgres",
+                "disk",
+                "storage",
+                "toast",
+                "digitalocean",
+                "performance",
+                "bloat"
+            ],
+            "archive_on": [
+                "db-size-optimization-executed-and-reclaimed"
+            ]
         }
     }
 }
