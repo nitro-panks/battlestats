@@ -9,8 +9,10 @@ import type { PlayerData } from './entityTypes';
 export const PLAYER_REFRESH_PENDING_HEADER = 'X-Player-Refresh-Pending';
 export const PLAYER_NEXT_REFRESH_HEADER = 'X-Player-Next-Refresh';
 
-const POLL_INTERVAL_MS = 5_000;
-const POLL_LIMIT = 24; // ~2 min ceiling so a slow/failed refresh can't poll forever
+const POLL_INTERVAL_MS = 6_000;
+const POLL_LIMIT = 30; // ~3 min ceiling — long enough to catch a queued refresh,
+// bounded so a slow/failed one can't poll forever. Polls are lightweight header
+// checks; the page only re-hydrates ONCE, when the refresh actually lands.
 
 export type LiveRefreshPhase = 'loading' | 'cooldown';
 
@@ -99,18 +101,30 @@ export const usePlayerLiveRefresh = ({
                 );
                 if (cancelled) return;
 
-                onRehydrateRef.current(data);
-                setRefreshNonce((nonce) => nonce + 1);
-
                 const stillPending = parsePendingHeader(headers[PLAYER_REFRESH_PENDING_HEADER]);
                 const next = parseNextRefreshHeader(headers[PLAYER_NEXT_REFRESH_HEADER]);
-                if (next !== null) {
-                    setNextRefresh(next);
+
+                if (!stillPending) {
+                    // Refresh landed — re-hydrate exactly ONCE (swap in fresh data,
+                    // bump the nonce so charts re-fetch a single time) and settle
+                    // into the cooldown countdown. Re-hydrating on every interim
+                    // poll is what caused the "loads repeatedly" loop.
+                    onRehydrateRef.current(data);
+                    setRefreshNonce((nonce) => nonce + 1);
+                    if (next !== null) setNextRefresh(next);
+                    setPending(false);
+                    setSecondsRemaining(computeSecondsRemaining(next));
+                    return;
                 }
 
-                if (stillPending && attempt < POLL_LIMIT) {
+                if (attempt < POLL_LIMIT) {
+                    // Still refreshing — keep checking the header, but do NOT touch
+                    // playerData/refreshNonce (no re-render storm, no chart reloads).
                     timer = setTimeout(poll, POLL_INTERVAL_MS);
                 } else {
+                    // Gave up waiting — stop the spinner without forcing a reload;
+                    // the countdown reflects whatever freshness we have.
+                    if (next !== null) setNextRefresh(next);
                     setPending(false);
                     setSecondsRemaining(computeSecondsRemaining(next));
                 }
