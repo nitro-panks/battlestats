@@ -99,7 +99,20 @@ class PlayerSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Player
-        fields = '__all__'
+        # Trim JSON columns the frontend never reads from the detail payload
+        # (grep of client/app: 0 refs) — they bloated every /api/players/<name>
+        # response and the Redis get_cached_player_detail dict by ~24 KB/player
+        # for no consumer. Server-side reads of battles_json (landing .values(),
+        # get_kill_ratio, battle-history baseline, randoms fallback) use the
+        # MODEL attribute, unaffected by the serialized field set. randoms_json,
+        # ranked_json and efficiency_json ARE consumed by the client, so they
+        # stay. This serializer is not ODCS-contract-governed (the contracts
+        # cover PlayerSummary/PlayerExplorerRow). See
+        # agents/runbooks/runbook-db-optimization-followups-2026-05-26.md (FU-2).
+        exclude = [
+            'battles_json', 'tiers_json', 'type_json',
+            'activity_json', 'achievements_json',
+        ]
         extra_kwargs = {
             'pvp_frags': {'write_only': True},
             'pvp_survived_battles': {'write_only': True},

@@ -1807,6 +1807,58 @@
             "archive_on": [
                 "cpu-saturation-root-caused-and-resolved"
             ]
+        },
+        "agents/runbooks/runbook-db-size-optimization-2026-05-26.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db size optimization",
+                "postgres disk bloat",
+                "battles_json bloat",
+                "battleobservation toast reclaim",
+                "db storage headroom"
+            ],
+            "tags": [
+                "postgres",
+                "disk",
+                "storage",
+                "toast",
+                "digitalocean",
+                "performance",
+                "bloat"
+            ],
+            "archive_on": [
+                "db-size-optimization-executed-and-reclaimed"
+            ]
+        },
+        "agents/runbooks/runbook-db-optimization-followups-2026-05-26.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db optimization followups",
+                "rollup oom fix",
+                "player serializer wire trim",
+                "warships_player vacuum full",
+                "pgstattuple bloat"
+            ],
+            "tags": [
+                "postgres",
+                "performance",
+                "oom",
+                "rollup",
+                "serializer",
+                "vacuum",
+                "followups"
+            ],
+            "archive_on": [
+                "db-optimization-followups-completed"
+            ]
         }
     }
 }

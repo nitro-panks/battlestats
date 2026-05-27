@@ -22,6 +22,7 @@ from datetime import datetime, timezone, timedelta, date
 import logging
 import math
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -5380,6 +5381,18 @@ BEST_CLAN_SORTS = ('overall', 'wr')
 # See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md (CPU axis).
 SCORE_BEST_CLANS_CACHE_TTL = int(
     os.environ.get('SCORE_BEST_CLANS_CACHE_TTL', 3 * 60 * 60))
+# Single-flight lock so a cold/expired cache can't let concurrent callers
+# (landing warm, bulk loader, cold-start request) all run the heavy
+# 3-aggregate scan at once — the cache-stampede behind the 2026-05-26
+# post-VACUUM-FULL CPU spike. LOCK_TIMEOUT must exceed the worst-case compute
+# (cold-cache ~3 min) so the leader's lock can't expire mid-compute and admit a
+# second leader. LOCK_WAIT is how long a non-leader waits for the leader to
+# publish the cache before computing itself (covers the warm ~15-18s compute;
+# bounded so a pathologically slow leader can't hang the caller indefinitely).
+SCORE_BEST_CLANS_LOCK_TIMEOUT = int(
+    os.environ.get('SCORE_BEST_CLANS_LOCK_TIMEOUT', 5 * 60))
+SCORE_BEST_CLANS_LOCK_WAIT = int(
+    os.environ.get('SCORE_BEST_CLANS_LOCK_WAIT', 30))
 
 
 def _minmax_normalize(values: list[float]) -> list[float]:
@@ -5583,6 +5596,24 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
         cached_ids, cached_metrics = cached
         return list(cached_ids[:limit]), cached_metrics
 
+    # Single-flight: only one caller computes a given (realm, sort) at a time;
+    # others wait for it to publish the cache rather than running the same heavy
+    # scan concurrently (the cold-cache stampede behind the 2026-05-26 spike).
+    # See SCORE_BEST_CLANS_LOCK_* above.
+    lock_key = f'{cache_key}:lock'
+    have_score_lock = cache.add(lock_key, 1, SCORE_BEST_CLANS_LOCK_TIMEOUT)
+    if not have_score_lock:
+        wait_deadline = time.monotonic() + SCORE_BEST_CLANS_LOCK_WAIT
+        while time.monotonic() < wait_deadline:
+            time.sleep(0.5)
+            cached = cache.get(cache_key)
+            if cached is not None:
+                cached_ids, cached_metrics = cached
+                return list(cached_ids[:limit]), cached_metrics
+        # Leader still computing (rare cold path) — compute ourselves rather
+        # than block the caller any longer. have_score_lock stays False so we
+        # never release a lock we don't own (the leader's auto-expires).
+
     now = django_timezone.now()
 
     # Hard filters via ORM annotation
@@ -5617,6 +5648,8 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     if not candidates:
         logging.warning(
             "score_best_clans: no clans passed hard filters for sort=%s", normalized_sort)
+        if have_score_lock:
+            cache.delete(lock_key)
         return [], {}
 
     clan_ids = [int(row['clan_id']) for row in candidates]
@@ -5805,6 +5838,8 @@ def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEF
     # limits — reuses this computation until the TTL lapses.
     cache.set(cache_key, (all_clan_ids, cb_metrics_by_clan),
               SCORE_BEST_CLANS_CACHE_TTL)
+    if have_score_lock:
+        cache.delete(lock_key)
 
     if all_clan_ids:
         logging.info(

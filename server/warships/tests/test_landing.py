@@ -593,6 +593,51 @@ class LandingHelperTests(TestCase):
         fresh_ids, _ = score_best_clans(sort='overall')
         self.assertNotIn(8201, fresh_ids)
 
+    def test_score_best_clans_single_flight_lock(self):
+        # Single-flight guard for the 2026-05-26 post-VACUUM cold-cache
+        # stampede: a leader releases its lock after publishing, and a
+        # non-leader that times out waiting falls through to compute a correct
+        # ranking (never blocks forever, never returns degraded).
+        # See runbook-db-optimization-followups / runbook-db-cpu-saturation.
+        from warships.models import DEFAULT_REALM
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=8202, name='LockClan', tag='LK', members_count=12,
+            cached_clan_wr=59.0, cached_total_battles=320000,
+            cached_active_member_count=10,
+        )
+        for index in range(5):
+            player = Player.objects.create(
+                name=f'LockClanP{index}', player_id=820200 + index, clan=clan,
+                pvp_battles=5000, pvp_wins=2800, days_since_last_battle=3,
+            )
+            PlayerExplorerSummary.objects.create(
+                player=player, player_score=8.5,
+                clan_battle_total_battles=15, clan_battle_overall_win_rate=56.0,
+                clan_battle_summary_updated_at=now - timedelta(days=30),
+            )
+
+        cache_key = realm_cache_key(
+            DEFAULT_REALM, 'best-clans:scored:v1:overall')
+        lock_key = f'{cache_key}:lock'
+
+        # Leader path: a normal call computes, caches, and RELEASES the lock.
+        cache.clear()
+        leader_ids, _ = score_best_clans(sort='overall')
+        self.assertIn(8202, leader_ids)
+        self.assertIsNone(cache.get(lock_key))
+
+        # Waiter fall-through: a stuck leader holds the lock with an empty
+        # cache. With the wait window collapsed to 0 the caller does not block;
+        # it falls through, computes a correct ranking, and (not owning the
+        # lock) leaves it intact for the leader's TTL to clear.
+        cache.clear()
+        self.assertTrue(cache.add(lock_key, 1, 300))
+        with patch('warships.data.SCORE_BEST_CLANS_LOCK_WAIT', 0):
+            waiter_ids, _ = score_best_clans(sort='overall')
+        self.assertIn(8202, waiter_ids)
+        self.assertEqual(cache.get(lock_key), 1)
+
     def test_queue_landing_republish_debounces_within_cooldown(self):
         # Regression guard for the background-queue flood: bursts of clan/player
         # invalidations must coalesce into at most one warm per realm within the
