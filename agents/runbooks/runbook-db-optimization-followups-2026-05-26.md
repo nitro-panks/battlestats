@@ -82,6 +82,22 @@ growth capped) but a regular `VACUUM` does not return it to the OS. To reclaim i
 **Verify:** `pg_total_relation_size('warships_player')` drops by ~the freed amount; `defaultdb` shrinks
 accordingly; API healthy after the lock releases.
 
+### FU-4 — Single-flight lock on `score_best_clans()` (added after the post-VACUUM spike)
+
+Running the FU-3 `VACUUM FULL warships_player` evicted the table from the PG buffer cache; the next
+landing-Best cache-miss callers read the cold pages from disk (`wait: DataFileRead`), one taking
+**2m41s** vs the normal 14-18s, and — with no single-flight lock — concurrent callers stampeded the
+same heavy 3-aggregate scan → a ~3-minute CPU/IO spike that self-resolved as the cache re-warmed.
+
+This was the deferred "slice 3" from `runbook-db-cpu-saturation-2026-05-24.md`. Fixed in `data.py`:
+`score_best_clans()` now wraps its cache-miss compute in a Redis single-flight lock
+(`cache.add(lock_key, …, SCORE_BEST_CLANS_LOCK_TIMEOUT=5m)`). The first caller computes + caches +
+releases; concurrent callers wait up to `SCORE_BEST_CLANS_LOCK_WAIT=30s` (covers the warm compute)
+for the cache, and only fall through to compute themselves if the leader is pathologically slow —
+correctness-preserving (never returns degraded), DB load reduced from N→1 in the common case.
+Test: `test_score_best_clans_single_flight_lock` (test_landing.py). The lock auto-expires
+(`LOCK_TIMEOUT`) so a crash can't deadlock; both env knobs are tunable.
+
 ## Execution order & sequencing
 
 1. **FU-1 + FU-2 together** (both code): implement, run the lean release gate, commit, backend-deploy.
