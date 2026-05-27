@@ -55,6 +55,7 @@ from warships.data import (
     is_sleepy_player,
     player_battle_data_needs_refresh,
     player_detail_needs_refresh,
+    PLAYER_BATTLE_DATA_STALE_AFTER,
     refresh_player_explorer_summary,
     update_battle_data,
 )
@@ -91,6 +92,49 @@ def _delay_task_safely(task, **kwargs) -> None:
             task_name,
             error,
         )
+
+
+def _player_refresh_signals(player_id: int, realm: str = DEFAULT_REALM) -> tuple[bool, int]:
+    """Live-update signals for the player page, surfaced via response headers.
+
+    Returns ``(pending, next_refresh_epoch_seconds)``:
+
+    * ``pending`` — True when the player's randoms payload is stale (>15 min,
+      ``PLAYER_BATTLE_DATA_STALE_AFTER``), i.e. a visit-triggered refresh is
+      warranted or in flight. Anchored on ``battles_updated_at`` specifically
+      because that is the timestamp the dispatched ``update_battle_data`` task
+      reliably bumps on every refresh — so ``pending`` deterministically flips
+      False once the refresh lands, letting the client poll-then-rehydrate
+      (anchoring on ``last_fetch`` would hang, as the hit path doesn't always
+      dispatch the core-profile refresh that bumps it).
+    * ``next_refresh_epoch`` — ``battles_updated_at + 15 min`` as unix seconds:
+      the server-authoritative cooldown anchor every visitor counts down to
+      (so all viewers see the same "next update" time).
+
+    Cheap: a single ``.values()`` read, reusing the existing 15-min window.
+    """
+    row = (
+        Player.objects.filter(player_id=player_id, realm=realm)
+        .values('battles_updated_at').first()
+    ) or {}
+    now = timezone.now()
+    window = PLAYER_BATTLE_DATA_STALE_AFTER
+    battles_updated_at = row.get('battles_updated_at')
+
+    pending = battles_updated_at is None or (now - battles_updated_at) > window
+    anchor = battles_updated_at or now
+    next_refresh_epoch = int((anchor + window).timestamp())
+    return pending, next_refresh_epoch
+
+
+def _set_player_refresh_headers(response, pending: bool, next_refresh_epoch: int) -> None:
+    """Surface the live-update contract on a player-detail response.
+
+    The frontend reads these to drive the Loading pill (poll until pending
+    clears, then rehydrate) and the "next update: N min" countdown.
+    """
+    response['X-Player-Refresh-Pending'] = 'true' if pending else 'false'
+    response['X-Player-Next-Refresh'] = str(next_refresh_epoch)
 
 
 def _record_clan_lookup(clan: Clan, realm: str = DEFAULT_REALM) -> None:
@@ -167,12 +211,32 @@ class PlayerViewSet(viewsets.ModelViewSet):
                             player_id=player_id,
                             force_refresh=True,
                         )
+                    pending, next_refresh = _player_refresh_signals(
+                        player_id, realm)
+                    # Uniformity: the bulk-cache hit path must also trigger the
+                    # visit-driven randoms+ranked refresh when stale (the
+                    # get_object miss path already does). The 15-min staleness
+                    # gate + _delay_task_safely 60s dedup + the task's per-player
+                    # lock keep repeat visits from spamming upstream.
+                    if pending and not cached.get('is_hidden'):
+                        from warships.tasks import (
+                            queue_ranked_data_refresh, update_battle_data_task)
+                        _delay_task_safely(
+                            update_battle_data_task,
+                            player_id=player_id, realm=realm)
+                        queue_ranked_data_refresh(player_id, realm=realm)
                     response = Response(cached)
                     response['X-Player-Cache'] = 'hit'
+                    _set_player_refresh_headers(response, pending, next_refresh)
                     return response
 
         response = super().retrieve(request, *args, **kwargs)
         response['X-Player-Cache'] = 'miss'
+        miss_player_id = (getattr(response, 'data', None) or {}).get('player_id')
+        if miss_player_id:
+            pending, next_refresh = _player_refresh_signals(
+                miss_player_id, realm)
+            _set_player_refresh_headers(response, pending, next_refresh)
         return response
 
     def _record_player_view(self, player_id: int, update_last_lookup: bool = True, realm: str = DEFAULT_REALM) -> None:

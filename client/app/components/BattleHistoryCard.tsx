@@ -83,6 +83,9 @@ interface BattleHistoryCardProps {
     playerName: string;
     realm: string;
     days?: number;
+    // Bumped by the live-update poll; folded into the fetch deps + cacheKey so
+    // the battle-history re-fetches after a visit-driven refresh lands.
+    refreshNonce?: number;
 }
 
 const formatInt = (n: number): string => n.toLocaleString();
@@ -434,6 +437,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     playerName,
     realm,
     days = 7,
+    refreshNonce = 0,
 }) => {
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
     const [error, setError] = useState<Error | null>(null);
@@ -469,7 +473,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             fetchSharedJson<BattleHistoryPayload>(url, {
                 label: `BattleHistoryCard:${window}:${mode}`,
                 ttlMs: 60_000,
-                cacheKey: `battle-history:${playerName}:${realm}:${window}:${mode}:${cacheBust}`,
+                cacheKey: `battle-history:${playerName}:${realm}:${window}:${mode}:${cacheBust}:${refreshNonce}`,
                 responseHeaders: ['X-Ranked-Observation-Pending'],
             })
                 .then(({ data, headers }) => {
@@ -505,7 +509,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             cancelled = true;
             if (pollTimer !== null) clearTimeout(pollTimer);
         };
-    }, [playerName, realm, window, mode]);
+    }, [playerName, realm, window, mode, refreshNonce]);
 
     // Auto-select the right default mode based on what the player actually
     // has data in. Skipped once the user has explicitly clicked a pill.

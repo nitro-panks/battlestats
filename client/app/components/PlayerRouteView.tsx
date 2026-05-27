@@ -7,6 +7,13 @@ import type { PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import {
+    PLAYER_NEXT_REFRESH_HEADER,
+    PLAYER_REFRESH_PENDING_HEADER,
+    parseNextRefreshHeader,
+    parsePendingHeader,
+    usePlayerLiveRefresh,
+} from './usePlayerLiveRefresh';
 import { trackEntityDetailView } from '../lib/visitAnalytics';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
@@ -33,6 +40,8 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
+    const [initialPending, setInitialPending] = useState(false);
+    const [initialNextRefresh, setInitialNextRefresh] = useState<number | null>(null);
     const trackedPlayerIdRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -43,12 +52,15 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
             setError('');
 
             try {
-                const { data } = await fetchSharedJson<PlayerData>(withRealm(`/api/player/${encodeURIComponent(playerName)}/`, realm), {
+                const { data, headers } = await fetchSharedJson<PlayerData>(withRealm(`/api/player/${encodeURIComponent(playerName)}/`, realm), {
                     label: `Player ${playerName}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    responseHeaders: [PLAYER_REFRESH_PENDING_HEADER, PLAYER_NEXT_REFRESH_HEADER],
                 });
                 if (!cancelled) {
                     setPlayerData(data);
+                    setInitialPending(parsePendingHeader(headers[PLAYER_REFRESH_PENDING_HEADER]));
+                    setInitialNextRefresh(parseNextRefreshHeader(headers[PLAYER_NEXT_REFRESH_HEADER]));
                 }
             } catch (fetchError) {
                 console.error('Error loading player route:', fetchError);
@@ -88,6 +100,14 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
         });
     }, [playerData, playerName]);
 
+    const liveRefresh = usePlayerLiveRefresh({
+        playerName,
+        realm,
+        initialPending,
+        initialNextRefresh,
+        onRehydrate: setPlayerData,
+    });
+
     if (isLoading) {
         return <LoadingPanel label="Loading player profile..." minHeight={280} />;
     }
@@ -103,6 +123,8 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
             onSelectMember={(memberName) => router.push(buildPlayerPath(memberName, realm))}
             onSelectClan={(clanId, clanName) => router.push(buildClanPath(clanId, clanName, realm))}
             isLoading={false}
+            refreshStatus={{ phase: liveRefresh.phase, secondsRemaining: liveRefresh.secondsRemaining }}
+            refreshNonce={liveRefresh.refreshNonce}
         />
     );
 };
