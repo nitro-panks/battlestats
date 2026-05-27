@@ -1859,6 +1859,31 @@
             "archive_on": [
                 "db-optimization-followups-completed"
             ]
+        },
+        "agents/runbooks/runbook-live-update-cooldown-2026-05-27.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "features",
+            "owner": "platform",
+            "aliases": [
+                "live update cooldown",
+                "player page live updating",
+                "next update countdown",
+                "visit-based refresh ui",
+                "15 minute cooldown ui"
+            ],
+            "tags": [
+                "frontend",
+                "feature",
+                "player-page",
+                "cooldown",
+                "refresh",
+                "ux"
+            ],
+            "archive_on": [
+                "live-update-cooldown-ui-shipped"
+            ]
         }
     }
 }

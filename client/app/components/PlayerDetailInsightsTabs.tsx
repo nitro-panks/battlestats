@@ -37,6 +37,10 @@ interface PlayerDetailInsightsTabsProps {
     onClanBattleSummaryChange?: (summary: PlayerClanBattleSummary | null) => void;
     onWarmupSettled?: () => void;
     isLoading?: boolean;
+    // Bumped by the live-update poll when fresh stats land; folded into the
+    // chart cacheKeys + fetch deps so the tabs re-fetch instead of serving the
+    // settled (pre-refresh) cache. 0 = inert (no live refresh).
+    refreshNonce?: number;
 }
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -139,6 +143,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     onClanBattleSummaryChange,
     onWarmupSettled,
     isLoading = false,
+    refreshNonce = 0,
 }) => {
     const { theme } = useTheme();
     const { realm } = useRealm();
@@ -154,7 +159,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     useEffect(() => {
         setProfileChartPayload(null);
         setProfileChartState('idle');
-    }, [playerId]);
+    }, [playerId, refreshNonce]);
 
     useEffect(() => {
         setShowRankedHeatmap(hasKnownRankedGames);
@@ -177,17 +182,18 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 fetchSharedJson<unknown>(withRealm(`/api/fetch/player_correlation/tier_type/${playerId}/`, realm), {
                     label: `Tier type correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
-                    cacheKey: `tier-type:${playerId}:0:0`,
+                    cacheKey: `tier-type:${playerId}:0:0:${refreshNonce}`,
                     responseHeaders: ['X-Tier-Type-Pending'],
                 }),
                 fetchSharedJson<unknown>(withRealm(`/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`, realm), {
                     label: `Ranked correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                    cacheKey: `ranked-corr:${playerId}:${refreshNonce}`,
                 }),
                 fetchSharedJson<unknown>(withRealm(`/api/fetch/ranked_data/${playerId}/`, realm), {
                     label: `Ranked data ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
-                    cacheKey: `ranked-data:${playerId}:0:0`,
+                    cacheKey: `ranked-data:${playerId}:0:0:${refreshNonce}`,
                     responseHeaders: ['X-Ranked-Pending'],
                 }),
             ];
@@ -197,6 +203,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
                         label: `Player clan battle seasons ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                        cacheKey: `clan-cb-seasons:${playerId}:${refreshNonce}`,
                     }),
                 );
             }
@@ -224,7 +231,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 window.clearTimeout(timeoutId);
             }
         };
-    }, [hasClan, isLoading, onWarmupSettled, playerId, realm]);
+    }, [hasClan, isLoading, onWarmupSettled, playerId, realm, refreshNonce]);
 
     useEffect(() => {
         if (isLoading || activeTab !== 'profile' || profileChartPayload || profileChartState === 'error' || profileChartState === 'warming') {
@@ -241,7 +248,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     const payload = await fetchSharedJson<TierTypePayload>(withRealm(`/api/fetch/player_correlation/tier_type/${playerId}/`, realm), {
                         label: `Tier type correlation ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
-                        cacheKey: `tier-type:${playerId}:${pendingAttempts}:${attempt}`,
+                        cacheKey: `tier-type:${playerId}:${pendingAttempts}:${attempt}:${refreshNonce}`,
                         responseHeaders: ['X-Tier-Type-Pending'],
                     });
 
@@ -303,7 +310,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 clearTimeout(timeoutId);
             }
         };
-    }, [activeTab, isLoading, playerId, profileChartPayload, profileChartState, realm]);
+    }, [activeTab, isLoading, playerId, profileChartPayload, profileChartState, realm, refreshNonce]);
 
     useEffect(() => {
         if (profileChartState !== 'warming') {

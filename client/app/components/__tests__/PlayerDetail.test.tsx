@@ -177,6 +177,48 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(mockUseClanMembers).toHaveBeenCalledWith(4444, false);
     });
 
+    it('shows the loading affordance while a visit refresh is pending', () => {
+        render(
+            <PlayerDetail
+                player={basePlayer}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+                refreshStatus={{ phase: 'loading', secondsRemaining: 0 }}
+            />,
+        );
+
+        expect(screen.getByTestId('live-refresh-status')).toHaveTextContent('Loading');
+    });
+
+    it('shows the cooldown countdown in minutes left of the share button', () => {
+        render(
+            <PlayerDetail
+                player={basePlayer}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+                refreshStatus={{ phase: 'cooldown', secondsRemaining: 720 }}
+            />,
+        );
+
+        expect(screen.getByTestId('live-refresh-status')).toHaveTextContent('Next update: 12 min');
+    });
+
+    it('suppresses the live-refresh badge for hidden players', () => {
+        render(
+            <PlayerDetail
+                player={{ ...basePlayer, is_hidden: true }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+                refreshStatus={{ phase: 'loading', secondsRemaining: 0 }}
+            />,
+        );
+
+        expect(screen.queryByTestId('live-refresh-status')).not.toBeInTheDocument();
+    });
+
     it('renders the clan chart on the player page when clan data exists', () => {
         render(
             <PlayerDetail

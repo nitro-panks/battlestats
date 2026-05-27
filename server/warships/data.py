@@ -2523,6 +2523,12 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     update_randoms_data(player.player_id, realm=realm)
     refresh_player_explorer_summary(player, battles_rows=sorted_data)
     logging.info(f"Updated battles_json data: {player.name}")
+    # Bust the player-detail bulk cache so the next visit / live-update poll
+    # serves the freshly-refreshed stats. Without this, hot/bulk-cached players
+    # (top ~50) would keep serving the stale cached body even after
+    # battles_updated_at advanced, so the rehydrate-on-poll loop would settle
+    # on old numbers. Cheap cache.delete; no-op for the ~uncached majority.
+    invalidate_player_detail_cache(player.player_id, realm=realm)
 
     # Battle-history capture hook (Phase 2 of the playerbase rollout).
     # Runbook: agents/runbooks/runbook-battle-history-rollout-2026-04-28.md

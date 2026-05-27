@@ -283,7 +283,7 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/101/?realm=na', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:101:0:0' }));
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/101/?realm=na', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:101:0:0:0' }));
         expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/tier_type/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
         expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_clan_battle_seasons/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/type_data/101/?realm=na', expect.anything());

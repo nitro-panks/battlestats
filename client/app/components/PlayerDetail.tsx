@@ -99,6 +99,10 @@ interface PlayerDetailProps {
     onSelectMember: (memberName: string) => void;
     onSelectClan: (clanId: number, clanName: string) => void;
     isLoading?: boolean;
+    // Visit-based live-update status (see usePlayerLiveRefresh). When omitted the
+    // page renders exactly as before — the badge and chart re-fetch are inert.
+    refreshStatus?: { phase: 'loading' | 'cooldown'; secondsRemaining: number };
+    refreshNonce?: number;
 }
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -215,6 +219,8 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     onSelectMember,
     onSelectClan,
     isLoading = false,
+    refreshStatus,
+    refreshNonce = 0,
 }) => {
     const { theme } = useTheme();
     const { realm } = useRealm();
@@ -422,6 +428,27 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
                             </div>
                             <div className="flex items-center gap-2 self-start">
+                                {refreshStatus && !player.is_hidden ? (
+                                    refreshStatus.phase === 'loading' ? (
+                                        <span
+                                            className="animate-pulse text-xs font-medium text-[var(--accent-light)]"
+                                            aria-live="polite"
+                                            data-testid="live-refresh-status"
+                                        >
+                                            Loading…
+                                        </span>
+                                    ) : (
+                                        <span
+                                            className="text-xs font-medium text-[var(--accent-light)]"
+                                            aria-live="polite"
+                                            data-testid="live-refresh-status"
+                                        >
+                                            {refreshStatus.secondsRemaining > 0
+                                                ? `Next update: ${Math.ceil(refreshStatus.secondsRemaining / 60)} min`
+                                                : 'Update available'}
+                                        </span>
+                                    )
+                                ) : null}
                                 <button
                                     type="button"
                                     onClick={handleShare}
@@ -516,10 +543,12 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             <BattleHistoryCard
                                 playerName={player.name}
                                 realm={realm}
+                                refreshNonce={refreshNonce}
                             />
                             <div className="mt-6" />
                             <PlayerDetailInsightsTabs
                                 playerId={player.player_id}
+                                refreshNonce={refreshNonce}
                                 pvpRatio={player.pvp_ratio}
                                 pvpSurvivalRate={player.pvp_survival_rate}
                                 pvpBattles={player.pvp_battles}

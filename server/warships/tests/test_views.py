@@ -5077,3 +5077,78 @@ class StreamerSubmissionViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(StreamerSubmission.objects.count(), 0)
+
+
+class PlayerLiveRefreshSignalTests(TestCase):
+    """Live-update contract: the player-detail response advertises whether a
+    visit-driven refresh is pending and when the next one is allowed, so the
+    client can poll-to-rehydrate and render the cooldown countdown.
+    See runbook-live-update-cooldown-2026-05-27.md.
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    @patch("warships.tasks.queue_ranked_data_refresh")
+    @patch("warships.tasks.update_battle_data_task.delay")
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_fresh_player_reports_not_pending_with_next_refresh(self, *_mocks):
+        now = timezone.now()
+        Player.objects.create(
+            name="FreshLivePlayer", player_id=77001, realm="na",
+            last_fetch=now, battles_updated_at=now,
+            pvp_battles=1000, is_hidden=False,
+        )
+        response = self.client.get("/api/player/FreshLivePlayer/?realm=na")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Player-Refresh-Pending"], "false")
+        next_refresh = int(response["X-Player-Next-Refresh"])
+        expected = int((now + timedelta(minutes=15)).timestamp())
+        self.assertAlmostEqual(next_refresh, expected, delta=5)
+
+    @patch("warships.tasks.queue_ranked_data_refresh")
+    @patch("warships.tasks.update_battle_data_task.delay")
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_stale_player_reports_pending(self, *_mocks):
+        stale = timezone.now() - timedelta(minutes=20)
+        Player.objects.create(
+            name="StaleLivePlayer", player_id=77002, realm="na",
+            last_fetch=stale, battles_updated_at=stale,
+            pvp_battles=1000, is_hidden=False,
+        )
+        response = self.client.get("/api/player/StaleLivePlayer/?realm=na")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Player-Refresh-Pending"], "true")
+
+    @patch("warships.tasks.queue_ranked_data_refresh")
+    @patch("warships.tasks.update_battle_data_task.delay")
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_never_fetched_player_reports_pending(self, *_mocks):
+        Player.objects.create(
+            name="NeverLivePlayer", player_id=77003, realm="na",
+            battles_updated_at=None, pvp_battles=1000, is_hidden=False,
+        )
+        response = self.client.get("/api/player/NeverLivePlayer/?realm=na")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Player-Refresh-Pending"], "true")
+
+    def test_invalidate_player_detail_cache_clears_bulk_cache(self):
+        # The rehydrate-on-poll loop depends on update_battle_data busting the
+        # player-detail bulk cache so the next poll serves fresh stats.
+        from warships.data import (
+            _bulk_cache_key_player, get_cached_player_detail,
+            invalidate_player_detail_cache,
+        )
+        Player.objects.create(
+            name="CacheBustPlayer", player_id=77004, realm="na", pvp_battles=10)
+        cache.set(_bulk_cache_key_player(77004, realm="na"),
+                  {"name": "CacheBustPlayer"})
+        self.assertIsNotNone(get_cached_player_detail(77004, realm="na"))
+        invalidate_player_detail_cache(77004, realm="na")
+        self.assertIsNone(get_cached_player_detail(77004, realm="na"))
