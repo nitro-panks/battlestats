@@ -310,7 +310,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 clearTimeout(timeoutId);
             }
         };
-    }, [activeTab, isLoading, playerId, profileChartPayload, profileChartState, realm]);
+    }, [activeTab, isLoading, playerId, profileChartPayload, profileChartState, realm, refreshNonce]);
 
     useEffect(() => {
         if (profileChartState !== 'warming') {
