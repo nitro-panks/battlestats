@@ -2,7 +2,7 @@
 
 _Created: 2026-05-27_
 _Context: Players want the player page to "live update" on visit. On landing on a player not refreshed in >15 min, the page should show a **Loading** affordance to the LEFT of the Share button, pull fresh **randoms + ranked** stats, and rehydrate; when done it shows **"Next update: <n> minutes"** counting 15→0. A visit during the cooldown must NOT trigger a refresh (anti-spam lock). This runbook documents current behavior, the gap, and a phased, file-referenced implementation design._
-_Status: **PLANNED** (2026-05-27). Analysis + design complete; no application code changed yet — implementation is a separately-authorized follow-up._
+_Status: **IMPLEMENTED** (2026-05-27, commit `fa573b9`, branch `feat/live-update-cooldown-2026-05-27`). All three phases shipped per the design below: backend headers (`X-Player-Refresh-Pending` + `X-Player-Next-Refresh`, anchored on `battles_updated_at`) + cache-hit uniformity dispatch + `update_battle_data` cache-bust; frontend `usePlayerLiveRefresh` poll-to-rehydrate hook + the Loading/countdown affordance left of Share + `refreshNonce` threading into BattleHistoryCard & InsightsTabs. Tests: backend `PlayerLiveRefreshSignalTests` (17 passed), frontend indicator + hook-helper tests (57 passed), types clean. NOT yet released/deployed — minor version bump + client rebuild pending._
 
 ## Key finding
 
