@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import PlayerDetail from './PlayerDetail';
+import { prefetchBattleHistory } from './BattleHistoryCard';
 import type { PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
@@ -50,6 +51,13 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
         const loadPlayer = async () => {
             setIsLoading(true);
             setError('');
+
+            // Kick the battle-history fetch in PARALLEL with the profile fetch.
+            // The card mounts only after the profile resolves + PlayerDetail
+            // renders, so without this its fetch starts serially after the
+            // profile; firing it here moves that round-trip off the critical
+            // path. The card's own fetch dedupes onto this (shared cacheKey).
+            prefetchBattleHistory(playerName, realm);
 
             try {
                 const { data, headers } = await fetchSharedJson<PlayerData>(withRealm(`/api/player/${encodeURIComponent(playerName)}/`, realm), {
