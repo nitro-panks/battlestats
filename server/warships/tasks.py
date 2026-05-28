@@ -246,12 +246,20 @@ def is_clan_battle_summary_refresh_pending(clan_id: object, realm: str = DEFAULT
     return bool(cache.get(_clan_battle_summary_refresh_dispatch_key(clan_id, realm=realm)))
 
 
-def queue_landing_page_warm(realm: str = DEFAULT_REALM):
+def queue_landing_page_warm(realm: str = DEFAULT_REALM, include_recent: bool = True):
     # If a warm is already executing for this realm, skip enqueue. The 30s
     # dispatch dedup expires while the 1200s task runs, so without this gate,
     # cache-fallback paths invoked from inside the warm itself would re-enqueue
     # in a loop (root cause of the 4581-message background-queue pileup
     # observed on 2026-04-27).
+    #
+    # `include_recent=False` is used by the invalidation-driven republish path
+    # (clan/player writes). Those writes don't change the recent-players 7-day
+    # rollup, but rebuilding it force-refreshes the 25s `week_battles` aggregate
+    # on every ~120s crawl-driven republish — which saturated the 1-vCPU DB on
+    # 2026-05-27 (~20 warms/40min during the ASIA crawl). The recent surfaces
+    # stay fresh via the scheduled beat warmers instead.
+    # See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
     if cache.get(_landing_page_warm_lock_key(realm)):
         return {"status": "skipped", "reason": "already-running"}
 
@@ -264,7 +272,7 @@ def queue_landing_page_warm(realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_landing_page_content_task.delay(include_recent=True, realm=realm)
+        warm_landing_page_content_task.delay(include_recent=include_recent, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)

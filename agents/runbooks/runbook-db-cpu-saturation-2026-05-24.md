@@ -257,3 +257,22 @@ Architecture: Django + Celery, Postgres + Redis + RabbitMQ, three Celery workers
 - **Still open:** does `score_best_clans()`'s ~2,180/day call rate trace to genuine user traffic on the Best-clan homepage, or to `LANDING_CLANS_DIRTY_KEY` thrashing forcing recompute on most requests? Confirm before/while implementing the cache fix.
 - Which specific periodic task (if any) owns the 03:00 and 23:00 UTC peaks? (The crawl at `CLAN_CRAWL_SCHEDULE_HOUR=3` and overnight rollups remain candidates for a *second* CPU contributor distinct from the score_best_clans daytime load — verify by sampling `pg_stat_activity` during a 03:00 episode.)
 - Is the 770-min May 3 episode a stuck/zombie worker (cf. `runbook-incident-celery-zombie-worker-2026-04-12.md`) rather than steady load?
+
+## Recurrence + fix — 2026-05-27 (the recent-players republish leg)
+
+A fresh "CPU 90%+ since ~23:00 UTC" report. Re-diagnosed from the cluster directly (DO Prometheus metrics endpoint — basic-auth creds from `GET /v2/databases/{id}/metrics/credentials`, scrape `https://<db-host>:9273/metrics`):
+
+- **CONFIRMED the saturation this time** (the 2026-05-24 number was trusted from the user): instantaneous CPU was only ~22% busy when sampled, but **`system_load1=1.27 / load5=3.22 / load15=4.38` on a 1-vCPU node** — run queue ~4 deep, i.e. genuine 15-min saturation that was already receding. Mem 60%, disk 38% — both fine. `pg_stat_activity` showed **0 active client backends** across 6 samples → the load was bursty periodic work between samples, not one long query (the trap that nearly sent this down the "crawl writes are the driver" path — they are not).
+- **Driver: the landing republish warm storm via the recent-players leg.** `warm_landing_page_content_task` ran **~20×/40min (~every 2 min) at 13–83s each**. The multi-day ASIA `crawl_all_clans_task` re-dirties the landing clan cache continuously; the 120s `LANDING_REPUBLISH_COOLDOWN_SECONDS` floor let a republish through every ~2 min, and each one ran `warm_landing_page_content(force_refresh=True, include_recent=True)` — **force-rebuilding the recent-*players* 7-day rollup (the 25s `week_battles` `PlayerDailyShipStats` SUM) even though only clan data changed.** ~20 rebuilds/40min on one core ≈ the saturation. At 23:00 the ASIA periodic cluster (recent-players warmer; observation-floor → 9 `update_battle_data`; ranked refresh) stacked on top and tipped it >90%.
+- This is exactly **fix-direction #2/#3** from the CPU-axis findings above, never shipped in the 2026-05-25 remediation (only #1, the `score_best_clans` cache, landed — and it held: that fingerprint's calls dropped 12,443→1,707).
+- **Red herring ruled out:** `enrich_player_data_task` was firing ~1,190/hr (loud in logs) — the known defer-before-lock fan-out during a crawl (`background-unacked-enrichment-deferral`). It is Redis-only, ~3ms/call, **near-zero DB cost** — not the CPU driver. Separate queue-hygiene bug (defer block at `tasks.py` runs before the lock); track as its own PR.
+
+**Fix shipped (v1.13.2):**
+1. `queue_landing_page_warm(realm, include_recent=True)` is now parameterized; `_queue_landing_republish` calls it with **`include_recent=False`** (`tasks.py` / `landing.py`). Clan/player writes no longer rebuild the recent surfaces — those are owned by the dedicated beat warmers (`recent-players-warmer-{realm}` every 3h) and the 55-min landing warmer (which dispatches the task directly with `include_recent=True`, unaffected).
+2. `LANDING_REPUBLISH_COOLDOWN_SECONDS` default **120 → 600** (and set durably in `server/.env.cloud`) — caps crawl-driven republishes at ~6/hr.
+3. Tests: 4 invalidation/fallback dispatch assertions updated to `include_recent=False`; new `test_queue_landing_republish_excludes_recent_surfaces`. Full backend release gate (251 tests) green.
+
+**Still open / follow-ups:**
+- The republish warm still force-refreshes `players_best_*` + `players_popular` (cheaper than `week_battles`, but a clan write shouldn't touch player surfaces at all). A "clan-surfaces-only" republish is the deeper slice if CPU is still elevated after this lands.
+- **Resize question** (1→2 vCPU) deferred per user: ship this fix, watch a full ASIA crawl cycle, then revisit. 209 CPU episodes/24 days says 1 vCPU is near its ceiling regardless.
+- Enrichment defer-before-lock fan-out: separate PR.

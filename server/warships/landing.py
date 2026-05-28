@@ -139,8 +139,12 @@ LANDING_RECENT_CLANS_DIRTY_KEY = 'landing:recent_clans:dirty:v1'
 # per window per realm. The scheduled beat warmer (LANDING_PAGE_WARM_MINUTES)
 # is unaffected — it dispatches the task directly, not via this path.
 # See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
+# Raised 120s -> 600s on 2026-05-27: a multi-day clan crawl re-dirties the
+# cache continuously, so the 120s floor still let ~30 republish warms/hour
+# through; 600s caps that at ~6/hr while the 55-min beat warmer guarantees
+# steady-state freshness. See runbook-db-cpu-saturation-2026-05-24.md.
 LANDING_REPUBLISH_COOLDOWN_SECONDS = int(
-    os.environ.get('LANDING_REPUBLISH_COOLDOWN_SECONDS', '120'))
+    os.environ.get('LANDING_REPUBLISH_COOLDOWN_SECONDS', '600'))
 LANDING_REPUBLISH_COOLDOWN_KEY = 'landing:republish:cooldown:v1'
 LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
@@ -606,7 +610,13 @@ def _queue_landing_republish(realm: str = DEFAULT_REALM) -> None:
         if not cache.add(cooldown_key, '1', LANDING_REPUBLISH_COOLDOWN_SECONDS):
             return
 
-    queue_landing_page_warm(realm=realm)
+    # include_recent=False: invalidation comes from clan/player writes, which
+    # do not change the recent-players 7-day rollup. Rebuilding it here re-runs
+    # the 25s `week_battles` aggregate on every crawl-driven republish — the
+    # 2026-05-27 DB-CPU saturation. The recent surfaces are kept fresh by their
+    # dedicated beat warmers (recent-players-warmer / the 55-min landing warmer
+    # which dispatches the task directly with include_recent=True).
+    queue_landing_page_warm(realm=realm, include_recent=False)
 
 
 def _publish_landing_payload(
