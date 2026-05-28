@@ -182,12 +182,23 @@ describe('PlayerRouteView tab warmup smoke', () => {
             label: 'Player Player One',
             ttlMs: 1500,
         }));
+        // Battle-history is prefetched in PARALLEL — fired before the player
+        // payload resolves, not serially after PlayerDetail mounts the card.
+        expect(mockFetchSharedJson).toHaveBeenCalledWith(
+            '/api/player/Player%20One/battle-history/?window=week&mode=random&realm=na',
+            expect.objectContaining({
+                ttlMs: 60000,
+                cacheKey: 'battle-history:Player One:na:week:random:0:0',
+            }),
+        );
 
         await act(async () => {
             jest.advanceTimersByTime(250);
         });
 
-        expect(mockFetchSharedJson).toHaveBeenCalledTimes(1);
+        // Profile + parallel battle-history prefetch fired; tab warmup has NOT
+        // yet (it still waits for the player payload to resolve).
+        expect(mockFetchSharedJson).toHaveBeenCalledTimes(2);
 
         await act(async () => {
             resolvePlayerRoute?.({ data: playerRoutePayload, headers: {} });

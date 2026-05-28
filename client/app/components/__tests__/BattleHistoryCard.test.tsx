@@ -1,6 +1,12 @@
 import React from 'react';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
-import BattleHistoryCard, { type BattleHistoryPayload } from '../BattleHistoryCard';
+import BattleHistoryCard, {
+    type BattleHistoryPayload,
+    battleHistoryCacheKey,
+    battleHistoryFetchUrl,
+    prefetchBattleHistory,
+    BATTLE_HISTORY_FETCH_TTL_MS,
+} from '../BattleHistoryCard';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
@@ -463,5 +469,46 @@ describe('BattleHistoryCard', () => {
         });
         // Pills still reachable.
         expect(screen.getByRole('button', { name: /^Random$/ })).toBeInTheDocument();
+    });
+});
+
+describe('battle-history prefetch dedupe contract', () => {
+    beforeEach(() => {
+        mockFetchSharedJson.mockReset();
+    });
+
+    it('builders produce the canonical week/random url + cache key', () => {
+        // Drift guard: PlayerRouteView's prefetch and the card's first fetch must
+        // share these EXACT strings, or the prefetch becomes a duplicate request.
+        expect(battleHistoryFetchUrl('lil_boots', 'na')).toBe(
+            '/api/player/lil_boots/battle-history/?window=week&mode=random&realm=na');
+        expect(battleHistoryCacheKey('lil_boots', 'na')).toBe(
+            'battle-history:lil_boots:na:week:random:0:0');
+    });
+
+    it('prefetchBattleHistory fires the canonical week/random fetch', () => {
+        mockFetchSharedJson.mockResolvedValueOnce({ data: buildPayload(), headers: {} });
+        prefetchBattleHistory('lil_boots', 'na');
+        expect(mockFetchSharedJson).toHaveBeenCalledWith(
+            '/api/player/lil_boots/battle-history/?window=week&mode=random&realm=na',
+            expect.objectContaining({
+                ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
+                cacheKey: 'battle-history:lil_boots:na:week:random:0:0',
+            }),
+        );
+    });
+
+    it("the card's first fetch uses the same url + cache key (so the prefetch dedupes onto it)", async () => {
+        resolveWith(buildPayload());
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(mockFetchSharedJson).toHaveBeenCalled();
+        });
+        const [url, opts] = mockFetchSharedJson.mock.calls[0];
+        expect(url).toBe('/api/player/lil_boots/battle-history/?window=week&mode=random&realm=na');
+        expect(opts).toEqual(expect.objectContaining({
+            cacheKey: 'battle-history:lil_boots:na:week:random:0:0',
+            ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
+        }));
     });
 });

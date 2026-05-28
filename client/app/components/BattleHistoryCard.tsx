@@ -79,6 +79,46 @@ const MODES: Mode[] = ['random', 'ranked', 'combined'];
 const RANKED_PENDING_RETRY_DELAY_MS = 2000;
 const RANKED_PENDING_RETRY_LIMIT = 6;
 
+// Canonical battle-history fetch URL + cache key. Shared by the card's own
+// fetch and PlayerRouteView's parallel prefetch so they dedupe onto the same
+// in-flight request (sharedJsonFetch keys on cacheKey). Keep these in lockstep —
+// if they drift, the prefetch silently becomes a duplicate request instead of a
+// dedup (guarded by a test).
+export const BATTLE_HISTORY_FETCH_TTL_MS = 60_000;
+
+export const battleHistoryFetchUrl = (
+    playerName: string, realm: string, window: string = 'week', mode: string = 'random',
+): string =>
+    `/api/player/${encodeURIComponent(playerName)}/battle-history/`
+    + `?window=${window}&mode=${mode}`
+    + `&realm=${encodeURIComponent(realm)}`;
+
+export const battleHistoryCacheKey = (
+    playerName: string, realm: string,
+    window: string = 'week', mode: string = 'random', cacheBust: number = 0, refreshNonce: number = 0,
+): string => `battle-history:${playerName}:${realm}:${window}:${mode}:${cacheBust}:${refreshNonce}`;
+
+/**
+ * Eagerly fire the initial (week / random) battle-history fetch so it runs in
+ * PARALLEL with the player-profile fetch, instead of starting only after the
+ * profile resolves and PlayerDetail mounts the card. The card's own first fetch
+ * dedupes onto this via the shared cacheKey (or hits the warm 60s cache), so it
+ * costs no extra request — it just moves the battle-history round-trip off the
+ * serial critical path, shaving it off T1.
+ *
+ * Fire-and-forget: this runs before we know `is_hidden` (hidden players never
+ * render the card), but the request is cheap and the card handles its own
+ * errors/404 — so do NOT gate this on is_hidden (that info isn't here yet).
+ */
+export const prefetchBattleHistory = (playerName: string, realm: string): void => {
+    void fetchSharedJson<BattleHistoryPayload>(battleHistoryFetchUrl(playerName, realm), {
+        label: 'BattleHistoryCard:week:random',
+        ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
+        cacheKey: battleHistoryCacheKey(playerName, realm),
+        responseHeaders: ['X-Ranked-Observation-Pending'],
+    }).catch(() => { /* the card re-fetches + surfaces errors on mount */ });
+};
+
 interface BattleHistoryCardProps {
     playerName: string;
     realm: string;
@@ -552,13 +592,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         setLoading(true);
 
         const fetchOnce = (cacheBust: number = 0) => {
-            const url = `/api/player/${encodeURIComponent(playerName)}/battle-history/`
-                + `?window=${window}&mode=${mode}`
-                + `&realm=${encodeURIComponent(realm)}`;
+            // Shared builders so the initial (week/random) fetch dedupes onto
+            // PlayerRouteView's parallel prefetch via an identical cacheKey.
+            const url = battleHistoryFetchUrl(playerName, realm, window, mode);
             fetchSharedJson<BattleHistoryPayload>(url, {
                 label: `BattleHistoryCard:${window}:${mode}`,
-                ttlMs: 60_000,
-                cacheKey: `battle-history:${playerName}:${realm}:${window}:${mode}:${cacheBust}:${refreshNonce}`,
+                ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
+                cacheKey: battleHistoryCacheKey(playerName, realm, window, mode, cacheBust, refreshNonce),
                 responseHeaders: ['X-Ranked-Observation-Pending'],
             })
                 .then(({ data, headers }) => {
