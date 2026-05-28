@@ -190,7 +190,9 @@ DJANGO_LOGLEVEL=INFO
 REDIS_URL=redis://127.0.0.1:6379/0
 CELERY_RESULT_BACKEND=rpc://
 ENABLE_CRAWLER_SCHEDULES=1
-WARM_CACHES_ON_STARTUP=0
+# Startup cache warming ON: avoids the request-driven cold-cache recompute
+# stampede on the 1-vCPU DB after a restart. See runbook-db-cpu-saturation-2026-05-24.md.
+WARM_CACHES_ON_STARTUP=1
 CACHE_WARMUP_START_DELAY_SECONDS=5
 HOT_ENTITY_PINNED_PLAYER_NAMES=lil_boots
 BEST_CLAN_EXCLUDED_IDS=1000068602
@@ -220,7 +222,7 @@ fi
 chgrp "${APP_USER}" /etc/battlestats-server.secrets.env
 chmod 640 /etc/battlestats-server.secrets.env
 
-migrate_env_value WARM_CACHES_ON_STARTUP WARM_LANDING_PAGE_ON_STARTUP 0
+migrate_env_value WARM_CACHES_ON_STARTUP WARM_LANDING_PAGE_ON_STARTUP 1
 migrate_env_value CACHE_WARMUP_START_DELAY_SECONDS LANDING_WARMUP_START_DELAY_SECONDS 5
 
 cat > /etc/systemd/system/battlestats-gunicorn.service <<EOF

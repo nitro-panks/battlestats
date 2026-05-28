@@ -405,7 +405,16 @@ materialize_best_player_snapshots() {
   "${APP_ROOT}/venv/bin/python" manage.py materialize_landing_player_best_snapshots "${args[@]}"
 }
 
-migrate_env_value WARM_CACHES_ON_STARTUP WARM_LANDING_PAGE_ON_STARTUP 0
+# Startup cache warming forced ON (2026-05-28): pre-warms score_best_clans +
+# landing sequentially on the background worker after deploy, replacing the
+# request-driven CONCURRENT cold-cache recompute that spiked the 1-vCPU DB to
+# load ~8 immediately post-deploy. set_env_value (not migrate_*) so every
+# deploy enforces it regardless of the prior on-host value (which was 0).
+# Droplet headroom is ample (7.8 GB + 2 GB swap; the 2026-03-30 OOM was at
+# 3.8 GB) and the warm is Celery-dispatched, not a subprocess (v1.2.14).
+# See runbook-db-cpu-saturation-2026-05-24.md.
+set_env_value WARM_CACHES_ON_STARTUP 1
+sed -i '/^WARM_LANDING_PAGE_ON_STARTUP=.*/d' /etc/battlestats-server.env 2>/dev/null || true
 migrate_env_value CACHE_WARMUP_START_DELAY_SECONDS LANDING_WARMUP_START_DELAY_SECONDS 5
 
 set_env_value CELERY_DEFAULT_CONCURRENCY 3
