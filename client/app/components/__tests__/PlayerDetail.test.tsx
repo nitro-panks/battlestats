@@ -188,7 +188,11 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByTestId('live-refresh-status')).toHaveTextContent('Loading');
+        const status = screen.getByTestId('live-refresh-status');
+        expect(status).toHaveTextContent('Loading');
+        // The in-progress "Loading…" pill uses the animated rainbow text so the
+        // refresh is hard to miss; the steady-state "Next update" text does not.
+        expect(status).toHaveClass('rainbow-text');
     });
 
     it('shows the cooldown countdown in minutes left of the share button', () => {
@@ -203,6 +207,23 @@ describe('PlayerDetail efficiency-rank icon', () => {
         );
 
         expect(screen.getByTestId('live-refresh-status')).toHaveTextContent('Next update: 12 min');
+    });
+
+    it('renders no status pill once the cooldown reaches zero (auto-refresh handles it)', () => {
+        // At zero the hook flips to phase "loading" in the same tick, so a
+        // cooldown/zero render is only the brief parked state — show nothing
+        // rather than a stale "Update available" prompt.
+        render(
+            <PlayerDetail
+                player={basePlayer}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+                refreshStatus={{ phase: 'cooldown', secondsRemaining: 0 }}
+            />,
+        );
+
+        expect(screen.queryByTestId('live-refresh-status')).not.toBeInTheDocument();
     });
 
     it('suppresses the live-refresh badge for hidden players', () => {

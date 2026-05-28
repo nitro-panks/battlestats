@@ -431,23 +431,21 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {refreshStatus && !player.is_hidden ? (
                                     refreshStatus.phase === 'loading' ? (
                                         <span
-                                            className="animate-pulse text-xs font-medium text-[var(--accent-light)]"
+                                            className="rainbow-text text-xs font-semibold"
                                             aria-live="polite"
                                             data-testid="live-refresh-status"
                                         >
                                             Loading…
                                         </span>
-                                    ) : (
+                                    ) : refreshStatus.secondsRemaining > 0 ? (
                                         <span
                                             className="text-xs font-medium text-[var(--accent-light)]"
                                             aria-live="polite"
                                             data-testid="live-refresh-status"
                                         >
-                                            {refreshStatus.secondsRemaining > 0
-                                                ? `Next update: ${Math.ceil(refreshStatus.secondsRemaining / 60)} min`
-                                                : 'Update available'}
+                                            {`Next update: ${Math.ceil(refreshStatus.secondsRemaining / 60)} min`}
                                         </span>
-                                    )
+                                    ) : null
                                 ) : null}
                                 <button
                                     type="button"
