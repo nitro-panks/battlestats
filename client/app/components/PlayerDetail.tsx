@@ -437,17 +437,15 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                         >
                                             Loading…
                                         </span>
-                                    ) : (
+                                    ) : refreshStatus.secondsRemaining > 0 ? (
                                         <span
                                             className="text-xs font-medium text-[var(--accent-light)]"
                                             aria-live="polite"
                                             data-testid="live-refresh-status"
                                         >
-                                            {refreshStatus.secondsRemaining > 0
-                                                ? `Next update: ${Math.ceil(refreshStatus.secondsRemaining / 60)} min`
-                                                : 'Update available'}
+                                            {`Next update: ${Math.ceil(refreshStatus.secondsRemaining / 60)} min`}
                                         </span>
-                                    )
+                                    ) : null
                                 ) : null}
                                 <button
                                     type="button"
