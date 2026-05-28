@@ -121,8 +121,12 @@ HOT_ENTITY_PLAYER_LIMIT = max(
     1, int(os.getenv('HOT_ENTITY_PLAYER_LIMIT', '20')))
 HOT_ENTITY_CLAN_LIMIT = max(
     1, int(os.getenv('HOT_ENTITY_CLAN_LIMIT', '10')))
+# Empty by default: pinning is opt-in via the HOT_ENTITY_PINNED_PLAYER_NAMES env
+# var. (Was historically defaulted to a single personal account, 'lil_boots';
+# removed 2026-05-28 at the owner's request so no specific record is perpetually
+# warmed unless explicitly configured.)
 HOT_ENTITY_PINNED_PLAYER_NAMES = [
-    n.strip() for n in os.getenv('HOT_ENTITY_PINNED_PLAYER_NAMES', 'lil_boots').split(',') if n.strip()
+    n.strip() for n in os.getenv('HOT_ENTITY_PINNED_PLAYER_NAMES', '').split(',') if n.strip()
 ]
 CLAN_PLOT_DATA_CACHE_TTL = 15 * 60
 
