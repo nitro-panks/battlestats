@@ -652,7 +652,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         return rows;
     }, [payload?.by_ship, sort]);
 
-    if (loading || error) {
+    // Only bail before the FIRST payload (or on error). On a re-fetch — a
+    // window/mode switch or a live-update `refreshNonce` rehydrate — we keep
+    // rendering the existing `payload` instead of collapsing to null. Returning
+    // null mid-refresh unmounted the whole card, so the live-update rehydrate
+    // made it blink out and back in, shifting the page content. Holding the
+    // prior data lets React reconcile the new rows in place — a smooth swap.
+    // (The header live-refresh pill already signals "Loading…" during the pull.)
+    if (error || !payload) {
         return null;
     }
     const totals = payload?.totals;

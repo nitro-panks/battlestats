@@ -150,6 +150,27 @@ describe('BattleHistoryCard', () => {
         expect(rows[2].textContent).toContain('Dalian');
     });
 
+    test('stays mounted with prior data during a refreshNonce rehydrate (no blink/reflow)', async () => {
+        resolveWith(buildPayload());
+        const { rerender } = render(
+            <BattleHistoryCard playerName="lil_boots" realm="na" refreshNonce={0} />,
+        );
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(screen.getByText('Yamato')).toBeInTheDocument();
+
+        // The live-update rehydrate bumps refreshNonce → a re-fetch starts. Keep
+        // that fetch in flight (never resolves) to hold the component in its
+        // loading state, then assert the card did NOT unmount — the old data
+        // stays on screen so there's no disappear/reappear blink or layout shift.
+        mockFetchSharedJson.mockReturnValueOnce(new Promise<never>(() => {}));
+        rerender(<BattleHistoryCard playerName="lil_boots" realm="na" refreshNonce={1} />);
+
+        expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        expect(screen.getByText('Yamato')).toBeInTheDocument();
+    });
+
     test('renders nothing while loading', () => {
         // Never resolve.
         mockFetchSharedJson.mockReturnValueOnce(new Promise(() => {}));
