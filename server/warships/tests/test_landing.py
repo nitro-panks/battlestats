@@ -119,7 +119,11 @@ class LandingHelperTests(TestCase):
             cache.get(realm_cache_key('na', LANDING_CLANS_DIRTY_KEY)))
         self.assertIsNotNone(cache.get(realm_cache_key(
             'na', LANDING_RECENT_CLANS_DIRTY_KEY)))
-        mock_delay.assert_called_once_with(include_recent=True, realm='na')
+        # Invalidation-driven republish skips the recent surfaces — they are
+        # owned by their dedicated beat warmers, and rebuilding the recent-
+        # players 7-day rollup on every crawl-driven republish was the
+        # 2026-05-27 DB-CPU saturation.
+        mock_delay.assert_called_once_with(include_recent=False, realm='na')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_marks_dirty_and_preserves_recent_key(self, mock_delay):
@@ -144,7 +148,8 @@ class LandingHelperTests(TestCase):
             cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)), ['recent'])
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
-        mock_delay.assert_called_once_with(include_recent=True, realm='na')
+        # Republish dispatch omits recent surfaces (owned by dedicated warmers).
+        mock_delay.assert_called_once_with(include_recent=False, realm='na')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_preserves_recent_key_by_default(self, mock_delay):
@@ -161,7 +166,8 @@ class LandingHelperTests(TestCase):
             cache.get(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY)), ['recent'])
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
-        mock_delay.assert_called_once_with(include_recent=True, realm='na')
+        # Republish dispatch omits recent surfaces (owned by dedicated warmers).
+        mock_delay.assert_called_once_with(include_recent=False, realm='na')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_preserves_namespace_by_default(self, mock_delay):
@@ -181,7 +187,8 @@ class LandingHelperTests(TestCase):
         self.assertEqual(original_published_key, rebuilt_published_key)
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
-        mock_delay.assert_called_once_with(include_recent=True, realm='na')
+        # Republish dispatch omits recent surfaces (owned by dedicated warmers).
+        mock_delay.assert_called_once_with(include_recent=False, realm='na')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_bumps_namespace_when_requested(self, mock_delay):
@@ -652,6 +659,20 @@ class LandingHelperTests(TestCase):
             landing_mod._queue_landing_republish(realm='eu')
             self.assertEqual(mock_warm.call_count, 2)
 
+    def test_queue_landing_republish_excludes_recent_surfaces(self):
+        # Invalidation-driven republishes (clan/player writes) must NOT rebuild
+        # the recent surfaces: clan/player writes don't change the recent-players
+        # 7-day rollup, and force-refreshing its 25s `week_battles` aggregate on
+        # every ~120s crawl-driven republish saturated the 1-vCPU DB on
+        # 2026-05-27. The recent surfaces stay fresh via their dedicated beat
+        # warmers. The scheduled 55-min warmer dispatches the task directly
+        # (include_recent=True) and is unaffected.
+        # See runbook-db-cpu-saturation-2026-05-24.md.
+        from warships import landing as landing_mod
+        with patch('warships.tasks.queue_landing_page_warm') as mock_warm:
+            landing_mod._queue_landing_republish(realm='na')
+            mock_warm.assert_called_once_with(realm='na', include_recent=False)
+
     def test_best_clan_wr_sort_ignores_tiny_cb_samples(self):
         now = timezone.now()
 
@@ -992,7 +1013,7 @@ class LandingHelperTests(TestCase):
         self.assertEqual(payload, [{'name': 'published-clan'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
         mock_builder.assert_not_called()
-        mock_queue_warm.assert_called_once_with(realm='na')
+        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False)
 
     @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
     def test_landing_players_use_published_fallback_when_primary_cache_is_missing(self, mock_queue_warm):
@@ -1012,7 +1033,7 @@ class LandingHelperTests(TestCase):
         self.assertEqual(payload, [{'name': 'published-player'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_PLAYER_CACHE_TTL)
         mock_builder.assert_not_called()
-        mock_queue_warm.assert_called_once_with(realm='na')
+        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False)
 
     def test_landing_clan_primary_cache_hit_backfills_published_fallback(self):
         cache.set(realm_cache_key('na', LANDING_CLANS_CACHE_KEY),
@@ -1075,7 +1096,7 @@ class LandingHelperTests(TestCase):
         self.assertEqual(payload, [{'name': 'published-best-clan'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
         mock_builder.assert_not_called()
-        mock_queue_warm.assert_called_once_with(realm='na')
+        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False)
 
     @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
     def test_best_landing_clans_preserve_non_empty_published_payload_when_primary_is_empty(self, mock_queue_warm):
@@ -1105,7 +1126,7 @@ class LandingHelperTests(TestCase):
         self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
         self.assertEqual(cache.get(published_cache_key),
                          [{'name': 'durable-best-clan'}])
-        mock_queue_warm.assert_called_once_with(realm='na')
+        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False)
 
     def test_warm_landing_page_content_force_refresh_republishes_recent_surfaces_without_deleting(self):
         cache.set(realm_cache_key('na', LANDING_RECENT_CLANS_CACHE_KEY), [
