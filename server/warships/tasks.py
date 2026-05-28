@@ -1411,26 +1411,36 @@ def enrich_player_data_task(self):
     limits.  Runs on the dedicated background worker so it never competes
     with user-facing tasks on the default/hydration queues.
     """
-    # Defer if any clan crawl is running — they share the WG API rate limit.
+    # Acquire the single-flight lock FIRST. Duplicate dispatches (the 15-min
+    # Beat kickstart, acks_late redelivery, and the startup-warmer kickstart can
+    # coincide) return here without re-enqueuing — so deferrals can't fan out
+    # into accumulating 300s-recurring chains (the 2026-05-27 ~1,190/hr churn
+    # while a clan crawl was active). See runbook-db-cpu-saturation-2026-05-24.md.
+    lock_key = _enrich_player_data_lock_key()
+    if not cache.add(lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping enrich_player_data_task — another enrichment is already running")
+        return {"status": "skipped", "reason": "already-running"}
+
+    # Defer while a clan crawl is active (shared WG API rate limit). We hold the
+    # lock, so release it and return WITHOUT re-enqueuing: the every-15-min Beat
+    # kickstart (player-enrichment-kickstart) is the retry, bounding deferrals to
+    # one no-op per cycle instead of a self-multiplying chain. (Benign race: a
+    # crawl may start between this check and enrich_players below; that batch
+    # competes for the WG budget once and the next dispatch defers. The 6h lock
+    # TTL + heartbeat lets a long-running batch hold the lock safely.)
     from warships.models import VALID_REALMS as _realms
     active_crawls = [
         r for r in sorted(_realms)
         if cache.get(_clan_crawl_lock_key(r)) is not None
     ]
     if active_crawls:
-        retry_delay = 300  # check again in 5 minutes
+        cache.delete(lock_key)
         logger.info(
-            "Deferring enrichment — clan crawl active for %s, retrying in %ds",
-            active_crawls, retry_delay,
+            "Deferring enrichment — clan crawl active for %s; Beat kickstart will retry",
+            active_crawls,
         )
-        enrich_player_data_task.apply_async(countdown=retry_delay)
         return {"status": "deferred", "reason": "crawl-running", "active_crawls": active_crawls}
-
-    lock_key = _enrich_player_data_lock_key()
-    if not cache.add(lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT):
-        logger.info(
-            "Skipping enrich_player_data_task — another enrichment is already running")
-        return {"status": "skipped", "reason": "already-running"}
 
     try:
         from warships.management.commands.enrich_player_data import enrich_players
