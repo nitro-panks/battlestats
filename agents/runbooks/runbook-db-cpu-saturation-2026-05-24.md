@@ -272,7 +272,8 @@ A fresh "CPU 90%+ since ~23:00 UTC" report. Re-diagnosed from the cluster direct
 2. `LANDING_REPUBLISH_COOLDOWN_SECONDS` default **120 → 600** (and set durably in `server/.env.cloud`) — caps crawl-driven republishes at ~6/hr.
 3. Tests: 4 invalidation/fallback dispatch assertions updated to `include_recent=False`; new `test_queue_landing_republish_excludes_recent_surfaces`. Full backend release gate (251 tests) green.
 
-**Still open / follow-ups:**
-- The republish warm still force-refreshes `players_best_*` + `players_popular` (cheaper than `week_battles`, but a clan write shouldn't touch player surfaces at all). A "clan-surfaces-only" republish is the deeper slice if CPU is still elevated after this lands.
-- **Resize question** (1→2 vCPU) deferred per user: ship this fix, watch a full ASIA crawl cycle, then revisit. 209 CPU episodes/24 days says 1 vCPU is near its ceiling regardless.
-- Enrichment defer-before-lock fan-out: separate PR.
+**Follow-ups — addressed 2026-05-28 (v1.13.3, one branch / three commits):**
+- ✅ **Item 1 — post-deploy cold-cache spike.** After a worker restart the 3h `score_best_clans` cache goes cold and multiple `(realm,sort)` keys recompute *concurrently* (single-flight is per-key), spiking the 1-vCPU DB to load ~8 (seen right after the v1.13.2 deploy). Fix: force `WARM_CACHES_ON_STARTUP=1` in the deploy/bootstrap scripts (`set_env_value`, since `migrate_env_value` preserved the on-host `0`) so the background worker pre-warms those rankings *sequentially* before request traffic. Safe now: droplet is 7.8 GB + 2 GB swap (the 2026-03-30 OOM was at 3.8 GB) and the warm is Celery-dispatched since v1.2.14.
+- ✅ **Item 2b — clan/player-scoped republish.** `warm_landing_page_content(scope=…)` now narrows both the rebuilt surfaces and the dirty keys it clears; clan writes warm only clan surfaces (no more wasteful `players_best_*`/`players_popular` rebuild), player writes only player surfaces. Periodic/startup warmers keep `scope='all'`.
+- ✅ **Item 3 — enrich defer-before-lock fan-out.** Lock acquired before the crawl check; deferrals no longer re-enqueue (the 15-min Beat kickstart is the retry), so the ~1,190/hr chain churn can't accumulate. Defer path never runs the heavy `_maybe_redispatch_enrichment` candidate scan.
+- ⏳ **Item 2a — resize 1→2 vCPU: deferred per user (2026-05-28).** Watch a full ASIA crawl cycle with the above load-reduction fixes in place; resize only if CPU episodes persist. 209 CPU episodes/24 days says 1 vCPU is near its ceiling regardless, so this stays on the radar.
