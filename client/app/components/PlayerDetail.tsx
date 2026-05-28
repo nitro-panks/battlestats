@@ -431,7 +431,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {refreshStatus && !player.is_hidden ? (
                                     refreshStatus.phase === 'loading' ? (
                                         <span
-                                            className="animate-pulse text-xs font-medium text-[var(--accent-light)]"
+                                            className="rainbow-text text-xs font-semibold"
                                             aria-live="polite"
                                             data-testid="live-refresh-status"
                                         >

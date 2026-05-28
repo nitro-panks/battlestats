@@ -188,7 +188,11 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByTestId('live-refresh-status')).toHaveTextContent('Loading');
+        const status = screen.getByTestId('live-refresh-status');
+        expect(status).toHaveTextContent('Loading');
+        // The in-progress "Loading…" pill uses the animated rainbow text so the
+        // refresh is hard to miss; the cooldown/"Update available" text does not.
+        expect(status).toHaveClass('rainbow-text');
     });
 
     it('shows the cooldown countdown in minutes left of the share button', () => {
