@@ -246,7 +246,7 @@ def is_clan_battle_summary_refresh_pending(clan_id: object, realm: str = DEFAULT
     return bool(cache.get(_clan_battle_summary_refresh_dispatch_key(clan_id, realm=realm)))
 
 
-def queue_landing_page_warm(realm: str = DEFAULT_REALM, include_recent: bool = True):
+def queue_landing_page_warm(realm: str = DEFAULT_REALM, include_recent: bool = True, scope: str = 'all'):
     # If a warm is already executing for this realm, skip enqueue. The 30s
     # dispatch dedup expires while the 1200s task runs, so without this gate,
     # cache-fallback paths invoked from inside the warm itself would re-enqueue
@@ -272,7 +272,7 @@ def queue_landing_page_warm(realm: str = DEFAULT_REALM, include_recent: bool = T
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_landing_page_content_task.delay(include_recent=include_recent, realm=realm)
+        warm_landing_page_content_task.delay(include_recent=include_recent, realm=realm, scope=scope)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -869,13 +869,14 @@ def warm_clan_battle_summaries_task(self, clan_ids=None, realm=DEFAULT_REALM):
 
 
 @app.task(bind=True, **TASK_OPTS)
-def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REALM):
+def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REALM, scope='all'):
     from warships.landing import warm_landing_page_content
 
     logger.info(
-        "Starting warm_landing_page_content_task include_recent=%s realm=%s",
+        "Starting warm_landing_page_content_task include_recent=%s realm=%s scope=%s",
         include_recent,
         realm,
+        scope,
     )
 
     lock_key = _landing_page_warm_lock_key(realm)
@@ -890,6 +891,7 @@ def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REAL
             force_refresh=True,
             include_recent=bool(include_recent),
             realm=realm,
+            scope=scope,
         )
         logger.info("Finished warm_landing_page_content_task: %s", result)
         return result

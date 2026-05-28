@@ -595,7 +595,7 @@ def _clear_cache_family_dirty(*dirty_keys: str) -> None:
         cache.delete_many(list(dirty_keys))
 
 
-def _queue_landing_republish(realm: str = DEFAULT_REALM) -> None:
+def _queue_landing_republish(realm: str = DEFAULT_REALM, scope: str = 'all') -> None:
     from warships.tasks import queue_landing_page_warm
 
     # Debounce: coalesce bursts of invalidations into at most one warm per
@@ -616,7 +616,10 @@ def _queue_landing_republish(realm: str = DEFAULT_REALM) -> None:
     # 2026-05-27 DB-CPU saturation. The recent surfaces are kept fresh by their
     # dedicated beat warmers (recent-players-warmer / the 55-min landing warmer
     # which dispatches the task directly with include_recent=True).
-    queue_landing_page_warm(realm=realm, include_recent=False)
+    # `scope` narrows the warm to the family that was invalidated (clan write ->
+    # 'clans', player write -> 'players') so a clan write doesn't rebuild the
+    # player surfaces and vice versa.
+    queue_landing_page_warm(realm=realm, include_recent=False, scope=scope)
 
 
 def _publish_landing_payload(
@@ -650,6 +653,7 @@ def _get_cached_landing_payload_with_fallback(
     use_published_fallback_when_dirty: bool = False,
     prefer_published_non_empty_payload: bool = False,
     publish_empty_primary_payload: bool = True,
+    republish_scope: str = 'all',
 ) -> tuple[list[dict] | None, dict[str, str | int]]:
     is_dirty = (not force_refresh) and any(
         cache.get(dirty_key) is not None for dirty_key in dirty_keys
@@ -666,7 +670,7 @@ def _get_cached_landing_payload_with_fallback(
                     cache.get(published_metadata_key), ttl_seconds)
                 cache.set(published_metadata_key,
                           published_metadata, timeout=None)
-                _queue_landing_republish(realm=realm)
+                _queue_landing_republish(realm=realm, scope=republish_scope)
                 return published_payload, published_metadata
         if cache.get(metadata_key) is None:
             cache.set(metadata_key, metadata, ttl_seconds)
@@ -681,7 +685,7 @@ def _get_cached_landing_payload_with_fallback(
         published_metadata = _normalize_landing_player_cache_metadata(
             cache.get(published_metadata_key), ttl_seconds)
         cache.set(published_metadata_key, published_metadata, timeout=None)
-        _queue_landing_republish(realm=realm)
+        _queue_landing_republish(realm=realm, scope=republish_scope)
         return published_payload, published_metadata
 
     return None, metadata
@@ -709,6 +713,7 @@ def get_landing_clans_payload_with_cache_metadata(force_refresh: bool = False, r
         force_refresh,
         realm=realm,
         dirty_keys=(realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),),
+        republish_scope='clans',
     )
 
     if payload is None:
@@ -801,7 +806,7 @@ def invalidate_landing_clan_caches(realm: str = DEFAULT_REALM, queue_republish: 
         realm_cache_key(realm, LANDING_RECENT_CLANS_DIRTY_KEY),
     )
     if queue_republish:
-        _queue_landing_republish(realm=realm)
+        _queue_landing_republish(realm=realm, scope='clans')
 
 
 def invalidate_landing_player_caches(include_recent: bool = False, realm: str = DEFAULT_REALM, queue_republish: bool = True, bump_namespace: bool = False) -> None:
@@ -818,7 +823,7 @@ def invalidate_landing_player_caches(include_recent: bool = False, realm: str = 
     # compatibility but no dirty key needs flipping.
     _mark_cache_family_dirty(*dirty_keys)
     if queue_republish:
-        _queue_landing_republish(realm=realm)
+        _queue_landing_republish(realm=realm, scope='players')
 
 
 def _normalize_cached_id_list(raw_value) -> list[int]:
@@ -897,6 +902,7 @@ def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = Fal
         use_published_fallback_when_dirty=True,
         prefer_published_non_empty_payload=True,
         publish_empty_primary_payload=False,
+        republish_scope='clans',
     )
 
     if payload is None:
@@ -1675,6 +1681,7 @@ def get_landing_players_payload_with_cache_metadata(mode: str = 'best', limit: i
         force_refresh,
         realm=realm,
         dirty_keys=(realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY),),
+        republish_scope='players',
     )
 
     if payload is None:
@@ -1917,7 +1924,21 @@ def get_landing_recent_players_payload(force_refresh: bool = False, realm: str =
     return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
 
 
-def warm_landing_page_content(force_refresh: bool = False, include_recent: bool = True, realm: str = DEFAULT_REALM) -> dict:
+# Surface-scope sets for warm_landing_page_content(scope=...). Invalidation-
+# driven republishes pass the family that actually changed so a clan write does
+# not rebuild player surfaces (and vice versa). The periodic/startup warmers use
+# scope='all'. recent_clans/recent_players are intentionally members of their
+# family set; whether they actually rebuild is still gated by include_recent.
+LANDING_CLAN_WARM_SURFACES = frozenset({
+    'clans_best_overall', 'clans_best_wr', 'recent_clans',
+})
+LANDING_PLAYER_WARM_SURFACES = frozenset({
+    'players_best_overall', 'players_best_ranked', 'players_best_efficiency',
+    'players_best_wr', 'players_best_cb', 'players_popular', 'recent_players',
+})
+
+
+def warm_landing_page_content(force_refresh: bool = False, include_recent: bool = True, realm: str = DEFAULT_REALM, scope: str = 'all') -> dict:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # 'players_random' + 'clans' (the random-clan cache) were retired
@@ -1936,6 +1957,13 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
         'recent_clans': lambda: len(get_landing_recent_clans_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
         'recent_players': lambda: len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
     }
+
+    # Narrow to the requested family. Unknown scope falls back to 'all' so a
+    # bad caller never silently warms nothing.
+    if scope == 'clans':
+        surfaces = {k: v for k, v in surfaces.items() if k in LANDING_CLAN_WARM_SURFACES}
+    elif scope == 'players':
+        surfaces = {k: v for k, v in surfaces.items() if k in LANDING_PLAYER_WARM_SURFACES}
 
     def _run_surface(fn):
         from django.db import close_old_connections
@@ -1966,9 +1994,17 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
         for name, fn in surfaces.items():
             warmed[name] = fn()
 
-    _clear_cache_family_dirty(
-        realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),
-        realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY),
-        realm_cache_key(realm, LANDING_RECENT_CLANS_DIRTY_KEY),
-    )
+    # Clear only the dirty keys for the family we actually rebuilt. A clan-scoped
+    # warm must NOT clear the players dirty key (it didn't rebuild player
+    # surfaces) — doing so would strand a stale published player payload with no
+    # pending republish until the next periodic warm.
+    dirty_keys = []
+    if scope in ('all', 'clans'):
+        dirty_keys += [
+            realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),
+            realm_cache_key(realm, LANDING_RECENT_CLANS_DIRTY_KEY),
+        ]
+    if scope in ('all', 'players'):
+        dirty_keys.append(realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY))
+    _clear_cache_family_dirty(*dirty_keys)
     return {'status': 'completed', 'warmed': warmed}
