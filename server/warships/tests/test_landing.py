@@ -123,7 +123,7 @@ class LandingHelperTests(TestCase):
         # owned by their dedicated beat warmers, and rebuilding the recent-
         # players 7-day rollup on every crawl-driven republish was the
         # 2026-05-27 DB-CPU saturation.
-        mock_delay.assert_called_once_with(include_recent=False, realm='na')
+        mock_delay.assert_called_once_with(include_recent=False, realm='na', scope='clans')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_marks_dirty_and_preserves_recent_key(self, mock_delay):
@@ -149,7 +149,7 @@ class LandingHelperTests(TestCase):
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
         # Republish dispatch omits recent surfaces (owned by dedicated warmers).
-        mock_delay.assert_called_once_with(include_recent=False, realm='na')
+        mock_delay.assert_called_once_with(include_recent=False, realm='na', scope='players')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_preserves_recent_key_by_default(self, mock_delay):
@@ -167,7 +167,7 @@ class LandingHelperTests(TestCase):
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
         # Republish dispatch omits recent surfaces (owned by dedicated warmers).
-        mock_delay.assert_called_once_with(include_recent=False, realm='na')
+        mock_delay.assert_called_once_with(include_recent=False, realm='na', scope='players')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_preserves_namespace_by_default(self, mock_delay):
@@ -188,7 +188,7 @@ class LandingHelperTests(TestCase):
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
         # Republish dispatch omits recent surfaces (owned by dedicated warmers).
-        mock_delay.assert_called_once_with(include_recent=False, realm='na')
+        mock_delay.assert_called_once_with(include_recent=False, realm='na', scope='players')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_bumps_namespace_when_requested(self, mock_delay):
@@ -671,7 +671,7 @@ class LandingHelperTests(TestCase):
         from warships import landing as landing_mod
         with patch('warships.tasks.queue_landing_page_warm') as mock_warm:
             landing_mod._queue_landing_republish(realm='na')
-            mock_warm.assert_called_once_with(realm='na', include_recent=False)
+            mock_warm.assert_called_once_with(realm='na', include_recent=False, scope='all')
 
     def test_best_clan_wr_sort_ignores_tiny_cb_samples(self):
         now = timezone.now()
@@ -1013,7 +1013,7 @@ class LandingHelperTests(TestCase):
         self.assertEqual(payload, [{'name': 'published-clan'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
         mock_builder.assert_not_called()
-        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False)
+        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False, scope='clans')
 
     @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
     def test_landing_players_use_published_fallback_when_primary_cache_is_missing(self, mock_queue_warm):
@@ -1033,7 +1033,7 @@ class LandingHelperTests(TestCase):
         self.assertEqual(payload, [{'name': 'published-player'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_PLAYER_CACHE_TTL)
         mock_builder.assert_not_called()
-        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False)
+        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False, scope='players')
 
     def test_landing_clan_primary_cache_hit_backfills_published_fallback(self):
         cache.set(realm_cache_key('na', LANDING_CLANS_CACHE_KEY),
@@ -1096,7 +1096,7 @@ class LandingHelperTests(TestCase):
         self.assertEqual(payload, [{'name': 'published-best-clan'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
         mock_builder.assert_not_called()
-        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False)
+        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False, scope='clans')
 
     @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
     def test_best_landing_clans_preserve_non_empty_published_payload_when_primary_is_empty(self, mock_queue_warm):
@@ -1126,7 +1126,7 @@ class LandingHelperTests(TestCase):
         self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
         self.assertEqual(cache.get(published_cache_key),
                          [{'name': 'durable-best-clan'}])
-        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False)
+        mock_queue_warm.assert_called_once_with(realm='na', include_recent=False, scope='clans')
 
     def test_warm_landing_page_content_force_refresh_republishes_recent_surfaces_without_deleting(self):
         cache.set(realm_cache_key('na', LANDING_RECENT_CLANS_CACHE_KEY), [
@@ -1773,7 +1773,7 @@ class QueueLandingPageWarmGateTests(TestCase):
         result = queue_landing_page_warm(realm='na')
 
         self.assertEqual(result, {'status': 'queued'})
-        mock_delay.assert_called_once_with(include_recent=True, realm='na')
+        mock_delay.assert_called_once_with(include_recent=True, realm='na', scope='all')
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_skips_when_warm_lock_is_held(self, mock_delay):
@@ -1873,3 +1873,72 @@ class QueueWarmPlayerCorrelationsGateTests(TestCase):
             result, {'status': 'skipped', 'reason': 'enqueue-failed'})
         self.assertIsNone(cache.get(_correlation_warm_dispatch_key('na')))
         mock_delay.assert_called_once()
+
+
+class LandingWarmScopeTests(TestCase):
+    """warm_landing_page_content(scope=...) narrows BOTH the rebuilt surfaces and
+    the dirty keys it clears, so an invalidation-driven republish rebuilds only
+    the family that changed. A clan write must not rebuild player surfaces (the
+    2026-05-27 recent-players cost) nor clear the players dirty flag (which would
+    strand the player published fallback with no pending republish). See
+    runbook-db-cpu-saturation-2026-05-24.md.
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    def _run_scope(self, scope, include_recent=True):
+        from warships import landing as landing_mod
+        with patch.object(landing_mod, 'get_landing_players_payload', return_value=[]) as players, \
+                patch.object(landing_mod, 'get_landing_best_clans_payload', return_value=[]) as best_clans, \
+                patch.object(landing_mod, 'get_landing_recent_clans_payload', return_value=[]) as recent_clans, \
+                patch.object(landing_mod, 'get_landing_recent_players_payload', return_value=[]) as recent_players:
+            landing_mod.warm_landing_page_content(
+                force_refresh=True, include_recent=include_recent, realm='na', scope=scope)
+        return players, best_clans, recent_clans, recent_players
+
+    def test_scope_clans_runs_only_clan_surfaces(self):
+        players, best_clans, recent_clans, recent_players = self._run_scope('clans')
+        self.assertTrue(best_clans.called)
+        self.assertTrue(recent_clans.called)  # recent_clans IS a clan-scope surface
+        players.assert_not_called()
+        recent_players.assert_not_called()
+
+    def test_scope_players_runs_only_player_surfaces(self):
+        players, best_clans, recent_clans, recent_players = self._run_scope('players')
+        self.assertTrue(players.called)
+        self.assertTrue(recent_players.called)  # recent_players IS a player-scope surface
+        best_clans.assert_not_called()
+        recent_clans.assert_not_called()
+
+    def test_scope_all_runs_every_surface(self):
+        players, best_clans, recent_clans, recent_players = self._run_scope('all')
+        self.assertTrue(players.called)
+        self.assertTrue(best_clans.called)
+        self.assertTrue(recent_clans.called)
+        self.assertTrue(recent_players.called)
+
+    def test_surface_family_sets_partition_correctly(self):
+        # Off-by-one guard: a startswith('clans_') test would miss recent_clans.
+        from warships.landing import LANDING_CLAN_WARM_SURFACES, LANDING_PLAYER_WARM_SURFACES
+        self.assertIn('recent_clans', LANDING_CLAN_WARM_SURFACES)
+        self.assertIn('recent_players', LANDING_PLAYER_WARM_SURFACES)
+        self.assertNotIn('recent_players', LANDING_CLAN_WARM_SURFACES)
+        self.assertNotIn('recent_clans', LANDING_PLAYER_WARM_SURFACES)
+        self.assertEqual(
+            LANDING_CLAN_WARM_SURFACES & LANDING_PLAYER_WARM_SURFACES, frozenset())
+
+    def test_clan_scope_clears_only_clan_dirty_keys(self):
+        from warships import landing as landing_mod
+        cache.set(realm_cache_key('na', LANDING_CLANS_DIRTY_KEY), 'd', timeout=None)
+        cache.set(realm_cache_key('na', LANDING_RECENT_CLANS_DIRTY_KEY), 'd', timeout=None)
+        cache.set(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY), 'd', timeout=None)
+        with patch.object(landing_mod, 'get_landing_players_payload', return_value=[]), \
+                patch.object(landing_mod, 'get_landing_best_clans_payload', return_value=[]), \
+                patch.object(landing_mod, 'get_landing_recent_clans_payload', return_value=[]), \
+                patch.object(landing_mod, 'get_landing_recent_players_payload', return_value=[]):
+            landing_mod.warm_landing_page_content(force_refresh=True, realm='na', scope='clans')
+        self.assertIsNone(cache.get(realm_cache_key('na', LANDING_CLANS_DIRTY_KEY)))
+        self.assertIsNone(cache.get(realm_cache_key('na', LANDING_RECENT_CLANS_DIRTY_KEY)))
+        # Players dirty key must survive — clan scope did not rebuild player surfaces.
+        self.assertIsNotNone(cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))

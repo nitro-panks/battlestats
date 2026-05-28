@@ -246,7 +246,7 @@ def is_clan_battle_summary_refresh_pending(clan_id: object, realm: str = DEFAULT
     return bool(cache.get(_clan_battle_summary_refresh_dispatch_key(clan_id, realm=realm)))
 
 
-def queue_landing_page_warm(realm: str = DEFAULT_REALM, include_recent: bool = True):
+def queue_landing_page_warm(realm: str = DEFAULT_REALM, include_recent: bool = True, scope: str = 'all'):
     # If a warm is already executing for this realm, skip enqueue. The 30s
     # dispatch dedup expires while the 1200s task runs, so without this gate,
     # cache-fallback paths invoked from inside the warm itself would re-enqueue
@@ -272,7 +272,7 @@ def queue_landing_page_warm(realm: str = DEFAULT_REALM, include_recent: bool = T
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_landing_page_content_task.delay(include_recent=include_recent, realm=realm)
+        warm_landing_page_content_task.delay(include_recent=include_recent, realm=realm, scope=scope)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -869,13 +869,14 @@ def warm_clan_battle_summaries_task(self, clan_ids=None, realm=DEFAULT_REALM):
 
 
 @app.task(bind=True, **TASK_OPTS)
-def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REALM):
+def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REALM, scope='all'):
     from warships.landing import warm_landing_page_content
 
     logger.info(
-        "Starting warm_landing_page_content_task include_recent=%s realm=%s",
+        "Starting warm_landing_page_content_task include_recent=%s realm=%s scope=%s",
         include_recent,
         realm,
+        scope,
     )
 
     lock_key = _landing_page_warm_lock_key(realm)
@@ -890,6 +891,7 @@ def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REAL
             force_refresh=True,
             include_recent=bool(include_recent),
             realm=realm,
+            scope=scope,
         )
         logger.info("Finished warm_landing_page_content_task: %s", result)
         return result
@@ -1411,26 +1413,36 @@ def enrich_player_data_task(self):
     limits.  Runs on the dedicated background worker so it never competes
     with user-facing tasks on the default/hydration queues.
     """
-    # Defer if any clan crawl is running — they share the WG API rate limit.
+    # Acquire the single-flight lock FIRST. Duplicate dispatches (the 15-min
+    # Beat kickstart, acks_late redelivery, and the startup-warmer kickstart can
+    # coincide) return here without re-enqueuing — so deferrals can't fan out
+    # into accumulating 300s-recurring chains (the 2026-05-27 ~1,190/hr churn
+    # while a clan crawl was active). See runbook-db-cpu-saturation-2026-05-24.md.
+    lock_key = _enrich_player_data_lock_key()
+    if not cache.add(lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping enrich_player_data_task — another enrichment is already running")
+        return {"status": "skipped", "reason": "already-running"}
+
+    # Defer while a clan crawl is active (shared WG API rate limit). We hold the
+    # lock, so release it and return WITHOUT re-enqueuing: the every-15-min Beat
+    # kickstart (player-enrichment-kickstart) is the retry, bounding deferrals to
+    # one no-op per cycle instead of a self-multiplying chain. (Benign race: a
+    # crawl may start between this check and enrich_players below; that batch
+    # competes for the WG budget once and the next dispatch defers. The 6h lock
+    # TTL + heartbeat lets a long-running batch hold the lock safely.)
     from warships.models import VALID_REALMS as _realms
     active_crawls = [
         r for r in sorted(_realms)
         if cache.get(_clan_crawl_lock_key(r)) is not None
     ]
     if active_crawls:
-        retry_delay = 300  # check again in 5 minutes
+        cache.delete(lock_key)
         logger.info(
-            "Deferring enrichment — clan crawl active for %s, retrying in %ds",
-            active_crawls, retry_delay,
+            "Deferring enrichment — clan crawl active for %s; Beat kickstart will retry",
+            active_crawls,
         )
-        enrich_player_data_task.apply_async(countdown=retry_delay)
         return {"status": "deferred", "reason": "crawl-running", "active_crawls": active_crawls}
-
-    lock_key = _enrich_player_data_lock_key()
-    if not cache.add(lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT):
-        logger.info(
-            "Skipping enrich_player_data_task — another enrichment is already running")
-        return {"status": "skipped", "reason": "already-running"}
 
     try:
         from warships.management.commands.enrich_player_data import enrich_players
