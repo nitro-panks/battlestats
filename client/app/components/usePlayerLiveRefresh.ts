@@ -52,8 +52,10 @@ interface UsePlayerLiveRefreshParams {
  *    player endpoint (cache-busted) until X-Player-Refresh-Pending clears,
  *    re-hydrating on each poll, then transition to cooldown.
  *  - phase "cooldown": tick a server-anchored countdown to X-Player-Next-Refresh
- *    (every visitor sees the same target). At 0 a new pull becomes possible on
- *    the next visit — we never auto-fire, matching the server-side lock.
+ *    (every visitor sees the same target). At 0 we auto-trigger an in-place
+ *    refresh (re-enter the loading poll → rehydrate → reset the countdown, no
+ *    page reload). The server-side cooldown lock + visit dedup still gate the
+ *    actual upstream pull, so an open/idle tab can't over-refresh.
  */
 export const usePlayerLiveRefresh = ({
     playerName,
@@ -144,15 +146,39 @@ export const usePlayerLiveRefresh = ({
     }, [pending, playerName, realm]);
 
     // Countdown tick during cooldown (recompute from the absolute target each
-    // tick, so it's correct after tab sleep / throttling).
+    // tick, so it's correct after tab sleep / throttling). When the cooldown
+    // elapses we AUTO-TRIGGER an in-place refresh instead of parking on "Update
+    // available": flipping `pending` re-enters the poll loop above, which
+    // re-fetches the (cache-busted) endpoint — the server dispatches the
+    // visit-driven refresh when stale (views.py) — then rehydrates via
+    // onRehydrate + a single refreshNonce bump and resets the countdown, all
+    // WITHOUT a page reload (SPA-style; reloading is disruptive).
+    //
+    // Fire only on the >0 → 0 down-crossing. The detector re-arms on any tick
+    // where `remaining > 0` (a "fresh" anchor), so:
+    //  - a successful refresh sets a future anchor (~15 min) → arms → fires again
+    //    at the next expiry (continuous in-place updates while the page is open);
+    //  - a refresh that fails to land leaves us parked at 0 (prev stays 0, never
+    //    >0) → does NOT hot-loop re-firing every tick; it waits for a real anchor.
     useEffect(() => {
         if (pending) {
             return;
         }
+        let prevRemaining = secondsRemaining;
         const intervalId = window.setInterval(() => {
-            setSecondsRemaining(computeSecondsRemaining(nextRefresh));
+            const remaining = computeSecondsRemaining(nextRefresh);
+            setSecondsRemaining(remaining);
+            if (nextRefresh !== null && prevRemaining > 0 && remaining <= 0) {
+                setPending(true);
+            }
+            prevRemaining = remaining;
         }, 1_000);
         return () => window.clearInterval(intervalId);
+        // `secondsRemaining` is read ONCE at effect setup to seed the crossing
+        // detector; later values are tracked via the local `prevRemaining`
+        // closure, so omitting it from deps does NOT cause a stale read — and
+        // including it would re-create the interval every tick (churn).
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pending, nextRefresh]);
 
     return {
