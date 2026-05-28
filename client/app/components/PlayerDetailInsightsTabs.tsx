@@ -103,8 +103,8 @@ const PlayerScoreDistributionSVG = dynamic(() => resilientDynamicImport(() => im
 });
 
 const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; minHeight: number; }> = [
-    { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 920 },
     { id: 'ships', label: 'Ships', panelLabel: 'Ship insights', minHeight: 560 },
+    { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 920 },
     { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 620 },
     { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
     { id: 'badges', label: 'Efficiency', panelLabel: 'Efficiency insights', minHeight: 360 },
@@ -147,13 +147,13 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
 }) => {
     const { theme } = useTheme();
     const { realm } = useRealm();
-    const [activeTab, setActiveTab] = useState<InsightsTabId>('profile');
+    const [activeTab, setActiveTab] = useState<InsightsTabId>('ships');
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
     const [profileChartPayload, setProfileChartPayload] = useState<TierTypePayload | null>(null);
     const [profileChartState, setProfileChartState] = useState<'idle' | 'loading' | 'ready' | 'warming' | 'error'>('idle');
 
     useEffect(() => {
-        setActiveTab('profile');
+        setActiveTab('ships');
     }, [playerId]);
 
     useEffect(() => {

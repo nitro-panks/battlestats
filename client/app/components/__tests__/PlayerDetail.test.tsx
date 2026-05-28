@@ -662,11 +662,19 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
+        // Default tab is Ships; the profile/efficiency/clan panels are gated behind tabs.
+        await waitFor(() => {
+            expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
+        });
+        expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
         expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+        expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
+
+        // Performance by Tier lives behind the Profile tab.
+        fireEvent.click(screen.getByRole('tab', { name: 'Profile' }));
         await waitFor(() => {
             expect(screen.getByText('Performance by Tier')).toBeInTheDocument();
         });
-        expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
 
@@ -752,7 +760,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(consoleErrorSpy).toHaveBeenCalled();
     });
 
-    it('renders the default profile insight tab on the player page', async () => {
+    it('renders the default ships insight tab on the player page', async () => {
         render(
             <PlayerDetail
                 player={{
@@ -765,10 +773,12 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByRole('tab', { name: 'Profile' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
         await waitFor(() => {
-            expect(screen.getByText('Tier vs Type Profile')).toBeInTheDocument();
+            expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
         });
+        // Profile and Ranked lanes stay inactive until selected.
+        expect(screen.queryByText('Tier vs Type Profile')).not.toBeInTheDocument();
         expect(screen.queryByText('Ranked Games vs Win Rate')).not.toBeInTheDocument();
     });
 

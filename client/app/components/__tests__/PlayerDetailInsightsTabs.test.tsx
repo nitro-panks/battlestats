@@ -84,7 +84,7 @@ describe('PlayerDetailInsightsTabs', () => {
         jest.useRealTimers();
     });
 
-    it('renders the profile lane by default and keeps other heavy panels inactive', () => {
+    it('renders the ships lane by default and keeps other heavy panels inactive', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
@@ -97,10 +97,11 @@ describe('PlayerDetailInsightsTabs', () => {
             />,
         );
 
-        expect(screen.getByText('Loading profile charts...')).toBeInTheDocument();
-
-        expect(screen.getByRole('tab', { name: 'Profile' })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.queryByText('Top Ships (Random Battles)')).not.toBeInTheDocument();
+        // Ships is now the default, left-most tab; Profile is second.
+        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
+        // Profile and the other heavy lanes stay inactive until selected.
+        expect(screen.queryByText('Loading profile charts...')).not.toBeInTheDocument();
         expect(screen.queryByText('Ranked Seasons')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
     });
@@ -277,9 +278,10 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            // 4 background warmup calls + 1 initial tier_type from profile tab + 1 re-run
-            // when profileChartState transitions idle→loading (profileChartState is in effect deps)
-            expect(mockFetchSharedJson).toHaveBeenCalledTimes(6);
+            // 4 background warmup calls. Ships is the default tab now, so the
+            // profile chart does NOT self-fetch tier_type until Profile is selected
+            // (that previously added 2 calls; warmup still pre-warms tier_type once).
+            expect(mockFetchSharedJson).toHaveBeenCalledTimes(4);
         });
 
         expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
@@ -310,8 +312,9 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            // 3 background warmup calls (no clan battle) + 2 tier_type calls (initial + idle→loading re-run)
-            expect(mockFetchSharedJson).toHaveBeenCalledTimes(5);
+            // 3 background warmup calls (no clan battle). Ships is the default tab,
+            // so the profile chart does not self-fetch tier_type until selected.
+            expect(mockFetchSharedJson).toHaveBeenCalledTimes(3);
         });
 
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith(
@@ -357,6 +360,12 @@ describe('PlayerDetailInsightsTabs', () => {
                 isLoading={false}
             />,
         );
+
+        // Ships is the default tab now — activate Profile to exercise its charts.
+        await act(async () => {
+            fireEvent.click(screen.getByRole('tab', { name: 'Profile' }));
+            await Promise.resolve();
+        });
 
         expect(screen.getByText('Loading profile charts...')).toBeInTheDocument();
 
@@ -414,6 +423,12 @@ describe('PlayerDetailInsightsTabs', () => {
                 isLoading={false}
             />,
         );
+
+        // Ships is the default tab now — activate Profile to exercise its charts.
+        await act(async () => {
+            fireEvent.click(screen.getByRole('tab', { name: 'Profile' }));
+            await Promise.resolve();
+        });
 
         // Exhaust pending retries to reach warming state. PROFILE_PENDING_RETRY_LIMIT=5,
         // each retry fires after PROFILE_PENDING_RETRY_DELAY_MS=1500ms. Advance enough to
