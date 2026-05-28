@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import BattleHistoryCard, { type BattleHistoryPayload } from '../BattleHistoryCard';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 
@@ -97,6 +97,57 @@ describe('BattleHistoryCard', () => {
         // Sparkline is intentionally hidden (kept in component code for future
         // re-enable). Confirm it is NOT rendered.
         expect(screen.queryByLabelText(/Win-rate trend across the period/i)).not.toBeInTheDocument();
+    });
+
+    test('splits Win Rate into sortable WR/S (session) and WR/O (overall + delta) columns', async () => {
+        resolveWith(buildPayload({
+            by_ship: [
+                {
+                    ship_id: 42, ship_name: 'Yamato', ship_tier: 10, ship_type: 'Battleship',
+                    battles: 6, wins: 4, losses: 2, win_rate: 66.7,
+                    lifetime_win_rate: 55.0, delta_win_rate: 11.7,
+                    damage: 287_400, avg_damage: 47_900, frags: 12, xp: 16_400,
+                    planes_killed: 0, survived_battles: 3,
+                },
+                {
+                    ship_id: 43, ship_name: 'Dalian', ship_tier: 9, ship_type: 'Destroyer',
+                    battles: 2, wins: 1, losses: 1, win_rate: 50.0,
+                    lifetime_win_rate: 60.0, delta_win_rate: -10.0,
+                    damage: 95_000, avg_damage: 47_500, frags: 3, xp: 5_000,
+                    planes_killed: 0, survived_battles: 1,
+                },
+            ],
+        }));
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+
+        // The single "Win Rate" column is now two distinct sortable columns.
+        expect(screen.getByRole('columnheader', { name: /WR\/S/ })).toBeInTheDocument();
+        expect(screen.getByRole('columnheader', { name: /WR\/O/ })).toBeInTheDocument();
+        expect(screen.queryByRole('columnheader', { name: /^Win Rate$/i })).not.toBeInTheDocument();
+
+        // Session WR (WR/S), overall WR (WR/O), and the delta all render.
+        expect(screen.getByText('66.7%')).toBeInTheDocument();   // Yamato session
+        expect(screen.getByText('55.0%')).toBeInTheDocument();   // Yamato overall
+        expect(screen.getByText('Δ+11.7%')).toBeInTheDocument();
+        expect(screen.getByText('Δ-10.0%')).toBeInTheDocument();
+
+        // Default sort is battles desc → Yamato (6) before Dalian (2).
+        expect(screen.getAllByRole('row')[1].textContent).toContain('Yamato');
+
+        // Sort by overall WR (WR/O), desc → Dalian (60.0) above Yamato (55.0).
+        fireEvent.click(screen.getByText('WR/O'));
+        let rows = screen.getAllByRole('row');
+        expect(rows[1].textContent).toContain('Dalian');
+        expect(rows[2].textContent).toContain('Yamato');
+
+        // Session WR (WR/S) sorts independently, desc → Yamato (66.7) above Dalian (50.0).
+        fireEvent.click(screen.getByText('WR/S'));
+        rows = screen.getAllByRole('row');
+        expect(rows[1].textContent).toContain('Yamato');
+        expect(rows[2].textContent).toContain('Dalian');
     });
 
     test('renders nothing while loading', () => {
