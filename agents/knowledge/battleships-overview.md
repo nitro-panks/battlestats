@@ -9,7 +9,7 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 ## Current Conclusion
 
 - battlestats is a Django + DRF + Celery + Next.js application for World of Warships player and clan analytics, deployed on a single DigitalOcean droplet.
-- background enrichment (player data population) runs as a DigitalOcean Function (`enrichment/enrich-batch`), not as a Celery task. Celery handles request-driven refresh, warmers, and periodic schedules.
+- background enrichment (player data population) runs on the Celery `background` worker via `warships.tasks.enrich_player_data_task`, which self-chains between batches and is kickstarted by Celery Beat every 15 min. (An experimental DigitalOcean Functions migration was reverted 2026-04-08 — DO Functions egress from a rotating IP pool the WG `application_id` cannot whitelist, so every call failed `407 INVALID_IP_ADDRESS`.)
 - the repo intentionally separates unreliable upstream WG API behavior from stable internal normalized payloads.
 - ranked history is now stored locally as the full non-empty season record, not a truncated tail.
 - request-time reads should prefer best-effort local data and degrade gracefully when async infrastructure is unavailable.
@@ -19,15 +19,15 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 
 - root shape:
   - `client/`: Next.js 15.5.10 app router frontend, React 18, TypeScript, Tailwind, D3, Font Awesome.
-  - `server/`: Django backend, DRF APIs, Celery worker/beat, WG ingestion logic, agentic tooling.
+  - `server/`: Django backend, DRF APIs, Celery worker/beat, WG ingestion logic.
   - `agents/`: persona markdown, runbooks, reviews, work items, knowledge base, contracts.
 - local dev runtime via `docker-compose.yml`:
   - Next client on `localhost:3001`
   - Django/Gunicorn on `localhost:8888`
   - Postgres, RabbitMQ, Redis, Celery worker, Celery beat
 - production droplet runtime:
-  - Gunicorn, 3 Celery worker pools (default/hydration/background), Beat, Redis, RabbitMQ, Next.js — all as systemd services
-  - DigitalOcean Functions for background enrichment (`enrichment/enrich-batch`) — runs outside the droplet, invoked via droplet crontab every 15 min
+  - Gunicorn, 4 Celery worker pools (default/hydration/background/crawls), Beat, Redis, RabbitMQ, Next.js — all as systemd services
+  - background enrichment runs inside the `background` Celery pool (`enrich_player_data_task`); the Beat `player-enrichment-kickstart` fires every 15 min
   - DigitalOcean managed Postgres
 - key backend app: `server/warships/`
 - key frontend app: `client/app/components/`
@@ -264,28 +264,16 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 - safe task dispatch now logs broker failures as warnings instead of surfacing them as 500s on read paths.
 - crawler and ranked incremental jobs use locks; incremental ranked must not run while the clan crawl lock is active.
 - crawl watchdog can clear stale crawl locks and resume crawl scheduling.
-- background enrichment (`PlayerExplorerSummary` population) now runs as a DigitalOcean Function (`enrichment/enrich-batch`), not as a Celery task:
-  - invoked via droplet crontab every 15 min
-  - each invocation boots Django, loops through 500-player batches for up to ~14 min
-  - throughput: ~10k players/hour (vs ~1,760/hr peak on Celery background worker)
-  - realm targeting via `ENRICH_REALMS` env var in `functions/.env`
-  - see `agents/runbooks/spec-serverless-background-workers-2026-04-04.md` for architecture
-- the Celery `background` worker still handles warmers, crawlers, ranked incrementals, and player refresh — only enrichment has migrated to DO Functions so far.
+- background enrichment (`PlayerExplorerSummary` population) runs on the Celery `background` worker via `enrich_player_data_task`:
+  - self-chains between 500-player batches (`ENRICH_BATCH_SIZE`); kickstarted by the Beat `player-enrichment-kickstart` every 15 min and by the Gunicorn `when_ready` warmer
+  - realm targeting via the `ENRICH_REALMS` env var
+  - a DigitalOcean Functions migration (`functions/packages/enrichment/enrich-batch`) was reverted 2026-04-08 — DO Functions egress from a rotating IP pool the WG `application_id` cannot whitelist (`407 INVALID_IP_ADDRESS`); see `agents/runbooks/archive/spec-serverless-background-workers-2026-04-04.md` for the post-mortem
+- the Celery `background` worker also handles warmers, ranked incrementals, and player refresh; the days-long clan crawl lives in its own `crawls` pool.
 
 ## Agentic Subsystem
 
-- two orchestration engines exist:
-  - LangGraph for guarded implementation-heavy workflows
-  - CrewAI for persona-shaped planning/synthesis
-- hybrid routing exists via `run_agent_workflow` with `auto|langgraph|crewai|hybrid`
-- key commands:
-  - `python manage.py run_agent_graph "..." --json`
-  - `python manage.py run_agent_crew "..." --dry-run --json`
-  - `python scripts/run_agent_workflow.py "..." --engine hybrid --json`
-- durable run logs live under `server/logs/agentic/{langgraph|crewai|hybrid}/`
-- CrewAI is strongest as two-pass usage:
-  - planning crew first
-  - implementation/review crew second
+- RETIRED. The experimental in-process LangGraph/CrewAI orchestration runtime (and the `run_agent_graph` / `run_agent_crew` / `run_agent_workflow` management commands and scripts) was removed in v1.12.1 (`f0fbbe3`); the pilot did not graduate.
+- What remains under `agents/` is markdown only: persona briefs, knowledge notes, runbooks, and contracts that Claude Code subagents read. There is no agentic runtime to invoke.
 
 ## Environment And Local Runtime Notes
 

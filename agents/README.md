@@ -19,10 +19,9 @@ This directory is the shortest useful path for agents that are told to review pr
 
 - Battlestats is a Django + Next.js stats platform with a cache-first, background-hydration architecture.
 - The browser should not call the Wargaming API directly.
-- Realm-aware behavior matters. `na` and `eu` are both active product concerns.
+- Realm-aware behavior matters. `na`, `eu`, and `asia` are all active product concerns.
 - Operational changes usually involve scheduled warmers, Celery queue behavior, deploy scripts, and published-cache fallbacks, not just endpoint code.
-- The repo has an internal agentic platform. LangGraph is the guarded implementation lane; CrewAI is the persona-oriented planning lane; hybrid routing combines them.
-- Production deploys keep the agentic runtime disabled by default; opt in only when the task actually needs it.
+- The `agents/` tree is markdown briefs (personas, knowledge, runbooks) for Claude Code subagents. The experimental in-process LangGraph/CrewAI runtime was retired in v1.12.1 (`f0fbbe3`); there is no agentic runtime to enable.
 
 ## Task-To-Doc Routing
 
@@ -36,10 +35,6 @@ This directory is the shortest useful path for agents that are told to review pr
   Read `runbooks/spec-multi-realm-eu-support.md` and then the related operational runbooks from the active index.
 - Deploy, droplet runtime, or memory tuning:
   Read `runbooks/runbook-backend-droplet-deploy.md` or `runbooks/runbook-client-droplet-deploy.md`.
-- Agentic workflow behavior:
-  Read `runbooks/runbook-agent-orchestrator-selection.md`, `runbooks/runbook-langgraph-opinionated-workflow.md`, and `runbooks/runbook-crewai-integration.md`.
-- Agentic memory or review flow:
-  Read `runbooks/runbook-agentic-memory-review.md` and `runbooks/spec-langmem-agentic-memory-pilot-2026-03-26.md`.
 - Verified upstream behavior or expensive rediscovery:
   Read `knowledge/README.md` and then the specific note.
 - Structured payload semantics:
@@ -73,7 +68,7 @@ Before each commit:
 
 ## Roles
 
-The role files in this directory remain the persona source material for the agentic stack:
+The role files in this directory are persona source material for Claude Code subagents (briefs, not a runtime):
 
 - Project Coordinator
 - Project Manager
