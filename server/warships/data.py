@@ -1,7 +1,7 @@
 from warships.tasks import update_activity_data_task, update_battle_data_task, update_clan_data_task, update_clan_members_task, update_randoms_data_task, update_snapshot_data_task, update_tiers_data_task, update_type_data_task
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
     _fetch_clan_battle_seasons_info, _fetch_clan_battle_season_stats
-from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info, _fetch_player_achievements
+from warships.api.players import _fetch_player_personal_data, _fetch_ranked_account_info, _fetch_player_achievements
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, _fetch_efficiency_badges_for_player, build_ship_chart_name
 from warships.achievements_catalog import get_achievement_catalog_entry
 from warships.player_analytics import compute_player_verdict
@@ -17,7 +17,7 @@ from django.core.cache import cache
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from typing import Dict, Any, Optional, Iterable
+from typing import Any, Optional, Iterable
 from datetime import datetime, timezone, timedelta, date
 import logging
 import math
@@ -196,12 +196,6 @@ def player_activity_data_needs_refresh(
 
     return _is_stale_timestamp(updated_at, stale_after)
 
-
-def player_derived_chart_data_needs_refresh(
-    updated_at: Optional[datetime],
-    stale_after: timedelta = PLAYER_DERIVED_DATA_STALE_AFTER,
-) -> bool:
-    return _is_stale_timestamp(updated_at, stale_after)
 
 
 def refresh_player_detail_payloads(
@@ -904,19 +898,6 @@ def efficiency_rank_publication_needs_refresh(player: Player) -> bool:
     return not _efficiency_rank_snapshot_is_fresh(player, explorer_summary)
 
 
-def _efficiency_rank_tier_from_percentile(percentile: Optional[float]) -> Optional[str]:
-    if percentile is None:
-        return None
-    if percentile >= EFFICIENCY_RANK_EXPERT_PERCENTILE:
-        return 'E'
-    if percentile >= EFFICIENCY_RANK_GRADE_I_PERCENTILE:
-        return 'I'
-    if percentile >= EFFICIENCY_RANK_GRADE_II_PERCENTILE:
-        return 'II'
-    if percentile >= EFFICIENCY_RANK_MIN_VISIBLE_PERCENTILE:
-        return 'III'
-    return None
-
 
 def _efficiency_rank_eligibility_reason(player: Player, explorer_summary: PlayerExplorerSummary) -> Optional[str]:
     total_badge_rows = int(explorer_summary.efficiency_badge_rows_total or 0)
@@ -940,28 +921,6 @@ def _efficiency_rank_eligibility_reason(player: Player, explorer_summary: Player
     return None
 
 
-def _calculate_shrunken_efficiency_strength(
-    normalized_badge_strength: float,
-    eligible_ship_count: int,
-    field_mean_strength: float,
-    shrinkage_k: float = EFFICIENCY_RANK_SHRINKAGE_K,
-) -> float:
-    if eligible_ship_count <= 0:
-        return field_mean_strength
-
-    weight = eligible_ship_count / (eligible_ship_count + shrinkage_k)
-    shrunken_strength = (
-        weight * normalized_badge_strength +
-        ((1.0 - weight) * field_mean_strength)
-    )
-    return round(shrunken_strength, 6)
-
-
-def _score_percentile_from_rank(average_rank: float, population_size: int) -> float:
-    if population_size <= 1:
-        return 1.0
-
-    return round((population_size - average_rank) / (population_size - 1), 6)
 
 
 def _interpolate_quantile(sorted_values: list[float], percentile: float) -> Optional[float]:
@@ -1003,37 +962,6 @@ def recompute_efficiency_rank_snapshot(
         publish_partial=publish_partial,
     )
 
-
-def _count_suppressed_players(min_pvp, min_ships, unmapped_limit):
-    suppressed_sql = """
-        SELECT
-            SUM(CASE WHEN COALESCE(p.pvp_battles, 0) < %s THEN 1 ELSE 0 END),
-            SUM(CASE WHEN COALESCE(es.eligible_ship_count, 0) < %s THEN 1 ELSE 0 END),
-            SUM(CASE WHEN COALESCE(es.efficiency_badge_rows_total, 0) > 0
-                      AND es.normalized_badge_strength IS NOT NULL
-                      AND COALESCE(es.eligible_ship_count, 0) >= %s
-                      AND COALESCE(p.pvp_battles, 0) >= %s
-                      AND (COALESCE(es.badge_rows_unmapped, 0)::float
-                           / es.efficiency_badge_rows_total) > %s
-                 THEN 1 ELSE 0 END)
-        FROM warships_playerexplorersummary es
-        JOIN warships_player p ON p.id = es.player_id
-        WHERE p.is_hidden = false
-    """
-    with connection.cursor() as cursor:
-        cursor.execute(suppressed_sql, [
-            min_pvp, min_ships, min_ships, min_pvp, unmapped_limit,
-        ])
-        row = cursor.fetchone()
-    counts = {}
-    if row:
-        if row[0]:
-            counts['low_battles'] = row[0]
-        if row[1]:
-            counts['low_ships'] = row[1]
-        if row[2]:
-            counts['unmapped_badge_gate'] = row[2]
-    return counts
 
 
 def _recompute_efficiency_rank_snapshot_sql(
@@ -1649,160 +1577,10 @@ def _normalize_battle_volume_score(total_battles: Optional[int], battle_rows: li
     return clamp(math.log10(battles + 1) / 4.0, 0.0, 1.0)
 
 
-def _calculate_competitive_tier_factor(battle_rows: list[dict], fallback_battles: Optional[int]) -> float:
-    total_battles = 0
-    weighted_battles = 0.0
-
-    for row in battle_rows:
-        battles = max(int(row.get('pvp_battles', 0) or 0), 0)
-        if battles <= 0:
-            continue
-
-        total_battles += battles
-        weighted_battles += battles * \
-            _player_score_tier_weight(row.get('ship_tier'))
-
-    if total_battles <= 0:
-        fallback_total = max(int(fallback_battles or 0), 0)
-        return 1.0 if fallback_total > 0 else 1.0
-
-    competitive_share = clamp(weighted_battles / total_battles, 0.0, 1.0)
-    return round(
-        clamp(
-            PLAYER_SCORE_LOW_TIER_FLOOR +
-                ((1.0 - PLAYER_SCORE_LOW_TIER_FLOOR)
-                 * math.sqrt(competitive_share)),
-            PLAYER_SCORE_LOW_TIER_FLOOR,
-            1.0,
-        ),
-        4,
-    )
 
 
-def _fibonacci_activity_weight(day_age: int) -> float:
-    if day_age <= 1:
-        return 34.0
-    if day_age <= 3:
-        return 21.0
-    if day_age <= 7:
-        return 13.0
-    if day_age <= 13:
-        return 8.0
-    if day_age <= 21:
-        return 5.0
-    if day_age <= 34:
-        return 3.0
-    if day_age <= 55:
-        return 2.0
-    if day_age <= 89:
-        return 1.0
-    if day_age <= 144:
-        return 0.55
-    if day_age <= 233:
-        return 0.34
-    if day_age <= 365:
-        return 0.21
-    return 0.08
 
 
-def _smoothstep(progress: float) -> float:
-    normalized = clamp(progress, 0.0, 1.0)
-    return normalized * normalized * (3.0 - (2.0 * normalized))
-
-
-def _inactivity_score_cap(days_since_last_battle: Optional[int]) -> Optional[float]:
-    if days_since_last_battle is None:
-        return None
-
-    days = max(int(days_since_last_battle), 0)
-    if days <= PLAYER_SCORE_INACTIVITY_GRACE_DAYS:
-        return PLAYER_SCORE_MAX
-
-    if days <= 180:
-        progress = (days - PLAYER_SCORE_INACTIVITY_GRACE_DAYS) / \
-            (180.0 - PLAYER_SCORE_INACTIVITY_GRACE_DAYS)
-        return round(
-            PLAYER_SCORE_MAX -
-            ((PLAYER_SCORE_MAX - PLAYER_SCORE_180_DAY_CAP) * _smoothstep(progress)),
-            2,
-        )
-
-    if days <= 365:
-        progress = (days - 180) / 185.0
-        return round(
-            PLAYER_SCORE_180_DAY_CAP -
-            ((PLAYER_SCORE_180_DAY_CAP - PLAYER_SCORE_365_DAY_CAP)
-             * _smoothstep(progress)),
-            2,
-        )
-
-    overflow_days = days - 365
-    return round(
-        max(
-            PLAYER_SCORE_DORMANT_MIN,
-            PLAYER_SCORE_365_DAY_CAP *
-            math.exp(-overflow_days / PLAYER_SCORE_POST_YEAR_DECAY_DAYS),
-        ),
-        2,
-    )
-
-
-def _inactivity_activity_multiplier(days_since_last_battle: Optional[int]) -> float:
-    if days_since_last_battle is None:
-        return 1.0
-
-    if days_since_last_battle <= 34:
-        return 1.0
-    if days_since_last_battle <= 55:
-        return 0.92
-    if days_since_last_battle <= 89:
-        return 0.75
-    if days_since_last_battle <= 144:
-        return 0.55
-    if days_since_last_battle <= 233:
-        return 0.35
-    if days_since_last_battle <= 365:
-        return 0.18
-    return 0.06
-
-
-def _calculate_recent_activity_score(activity_rows: Any, days_since_last_battle: Optional[int]) -> float:
-    normalized_rows = _coerce_activity_rows(activity_rows)
-    today = datetime.now().date()
-    weighted_intensity = 0.0
-
-    for row in normalized_rows:
-        row_date = row.get('date')
-        if not row_date:
-            continue
-
-        try:
-            age_days = (
-                today - datetime.fromisoformat(str(row_date)).date()).days
-        except ValueError:
-            continue
-
-        if age_days < 0:
-            continue
-
-        battles = int(row.get('battles', 0) or 0)
-        if battles <= 0:
-            continue
-
-        day_intensity = clamp(
-            math.log1p(battles) /
-            math.log1p(PLAYER_SCORE_ACTIVITY_SATURATION_BATTLES),
-            0.0,
-            1.0,
-        )
-        weighted_intensity += day_intensity * \
-            _fibonacci_activity_weight(age_days)
-
-    max_recent_weight = sum(_fibonacci_activity_weight(day_age)
-                            for day_age in range(29))
-    recent_score = weighted_intensity / \
-        max_recent_weight if max_recent_weight > 0 else 0.0
-    return round(clamp(recent_score, 0.0, 1.0) * _inactivity_activity_multiplier(days_since_last_battle), 4)
 
 
 def _calculate_player_score(
@@ -2164,38 +1942,6 @@ def fetch_player_summary(player_id: str, realm: str = DEFAULT_REALM) -> dict:
 
     return build_player_summary(player)
 
-
-def fetch_player_explorer_rows(
-    query: str = '',
-    hidden: str = 'all',
-    activity_bucket: str = 'all',
-    ranked: str = 'all',
-    min_pvp_battles: int = 0,
-    realm: str = DEFAULT_REALM,
-) -> list[dict]:
-    players = _build_player_explorer_queryset(
-        query=query,
-        hidden=hidden,
-        activity_bucket=activity_bucket,
-        ranked=ranked,
-        min_pvp_battles=min_pvp_battles,
-        realm=realm,
-    )
-
-    rows = []
-    for player in players:
-        if getattr(player, 'explorer_summary', None) is None:
-            refresh_player_explorer_summary(player)
-        rows.append(build_player_summary(player))
-
-    if ranked == 'yes':
-        rows = [row for row in rows if (
-            row.get('ranked_seasons_participated') or 0) > 0]
-    elif ranked == 'no':
-        rows = [row for row in rows if (
-            row.get('ranked_seasons_participated') or 0) == 0]
-
-    return rows
 
 
 def _player_explorer_base_queryset(realm: str = DEFAULT_REALM):
@@ -3676,26 +3422,6 @@ def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
     return payload
 
 
-def _fetch_player_ranked_wr_battles_population_correlation(realm: str = DEFAULT_REALM) -> dict:
-    cache_key = _player_correlation_cache_key(
-        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
-    published_cache_key = _player_correlation_published_cache_key(
-        PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        cache.set(published_cache_key, cached, timeout=None)
-        return cached
-
-    published = cache.get(published_cache_key)
-    if published is not None:
-        return published
-
-    payload = _build_player_ranked_wr_battles_population_correlation_payload(
-        realm=realm)
-    cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
-    cache.set(published_cache_key, payload, timeout=None)
-    return payload
-
 
 def _build_empty_player_ranked_wr_battles_population_correlation_payload() -> dict:
     config = PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG
@@ -4005,20 +3731,6 @@ def _get_player_clan_battle_season_stats(account_id: int, realm: str = DEFAULT_R
     cache.set(cache_key, seasons, CLAN_BATTLE_PLAYER_STATS_CACHE_TTL)
     return seasons
 
-
-def get_player_clan_battle_summary(account_id: Optional[int], allow_fetch: bool = True, realm: str = DEFAULT_REALM) -> dict[str, Any]:
-    if not account_id:
-        return summarize_clan_battle_seasons([])
-
-    player_account_id = int(account_id)
-    if allow_fetch:
-        seasons = _get_player_clan_battle_season_stats(
-            player_account_id, realm=realm)
-    else:
-        seasons = cache.get(realm_cache_key(
-            realm, f'clan_battles:player:{player_account_id}')) or []
-
-    return summarize_clan_battle_seasons(seasons)
 
 
 def _persist_player_clan_battle_summary(
@@ -5246,9 +4958,6 @@ def _bulk_cache_key_clan(clan_id: int, realm: str = DEFAULT_REALM) -> str:
 def get_cached_player_detail(player_id: int, realm: str = DEFAULT_REALM) -> Optional[dict]:
     return cache.get(_bulk_cache_key_player(player_id, realm=realm))
 
-
-def get_cached_clan_detail(clan_id: int, realm: str = DEFAULT_REALM) -> Optional[dict]:
-    return cache.get(_bulk_cache_key_clan(clan_id, realm=realm))
 
 
 def invalidate_player_detail_cache(player_id: int, realm: str = DEFAULT_REALM) -> None:

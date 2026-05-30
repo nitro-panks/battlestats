@@ -499,32 +499,6 @@ def compute_battle_events(
     return events
 
 
-def fetch_player_observation_payload(player_id: int, realm: str) -> Optional[PlayerSnapshot]:
-    """Single WG poll → PlayerSnapshot. None on flake (caller should retry next tick)."""
-    from warships.api.players import _fetch_player_personal_data
-    from warships.api.ships import _fetch_ship_stats_for_player
-
-    try:
-        player_data = _fetch_player_personal_data(player_id, realm=realm)
-    except Exception:
-        logger.exception("WG account/info fetch failed for player_id=%s", player_id)
-        return None
-    if not player_data:
-        logger.info("WG account/info empty for player_id=%s", player_id)
-        return None
-
-    try:
-        ship_data = _fetch_ship_stats_for_player(player_id, realm=realm)
-    except Exception:
-        logger.exception("WG ships/stats fetch failed for player_id=%s", player_id)
-        return None
-    if ship_data is None:
-        return None
-    if isinstance(ship_data, dict):
-        ship_data = []
-
-    return coerce_observation_payload(player_data, ship_data)
-
 
 def _serialize_ships_payload(snapshot: PlayerSnapshot) -> List[Dict[str, Any]]:
     return [

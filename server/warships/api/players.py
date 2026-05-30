@@ -9,18 +9,6 @@ from warships.api.client import DEFAULT_REALM, make_api_request
 logging.basicConfig(level=logging.INFO)
 
 
-def _fetch_snapshot_data(player_id: int, dates: str = '', realm: str = DEFAULT_REALM) -> Dict:
-    """Fetch JSON data containing recent battle stats for a given player_id."""
-    params = {
-        "account_id": player_id,
-        "dates": dates,
-        "fields": "pvp.account_id,pvp.battles,pvp.wins,pvp.survived_battles,pvp.battle_type,pvp.date"
-    }
-    logging.info(f' ---> Remote fetching snapshot for player_id: {player_id}')
-    data = _make_api_request("account/statsbydate/", params, realm=realm)
-
-    return data.get(str(player_id), {}).get('pvp', {}) if data else {}
-
 
 def _fetch_player_personal_data(player_id: int, realm: str = DEFAULT_REALM) -> Dict:
     """Fetch JSON data for a given player_id."""
