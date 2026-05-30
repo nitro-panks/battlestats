@@ -32,7 +32,7 @@ Do not scan every markdown file by default. Open `agents/reviews/`, `agents/work
 
 ## Next steps
 
-Two threads are in flight as of v1.15.3:
+Two threads are in flight:
 
 1. **Finish bringing in ranked battles.** Random-battle capture + diff + rollup is fully wired and validated. Ranked is shipped end-to-end on NA (~2,787 active ranked players baselined; on-render refresh, daily floor sweep, and BattleHistoryCard mode pills all live). Outstanding:
    - Period-tier rollups (weekly/monthly/yearly) for `mode='ranked'` — currently randoms-only by design.
