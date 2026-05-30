@@ -1,5 +1,7 @@
 # Runbook: Opinionated LangGraph Workflow
 
+> **RETIRED (v1.12.1, `f0fbbe3`).** This documents the experimental in-process LangGraph/CrewAI agentic runtime, which was removed from the repo — the `run_agent_graph`/`run_agent_crew`/`run_agent_workflow` commands, the LangSmith trace dashboard, and the in-app memory seam it describes no longer exist. Kept for historical reference only.
+
 _Last updated: 2026-04-02_
 
 _Status: Active workflow reference_

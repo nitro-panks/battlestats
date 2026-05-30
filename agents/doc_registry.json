@@ -932,10 +932,10 @@
                 "analysis-superseded"
             ]
         },
-        "agents/runbooks/runbook-kdr-backfill.md": {
+        "agents/runbooks/archive/runbook-kdr-backfill.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "data",
             "aliases": [
@@ -1105,10 +1105,10 @@
                 "spec-superseded"
             ]
         },
-        "agents/runbooks/spec-serverless-background-workers-2026-04-04.md": {
+        "agents/runbooks/archive/spec-serverless-background-workers-2026-04-04.md": {
             "kind": "spec",
-            "status": "active",
-            "lifecycle": "active-spec",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "architecture",
             "owner": "platform",
             "aliases": [
@@ -1834,10 +1834,10 @@
                 "db-size-optimization-executed-and-reclaimed"
             ]
         },
-        "agents/runbooks/runbook-db-optimization-followups-2026-05-26.md": {
+        "agents/runbooks/archive/runbook-db-optimization-followups-2026-05-26.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "operations",
             "owner": "platform",
             "aliases": [
