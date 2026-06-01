@@ -835,11 +835,23 @@ def _build_battle_history_payload_24h(player, mode: str) -> dict:
                     s["lifetime_battles"] = lifetime["battles"]
                     s["lifetime_win_rate"] = lifetime_wr_now
             else:
-                prior_wr = round(100.0 * prior_wins / prior_battles, 1)
                 s["lifetime_battles"] = lifetime["battles"]
                 s["lifetime_win_rate"] = lifetime_wr_now
-                s["delta_win_rate"] = round(lifetime_wr_now - prior_wr, 1)
                 s["is_new_ship"] = False
+                # Sync skew between the randoms-only lifetime snapshot
+                # (battles_json, a refresh-cadence snapshot) and the live
+                # rollup can make the subtracted prior impossible — more
+                # wins than battles, or negative — when the snapshot
+                # predates some of the period's recorded battles. That
+                # would yield a >100% prior WR and a nonsense delta (e.g.
+                # lifetime 8b/4w minus period 5b/0w → prior 3b/4w → -83pp).
+                # Keep the valid lifetime WR but suppress the delta until
+                # the snapshot catches up.
+                if 0 <= prior_wins <= prior_battles:
+                    prior_wr = round(100.0 * prior_wins / prior_battles, 1)
+                    s["delta_win_rate"] = round(lifetime_wr_now - prior_wr, 1)
+                else:
+                    s["delta_win_rate"] = None
         else:
             s["lifetime_battles"] = None
             s["lifetime_win_rate"] = None
@@ -871,9 +883,14 @@ def _build_battle_history_payload_24h(player, mode: str) -> dict:
             and totals_random_battles > 0):
         prior_battles_overall = lifetime_battles_overall - totals_random_battles
         prior_wins_overall = lifetime_wins_overall - totals_random_wins
+        # Same sync-skew guard as the per-ship delta: an impossible prior
+        # (wins outside [0, battles]) means the lifetime snapshot and the
+        # rollup disagree; suppress the delta rather than show a nonsense
+        # value.
         prior_overall_wr = round(
             100.0 * prior_wins_overall / prior_battles_overall, 1
-        ) if prior_battles_overall > 0 else None
+        ) if (prior_battles_overall > 0
+              and 0 <= prior_wins_overall <= prior_battles_overall) else None
         delta_overall_wr = round(
             lifetime_overall_wr - prior_overall_wr, 1
         ) if prior_overall_wr is not None and lifetime_overall_wr is not None else None
@@ -1113,11 +1130,23 @@ def _build_battle_history_payload(player, period: str, windows: int,
                     s["lifetime_battles"] = lifetime["battles"]
                     s["lifetime_win_rate"] = lifetime_wr_now
             else:
-                prior_wr = round(100.0 * prior_wins / prior_battles, 1)
                 s["lifetime_battles"] = lifetime["battles"]
                 s["lifetime_win_rate"] = lifetime_wr_now
-                s["delta_win_rate"] = round(lifetime_wr_now - prior_wr, 1)
                 s["is_new_ship"] = False
+                # Sync skew between the randoms-only lifetime snapshot
+                # (battles_json, a refresh-cadence snapshot) and the live
+                # rollup can make the subtracted prior impossible — more
+                # wins than battles, or negative — when the snapshot
+                # predates some of the period's recorded battles. That
+                # would yield a >100% prior WR and a nonsense delta (e.g.
+                # lifetime 8b/4w minus period 5b/0w → prior 3b/4w → -83pp).
+                # Keep the valid lifetime WR but suppress the delta until
+                # the snapshot catches up.
+                if 0 <= prior_wins <= prior_battles:
+                    prior_wr = round(100.0 * prior_wins / prior_battles, 1)
+                    s["delta_win_rate"] = round(lifetime_wr_now - prior_wr, 1)
+                else:
+                    s["delta_win_rate"] = None
         else:
             # No lifetime row, zero lifetime battles, or sync skew between
             # battles_json (a refresh-cadence snapshot) and the rollup
@@ -1160,9 +1189,14 @@ def _build_battle_history_payload(player, period: str, windows: int,
     ):
         prior_battles_overall = lifetime_battles_overall - totals_random_battles
         prior_wins_overall = lifetime_wins_overall - totals_random_wins
+        # Same sync-skew guard as the per-ship delta: an impossible prior
+        # (wins outside [0, battles]) means the lifetime snapshot and the
+        # rollup disagree; suppress the delta rather than show a nonsense
+        # value.
         prior_overall_wr = round(
             100.0 * prior_wins_overall / prior_battles_overall, 1
-        ) if prior_battles_overall > 0 else None
+        ) if (prior_battles_overall > 0
+              and 0 <= prior_wins_overall <= prior_battles_overall) else None
         delta_overall_wr = round(
             lifetime_overall_wr - prior_overall_wr, 1
         ) if prior_overall_wr is not None and lifetime_overall_wr is not None else None
