@@ -2052,6 +2052,43 @@ class BattleHistoryEndpointTests(TestCase):
         # Period: 1 win in 4 battles. Prior: 55/96 = 57.3%. Delta: 56 - 57.3 = -1.3.
         self.assertEqual(ship["delta_win_rate"], -1.3)
 
+    def test_delta_suppressed_when_snapshot_skew_makes_prior_impossible(self):
+        """Regression for the Bremen -83% delta: when the randoms-only
+        lifetime snapshot (battles_json) lags the live rollup, subtracting
+        the period from lifetime can yield an impossible prior (more wins
+        than battles). Lifetime stays visible; the delta is suppressed.
+        """
+        # Lifetime snapshot: 8 battles / 4 wins (50%). Rollup period: 5
+        # battles / 0 wins. Prior = 8-5 = 3 battles but 4-0 = 4 wins —
+        # impossible (would compute a 133.3% prior WR → -83.3pp delta).
+        self.player.pvp_battles = 1000
+        self.player.pvp_wins = 530
+        self.player.battles_json = [
+            {"ship_id": 42, "ship_name": "Bremen", "ship_tier": 10,
+             "ship_type": "Cruiser",
+             "pvp_battles": 8, "wins": 4, "losses": 4},
+        ]
+        self.player.save()
+        self._seed_daily_rows({
+            42: {"battles": 5, "wins": 0, "losses": 5, "ship_name": "Bremen"},
+        })
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=random",
+            )
+        ship = response.json()["by_ship"][0]
+        self.assertEqual(ship["win_rate"], 0.0)
+        # Valid career number is preserved.
+        self.assertEqual(ship["lifetime_battles"], 8)
+        self.assertEqual(ship["lifetime_win_rate"], 50.0)
+        # Nonsense delta suppressed; not a new ship (real prior history).
+        self.assertIsNone(ship["delta_win_rate"])
+        self.assertFalse(ship["is_new_ship"])
+
     def test_overall_lifetime_delta_uses_player_aggregates(self):
         """Phase 4.6: totals tile lifetime delta uses player's PvP aggregate."""
         self.player.pvp_battles = 1000
