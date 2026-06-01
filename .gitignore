@@ -37,6 +37,7 @@ tests/load/results/
 
 # Account deletion requests (contains PII)
 deleted_accounts*
+deleted/
 
 # Generated transcript purge artifacts
 server/purge_transcript_*.jsonl
