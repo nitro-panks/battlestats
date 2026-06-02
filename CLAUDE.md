@@ -323,12 +323,12 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 
 ### Umami analytics
 
-- Dashboard: `https://battlestats.online/umami/`
-- Runs as a standalone Next.js app on port 3002 behind nginx
-- Uses the same managed Postgres (separate `umami` database)
+- Dashboard: `https://battlestats.online/umami/` — dashboard + admin API restricted to a **home-IP allowlist** (nginx `allow … ; deny all;` on `location /umami`; rotate the IP if it changes). The collection endpoints (`/umami/script.js`, `/umami/api/send`) are public. (Not Basic auth — that collides with umami's `Authorization: Bearer` API auth and breaks login; see the runbook.)
+- Runs as a standalone Next.js app (**v2.20.2**) on port 3002 (bound to `127.0.0.1`) behind nginx
+- Uses the same managed Postgres (separate `umami` database), connecting via a **least-privilege `umami_app` role** scoped to that database only — NOT the `doadmin` cluster superuser (`UMAMI_DB_USER`/`UMAMI_DB_PASSWORD` in `/etc/battlestats-server.secrets.env`)
 - Bootstrap script: `umami/deploy/bootstrap_umami.sh`
 - Tracking script loaded via `<script>` tag in `client/app/layout.tsx`
-- Credentials stored on droplet; default user is `admin`
+- Hardening details: `agents/runbooks/runbook-umami-hardening-2026-06-02.md`
 
 ### Docker ports
 

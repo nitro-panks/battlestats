@@ -178,6 +178,29 @@
                 "doc-system-replaced"
             ]
         },
+        "agents/runbooks/runbook-umami-hardening-2026-06-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "incident",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "umami hardening",
+                "umami attack surface",
+                "umami scoped db role",
+                "umami basic auth"
+            ],
+            "tags": [
+                "umami",
+                "security",
+                "nginx",
+                "postgres",
+                "analytics"
+            ],
+            "archive_on": [
+                "umami-v3-migration"
+            ]
+        },
         "agents/runbooks/runbook-api-surface.md": {
             "kind": "runbook",
             "status": "active",
