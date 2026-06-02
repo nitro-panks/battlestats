@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import React, { useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faReddit } from '@fortawesome/free-brands-svg-icons';
 import { buildPlayerPath } from '../lib/entityRoutes';
 import StreamerSubmissionModal from './StreamerSubmissionModal';
 
@@ -15,6 +17,17 @@ const Footer: React.FC = () => {
                     <Link href={buildPlayerPath('lil_boots', 'na')} className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline">
                         lil_boots
                     </Link>
+                    {' '}
+                    <a
+                        href="https://www.reddit.com/user/_lil_boots/"
+                        className="text-[var(--accent-mid)] hover:text-[var(--accent-dark)]"
+                        target="_blank"
+                        rel="noreferrer"
+                        title="lil_boots on Reddit"
+                        aria-label="lil_boots on Reddit"
+                    >
+                        <FontAwesomeIcon icon={faReddit} aria-hidden="true" />
+                    </a>
                     {' · '}
                     <a
                         href="https://creativecommons.org/licenses/by-nc-sa/4.0/"
