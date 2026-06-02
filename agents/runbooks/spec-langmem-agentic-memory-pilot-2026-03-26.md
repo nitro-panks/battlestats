@@ -53,6 +53,8 @@ validation_artifacts:
   - server/warships/tests/test_agentic_memory_command.py
 ---
 
+> **RETIRED (v1.12.1, `f0fbbe3`).** This documents the experimental in-process LangGraph/CrewAI agentic runtime, which was removed from the repo — the `run_agent_graph`/`run_agent_crew`/`run_agent_workflow` commands, the LangSmith trace dashboard, and the in-app memory seam it describes no longer exist. Kept for historical reference only.
+
 # Spec: LangMem Pilot For Agentic Development
 
 _Last updated: 2026-03-26_

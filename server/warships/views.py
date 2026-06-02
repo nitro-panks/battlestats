@@ -1,15 +1,13 @@
 import logging
 import random
-from functools import partial
 from datetime import timedelta
 from hashlib import sha256
 from kombu.exceptions import OperationalError as KombuOperationalError
-from django.conf import settings
 from django.core.cache import cache
-from django.db.models import Sum, F, FloatField, Case, When, Value, IntegerField, Count, Q
-from django.db.models.functions import Cast, Lower
+from django.db.models import Sum, F, Case, When, Value, IntegerField, Q
+from django.db.models.functions import Lower
 from django.http import Http404
-from rest_framework import generics, permissions, viewsets
+from rest_framework import permissions, viewsets
 from rest_framework import status
 from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
@@ -20,10 +18,9 @@ from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
-    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, CompactPlayerCorrelationDistributionSerializer, PlayerCorrelationDistributionSerializer, PlayerExtendedCorrelationDistributionSerializer, RankedPlayerCorrelationDistributionSerializer, \
+    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, CompactPlayerCorrelationDistributionSerializer, RankedPlayerCorrelationDistributionSerializer, \
     PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer, TopEntitiesQuerySerializer, TopEntityVisitSerializer
 from warships.data import (
-    calculate_tier_filtered_pvp_record,
     clan_detail_needs_refresh,
     clan_members_missing_or_incomplete,
     compute_player_verdict,
@@ -35,7 +32,6 @@ from warships.data import (
     fetch_landing_activity_attrition,
     fetch_player_clan_battle_seasons,
     fetch_player_explorer_page,
-    fetch_player_explorer_rows,
     fetch_player_population_distribution,
     fetch_player_ranked_wr_battles_correlation,
     fetch_player_summary,
@@ -57,7 +53,6 @@ from warships.data import (
     player_detail_needs_refresh,
     PLAYER_BATTLE_DATA_STALE_AFTER,
     refresh_player_explorer_summary,
-    update_battle_data,
 )
 from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, invalidate_landing_clan_caches, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
@@ -397,12 +392,6 @@ class PlayerViewSet(viewsets.ModelViewSet):
         return obj
 
 
-class PlayerDetail(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Player.objects.select_related('clan', 'explorer_summary').all()
-    serializer_class = PlayerSerializer
-    lookup_field = 'name'
-    permission_classes = [permissions.AllowAny]
-
 
 class ClanViewSet(viewsets.ModelViewSet):
     queryset = Clan.objects.all()
@@ -433,22 +422,12 @@ class ClanViewSet(viewsets.ModelViewSet):
         return obj
 
 
-class ClanDetail(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Clan.objects.all()
-    serializer_class = ClanSerializer
-    permission_classes = [permissions.AllowAny]
-
 
 class ShipViewSet(viewsets.ModelViewSet):
     queryset = Ship.objects.all()
     serializer_class = ShipSerializer
     permission_classes = [permissions.AllowAny]
 
-
-class ShipDetail(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Ship.objects.all()
-    serializer_class = ShipSerializer
-    permission_classes = [permissions.AllowAny]
 
 
 def _validated_list_response(data, serializer_class):

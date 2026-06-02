@@ -19,7 +19,6 @@
      hue family, so the window pills don't read as the same control as
      the mode pills. */
   --accent-secondary-mid: #6a51a3;
-  --accent-secondary-faint: #efedf5;
 }
 
 [data-theme="dark"] {
@@ -36,7 +35,6 @@
   /* Dark-mode purple — Purples color 5 is bright enough to read on the
      dark surface, parallel to how `--accent-mid` lightens for dark. */
   --accent-secondary-mid: #b8a4dd;
-  --accent-secondary-faint: #2a1e4a;
 }
 
 html {

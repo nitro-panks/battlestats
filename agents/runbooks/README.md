@@ -78,7 +78,6 @@ Open these only when the task matches them directly:
 - `runbook-security-audit-2026-04-05.md`: Wapiti production audit findings and remediation plan (nginx headers, input validation)
 - `runbook-icon-analysis.md`
 - `runbook-player-achievements-data-lane.md`
-- `runbook-kdr-backfill.md`
 - `runbook-mobile-player-detail-charts.md`
 - `runbook-mobile-routing-bugs.md`
 - `runbook-multi-realm-hardening.md`

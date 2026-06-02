@@ -191,13 +191,6 @@ LANDING_PLAYER_CB_SORT_MAX_BATTLES = 4000
 LANDING_PLAYER_CB_SORT_MAX_SEASONS = 10
 
 
-def _player_score_ordering(secondary_field: str):
-    return (
-        F('explorer_summary__player_score').desc(nulls_last=True),
-        F(secondary_field).desc(nulls_last=True),
-        'name',
-    )
-
 
 def _normalize_best_wr_score(value: float | None) -> float:
     if value is None:
@@ -316,15 +309,6 @@ def _ranked_freshness_multiplier(ranked_updated_at) -> float:
         4,
     )
 
-
-def _normalize_best_ranked_score(latest_ranked_battles: int | None, highest_ranked_league: str | None) -> float:
-    battles = max(int(latest_ranked_battles or 0), 0)
-    if battles <= 0 and not highest_ranked_league:
-        return 0.0
-
-    volume_score = _normalize_ranked_volume_score(battles)
-    league_score = _ranked_league_score(highest_ranked_league)
-    return round((0.65 * league_score) + (0.35 * volume_score), 4)
 
 
 def _normalize_best_clan_score(is_clan_battle_player: bool | None, clan_battle_win_rate: float | None) -> float:
@@ -1615,9 +1599,6 @@ def _build_best_cb_landing_players(limit: int, realm: str = DEFAULT_REALM) -> li
 def _build_best_landing_players(limit: int, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
     return _get_materialized_best_landing_players(limit, realm=realm, sort=sort)
 
-
-def _build_sigma_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
-    return _build_best_efficiency_landing_players(limit, realm=realm)
 
 
 def _build_popular_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:

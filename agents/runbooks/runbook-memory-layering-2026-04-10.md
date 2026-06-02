@@ -1,5 +1,7 @@
 # Agentic Memory Layering — SuperLocalMemory at the Guidance Seam
 
+> **RETIRED (v1.12.1, `f0fbbe3`).** This documents the experimental in-process LangGraph/CrewAI agentic runtime, which was removed from the repo — the `run_agent_graph`/`run_agent_crew`/`run_agent_workflow` commands, the LangSmith trace dashboard, and the in-app memory seam it describes no longer exist. Kept for historical reference only.
+
 **Status:** Implemented 2026-04-10. Optional, opt-in via env var. Droplet-safe.
 
 ## Why this runbook exists

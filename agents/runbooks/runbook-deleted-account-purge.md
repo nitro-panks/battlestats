@@ -1,8 +1,8 @@
 # Runbook: Deleted Account Purge (GDPR / WG Account Deletion Request)
 
 **Created**: 2026-03-30
-**Last executed**: 2026-04-30 (second batch — see "Execution Results" section)
-**Status**: Recurring — tooling deployed v1.2.13; executed 2026-03-30 (11,839 IDs / 0 found) and 2026-04-30 (9,723 IDs / 14 found), responses sent to Wargaming after each batch. Expect future batches at irregular cadence.
+**Last executed**: 2026-05-30 (third batch — see "Execution Results" section)
+**Status**: Recurring — tooling deployed v1.2.13; executed 2026-03-30 (11,839 IDs / 0 found), 2026-04-30 (9,723 IDs / 14 found), and 2026-05-30 (9,729 IDs / 79 found), responses sent to Wargaming after each batch. Expect future batches at irregular cadence.
 
 ## Context
 
@@ -213,6 +213,55 @@ Match distribution: 1 ASIA, 13 NA, 0 EU. All 14 were clan members; none were cla
 2. **Loading env in a sub-shell beats `switch_db_target.sh`.** For one-off cloud reads, `(set -a; . ./.env.cloud; . ./.env.secrets.cloud; set +a; python manage.py ...)` keeps the parens-scoped env from leaking into the user's shell. The `switch_db_target.sh` helper is heavier and rewrites `.env`, which we don't need for a single read.
 3. **Production read-only queries are still gated.** Even after a successful first dry-run, follow-up itemization queries against the cloud DB are individually rejected by the harness. Plan for the user to re-run via `!` prefix or pre-add a scoped permission rule before doing multi-step prod-read sessions.
 4. **Cache invalidation may legitimately count zero on a live run.** The dry-run reports the *number of templates it would try* (`len(CACHE_KEY_TEMPLATES) = 8` per player), the live run reports the *number of keys actually deleted*. If the matched accounts are cold (no recent visits), the live count will be lower than the dry-run prediction. This is not a bug.
+
+---
+
+## Execution Results (2026-05-30)
+
+Source: `deleted_accounts.zip` arrived from WG data protection team on 2026-05-30. Same envelope as the prior batches (zip -> `accounts.csv` with header `account_id`). The CSV contained 9,730 lines, i.e. 9,729 account IDs plus the header.
+
+**Pre-flight (read-only)**: Ran `purge_deleted_accounts --dry-run` locally against the cloud DB (env loaded from `.env.cloud` + `.env.secrets.cloud` in a sub-shell so the local target was not switched). Predicted 79/9,729 found, 9,729 to blocklist. Followed by a read-only summary query for response context.
+
+Match distribution: 14 ASIA, 47 EU, 18 NA. 78 of 79 matched players were clan members; 9 were clan leaders. Battle volume: 46 had <250 lifetime PvP battles, 14 had 250-999, and 19 had >=1,000.
+
+**Execution**: On the droplet:
+```bash
+scp deleted/deleted_accounts.zip root@battlestats.online:/tmp/deleted_accounts.zip
+ssh root@battlestats.online '/opt/battlestats-server/venv/bin/python /opt/battlestats-server/current/server/manage.py purge_deleted_accounts /tmp/deleted_accounts.zip --transcript /tmp/purge_transcript_20260530.jsonl'
+```
+
+```json
+{
+  "total_ids": 9729,
+  "found_in_db": 79,
+  "not_found": 9650,
+  "total_player_rows": 79,
+  "total_snapshot_rows": 35,
+  "total_achievement_rows": 218,
+  "total_explorer_rows": 45,
+  "total_visit_event_rows": 0,
+  "total_visit_daily_rows": 0,
+  "total_cache_keys_deleted": 0,
+  "total_clan_leaders_nulled": 9,
+  "blocked": 9729
+}
+```
+
+79 players were purged with full cascade: 79 `Player` rows, 35 `Snapshot` rows, 218 `PlayerAchievementStat` rows, and 45 `PlayerExplorerSummary` rows. No visit-event or visit-daily rows were affected. 9 clan leader references were nulled. Cache invalidation found no live keys, consistent with prior cold-account batches.
+
+**Post-purge verification**:
+```json
+{
+  "ids": 9729,
+  "players_remaining": 0,
+  "blocklisted_for_batch": 9729,
+  "visit_events_remaining": 0,
+  "visit_daily_remaining": 0,
+  "clan_leaders_remaining": 0
+}
+```
+
+**Transcript**: `/tmp/purge_transcript_20260530.jsonl` on the droplet (9,730 lines: 9,729 per-account + 1 summary).
 
 ---
 

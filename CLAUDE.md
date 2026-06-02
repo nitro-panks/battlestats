@@ -92,7 +92,7 @@ Backfills per-player clan battle data (`clan_battle_total_battles`, `clan_battle
 
 Player enrichment runs on the droplet's Celery `background` worker via `warships.tasks.enrich_player_data_task`. The task self-chains between batches (~17–20 min per 500 players at steady state) and is kickstarted periodically by Celery Beat (`player-enrichment-kickstart`, every 15 min — a no-op if a batch is already running). Kickstart is also dispatched by the Gunicorn `when_ready` startup warmer.
 
-**Historical note:** An experimental DigitalOcean Functions migration (`functions/enrichment/enrich-batch`) was reverted on 2026-04-08 because DO Functions egress from a rotating IP pool that cannot be whitelisted by the Wargaming `application_id`, causing every call to fail with `407 INVALID_IP_ADDRESS`. See `agents/runbooks/archive/spec-serverless-background-workers-2026-04-04.md` for the post-mortem. The `functions/` directory and `db-test` function remain for potential future workers that do not touch the WG API.
+**Historical note:** An experimental DigitalOcean Functions migration (`functions/packages/enrichment/enrich-batch`) was reverted on 2026-04-08 because DO Functions egress from a rotating IP pool that cannot be whitelisted by the Wargaming `application_id`, causing every call to fail with `407 INVALID_IP_ADDRESS`. See `agents/runbooks/archive/spec-serverless-background-workers-2026-04-04.md` for the post-mortem. The `functions/` directory and `db-test` function remain for potential future workers that do not touch the WG API.
 
 ### Releases
 
@@ -117,7 +117,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 
 ### Key backend modules
 
-- `server/warships/data.py` (~5K lines) — Core hydration, chart payload assembly, cache warming, hot entity warming, population correlations/distributions, `score_best_clans()` composite ranking. Analytical queries use elevated `work_mem` via `_elevated_work_mem()` context manager.
+- `server/warships/data.py` (~5.7K lines) — Core hydration, chart payload assembly, cache warming, hot entity warming, population correlations/distributions, `score_best_clans()` composite ranking. Analytical queries use elevated `work_mem` via `_elevated_work_mem()` context manager.
 - `server/warships/landing.py` — Landing page modes (Best, Random, Sigma, Popular) with published-cache + durable fallback
 - `server/warships/tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing warmup, distribution/correlation warming
 - `server/warships/signals.py` — Registers all Celery Beat periodic tasks via `@receiver(post_migrate)` (landing warmer, hot entity warmer, clan crawl, player refresh, etc.)
@@ -201,7 +201,7 @@ Player detail pages coordinate chart rendering vs hydration polling:
 
 ### Data models (server/warships/models.py)
 
-Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat, DeletedAccount (GDPR blocklist).
+Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot/LandingRecentPlayersSnapshot (landing durable fallbacks), MvPlayerDistributionStats (population distribution materialized stats), StreamerSubmission.
 
 Battle-history pipeline (rollout runbook): BattleObservation (raw `ships/stats/` payload snapshots, JSON), BattleEvent (per-event deltas — `battles_delta`/`damage_delta`/etc. plus the Phase 7 widening: `main_shots_delta`, `main_hits_delta`, `main_frags_delta`, `secondary_shots_delta`, `secondary_hits_delta`, `secondary_frags_delta`, `torpedo_shots_delta`, `torpedo_hits_delta`, `torpedo_frags_delta`, `damage_scouting_delta`, `ships_spotted_delta`, `capture_points_delta`, `dropped_capture_points_delta`, `team_capture_points_delta`), PlayerDailyShipStats (per-day per-ship aggregate of every BattleEvent column), PlayerWeeklyShipStats / PlayerMonthlyShipStats / PlayerYearlyShipStats (period rollup tiers; populated only when the period writer is reactivated).
 
@@ -323,12 +323,12 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 
 ### Umami analytics
 
-- Dashboard: `https://battlestats.online/umami/`
-- Runs as a standalone Next.js app on port 3002 behind nginx
-- Uses the same managed Postgres (separate `umami` database)
+- Dashboard: `https://battlestats.online/umami/` — dashboard + admin API restricted to a **home-IP allowlist** (nginx `allow … ; deny all;` on `location /umami`; rotate the IP if it changes). The collection endpoints (`/umami/script.js`, `/umami/api/send`) are public. (Not Basic auth — that collides with umami's `Authorization: Bearer` API auth and breaks login; see the runbook.)
+- Runs as a standalone Next.js app (**v2.20.2**) on port 3002 (bound to `127.0.0.1`) behind nginx
+- Uses the same managed Postgres (separate `umami` database), connecting via a **least-privilege `umami_app` role** scoped to that database only — NOT the `doadmin` cluster superuser (`UMAMI_DB_USER`/`UMAMI_DB_PASSWORD` in `/etc/battlestats-server.secrets.env`)
 - Bootstrap script: `umami/deploy/bootstrap_umami.sh`
 - Tracking script loaded via `<script>` tag in `client/app/layout.tsx`
-- Credentials stored on droplet; default user is `admin`
+- Hardening details: `agents/runbooks/runbook-umami-hardening-2026-06-02.md`
 
 ### Docker ports
 
