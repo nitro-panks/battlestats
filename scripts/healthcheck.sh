@@ -20,6 +20,7 @@ PLAYER_NAME="lil_boots"
 PLAYER_ID="1031615890"    # lil_boots (pinned warm player)
 CLAN_ID="1000067803"      # RAIN
 CLAN_SLUG="1000067803-rain"
+REALMS=(na eu asia)
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -30,12 +31,16 @@ log() { echo "$TIMESTAMP  $1" >> "$LOGFILE"; }
 #   MIN_BYTES  — minimum Content-Length (default 256)
 check() {
     local label="$1" url="$2" body_grep="$3" min_bytes="${4:-256}"
+    local attempts="${HEALTHCHECK_CURL_ATTEMPTS:-2}"
     local tmpfile
     tmpfile=$(mktemp)
 
     local http_code
-    http_code=$(curl -sS -o "$tmpfile" -w '%{http_code}' \
-        --max-time 30 --connect-timeout 10 "$url" 2>/dev/null) || http_code="000"
+    for (( attempt = 1; attempt <= attempts; attempt++ )); do
+        http_code=$(curl -sS -o "$tmpfile" -w '%{http_code}' \
+            --max-time 30 --connect-timeout 10 "$url" 2>/dev/null) || http_code="000"
+        [[ "$http_code" == "200" ]] && break
+    done
 
     local size
     size=$(wc -c < "$tmpfile")
@@ -82,15 +87,17 @@ check "page:clan" \
 
 # ── API: landing / discovery ─────────────────────────────────────────────────
 
-check "api:landing-players-best" \
-    "$BASE/api/landing/players?mode=best&limit=5&sort=overall&realm=na" \
-    '"name"|"pvp_ratio"' \
-    128
+for realm in "${REALMS[@]}"; do
+    check "api:landing-players-best:${realm}" \
+        "$BASE/api/landing/players?mode=best&limit=5&sort=overall&realm=${realm}" \
+        '"name"|"pvp_ratio"' \
+        128
 
-check "api:landing-clans-best" \
-    "$BASE/api/landing/clans?mode=best&limit=5&sort=overall&realm=na" \
-    '"clan_id"|"tag"' \
-    128
+    check "api:landing-clans-best:${realm}" \
+        "$BASE/api/landing/clans?mode=best&limit=5&sort=overall&realm=${realm}" \
+        '"clan_id"|"tag"' \
+        128
+done
 
 check "api:landing-player-suggestions" \
     "$BASE/api/landing/player-suggestions?q=lil" \
@@ -138,10 +145,12 @@ check "api:randoms-data" \
 
 # ── API: population / distributions ─────────────────────────────────────────
 
-check "api:distribution-wr" \
-    "$BASE/api/fetch/player_distribution/win_rate/?realm=na" \
-    '"bins"|"bucket"|"count"' \
-    128
+for realm in "${REALMS[@]}"; do
+    check "api:distribution-wr:${realm}" \
+        "$BASE/api/fetch/player_distribution/win_rate/?realm=${realm}" \
+        '"bins"|"bucket"|"count"' \
+        128
+done
 
 check "api:correlation-tier-type" \
     "$BASE/api/fetch/player_correlation/tier_type/${PLAYER_ID}/?realm=na" \
