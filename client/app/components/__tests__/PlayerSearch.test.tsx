@@ -4,7 +4,6 @@ import PlayerSearch from '../PlayerSearch';
 
 const pushMock = jest.fn();
 const capturedPlayerDetailProps: { current: null | Record<string, unknown> } = { current: null };
-let mockQueryParam = '';
 
 const buildJsonResponse = (payload: unknown) => ({
     ok: true,
@@ -284,9 +283,6 @@ jest.mock('next/navigation', () => ({
     useRouter: () => ({
         push: pushMock,
     }),
-    useSearchParams: () => ({
-        get: (key: string) => key === 'q' && mockQueryParam ? mockQueryParam : null,
-    }),
 }));
 
 jest.mock('../PlayerDetail', () => {
@@ -320,7 +316,7 @@ describe('PlayerSearch landing efficiency icon', () => {
     beforeEach(() => {
         pushMock.mockReset();
         capturedPlayerDetailProps.current = null;
-        mockQueryParam = '';
+        window.history.replaceState({}, '', '/');
         jest.useRealTimers();
         installFetchMock();
         consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -820,7 +816,7 @@ describe('PlayerSearch landing efficiency icon', () => {
     });
 
     it('loads player detail from the q parameter and returns to landing on back', async () => {
-        mockQueryParam = 'Player One';
+        window.history.replaceState({}, '', '/?q=Player%20One');
         installFetchMock({
             playerResponses: {
                 'Player One': [buildJsonResponse(buildPlayerPayload())],

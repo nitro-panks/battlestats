@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 from datetime import timedelta
 from hashlib import sha256
@@ -108,6 +109,9 @@ def _player_refresh_signals(player_id: int, realm: str = DEFAULT_REALM) -> tuple
 
     Cheap: a single ``.values()`` read, reusing the existing 15-min window.
     """
+    if os.getenv('BATTLESTATS_DISABLE_LIVE_REFRESH', '0') == '1':
+        return False, int((timezone.now() + PLAYER_BATTLE_DATA_STALE_AFTER).timestamp())
+
     row = (
         Player.objects.filter(player_id=player_id, realm=realm)
         .values('battles_updated_at').first()
@@ -222,12 +226,14 @@ class PlayerViewSet(viewsets.ModelViewSet):
                         queue_ranked_data_refresh(player_id, realm=realm)
                     response = Response(cached)
                     response['X-Player-Cache'] = 'hit'
-                    _set_player_refresh_headers(response, pending, next_refresh)
+                    _set_player_refresh_headers(
+                        response, pending, next_refresh)
                     return response
 
         response = super().retrieve(request, *args, **kwargs)
         response['X-Player-Cache'] = 'miss'
-        miss_player_id = (getattr(response, 'data', None) or {}).get('player_id')
+        miss_player_id = (getattr(response, 'data', None)
+                          or {}).get('player_id')
         if miss_player_id:
             pending, next_refresh = _player_refresh_signals(
                 miss_player_id, realm)
@@ -392,7 +398,6 @@ class PlayerViewSet(viewsets.ModelViewSet):
         return obj
 
 
-
 class ClanViewSet(viewsets.ModelViewSet):
     queryset = Clan.objects.all()
     serializer_class = ClanSerializer
@@ -422,12 +427,10 @@ class ClanViewSet(viewsets.ModelViewSet):
         return obj
 
 
-
 class ShipViewSet(viewsets.ModelViewSet):
     queryset = Ship.objects.all()
     serializer_class = ShipSerializer
     permission_classes = [permissions.AllowAny]
-
 
 
 def _validated_list_response(data, serializer_class):
@@ -1247,7 +1250,8 @@ def battle_history(request, player_name: str) -> Response:
             request.query_params.get("days") if period == "daily" else None,
         )
         try:
-            windows = int(raw_windows) if raw_windows is not None else period_cfg["default_windows"]
+            windows = int(
+                raw_windows) if raw_windows is not None else period_cfg["default_windows"]
         except (TypeError, ValueError):
             windows = period_cfg["default_windows"]
         windows = max(1, min(period_cfg["max_windows"], windows))
@@ -1274,7 +1278,8 @@ def battle_history(request, player_name: str) -> Response:
         if is_24h_window:
             payload = _build_battle_history_payload_24h(player, mode)
         else:
-            payload = _build_battle_history_payload(player, period, windows, mode)
+            payload = _build_battle_history_payload(
+                player, period, windows, mode)
         cache.set(cache_key, payload, BATTLE_HISTORY_CACHE_TTL)
         response = Response(payload)
 
@@ -1979,7 +1984,8 @@ def clan_name_suggestions(request) -> Response:
                 [realm, f'%{query}%', f'%{query}%', f'{query}%', f'{query}%'],
             )
             columns = [col[0] for col in cursor.description]
-            suggestions = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            suggestions = [dict(zip(columns, row))
+                           for row in cursor.fetchall()]
     else:
         suggestions = list(
             Clan.objects.filter(
@@ -1988,7 +1994,8 @@ def clan_name_suggestions(request) -> Response:
                 Q(name__icontains=query) | Q(tag__icontains=query),
             ).annotate(
                 prefix_match=Case(
-                    When(Q(name__istartswith=query) | Q(tag__istartswith=query), then=Value(0)),
+                    When(Q(name__istartswith=query) | Q(
+                        tag__istartswith=query), then=Value(0)),
                     default=Value(1),
                     output_field=IntegerField(),
                 ),

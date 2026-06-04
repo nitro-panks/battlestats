@@ -59,6 +59,7 @@ esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SERVER_DIR="$ROOT_DIR/server"
+BACKEND_SERVICES=(server task-runner task-runner-hydration)
 
 ACTIVE_ENV="$SERVER_DIR/.env"
 ACTIVE_SECRETS="$SERVER_DIR/.env.secrets"
@@ -95,9 +96,9 @@ copy_file "$TARGET_SECRETS" "$ACTIVE_SECRETS"
 
 if [[ "$TARGET" == "local" ]]; then
 	run_cmd docker compose --profile local-db up -d db
-	run_cmd docker compose up -d server task-runner task-scheduler
+	run_cmd docker compose up -d "${BACKEND_SERVICES[@]}"
 else
-	run_cmd docker compose up -d server task-runner task-scheduler
+	run_cmd docker compose up -d "${BACKEND_SERVICES[@]}"
 	run_cmd docker compose --profile local-db stop db
 fi
 

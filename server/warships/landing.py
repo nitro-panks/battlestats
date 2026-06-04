@@ -116,6 +116,7 @@ LANDING_RECENT_PLAYERS_MAX_WEEK_BATTLES = 1500
 # definitionally bogus (you can't play more battles in a week than you've
 # played in your entire account history).
 LANDING_RECENT_PLAYERS_PVP_SLACK = 50
+LANDING_RECENT_PLAYERS_STALE_FALLBACK_ENV = 'BATTLESTATS_ENABLE_STALE_RECENT_PLAYERS'
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v4'
 LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v4:meta'
 LANDING_CLANS_PUBLISHED_CACHE_KEY = 'landing:clans:v4:published'
@@ -189,7 +190,6 @@ LANDING_PLAYER_CB_SORT_VOLUME_WEIGHT = 0.15
 LANDING_PLAYER_CB_SORT_SEASON_DEPTH_WEIGHT = 0.05
 LANDING_PLAYER_CB_SORT_MAX_BATTLES = 4000
 LANDING_PLAYER_CB_SORT_MAX_SEASONS = 10
-
 
 
 def _normalize_best_wr_score(value: float | None) -> float:
@@ -308,7 +308,6 @@ def _ranked_freshness_multiplier(ranked_updated_at) -> float:
         1.0 - ((1.0 - LANDING_PLAYER_RANKED_SORT_FRESHNESS_FLOOR) * decay_progress),
         4,
     )
-
 
 
 def _normalize_best_clan_score(is_clan_battle_player: bool | None, clan_battle_win_rate: float | None) -> float:
@@ -831,8 +830,6 @@ def _normalize_cached_id_list(raw_value) -> list[int]:
     return normalized_ids
 
 
-
-
 def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
     normalized_sort = normalize_landing_clan_best_sort(sort)
     best_clan_ids, cb_metrics = score_best_clans(
@@ -908,8 +905,6 @@ def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = Fal
     return payload, metadata
 
 
-
-
 def resolve_landing_players_by_id_order(player_ids: list[int], realm: str = DEFAULT_REALM) -> list[dict]:
     normalized_ids = _normalize_cached_id_list(player_ids)
     if not normalized_ids:
@@ -934,7 +929,6 @@ def resolve_landing_players_by_id_order(player_ids: list[int], realm: str = DEFA
     rows.sort(key=lambda row: selected_order.get(
         int(row.get('player_id') or 0), len(selected_order)))
     return _serialize_landing_player_rows(rows)
-
 
 
 def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
@@ -1112,7 +1106,6 @@ def _build_landing_payload_with_lock(cache_key, builder, normalized_limit, realm
     logger.warning(
         "Landing build lock wait expired for %s; building inline", cache_key)
     return builder(normalized_limit)
-
 
 
 def _best_landing_player_candidate_rows(
@@ -1600,7 +1593,6 @@ def _build_best_landing_players(limit: int, realm: str = DEFAULT_REALM, sort: st
     return _get_materialized_best_landing_players(limit, realm=realm, sort=sort)
 
 
-
 def _build_popular_landing_players(limit: int, realm: str = DEFAULT_REALM) -> list[dict]:
     candidate_limit = max(limit * 4, limit)
 
@@ -1753,6 +1745,33 @@ def _serialize_landing_player_row(player_obj) -> dict:
     return row
 
 
+def _stale_recent_players_fallback_enabled() -> bool:
+    return os.environ.get(LANDING_RECENT_PLAYERS_STALE_FALLBACK_ENV, '0') == '1'
+
+
+def _build_stale_recent_players_fallback(realm: str = DEFAULT_REALM) -> list[dict]:
+    candidates = list(
+        Player.objects
+        .filter(
+            realm=realm,
+            is_hidden=False,
+            last_battle_date__isnull=False,
+            pvp_battles__gte=LANDING_PLAYER_SIGMA_MIN_PVP_BATTLES,
+        )
+        .exclude(name='')
+        .select_related('explorer_summary')
+        .only(*_LANDING_PLAYER_ROW_ONLY_FIELDS, 'last_battle_date')
+        .order_by(F('last_battle_date').desc(nulls_last=True), F('pvp_battles').desc(nulls_last=True), 'name')[:LANDING_RECENT_PLAYERS_LIMIT]
+    )
+
+    payload = []
+    for player_obj in candidates:
+        row = _serialize_landing_player_row(player_obj)
+        row['week_battles'] = None
+        payload.append(row)
+    return payload
+
+
 def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
     # Surface contract: the LANDING_RECENT_PLAYERS_LIMIT most-recently-active
     # random-battle players who have crossed the >MIN_WEEK_BATTLES floor over
@@ -1782,6 +1801,8 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
     )
     eligibility_rows = list(eligibility)
     if not eligibility_rows:
+        if _stale_recent_players_fallback_enabled():
+            return _build_stale_recent_players_fallback(realm=realm)
         return []
 
     battle_counts = {r['player']: r['week_battles'] for r in eligibility_rows}
@@ -1888,9 +1909,13 @@ def get_landing_recent_players_payload(force_refresh: bool = False, realm: str =
         return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
     cached = cache.get(cache_key)
     if cached is not None:
+        if not cached and _stale_recent_players_fallback_enabled():
+            return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
         return cached
     snapshot = _get_landing_recent_players_snapshot(realm=realm)
     if snapshot is not None:
+        if not snapshot.payload_json and _stale_recent_players_fallback_enabled():
+            return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
         # Re-warm Redis with the same TTL=None as the materializer so the
         # next reader hits Tier 1.
         cache.set(cache_key, snapshot.payload_json,
@@ -1942,9 +1967,11 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
     # Narrow to the requested family. Unknown scope falls back to 'all' so a
     # bad caller never silently warms nothing.
     if scope == 'clans':
-        surfaces = {k: v for k, v in surfaces.items() if k in LANDING_CLAN_WARM_SURFACES}
+        surfaces = {k: v for k, v in surfaces.items(
+        ) if k in LANDING_CLAN_WARM_SURFACES}
     elif scope == 'players':
-        surfaces = {k: v for k, v in surfaces.items() if k in LANDING_PLAYER_WARM_SURFACES}
+        surfaces = {k: v for k, v in surfaces.items(
+        ) if k in LANDING_PLAYER_WARM_SURFACES}
 
     def _run_surface(fn):
         from django.db import close_old_connections

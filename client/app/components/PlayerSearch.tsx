@@ -1,8 +1,10 @@
+"use client";
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import ClanDetail from './ClanDetail';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier, type EfficiencyRankTier } from './EfficiencyRankIcon';
 import PlayerDetail from './PlayerDetail';
@@ -212,7 +214,6 @@ const PlayerSearch: React.FC = () => {
     const { theme } = useTheme();
     const { realm } = useRealm();
     const router = useRouter();
-    const searchParams = useSearchParams();
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
     const [error, setError] = useState('');
     const [isLoadingPlayer, setIsLoadingPlayer] = useState(false);
@@ -436,13 +437,15 @@ const PlayerSearch: React.FC = () => {
     }, [router, realm]);
 
     useEffect(() => {
-        const query = (searchParams.get('q') || '').trim();
+        const query = typeof window !== 'undefined'
+            ? (new URLSearchParams(window.location.search).get('q') || '').trim()
+            : '';
         if (!query || query === lastSubmittedSearchRef.current) {
             return;
         }
 
         void executePlayerSearch(query);
-    }, [executePlayerSearch, searchParams]);
+    }, [executePlayerSearch]);
 
     useEffect(() => {
         const onNavSearch = (event: Event) => {

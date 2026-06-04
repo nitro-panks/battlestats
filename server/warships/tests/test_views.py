@@ -1850,9 +1850,12 @@ class ApiContractTests(TestCase):
         self.assertIn(response.status_code, [200, 400])
 
     def test_clan_name_suggestions_returns_matching_clans(self):
-        Clan.objects.create(clan_id=9001, name="Storm Fleet", tag="STORM", members_count=40)
-        Clan.objects.create(clan_id=9002, name="Thunderstorm", tag="THDR", members_count=20)
-        Clan.objects.create(clan_id=9003, name="Calm Seas", tag="CALM", members_count=30)
+        Clan.objects.create(clan_id=9001, name="Storm Fleet",
+                            tag="STORM", members_count=40)
+        Clan.objects.create(clan_id=9002, name="Thunderstorm",
+                            tag="THDR", members_count=20)
+        Clan.objects.create(clan_id=9003, name="Calm Seas",
+                            tag="CALM", members_count=30)
 
         response = self.client.get("/api/landing/clan-suggestions/?q=storm")
         self.assertEqual(response.status_code, 200)
@@ -1867,8 +1870,10 @@ class ApiContractTests(TestCase):
             self.assertIn("members_count", entry)
 
     def test_clan_name_suggestions_matches_tag(self):
-        Clan.objects.create(clan_id=9010, name="Alpha Fleet", tag="ALFA", members_count=25)
-        Clan.objects.create(clan_id=9011, name="Bravo Crew", tag="BRV", members_count=15)
+        Clan.objects.create(clan_id=9010, name="Alpha Fleet",
+                            tag="ALFA", members_count=25)
+        Clan.objects.create(clan_id=9011, name="Bravo Crew",
+                            tag="BRV", members_count=15)
 
         response = self.client.get("/api/landing/clan-suggestions/?q=alfa")
         self.assertEqual(response.status_code, 200)
@@ -1882,10 +1887,13 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.json(), [])
 
     def test_clan_name_suggestions_respects_realm(self):
-        Clan.objects.create(clan_id=9020, name="Euro Fleet", tag="EURO", members_count=30, realm="eu")
-        Clan.objects.create(clan_id=9021, name="Euro Corps", tag="EURC", members_count=20, realm="na")
+        Clan.objects.create(clan_id=9020, name="Euro Fleet",
+                            tag="EURO", members_count=30, realm="eu")
+        Clan.objects.create(clan_id=9021, name="Euro Corps",
+                            tag="EURC", members_count=20, realm="na")
 
-        response = self.client.get("/api/landing/clan-suggestions/?q=euro&realm=eu")
+        response = self.client.get(
+            "/api/landing/clan-suggestions/?q=euro&realm=eu")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(len(payload), 1)
@@ -5137,6 +5145,24 @@ class PlayerLiveRefreshSignalTests(TestCase):
         response = self.client.get("/api/player/NeverLivePlayer/?realm=na")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["X-Player-Refresh-Pending"], "true")
+
+    @patch.dict("os.environ", {"BATTLESTATS_DISABLE_LIVE_REFRESH": "1"})
+    @patch("warships.tasks.queue_ranked_data_refresh")
+    @patch("warships.tasks.update_battle_data_task.delay")
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_live_refresh_can_be_disabled_for_local_stale_snapshots(self, *_mocks):
+        stale = timezone.now() - timedelta(days=30)
+        Player.objects.create(
+            name="LocalStaleLivePlayer", player_id=77005, realm="na",
+            last_fetch=stale, battles_updated_at=stale,
+            pvp_battles=1000, is_hidden=False,
+        )
+        response = self.client.get(
+            "/api/player/LocalStaleLivePlayer/?realm=na")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Player-Refresh-Pending"], "false")
 
     def test_invalidate_player_detail_cache_clears_bulk_cache(self):
         # The rehydrate-on-poll loop depends on update_battle_data busting the

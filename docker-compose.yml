@@ -35,7 +35,7 @@ services:
     command: >
       bash -c "python manage.py makemigrations &&
                   python manage.py migrate &&
-                  exec gunicorn --config gunicorn.conf.py battlestats.wsgi:application --bind 0.0.0.0:8888"
+                  exec gunicorn --reload --config gunicorn.conf.py battlestats.wsgi:application --bind 0.0.0.0:8888"
     volumes:
       - ./server:/usr/src/app
       - ./agents:/usr/src/agents:ro
@@ -44,6 +44,10 @@ services:
       - server/.env.secrets
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,server
+      - BATTLE_HISTORY_API_ENABLED=1
+      - BATTLESTATS_DISABLE_LIVE_REFRESH=1
+      - BATTLESTATS_ENABLE_STALE_RECENT_PLAYERS=1
       - ENABLE_AGENTIC_RUNTIME=${ENABLE_AGENTIC_RUNTIME:-1}
       - WARM_CACHES_ON_STARTUP=1
       - CACHE_WARMUP_START_DELAY_SECONDS=5

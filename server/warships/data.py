@@ -197,7 +197,6 @@ def player_activity_data_needs_refresh(
     return _is_stale_timestamp(updated_at, stale_after)
 
 
-
 def refresh_player_detail_payloads(
     player: Player,
     *,
@@ -898,7 +897,6 @@ def efficiency_rank_publication_needs_refresh(player: Player) -> bool:
     return not _efficiency_rank_snapshot_is_fresh(player, explorer_summary)
 
 
-
 def _efficiency_rank_eligibility_reason(player: Player, explorer_summary: PlayerExplorerSummary) -> Optional[str]:
     total_badge_rows = int(explorer_summary.efficiency_badge_rows_total or 0)
     badge_rows_unmapped = int(explorer_summary.badge_rows_unmapped or 0)
@@ -919,8 +917,6 @@ def _efficiency_rank_eligibility_reason(player: Player, explorer_summary: Player
         return 'unmapped_badge_gate'
 
     return None
-
-
 
 
 def _interpolate_quantile(sorted_values: list[float], percentile: float) -> Optional[float]:
@@ -961,7 +957,6 @@ def recompute_efficiency_rank_snapshot(
         player_limit=player_limit,
         publish_partial=publish_partial,
     )
-
 
 
 def _recompute_efficiency_rank_snapshot_sql(
@@ -1577,12 +1572,6 @@ def _normalize_battle_volume_score(total_battles: Optional[int], battle_rows: li
     return clamp(math.log10(battles + 1) / 4.0, 0.0, 1.0)
 
 
-
-
-
-
-
-
 def _calculate_player_score(
     *,
     pvp_ratio: Optional[float],
@@ -1941,7 +1930,6 @@ def fetch_player_summary(player_id: str, realm: str = DEFAULT_REALM) -> dict:
         refresh_player_explorer_summary(player)
 
     return build_player_summary(player)
-
 
 
 def _player_explorer_base_queryset(realm: str = DEFAULT_REALM):
@@ -3257,7 +3245,7 @@ def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
 def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None, realm: str = DEFAULT_REALM) -> dict:
     player = player or Player.objects.get(player_id=player_id, realm=realm)
     population_payload = _fetch_player_tier_type_population_correlation(
-        realm=realm)
+        realm=realm, allow_rebuild=False)
 
     if population_payload is None:
         _dispatch_async_correlation_warm(realm=realm)
@@ -3420,7 +3408,6 @@ def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
     cache.set(published_cache_key, payload, timeout=None)
     return payload
-
 
 
 def _build_empty_player_ranked_wr_battles_population_correlation_payload() -> dict:
@@ -3730,7 +3717,6 @@ def _get_player_clan_battle_season_stats(account_id: int, realm: str = DEFAULT_R
     seasons = raw.get('seasons', []) if raw else []
     cache.set(cache_key, seasons, CLAN_BATTLE_PLAYER_STATS_CACHE_TTL)
     return seasons
-
 
 
 def _persist_player_clan_battle_summary(
@@ -4959,7 +4945,6 @@ def get_cached_player_detail(player_id: int, realm: str = DEFAULT_REALM) -> Opti
     return cache.get(_bulk_cache_key_player(player_id, realm=realm))
 
 
-
 def invalidate_player_detail_cache(player_id: int, realm: str = DEFAULT_REALM) -> None:
     cache.delete(_bulk_cache_key_player(player_id, realm=realm))
 
@@ -5732,5 +5717,3 @@ def bulk_load_entity_caches(
         'players': player_result,
         'clans': clan_result,
     }
-
-

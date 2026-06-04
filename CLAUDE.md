@@ -301,6 +301,8 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
 - `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
 - `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)
+- `BATTLESTATS_DISABLE_LIVE_REFRESH` — Local-dev only. When `1`, `_player_refresh_signals()` short-circuits to "not pending", so player detail pages serve stale snapshots without queueing live WG refreshes. Keeps dev usable against a frozen DB copy. Default `0`.
+- `BATTLESTATS_ENABLE_STALE_RECENT_PLAYERS` — Local-dev only. When `1`, the landing "recent players" surface falls back to a `Player`-table ordering (by `last_battle_date`) when no `PlayerDailyShipStats` rollups exist, so the landing page isn't empty on a dev DB without the battle-history pipeline. `week_battles` is `None` in the fallback rows. Default `0`.
 - `ENRICH_REALMS` — Comma-separated realm list for enrichment crawler (e.g. `na`, `na,eu`). Empty or unset means all realms
 - `ENRICH_BATCH_SIZE` — Players enriched per `enrich_player_data_task` invocation before the task self-chains (default: `500`).
 - `ENRICH_MIN_PVP_BATTLES` — Minimum `pvp_battles` for a player to be enrichment-eligible (default: `500`). Filters out low-activity / new accounts.

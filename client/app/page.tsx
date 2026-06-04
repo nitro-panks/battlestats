@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense } from 'react';
+import React from 'react';
 import PlayerSearch from './components/PlayerSearch';
 import { getSiteUrl } from './lib/siteOrigin';
 
@@ -24,9 +24,7 @@ export default function Page() {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
       <div className="mx-auto w-full max-w-5xl text-[var(--text-primary)]">
-        <Suspense fallback={null}>
-          <PlayerSearch />
-        </Suspense>
+        <PlayerSearch />
       </div>
     </div>
   );
