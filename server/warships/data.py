@@ -5924,15 +5924,17 @@ def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
     }
 
 
-def compute_realm_top_ships(realm, hours=24, limit=25, mode="random", use_cache=True):
-    """Most-played ships on a realm over the last ``hours`` (the treemap source).
+def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
+    """Most-played ships on a realm over the previous 7 full UTC days (treemap source).
 
-    Sums ``BattleEvent.battles_delta`` per ship — filtered by realm + mode, with
-    ``detected_at`` as the rolling-window clock — joins ``Ship`` for type/tier,
-    and returns the top-``limit`` as a payload dict. Writes the result to the
-    Redis cache (1h TTL) so it refreshes at most once per hour. Shared by the
-    ``realm_top_ships`` API view and the hourly ``warm_realm_top_ships_task``
-    warmer; pass ``use_cache=False`` to force a recompute (the warmer does).
+    Sums ``BattleEvent.battles_delta`` per ship — filtered by realm + mode over the
+    window ``[midnight_utc - 7d, midnight_utc)``, i.e. the current UTC day is
+    *excluded* — joins ``Ship`` for type/tier, and returns the top-``limit`` as a
+    payload dict. This is a *static daily count*: computed once and cached under a
+    day-tagged key until just past the next UTC midnight, so it changes at most
+    once per day. Shared by the ``realm_top_ships`` API view and the daily
+    ``warm_realm_top_ships_task`` warmer; pass ``use_cache=False`` to force a
+    recompute (the warmer does, just after midnight).
     """
     from warships.models import BattleEvent
 
@@ -5941,26 +5943,31 @@ def compute_realm_top_ships(realm, hours=24, limit=25, mode="random", use_cache=
     if mode not in ("random", "ranked"):
         mode = "random"
     try:
-        hours = int(hours)
-    except (TypeError, ValueError):
-        hours = 24
-    hours = max(1, min(hours, 168))
-    try:
         limit = int(limit)
     except (TypeError, ValueError):
         limit = 25
     limit = max(5, min(limit, 50))
 
-    cache_key = realm_cache_key(realm, f"top-ships:{mode}:{hours}:{limit}")
+    # Window: the 7 full calendar days before today, in UTC. ``window_end`` is
+    # today's midnight (exclusive), so the in-progress current day never counts.
+    # The whole stack runs UTC (Celery crontabs, django_timezone) so UTC is the
+    # consistent day boundary; change the single line below if a realm-local
+    # boundary is ever wanted.
+    now = django_timezone.now()
+    window_end = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    window_start = window_end - timedelta(days=7)
+    day_tag = window_end.strftime("%Y%m%d")
+
+    cache_key = realm_cache_key(realm, f"top-ships:{mode}:7d:{limit}:{day_tag}")
     if use_cache:
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
 
-    since = django_timezone.now() - timedelta(hours=hours)
     rows = list(
         BattleEvent.objects
-        .filter(detected_at__gte=since, player__realm=realm, mode=mode)
+        .filter(detected_at__gte=window_start, detected_at__lt=window_end,
+                player__realm=realm, mode=mode)
         .values("ship_id", "ship_name")
         .annotate(battles=Sum("battles_delta"))
         .filter(battles__gt=0)
@@ -5983,6 +5990,18 @@ def compute_realm_top_ships(realm, hours=24, limit=25, mode="random", use_cache=
         for r in rows
     ]
 
-    payload = {"realm": realm, "hours": hours, "mode": mode, "ships": payload_ships}
-    cache.set(cache_key, payload, timeout=3600)
+    payload = {
+        "realm": realm,
+        "days": 7,
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "mode": mode,
+        "ships": payload_ships,
+    }
+    # Cache until ~1h past the next UTC midnight: by then the daily warmer has
+    # written the new day's tagged key, so this one expires rather than serving
+    # a stale window. The day-tag in the key means each day is a distinct entry.
+    next_midnight = window_end + timedelta(days=1)
+    ttl = int((next_midnight - now).total_seconds()) + 3600
+    cache.set(cache_key, payload, timeout=ttl)
     return payload
