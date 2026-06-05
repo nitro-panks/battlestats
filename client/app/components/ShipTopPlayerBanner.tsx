@@ -37,7 +37,7 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
     if (!badges || badges.length === 0) return null;
 
     return (
-        <div className="mt-6 flex flex-col gap-2" aria-label="Top ship rankings">
+        <div className="mt-6 flex flex-wrap gap-2" aria-label="Top ship rankings">
             {badges.map((b) => {
                 const color = RANK_COLOR[b.rank] ?? 'text-amber-500';
                 return (
