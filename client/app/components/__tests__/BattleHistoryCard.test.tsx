@@ -302,38 +302,39 @@ describe('BattleHistoryCard', () => {
         expect(screen.queryByRole('button', { name: /^All$/ })).not.toBeInTheDocument();
     });
 
-    test('renders mode pill row with three options + defaults to All when both modes available', async () => {
-        // Dual-mode availability on every response → auto-switch to combined
-        // ('All') fires, triggering a main refetch with mode=combined.
+    test('renders mode pill row with three options + defaults to Random when both modes available', async () => {
+        // Dual-mode availability → the card keeps its initial 'random' default
+        // (no auto-switch); Ranked/All pills remain reachable.
         mockByMode({ available_modes: ['random', 'ranked'] });
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        // The auto-switch fetch should request the main window with mode=combined.
+        // The main window fetch stays mode=random and no combined auto-switch fires.
         await waitFor(() => {
-            expect(mainFetchCalls('combined').length).toBeGreaterThanOrEqual(1);
+            expect(mainFetchCalls('random').length).toBeGreaterThanOrEqual(1);
         });
+        expect(mainFetchCalls('combined').length).toBe(0);
         const group = screen.getByRole('group', { name: /battle mode/i });
         expect(group).toBeInTheDocument();
         const random = screen.getByRole('button', { name: /^Random$/ });
         const ranked = screen.getByRole('button', { name: /^Ranked$/ });
         const all = screen.getByRole('button', { name: /^All$/ });
-        // New default: All is pressed when both modes are available.
-        expect(random).toHaveAttribute('aria-pressed', 'false');
+        // Default: Random is pressed when both modes are available.
+        expect(random).toHaveAttribute('aria-pressed', 'true');
         expect(ranked).toHaveAttribute('aria-pressed', 'false');
-        expect(all).toHaveAttribute('aria-pressed', 'true');
+        expect(all).toHaveAttribute('aria-pressed', 'false');
     });
 
     test('clicking ranked pill refetches with mode=ranked', async () => {
-        // Dual-mode payload triggers auto-switch to combined (refetch).
+        // Dual-mode payload → default stays random (no auto-switch).
         mockByMode({ available_modes: ['random', 'ranked'] });
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
         await waitFor(() => {
-            expect(mainFetchCalls('combined').length).toBeGreaterThanOrEqual(1);
+            expect(mainFetchCalls('random').length).toBeGreaterThanOrEqual(1);
         });
         await act(async () => {
             screen.getByRole('button', { name: /^Ranked$/ }).click();
@@ -408,7 +409,7 @@ describe('BattleHistoryCard', () => {
                 expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
             });
             await waitFor(() => {
-                expect(mainFetchCalls('combined').length).toBeGreaterThanOrEqual(1);
+                expect(mainFetchCalls('random').length).toBeGreaterThanOrEqual(1);
             });
 
             await act(async () => {
@@ -449,7 +450,7 @@ describe('BattleHistoryCard', () => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
         await waitFor(() => {
-            expect(mainFetchCalls('combined').length).toBeGreaterThanOrEqual(1);
+            expect(mainFetchCalls('random').length).toBeGreaterThanOrEqual(1);
         });
         await act(async () => {
             screen.getByRole('button', { name: /^Ranked$/ }).click();
