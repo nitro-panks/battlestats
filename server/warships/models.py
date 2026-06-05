@@ -699,6 +699,11 @@ class ShipTopPlayerSnapshot(models.Model):
         Player, on_delete=models.CASCADE, related_name='ship_top_player_badges')
     win_rate = models.FloatField(default=0.0)
     battles = models.IntegerField(default=0)
+    # Window aggregates for the profile banner (avg dmg / KDR / survival are
+    # derived from these in data.get_player_ship_badges).
+    damage = models.BigIntegerField(default=0)
+    frags = models.IntegerField(default=0)
+    survived = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

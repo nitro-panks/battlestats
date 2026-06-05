@@ -64,7 +64,8 @@ class ShipBadgeSnapshotTests(TestCase):
             is_hidden=is_hidden, pvp_battles=500,
         )
 
-    def _event(self, player, ship_id, battles, wins, detected_days_ago=0):
+    def _event(self, player, ship_id, battles, wins, detected_days_ago=0,
+               damage=0, frags=0, survived=None):
         """One BattleEvent carrying the player's whole window total for a ship.
 
         Each player gets its own observation pair, so the per-pair unique
@@ -76,6 +77,7 @@ class ShipBadgeSnapshotTests(TestCase):
         event = BattleEvent.objects.create(
             player=player, ship_id=ship_id, ship_name="x", mode="random",
             battles_delta=battles, wins_delta=wins,
+            damage_delta=damage, frags_delta=frags, survived=survived,
             from_observation=from_obs, to_observation=to_obs,
         )
         if detected_days_ago:
@@ -225,6 +227,44 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertEqual(badges, [1])
         # A player who earned nothing has no badges.
         self.assertEqual(self._badge_ranks(self._player("Nobody")), [])
+
+    def test_badge_payload_derives_window_aggregates(self):
+        from warships.data import get_player_ship_badges
+        p = self._player("Aggs")
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=timezone.now().date(), realm="na", ship_id=SHIMA,
+            ship_name="Shimakaze", rank=1, player=p, win_rate=70.0,
+            battles=100, damage=6_240_000, frags=150, survived=68,
+        )
+
+        with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
+            badges = get_player_ship_badges(p)
+
+        self.assertEqual(len(badges), 1)
+        b = badges[0]
+        self.assertEqual(b["avg_damage"], 62_400)        # 6_240_000 / 100
+        self.assertAlmostEqual(b["kdr"], 4.69)            # 150 / (100-68)=4.6875
+        self.assertAlmostEqual(b["survival_rate"], 68.0)  # 100 * 68/100
+        self.assertEqual(b["window_days"], 14)
+
+    def test_snapshot_persists_window_aggregates_from_events(self):
+        # End-to-end: events carrying damage/frags/survived → run → stored row.
+        # `survived` is the per-event boolean (1 if survived else 0), matching the
+        # daily rollup writer's `survived_battles` convention (incremental_battles).
+        ace = self._player("Ace")
+        self._event(ace, SHIMA, battles=20, wins=15, damage=1_000_000,
+                    frags=30, survived=True)
+        for i in range(2):  # padding to clear the population guard (3)
+            self._event(self._player(f"Pad{i}"), SHIMA, battles=20, wins=10,
+                        damage=400_000, frags=10, survived=False)
+
+        self._run("na")
+
+        row = ShipTopPlayerSnapshot.objects.get(ship_id=SHIMA, player=ace)
+        self.assertEqual(row.battles, 20)
+        self.assertEqual(row.damage, 1_000_000)
+        self.assertEqual(row.frags, 30)
+        self.assertEqual(row.survived, 1)  # one event, survived=True
 
     def test_get_ship_leaderboard_returns_ranked_players(self):
         ace = self._player("Ace")

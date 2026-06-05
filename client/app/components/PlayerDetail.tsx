@@ -17,7 +17,7 @@ import PveEnjoyerIcon from './PveEnjoyerIcon';
 import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
-import ShipTopPlayerBadgeIcon, { ShipBadge } from './ShipTopPlayerBadgeIcon';
+import ShipTopPlayerBanner, { ShipBadge } from './ShipTopPlayerBanner';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
 import { useTheme } from '../context/ThemeContext';
@@ -430,14 +430,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}
                                 {isClanBattleEnjoyer && clanBattleSummary ? <ClanBattleShieldIcon winRate={clanBattleSummary.overallWinRate} size="header" /> : null}
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
-                                {!player.is_hidden && player.ship_badges && player.ship_badges.length > 0
-                                    ? player.ship_badges.slice(0, 6).map((badge) => (
-                                        <ShipTopPlayerBadgeIcon key={`${badge.ship_id}-${badge.rank}`} badge={badge} realm={player.realm} size="header" />
-                                    ))
-                                    : null}
-                                {!player.is_hidden && player.ship_badges && player.ship_badges.length > 6
-                                    ? <span className="text-xs text-[var(--text-muted)]">+{player.ship_badges.length - 6}</span>
-                                    : null}
                             </div>
                             <div className="flex items-center gap-2 self-start">
                                 {refreshStatus && !player.is_hidden ? (
@@ -550,6 +542,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     ) : null}
                                 </div>
                             )}
+                            {!player.is_hidden ? (
+                                <ShipTopPlayerBanner badges={player.ship_badges ?? []} realm={player.realm} />
+                            ) : null}
                             <BattleHistoryCard
                                 playerName={player.name}
                                 realm={realm}

@@ -796,7 +796,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.getByText('Loading player...')).toBeInTheDocument();
     });
 });
-describe('PlayerDetail ship-badge icons', () => {
+describe('PlayerDetail ship-badge banner', () => {
     let consoleErrorSpy: jest.SpyInstance;
 
     beforeEach(() => {
@@ -824,28 +824,43 @@ describe('PlayerDetail ship-badge icons', () => {
             />,
         );
 
-    it('renders a tiered badge icon for each ship placement', () => {
+    const badge = (over: Record<string, unknown> = {}) => ({
+        ship_id: 10, ship_name: 'Shimakaze', rank: 1, win_rate: 64.0, battles: 312,
+        avg_damage: 62431, kdr: 1.85, survival_rate: 68, window_days: 14, ...over,
+    });
+
+    it('renders a banner card per ship placement with the window stats', () => {
         renderWithBadges([
-            { ship_id: 10, ship_name: 'Shimakaze', rank: 1, win_rate: 64.0, battles: 312 },
-            { ship_id: 20, ship_name: 'Zao', rank: 2, win_rate: 61.5, battles: 280 },
+            badge(),
+            badge({ ship_id: 20, ship_name: 'Zao', rank: 2, avg_damage: 41200, kdr: 1.4, survival_rate: 55 }),
         ]);
 
-        expect(screen.getByTitle(/#1 Shimakaze · 64.0% WR · 312 battles \(last 14d\)/)).toBeInTheDocument();
-        expect(screen.getByTitle(/#2 Zao · 61.5% WR · 280 battles \(last 14d\)/)).toBeInTheDocument();
+        expect(screen.getByText('Shimakaze')).toBeInTheDocument();
+        expect(screen.getByText('Zao')).toBeInTheDocument();
+        // Stats line: avg dmg | KDR | survival.
+        expect(screen.getByText(/62,431 dmg/)).toBeInTheDocument();
+        expect(screen.getByText(/1\.85 KDR/)).toBeInTheDocument();
+        expect(screen.getByText(/68% survival/)).toBeInTheDocument();
+        // Links to the ship standings page.
+        const link = screen.getByTitle(/#1 in Shimakaze over the last 14 days/);
+        expect(link).toHaveAttribute('href', expect.stringContaining('/ship/10-shimakaze'));
     });
 
-    it('renders no badge icons when ship_badges is empty', () => {
+    it('renders no banner when ship_badges is empty', () => {
         renderWithBadges([]);
 
-        expect(screen.queryByTitle(/WR · .* battles \(last 14d\)/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/dmg/)).not.toBeInTheDocument();
     });
 
-    it('caps visible badges at six and shows a +N overflow', () => {
-        const badges = Array.from({ length: 8 }, (_, i) => ({
-            ship_id: i + 1, ship_name: `Ship${i + 1}`, rank: ((i % 3) + 1), win_rate: 60, battles: 100,
-        }));
-        renderWithBadges(badges);
+    it('stacks multiple badges (no overflow cap — backend already limits to top 3)', () => {
+        renderWithBadges([
+            badge({ ship_id: 1, ship_name: 'ShipA', rank: 1 }),
+            badge({ ship_id: 2, ship_name: 'ShipB', rank: 2 }),
+            badge({ ship_id: 3, ship_name: 'ShipC', rank: 3 }),
+        ]);
 
-        expect(screen.getByText('+2')).toBeInTheDocument();
+        expect(screen.getByText('ShipA')).toBeInTheDocument();
+        expect(screen.getByText('ShipB')).toBeInTheDocument();
+        expect(screen.getByText('ShipC')).toBeInTheDocument();
     });
 });

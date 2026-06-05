@@ -118,7 +118,8 @@ class PlayerViewSetTests(TestCase):
         ShipTopPlayerSnapshot.objects.create(
             captured_on=now.date(), realm="na", ship_id=10,
             ship_name="Shimakaze", rank=1, player=player,
-            win_rate=64.0, battles=312,
+            win_rate=64.0, battles=312, damage=19_344_000, frags=400,
+            survived=200,
         )
 
         response = self.client.get("/api/player/BadgeHolder/")
@@ -131,6 +132,10 @@ class PlayerViewSetTests(TestCase):
         self.assertEqual(badges[0]["rank"], 1)
         self.assertEqual(badges[0]["win_rate"], 64.0)
         self.assertEqual(badges[0]["battles"], 312)
+        self.assertEqual(badges[0]["avg_damage"], 62_000)        # 19_344_000/312
+        self.assertAlmostEqual(badges[0]["kdr"], 3.57)           # 400/(312-200)
+        self.assertAlmostEqual(badges[0]["survival_rate"], 64.1)  # 100*200/312
+        self.assertEqual(badges[0]["window_days"], 14)
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")

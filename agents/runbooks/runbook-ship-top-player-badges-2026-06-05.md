@@ -87,6 +87,7 @@ Per realm, per `since = now - 14d`:
 | `rank` | `IntegerField` | 1..`SHIP_BADGE_LIST_SIZE`. Ranks 1–3 are badges. |
 | `player` | `FK(Player)` | |
 | `win_rate` / `battles` | `Float` / `Int` | Denormalized 14d figures. |
+| `damage` / `frags` / `survived` | `BigInt` / `Int` / `Int` | 14d window aggregates (migration `0061`); the profile banner's avg dmg / KDR / survival % are derived from these + `battles` in `get_player_ship_badges`. |
 | `created_at` | `DateTimeField(auto_now_add)` | |
 
 `UniqueConstraint(captured_on, realm, ship_id, rank)` (also the ship-page read index); `Index(player,
@@ -152,7 +153,13 @@ Registered unconditionally; the **task** is the no-op gate (not folded under `EN
   the leaderboard endpoint (15-min client TTL), loading message, error + empty states, a header
   (name · Tier · type · nation) and a table (rank, player → `buildPlayerPath`, WR via `wrColor`,
   battles).
-- **Badge** — `ShipTopPlayerBadgeIcon` is a labeled pill (`<medal> ShipName`) linking via
+- **Banner** (updated 2026-06-05) — `ShipTopPlayerBanner` renders one stacked card per top-3 badge
+  **above the Battle History card** (moved out of the player header, where wrapping pills pushed the
+  Next-update/Share buttons down). Each card: `#<rank> <ship> for <N> days | <avg dmg> | <KDR> |
+  <survival %>`, ~sparkline height, links to `/ship/<id>`. The old header-pill
+  `ShipTopPlayerBadgeIcon` was removed. The badge payload gained `avg_damage`/`kdr`/`survival_rate`/
+  `window_days` (derived from the new `damage`/`frags`/`survived` snapshot fields).
+- **(superseded) Badge** — `ShipTopPlayerBadgeIcon` was a labeled pill (`<medal> ShipName`) linking via
   `buildShipPath`; rendered in `PlayerDetail` header (capped at 6 + `+N`), passed `realm={player.realm}`.
 
 ## Env tunables (also in `CLAUDE.md`)

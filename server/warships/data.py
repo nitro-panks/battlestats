@@ -5788,7 +5788,14 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
         # player_id is the FK PK (used for the snapshot FK); player__player_id
         # is the WG account id (used for cache invalidation) — keep both.
         .values('ship_id', 'player_id', 'player__player_id', 'player__name')
-        .annotate(battles=Sum('battles_delta'), wins=Sum('wins_delta'))
+        .annotate(
+            battles=Sum('battles_delta'),
+            wins=Sum('wins_delta'),
+            damage=Sum('damage_delta'),
+            frags=Sum('frags_delta'),
+            survived=Sum(Case(When(survived=True, then=1), default=0,
+                              output_field=IntegerField())),
+        )
         .filter(battles__gte=min_battles)
     )
 
@@ -5824,6 +5831,9 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
                 player_id=entry['player_id'],
                 win_rate=round(entry['win_rate'], 2),
                 battles=entry['battles'] or 0,
+                damage=entry['damage'] or 0,
+                frags=entry['frags'] or 0,
+                survived=entry['survived'] or 0,
             ))
             # Only the top-N rows are profile badges → only they change a
             # player's cached detail payload.
@@ -5872,14 +5882,27 @@ def get_player_ship_badges(player: Player) -> list:
     )
     if latest is None:
         return []
-    return [
-        {
+
+    def _badge(r) -> dict:
+        battles = r.battles or 0
+        deaths = max(battles - (r.survived or 0), 0)
+        avg_damage = round((r.damage or 0) / battles) if battles else 0
+        kdr = round((r.frags or 0) / deaths, 2) if deaths else float(r.frags or 0)
+        survival_rate = round(100.0 * (r.survived or 0) / battles, 1) if battles else 0.0
+        return {
             'ship_id': r.ship_id,
             'ship_name': r.ship_name,
             'rank': r.rank,
             'win_rate': r.win_rate,
-            'battles': r.battles,
+            'battles': battles,
+            'avg_damage': avg_damage,
+            'kdr': kdr,
+            'survival_rate': survival_rate,
+            'window_days': SHIP_LEADERBOARD_WINDOW_DAYS,
         }
+
+    return [
+        _badge(r)
         for r in ShipTopPlayerSnapshot.objects
         .filter(player=player, captured_on=latest, rank__lte=top_n)
         .order_by('rank', 'ship_name')
