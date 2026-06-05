@@ -5768,22 +5768,29 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
     today = django_timezone.now().date()
     since = django_timezone.now() - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS)
 
-    t10_ids = list(
-        Ship.objects.filter(tier=tier).values_list('ship_id', flat=True)
-    )
-    if not t10_ids:
-        logger.info(
-            "ship-badge snapshot realm=%s: no tier-%s ships found", realm, tier)
+    # Target set = all Tier-`tier` ships UNION the realm treemap's top-25
+    # most-played ships (any tier), so every clickable treemap tile gets a
+    # best-list while the full T10 badge coverage is preserved.
+    target_ids = set(
+        Ship.objects.filter(tier=tier).values_list('ship_id', flat=True))
+    try:
+        treemap = compute_realm_top_ships(realm, limit=25, mode='random')
+        target_ids |= {s['ship_id'] for s in treemap.get('ships', [])}
+    except Exception:  # treemap is best-effort enrichment, never fatal
+        logger.exception("ship-badge snapshot realm=%s: treemap fetch failed", realm)
+    target_ids = list(target_ids)
+    if not target_ids:
+        logger.info("ship-badge snapshot realm=%s: no target ships", realm)
         return {'realm': realm, 'captured_on': today, 'ships_qualified': 0,
                 'ships_total': 0, 'badges': 0, 'ranked_rows': 0}
 
     ship_names = {
-        s.ship_id: s.name for s in Ship.objects.filter(ship_id__in=t10_ids)
+        s.ship_id: s.name for s in Ship.objects.filter(ship_id__in=target_ids)
     }
 
     rows = (
         BattleEvent.objects
-        .filter(ship_id__in=t10_ids, mode='random', detected_at__gte=since,
+        .filter(ship_id__in=target_ids, mode='random', detected_at__gte=since,
                 player__realm=realm, player__is_hidden=False)
         # player_id is the FK PK (used for the snapshot FK); player__player_id
         # is the WG account id (used for cache invalidation) — keep both.
@@ -5856,10 +5863,10 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
     logger.info(
         "ship-badge snapshot realm=%s window=%sd ships_qualified=%s/%s "
         "ranked_rows=%s badges=%s", realm, SHIP_LEADERBOARD_WINDOW_DAYS,
-        qualified, len(t10_ids), len(snapshot_rows), badge_count,
+        qualified, len(target_ids), len(snapshot_rows), badge_count,
     )
     return {'realm': realm, 'captured_on': today, 'ships_qualified': qualified,
-            'ships_total': len(t10_ids), 'badges': badge_count,
+            'ships_total': len(target_ids), 'badges': badge_count,
             'ranked_rows': len(snapshot_rows)}
 
 

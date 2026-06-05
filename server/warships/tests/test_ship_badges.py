@@ -175,7 +175,11 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertFalse(
             ShipTopPlayerSnapshot.objects.filter(player=hidden_ace).exists())
 
-    def test_non_t10_ignored(self):
+    def test_non_t10_not_in_treemap_is_ignored(self):
+        # A non-T10 ship that is NOT in the realm treemap top-25 isn't a target.
+        # (These events are stamped "today", which compute_realm_top_ships's
+        # previous-7-full-UTC-days window excludes, so the ship never enters the
+        # treemap set here.)
         for i in range(5):
             self._event(self._player(f"T9p{i}"), T9_SHIP, battles=30, wins=20)
 
@@ -183,6 +187,20 @@ class ShipBadgeSnapshotTests(TestCase):
 
         self.assertEqual(result["ranked_rows"], 0)
         self.assertFalse(
+            ShipTopPlayerSnapshot.objects.filter(ship_id=T9_SHIP).exists())
+
+    def test_non_t10_in_treemap_is_included(self):
+        # A non-T10 ship that IS among the most-played (in the treemap's
+        # previous-7-UTC-day window) is unioned into the target set and ranked,
+        # even though it isn't Tier 10. Events dated 2 days ago land in both the
+        # treemap window and the 14-day snapshot window.
+        for i in range(3):
+            self._event(self._player(f"T9p{i}"), T9_SHIP, battles=30,
+                        wins=20 + i, detected_days_ago=2)
+
+        self._run("na")
+
+        self.assertTrue(
             ShipTopPlayerSnapshot.objects.filter(ship_id=T9_SHIP).exists())
 
     def test_rolling_14d_window_excludes_older_events(self):

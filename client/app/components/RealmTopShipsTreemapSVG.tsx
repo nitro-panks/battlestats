@@ -17,10 +17,6 @@ import { chartColors } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { buildShipPath } from '../lib/entityRoutes';
 
-// Only Tier-10 ships have a snapshot-backed standings page (the badge feature is
-// T10-scoped), so only T10 tiles navigate.
-const SHIP_PAGE_TIER = 10;
-
 interface TopShip {
     ship_id: number;
     ship_name: string;
@@ -152,11 +148,9 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
             .attr('fill', (d: { data: TopShip }) => shadeByTier(typeColor(d.data.ship_type), d.data.tier))
             .attr('stroke', 'var(--bg-card)')
             .attr('stroke-width', 1)
-            .style('cursor', (d: { data: TopShip }) => (d.data.tier === SHIP_PAGE_TIER ? 'pointer' : 'default'))
+            .style('cursor', 'pointer')
             .on('click', function onClick(this: SVGRectElement, _event: MouseEvent, d: { data: TopShip }) {
-                if (d.data.tier === SHIP_PAGE_TIER) {
-                    router.push(buildShipPath(d.data.ship_id, d.data.ship_name, realm));
-                }
+                router.push(buildShipPath(d.data.ship_id, d.data.ship_name, realm));
             })
             .on('mousemove', function onMove(this: SVGRectElement, event: MouseEvent, d: { data: TopShip }) {
                 const rect = containerRef.current?.getBoundingClientRect();
