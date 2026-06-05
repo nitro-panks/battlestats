@@ -5730,8 +5730,12 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
     `SHIP_LEADERBOARD_WINDOW_DAYS` (14) days, grouped by (ship, player) — the
     inverse grouping of `compute_realm_top_ships`. Keeps players with
     >= `SHIP_BADGE_MIN_BATTLES` battles; a ship is "ranked" only if its
-    qualifying pool is >= `SHIP_BADGE_MIN_SHIP_POPULATION`. For each ranked ship
-    it writes the top `SHIP_BADGE_LIST_SIZE` (50) players as `ShipTopPlayerSnapshot`
+    qualifying pool is >= `SHIP_BADGE_MIN_SHIP_POPULATION`. Players are ordered by
+    a **volume-aware composite score** — the win proportion shrunk toward 50% by
+    `SHIP_BADGE_PRIOR_BATTLES` pseudo-battles (empirical-Bayes), tiebreak raw
+    battles — so a short hot streak doesn't outrank a high-volume player; the
+    stored/displayed `win_rate` is still the raw rate. For each ranked ship it
+    writes the top `SHIP_BADGE_LIST_SIZE` (50) players as `ShipTopPlayerSnapshot`
     rows (ranks 1..N) — the ship-page leaderboard — of which ranks
     1..`SHIP_BADGE_TOP_N` (3) are the gold/silver/bronze profile badges.
     Idempotent per (realm, today). Invalidates the badged (top-3) players' cached
@@ -5744,12 +5748,17 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
     """
     from warships.models import BattleEvent, ShipTopPlayerSnapshot
 
-    min_battles = int(os.getenv('SHIP_BADGE_MIN_BATTLES', '10'))
+    min_battles = int(os.getenv('SHIP_BADGE_MIN_BATTLES', '25'))
     min_population = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION', '25'))
     top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
     list_size = int(os.getenv('SHIP_BADGE_LIST_SIZE', '50'))
     tier = int(os.getenv('SHIP_BADGE_TIER', '10'))
     retention_days = int(os.getenv('SHIP_BADGE_RETENTION_DAYS', '21'))
+    # Volume-aware ranking: empirical-Bayes shrinkage of the win proportion
+    # toward a baseline. `prior_battles` is the pseudo-sample weight (higher =
+    # more shrinkage of small samples); `prior_wr` is the baseline (50%).
+    prior_battles = int(os.getenv('SHIP_BADGE_PRIOR_BATTLES', '30'))
+    prior_wr = float(os.getenv('SHIP_BADGE_PRIOR_WR', '0.5'))
 
     realm = (realm or DEFAULT_REALM).lower().strip()
     today = django_timezone.now().date()
@@ -5793,8 +5802,14 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
         qualified += 1
         for entry in pool:
             b = entry['battles'] or 0
-            entry['win_rate'] = (100.0 * (entry['wins'] or 0) / b) if b else 0.0
-        pool.sort(key=lambda e: (-e['win_rate'], -(e['battles'] or 0)))
+            w = entry['wins'] or 0
+            entry['win_rate'] = (100.0 * w / b) if b else 0.0
+            # Shrink the win proportion toward `prior_wr` by `prior_battles`
+            # pseudo-battles, so a short hot streak doesn't outrank a high-volume
+            # player with a slightly lower raw win rate. Rank by this score;
+            # display still uses the raw win_rate.
+            entry['_score'] = (w + prior_battles * prior_wr) / (b + prior_battles)
+        pool.sort(key=lambda e: (-e['_score'], -(e['battles'] or 0)))
         for rank, entry in enumerate(pool[:list_size], start=1):
             snapshot_rows.append(ShipTopPlayerSnapshot(
                 captured_on=today,

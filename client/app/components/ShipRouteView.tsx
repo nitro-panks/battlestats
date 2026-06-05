@@ -119,6 +119,9 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                 <p className="mt-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                     {realm.toUpperCase()} · best players · last {data.window_days} days
                 </p>
+                <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+                    Ranked by win rate adjusted for battles played, so a short hot streak doesn&apos;t outrank a high-volume player.
+                </p>
             </header>
 
             {players.length === 0 ? (

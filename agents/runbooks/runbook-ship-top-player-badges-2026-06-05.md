@@ -55,15 +55,20 @@ Per realm, per `since = now - 14d`:
 1. Aggregate `BattleEvent` (`ship_id ∈ T10`, `mode='random'`, `detected_at >= since`,
    `player__realm=realm`, `player__is_hidden=False`) grouped by `(ship_id, player)`, summing
    `battles_delta→battles`, `wins_delta→wins`.
-2. **Per-player floor:** keep `battles >= SHIP_BADGE_MIN_BATTLES` (default **10**).
+2. **Per-player floor:** keep `battles >= SHIP_BADGE_MIN_BATTLES` (default **25**).
 3. **Per-ship guard:** ship is "ranked" only if its qualifying pool ≥ `SHIP_BADGE_MIN_SHIP_POPULATION`
    (default **25**).
-4. **Rank** by `win_rate` desc, tiebreak `battles` desc. Persist the top `SHIP_BADGE_LIST_SIZE`
-   (default **50**) as ranks 1..N. Ranks 1..`SHIP_BADGE_TOP_N` (default **3**) are badges.
+4. **Rank** by a **volume-aware composite score** (empirical-Bayes): the win proportion shrunk toward
+   `SHIP_BADGE_PRIOR_WR` (default **0.5**) by `SHIP_BADGE_PRIOR_BATTLES` (default **30**) pseudo-battles
+   — `score = (wins + prior_battles·prior_wr) / (battles + prior_battles)` — tiebreak raw `battles`
+   desc. This demotes short hot streaks (a 25-0 no longer outranks a 300-battle 65% grinder) while the
+   stored/displayed `win_rate` stays the raw rate. Persist the top `SHIP_BADGE_LIST_SIZE` (default
+   **50**) as ranks 1..N; ranks 1..`SHIP_BADGE_TOP_N` (default **3**) are badges.
 
-> ≥25 players × ≥10 battles of one T10 on one realm in 14d is still a real bar — on NA expect mostly
-> the popular T10s to qualify. Intended; thresholds are env-tunable and the task logs
-> `ships_qualified` for first-run validation.
+> First-run validation (NA, 2026-06-05): with the original raw-WR ranking + a 10-battle floor, the #1
+> spots were dominated by 100%-on-10-battles streaks — hence the move to the 25-battle floor + the
+> composite score. 90/202 T10 ships qualified on NA, so the bar is not too strict. Thresholds are
+> env-tunable and the task logs `ships_qualified`.
 
 ## Storage shape
 
@@ -151,7 +156,8 @@ Registered unconditionally; the **task** is the no-op gate (not folded under `EN
 | Var | Default | Meaning |
 |---|---|---|
 | `SHIP_BADGE_SNAPSHOT_ENABLED` | `0` | Master gate for the weekly snapshot task. |
-| `SHIP_BADGE_MIN_BATTLES` | `10` | Min random battles in 14d to qualify. |
+| `SHIP_BADGE_MIN_BATTLES` | `25` | Min random battles in 14d to qualify. |
+| `SHIP_BADGE_PRIOR_BATTLES` / `SHIP_BADGE_PRIOR_WR` | `30` / `0.5` | Composite-ranking shrinkage (pseudo-battles / baseline WR). |
 | `SHIP_BADGE_MIN_SHIP_POPULATION` | `25` | Min qualifiers before a ship is "ranked". |
 | `SHIP_BADGE_LIST_SIZE` | `50` | Ranked players stored per ship (ship-page length). |
 | `SHIP_BADGE_TOP_N` | `3` | Placements that become profile badges. |

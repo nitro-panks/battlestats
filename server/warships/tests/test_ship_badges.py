@@ -37,6 +37,8 @@ BADGE_ENV = {
     "SHIP_BADGE_LIST_SIZE": "50",
     "SHIP_BADGE_TIER": "10",
     "SHIP_BADGE_RETENTION_DAYS": "21",
+    "SHIP_BADGE_PRIOR_BATTLES": "30",
+    "SHIP_BADGE_PRIOR_WR": "0.5",
 }
 
 SHIMA = 10      # T10
@@ -90,34 +92,45 @@ class ShipBadgeSnapshotTests(TestCase):
         with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
             return [b["rank"] for b in get_player_ship_badges(player)]
 
-    def test_ranks_by_win_rate_badges_are_top_three(self):
-        # Shimakaze pool: 4 qualifiers + 1 sub-floor player.
-        a = self._player("Ace")     # 90%
-        b = self._player("Bravo")   # 80%
-        c = self._player("Charlie")  # 70%
-        d = self._player("Delta")   # 60% — ranked #4 (on the page, not a badge)
-        e = self._player("Echo")    # below the battle floor
-        self._event(a, SHIMA, battles=20, wins=18)
-        self._event(b, SHIMA, battles=15, wins=12)
-        self._event(c, SHIMA, battles=30, wins=21)
-        self._event(d, SHIMA, battles=10, wins=6)
-        self._event(e, SHIMA, battles=5, wins=5)  # 100% but only 5 battles
+    def test_composite_ranking_demotes_small_sample_streaks(self):
+        # The volume-aware score (shrink WR toward 50% by 30 pseudo-battles)
+        # must rank a high-volume 70% player ABOVE a 10-0 hot streak, even
+        # though the streak's raw win rate is higher.
+        #   streak : (10 + 30*0.5)/(10+30) = 0.625
+        #   grinder: (70 + 30*0.5)/(100+30) = 0.654   <- wins despite lower raw WR
+        #   mid    : (33 + 30*0.5)/(50+30)  = 0.600
+        streak = self._player("Streak")    # 100% raw on 10 battles
+        grinder = self._player("Grinder")  # 70% raw on 100 battles
+        mid = self._player("Mid")          # 66% raw on 50 battles
+        self._event(streak, SHIMA, battles=10, wins=10)
+        self._event(grinder, SHIMA, battles=100, wins=70)
+        self._event(mid, SHIMA, battles=50, wins=33)
 
         result = self._run("na")
 
-        # The full ranked list (page) has all 4 qualifiers; badges are top 3.
-        self.assertEqual(result["ranked_rows"], 4)
         self.assertEqual(result["badges"], 3)
         rows = list(ShipTopPlayerSnapshot.objects.filter(ship_id=SHIMA)
                     .order_by("rank"))
-        self.assertEqual([r.player_id for r in rows], [a.id, b.id, c.id, d.id])
-        self.assertEqual([r.rank for r in rows], [1, 2, 3, 4])
-        self.assertEqual(rows[0].ship_name, "Shimakaze")
-        self.assertAlmostEqual(rows[0].win_rate, 90.0)
-        # Badges only for ranks 1-3; #4 is on the page but holds no badge.
-        self.assertEqual(self._badge_ranks(a), [1])
-        self.assertEqual(self._badge_ranks(d), [])
-        # Sub-floor player never ranked at all.
+        # Composite order: grinder, streak, mid — NOT raw-WR order.
+        self.assertEqual([r.player_id for r in rows],
+                        [grinder.id, streak.id, mid.id])
+        self.assertEqual(self._badge_ranks(grinder), [1])
+        # Display still uses the raw win rate, not the shrunk score.
+        self.assertAlmostEqual(rows[0].win_rate, 70.0)
+
+    def test_battle_floor_excludes_sub_floor_players(self):
+        a = self._player("Ace")
+        b = self._player("Bravo")
+        c = self._player("Charlie")
+        e = self._player("Echo")  # below the battle floor (5 < 10)
+        self._event(a, SHIMA, battles=20, wins=18)
+        self._event(b, SHIMA, battles=15, wins=12)
+        self._event(c, SHIMA, battles=30, wins=21)
+        self._event(e, SHIMA, battles=5, wins=5)
+
+        result = self._run("na")
+
+        self.assertEqual(result["ranked_rows"], 3)
         self.assertFalse(
             ShipTopPlayerSnapshot.objects.filter(player=e).exists())
 
