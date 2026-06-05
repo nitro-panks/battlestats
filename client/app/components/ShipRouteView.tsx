@@ -10,6 +10,7 @@ import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import wrColor from '../lib/wrColor';
 import TopShipIcon from './TopShipIcon';
 import { nextWindowOpenMs, formatCountdown, formatSeasonLabel } from '../lib/shipSeason';
+import { trackEvent } from '../lib/umami';
 
 const RANKING_TOOLTIP = "Ranked by a blend of win rate, average damage, and kills per battle (win rate weighted most), each tempered for games played (empirical-Bayes shrinkage) so a short hot streak doesn't outrank a high-volume player. Shows the top 15 for the window.";
 
@@ -205,6 +206,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                                         <Link
                                             href={buildPlayerPath(p.player_name, realm)}
                                             className="text-[var(--accent-mid)] hover:underline"
+                                            onClick={() => trackEvent('ship-player', { ship_id: ship.ship_id, ship_name: ship.name, rank: p.rank, realm })}
                                         >
                                             {p.player_name}
                                         </Link>

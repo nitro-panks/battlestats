@@ -6,6 +6,7 @@ import { fetchSharedJson, incrementChartFetches, decrementChartFetches } from '.
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
+import { trackEvent } from '../lib/umami';
 
 interface ClanProps {
     clanId: number;
@@ -629,6 +630,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
 
     const handleScaleSelect = useCallback((scale: 'linear' | 'log') => {
         setUserScalePref(scale);
+        trackEvent('chart-scale', { chart: 'clan-members', scale });
         if (typeof window === 'undefined') {
             return;
         }

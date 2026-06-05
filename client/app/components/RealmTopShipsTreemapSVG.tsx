@@ -18,6 +18,7 @@ import { chartColors } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { buildShipPath } from '../lib/entityRoutes';
 import { formatSeasonLabel } from '../lib/shipSeason';
+import { trackEvent } from '../lib/umami';
 
 interface TopShip {
     ship_id: number;
@@ -177,6 +178,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
             .attr('stroke-width', 1)
             .style('cursor', 'pointer')
             .on('click', function onClick(this: SVGRectElement, _event: MouseEvent, d: { data: TopShip }) {
+                trackEvent('treemap-ship', { ship_id: d.data.ship_id, ship_name: d.data.ship_name, mode, realm });
                 router.push(buildShipPath(d.data.ship_id, d.data.ship_name, realm));
             })
             .on('mousemove', function onMove(this: SVGRectElement, event: MouseEvent, d: { data: TopShip }) {
@@ -235,7 +237,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
                     .text(`${d.data.battles.toLocaleString()} · T${d.data.tier ?? '?'}`);
             }
         });
-    }, [data, width, height, palette, typeColor, realm, router, theme, tileFill]);
+    }, [data, width, height, palette, typeColor, realm, router, theme, tileFill, mode]);
 
     return (
         <section
