@@ -98,13 +98,18 @@ const mockByMode = (
     });
 };
 
-// Main (non-sparkline) fetch calls — identified by window=week, since the
-// sparkline fetch is always window=month. Optionally filtered by mode. Lets
-// assertions target the main fetch without depending on call order/count.
+// Main (non-sparkline) fetch calls — identified by label, since the main window
+// now defaults to 'month' and shares the same url as the always-month sparkline
+// fetch (the sparkline uses label 'BattleHistoryCard:sparkline'). Optionally
+// filtered by mode. Lets assertions target the main fetch without depending on
+// call order/count.
 const mainFetchCalls = (mode?: string): unknown[] =>
     mockFetchSharedJson.mock.calls.filter((c) => {
+        const label = (c[1] as { label?: string } | undefined)?.label ?? '';
         const u = c[0] as string;
-        return u.includes('window=week') && (mode ? u.includes(`mode=${mode}`) : true);
+        return label.startsWith('BattleHistoryCard:')
+            && label !== 'BattleHistoryCard:sparkline'
+            && (mode ? u.includes(`mode=${mode}`) : true);
     });
 
 describe('BattleHistoryCard', () => {
@@ -123,7 +128,7 @@ describe('BattleHistoryCard', () => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
 
-        expect(screen.getByText(/Last 7 days/i)).toBeInTheDocument();
+        expect(screen.getByText(/Last 30 days/i)).toBeInTheDocument();
         // Two ships present, sorted Yamato first.
         const rows = screen.getAllByRole('row');
         // 1 header + 2 data rows.
@@ -244,17 +249,17 @@ describe('BattleHistoryCard', () => {
         expect(container).toBeEmptyDOMElement();
     });
 
-    test('initial fetch uses window=week (default) + realm', () => {
+    test('initial fetch uses window=month (default) + realm', () => {
         mockFetchSharedJson.mockReturnValue(new Promise(() => {}));
         render(<BattleHistoryCard playerName="lil_boots" realm="eu" />);
         // The card fires the main window fetch plus the always-month sparkline
-        // fetch; the main fetch is the window=week one.
+        // fetch; the main fetch is the window=month one.
         const url = mockFetchSharedJson.mock.calls
             .map((c) => c[0] as string)
-            .find((u) => u.includes('window=week'));
+            .find((u) => u.includes('window=month'));
         expect(url).toBeDefined();
         expect(url).toContain('/api/player/lil_boots/battle-history/');
-        expect(url).toContain('window=week');
+        expect(url).toContain('window=month');
         expect(url).toContain('realm=eu');
     });
 
@@ -396,7 +401,7 @@ describe('BattleHistoryCard', () => {
             // pending header so the card schedules a poll, the next does not.
             let rankedMainSeen = 0;
             mockByMode({ available_modes: ['random', 'ranked'] }, {}, (params) => {
-                if (params.get('mode') === 'ranked' && params.get('window') === 'week') {
+                if (params.get('mode') === 'ranked' && params.get('window') === 'month') {
                     rankedMainSeen += 1;
                     if (rankedMainSeen === 1) {
                         return { 'X-Ranked-Observation-Pending': 'true' };
@@ -471,23 +476,23 @@ describe('battle-history prefetch dedupe contract', () => {
         mockFetchSharedJson.mockResolvedValue({ data: buildPayload({ by_day: [] }), headers: {} });
     });
 
-    it('builders produce the canonical week/random url + cache key', () => {
+    it('builders produce the canonical month/random url + cache key', () => {
         // Drift guard: PlayerRouteView's prefetch and the card's first fetch must
         // share these EXACT strings, or the prefetch becomes a duplicate request.
         expect(battleHistoryFetchUrl('lil_boots', 'na')).toBe(
-            '/api/player/lil_boots/battle-history/?window=week&mode=random&realm=na');
+            '/api/player/lil_boots/battle-history/?window=month&mode=random&realm=na');
         expect(battleHistoryCacheKey('lil_boots', 'na')).toBe(
-            'battle-history:lil_boots:na:week:random:0:0');
+            'battle-history:lil_boots:na:month:random:0:0');
     });
 
-    it('prefetchBattleHistory fires the canonical week/random fetch', () => {
+    it('prefetchBattleHistory fires the canonical month/random fetch', () => {
         mockFetchSharedJson.mockResolvedValueOnce({ data: buildPayload(), headers: {} });
         prefetchBattleHistory('lil_boots', 'na');
         expect(mockFetchSharedJson).toHaveBeenCalledWith(
-            '/api/player/lil_boots/battle-history/?window=week&mode=random&realm=na',
+            '/api/player/lil_boots/battle-history/?window=month&mode=random&realm=na',
             expect.objectContaining({
                 ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
-                cacheKey: 'battle-history:lil_boots:na:week:random:0:0',
+                cacheKey: 'battle-history:lil_boots:na:month:random:0:0',
             }),
         );
     });
@@ -499,9 +504,9 @@ describe('battle-history prefetch dedupe contract', () => {
             expect(mockFetchSharedJson).toHaveBeenCalled();
         });
         const [url, opts] = mockFetchSharedJson.mock.calls[0];
-        expect(url).toBe('/api/player/lil_boots/battle-history/?window=week&mode=random&realm=na');
+        expect(url).toBe('/api/player/lil_boots/battle-history/?window=month&mode=random&realm=na');
         expect(opts).toEqual(expect.objectContaining({
-            cacheKey: 'battle-history:lil_boots:na:week:random:0:0',
+            cacheKey: 'battle-history:lil_boots:na:month:random:0:0',
             ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
         }));
     });

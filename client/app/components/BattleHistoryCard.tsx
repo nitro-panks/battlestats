@@ -88,7 +88,7 @@ const RANKED_PENDING_RETRY_LIMIT = 6;
 export const BATTLE_HISTORY_FETCH_TTL_MS = 60_000;
 
 export const battleHistoryFetchUrl = (
-    playerName: string, realm: string, window: string = 'week', mode: string = 'random',
+    playerName: string, realm: string, window: string = 'month', mode: string = 'random',
 ): string =>
     `/api/player/${encodeURIComponent(playerName)}/battle-history/`
     + `?window=${window}&mode=${mode}`
@@ -96,11 +96,11 @@ export const battleHistoryFetchUrl = (
 
 export const battleHistoryCacheKey = (
     playerName: string, realm: string,
-    window: string = 'week', mode: string = 'random', cacheBust: number = 0, refreshNonce: number = 0,
+    window: string = 'month', mode: string = 'random', cacheBust: number = 0, refreshNonce: number = 0,
 ): string => `battle-history:${playerName}:${realm}:${window}:${mode}:${cacheBust}:${refreshNonce}`;
 
 /**
- * Eagerly fire the initial (week / random) battle-history fetch so it runs in
+ * Eagerly fire the initial (month / random) battle-history fetch so it runs in
  * PARALLEL with the player-profile fetch, instead of starting only after the
  * profile resolves and PlayerDetail mounts the card. The card's own first fetch
  * dedupes onto this via the shared cacheKey (or hits the warm 60s cache), so it
@@ -113,7 +113,7 @@ export const battleHistoryCacheKey = (
  */
 export const prefetchBattleHistory = (playerName: string, realm: string): void => {
     void fetchSharedJson<BattleHistoryPayload>(battleHistoryFetchUrl(playerName, realm), {
-        label: 'BattleHistoryCard:week:random',
+        label: 'BattleHistoryCard:month:random',
         ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
         cacheKey: battleHistoryCacheKey(playerName, realm),
         responseHeaders: ['X-Ranked-Observation-Pending'],
@@ -604,7 +604,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     }>({ battles: null, winRate: null });
     const [error, setError] = useState<Error | null>(null);
     const [loading, setLoading] = useState(true);
-    const [window, setWindow] = useState<BattleHistoryWindow>('week');
+    const [window, setWindow] = useState<BattleHistoryWindow>('month');
     const [userPickedWindow, setUserPickedWindow] = useState(false);
     const [mode, setMode] = useState<Mode>('random');
     const [userPickedMode, setUserPickedMode] = useState(false);
@@ -778,15 +778,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             ? ['ranked']
             : [];
     // Hide the card only when the user is at the implicit defaults
-    // (mode=random, window=week) AND there's no data — preserves the
-    // pre-Phase-5 contract that the card never appears for players with
-    // no recent random battles in the default 7d window. Any explicit
-    // user pick (different mode or different window) keeps the card
-    // visible so the pill row stays reachable.
+    // (mode=random, window=month — matching the always-month sparkline) AND
+    // there's no data — the card never appears for players with no random
+    // battles in the default 30d window. Any explicit user pick (different mode
+    // or window) keeps the card visible so the pill row stays reachable.
     if (!payload || (
         !hasBattles
         && mode === 'random' && !userPickedMode
-        && window === 'week' && !userPickedWindow
+        && window === 'month' && !userPickedWindow
     )) {
         return null;
     }
