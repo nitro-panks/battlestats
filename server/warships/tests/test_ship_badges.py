@@ -744,7 +744,10 @@ class BackfillShipSeasonsCommandTests(TestCase):
         with mock.patch(f"{cmd}.current_season_index", return_value=2), \
                 mock.patch(f"{cmd}.compute_ship_top_player_snapshot",
                            return_value={"badges": 0, "ranked_rows": 0,
-                                         "ships_qualified": 0, "ships_total": 0}) as comp:
+                                         "ships_qualified": 0, "ships_total": 0}) as comp, \
+                mock.patch(
+                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
+                ):
             call_command("backfill_ship_seasons", "--wipe", "--realms", "na")
 
         # Stale ledger row wiped (compute is mocked, writes nothing back).
@@ -759,3 +762,39 @@ class BackfillShipSeasonsCommandTests(TestCase):
                 ship_season_bounds(
                     (call.kwargs["captured_on"] - SHIP_SEASON_EPOCH).days // 14),
                 (call.kwargs["window_start"], call.kwargs["window_end"]))
+
+    def test_backfill_rematerializes_landing_per_realm(self):
+        # A direct ShipTopPlayerSnapshot rewrite must refresh the landing
+        # Best-player snapshots (which bake in ship_badges) so the landing list and
+        # the profile don't disagree on medal counts until the daily cron.
+        from django.core.management import call_command
+
+        cmd = "warships.management.commands.backfill_ship_seasons"
+        with mock.patch(f"{cmd}.current_season_index", return_value=2), \
+                mock.patch(f"{cmd}.compute_ship_top_player_snapshot",
+                           return_value={"badges": 0}), \
+                mock.patch(
+                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
+                ) as dispatch:
+            call_command("backfill_ship_seasons", "--realms", "na,eu")
+
+        self.assertEqual(
+            sorted(c.kwargs["kwargs"]["realm"] for c in dispatch.call_args_list),
+            ["eu", "na"])
+        for call in dispatch.call_args_list:
+            self.assertEqual(call.kwargs["queue"], "background")
+
+    def test_no_landing_refresh_flag_skips_dispatch(self):
+        from django.core.management import call_command
+
+        cmd = "warships.management.commands.backfill_ship_seasons"
+        with mock.patch(f"{cmd}.current_season_index", return_value=2), \
+                mock.patch(f"{cmd}.compute_ship_top_player_snapshot",
+                           return_value={"badges": 0}), \
+                mock.patch(
+                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
+                ) as dispatch:
+            call_command("backfill_ship_seasons", "--realms", "na",
+                         "--no-landing-refresh")
+
+        dispatch.assert_not_called()

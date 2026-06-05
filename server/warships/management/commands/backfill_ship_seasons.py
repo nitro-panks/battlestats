@@ -13,8 +13,16 @@ Idempotent: each season is keyed by its start date, so re-running overwrites tha
 season's rows. Walk is sequential per (realm, season) — one current snapshot's
 worth of aggregation each, fine on the droplet/background.
 
+After writing, this dispatches `materialize_landing_player_best_snapshots_task`
+per affected realm (background queue) so the landing Best-player snapshots — which
+bake in each row's `ship_badges` and are otherwise rebuilt only by a daily cron —
+refresh promptly; otherwise the landing list and the profile disagree on medal
+counts until the next daily run. Pass `--no-landing-refresh` to skip the dispatch
+when no Celery broker is reachable (offline/local).
+
   python manage.py backfill_ship_seasons --wipe                  # all realms, all completed seasons
   python manage.py backfill_ship_seasons --realms na --through 2026-05-25
+  python manage.py backfill_ship_seasons --realms na --no-landing-refresh  # offline; no broker
 """
 from __future__ import annotations
 
@@ -59,6 +67,10 @@ class Command(BaseCommand):
             "--wipe", action="store_true",
             help="Delete existing ShipTopPlayerSnapshot + ShipAward rows for the "
                  "target realms before backfilling (clears rolling-era rows).")
+        parser.add_argument(
+            "--no-landing-refresh", action="store_true",
+            help="Skip the post-backfill landing Best-player re-materialize "
+                 "(use when no Celery broker is reachable, e.g. local/offline).")
 
     def handle(self, *args, **options):
         realms = (
@@ -113,3 +125,31 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f"Backfilled seasons W{first_idx}..W{last_idx} for "
             f"{len(realms)} realm(s): {len(results)} runs, {total_badges} badges."))
+
+        # The landing Best-player snapshots bake in each row's `ship_badges` at
+        # materialize time and are otherwise rebuilt only by a daily cron, so a
+        # direct rewrite of ShipTopPlayerSnapshot here leaves them stale until the
+        # next daily run — the landing list and the profile then disagree on medal
+        # counts. Re-materialize per affected realm (same chain the weekly
+        # snapshot_ship_top_players_task fires), which republishes the Redis
+        # payloads via warm_after. Dispatched async to the background queue, so it
+        # needs a reachable broker; `--no-landing-refresh` opts out for offline runs.
+        if options["no_landing_refresh"]:
+            self.stdout.write(self.style.WARNING(
+                "Skipping landing Best-player re-materialize (--no-landing-refresh); "
+                "run materialize_landing_player_best_snapshots_task per realm manually "
+                "or the landing medal counts will lag until the daily materializer."))
+            return
+
+        from warships.tasks import materialize_landing_player_best_snapshots_task
+        for realm in realms:
+            try:
+                materialize_landing_player_best_snapshots_task.apply_async(
+                    kwargs={"realm": realm}, queue="background")
+                self.stdout.write(
+                    f"Dispatched landing Best-player re-materialize for {realm}.")
+            except Exception as exc:  # broker unreachable, etc. — non-fatal.
+                self.stdout.write(self.style.WARNING(
+                    f"Could not dispatch landing re-materialize for {realm}: {exc}. "
+                    f"Run materialize_landing_player_best_snapshots_task(realm='{realm}') "
+                    f"manually so landing medal counts match the profile."))
