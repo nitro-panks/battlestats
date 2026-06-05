@@ -54,7 +54,6 @@ const TYPE_LABEL: Record<string, string> = {
     AirCarrier: 'CV',
     Submarine: 'SS',
 };
-const TYPE_ORDER = ['Destroyer', 'Cruiser', 'Battleship', 'AirCarrier', 'Submarine'];
 
 const fetchRealmTopShips = (realm: string, mode: ShipMode): Promise<RealmTopShips> =>
     fetchSharedJson<RealmTopShips>(
@@ -203,12 +202,6 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
         });
     }, [data, width, height, palette, typeColor, realm, router]);
 
-    const presentTypes = useMemo(() => {
-        if (!data) return [] as string[];
-        const seen = new Set(data.ships.map((s) => s.ship_type ?? ''));
-        return TYPE_ORDER.filter((t) => seen.has(t));
-    }, [data]);
-
     return (
         <section
             className="w-full"
@@ -236,17 +229,6 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
                             </button>
                         ))}
                     </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    {presentTypes.map((t) => (
-                        <span key={t} className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-                            <span
-                                className="inline-block h-2 w-2 rounded-sm"
-                                style={{ backgroundColor: typeColor(t) }}
-                            />
-                            {TYPE_LABEL[t] ?? t}
-                        </span>
-                    ))}
                 </div>
             </div>
             <div ref={containerRef} className="relative w-full max-w-[900px]">
