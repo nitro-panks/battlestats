@@ -288,7 +288,7 @@ def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Cal
     return all_clans
 
 
-def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, core_only: bool = False, request_delay: float = 0.25) -> dict[str, int]:
+def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, core_only: bool = False, request_delay: float = 0.25, fresh_after: Optional[datetime] = None) -> dict[str, int]:
     from warships.data import refresh_clan_cached_aggregates
 
     total = len(clan_stubs)
@@ -300,9 +300,20 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
         _touch_crawl_heartbeat(heartbeat_callback)
         clan_id = stub["clan_id"]
 
-        if resume and Clan.objects.filter(clan_id=clan_id, realm=realm, last_fetch__isnull=False).exists():
-            skipped += 1
-            continue
+        # Resume skip. With no `fresh_after`, "resume" means "skip any clan ever
+        # fetched" (the original manual `--resume` semantics). With a
+        # `fresh_after` cutoff (run-scoped resume from the scheduled task), only
+        # skip clans already fetched *during the current pass* — clans whose
+        # last_fetch predates this pass are re-crawled so periodic refresh is
+        # preserved across passes. See runbook-na-crawl-restart-loop-starves-refresh.
+        if resume:
+            already = Clan.objects.filter(
+                clan_id=clan_id, realm=realm, last_fetch__isnull=False)
+            if fresh_after is not None:
+                already = already.filter(last_fetch__gte=fresh_after)
+            if already.exists():
+                skipped += 1
+                continue
 
         info = fetch_clan_info(clan_id, realm=realm,
                                request_delay=request_delay)
@@ -364,6 +375,7 @@ def run_clan_crawl(
     heartbeat_callback: Optional[Callable[[], None]] = None,
     realm: str = DEFAULT_REALM,
     core_only: bool = False,
+    fresh_after: Optional[datetime] = None,
 ) -> dict[str, int | bool]:
     from warships.tasks import queue_efficiency_rank_snapshot_refresh
 
@@ -372,8 +384,8 @@ def run_clan_crawl(
     if not APP_ID:
         raise RuntimeError("WG_APP_ID environment variable is not set")
 
-    log.info("Starting crawl (realm=%s, resume=%s, dry_run=%s, limit=%s, core_only=%s, request_delay=%.3fs)",
-             realm, resume, dry_run, limit, core_only, request_delay)
+    log.info("Starting crawl (realm=%s, resume=%s, fresh_after=%s, dry_run=%s, limit=%s, core_only=%s, request_delay=%.3fs)",
+             realm, resume, fresh_after, dry_run, limit, core_only, request_delay)
 
     clan_stubs = crawl_clan_ids(
         limit=limit,
@@ -401,6 +413,7 @@ def run_clan_crawl(
         realm=realm,
         core_only=core_only,
         request_delay=request_delay,
+        fresh_after=fresh_after,
     )
     if summary.get("players_saved", 0) > 0 and not core_only:
         queue_efficiency_rank_snapshot_refresh(realm=realm)

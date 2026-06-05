@@ -5,6 +5,7 @@ import time
 
 from django.core.cache import cache
 from django.core.management import call_command
+from django.utils import timezone as django_timezone
 
 from battlestats.celery import app
 
@@ -27,6 +28,12 @@ CRAWL_TASK_OPTS = {
 }
 CLAN_CRAWL_LOCK_TIMEOUT = 8 * 60 * 60
 CLAN_CRAWL_HEARTBEAT_STALE_AFTER = 15 * 60
+# Run-scoped resume marker: timestamp at which the current full crawl pass
+# began. A pass takes ~14 days; the marker must outlive that plus restart gaps,
+# so give it a generous TTL well beyond a single pass. Cleared on pass
+# completion so the next scheduled pass starts fresh. See
+# runbook-na-crawl-restart-loop-starves-refresh.
+CLAN_CRAWL_PASS_MARKER_TTL = 21 * 24 * 60 * 60
 RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
 RANKED_INCREMENTAL_LOCK_TIMEOUT = 6 * 60 * 60
 PLAYER_REFRESH_LOCK_TIMEOUT = 6 * 60 * 60
@@ -80,6 +87,10 @@ def _clan_crawl_lock_key(realm: str = DEFAULT_REALM) -> str:
 
 def _clan_crawl_heartbeat_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:crawl_all_clans:{realm}:heartbeat"
+
+
+def _clan_crawl_pass_marker_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:crawl_all_clans:{realm}:pass_started_at"
 
 
 def _ranked_incremental_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -1298,8 +1309,36 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
             "Skipping crawl_all_clans_task because another crawl is already running")
         return {"status": "skipped", "reason": "already-running"}
 
+    pass_marker_key = _clan_crawl_pass_marker_key(realm)
     try:
         touch_clan_crawl_heartbeat(realm=realm)
+
+        # Run-scoped resume. A full pass takes ~14 days and is regularly
+        # interrupted by deploys (which SIGTERM the crawls worker) and the
+        # per-task soft time limit. With acks_late the same crawl message is
+        # redelivered on restart; honoring a stored pass marker lets that
+        # redelivery (and the watchdog's resume=True re-dispatch) continue the
+        # interrupted pass instead of restarting from clan 0 — which is why the
+        # crawl was previously never finishing and holding its realm lock 24/7,
+        # starving the observation floor + incrementals. A fresh pass (resume
+        # False, or no marker yet) stamps a new marker so every clan is
+        # re-crawled for periodic refresh. dry_run never touches the marker.
+        fresh_after = None
+        if not dry_run:
+            stored_marker = cache.get(pass_marker_key)
+            if resume and stored_marker is not None:
+                fresh_after = stored_marker
+                logger.info(
+                    "Resuming clan crawl pass for realm=%s started at %s",
+                    realm, fresh_after)
+            else:
+                fresh_after = django_timezone.now()
+                logger.info(
+                    "Starting fresh clan crawl pass for realm=%s at %s",
+                    realm, fresh_after)
+            cache.set(pass_marker_key, fresh_after,
+                      timeout=CLAN_CRAWL_PASS_MARKER_TTL)
+
         logger.info(
             "Starting crawl_all_clans_task resume=%s dry_run=%s limit=%s realm=%s core_only=%s",
             resume,
@@ -1316,7 +1355,14 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
                 timestamp=ts, realm=realm),
             realm=realm,
             core_only=core_only,
+            fresh_after=fresh_after,
         )
+        # A normal return means the pass walked the entire clan list, so clear
+        # the marker; the next scheduled run starts a fresh full pass. An
+        # interrupting exception (SoftTimeLimit / SIGTERM) skips this, leaving
+        # the marker so the redelivered task resumes where this one stopped.
+        if not dry_run:
+            cache.delete(pass_marker_key)
         logger.info("Finished crawl_all_clans_task: %s", summary)
         return {"status": "completed", **summary}
     finally:

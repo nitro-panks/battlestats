@@ -508,7 +508,12 @@ def register_periodic_schedules(sender, **kwargs):
                 "crontab": clan_crawl_schedule,
                 "enabled": crawler_schedules_enabled,
                 "args": json.dumps([]),
-                "kwargs": json.dumps({"resume": False, "realm": realm}),
+                # resume=True so a deploy/SIGTERM mid-pass (acks_late redelivery)
+                # or the watchdog re-dispatch continues the interrupted pass via
+                # the run-scoped pass marker instead of restarting from clan 0.
+                # The marker is cleared on pass completion, so each *new* pass
+                # still re-crawls every clan for periodic refresh.
+                "kwargs": json.dumps({"resume": True, "realm": realm}),
                 "description": f"Daily full crawl of clans and players from the Wargaming API ({realm.upper()}).",
             },
         )
