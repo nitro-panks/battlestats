@@ -111,7 +111,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
 
     return (
         <section className="mx-auto max-w-3xl">
-            <header className="mb-4 border-b border-[var(--border)] pb-3">
+            <header className="mb-4">
                 <div className="flex flex-wrap items-baseline gap-3">
                     <h1 className="text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
                         {ship.name}
