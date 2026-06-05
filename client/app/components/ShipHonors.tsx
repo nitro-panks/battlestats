@@ -4,11 +4,13 @@ import React from 'react';
 import Link from 'next/link';
 import MedalIcon from './MedalIcon';
 import { buildShipPath } from '../lib/entityRoutes';
+import { formatWeek } from '../lib/shipSeason';
 
 // Durable per-ship career record, accreted from the append-only ShipAward
 // ledger (data.get_player_ship_awards). Unlike the live ShipTopPlayerBanner
 // (current standing only), this persists through inactivity — a player who
-// stops playing keeps "7× #1 · last held Apr 12" instead of a vanished badge.
+// stops playing keeps "Shimakaze ×2: WK20'26, WK22'26" instead of a vanished
+// badge. The year disambiguates the same week number across years.
 // See agents/runbooks/runbook-ship-award-ledger-2026-06-05.md.
 
 export interface ShipAward {
@@ -20,16 +22,11 @@ export interface ShipAward {
     current_rank: number | null;
     first_on: string | null;
     last_on: string | null;
+    // Each placement as {season-start date, rank}, newest first.
+    seasons?: { captured_on: string; rank: number }[];
 }
 
 const MAX_VISIBLE = 12;
-
-const formatDate = (iso: string | null): string => {
-    if (!iso) return '';
-    const d = new Date(`${iso}T00:00:00`);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-};
 
 interface ShipHonorsProps {
     awards: ShipAward[];
@@ -51,10 +48,12 @@ const ShipHonors: React.FC<ShipHonorsProps> = ({ awards, realm }) => {
             </h2>
             <ul className="flex flex-col gap-1.5">
                 {visible.map((a) => {
-                    const headline = a.times_first > 0 ? `${a.times_first}× #1` : `best #${a.best_rank}`;
-                    const status = a.current_rank != null
-                        ? `currently #${a.current_rank}`
-                        : `last held ${formatDate(a.last_on)}`;
+                    // Season weeks (with year) for every placement, oldest → newest.
+                    const weeks = (a.seasons ?? [])
+                        .slice()
+                        .sort((x, y) => x.captured_on.localeCompare(y.captured_on))
+                        .map((s) => formatWeek(Date.parse(s.captured_on), true))
+                        .join(', ');
                     return (
                         <li key={a.ship_id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
                             <MedalIcon rank={a.current_rank ?? a.best_rank} className="shrink-0" />
@@ -65,7 +64,7 @@ const ShipHonors: React.FC<ShipHonorsProps> = ({ awards, realm }) => {
                                 {a.ship_name}
                             </Link>
                             <span className="text-[var(--text-muted)]">
-                                {headline} · {a.times_top3} season{a.times_top3 === 1 ? '' : 's'} top-3 · {status}
+                                ×{a.times_top3}{weeks ? `: ${weeks}` : ''}
                             </span>
                         </li>
                     );

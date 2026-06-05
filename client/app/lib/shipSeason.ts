@@ -45,6 +45,28 @@ export function formatSeasonLabel(startMs: number, endMs: number): string {
         : `${day(start)} ${mon(start)} – ${day(lastDay)} ${mon(lastDay)}`;
 }
 
+// ISO-8601 week number + week-year for a UTC timestamp. Used to label a season
+// by its starting week, e.g. season 0 (Mon 11 May 2026) → { week: 20, year: 2026 }.
+export function isoWeek(ms: number): { week: number; year: number } {
+    const d = new Date(ms);
+    const target = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const dayNr = (target.getUTCDay() + 6) % 7;          // Mon=0 … Sun=6
+    target.setUTCDate(target.getUTCDate() - dayNr + 3);  // Thursday of this ISO week
+    const year = target.getUTCFullYear();                // ISO week-year
+    const firstThursday = new Date(Date.UTC(year, 0, 4));
+    const firstDayNr = (firstThursday.getUTCDay() + 6) % 7;
+    firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNr + 3);
+    const week = 1 + Math.round((target.getTime() - firstThursday.getTime()) / (7 * 86_400_000));
+    return { week, year };
+}
+
+// Season week label, e.g. "WK20" or (with year) "WK20'26". `ms` is a season-start
+// timestamp (ISO date-only strings parse as UTC midnight).
+export function formatWeek(ms: number, withYear = false): string {
+    const { week, year } = isoWeek(ms);
+    return withYear ? `WK${week}'${String(year).slice(-2)}` : `WK${week}`;
+}
+
 // Compact human duration, e.g. "2d 14h", "14h 03m", "07m". Floors to the minute.
 export function formatCountdown(ms: number): string {
     if (ms <= 0) return 'now';

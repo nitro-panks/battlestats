@@ -6050,6 +6050,9 @@ def get_player_ship_badges(player: Player) -> list:
             'battles': battles,
             'avg_damage': avg_damage,
             'window_days': SHIP_LEADERBOARD_WINDOW_DAYS,
+            # Season-start date (captured_on) so the UI can label the badge with
+            # its ISO week, e.g. "WK20".
+            'window_start': r.captured_on.isoformat() if r.captured_on else None,
         }
 
     return [
@@ -6111,6 +6114,7 @@ def get_players_ship_badges_bulk(player_pks, realm: Optional[str] = None) -> dic
             'battles': battles,
             'avg_damage': round((r.damage or 0) / battles) if battles else 0,
             'window_days': SHIP_LEADERBOARD_WINDOW_DAYS,
+            'window_start': r.captured_on.isoformat() if r.captured_on else None,
         })
     return result
 
@@ -6122,24 +6126,17 @@ def get_player_ship_awards(player: Player, current_badges: Optional[list] = None
     = season-start date), `times_first` = number of **seasons** the player held #1
     in the ship; `times_top3` = seasons at any top-3 rank; `current_rank` is grafted from the
     live snapshot (None when the player isn't currently top-3 — the vacation
-    case), `last_on` is their most recent placement date. One indexed aggregate
-    on `ship_award_player_ship_idx`. See
-    `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md`.
+    case), `last_on` is their most recent placement date. `seasons` lists each
+    placement as `{captured_on, rank}` (newest first) so the UI can spell out the
+    season weeks (e.g. "WK20'26, WK22'26"). Indexed by `ship_award_player_ship_idx`.
+    See `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md`.
     """
     from warships.models import ShipAward
 
     rows = list(
         ShipAward.objects.filter(player=player)
-        .values('ship_id')
-        .annotate(
-            ship_name=Max('ship_name'),
-            times_first=Count('id', filter=Q(rank=1)),
-            times_top3=Count('id'),
-            best_rank=Min('rank'),
-            first_on=Min('captured_on'),
-            last_on=Max('captured_on'),
-        )
-        .order_by('-times_first', 'best_rank', '-times_top3')
+        .values('ship_id', 'ship_name', 'rank', 'captured_on')
+        .order_by('ship_id', '-captured_on')
     )
     if not rows:
         return []
@@ -6148,19 +6145,34 @@ def get_player_ship_awards(player: Player, current_badges: Optional[list] = None
     # passes them) so the latest-snapshot lookup isn't done twice per player.
     badges = current_badges if current_badges is not None else get_player_ship_badges(player)
     current = {b['ship_id']: b['rank'] for b in badges}
-    return [
-        {
-            'ship_id': r['ship_id'],
-            'ship_name': r['ship_name'],
-            'times_first': r['times_first'],
-            'times_top3': r['times_top3'],
-            'best_rank': r['best_rank'],
-            'current_rank': current.get(r['ship_id']),
-            'first_on': r['first_on'].isoformat() if r['first_on'] else None,
-            'last_on': r['last_on'].isoformat() if r['last_on'] else None,
-        }
-        for r in rows
-    ]
+
+    # Aggregate per ship in Python (rows are already newest-first within a ship).
+    by_ship: dict = {}
+    for r in rows:
+        by_ship.setdefault(r['ship_id'], []).append(r)
+
+    entries = []
+    for ship_id, ship_rows in by_ship.items():
+        ranks = [x['rank'] for x in ship_rows]
+        caps = [x['captured_on'] for x in ship_rows]
+        entries.append({
+            'ship_id': ship_id,
+            'ship_name': ship_rows[0]['ship_name'],
+            'times_first': sum(1 for x in ship_rows if x['rank'] == 1),
+            'times_top3': len(ship_rows),
+            'best_rank': min(ranks),
+            'current_rank': current.get(ship_id),
+            'first_on': min(caps).isoformat(),
+            'last_on': max(caps).isoformat(),
+            'seasons': [
+                {'captured_on': x['captured_on'].isoformat(), 'rank': x['rank']}
+                for x in ship_rows
+            ],
+        })
+
+    # Same ordering as before: most #1s, then best rank, then most placements.
+    entries.sort(key=lambda e: (-e['times_first'], e['best_rank'], -e['times_top3']))
+    return entries
 
 
 def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:

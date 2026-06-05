@@ -924,25 +924,37 @@ describe('PlayerDetail ship-honors panel', () => {
             />,
         );
 
-    it('renders the durable career record (N× #1 + current standing)', () => {
+    it('renders the durable career record as ×count + season weeks (oldest→newest)', () => {
         renderWithAwards([
-            { ship_id: 10, ship_name: 'Shimakaze', times_first: 7, times_top3: 11, best_rank: 1, current_rank: 1, first_on: '2026-03-01', last_on: '2026-06-01' },
+            {
+                ship_id: 10, ship_name: 'Shimakaze', times_first: 2, times_top3: 2,
+                best_rank: 1, current_rank: 1, first_on: '2026-05-11', last_on: '2026-05-25',
+                seasons: [
+                    { captured_on: '2026-05-25', rank: 1 },  // newest first (as the API returns)
+                    { captured_on: '2026-05-11', rank: 1 },
+                ],
+            },
         ]);
 
         expect(screen.getByText('Ship Honors')).toBeInTheDocument();
         expect(screen.getByText('Shimakaze')).toBeInTheDocument();
-        expect(screen.getByText(/7× #1/)).toBeInTheDocument();
-        expect(screen.getByText(/currently #1/)).toBeInTheDocument();
+        // ×<count>: weeks shown oldest→newest, year-disambiguated.
+        expect(screen.getByText(/×2/)).toBeInTheDocument();
+        expect(screen.getByText(/WK20'26, WK22'26/)).toBeInTheDocument();
     });
 
-    it('shows "last held <date>" for a record with no current standing (vacation)', () => {
+    it('persists through inactivity (year-disambiguated weeks, no current-standing text)', () => {
         renderWithAwards([
-            { ship_id: 20, ship_name: 'Zao', times_first: 3, times_top3: 5, best_rank: 1, current_rank: null, first_on: '2026-02-01', last_on: '2026-04-12' },
+            {
+                ship_id: 20, ship_name: 'Zao', times_first: 1, times_top3: 1,
+                best_rank: 1, current_rank: null, first_on: '2026-06-08', last_on: '2026-06-08',
+                seasons: [{ captured_on: '2026-06-08', rank: 1 }],
+            },
         ]);
 
-        expect(screen.getByText(/3× #1/)).toBeInTheDocument();
-        expect(screen.getByText(/last held/)).toBeInTheDocument();
+        expect(screen.getByText(/×1: WK24'26/)).toBeInTheDocument();
         expect(screen.queryByText(/currently/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/last held/)).not.toBeInTheDocument();
     });
 
     it('renders nothing when there are no awards', () => {

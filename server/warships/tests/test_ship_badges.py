@@ -543,6 +543,12 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertEqual(shima["times_top3"], 2)
         self.assertEqual(shima["first_on"], s0_start.isoformat())
         self.assertEqual(shima["last_on"], s1_start.isoformat())
+        # `seasons` lists each placement {captured_on, rank}, newest first — the
+        # UI spells these out as WK<n>'YY for the Ship Honors panel.
+        self.assertEqual(
+            shima["seasons"],
+            [{"captured_on": s1_start.isoformat(), "rank": 1},
+             {"captured_on": s0_start.isoformat(), "rank": 1}])
 
     def test_leaderboard_payload_carries_season_bounds(self):
         for i in range(3):

@@ -439,25 +439,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 ))}
                             </div>
                             <div className="flex items-center gap-2 self-start">
-                                {refreshStatus && !player.is_hidden ? (
-                                    refreshStatus.phase === 'loading' ? (
-                                        <span
-                                            className="rainbow-text text-xs font-semibold"
-                                            aria-live="polite"
-                                            data-testid="live-refresh-status"
-                                        >
-                                            Loading…
-                                        </span>
-                                    ) : refreshStatus.secondsRemaining > 0 ? (
-                                        <span
-                                            className="text-xs font-medium text-[var(--accent-light)]"
-                                            aria-live="polite"
-                                            data-testid="live-refresh-status"
-                                        >
-                                            {`Next update: ${Math.ceil(refreshStatus.secondsRemaining / 60)} min`}
-                                        </span>
-                                    ) : null
-                                ) : null}
                                 <button
                                     type="button"
                                     onClick={handleShare}
@@ -478,18 +459,41 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             <p className="text-sm text-[var(--accent-light)]">
                                 Last played {player.days_since_last_battle} days ago
                             </p>
-                            {player.is_streamer && player.twitch_handle && player.twitch_url ? (
-                                <a
-                                    href={player.twitch_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--accent-mid)] hover:text-[var(--accent-dark)] hover:underline"
-                                    aria-label={`Twitch channel for ${player.twitch_handle}`}
-                                >
-                                    <span>{player.twitch_handle}</span>
-                                    <TwitchStreamerIcon size="header" titleText={`Watch ${player.twitch_handle} on Twitch`} ariaLabel="Twitch" />
-                                </a>
-                            ) : null}
+                            {/* Right group: refresh status floats left of the streamer link
+                                (which stays right-most); refresh alone is right-justified. */}
+                            <div className="flex items-center gap-3">
+                                {refreshStatus && !player.is_hidden ? (
+                                    refreshStatus.phase === 'loading' ? (
+                                        <span
+                                            className="rainbow-text text-xs font-semibold"
+                                            aria-live="polite"
+                                            data-testid="live-refresh-status"
+                                        >
+                                            Loading…
+                                        </span>
+                                    ) : refreshStatus.secondsRemaining > 0 ? (
+                                        <span
+                                            className="text-xs font-medium text-[var(--accent-light)]"
+                                            aria-live="polite"
+                                            data-testid="live-refresh-status"
+                                        >
+                                            {`Next update: ${Math.ceil(refreshStatus.secondsRemaining / 60)} min`}
+                                        </span>
+                                    ) : null
+                                ) : null}
+                                {player.is_streamer && player.twitch_handle && player.twitch_url ? (
+                                    <a
+                                        href={player.twitch_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--accent-mid)] hover:text-[var(--accent-dark)] hover:underline"
+                                        aria-label={`Twitch channel for ${player.twitch_handle}`}
+                                    >
+                                        <span>{player.twitch_handle}</span>
+                                        <TwitchStreamerIcon size="header" titleText={`Watch ${player.twitch_handle} on Twitch`} ariaLabel="Twitch" />
+                                    </a>
+                                ) : null}
+                            </div>
                         </div>
                     </div>
 
