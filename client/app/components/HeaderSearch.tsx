@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { buildClanPath, buildPlayerPath } from "../lib/entityRoutes";
 import { useRealm } from "../context/RealmContext";
 import { withRealm } from "../lib/realmParams";
+import { trackEvent } from "../lib/umami";
 import HiddenAccountIcon from "./HiddenAccountIcon";
 import SearchModeToggle from "./SearchModeToggle";
 import wrColor from "../lib/wrColor";
@@ -51,9 +52,11 @@ const HeaderSearch: React.FC = () => {
 
     const navigateToSuggestion = (suggestion: Suggestion) => {
         if (isClanSuggestion(suggestion)) {
+            trackEvent("search", { mode: "clan", realm, via: "suggestion" });
             const targetPath = buildClanPath(suggestion.clan_id, suggestion.name, realm);
             startTransition(() => { router.push(targetPath); });
         } else {
+            trackEvent("search", { mode: "player", realm, via: "suggestion" });
             const targetPath = buildPlayerPath(suggestion.name, realm);
             startTransition(() => { router.push(targetPath); });
         }
@@ -80,6 +83,7 @@ const HeaderSearch: React.FC = () => {
             return;
         }
 
+        trackEvent("search", { mode: "player", realm, via: "text" });
         const targetPath = buildPlayerPath(trimmedQuery, realm);
         startTransition(() => { router.push(targetPath); });
     };
@@ -97,7 +101,9 @@ const HeaderSearch: React.FC = () => {
     };
 
     const handleToggle = () => {
-        setSearchMode((prev) => (prev === "player" ? "clan" : "player"));
+        const nextMode: SearchMode = searchMode === "player" ? "clan" : "player";
+        trackEvent("search-mode-toggle", { mode: nextMode });
+        setSearchMode(nextMode);
         setSuggestions([]);
         setHighlightedSuggestionIndex(-1);
         setIsSuggestionListOpen(false);

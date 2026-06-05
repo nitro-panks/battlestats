@@ -5,6 +5,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck, faChevronDown, faGlobe } from '@fortawesome/free-solid-svg-icons';
 import { useRealm, type Realm } from '../context/RealmContext';
 import { useRouter } from 'next/navigation';
+import { trackEvent } from '../lib/umami';
 
 interface RealmOption {
     value: Realm;
@@ -58,6 +59,7 @@ const RealmSelector: React.FC = () => {
     }, [open]);
 
     const handleRealmChange = (newRealm: Realm) => {
+        trackEvent('realm-change', { realm: newRealm });
         setRealm(newRealm);
         setOpen(false);
         router.replace(`/?realm=${newRealm}`);

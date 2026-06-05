@@ -1904,16 +1904,18 @@ def sitemap_entities(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def realm_top_ships(request, realm: str) -> Response:
-    """Most-played ships on a realm over the previous 7 full UTC days.
+    """Most-played ships on a realm over the most recently completed ship season.
 
     Powers the landing treemap: each ship is a tile sized by battles, colored
     by type and shaded by tier. Sums BattleEvent.battles_delta per ship over the
-    window [midnight_utc - 7d, midnight_utc) — the current UTC day is excluded —
-    then joins Ship for type + tier. A static daily count: recomputed once per
-    day (day-tagged Redis key) and served from cache otherwise.
+    most recently completed fixed 2-week ship season — the same window the
+    /ship/<id> leaderboard and profile medals reflect — then joins Ship for
+    type + tier. A static per-season count: recomputed once per season
+    (season-tagged Redis key) and served from cache otherwise.
 
     Response shape:
-        {realm, days, window_start, window_end, mode,
+        {realm, days, season_index, season_start, season_end,
+         window_start, window_end, mode,
          ships: [{ship_id, ship_name, ship_type, tier, battles}]}
     """
     from warships.data import compute_realm_top_ships
@@ -1922,9 +1924,9 @@ def realm_top_ships(request, realm: str) -> Response:
     if realm not in VALID_REALMS:
         return Response({"detail": "Unknown realm."}, status=status.HTTP_404_NOT_FOUND)
 
-    # The shared helper fixes the 7-day window, clamps limit/mode, and handles
-    # the Redis cache (day-tagged key, TTL to next midnight); the daily warmer
-    # calls the same helper with use_cache=False.
+    # The shared helper fixes the season window, clamps limit/mode, and handles
+    # the Redis cache (season-tagged key, TTL to the next season boundary); the
+    # daily warmer calls the same helper with use_cache=False.
     payload = compute_realm_top_ships(
         realm,
         limit=request.query_params.get("limit", 25),

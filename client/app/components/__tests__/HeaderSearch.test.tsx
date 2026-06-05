@@ -20,6 +20,11 @@ jest.mock('../../lib/realmParams', () => ({
     withRealm: (url: string, realm: string) => `${url}${url.includes('?') ? '&' : '?'}realm=${realm}`,
 }));
 
+const trackEventMock = jest.fn();
+jest.mock('../../lib/umami', () => ({
+    trackEvent: (...args: unknown[]) => trackEventMock(...args),
+}));
+
 import HeaderSearch from '../HeaderSearch';
 
 const buildOkResponse = (payload: unknown) => ({
@@ -31,6 +36,7 @@ let fetchMock: jest.Mock;
 
 beforeEach(() => {
     pushMock.mockReset();
+    trackEventMock.mockReset();
     mockRealm = 'na';
     fetchMock = jest.fn(() => Promise.resolve(buildOkResponse([])));
     global.fetch = fetchMock as unknown as typeof fetch;
@@ -68,6 +74,34 @@ describe('HeaderSearch toggle', () => {
         expect(screen.getByPlaceholderText('Search Clans')).toBeTruthy();
         expect(toggle).toHaveAttribute('aria-checked', 'true');
         expect(toggle).toHaveAttribute('title', 'Search Clans');
+    });
+
+    it('tracks a search-mode-toggle umami event with the next mode', () => {
+        render(<HeaderSearch />);
+        fireEvent.click(screen.getByRole('switch'));
+        expect(trackEventMock).toHaveBeenCalledWith('search-mode-toggle', { mode: 'clan' });
+    });
+
+    it('tracks a search umami event (with realm) when navigating to a suggestion', async () => {
+        fetchMock.mockImplementation(() =>
+            Promise.resolve(buildOkResponse([
+                { clan_id: 42, tag: 'ABC', name: 'Alpha Bravo', members_count: 30 },
+            ]))
+        );
+
+        render(<HeaderSearch />);
+        await act(async () => {
+            fireEvent.click(screen.getByRole('switch'));
+        });
+        const input = screen.getByPlaceholderText('Search Clans');
+        await typeAndWaitForFetch(input, 'alpha');
+
+        trackEventMock.mockReset();  // ignore the toggle event from above
+        fireEvent.mouseDown(screen.getByText('Alpha Bravo'));
+
+        expect(trackEventMock).toHaveBeenCalledWith('search', {
+            mode: 'clan', realm: 'na', via: 'suggestion',
+        });
     });
 
     it('fetches from clan-suggestions endpoint in clan mode', async () => {

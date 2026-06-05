@@ -181,11 +181,12 @@ def register_periodic_schedules(sender, **kwargs):
     PeriodicTask.objects.filter(name="landing-page-warmer").delete()
 
     # -- Realm top-ships treemap warmer --
-    # The treemap is a static daily count over the previous 7 full UTC days
-    # (current day excluded), so it only needs warming once per day, just after
-    # UTC midnight when the prior day has closed. Fires at hour 0, striped per
-    # realm by a few minutes (NA :05, EU :10, ASIA :15 by default) so the three
-    # realms don't recompute concurrently on the background worker.
+    # The treemap is a static per-season count over the most recently completed
+    # fixed 2-week ship season (cached under a season-tagged key). A daily warm
+    # is still cheap and keeps the cache fresh across a season boundary, when the
+    # completed-season key advances. Fires at hour 0, striped per realm by a few
+    # minutes (NA :05, EU :10, ASIA :15 by default) so the three realms don't
+    # recompute concurrently on the background worker.
     top_ships_warm_minute = int(os.getenv("TOP_SHIPS_WARM_MINUTE", "5"))
     for realm in sorted(VALID_REALMS):
         realm_minute = (top_ships_warm_minute +
@@ -207,7 +208,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
-                "description": f"Daily warm of top-ships treemap caches, prev 7 UTC days, random+ranked ({realm.upper()}).",
+                "description": f"Daily warm of top-ships treemap caches, last completed ship season, random+ranked ({realm.upper()}).",
             },
         )
 

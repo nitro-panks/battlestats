@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck, faChevronDown, faMoon, faSun } from '@fortawesome/free-solid-svg-icons';
 import { useTheme, type Theme } from '../context/ThemeContext';
+import { trackEvent } from '../lib/umami';
 
 interface ThemeOption {
     value: Theme;
@@ -108,6 +109,7 @@ const ThemeToggle: React.FC = () => {
                                 aria-selected={isActive}
                                 type="button"
                                 onClick={() => {
+                                    trackEvent('theme-change', { theme: option.value });
                                     setTheme(option.value);
                                     setOpen(false);
                                 }}

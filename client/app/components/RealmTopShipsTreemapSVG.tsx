@@ -2,11 +2,12 @@
 
 // Realm top-ships treemap.
 //
-// The 25 most-played ships on the active realm over the PREVIOUS 7 FULL UTC DAYS
-// (the current day is excluded), as a treemap: each tile is one ship, sized by
-// battles, COLORED BY SHIP TYPE and SHADED BY TIER (lighter = low tier, darker =
-// high tier). Fed by `/api/realm/<realm>/top-ships`, a static daily count that
-// aggregates BattleEvent over the 7-day window and joins Ship for type/tier.
+// The 25 most-played ships on the active realm over the MOST RECENTLY COMPLETED
+// 2-WEEK SHIP SEASON (the same window the /ship leaderboard + profile medals
+// reflect), as a treemap: each tile is one ship, sized by battles, COLORED BY
+// SHIP TYPE and SHADED BY TIER (lighter = low tier, darker = high tier). Fed by
+// `/api/realm/<realm>/top-ships`, a static per-season count that aggregates
+// BattleEvent over the completed-season window and joins Ship for type/tier.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -16,6 +17,7 @@ import { useTheme } from '../context/ThemeContext';
 import { chartColors } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { buildShipPath } from '../lib/entityRoutes';
+import { formatSeasonLabel } from '../lib/shipSeason';
 
 interface TopShip {
     ship_id: number;
@@ -31,6 +33,9 @@ interface RealmTopShips {
     realm: string;
     days?: number;
     mode?: ShipMode;
+    season_index?: number;
+    season_start?: string;  // date-only ISO (UTC midnight), inclusive
+    season_end?: string;    // date-only ISO (UTC midnight), exclusive
     ships: TopShip[];
 }
 
@@ -38,9 +43,10 @@ const SHIP_MODES: ShipMode[] = ['random', 'ranked'];
 const SHIP_MODE_LABEL: Record<ShipMode, string> = { random: 'Random', ranked: 'Ranked' };
 
 const SHIP_LIMIT = 25;
-// 1h client TTL. The payload only changes once per day (static daily count), but
-// a short client TTL keeps a tab left open across UTC midnight from showing the
-// stale window for long; the backend serves it from a warm day-tagged cache.
+// 1h client TTL. The payload only changes once per 2-week season (static
+// per-season count), but a short client TTL keeps a tab left open across a
+// season boundary from showing the stale window for long; the backend serves it
+// from a warm season-tagged cache.
 const TOP_SHIPS_FETCH_TTL_MS = 3_600_000;
 
 const TYPE_LABEL: Record<string, string> = {
@@ -133,6 +139,17 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
         () => Math.max(280, Math.min(440, Math.round(width * 0.4))),
         [width],
     );
+
+    // Season range label (e.g. "11–24 May") from the payload's date-only bounds.
+    // `season_end` is the exclusive next-season start; formatSeasonLabel already
+    // steps back a day for the last included date.
+    const seasonLabel = useMemo(() => {
+        if (!data?.season_start || !data?.season_end) return null;
+        const startMs = Date.parse(data.season_start);
+        const endMs = Date.parse(data.season_end);
+        if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null;
+        return formatSeasonLabel(startMs, endMs);
+    }, [data?.season_start, data?.season_end]);
 
     useEffect(() => {
         if (!svgRef.current || !data || width <= 0 || data.ships.length === 0) return;
@@ -228,7 +245,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex items-center gap-3">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                        {realm.toUpperCase()} most-played ships · Previous 7D
+                        {realm.toUpperCase()} most-played ships{seasonLabel ? ` · ${seasonLabel}` : ' · Last season'}
                     </h2>
                     <div className="flex items-center gap-1 text-xs" role="group" aria-label="Battle mode">
                         {SHIP_MODES.map((m) => (
@@ -250,7 +267,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
                 </div>
             </div>
             <div ref={containerRef} className="relative w-full max-w-[900px]">
-                <svg ref={svgRef} role="img" aria-label={`${realm} top ${SHIP_LIMIT} most-played ships over the previous 7 days`} />
+                <svg ref={svgRef} role="img" aria-label={`${realm} top ${SHIP_LIMIT} most-played ships over the most recently completed 2-week ship season`} />
                 {hover && (
                     <div
                         className="pointer-events-none absolute z-10 rounded bg-[var(--bg-page)] px-2 py-1 text-xs shadow-md ring-1 ring-[var(--accent-faint)]"

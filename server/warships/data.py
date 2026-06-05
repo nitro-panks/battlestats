@@ -6308,16 +6308,17 @@ def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
 
 
 def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
-    """Most-played ships on a realm over the previous 7 full UTC days (treemap source).
+    """Most-played ships on a realm over the most recently completed ship season.
 
     Sums ``BattleEvent.battles_delta`` per ship — filtered by realm + mode over the
-    window ``[midnight_utc - 7d, midnight_utc)``, i.e. the current UTC day is
-    *excluded* — joins ``Ship`` for type/tier, and returns the top-``limit`` as a
-    payload dict. This is a *static daily count*: computed once and cached under a
-    day-tagged key until just past the next UTC midnight, so it changes at most
-    once per day. Shared by the ``realm_top_ships`` API view and the daily
-    ``warm_realm_top_ships_task`` warmer; pass ``use_cache=False`` to force a
-    recompute (the warmer does, just after midnight).
+    most recently *completed* fixed 2-week ship season (the same window the
+    ``/ship/<id>`` leaderboard and profile medals reflect; see
+    ``most_recent_completed_season``) — joins ``Ship`` for type/tier, and returns
+    the top-``limit`` as a payload dict. A closed season's window is immutable (no
+    new events ever fall inside it), so this is computed once per season and cached
+    under a season-tagged key until the next boundary. Shared by the
+    ``realm_top_ships`` API view and the daily ``warm_realm_top_ships_task``
+    warmer; pass ``use_cache=False`` to force a recompute.
     """
     from warships.models import BattleEvent
 
@@ -6331,17 +6332,15 @@ def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
         limit = 25
     limit = max(5, min(limit, 50))
 
-    # Window: the 7 full calendar days before today, in UTC. ``window_end`` is
-    # today's midnight (exclusive), so the in-progress current day never counts.
-    # The whole stack runs UTC (Celery crontabs, django_timezone) so UTC is the
-    # consistent day boundary; change the single line below if a realm-local
-    # boundary is ever wanted.
-    now = django_timezone.now()
-    window_end = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    window_start = window_end - timedelta(days=7)
-    day_tag = window_end.strftime("%Y%m%d")
+    # Window: the most recently completed fixed 2-week ship season, aligning the
+    # treemap with the /ship leaderboard + profile medals (identical season
+    # bounds). A closed season's window is immutable, so the aggregation only
+    # changes at a season boundary — the cache key carries the season index and
+    # the TTL runs to the next boundary.
+    season_idx, season_start, season_end = most_recent_completed_season()
+    window_start, window_end = _season_window_datetimes(season_start, season_end)
 
-    cache_key = realm_cache_key(realm, f"top-ships:{mode}:7d:{limit}:{day_tag}")
+    cache_key = realm_cache_key(realm, f"top-ships:{mode}:season{season_idx}:{limit}")
     if use_cache:
         cached = cache.get(cache_key)
         if cached is not None:
@@ -6375,16 +6374,22 @@ def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
 
     payload = {
         "realm": realm,
-        "days": 7,
+        "days": SHIP_SEASON_LENGTH_DAYS,
+        "season_index": season_idx,
+        "season_start": season_start.isoformat(),  # date-only ISO (UTC midnight)
+        "season_end": season_end.isoformat(),      # exclusive end (next season start)
         "window_start": window_start.isoformat(),
         "window_end": window_end.isoformat(),
         "mode": mode,
         "ships": payload_ships,
     }
-    # Cache until ~1h past the next UTC midnight: by then the daily warmer has
-    # written the new day's tagged key, so this one expires rather than serving
-    # a stale window. The day-tag in the key means each day is a distinct entry.
-    next_midnight = window_end + timedelta(days=1)
-    ttl = int((next_midnight - now).total_seconds()) + 3600
+    # Cache until ~1h past the next season boundary: at that point
+    # most_recent_completed_season advances, the season-tagged key changes, and
+    # the daily warmer recomputes the new season. The closed-season aggregation is
+    # immutable until then, so the (up to ~2 week) TTL is safe.
+    now = django_timezone.now()
+    _, current_season_end = ship_season_bounds(current_season_index())
+    next_boundary_dt, _ = _season_window_datetimes(current_season_end, current_season_end)
+    ttl = max(3600, int((next_boundary_dt - now).total_seconds()) + 3600)
     cache.set(cache_key, payload, timeout=ttl)
     return payload
