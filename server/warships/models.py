@@ -677,6 +677,48 @@ class PlayerDailyShipStats(models.Model):
         )
 
 
+class ShipTopPlayerSnapshot(models.Model):
+    """Weekly per-realm top-N players for each Tier-10 ship by random-battle WR.
+
+    Written by `snapshot_ship_top_players_task` once per realm per week (the
+    aggregation/write lives in `data.compute_ship_top_player_snapshot`). Read on
+    the player-detail path (`data.get_player_ship_badges`) to render gold/silver/
+    bronze profile badges. `captured_on` is the run date; the trailing window is
+    `[captured_on - 7d, captured_on]`. A profile surfaces only its rows at the
+    latest `captured_on`. `win_rate`/`battles` are denormalized so the read path
+    needs no re-aggregation. See
+    `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
+    """
+    captured_on = models.DateField(db_index=True)
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM)
+    ship_id = models.BigIntegerField(db_index=True)
+    ship_name = models.CharField(max_length=200, blank=True, default='')
+    rank = models.IntegerField()
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name='ship_top_player_badges')
+    win_rate = models.FloatField(default=0.0)
+    battles = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['captured_on', 'realm', 'ship_id', 'rank'],
+                name='unique_ship_top_player_per_rank'),
+        ]
+        indexes = [
+            models.Index(fields=['player', '-captured_on'],
+                         name='ship_badge_player_captured_idx'),
+        ]
+
+    def __str__(self):
+        return (
+            f"ShipTopPlayerSnapshot({self.realm} {self.captured_on} "
+            f"ship={self.ship_id} #{self.rank} player={self.player_id})"
+        )
+
+
 class _PlayerPeriodShipStatsBase(models.Model):
     """Shared shape for the weekly / monthly / yearly rollup tiers.
 

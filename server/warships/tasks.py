@@ -806,6 +806,30 @@ def refresh_efficiency_rank_snapshot_task(self, realm=DEFAULT_REALM):
 
 
 @app.task(bind=True, **TASK_OPTS)
+def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
+    """Weekly per-realm T10 top-player badge snapshot. No-op unless
+    SHIP_BADGE_SNAPSHOT_ENABLED=1 (the schedule is always registered; this flag
+    is the rollout switch). Delegates to data.compute_ship_top_player_snapshot.
+    See agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
+    """
+    if os.getenv("SHIP_BADGE_SNAPSHOT_ENABLED", "0") != "1":
+        logger.info(
+            "snapshot_ship_top_players_task skipped "
+            "(SHIP_BADGE_SNAPSHOT_ENABLED!=1) realm=%s", realm)
+        return {"status": "disabled", "realm": realm}
+
+    from warships.data import compute_ship_top_player_snapshot
+
+    logger.info("Starting snapshot_ship_top_players_task realm=%s", realm)
+    return _run_locked_task(
+        "snapshot_ship_top_players",
+        realm,
+        self.request.id,
+        lambda: compute_ship_top_player_snapshot(realm=realm),
+    )
+
+
+@app.task(bind=True, **TASK_OPTS)
 def warm_player_ranked_wr_battles_correlation_task(self, realm=DEFAULT_REALM):
     from warships.data import warm_player_ranked_wr_battles_population_correlation
 

@@ -135,7 +135,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - `client/app/globals.css` — CSS custom properties for theming (`--bg-*`, `--text-*`, `--accent-*`), dark mode via `[data-theme="dark"]`
 - `client/app/components/HeaderSearch.tsx` — Dual-mode player/clan search with toggle, debounced autocomplete, client-side suggestion cache per mode, and themed input
 - `client/app/components/SearchModeToggle.tsx` — Compact pill toggle (P/C) for switching between player and clan search modes
-- Shared icon components in `client/app/components/` — 7 player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon) with `size` prop for surface variants
+- Shared icon components in `client/app/components/` — 8 player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon, ShipTopPlayerBadgeIcon) with `size` prop for surface variants. ShipTopPlayerBadgeIcon renders a gold/silver/bronze medal per weekly T10 top-3 finish, fed by the player payload's `ship_badges` field.
 
 ### Caching strategy
 
@@ -170,7 +170,7 @@ Resilience mechanisms:
 
 ### Per-realm schedule striping
 
-Periodic tasks that run per realm (NA, EU, ASIA) are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` in `signals.py` so at most one realm is mid-cycle at any moment on the `background` worker. Striped families: landing/recent-players/distribution/correlation/hot-entity/recently-viewed warmers, incremental player refresh, incremental ranked refresh, and the rolling BattleObservation floor. The `_realm_crontab_for_cycle(realm, cycle_minutes, base_minute=0)` helper computes per-realm crontab `(minute_str, hour_str)` from the cycle length and offset index. Daily-cron families that already had hour offsets (clan crawl, clan-tier-dist warmer, best-player snapshot) continue to use `REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}`.
+Periodic tasks that run per realm (NA, EU, ASIA) are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` in `signals.py` so at most one realm is mid-cycle at any moment on the `background` worker. Striped families: landing/recent-players/distribution/correlation/hot-entity/recently-viewed warmers, incremental player refresh, incremental ranked refresh, and the rolling BattleObservation floor. The `_realm_crontab_for_cycle(realm, cycle_minutes, base_minute=0)` helper computes per-realm crontab `(minute_str, hour_str)` from the cycle length and offset index. Daily/weekly-cron families that already had hour offsets (clan crawl, clan-tier-dist warmer, best-player snapshot, the weekly ship-badge snapshot) continue to use `REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}`.
 
 Battle pickup latency: the rolling 6-hourly observation floor (active-7d players whose latest observation > `BATTLE_OBSERVATION_FLOOR_HOURS` = 8h) guarantees no active player goes >8h without a fresh `BattleObservation`, regardless of whether the tiered crawler reached them. Combined with the page-load 15-min staleness check on visited players, the worst-case "battle landed in DB" lag for any active player on any realm is roughly 8h.
 
@@ -201,7 +201,7 @@ Player detail pages coordinate chart rendering vs hydration polling:
 
 ### Data models (server/warships/models.py)
 
-Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot/LandingRecentPlayersSnapshot (landing durable fallbacks), MvPlayerDistributionStats (population distribution materialized stats), StreamerSubmission.
+Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot/LandingRecentPlayersSnapshot (landing durable fallbacks), MvPlayerDistributionStats (population distribution materialized stats), ShipTopPlayerSnapshot (weekly per-realm top-3 players per T10 ship — backs the profile "top ship player" badges; see `runbook-ship-top-player-badges-2026-06-05.md`), StreamerSubmission.
 
 Battle-history pipeline (rollout runbook): BattleObservation (raw `ships/stats/` payload snapshots, JSON), BattleEvent (per-event deltas — `battles_delta`/`damage_delta`/etc. plus the Phase 7 widening: `main_shots_delta`, `main_hits_delta`, `main_frags_delta`, `secondary_shots_delta`, `secondary_hits_delta`, `secondary_frags_delta`, `torpedo_shots_delta`, `torpedo_hits_delta`, `torpedo_frags_delta`, `damage_scouting_delta`, `ships_spotted_delta`, `capture_points_delta`, `dropped_capture_points_delta`, `team_capture_points_delta`), PlayerDailyShipStats (per-day per-ship aggregate of every BattleEvent column), PlayerWeeklyShipStats / PlayerMonthlyShipStats / PlayerYearlyShipStats (period rollup tiers; populated only when the period writer is reactivated).
 
@@ -317,6 +317,13 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `BATTLE_HISTORY_API_ENABLED` — When `1`, exposes `GET /api/player/<name>/battle-history?days=N` (default 7, max 30). Reads `PlayerDailyShipStats` only; cached in Redis under `{realm}:battle-history:{name}:{days}` with a 5-minute TTL. Returns 404 when off so the absence is indistinguishable from a missing route. Default `0`. (Phase 4)
 - `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED` — When `1`, `update_battle_data` makes a third WG call (`seasons/shipstats/`) per refresh and stores the payload on `BattleObservation.ranked_ships_stats_json`. The diff lane in `record_observation_from_payloads` then emits per-(ship, season) `BattleEvent(mode='ranked')` rows on the second observation, which feed `PlayerDailyShipStats(mode='ranked')` via the same on-write rollup writer used for randoms. Default `0`. See `agents/runbooks/runbook-ranked-battle-history-rollout-2026-05-02.md`
 - `BATTLE_HISTORY_RANKED_CAPTURE_REALMS` — Comma-separated realm gate for ranked capture. Capture only runs when both `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=1` AND the player's realm appears in this list. Lets ranked rollout proceed realm-by-realm without rewiring code. Default: `na` (NA-only rollout). Widen to `na,eu,asia` once each realm's baseline fill (`establish_ranked_baseline`) has run.
+- `SHIP_BADGE_SNAPSHOT_ENABLED` — Master gate for the weekly per-realm "top ship player" badge snapshot (`snapshot_ship_top_players_task`). The beat schedule is always registered; the task is a no-op unless this is `1`. Default `0`. See `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
+- `SHIP_BADGE_MIN_BATTLES` — Minimum random battles a player must have in a ship over the trailing 7d to qualify for that ship's badge ranking (default `10`). Read at task call time, so a re-run picks up changes without a redeploy.
+- `SHIP_BADGE_MIN_SHIP_POPULATION` — Minimum qualifying players a ship needs before any badge is minted for it (default `25`). Suppresses meaningless "#1" badges on rarely-played ships.
+- `SHIP_BADGE_TOP_N` — Placements awarded per ship (default `3` → gold/silver/bronze).
+- `SHIP_BADGE_TIER` — Ship tier in scope (default `10`).
+- `SHIP_BADGE_RETENTION_DAYS` — Prune `ShipTopPlayerSnapshot` rows older than this (default `21`).
+- `SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK` / `SHIP_BADGE_SNAPSHOT_HOUR` — Weekly cron day/hour (UTC base) for the snapshot; per-realm hour offset via `REALM_CRAWL_CRON_HOURS` (defaults: `1` Monday / `2`).
 
 ### Client env
 
