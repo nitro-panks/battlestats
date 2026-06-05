@@ -876,3 +876,58 @@ describe('PlayerDetail ship-badge banner', () => {
         expect(screen.getByText('ShipC')).toBeInTheDocument();
     });
 });
+
+describe('PlayerDetail ship-honors panel', () => {
+    let consoleErrorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+        mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: null });
+        mockClanBattleSummary = undefined;
+        mockRankedHeatmapVisibility = undefined;
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockImplementation(() => Promise.resolve({ data: [], headers: {} }));
+        consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        jest.useRealTimers();
+    });
+
+    afterEach(() => {
+        mockUseClanMembers.mockClear();
+        consoleErrorSpy.mockRestore();
+    });
+
+    const renderWithAwards = (ship_awards: unknown) =>
+        render(
+            <PlayerDetail
+                player={{ ...basePlayer, ship_awards } as never}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+    it('renders the durable career record (N× #1 + current standing)', () => {
+        renderWithAwards([
+            { ship_id: 10, ship_name: 'Shimakaze', times_first: 7, times_top3: 11, best_rank: 1, current_rank: 1, first_on: '2026-03-01', last_on: '2026-06-01' },
+        ]);
+
+        expect(screen.getByText('Ship Honors')).toBeInTheDocument();
+        expect(screen.getByText('Shimakaze')).toBeInTheDocument();
+        expect(screen.getByText(/7× #1/)).toBeInTheDocument();
+        expect(screen.getByText(/currently #1/)).toBeInTheDocument();
+    });
+
+    it('shows "last held <date>" for a record with no current standing (vacation)', () => {
+        renderWithAwards([
+            { ship_id: 20, ship_name: 'Zao', times_first: 3, times_top3: 5, best_rank: 1, current_rank: null, first_on: '2026-02-01', last_on: '2026-04-12' },
+        ]);
+
+        expect(screen.getByText(/3× #1/)).toBeInTheDocument();
+        expect(screen.getByText(/last held/)).toBeInTheDocument();
+        expect(screen.queryByText(/currently/)).not.toBeInTheDocument();
+    });
+
+    it('renders nothing when there are no awards', () => {
+        renderWithAwards([]);
+        expect(screen.queryByText('Ship Honors')).not.toBeInTheDocument();
+    });
+});

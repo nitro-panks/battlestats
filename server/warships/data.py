@@ -11,7 +11,7 @@ from warships.models import PlayerAchievementStat, MvPlayerDistributionStats
 from warships.models import DEFAULT_REALM, realm_cache_key, Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 from django.utils import timezone as django_timezone
 from django.db.models.functions import Cast, Lower, TruncMonth
-from django.db.models import Avg, Case, Count, F, FloatField, IntegerField, Q, Sum, Value, When
+from django.db.models import Avg, Case, Count, F, FloatField, IntegerField, Max, Min, Q, Sum, Value, When
 from django.db import connection, transaction
 from django.core.cache import cache
 from collections import Counter
@@ -5746,7 +5746,7 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
     time (not module load) so an operator can re-tune and re-run without a
     redeploy. See `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
     """
-    from warships.models import BattleEvent, ShipTopPlayerSnapshot
+    from warships.models import BattleEvent, ShipTopPlayerSnapshot, ShipAward
 
     min_battles = int(os.getenv('SHIP_BADGE_MIN_BATTLES', '15'))
     min_population = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION', '20'))
@@ -5811,6 +5811,7 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
         by_ship.setdefault(r['ship_id'], []).append(r)
 
     snapshot_rows = []
+    award_rows = []
     invalidate_wg_ids = []
     qualified = 0
     badge_count = 0
@@ -5843,10 +5844,19 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
                 survived=entry['survived'] or 0,
             ))
             # Only the top-N rows are profile badges → only they change a
-            # player's cached detail payload.
+            # player's cached detail payload, and only they accrete to the
+            # durable award ledger.
             if rank <= top_n:
                 invalidate_wg_ids.append(entry['player__player_id'])
                 badge_count += 1
+                award_rows.append(ShipAward(
+                    captured_on=today,
+                    realm=realm,
+                    ship_id=ship_id,
+                    ship_name=ship_names.get(ship_id) or entry['player__name'] or '',
+                    rank=rank,
+                    player_id=entry['player_id'],
+                ))
 
     with transaction.atomic():
         ShipTopPlayerSnapshot.objects.filter(
@@ -5856,6 +5866,11 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
         prune_before = today - timedelta(days=retention_days)
         ShipTopPlayerSnapshot.objects.filter(
             realm=realm, captured_on__lt=prune_before).delete()
+
+        # Durable award ledger: idempotent for today, never pruned.
+        ShipAward.objects.filter(realm=realm, captured_on=today).delete()
+        if award_rows:
+            ShipAward.objects.bulk_create(award_rows)
 
     for wg_id in invalidate_wg_ids:
         invalidate_player_detail_cache(wg_id, realm=realm)
@@ -5913,6 +5928,54 @@ def get_player_ship_badges(player: Player) -> list:
         for r in ShipTopPlayerSnapshot.objects
         .filter(player=player, captured_on=latest, rank__lte=top_n)
         .order_by('rank', 'ship_name')
+    ]
+
+
+def get_player_ship_awards(player: Player, current_badges: Optional[list] = None) -> list:
+    """Durable per-ship career summary from the append-only `ShipAward` ledger.
+
+    Read path for the profile "Ship Honors" panel. `times_first` = number of
+    snapshot runs the player held #1 in the ship (≈ windows/weeks held #1);
+    `times_top3` = runs at any top-3 rank; `current_rank` is grafted from the
+    live snapshot (None when the player isn't currently top-3 — the vacation
+    case), `last_on` is their most recent placement date. One indexed aggregate
+    on `ship_award_player_ship_idx`. See
+    `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md`.
+    """
+    from warships.models import ShipAward
+
+    rows = list(
+        ShipAward.objects.filter(player=player)
+        .values('ship_id')
+        .annotate(
+            ship_name=Max('ship_name'),
+            times_first=Count('id', filter=Q(rank=1)),
+            times_top3=Count('id'),
+            best_rank=Min('rank'),
+            first_on=Min('captured_on'),
+            last_on=Max('captured_on'),
+        )
+        .order_by('-times_first', 'best_rank', '-times_top3')
+    )
+    if not rows:
+        return []
+
+    # Reuse the caller's already-computed badges when available (the serializer
+    # passes them) so the latest-snapshot lookup isn't done twice per player.
+    badges = current_badges if current_badges is not None else get_player_ship_badges(player)
+    current = {b['ship_id']: b['rank'] for b in badges}
+    return [
+        {
+            'ship_id': r['ship_id'],
+            'ship_name': r['ship_name'],
+            'times_first': r['times_first'],
+            'times_top3': r['times_top3'],
+            'best_rank': r['best_rank'],
+            'current_rank': current.get(r['ship_id']),
+            'first_on': r['first_on'].isoformat() if r['first_on'] else None,
+            'last_on': r['last_on'].isoformat() if r['last_on'] else None,
+        }
+        for r in rows
     ]
 
 

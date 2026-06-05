@@ -18,6 +18,7 @@ import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import ShipTopPlayerBanner, { ShipBadge } from './ShipTopPlayerBanner';
+import ShipHonors, { ShipAward } from './ShipHonors';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
 import { useTheme } from '../context/ThemeContext';
@@ -70,6 +71,8 @@ interface PlayerDetailProps {
         clan_battle_header_updated_at?: string | null;
         // Weekly top-3 finishes in a Tier-10 ship (gold/silver/bronze badges).
         ship_badges?: ShipBadge[];
+        // Durable per-ship career record (append-only award ledger).
+        ship_awards?: ShipAward[];
         verdict: string | null;
         randoms_json?: Array<{
             ship_name?: string | null;
@@ -544,6 +547,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             )}
                             {!player.is_hidden ? (
                                 <ShipTopPlayerBanner badges={player.ship_badges ?? []} realm={player.realm} />
+                            ) : null}
+                            {!player.is_hidden ? (
+                                <ShipHonors awards={player.ship_awards ?? []} realm={player.realm} />
                             ) : null}
                             <BattleHistoryCard
                                 playerName={player.name}

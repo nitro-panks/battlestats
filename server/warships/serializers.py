@@ -3,7 +3,7 @@ import time
 
 from rest_framework import serializers
 from .models import Player, Clan, Ship, StreamerSubmission
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges, get_player_ship_awards
 
 
 TWITCH_URL_RE = re.compile(
@@ -97,6 +97,7 @@ class PlayerSerializer(serializers.ModelSerializer):
     clan_battle_header_updated_at = serializers.SerializerMethodField()
     is_pve_player = serializers.SerializerMethodField()
     ship_badges = serializers.SerializerMethodField()
+    ship_awards = serializers.SerializerMethodField()
 
     class Meta:
         model = Player
@@ -149,10 +150,27 @@ class PlayerSerializer(serializers.ModelSerializer):
 
         return build_player_summary(obj, use_cached_summary=False).get('player_score')
 
+    def _get_ship_badges(self, obj):
+        # Per-instance memo so the latest-snapshot lookup runs once even though
+        # both ship_badges and ship_awards (for current_rank) need it.
+        cache = getattr(self, '_ship_badges_cache', None)
+        if cache is None:
+            cache = {}
+            self._ship_badges_cache = cache
+        key = getattr(obj, 'pk', id(obj))
+        if key not in cache:
+            cache[key] = get_player_ship_badges(obj)
+        return cache[key]
+
     def get_ship_badges(self, obj):
-        # Current-week T10 top-player badges. One indexed lookup per player;
+        # Current-week top-player badges. One indexed lookup per player;
         # bounded N+1 on the bulk-cache warmers is accepted (see runbook).
-        return get_player_ship_badges(obj)
+        return self._get_ship_badges(obj)
+
+    def get_ship_awards(self, obj):
+        # Durable per-ship career summary from the append-only award ledger;
+        # reuses the memoized badges for the current-standing graft.
+        return get_player_ship_awards(obj, current_badges=self._get_ship_badges(obj))
 
     def _get_efficiency_rank_payload(self, obj):
         payload_cache = getattr(self, '_efficiency_rank_payload_cache', None)

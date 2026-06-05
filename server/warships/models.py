@@ -717,6 +717,46 @@ class ShipTopPlayerSnapshot(models.Model):
                          name='ship_badge_player_captured_idx'),
         ]
 
+
+class ShipAward(models.Model):
+    """Append-only ledger of top-3 ship placements (the durable record).
+
+    Whereas `ShipTopPlayerSnapshot` is the ephemeral *current* standing
+    (overwritten + pruned each run), this records each top-`SHIP_BADGE_TOP_N`
+    placement as a permanent fact — one row per (realm, ship, rank, captured_on).
+    Written by `compute_ship_top_player_snapshot` (idempotent per day, never
+    pruned); read by `data.get_player_ship_awards` to render the profile "Ship
+    Honors" career summary (N-time #1, windows held, current/last-held). So a
+    dominant player who stops playing keeps their record instead of a vanished
+    badge. See `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md`.
+    """
+    captured_on = models.DateField(db_index=True)
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM)
+    ship_id = models.BigIntegerField(db_index=True)
+    ship_name = models.CharField(max_length=200, blank=True, default='')
+    rank = models.IntegerField()
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name='ship_awards')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['captured_on', 'realm', 'ship_id', 'rank'],
+                name='unique_ship_award_per_rank'),
+        ]
+        indexes = [
+            models.Index(fields=['player', 'ship_id'],
+                         name='ship_award_player_ship_idx'),
+        ]
+
+    def __str__(self):
+        return (
+            f"ShipAward({self.realm} {self.captured_on} ship={self.ship_id} "
+            f"#{self.rank} player={self.player_id})"
+        )
+
     def __str__(self):
         return (
             f"ShipTopPlayerSnapshot({self.realm} {self.captured_on} "
