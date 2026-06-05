@@ -109,8 +109,8 @@ const PlayerNameGrid: React.FC<{
                             size="inline"
                         />
                     ) : null}
-                    {(player.ship_badges ?? []).map((b) => (
-                        <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} realm={realm} size="search" />
+                    {(player.ship_badges ?? []).slice(0, 3).map((b) => (
+                        <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} tier={b.tier} realm={realm} size="search" />
                     ))}
                 </>
             );

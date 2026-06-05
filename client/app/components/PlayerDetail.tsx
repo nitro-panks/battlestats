@@ -434,8 +434,8 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}
                                 {isClanBattleEnjoyer && clanBattleSummary ? <ClanBattleShieldIcon winRate={clanBattleSummary.overallWinRate} size="header" /> : null}
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
-                                {!player.is_hidden && (player.ship_badges ?? []).map((b) => (
-                                    <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} realm={player.realm} size="header" />
+                                {!player.is_hidden && (player.ship_badges ?? []).slice(0, 3).map((b) => (
+                                    <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} tier={b.tier} realm={player.realm} size="header" />
                                 ))}
                             </div>
                             <div className="flex items-center gap-2 self-start">

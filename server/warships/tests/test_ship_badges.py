@@ -66,7 +66,8 @@ BADGE_ENV = {
 
 SHIMA = 10      # T10
 ZAO = 20        # T10
-T9_SHIP = 99    # tier 9 — must be ignored
+T9_SHIP = 99    # tier 9 — ignored under T10-only scope; in scope for T8–10
+T8_SHIP = 88    # tier 8
 
 
 class ShipBadgeSnapshotTests(TestCase):
@@ -549,6 +550,74 @@ class ShipBadgeSnapshotTests(TestCase):
             shima["seasons"],
             [{"captured_on": s1_start.isoformat(), "rank": 1},
              {"captured_on": s0_start.isoformat(), "rank": 1}])
+        self.assertEqual(shima["tier"], 10)  # tier surfaced for the Ship Honors label
+
+    def test_multi_tier_ranks_each_scoped_tier_independently(self):
+        # With SHIP_BADGE_TIERS spanning 8–10, ships in each tier are ranked in
+        # their own pool — no cross-tier comparison.
+        Ship.objects.create(ship_id=T8_SHIP, name="Tirpitz", nation="germany",
+                            ship_type="Battleship", tier=8)
+        for sid in (T8_SHIP, T9_SHIP, SHIMA):
+            for i in range(3):
+                self._event(self._player(f"P{sid}_{i}"), sid, battles=20, wins=10 + i)
+        today = timezone.now().date()
+        env = {**BADGE_ENV, "SHIP_BADGE_TIERS": "8,9,10"}
+        with mock.patch.dict("os.environ", env, clear=False):
+            compute_ship_top_player_snapshot(
+                realm="na", window_start=today - timedelta(days=14),
+                window_end=today + timedelta(days=1), captured_on=today)
+
+        self.assertEqual(
+            set(ShipTopPlayerSnapshot.objects.values_list("ship_id", flat=True)),
+            {T8_SHIP, T9_SHIP, SHIMA})
+
+    def test_badges_carry_tier_and_order_tier_desc(self):
+        # A player who is #1 in both a T9 and a T10 ship: the badges carry `tier`
+        # and the T10 badge leads (most prestigious first).
+        star = self._player("Star")
+        self._event(star, SHIMA, battles=40, wins=38)    # T10 #1
+        self._event(star, T9_SHIP, battles=40, wins=38)  # T9 #1
+        for i in range(3):  # filler so both ships clear the population guard
+            self._event(self._player(f"F{i}"), SHIMA, battles=20, wins=10)
+            self._event(self._player(f"G{i}"), T9_SHIP, battles=20, wins=10)
+        today = timezone.now().date()
+        env = {**BADGE_ENV, "SHIP_BADGE_TIERS": "8,9,10"}
+        with mock.patch.dict("os.environ", env, clear=False):
+            compute_ship_top_player_snapshot(
+                realm="na", window_start=today - timedelta(days=14),
+                window_end=today + timedelta(days=1), captured_on=today)
+            badges = get_player_ship_badges(star)
+            bulk = get_players_ship_badges_bulk([star.pk])[star.pk]
+
+        self.assertEqual([b["ship_id"] for b in badges], [SHIMA, T9_SHIP])
+        self.assertEqual([b["tier"] for b in badges], [10, 9])
+        # Bulk reader carries tier + the same tier-desc ordering.
+        self.assertEqual([b["tier"] for b in bulk], [10, 9])
+
+    def test_off_scope_treemap_ship_gets_board_not_badge(self):
+        # A popular off-scope (T5) ship pulled in via the treemap union gets a
+        # /ship board (snapshot rows) but NEVER a profile badge or award — the
+        # excluded-tier guarantee the density study made.
+        T5 = 55
+        Ship.objects.create(ship_id=T5, name="Kamikaze", nation="japan",
+                            ship_type="Destroyer", tier=5)
+        champ = self._player("T5Champ")
+        self._event(champ, T5, battles=40, wins=38)
+        for i in range(3):
+            self._event(self._player(f"H{i}"), T5, battles=20, wins=10)
+        today = timezone.now().date()
+        env = {**BADGE_ENV, "SHIP_BADGE_TIERS": "8,9,10"}
+        with mock.patch.dict("os.environ", env, clear=False), \
+                mock.patch("warships.data.compute_realm_top_ships",
+                           return_value={"ships": [{"ship_id": T5}]}):
+            compute_ship_top_player_snapshot(
+                realm="na", window_start=today - timedelta(days=14),
+                window_end=today + timedelta(days=1), captured_on=today)
+            badges = get_player_ship_badges(champ)
+
+        self.assertTrue(ShipTopPlayerSnapshot.objects.filter(ship_id=T5).exists())  # board
+        self.assertFalse(ShipAward.objects.filter(ship_id=T5).exists())             # no award (write-gated)
+        self.assertEqual(badges, [])                                                # no badge (read-gated)
 
     def test_leaderboard_payload_carries_season_bounds(self):
         for i in range(3):

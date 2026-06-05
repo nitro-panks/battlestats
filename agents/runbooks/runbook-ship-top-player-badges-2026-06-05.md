@@ -325,3 +325,38 @@ matches the data.
 - **Tests:** `test_ship_badges.py` (season math, captured_on=season-start, `times_first` counts seasons,
   boundary gate, leaderboard payload, backfill command) + `test_ship_awards.py` `_run` updated to pass an
   explicit window.
+
+## Tier extension: T8 + T9 (2026-06-05)
+
+Scope widened from **T10 only** to **T8–T10** after a per-tier density study of the W20-21 season
+(ranked ship = ≥20 players with ≥15 random battles):
+
+| Tier | NA | EU | ASIA | verdict |
+|------|---:|---:|-----:|---------|
+| 9 | 10 | 17 | 14 | extend — robust on every realm (denser/ship than T10), real prestige |
+| 8 | 9 | 7 | 10 | extend — viable + broadest reach (most-played tier) |
+| 5 | 4 | 2 | 1 | **skip** — sparse; #1s avg 85% WR (seal-clubbing) |
+
+- **`SHIP_BADGE_TIERS`** (comma list, default `10`, prod-pinned `8,9,10` in the backend deploy
+  script) replaces the single `SHIP_BADGE_TIER` (still read as a fallback). `compute_ship_top_player_snapshot`
+  targets `Ship.objects.filter(tier__in=tiers) ∪ treemap-25`; each ship is ranked in its own pool, so
+  it's purely a wider target set. **Thresholds unchanged** (≥20/≥15) — loosening them is exactly what
+  would create the degenerate low-tier boards, so we don't.
+- **Badge-tier gate (the excluded-tier guarantee).** The treemap-25 union pulls in popular ships of
+  *any* tier so each clickable tile gets a `/ship` board — but those off-scope ships must NOT mint
+  badges (else a popular T5/T6 ship crowns a "best player" we excluded). So the **board** (`ShipTopPlayerSnapshot`
+  rows / `get_ship_leaderboard`) serves every target ship, while **badges + the `ShipAward` ledger are
+  gated to `SHIP_BADGE_TIERS`** in three places: the award write in `compute` (write-time scope) and
+  the live-badge reads `get_player_ship_badges` / `_bulk` (current scope, via `_badge_tiers()`).
+  `get_player_ship_awards` is *not* read-filtered — a historical award persists regardless of later
+  scope changes. Verify post-backfill: `SELECT DISTINCT s.tier FROM warships_shiptopplayersnapshot t
+  JOIN warships_ship s ON s.ship_id=t.ship_id WHERE t.rank<=3;` should return only 8/9/10.
+- **Tier surfaced in the read paths** (`_ship_tier_map` — a short `Ship` lookup, no migration):
+  `get_player_ship_badges` / `get_players_ship_badges_bulk` / `get_player_ship_awards` carry `tier` and
+  order **tier-desc** so the most prestigious (T10) leads. The `/ship` board already had tier.
+- **UI:** a `T<n>` chip on the banner cards + Ship Honors rows, and the tier in the tray tooltip; the
+  landing/clan/header trays **cap at the top 3** badges (a player can now hold badges across 3 tiers).
+- **Cost:** target set ~202 → ~560 ships; same BattleEvent window, more `(ship,player)` groups — fine
+  for the weekly job + one-off backfill.
+- **Rollout:** deploy backend → `backfill_ship_seasons --wipe` (rebuilds completed seasons across all
+  tiers via the now-multi-tier compute) → deploy frontend.

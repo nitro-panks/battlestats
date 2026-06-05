@@ -15,6 +15,7 @@ import { formatWeek } from '../lib/shipSeason';
 export interface ShipBadge {
     ship_id: number;
     ship_name: string;
+    tier?: number | null; // ship tier (standings span T8–T10); shown so tiers aren't conflated
     rank: number;
     win_rate: number;
     battles: number;
@@ -54,6 +55,11 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
                         <div className="min-w-0">
                             <div className="truncate text-sm">
                                 <span className={`font-semibold ${color}`}>#{b.rank}</span>{' '}
+                                {b.tier ? (
+                                    <span className="mr-1 rounded bg-[var(--accent-faint)] px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)] align-middle">
+                                        T{b.tier}
+                                    </span>
+                                ) : null}
                                 <span className="font-semibold text-[var(--text-strong)]">{b.ship_name}</span>{' '}
                                 <span className="text-[var(--text-muted)]">{weekLabel}</span>
                             </div>

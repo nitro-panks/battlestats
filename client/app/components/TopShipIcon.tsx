@@ -15,12 +15,13 @@ const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]', search: 'text-xs'
 interface TopShipIconProps {
     rank: number;
     shipName: string;
+    tier?: number | null;
     realm?: string;
     size?: keyof typeof SIZE_CLASS;
 }
 
-const TopShipIcon: React.FC<TopShipIconProps> = ({ rank, shipName, realm, size = 'header' }) => {
-    const label = `Currently #${rank} ${shipName}${realm ? ` on ${realm.toUpperCase()}` : ''}`;
+const TopShipIcon: React.FC<TopShipIconProps> = ({ rank, shipName, tier, realm, size = 'header' }) => {
+    const label = `Currently #${rank} ${shipName}${tier ? ` (T${tier})` : ''}${realm ? ` on ${realm.toUpperCase()}` : ''}`;
     return (
         <span title={label} aria-label={label} className="inline-flex items-center cursor-help">
             <MedalIcon rank={rank} className={SIZE_CLASS[size]} />

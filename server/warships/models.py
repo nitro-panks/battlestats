@@ -678,7 +678,7 @@ class PlayerDailyShipStats(models.Model):
 
 
 class ShipTopPlayerSnapshot(models.Model):
-    """Per-season per-realm top-N players for each Tier-10 ship by composite score.
+    """Per-season per-realm top-N players for each in-scope-tier ship (T8–T10) by composite score.
 
     Written by `snapshot_ship_top_players_task` once per realm per fixed 2-week
     season (the aggregation/write lives in `data.compute_ship_top_player_snapshot`).

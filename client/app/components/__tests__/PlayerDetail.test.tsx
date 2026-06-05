@@ -849,6 +849,13 @@ describe('PlayerDetail ship-badge banner', () => {
         expect(screen.queryByText(/dmg/)).not.toBeInTheDocument();
     });
 
+    it('shows the ship tier chip on the banner card', () => {
+        renderWithBadges([badge({ ship_id: 30, ship_name: 'Baltimore', tier: 8 })]);
+
+        expect(screen.getByText('Baltimore')).toBeInTheDocument();
+        expect(screen.getByText('T8')).toBeInTheDocument();
+    });
+
     it('shows the realm under the medal and in the tooltip (awards are per realm)', () => {
         render(
             <PlayerDetail
@@ -927,7 +934,7 @@ describe('PlayerDetail ship-honors panel', () => {
     it('renders the durable career record as ×count + season weeks (oldest→newest)', () => {
         renderWithAwards([
             {
-                ship_id: 10, ship_name: 'Shimakaze', times_first: 2, times_top3: 2,
+                ship_id: 10, ship_name: 'Shimakaze', tier: 10, times_first: 2, times_top3: 2,
                 best_rank: 1, current_rank: 1, first_on: '2026-05-11', last_on: '2026-05-25',
                 seasons: [
                     { captured_on: '2026-05-25', rank: 1 },  // newest first (as the API returns)
@@ -938,6 +945,7 @@ describe('PlayerDetail ship-honors panel', () => {
 
         expect(screen.getByText('Ship Honors')).toBeInTheDocument();
         expect(screen.getByText('Shimakaze')).toBeInTheDocument();
+        expect(screen.getByText('T10')).toBeInTheDocument();   // tier chip
         // ×<count>: weeks shown oldest→newest, year-disambiguated.
         expect(screen.getByText(/×2/)).toBeInTheDocument();
         expect(screen.getByText(/WK20-21'26, WK22-23'26/)).toBeInTheDocument();

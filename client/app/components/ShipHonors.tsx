@@ -16,6 +16,7 @@ import { formatWeek } from '../lib/shipSeason';
 export interface ShipAward {
     ship_id: number;
     ship_name: string;
+    tier?: number | null; // ship tier (standings span T8–T10)
     times_first: number;
     times_top3: number;
     best_rank: number;
@@ -57,6 +58,11 @@ const ShipHonors: React.FC<ShipHonorsProps> = ({ awards, realm }) => {
                     return (
                         <li key={a.ship_id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
                             <MedalIcon rank={a.current_rank ?? a.best_rank} className="shrink-0" />
+                            {a.tier ? (
+                                <span className="rounded bg-[var(--accent-faint)] px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                                    T{a.tier}
+                                </span>
+                            ) : null}
                             <Link
                                 href={buildShipPath(a.ship_id, a.ship_name, realm)}
                                 className="font-semibold text-[var(--text-strong)] hover:underline"

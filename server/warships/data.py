@@ -5843,7 +5843,12 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     min_population = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION', '20'))
     top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
     list_size = int(os.getenv('SHIP_BADGE_LIST_SIZE', '15'))
-    tier = int(os.getenv('SHIP_BADGE_TIER', '10'))
+    # Ship tiers in scope. `SHIP_BADGE_TIERS` is a comma list (e.g. "8,9,10");
+    # falls back to the legacy single `SHIP_BADGE_TIER`. Each ship is ranked
+    # within its own pool, so multi-tier is just a wider target set — no
+    # cross-tier comparison. See the ship-badge runbook for the tier study.
+    _tiers_env = os.getenv('SHIP_BADGE_TIERS') or os.getenv('SHIP_BADGE_TIER', '10')
+    tiers = sorted({int(t) for t in _tiers_env.split(',') if t.strip()})
     # >= ~2 seasons so the displayed (last-completed) season survives until the
     # next finalize; the ShipAward ledger is never pruned regardless.
     retention_days = int(os.getenv('SHIP_BADGE_RETENTION_DAYS', '30'))
@@ -5879,11 +5884,11 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     season_index = (window_start - SHIP_SEASON_EPOCH).days // SHIP_SEASON_LENGTH_DAYS
     since_dt, until_dt = _season_window_datetimes(window_start, window_end)
 
-    # Target set = all Tier-`tier` ships UNION the realm treemap's top-25
+    # Target set = all in-scope-tier ships UNION the realm treemap's top-25
     # most-played ships (any tier), so every clickable treemap tile gets a
-    # best-list while the full T10 badge coverage is preserved.
+    # best-list while the full badge coverage for the scoped tiers is preserved.
     target_ids = set(
-        Ship.objects.filter(tier=tier).values_list('ship_id', flat=True))
+        Ship.objects.filter(tier__in=tiers).values_list('ship_id', flat=True))
     try:
         treemap = compute_realm_top_ships(realm, limit=25, mode='random')
         target_ids |= {s['ship_id'] for s in treemap.get('ships', [])}
@@ -5895,9 +5900,17 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
         return {'realm': realm, 'captured_on': captured_on, 'ships_qualified': 0,
                 'ships_total': 0, 'badges': 0, 'ranked_rows': 0}
 
-    ship_names = {
-        s.ship_id: s.name for s in Ship.objects.filter(ship_id__in=target_ids)
+    # Names for the snapshot rows; tiers to gate *badge eligibility*. The treemap
+    # union can pull in off-scope tiers (any popular ship) so they get a /ship
+    # board, but only in-scope tiers (`tiers`) mint profile badges + awards —
+    # otherwise a popular T5/T6 ship would crown a "best player" we deliberately
+    # excluded. The full ranked board is still written for every target ship.
+    ship_rows_meta = {
+        s.ship_id: (s.name, s.tier)
+        for s in Ship.objects.filter(ship_id__in=target_ids)
     }
+    ship_names = {sid: name for sid, (name, _t) in ship_rows_meta.items()}
+    tiers_set = set(tiers)
 
     rows = (
         BattleEvent.objects
@@ -5971,10 +5984,11 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
                 frags=entry['frags'] or 0,
                 survived=entry['survived'] or 0,
             ))
-            # Only the top-N rows are profile badges → only they change a
-            # player's cached detail payload, and only they accrete to the
-            # durable award ledger.
-            if rank <= top_n:
+            # Only the top-N rows of an *in-scope-tier* ship are profile badges →
+            # only they change a player's cached detail payload, and only they
+            # accrete to the durable award ledger. Off-scope treemap-union ships
+            # still get the full ranked board above, but never a badge/award.
+            if rank <= top_n and ship_rows_meta.get(ship_id, (None, None))[1] in tiers_set:
                 invalidate_wg_ids.append(entry['player__player_id'])
                 badge_count += 1
                 award_rows.append(ShipAward(
@@ -6004,8 +6018,8 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
         invalidate_player_detail_cache(wg_id, realm=realm)
 
     logger.info(
-        "ship-badge snapshot realm=%s season=%s window=%s..%s ships_qualified=%s/%s "
-        "ranked_rows=%s badges=%s", realm, season_index, window_start, window_end,
+        "ship-badge snapshot realm=%s tiers=%s season=%s window=%s..%s ships_qualified=%s/%s "
+        "ranked_rows=%s badges=%s", realm, tiers, season_index, window_start, window_end,
         qualified, len(target_ids), len(snapshot_rows), badge_count,
     )
     return {'realm': realm, 'captured_on': captured_on, 'ships_qualified': qualified,
@@ -6014,13 +6028,38 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
             'window_start': window_start, 'window_end': window_end}
 
 
+def _badge_tiers() -> set:
+    """Tiers eligible for profile badges (`SHIP_BADGE_TIERS`; legacy single
+    `SHIP_BADGE_TIER` fallback). The `/ship` board serves any tier (treemap tiles),
+    but only these mint badges — so a popular off-tier treemap ship never surfaces
+    a 'best player' we excluded. Mirrors the parse in compute.
+    """
+    env = os.getenv('SHIP_BADGE_TIERS') or os.getenv('SHIP_BADGE_TIER', '10')
+    return {int(t) for t in env.split(',') if t.strip()}
+
+
+def _ship_tier_map(ship_ids) -> dict:
+    """`{ship_id: tier}` for the given ids — labels badges/awards with their tier.
+
+    The snapshot/award rows don't denormalize tier, so the read paths look it up
+    from `Ship` (one short query). Matters now that standings span tiers 8–10 and
+    a T8 #1 must not read like a T10 #1.
+    """
+    ids = [s for s in set(ship_ids or []) if s is not None]
+    if not ids:
+        return {}
+    return dict(
+        Ship.objects.filter(ship_id__in=ids).values_list('ship_id', 'tier'))
+
+
 def get_player_ship_badges(player: Player) -> list:
     """Current-window ship badges (ranks 1..SHIP_BADGE_TOP_N) for a player.
 
     Read path for the profile badge icons; one indexed lookup on
     `ship_badge_player_captured_idx`. Returns [] when the player holds none. The
     `rank <= top_n` filter keeps mid-list ranked finishes (4..50) — which appear
-    on the ship page but are not badges — off the profile.
+    on the ship page but are not badges — off the profile. Ordered tier-desc then
+    rank so the most prestigious (T10) badge leads.
     """
     from warships.models import ShipTopPlayerSnapshot
 
@@ -6055,12 +6094,19 @@ def get_player_ship_badges(player: Player) -> list:
             'window_start': r.captured_on.isoformat() if r.captured_on else None,
         }
 
-    return [
-        _badge(r)
-        for r in ShipTopPlayerSnapshot.objects
+    rows = list(
+        ShipTopPlayerSnapshot.objects
         .filter(player=player, captured_on=latest, rank__lte=top_n)
         .order_by('rank', 'ship_name')
-    ]
+    )
+    tier_by_ship = _ship_tier_map([r.ship_id for r in rows])
+    eligible = _badge_tiers()
+    # Filter to badge-eligible tiers: the snapshot also holds off-scope treemap
+    # ships (for their /ship board), which must NOT become profile badges.
+    badges = [{**_badge(r), 'tier': tier_by_ship.get(r.ship_id)} for r in rows
+              if tier_by_ship.get(r.ship_id) in eligible]
+    badges.sort(key=lambda b: (-(b['tier'] or 0), b['rank'], b['ship_name']))
+    return badges
 
 
 def get_players_ship_badges_bulk(player_pks, realm: Optional[str] = None) -> dict:
@@ -6093,17 +6139,22 @@ def get_players_ship_badges_bulk(player_pks, realm: Optional[str] = None) -> dic
         return {}
 
     result: dict = {}
-    rows = (
+    rows = list(
         ShipTopPlayerSnapshot.objects
         .filter(player_id__in=latest_per_player.keys(),
                 captured_on__in=set(latest_per_player.values()),
                 rank__lte=top_n)
         .order_by('rank', 'ship_name')
     )
+    tier_by_ship = _ship_tier_map([r.ship_id for r in rows])
+    eligible = _badge_tiers()
     for r in rows:
         # captured_on__in widens to every player's latest; keep only the row that
         # matches THIS player's own latest snapshot date.
         if r.captured_on != latest_per_player.get(r.player_id):
+            continue
+        # Off-scope treemap ships hold board rows but are not profile badges.
+        if tier_by_ship.get(r.ship_id) not in eligible:
             continue
         battles = r.battles or 0
         result.setdefault(r.player_id, []).append({
@@ -6115,7 +6166,11 @@ def get_players_ship_badges_bulk(player_pks, realm: Optional[str] = None) -> dic
             'avg_damage': round((r.damage or 0) / battles) if battles else 0,
             'window_days': SHIP_LEADERBOARD_WINDOW_DAYS,
             'window_start': r.captured_on.isoformat() if r.captured_on else None,
+            'tier': tier_by_ship.get(r.ship_id),
         })
+    # Most prestigious tier first, then rank (same order as get_player_ship_badges).
+    for pk in result:
+        result[pk].sort(key=lambda b: (-(b['tier'] or 0), b['rank'], b['ship_name']))
     return result
 
 
@@ -6150,6 +6205,7 @@ def get_player_ship_awards(player: Player, current_badges: Optional[list] = None
     by_ship: dict = {}
     for r in rows:
         by_ship.setdefault(r['ship_id'], []).append(r)
+    tier_by_ship = _ship_tier_map(by_ship.keys())
 
     entries = []
     for ship_id, ship_rows in by_ship.items():
@@ -6158,6 +6214,7 @@ def get_player_ship_awards(player: Player, current_badges: Optional[list] = None
         entries.append({
             'ship_id': ship_id,
             'ship_name': ship_rows[0]['ship_name'],
+            'tier': tier_by_ship.get(ship_id),
             'times_first': sum(1 for x in ship_rows if x['rank'] == 1),
             'times_top3': len(ship_rows),
             'best_rank': min(ranks),
@@ -6170,8 +6227,10 @@ def get_player_ship_awards(player: Player, current_badges: Optional[list] = None
             ],
         })
 
-    # Same ordering as before: most #1s, then best rank, then most placements.
-    entries.sort(key=lambda e: (-e['times_first'], e['best_rank'], -e['times_top3']))
+    # Most prestigious tier first, then the career strength (most #1s, best rank,
+    # most placements) within a tier.
+    entries.sort(key=lambda e: (-(e['tier'] or 0), -e['times_first'],
+                                e['best_rank'], -e['times_top3']))
     return entries
 
 
