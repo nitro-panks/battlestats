@@ -52,7 +52,7 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
                             <div className="truncate text-sm">
                                 <span className={`font-semibold ${color}`}>#{b.rank}</span>{' '}
                                 <span className="font-semibold text-[var(--text-strong)]">{b.ship_name}</span>{' '}
-                                <span className="text-[var(--text-muted)]">for {b.window_days} days</span>
+                                <span className="text-[var(--text-muted)]">last {b.window_days} days</span>
                             </div>
                             <div className="mt-0.5 truncate text-xs tabular-nums text-[var(--text-muted)]">
                                 {b.avg_damage.toLocaleString()} avg dmg
