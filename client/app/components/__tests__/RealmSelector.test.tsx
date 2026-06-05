@@ -10,6 +10,7 @@ jest.mock('next/navigation', () => ({
     useRouter: () => ({
         replace: replaceMock,
     }),
+    usePathname: () => '/player/Someone',
 }));
 
 describe('RealmSelector', () => {
