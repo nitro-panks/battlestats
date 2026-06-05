@@ -8,6 +8,8 @@ import { useRealm } from '../context/RealmContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import wrColor from '../lib/wrColor';
+import TopShipIcon from './TopShipIcon';
+import { nextWindowOpenMs, formatCountdown, formatSeasonLabel } from '../lib/shipSeason';
 
 const RANKING_TOOLTIP = "Ranked by a blend of win rate, average damage, and kills per battle (win rate weighted most), each tempered for games played (empirical-Bayes shrinkage) so a short hot streak doesn't outrank a high-volume player. Shows the top 15 for the window.";
 
@@ -32,6 +34,11 @@ interface ShipLeaderboard {
     realm: string;
     window_days: number;
     captured_on: string | null;
+    // Fixed-season boundaries (authoritative; older cached payloads may omit them,
+    // in which case the client falls back to lib/shipSeason.ts).
+    season_start?: string | null;
+    season_end?: string | null;
+    next_window_open?: string | null;
     ship: {
         ship_id: number;
         name: string;
@@ -65,6 +72,16 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
     const [data, setData] = useState<ShipLeaderboard | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
+    // Client-only clock for the "next window opens" countdown. Starts null so the
+    // server and first client render agree (no hydration mismatch); the effect
+    // fills it in and ticks once a minute.
+    const [nowMs, setNowMs] = useState<number | null>(null);
+
+    useEffect(() => {
+        setNowMs(Date.now());
+        const id = setInterval(() => setNowMs(Date.now()), 60_000);
+        return () => clearInterval(id);
+    }, []);
 
     useEffect(() => {
         if (shipId == null) {
@@ -119,6 +136,17 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
     const tierLabel = ship.tier ? `Tier ${ship.tier}` : '';
     const subtitle = [tierLabel, ship.ship_type, ship.nation].filter(Boolean).join(' · ');
 
+    // Fixed-season boundaries from the payload (authoritative); ISO date-only
+    // strings parse as UTC midnight. Fall back to lib/shipSeason.ts when an older
+    // cached payload omits them.
+    const seasonStartMs = data.season_start ? Date.parse(data.season_start) : null;
+    const seasonEndMs = data.season_end ? Date.parse(data.season_end) : null;
+    const seasonLabel = seasonStartMs != null && seasonEndMs != null
+        ? formatSeasonLabel(seasonStartMs, seasonEndMs) : null;
+    const nextOpenMs = data.next_window_open
+        ? Date.parse(data.next_window_open)
+        : (nowMs !== null ? nextWindowOpenMs(nowMs) : null);
+
     return (
         <section className="mx-auto max-w-3xl">
             <header className="mb-4">
@@ -129,7 +157,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                     <span className="text-sm text-[var(--text-muted)]">{subtitle}</span>
                 </div>
                 <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                    {realm.toUpperCase()} · best players · last {data.window_days} days ·
+                    {realm.toUpperCase()} · best players · {seasonLabel ? `season ${seasonLabel}` : `last ${data.window_days} days`} ·
                     <span
                         title={RANKING_TOOLTIP}
                         aria-label={RANKING_TOOLTIP}
@@ -138,6 +166,18 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                         <FontAwesomeIcon icon={faCircleInfo} aria-hidden="true" />
                     </span>
                 </p>
+                {nowMs !== null && nextOpenMs !== null && (
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        Next standings window opens in{' '}
+                        <span className="font-semibold text-[var(--accent-mid)] tabular-nums">
+                            {formatCountdown(nextOpenMs - nowMs)}
+                        </span>
+                        {' '}·{' '}
+                        {new Date(nextOpenMs).toLocaleDateString(undefined, {
+                            month: 'short', day: 'numeric', timeZone: 'UTC',
+                        })} UTC
+                    </p>
+                )}
             </header>
 
             {players.length === 0 ? (
@@ -161,12 +201,17 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                             <tr key={p.rank}>
                                 <td className="py-1.5 pr-3 tabular-nums text-[var(--text-muted)]">{p.rank}</td>
                                 <td className="py-1.5 pr-8">
-                                    <Link
-                                        href={buildPlayerPath(p.player_name, realm)}
-                                        className="text-[var(--accent-mid)] hover:underline"
-                                    >
-                                        {p.player_name}
-                                    </Link>
+                                    <span className="inline-flex items-center gap-1.5">
+                                        <Link
+                                            href={buildPlayerPath(p.player_name, realm)}
+                                            className="text-[var(--accent-mid)] hover:underline"
+                                        >
+                                            {p.player_name}
+                                        </Link>
+                                        {p.rank <= 3 && (
+                                            <TopShipIcon rank={p.rank} shipName={ship.name} realm={data.realm} size="header" />
+                                        )}
+                                    </span>
                                 </td>
                                 <td className="py-1.5 pr-8 tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>
                                     {p.win_rate.toFixed(1)}%

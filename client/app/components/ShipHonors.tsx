@@ -2,8 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faMedal } from '@fortawesome/free-solid-svg-icons';
+import MedalIcon from './MedalIcon';
 import { buildShipPath } from '../lib/entityRoutes';
 
 // Durable per-ship career record, accreted from the append-only ShipAward
@@ -23,11 +22,6 @@ export interface ShipAward {
     last_on: string | null;
 }
 
-const RANK_COLOR: Record<number, string> = {
-    1: 'text-amber-500',   // gold
-    2: 'text-zinc-400',    // silver
-    3: 'text-orange-700',  // bronze
-};
 const MAX_VISIBLE = 12;
 
 const formatDate = (iso: string | null): string => {
@@ -57,14 +51,13 @@ const ShipHonors: React.FC<ShipHonorsProps> = ({ awards, realm }) => {
             </h2>
             <ul className="flex flex-col gap-1.5">
                 {visible.map((a) => {
-                    const color = RANK_COLOR[a.current_rank ?? a.best_rank] ?? 'text-amber-500';
                     const headline = a.times_first > 0 ? `${a.times_first}× #1` : `best #${a.best_rank}`;
                     const status = a.current_rank != null
                         ? `currently #${a.current_rank}`
                         : `last held ${formatDate(a.last_on)}`;
                     return (
                         <li key={a.ship_id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                            <FontAwesomeIcon icon={faMedal} className={`${color} shrink-0`} aria-hidden="true" />
+                            <MedalIcon rank={a.current_rank ?? a.best_rank} className="shrink-0" />
                             <Link
                                 href={buildShipPath(a.ship_id, a.ship_name, realm)}
                                 className="font-semibold text-[var(--text-strong)] hover:underline"
@@ -72,7 +65,7 @@ const ShipHonors: React.FC<ShipHonorsProps> = ({ awards, realm }) => {
                                 {a.ship_name}
                             </Link>
                             <span className="text-[var(--text-muted)]">
-                                {headline} · {a.times_top3} window{a.times_top3 === 1 ? '' : 's'} top-3 · {status}
+                                {headline} · {a.times_top3} season{a.times_top3 === 1 ? '' : 's'} top-3 · {status}
                             </span>
                         </li>
                     );

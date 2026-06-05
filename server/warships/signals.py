@@ -296,9 +296,10 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
-    # -- Weekly T10 Top-Ship-Player badge snapshot (per realm, striped) --
-    # Schedule is always registered; the task self-gates on
-    # SHIP_BADGE_SNAPSHOT_ENABLED. See
+    # -- Fixed-season T10 Top-Ship-Player snapshot (per realm, striped) --
+    # Beat ticks weekly (Monday); the task self-gates on SHIP_BADGE_SNAPSHOT_ENABLED
+    # AND on a season boundary, so it finalizes each fixed 2-week season exactly
+    # once (effectively bi-weekly). See
     # agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
     ship_badge_hour = int(os.getenv("SHIP_BADGE_SNAPSHOT_HOUR", "2"))
     ship_badge_dow = os.getenv("SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK", "1")  # Monday
@@ -322,7 +323,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
-                "description": f"Weekly T10 top-player badge snapshot ({realm.upper()}).",
+                "description": f"T10 top-player season snapshot ({realm.upper()}) — beat ticks weekly (Mon); the task self-gates to season boundaries so it finalizes each fixed 2-week season once.",
             },
         )
 

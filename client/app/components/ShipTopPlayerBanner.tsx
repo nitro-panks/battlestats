@@ -2,8 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faMedal } from '@fortawesome/free-solid-svg-icons';
+import MedalIcon, { RANK_COLOR } from './MedalIcon';
 import { buildShipPath } from '../lib/entityRoutes';
 
 // Profile banner for a player's weekly top-3 finishes in a Tier-10 ship. One
@@ -22,12 +21,6 @@ export interface ShipBadge {
     window_days: number;
 }
 
-const RANK_COLOR: Record<number, string> = {
-    1: 'text-amber-500',   // gold
-    2: 'text-zinc-400',    // silver
-    3: 'text-orange-700',  // bronze
-};
-
 interface ShipTopPlayerBannerProps {
     badges: ShipBadge[];
     realm?: string;
@@ -44,11 +37,11 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
                     <Link
                         key={`${b.ship_id}-${b.rank}`}
                         href={buildShipPath(b.ship_id, b.ship_name, realm)}
-                        title={`#${b.rank} in ${b.ship_name}${realm ? ` on ${realm.toUpperCase()}` : ''} over the last ${b.window_days} days — ${b.win_rate.toFixed(1)}% win rate`}
+                        title={`#${b.rank} in ${b.ship_name}${realm ? ` on ${realm.toUpperCase()}` : ''} this season — ${b.win_rate.toFixed(1)}% win rate`}
                         className="flex min-h-16 items-center gap-4 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] px-4 py-2 transition-colors hover:border-[var(--accent-mid)]"
                     >
                         <div className="flex shrink-0 flex-col items-center gap-0.5">
-                            <FontAwesomeIcon icon={faMedal} className={`${color} text-2xl`} aria-hidden="true" />
+                            <MedalIcon rank={b.rank} className="text-2xl" />
                             {realm && (
                                 <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                                     {realm.toUpperCase()}
@@ -59,7 +52,7 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
                             <div className="truncate text-sm">
                                 <span className={`font-semibold ${color}`}>#{b.rank}</span>{' '}
                                 <span className="font-semibold text-[var(--text-strong)]">{b.ship_name}</span>{' '}
-                                <span className="text-[var(--text-muted)]">last {b.window_days} days</span>
+                                <span className="text-[var(--text-muted)]">this season</span>
                             </div>
                             <div className="mt-0.5 truncate text-xs tabular-nums text-[var(--text-muted)]">
                                 {b.avg_damage.toLocaleString()} avg dmg

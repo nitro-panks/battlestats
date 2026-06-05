@@ -678,15 +678,15 @@ class PlayerDailyShipStats(models.Model):
 
 
 class ShipTopPlayerSnapshot(models.Model):
-    """Weekly per-realm top-N players for each Tier-10 ship by random-battle WR.
+    """Per-season per-realm top-N players for each Tier-10 ship by composite score.
 
-    Written by `snapshot_ship_top_players_task` once per realm per week (the
-    aggregation/write lives in `data.compute_ship_top_player_snapshot`). Read on
-    the player-detail path (`data.get_player_ship_badges`) to render gold/silver/
-    bronze profile badges. `captured_on` is the run date; the trailing window is
-    `[captured_on - 7d, captured_on]`. A profile surfaces only its rows at the
-    latest `captured_on`. `win_rate`/`battles` are denormalized so the read path
-    needs no re-aggregation. See
+    Written by `snapshot_ship_top_players_task` once per realm per fixed 2-week
+    season (the aggregation/write lives in `data.compute_ship_top_player_snapshot`).
+    Read on the player-detail path (`data.get_player_ship_badges`) to render
+    gold/silver/bronze profile badges. `captured_on` is the **season-start date**;
+    the window is `[captured_on, captured_on + 14d)`. A profile surfaces only its
+    rows at the latest `captured_on` (the most recently completed season).
+    `win_rate`/`battles` are denormalized so the read path needs no re-aggregation. See
     `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
     """
     captured_on = models.DateField(db_index=True)
@@ -722,11 +722,12 @@ class ShipAward(models.Model):
     """Append-only ledger of top-3 ship placements (the durable record).
 
     Whereas `ShipTopPlayerSnapshot` is the ephemeral *current* standing
-    (overwritten + pruned each run), this records each top-`SHIP_BADGE_TOP_N`
-    placement as a permanent fact — one row per (realm, ship, rank, captured_on).
-    Written by `compute_ship_top_player_snapshot` (idempotent per day, never
-    pruned); read by `data.get_player_ship_awards` to render the profile "Ship
-    Honors" career summary (N-time #1, windows held, current/last-held). So a
+    (overwritten + pruned each season), this records each top-`SHIP_BADGE_TOP_N`
+    placement as a permanent fact — one row per (realm, ship, rank, captured_on),
+    where `captured_on` is the season-start date. Written by
+    `compute_ship_top_player_snapshot` (idempotent per season, never pruned); read
+    by `data.get_player_ship_awards` to render the profile "Ship Honors" career
+    summary (N-time #1 = seasons held #1, seasons top-3, current/last-held). So a
     dominant player who stops playing keeps their record instead of a vanished
     badge. See `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md`.
     """

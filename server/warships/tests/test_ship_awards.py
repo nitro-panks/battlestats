@@ -61,8 +61,17 @@ class ShipAwardLedgerTests(TestCase):
             from_observation=from_obs, to_observation=to_obs)
 
     def _run(self, realm="na"):
+        # Fixed-season pivot: drive compute over a window covering the "now"
+        # fixtures, stamping captured_on=today (these tests assert today-keyed
+        # rows). The default window now targets the last *completed* season.
+        today = timezone.now().date()
         with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
-            return compute_ship_top_player_snapshot(realm=realm)
+            return compute_ship_top_player_snapshot(
+                realm=realm,
+                window_start=today - timedelta(days=14),
+                window_end=today + timedelta(days=1),
+                captured_on=today,
+            )
 
     def _awards(self, player):
         with mock.patch.dict("os.environ", BADGE_ENV, clear=False):

@@ -807,10 +807,14 @@ def refresh_efficiency_rank_snapshot_task(self, realm=DEFAULT_REALM):
 
 @app.task(bind=True, **TASK_OPTS)
 def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
-    """Weekly per-realm T10 top-player badge snapshot. No-op unless
-    SHIP_BADGE_SNAPSHOT_ENABLED=1 (the schedule is always registered; this flag
-    is the rollout switch). Delegates to data.compute_ship_top_player_snapshot.
-    See agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
+    """Per-realm T10 top-player snapshot for the just-closed fixed 2-week season.
+
+    No-op unless SHIP_BADGE_SNAPSHOT_ENABLED=1 (the rollout switch). The beat
+    schedule fires weekly (Monday), but the task self-gates on a *season
+    boundary* (`is_season_boundary`) so it effectively runs bi-weekly — only the
+    Monday a season closes — and finalizes that completed season. Delegates to
+    data.compute_ship_top_player_snapshot (default window = most recently
+    completed season). See agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
     """
     if os.getenv("SHIP_BADGE_SNAPSHOT_ENABLED", "0") != "1":
         logger.info(
@@ -818,7 +822,16 @@ def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
             "(SHIP_BADGE_SNAPSHOT_ENABLED!=1) realm=%s", realm)
         return {"status": "disabled", "realm": realm}
 
-    from warships.data import compute_ship_top_player_snapshot
+    from warships.data import compute_ship_top_player_snapshot, is_season_boundary
+
+    # Only finalize on the day a season closes; weekly beat ticks in between are
+    # no-ops so each completed season is written exactly once.
+    if not is_season_boundary():
+        logger.info(
+            "snapshot_ship_top_players_task skipped "
+            "(not a season boundary) realm=%s", realm)
+        return {"status": "skipped", "reason": "not-a-season-boundary",
+                "realm": realm}
 
     logger.info("Starting snapshot_ship_top_players_task realm=%s", realm)
     result = _run_locked_task(

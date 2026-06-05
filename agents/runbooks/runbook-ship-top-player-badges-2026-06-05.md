@@ -25,6 +25,13 @@ rows. Two surfaces read that snapshot:
 
 ## Interval decision
 
+> **SUPERSEDED 2026-06-05 — pivoted to fixed calendar seasons.** The window below describes the
+> original *rolling* 14d / weekly scheme. It was replaced by **fixed, non-overlapping 2-week calendar
+> seasons** anchored to **ISO week 20 of 2026 (Mon 11 May 2026, 00:00 UTC)**, 14-day length. The board /
+> badges show the **most recently completed season** (they advance only at a season boundary), which is
+> deterministic for players and matches the `/ship` "next window opens" countdown. See the
+> **Fixed-season pivot** section at the bottom for the implementation.
+
 **Rolling 14 days, recomputed weekly.** Rationale (vs the alternatives considered):
 - The ≥25-qualifier × ≥10-battle bar is strict, so **sample size is the binding constraint**. A
   fortnight roughly doubles the 7d pool → more ships clear the guard and more players clear the floor,
@@ -282,3 +289,39 @@ grep/sed pattern as `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED`, so the `.env.cloud`
 (2) redeployed the backend from `origin/main` (`b898b9a`) to bring code level with the schema — `migrate`
 was a no-op since `0061` was already recorded; (3) re-ran the snapshot for all three realms and verified
 non-zero `damage`/`frags`/`survived`, not just row counts.
+
+## Fixed-season pivot (2026-06-05)
+
+The standings moved from a rolling trailing fortnight to **fixed 2-week calendar seasons** so the
+award is deterministic and comparable across players, and so the UI's "next window opens" countdown
+matches the data.
+
+- **Epoch / length:** `SHIP_SEASON_EPOCH = 2026-05-11` (Mon, ISO week 20), `SHIP_SEASON_LENGTH_DAYS = 14`
+  in `data.py`, mirrored by `client/app/lib/shipSeason.ts` (`SHIP_SEASON_EPOCH_MS` / `_LENGTH_MS`).
+  Backend is authoritative — `get_ship_leaderboard` emits `season_start` / `season_end` /
+  `next_window_open` and the frontend reads them (falling back to the TS mirror for old cached payloads).
+  Helpers: `ship_season_bounds`, `current_season_index`, `most_recent_completed_season`,
+  `is_season_boundary`.
+- **Semantics = last completed season.** `compute_ship_top_player_snapshot(realm, *, window_start,
+  window_end, captured_on)` defaults to the most recently *completed* season; `captured_on` is now the
+  **season-start date** (not the run day), so a re-run overwrites that season's rows and the `ShipAward`
+  ledger's `times_first` counts **seasons held #1**. `BattleEvent` filter is the explicit
+  `[window_start, window_end)` (UTC; `_season_window_datetimes` respects `USE_TZ`).
+- **Schedule.** `snapshot_ship_top_players_task` keeps the weekly Monday beat but self-gates on
+  `is_season_boundary()` (and `SHIP_BADGE_SNAPSHOT_ENABLED`), so it finalizes each season exactly once
+  (effectively bi-weekly), then chains the landing materialize+warm. Retention bumped to **30d** so the
+  displayed last-completed season survives until the next finalize; the ledger is never pruned.
+  - **Fire-once, no catch-up:** the runtime task only finalizes the *single* just-closed season. If the
+    boundary run is missed (worker down on a boundary Monday), the next qualifying boundary is **14 days
+    later** and that season is skipped → a hole in Ship Honors until recovered. Recovery is
+    `backfill_ship_seasons` (no `--wipe`) for the missed season range — its loop finalizes any range of
+    seasons. Watch the boundary Mondays; if one is missed, run the backfill.
+- **Backfill.** `python manage.py backfill_ship_seasons --wipe` clears the rolling-era rows (keyed by
+  arbitrary run-days) and replays W20-21 → last completed, one snapshot+award set per season —
+  retroactively populating the board and the durable Ship Honors history.
+- **Rollout:** deploy backend → run `backfill_ship_seasons --wipe` (all realms) → deploy frontend.
+  Confirmed dense across realms for W20-21 (NA 46 / EU 55 / ASIA 63 ranked T10 ships). Next auto-finalize:
+  **Mon 8 Jun** (W22-23).
+- **Tests:** `test_ship_badges.py` (season math, captured_on=season-start, `times_first` counts seasons,
+  boundary gate, leaderboard payload, backfill command) + `test_ship_awards.py` `_run` updated to pass an
+  explicit window.

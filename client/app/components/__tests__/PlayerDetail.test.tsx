@@ -839,7 +839,7 @@ describe('PlayerDetail ship-badge banner', () => {
         expect(screen.getByText('Zao')).toBeInTheDocument();
         expect(screen.getByText(/62,431 avg dmg/)).toBeInTheDocument();
         // Links to the ship standings page.
-        const link = screen.getByTitle(/#1 in Shimakaze over the last 14 days/);
+        const link = screen.getByTitle(/#1 in Shimakaze this season/);
         expect(link).toHaveAttribute('href', expect.stringContaining('/ship/10-shimakaze'));
     });
 
@@ -861,7 +861,7 @@ describe('PlayerDetail ship-badge banner', () => {
 
         const banner = screen.getByLabelText('Top ship rankings');
         expect(within(banner).getByText('NA')).toBeInTheDocument();
-        expect(screen.getByTitle(/#1 in Shimakaze on NA over the last 14 days/)).toBeInTheDocument();
+        expect(screen.getByTitle(/#1 in Shimakaze on NA this season/)).toBeInTheDocument();
     });
 
     it('stacks multiple badges (no overflow cap — backend already limits to top 3)', () => {
