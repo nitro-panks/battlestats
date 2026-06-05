@@ -804,10 +804,10 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             <hr className="mb-6 border-[var(--accent-faint)]" />
             <header className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex flex-wrap items-baseline gap-3">
-                    <h2 className="w-36 shrink-0 whitespace-nowrap text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    <h2 className="whitespace-nowrap text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                         {WINDOW_HEADER[window]}
                     </h2>
-                    <div className="flex w-40 shrink-0 items-center gap-1 text-xs" role="group" aria-label="Lookback window">
+                    <div className="flex items-center gap-1 text-xs" role="group" aria-label="Lookback window">
                         {VISIBLE_WINDOWS.map((w) => {
                             // Only Day is conditionally disabled — Week/Month
                             // always have something useful to render (even if
