@@ -34,8 +34,16 @@ const normalizeRandomsRows = (data: unknown): RandomsRow[] => {
 
 type RandomsChartDesign = 'design1' | 'design2';
 
-const TOP_N = 20;
 const DEFAULT_RANDOMS_DESIGN: RandomsChartDesign = 'design1';
+// Per-row slot height for the scrollable design1 bar list. ~22px keeps each bar
+// at roughly the same density the old fixed-height (top-20) chart rendered at.
+const RANDOMS_ROW_HEIGHT_PX = 22;
+// Visible height of the scroll viewport; taller ship lists scroll within this.
+const RANDOMS_CHART_MAX_VIEWPORT_PX = 520;
+// Floor for the battles bar so low-volume tail ships stay visible rather than
+// collapsing to a 1px sliver on the linear scale. The wins overlay stays a true
+// fraction of this (possibly floored) width, so win rate reads correctly.
+const RANDOMS_MIN_BAR_PX = 6;
 const WR_BREAKPOINTS = [45, 50, 52, 54, 56, 60, 65];
 const RANDOMS_CHART_SHIFT_RIGHT_PX = 15;
 const RANDOMS_CHART_RIGHT_EXTENSION_PX = 10;
@@ -74,22 +82,30 @@ const selectShipTypeColor = (shipType: string, theme: ChartTheme): string => {
     }
 };
 
-const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRow[], theme: ChartTheme) => {
+const drawBattlePlotDesign1 = (
+    containerElement: HTMLDivElement,
+    data: RandomsRow[],
+    theme: ChartTheme,
+    onHover?: (datum: RandomsRow | null) => void,
+) => {
     const colors = chartColors[theme];
     type RandomsChartRow = RandomsRow & { rowKey: string };
 
     const rows: RandomsChartRow[] = data.map((datum, index) => ({ ...datum, rowKey: `row-${index}` }));
     const labelByRowKey = new Map(rows.map((row) => [row.rowKey, row.ship_chart_name]));
+    const rowByKey = new Map(rows.map((row) => [row.rowKey, row]));
     const containerWidth = containerElement.clientWidth;
     const compact = containerWidth < 580;
     const totalSvgWidth = Math.max(containerWidth || 0, 280) + RANDOMS_CHART_RIGHT_EXTENSION_PX;
-    const totalSvgHeight = 420 + RANDOMS_CHART_HEIGHT_INCREASE_PX;
     const margin = compact
         ? { top: 28, right: 14, bottom: 48, left: 52 }
         : { top: 28, right: 96, bottom: 48, left: 68 + RANDOMS_CHART_SHIFT_RIGHT_PX };
     const axisFontSize = compact ? '9px' : '10px';
     const width = totalSvgWidth - margin.left - margin.right;
-    const height = totalSvgHeight - margin.top - margin.bottom;
+    // Height grows with the number of ships so the full list renders at a
+    // consistent per-row density; the React container scrolls past the viewport.
+    const height = rows.length * RANDOMS_ROW_HEIGHT_PX;
+    const totalSvgHeight = height + margin.top + margin.bottom;
 
     const svgRoot = d3.select(containerElement)
         .append('svg')
@@ -135,13 +151,13 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         .style('font-size', axisFontSize);
 
     const truncateLabel = (label: string, maxLen: number) => label.length > maxLen ? label.slice(0, maxLen) + '\u2026' : label;
-    svg.append('g')
+    const yAxis = svg.append('g')
         .style('color', colors.labelMid)
         .call(d3.axisLeft(y).tickSize(0).tickPadding(compact ? 4 : 6).tickFormat((value: number) => {
             const label = labelByRowKey.get(String(value)) ?? '';
             return compact ? truncateLabel(label, 8) : label;
-        }))
-        .selectAll('text')
+        }));
+    yAxis.selectAll('text')
         .style('font-size', axisFontSize)
         .style('font-weight', '500');
 
@@ -155,109 +171,94 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
         .style('fill', colors.labelText)
         .text('Random battles');
 
-    const detailGroup = svgRoot.append('g').attr('transform', `translate(${margin.left + width - 6}, 16)`);
-
+    // The hovered-ship readout is rendered as an HTML element above the scroll
+    // viewport (see RandomsSVG) so it stays visible no matter how far the list is
+    // scrolled — an in-SVG group would scroll off-screen on long ship lists.
     const renderDetails = (datum: RandomsRow | null) => {
-        detailGroup.selectAll('*').remove();
-        if (!datum) {
-            return;
-        }
-
-        const detailText = detailGroup.append('text')
-            .attr('x', 0)
-            .attr('y', 0)
-            .attr('text-anchor', 'end')
-            .attr('dominant-baseline', 'hanging');
-
-        detailText.append('tspan')
-            .style('font-size', '11px')
-            .style('font-weight', '700')
-            .style('fill', colors.accentLink)
-            .text(datum.ship_name);
-
-        detailText.append('tspan')
-            .style('font-size', '10px')
-            .style('font-weight', '400')
-            .style('fill', colors.separator)
-            .text('  •  ');
-
-        detailText.append('tspan')
-            .style('font-size', '10px')
-            .style('font-weight', '400')
-            .style('fill', colors.labelMid)
-            .text(`T${datum.ship_tier} ${datum.ship_type}`);
-
-        detailText.append('tspan')
-            .style('font-size', '10px')
-            .style('font-weight', '400')
-            .style('fill', colors.separator)
-            .text('  •  ');
-
-        detailText.append('tspan')
-            .style('font-size', '10px')
-            .style('font-weight', '400')
-            .style('fill', colors.labelMid)
-            .text(`${datum.pvp_battles.toLocaleString()} battles • ${datum.wins.toLocaleString()} wins`);
-
-        detailText.append('tspan')
-            .style('font-size', '10px')
-            .style('font-weight', '400')
-            .style('fill', colors.separator)
-            .text('  •  ');
-
-        detailText.append('tspan')
-            .style('font-size', '10px')
-            .style('font-weight', '700')
-            .style('fill', colors.labelMid)
-            .text(`${(datum.win_ratio * 100).toFixed(1)}% win rate`);
+        onHover?.(datum);
     };
+
+    // Battles bar width, floored so the long tail stays visible. The wins overlay
+    // is drawn as win_ratio of this width, so the colored fraction still reads as
+    // the true win rate even when the bar is floored.
+    const barWidth = (datum: RandomsChartRow) => Math.max(x(datum.pvp_battles), RANDOMS_MIN_BAR_PX);
 
     const nodes = svg.selectAll('.randoms-row')
         .data(rows)
         .enter()
         .append('g')
-        .classed('randoms-row', true);
+        .classed('randoms-row', true)
+        .style('cursor', 'default')
+        .on('mouseover', function (this: SVGGElement, _event: MouseEvent, datum: RandomsChartRow) {
+            renderDetails(datum);
+            d3.select(this).select('.randoms-wins-bar').transition()
+                .duration(70)
+                .attr('opacity', 0.82);
+        })
+        .on('mouseout', function (this: SVGGElement) {
+            renderDetails(null);
+            d3.select(this).select('.randoms-wins-bar').transition()
+                .duration(70)
+                .attr('opacity', 1);
+        });
+
+    // Transparent full-row hit area so the whole row is hoverable, not just the
+    // (possibly tiny) colored bar on tail ships.
+    nodes.append('rect')
+        .attr('x', 0)
+        .attr('y', (datum: RandomsChartRow) => y(datum.rowKey) ?? 0)
+        .attr('width', width)
+        .attr('height', foregroundBarHeight)
+        .attr('fill', 'transparent');
 
     nodes.append('rect')
         .attr('x', 0)
         .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + backgroundBarOffset)
-        .attr('width', (datum: RandomsChartRow) => x(datum.pvp_battles))
+        .attr('width', barWidth)
         .attr('height', backgroundBarHeight)
         .attr('rx', 3)
         .attr('fill', colors.barBg);
 
     nodes.append('rect')
+        .classed('randoms-wins-bar', true)
         .attr('x', 0)
         .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + foregroundBarOffset)
-        .attr('width', (datum: RandomsChartRow) => x(datum.wins))
+        .attr('width', (datum: RandomsChartRow) => barWidth(datum) * datum.win_ratio)
         .attr('height', foregroundBarHeight)
         .attr('rx', 3)
         .style('stroke', colors.axisLine)
         .style('stroke-width', 0.5)
-        .attr('fill', (datum: RandomsChartRow) => selectRandomsColorByWr(datum.win_ratio, theme))
-        .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, datum: RandomsChartRow) {
-            renderDetails(datum);
-            d3.select(this).transition()
-                .duration(70)
-                .attr('opacity', 0.82);
-        })
-        .on('mouseout', function (this: SVGRectElement) {
-            renderDetails(null);
-            d3.select(this).transition()
-                .duration(70)
-                .attr('opacity', 1);
-        });
+        .attr('fill', (datum: RandomsChartRow) => selectRandomsColorByWr(datum.win_ratio, theme));
 
     nodes.append('text')
         .attr('x', (datum: RandomsChartRow) => {
-            const labelX = x(datum.pvp_battles) + 6;
+            const labelX = barWidth(datum) + 6;
             return labelX > width - 4 ? width - 4 : labelX;
         })
         .attr('y', (datum: RandomsChartRow) => (y(datum.rowKey) ?? 0) + foregroundBarOffset + (foregroundBarHeight / 2) + 3)
         .style('font-size', axisFontSize)
         .style('fill', colors.labelMuted)
-        .attr('text-anchor', (datum: RandomsChartRow) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
+        .attr('text-anchor', (datum: RandomsChartRow) => (barWidth(datum) + 6 > width - 4 ? 'end' : 'start'))
         .text((datum: RandomsChartRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
+
+    // Hovering a ship-name label on the left axis triggers the same readout (and
+    // highlights its bar) — useful for tail ships whose bars are short.
+    yAxis.selectAll('.tick text')
+        .style('cursor', 'default')
+        .on('mouseover', function (this: SVGTextElement, _event: MouseEvent, value: unknown) {
+            const datum = rowByKey.get(String(value));
+            if (!datum) return;
+            renderDetails(datum);
+            nodes.filter((row: RandomsChartRow) => row.rowKey === datum.rowKey)
+                .select('.randoms-wins-bar')
+                .transition().duration(70).attr('opacity', 0.82);
+        })
+        .on('mouseout', function (this: SVGTextElement, _event: MouseEvent, value: unknown) {
+            renderDetails(null);
+            nodes.filter((row: RandomsChartRow) => row.rowKey === String(value))
+                .select('.randoms-wins-bar')
+                .transition().duration(70).attr('opacity', 1);
+        });
 };
 
 const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRow[], theme: ChartTheme) => {
@@ -542,6 +543,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const [selectedTiers, setSelectedTiers] = useState<number[]>([]);
     const [isChartLoading, setIsChartLoading] = useState(true);
     const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(null);
+    const [hoveredShip, setHoveredShip] = useState<RandomsRow | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Fetch ALL ships, then re-fetch if stale until the backend delivers fresh data.
@@ -613,23 +615,23 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         };
     }, [playerId, realm]);
 
-    // Filter, sort, and take top N
+    // Filter and sort every matching ship; the chart container scrolls to fit.
     const chartData = useMemo(() => {
         const filtered = allShips.filter(
             (row) => selectedTypes.includes(row.ship_type) && selectedTiers.includes(row.ship_tier)
         );
         return filtered
-            .sort((a, b) => b.pvp_battles - a.pvp_battles)
-            .slice(0, TOP_N);
+            .sort((a, b) => b.pvp_battles - a.pvp_battles);
     }, [allShips, selectedTypes, selectedTiers]);
 
     // Draw chart when data changes
     useEffect(() => {
         if (!containerRef.current) return;
         d3.select(containerRef.current).selectAll("*").remove();
+        setHoveredShip(null);
         if (chartData.length > 0) {
             if (design === 'design1') {
-                drawBattlePlotDesign1(containerRef.current, chartData, theme);
+                drawBattlePlotDesign1(containerRef.current, chartData, theme, setHoveredShip);
             } else {
                 drawBattlePlotDesign2(containerRef.current, chartData, theme);
             }
@@ -782,12 +784,34 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 <p className="text-sm text-[var(--text-secondary)]">No ships match the selected filters.</p>
             ) : null}
 
+            {!shouldShowEmptyState ? (
+                <div className="mb-1 min-h-[1.25rem] text-xs">
+                    {hoveredShip ? (
+                        <span>
+                            <span className="font-bold text-[var(--accent-dark)]">{hoveredShip.ship_name}</span>
+                            <span className="text-[var(--text-secondary)]">{'  •  '}</span>
+                            <span className="text-[var(--text-secondary)]">T{hoveredShip.ship_tier} {hoveredShip.ship_type}</span>
+                            <span className="text-[var(--text-secondary)]">{'  •  '}</span>
+                            <span className="text-[var(--text-secondary)]">{hoveredShip.pvp_battles.toLocaleString()} battles • {hoveredShip.wins.toLocaleString()} wins</span>
+                            <span className="text-[var(--text-secondary)]">{'  •  '}</span>
+                            <span className="font-semibold text-[var(--text-primary)]">{(hoveredShip.win_ratio * 100).toFixed(1)}% win rate</span>
+                        </span>
+                    ) : (
+                        <span className="text-[var(--text-secondary)]">Hover a bar for ship details.</span>
+                    )}
+                </div>
+            ) : null}
+
             <div className="relative">
                 <div
                     className={shouldGrayOut ? 'pointer-events-none opacity-60 grayscale transition' : 'transition'}
                     aria-busy={shouldGrayOut}
                 >
-                    <div ref={containerRef}></div>
+                    <div
+                        ref={containerRef}
+                        className="overflow-y-auto overflow-x-hidden"
+                        style={{ maxHeight: `${RANDOMS_CHART_MAX_VIEWPORT_PX}px` }}
+                    ></div>
                 </div>
                 {shouldGrayOut ? (
                     <div className="absolute inset-0 flex items-center justify-center rounded bg-[var(--bg-page)]/65">

@@ -77,9 +77,42 @@ const resolveWith = (payload: BattleHistoryPayload) => {
     mockFetchSharedJson.mockResolvedValueOnce({ data: payload, headers: {} });
 };
 
+// URL/mode-aware mock. The card fires TWO fetches per (window, mode): the main
+// window fetch and the always-month sparkline fetch (second useEffect). A fixed
+// mockResolvedValueOnce queue misaligns when the sparkline call consumes a
+// response meant for the main fetch, so for multi-mode tests we drive responses
+// off the request's ?mode= instead. `base` applies to every response; `perMode`
+// overrides specific modes; `makeHeaders` optionally sets per-request headers.
+const mockByMode = (
+    base: Partial<BattleHistoryPayload>,
+    perMode: Partial<Record<string, Partial<BattleHistoryPayload>>> = {},
+    makeHeaders?: (params: URLSearchParams) => Record<string, string>,
+) => {
+    mockFetchSharedJson.mockImplementation((url: string) => {
+        const params = new URL(url, 'http://t').searchParams;
+        const mode = (params.get('mode') ?? 'random') as BattleHistoryPayload['mode'];
+        return Promise.resolve({
+            data: buildPayload({ ...base, mode, ...(perMode[mode as string] ?? {}) }),
+            headers: makeHeaders ? makeHeaders(params) : {},
+        });
+    });
+};
+
+// Main (non-sparkline) fetch calls — identified by window=week, since the
+// sparkline fetch is always window=month. Optionally filtered by mode. Lets
+// assertions target the main fetch without depending on call order/count.
+const mainFetchCalls = (mode?: string): unknown[] =>
+    mockFetchSharedJson.mock.calls.filter((c) => {
+        const u = c[0] as string;
+        return u.includes('window=week') && (mode ? u.includes(`mode=${mode}`) : true);
+    });
+
 describe('BattleHistoryCard', () => {
     beforeEach(() => {
         mockFetchSharedJson.mockReset();
+        // Default response for the always-month sparkline fetch (second useEffect call).
+        // Individual tests override the main window fetch via resolveWith().
+        mockFetchSharedJson.mockResolvedValue({ data: buildPayload({ by_day: [] }), headers: {} });
     });
 
     test('renders the totals row, sparkline, and per-ship table once the API resolves', async () => {
@@ -100,9 +133,7 @@ describe('BattleHistoryCard', () => {
         // Win-rate cell renders the percentage with one decimal.
         expect(screen.getByText('66.7%')).toBeInTheDocument();
         expect(screen.getByText('50.0%')).toBeInTheDocument();
-        // Sparkline is intentionally hidden (kept in component code for future
-        // re-enable). Confirm it is NOT rendered.
-        expect(screen.queryByLabelText(/Win-rate trend across the period/i)).not.toBeInTheDocument();
+        expect(screen.getByLabelText(/30-day battle activity/i)).toBeInTheDocument();
     });
 
     test('splits Win Rate into sortable WR/S (session) and WR/O (overall + delta) columns', async () => {
@@ -214,10 +245,14 @@ describe('BattleHistoryCard', () => {
     });
 
     test('initial fetch uses window=week (default) + realm', () => {
-        mockFetchSharedJson.mockReturnValueOnce(new Promise(() => {}));
+        mockFetchSharedJson.mockReturnValue(new Promise(() => {}));
         render(<BattleHistoryCard playerName="lil_boots" realm="eu" />);
-        expect(mockFetchSharedJson).toHaveBeenCalledTimes(1);
-        const [url] = mockFetchSharedJson.mock.calls[0];
+        // The card fires the main window fetch plus the always-month sparkline
+        // fetch; the main fetch is the window=week one.
+        const url = mockFetchSharedJson.mock.calls
+            .map((c) => c[0] as string)
+            .find((u) => u.includes('window=week'));
+        expect(url).toBeDefined();
         expect(url).toContain('/api/player/lil_boots/battle-history/');
         expect(url).toContain('window=week');
         expect(url).toContain('realm=eu');
@@ -243,41 +278,24 @@ describe('BattleHistoryCard', () => {
     });
 
     test('defaults to Ranked + hides Random/All when player has only ranked data', async () => {
-        // Initial fetch returns mode=random with available_modes=['ranked'].
-        // The card auto-switches mode and refetches; second response is ranked.
-        mockFetchSharedJson.mockResolvedValueOnce({
-            data: buildPayload({
-                mode: 'random',
-                available_modes: ['ranked'],
-                totals: {
-                    battles: 0, wins: 0, losses: 0, win_rate: 0,
-                    damage: 0, avg_damage: 0, frags: 0, xp: 0,
-                    planes_killed: 0, survived_battles: 0, survival_rate: 0,
-                },
-                by_ship: [], by_day: [],
-            }),
-            headers: {},
-        });
-        mockFetchSharedJson.mockResolvedValueOnce({
-            data: buildPayload({
-                mode: 'ranked',
-                available_modes: ['ranked'],
+        // Ranked-only player: every response reports available_modes=['ranked'],
+        // so the initial mode=random fetch triggers an auto-switch + refetch to
+        // mode=ranked.
+        mockByMode({ available_modes: ['ranked'] }, {
+            ranked: {
                 totals: {
                     battles: 12, wins: 8, losses: 4, win_rate: 66.7,
                     damage: 480_000, avg_damage: 40_000, frags: 18,
                     xp: 7_200, planes_killed: 0, survived_battles: 8,
                     survival_rate: 66.7,
                 },
-            }),
-            headers: {},
+            },
         });
         render(<BattleHistoryCard playerName="ranked_only" realm="na" />);
-        // Wait for the second fetch (auto-mode-switch) to land.
+        // The auto-mode-switch refetches the main window with mode=ranked.
         await waitFor(() => {
-            expect(mockFetchSharedJson.mock.calls.length).toBeGreaterThanOrEqual(2);
+            expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
         });
-        const lastUrl = mockFetchSharedJson.mock.calls[1][0] as string;
-        expect(lastUrl).toContain('mode=ranked');
         // No pill row (single visible mode → group hidden).
         expect(screen.queryByRole('group', { name: /battle mode/i })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^Random$/ })).not.toBeInTheDocument();
@@ -285,17 +303,16 @@ describe('BattleHistoryCard', () => {
     });
 
     test('renders mode pill row with three options + defaults to All when both modes available', async () => {
-        // Initial fetch returns dual-mode availability → auto-switch to
-        // combined ('All') fires, triggering a second fetch.
-        resolveWith(buildPayload({ available_modes: ['random', 'ranked'] }));
-        resolveWith(buildPayload({ available_modes: ['random', 'ranked'], mode: 'combined' }));
+        // Dual-mode availability on every response → auto-switch to combined
+        // ('All') fires, triggering a main refetch with mode=combined.
+        mockByMode({ available_modes: ['random', 'ranked'] });
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        // Wait for the auto-switch refetch to complete.
+        // The auto-switch fetch should request the main window with mode=combined.
         await waitFor(() => {
-            expect(mockFetchSharedJson.mock.calls.length).toBeGreaterThanOrEqual(2);
+            expect(mainFetchCalls('combined').length).toBeGreaterThanOrEqual(1);
         });
         const group = screen.getByRole('group', { name: /battle mode/i });
         expect(group).toBeInTheDocument();
@@ -306,32 +323,24 @@ describe('BattleHistoryCard', () => {
         expect(random).toHaveAttribute('aria-pressed', 'false');
         expect(ranked).toHaveAttribute('aria-pressed', 'false');
         expect(all).toHaveAttribute('aria-pressed', 'true');
-        // The auto-switch fetch should have requested mode=combined.
-        const secondUrl = mockFetchSharedJson.mock.calls[1][0] as string;
-        expect(secondUrl).toContain('mode=combined');
     });
 
     test('clicking ranked pill refetches with mode=ranked', async () => {
         // Dual-mode payload triggers auto-switch to combined (refetch).
-        resolveWith(buildPayload({ available_modes: ['random', 'ranked'] }));
-        resolveWith(buildPayload({ available_modes: ['random', 'ranked'], mode: 'combined' }));
+        mockByMode({ available_modes: ['random', 'ranked'] });
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
         await waitFor(() => {
-            expect(mockFetchSharedJson.mock.calls.length).toBeGreaterThanOrEqual(2);
+            expect(mainFetchCalls('combined').length).toBeGreaterThanOrEqual(1);
         });
-        const initialCalls = mockFetchSharedJson.mock.calls.length;
-        resolveWith(buildPayload({ available_modes: ['random', 'ranked'], mode: 'ranked' }));
         await act(async () => {
             screen.getByRole('button', { name: /^Ranked$/ }).click();
         });
         await waitFor(() => {
-            expect(mockFetchSharedJson.mock.calls.length).toBe(initialCalls + 1);
+            expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
         });
-        const lastUrl = mockFetchSharedJson.mock.calls[initialCalls][0] as string;
-        expect(lastUrl).toContain('mode=ranked');
     });
 
     test('clicking each visible window pill refetches with the matching ?window= param', async () => {
@@ -382,55 +391,39 @@ describe('BattleHistoryCard', () => {
     test('polls when X-Ranked-Observation-Pending is true on a ranked-mode response', async () => {
         jest.useFakeTimers();
         try {
-            // Initial fetch with dual modes → auto-switch to combined.
-            mockFetchSharedJson.mockResolvedValueOnce({
-                data: buildPayload({ available_modes: ['random', 'ranked'] }),
-                headers: {},
-            });
-            mockFetchSharedJson.mockResolvedValueOnce({
-                data: buildPayload({ available_modes: ['random', 'ranked'], mode: 'combined' }),
-                headers: {},
+            // Dual-mode availability; the FIRST main ranked fetch returns the
+            // pending header so the card schedules a poll, the next does not.
+            let rankedMainSeen = 0;
+            mockByMode({ available_modes: ['random', 'ranked'] }, {}, (params) => {
+                if (params.get('mode') === 'ranked' && params.get('window') === 'week') {
+                    rankedMainSeen += 1;
+                    if (rankedMainSeen === 1) {
+                        return { 'X-Ranked-Observation-Pending': 'true' };
+                    }
+                }
+                return {};
             });
             render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
             await waitFor(() => {
                 expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
             });
             await waitFor(() => {
-                expect(mockFetchSharedJson.mock.calls.length).toBeGreaterThanOrEqual(2);
+                expect(mainFetchCalls('combined').length).toBeGreaterThanOrEqual(1);
             });
 
-            // Switch to ranked: first response is pending; second is fresh.
-            mockFetchSharedJson.mockResolvedValueOnce({
-                data: buildPayload({ available_modes: ['random', 'ranked'], mode: 'ranked' }),
-                headers: { 'X-Ranked-Observation-Pending': 'true' },
-            });
-            mockFetchSharedJson.mockResolvedValueOnce({
-                data: buildPayload({
-                    available_modes: ['random', 'ranked'],
-                    mode: 'ranked',
-                    totals: {
-                        battles: 25, wins: 18, losses: 7, win_rate: 72.0,
-                        damage: 900_000, avg_damage: 36_000, frags: 30,
-                        xp: 11_000, planes_killed: 0, survived_battles: 18,
-                        survival_rate: 72.0,
-                    },
-                }),
-                headers: {},
-            });
-            const callsBefore = mockFetchSharedJson.mock.calls.length;
             await act(async () => {
                 screen.getByRole('button', { name: /^Ranked$/ }).click();
             });
-            // First ranked fetch landed (pending header set).
+            // First ranked main fetch landed (pending header set).
             await waitFor(() => {
-                expect(mockFetchSharedJson.mock.calls.length).toBe(callsBefore + 1);
+                expect(mainFetchCalls('ranked').length).toBe(1);
             });
-            // Advance the polling delay; the second fetch fires.
+            // Advance the polling delay; the second (poll) ranked fetch fires.
             await act(async () => {
                 jest.advanceTimersByTime(2100);
             });
             await waitFor(() => {
-                expect(mockFetchSharedJson.mock.calls.length).toBe(callsBefore + 2);
+                expect(mainFetchCalls('ranked').length).toBe(2);
             });
         } finally {
             jest.useRealTimers();
@@ -438,29 +431,26 @@ describe('BattleHistoryCard', () => {
     });
 
     test('renders empty state with pill row when ranked mode has zero data', async () => {
-        // Initial dual-mode fetch → auto-switch to combined.
-        resolveWith(buildPayload({ available_modes: ['random', 'ranked'] }));
-        resolveWith(buildPayload({ available_modes: ['random', 'ranked'], mode: 'combined' }));
+        // Dual-mode availability; ranked mode has zero battles so the card stays
+        // visible with the pill row (user can switch back).
+        mockByMode({ available_modes: ['random', 'ranked'] }, {
+            ranked: {
+                totals: {
+                    battles: 0, wins: 0, losses: 0, win_rate: 0,
+                    damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                    planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                },
+                by_ship: [],
+                by_day: [],
+            },
+        });
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
         await waitFor(() => {
-            expect(mockFetchSharedJson.mock.calls.length).toBeGreaterThanOrEqual(2);
+            expect(mainFetchCalls('combined').length).toBeGreaterThanOrEqual(1);
         });
-        // Switch to ranked: zero battles → card stays visible with pill so
-        // user can switch back.
-        resolveWith(buildPayload({
-            available_modes: ['random', 'ranked'],
-            mode: 'ranked',
-            totals: {
-                battles: 0, wins: 0, losses: 0, win_rate: 0,
-                damage: 0, avg_damage: 0, frags: 0, xp: 0,
-                planes_killed: 0, survived_battles: 0, survival_rate: 0,
-            },
-            by_ship: [],
-            by_day: [],
-        }));
         await act(async () => {
             screen.getByRole('button', { name: /^Ranked$/ }).click();
         });
@@ -475,6 +465,9 @@ describe('BattleHistoryCard', () => {
 describe('battle-history prefetch dedupe contract', () => {
     beforeEach(() => {
         mockFetchSharedJson.mockReset();
+        // Default for the always-month sparkline fetch (second useEffect);
+        // tests override the main fetch via resolveWith().
+        mockFetchSharedJson.mockResolvedValue({ data: buildPayload({ by_day: [] }), headers: {} });
     });
 
     it('builders produce the canonical week/random url + cache key', () => {

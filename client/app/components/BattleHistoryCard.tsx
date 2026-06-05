@@ -449,88 +449,118 @@ const buildWindowedDays = (
     return padded;
 };
 
-interface SparklinePoint {
-    date: string;
-    value: number;
-    color: string;
-    tooltip: string;
-}
-
-// Inline sparkline that lives inside the totals tile (between Win rate
-// and Avg damage). No hover values, no day markers — just a continuous
-// polyline scaled to the window's value range.
-const InlineSparkline: React.FC<{ values: number[]; ariaLabel: string }> = ({
-    values, ariaLabel,
+const InlineSparkline: React.FC<{
+    days: BattleHistoryByDay[];
+    ariaLabel: string;
+    lifetimeBattles?: number | null;
+    lifetimeWinRate?: number | null;
+}> = ({
+    days, ariaLabel, lifetimeBattles, lifetimeWinRate,
 }) => {
-    if (values.length < 2) return null;
-    const width = 100;
-    const height = 28;
-    const pad = 2;
-    const minV = Math.min(...values);
-    const maxV = Math.max(...values);
-    const range = Math.max(maxV - minV, 0.0001);
-    const padding = range * 0.15 + 0.0001;
-    const yMin = minV - padding;
-    const yMax = maxV + padding;
-    const span = yMax - yMin;
-    const points = values.map((v, i) => {
-        const x = pad + (i * (width - 2 * pad)) / Math.max(1, values.length - 1);
-        const y = height - pad - ((v - yMin) / span) * (height - 2 * pad);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(' ');
+    if (days.length < 2) return null;
+    const W = 100;
+    const H = 64;
+    const gap = 0.5;
+    const barW = (W - gap * (days.length - 1)) / days.length;
+    const maxBattles = Math.max(1, ...days.map(d => d.battles));
+
+    // Overlay: a continuous line tracing the player's OVERALL (lifetime) win rate
+    // over the window — not the per-day session WR. Anchored to the lifetime
+    // baseline (battles + WR as of now), we walk backward day by day, subtracting
+    // each day's battles/wins, to reconstruct the lifetime aggregate at the end of
+    // every prior day. Because lifetime battle counts dwarf a day's handful of
+    // games, this drifts only slightly — so we auto-scale the line to its own
+    // min/max range (15% padding) to make that drift visible, rather than mapping
+    // the full 0–100% axis. Empty days inherit the prior aggregate, so the line is
+    // naturally continuous. Modes without a lifetime baseline (e.g. pure ranked)
+    // omit the line.
+    const wrPad = 2;
+    const wrPoints: string[] = [];
+    if (
+        lifetimeBattles != null && lifetimeBattles > 0
+        && lifetimeWinRate != null
+    ) {
+        let cumBattles = lifetimeBattles;
+        let cumWins = Math.round(lifetimeBattles * (lifetimeWinRate / 100));
+        const series: (number | null)[] = new Array(days.length).fill(null);
+        for (let i = days.length - 1; i >= 0; i -= 1) {
+            series[i] = cumBattles > 0 ? (cumWins / cumBattles) * 100 : null;
+            cumBattles -= days[i].battles;
+            cumWins -= days[i].wins;
+        }
+        const vals = series.filter((v): v is number => v != null);
+        if (vals.length >= 1) {
+            const minV = Math.min(...vals);
+            const maxV = Math.max(...vals);
+            const range = Math.max(maxV - minV, 0.0001);
+            const padding = range * 0.15 + 0.0001;
+            const yMin = minV - padding;
+            const span = (maxV + padding) - yMin;
+            series.forEach((v, i) => {
+                if (v == null) return;
+                const cx = i * (barW + gap) + barW / 2;
+                const cy = wrPad + (1 - (v - yMin) / span) * (H - 2 * wrPad);
+                wrPoints.push(`${cx.toFixed(2)},${cy.toFixed(2)}`);
+            });
+        }
+    }
+
     return (
         <svg
-            viewBox={`0 0 ${width} ${height}`}
-            width="30%"
-            height={height}
+            viewBox={`0 0 ${W} ${H}`}
+            width="100%"
+            height={H}
             preserveAspectRatio="none"
-            className="block"
             aria-label={ariaLabel}
             role="img"
         >
-            <polyline
-                fill="none"
-                stroke="var(--accent-mid)"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                points={points}
-            />
+            {days.map((d, i) => {
+                const x = i * (barW + gap);
+                const totalH = d.battles === 0
+                    ? 2
+                    : Math.max(4, (d.battles / maxBattles) * (H - 2));
+                const totalY = H - totalH;
+                const winsH = d.battles > 0 ? (d.wins / d.battles) * totalH : 0;
+                const winsY = H - winsH;
+                const wr = d.battles > 0 ? (d.wins / d.battles) * 100 : null;
+                const losses = d.battles - d.wins;
+                const tooltip = d.battles > 0
+                    ? `${d.date}: ${d.battles} battles — ${d.wins}W / ${losses}L (${wr!.toFixed(1)}%)`
+                    : `${d.date}: no battles`;
+                return (
+                    <g key={d.date}>
+                        <title>{tooltip}</title>
+                        <rect x={x} y={totalY} width={barW} height={totalH} fill="rgba(120,120,120,0.25)" rx="0.5" />
+                        {winsH > 0 && (
+                            <rect x={x} y={winsY} width={barW} height={winsH} fill={wrColor(wr)} opacity={0.85} rx="0.5" />
+                        )}
+                    </g>
+                );
+            })}
+            {wrPoints.length >= 2 && (
+                <polyline
+                    points={wrPoints.join(' ')}
+                    fill="none"
+                    stroke="var(--accent-secondary-mid)"
+                    strokeWidth={1.75}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    vectorEffect="non-scaling-stroke"
+                />
+            )}
+            {wrPoints.length === 1 && (
+                <circle
+                    cx={Number(wrPoints[0].split(',')[0])}
+                    cy={Number(wrPoints[0].split(',')[1])}
+                    r={1.75}
+                    fill="var(--accent-secondary-mid)"
+                    vectorEffect="non-scaling-stroke"
+                />
+            )}
         </svg>
     );
 };
 
-const buildOverallWrSeries = (
-    days: BattleHistoryByDay[],
-    totals: BattleHistoryTotals,
-): number[] | null => {
-    // Need lifetime baseline to anchor the running overall WR.
-    const lifetimeBattles = totals.lifetime_battles ?? null;
-    const lifetimeWr = totals.lifetime_win_rate ?? null;
-    if (lifetimeBattles == null || lifetimeWr == null || lifetimeBattles <= 0) {
-        return null;
-    }
-    const lifetimeWins = Math.round(lifetimeBattles * (lifetimeWr / 100));
-    const periodBattles = totals.battles;
-    const periodWins = totals.wins;
-    const priorBattles = Math.max(0, lifetimeBattles - periodBattles);
-    const priorWins = Math.max(0, lifetimeWins - periodWins);
-
-    let cumBattles = 0;
-    let cumWins = 0;
-    return days.map((d) => {
-        cumBattles += d.battles;
-        cumWins += d.wins;
-        const denom = priorBattles + cumBattles;
-        return denom > 0 ? (100 * (priorWins + cumWins)) / denom : 0;
-    });
-};
-
-// Fallback when no lifetime baseline is available — plot battles-per-day
-// as the value series. Same visual contract as the WR series; just a line.
-const buildBattlesPerDaySeries = (days: BattleHistoryByDay[]): number[] => (
-    days.map((d) => d.battles)
-);
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -565,6 +595,12 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     refreshNonce = 0,
 }) => {
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
+    const [monthByDay, setMonthByDay] = useState<BattleHistoryByDay[]>([]);
+    // Lifetime baseline from the month fetch, used to anchor the sparkline's
+    // overall-WR overlay line. Null in modes without a lifetime (e.g. combined).
+    const [monthLifetime, setMonthLifetime] = useState<{
+        battles: number | null; winRate: number | null;
+    }>({ battles: null, winRate: null });
     const [error, setError] = useState<Error | null>(null);
     const [loading, setLoading] = useState(true);
     const [window, setWindow] = useState<BattleHistoryWindow>('week');
@@ -635,6 +671,31 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             if (pollTimer !== null) clearTimeout(pollTimer);
         };
     }, [playerName, realm, window, mode, refreshNonce]);
+
+    // Separate fetch that always retrieves the month window for the sparkline,
+    // independent of whichever window the user has selected. fetchSharedJson
+    // deduplicates against the main fetch when window === 'month'.
+    useEffect(() => {
+        let cancelled = false;
+        fetchSharedJson<BattleHistoryPayload>(
+            battleHistoryFetchUrl(playerName, realm, 'month', mode),
+            {
+                label: `BattleHistoryCard:sparkline`,
+                ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
+                cacheKey: battleHistoryCacheKey(playerName, realm, 'month', mode, 0, refreshNonce),
+            },
+        )
+            .then(({ data }) => {
+                if (cancelled) return;
+                setMonthByDay(data.by_day);
+                setMonthLifetime({
+                    battles: data.totals?.lifetime_battles ?? null,
+                    winRate: data.totals?.lifetime_win_rate ?? null,
+                });
+            })
+            .catch(() => { /* sparkline stays empty on error */ });
+        return () => { cancelled = true; };
+    }, [playerName, realm, mode, refreshNonce]);
 
     // Auto-select the right default mode based on what the player actually
     // has data in. Skipped once the user has explicitly clicked a pill.
@@ -731,22 +792,28 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         return null;
     }
 
+    const sparkline = (
+        <InlineSparkline
+            days={buildWindowedDays(monthByDay, 30)}
+            ariaLabel="30-day battle activity"
+            lifetimeBattles={monthLifetime.battles}
+            lifetimeWinRate={monthLifetime.winRate}
+        />
+    );
     return (
         <section
             data-testid="battle-history-card"
             className="mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5"
             aria-label="Recent battles"
         >
+            <div className="w-full pb-6">{sparkline}</div>
+            <hr className="mb-6 border-[var(--accent-faint)]" />
             <header className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex flex-wrap items-baseline gap-3">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                    <h2 className="w-36 shrink-0 whitespace-nowrap text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                         {WINDOW_HEADER[window]}
                     </h2>
-                    <div
-                        className="flex items-center gap-1 text-xs"
-                        role="group"
-                        aria-label="Lookback window"
-                    >
+                    <div className="flex w-40 shrink-0 items-center gap-1 text-xs" role="group" aria-label="Lookback window">
                         {VISIBLE_WINDOWS.map((w) => {
                             // Only Day is conditionally disabled — Week/Month
                             // always have something useful to render (even if
@@ -779,7 +846,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 </button>
                             );
                         })}
-                </div>
+                    </div>
                 </div>
                 {visibleModes.length >= 2 && (
                     <div
@@ -822,12 +889,6 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             )}
             {hasBattles && (() => {
                 const kdr = totals!.battles > 0 ? totals!.frags / totals!.battles : 0;
-                // Sparkline + helpers (InlineSparkline, buildOverallWrSeries,
-                // buildBattlesPerDaySeries, buildWindowedDays) intentionally
-                // kept in the file — disabled here to declutter the totals
-                // tile but available if we want to re-enable. To restore,
-                // uncomment the InlineSparkline cell below and bump the grid
-                // back to sm:grid-cols-6.
                 return (
                     <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5 sm:items-end">
                         <div>
@@ -845,23 +906,6 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 />
                             </div>
                         </div>
-                        {/* <div className="pb-1">
-                            <InlineSparkline
-                                values={
-                                    buildOverallWrSeries(
-                                        (payload.period ?? 'daily') === 'daily'
-                                            ? buildWindowedDays(payload.by_day, payload.window_days ?? payload.windows ?? 7)
-                                            : payload.by_day,
-                                        totals!,
-                                    ) ?? buildBattlesPerDaySeries(
-                                        (payload.period ?? 'daily') === 'daily'
-                                            ? buildWindowedDays(payload.by_day, payload.window_days ?? payload.windows ?? 7)
-                                            : payload.by_day,
-                                    )
-                                }
-                                ariaLabel="Win-rate trend across the period"
-                            />
-                        </div> */}
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
