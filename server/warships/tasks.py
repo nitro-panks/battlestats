@@ -1458,14 +1458,16 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
     3 calls when it's on (random + ranked baseline rolled into the same
     observation).
 
-    Defers when a clan crawl is running (same convention as the tiered
-    crawler) so we don't pile WG calls on top of the long-running batch.
+    Crawl coexistence: a clan crawl holds its realm lock for hours per pass,
+    so the floor used to *skip entirely* whenever a crawl was running — which
+    starved active-player observations for days and produced lumpy battle
+    history. Instead, when a crawl is running we still run the floor but at a
+    slower per-player delay so combined WG load stays under the ~10 req/s app
+    budget (the crawl paces ~4 req/s; running both at full tilt previously
+    tripped a 407 REQUEST_LIMIT_EXCEEDED). See
+    runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.
     """
-    if cache.get(_clan_crawl_lock_key(realm)) is not None:
-        logger.info(
-            "Skipping ensure_daily_battle_observations_task because clan crawl is currently running"
-        )
-        return {"status": "skipped", "reason": "crawl-running"}
+    crawl_running = cache.get(_clan_crawl_lock_key(realm)) is not None
 
     lock_key = _daily_observation_floor_lock_key(realm)
     if not cache.add(
@@ -1479,15 +1481,28 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
 
     try:
         from django.core.management import call_command
+        if crawl_running:
+            # Coexist with the crawl at a reduced pace instead of skipping.
+            delay = float(os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_CRAWL_DELAY", "0.8"))
+            limit = int(os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_CRAWL_LIMIT",
+                os.getenv("BATTLE_OBSERVATION_FLOOR_LIMIT", "3000")))
+            logger.info(
+                "Running observation floor in crawl-coexist mode "
+                "(realm=%s, delay=%s, limit=%s)", realm, delay, limit)
+        else:
+            delay = float(os.getenv("BATTLE_OBSERVATION_FLOOR_DELAY", "0.3"))
+            limit = int(os.getenv("BATTLE_OBSERVATION_FLOOR_LIMIT", "3000"))
         call_command(
             "ensure_daily_battle_observations",
             realm=realm,
             days=int(os.getenv("BATTLE_OBSERVATION_FLOOR_DAYS", "7")),
             stale_hours=int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOURS", "8")),
-            limit=int(os.getenv("BATTLE_OBSERVATION_FLOOR_LIMIT", "3000")),
-            delay=float(os.getenv("BATTLE_OBSERVATION_FLOOR_DELAY", "0.3")),
+            limit=limit,
+            delay=delay,
         )
-        return {"status": "completed"}
+        return {"status": "completed", "crawl_coexist": crawl_running}
     finally:
         cache.delete(lock_key)
 

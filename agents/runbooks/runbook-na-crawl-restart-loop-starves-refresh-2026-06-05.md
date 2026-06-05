@@ -2,7 +2,7 @@
 
 _Created: 2026-06-05_
 _Context: A user-reported "lumpy" battle-history chart on `/player/gkgkgkgkgk?realm=na` traced to the NA `crawl_all_clans_task` never completing — it restarts `resume=False` on every deploy/restart and self-aborts at its 5h45m soft time limit, so it holds the `crawl_all_clans:na` realm lock ~24/7. Because the observation floor, incremental player refresh, and incremental ranked refresh all voluntarily defer to that lock, all three NA freshness paths are continuously skipped, leaving active players observed only sporadically._
-_Status: diagnosed; resumable-crawl fix **drafted** on branch `fix/clan-crawl-resumable-pass-2026-06-05` (committed locally, not deployed). See "Implementation (drafted)". Remaining next steps below._
+_Status: diagnosed; two fixes **implemented** on branch `fix/clan-crawl-resumable-pass-2026-06-05` (committed locally, not deployed) — (1) run-scoped resumable crawl, (2) observation floor now coexists with crawls instead of skipping. See "Implementation". Deploy + validation pending._
 
 ## Purpose
 
@@ -91,7 +91,7 @@ Tests: `warships/tests/test_clan_crawl.py::ClanCrawlResumeWindowTests` (4 cases 
 ## Remaining next steps (priority order)
 
 1. ~~Make the scheduled crawl resumable~~ — **drafted** (above). Run the release gate, deploy, and confirm the NA crawl completes a pass + releases the lock.
-2. **Decouple the floor from the crawl lock (the actual de-lumping fix).** The floor + incrementals run on `background`, not `crawls`; the lock deferral exists only to avoid WG-rate contention. With resume in place the lock now expires 8h after each crawl start, but deploys < 8h apart keep re-arming it, so the floor's coverage is still coupled to deploy timing. Replace the hard `crawl-running` skip with rate-aware coexistence — e.g. let the floor run during a crawl but at a reduced `BATTLE_OBSERVATION_FLOOR_LIMIT` / slower delay so combined WG load stays under 10 req/s. This is what reliably gives active players ≤8h observation spacing regardless of crawl/deploy timing.
+2. ~~Decouple the floor from the crawl lock~~ — **implemented.** `ensure_daily_battle_observations_task` no longer returns `skipped: crawl-running`; when a crawl holds the realm lock it runs the floor at a slower pace (`BATTLE_OBSERVATION_FLOOR_CRAWL_DELAY=0.8`, limit falls back to the normal `BATTLE_OBSERVATION_FLOOR_LIMIT=3000`) so combined WG load stays under ~10 req/s (crawl ~4/s + floor ~2.4/s ≈ 6.4/s avg). This is the actual de-lumping fix: active players now get observed regardless of crawl/deploy timing. Tests: `test_observation_floor_crawl_coexist.py` (3 cases). The heavier `incremental_player_refresh_task` / `incremental_ranked_data_task` still defer to the crawl lock (deliberately scoped out — the floor alone provides the ≤8h observation guarantee, and the incrementals are far heavier on the WG budget).
 3. **Optionally** raise `BATTLE_OBSERVATION_FLOOR_LIMIT` toward 6000 — but only after the crawl is healthy; it is the wrong first lever and has near-zero rate headroom today.
 4. Consider not stopping `battlestats-celery-crawls` on every deploy when a crawl is mid-run (deploy-script change), and/or raising the 5h45m soft limit now that resume preserves progress.
 
