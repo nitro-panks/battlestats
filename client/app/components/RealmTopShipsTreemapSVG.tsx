@@ -249,7 +249,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
                     ))}
                 </div>
             </div>
-            <div ref={containerRef} className="relative w-full">
+            <div ref={containerRef} className="relative w-full max-w-[900px]">
                 <svg ref={svgRef} role="img" aria-label={`${realm} top ${SHIP_LIMIT} most-played ships over the previous 7 days`} />
                 {hover && (
                     <div
