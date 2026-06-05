@@ -129,20 +129,20 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                     Not enough players ranked this ship in the last {data.window_days} days yet. Check back soon.
                 </div>
             ) : (
-                <table className="w-full text-sm">
+                <table className="text-sm">
                     <thead>
                         <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                            <th className="py-2 pr-2 w-10">#</th>
-                            <th className="py-2 pr-2">Player</th>
-                            <th className="py-2 pr-2 text-right">Win rate</th>
-                            <th className="py-2 text-right">Battles</th>
+                            <th className="py-2 pr-3">#</th>
+                            <th className="py-2 pr-8">Player</th>
+                            <th className="py-2 pr-8">Win rate</th>
+                            <th className="py-2">Battles</th>
                         </tr>
                     </thead>
                     <tbody>
                         {players.map((p) => (
-                            <tr key={p.rank} className="border-b border-[var(--border)]/50">
-                                <td className="py-1.5 pr-2 tabular-nums text-[var(--text-muted)]">{p.rank}</td>
-                                <td className="py-1.5 pr-2">
+                            <tr key={p.rank}>
+                                <td className="py-1.5 pr-3 tabular-nums text-[var(--text-muted)]">{p.rank}</td>
+                                <td className="py-1.5 pr-8">
                                     <Link
                                         href={buildPlayerPath(p.player_name, realm)}
                                         className="text-[var(--accent-mid)] hover:underline"
@@ -150,10 +150,10 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                                         {p.player_name}
                                     </Link>
                                 </td>
-                                <td className="py-1.5 pr-2 text-right tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>
+                                <td className="py-1.5 pr-8 tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>
                                     {p.win_rate.toFixed(1)}%
                                 </td>
-                                <td className="py-1.5 text-right tabular-nums text-[var(--text-muted)]">
+                                <td className="py-1.5 tabular-nums text-[var(--text-muted)]">
                                     {p.battles.toLocaleString()}
                                 </td>
                             </tr>
