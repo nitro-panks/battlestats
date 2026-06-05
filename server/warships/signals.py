@@ -237,6 +237,37 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
+    # -- Recent-clans warmer --
+    # recent-clans is lazily rebuilt on request (multi-second Clan aggregation)
+    # with a 6h TTL + dirty-invalidation on clan updates, so without a warmer the
+    # cold rebuild periodically lands on a user. Rebuild it out-of-band, striped
+    # per realm. Default hourly (well inside the 6h TTL, covers dirty churn).
+    recent_clans_warm_minutes = int(
+        os.getenv("LANDING_RECENT_CLANS_WARM_MINUTES", "60"))
+    for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, recent_clans_warm_minutes)
+        recent_clans_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"recent-clans-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_landing_recent_clans_task",
+                "crontab": recent_clans_warm_schedule,
+                "interval": None,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Rebuilds the landing recent-clans payload out-of-band ({realm.upper()}).",
+            },
+        )
+
     landing_best_snapshot_hour = int(
         os.getenv("LANDING_BEST_PLAYER_SNAPSHOT_HOUR", "1"))
     for realm in sorted(VALID_REALMS):

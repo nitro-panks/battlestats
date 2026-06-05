@@ -262,25 +262,28 @@ const PlayerSearch: React.FC = () => {
         });
     }, [realm]);
 
-    const fetchLandingData = useCallback(async () => {
+    const fetchLandingData = useCallback(() => {
         triggerBestLandingWarmup();
 
-        try {
-            const [{ data: recentClansPayload }, { data: recentPlayersPayload }] = await Promise.all([
-                fetchSharedJson<LandingClan[]>(withRealm('/api/landing/recent-clans/', realm), {
-                    label: 'Recent clans',
-                    ttlMs: LANDING_RECENT_FETCH_TTL_MS,
-                }),
-                fetchSharedJson<LandingPlayer[]>(withRealm('/api/landing/recent/', realm), {
-                    label: 'Recent players',
-                    ttlMs: LANDING_RECENT_FETCH_TTL_MS,
-                }),
-            ]);
-            setRecentClans(Array.isArray(recentClansPayload) ? recentClansPayload : []);
-            setRecentPlayers(Array.isArray(recentPlayersPayload) ? recentPlayersPayload : []);
-        } catch (err) {
-            console.error('Error fetching landing data:', err);
-        }
+        // Fire the two recent fetches INDEPENDENTLY and commit each as it
+        // resolves — do not await them together. A single Promise.all here used
+        // to set both states only after BOTH responses landed, so a cold
+        // `recent-clans` (multi-second rebuild) blocked the recent-players chart
+        // even though `/api/landing/recent/` returned in ~50ms. Decoupling lets
+        // the player chart render the instant its own (usually warm) data lands.
+        void fetchSharedJson<LandingPlayer[]>(withRealm('/api/landing/recent/', realm), {
+            label: 'Recent players',
+            ttlMs: LANDING_RECENT_FETCH_TTL_MS,
+        })
+            .then(({ data }) => setRecentPlayers(Array.isArray(data) ? data : []))
+            .catch((err) => console.error('Error fetching recent players:', err));
+
+        void fetchSharedJson<LandingClan[]>(withRealm('/api/landing/recent-clans/', realm), {
+            label: 'Recent clans',
+            ttlMs: LANDING_RECENT_FETCH_TTL_MS,
+        })
+            .then(({ data }) => setRecentClans(Array.isArray(data) ? data : []))
+            .catch((err) => console.error('Error fetching recent clans:', err));
     }, [realm, triggerBestLandingWarmup]);
 
     const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode, sort: PlayerBestSort = 'overall') => {

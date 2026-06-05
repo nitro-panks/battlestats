@@ -964,6 +964,33 @@ def warm_landing_recent_players_task(self, realm=DEFAULT_REALM):
 
 
 @app.task(bind=True, **TASK_OPTS)
+def warm_landing_recent_clans_task(self, realm=DEFAULT_REALM):
+    """Rebuild the landing "recent clans" payload out-of-band so reads stay warm.
+
+    `get_landing_recent_clans_payload` lazily rebuilds (a multi-second Clan
+    aggregation) on cache miss / TTL expiry / dirty-invalidation — and without
+    this warmer that cold rebuild lands on a user request, delaying the landing
+    clan chart (and, before the fetch decoupling, the player chart too). Mirrors
+    the recent-players warmer; force_refresh ignores the dirty flag.
+    """
+    from warships.landing import get_landing_recent_clans_payload
+
+    lock_key = f"warships:tasks:warm_landing_recent_clans:{realm}:lock"
+    if not cache.add(lock_key, self.request.id, timeout=300):
+        logger.info(
+            "Skipping warm_landing_recent_clans_task realm=%s — already running", realm)
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        payload = get_landing_recent_clans_payload(force_refresh=True, realm=realm)
+        result = {"status": "completed", "rows": len(payload), "realm": realm}
+        logger.info("Finished warm_landing_recent_clans_task: %s", result)
+        return result
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, **TASK_OPTS)
 def warm_player_distributions_task(self, realm=DEFAULT_REALM):
     from warships.data import warm_player_distributions
 
