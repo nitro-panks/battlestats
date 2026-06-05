@@ -244,15 +244,19 @@ class ShipBadgeSnapshotTests(TestCase):
             ShipTopPlayerSnapshot.objects.filter(ship_id=T9_SHIP).exists())
 
     def test_non_t10_in_treemap_is_included(self):
-        # A non-T10 ship that IS among the most-played (in the treemap's
-        # previous-7-UTC-day window) is unioned into the target set and ranked,
-        # even though it isn't Tier 10. Events dated 2 days ago land in both the
-        # treemap window and the 14-day snapshot window.
+        # A non-T10 ship that IS among the most-played (returned by the realm
+        # treemap) is unioned into the snapshot target set and ranked, even though
+        # it isn't Tier 10. The treemap window is now the completed ship season
+        # (not a rolling 7d, per the treemap-season-alignment change), so mock the
+        # treemap to exercise the union mechanism directly, decoupled from its
+        # window.
         for i in range(3):
             self._event(self._player(f"T9p{i}"), T9_SHIP, battles=30,
                         wins=20 + i, detected_days_ago=2)
 
-        self._run("na")
+        with mock.patch("warships.data.compute_realm_top_ships",
+                        return_value={"ships": [{"ship_id": T9_SHIP}]}):
+            self._run("na")
 
         self.assertTrue(
             ShipTopPlayerSnapshot.objects.filter(ship_id=T9_SHIP).exists())
@@ -430,7 +434,10 @@ class ShipBadgeSnapshotTests(TestCase):
             self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
 
         env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "1"}
-        with mock.patch.dict("os.environ", env, clear=False), _season_boundary_now():
+        with mock.patch.dict("os.environ", env, clear=False), _season_boundary_now(), \
+                mock.patch(
+                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
+                ):
             result = snapshot_ship_top_players_task.apply(
                 kwargs={"realm": "na"}).get()
 
