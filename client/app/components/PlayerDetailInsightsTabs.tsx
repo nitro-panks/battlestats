@@ -12,6 +12,7 @@ import { decrementChartFetches, fetchSharedJson, incrementChartFetches } from '.
 import { useTheme } from '../context/ThemeContext';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
+import { trackEvent } from '../lib/umami';
 
 type InsightsTabId = 'profile' | 'ships' | 'ranked' | 'career' | 'badges' | 'population';
 
@@ -347,7 +348,10 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 aria-selected={isActive}
                                 aria-controls={`player-insights-panel-${tab.id}`}
                                 tabIndex={isActive ? 0 : -1}
-                                onClick={() => setActiveTab(tab.id)}
+                                onClick={() => {
+                                    setActiveTab(tab.id);
+                                    trackEvent('insights-tab', { tab: tab.id });
+                                }}
                                 className={isActive
                                     ? 'rounded-full border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-3 py-1.5 text-sm font-medium text-[var(--accent-mid)]'
                                     : 'rounded-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-light)] hover:text-[var(--accent-mid)]'}

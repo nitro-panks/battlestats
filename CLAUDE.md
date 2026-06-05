@@ -344,6 +344,7 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - Uses the same managed Postgres (separate `umami` database), connecting via a **least-privilege `umami_app` role** scoped to that database only — NOT the `doadmin` cluster superuser (`UMAMI_DB_USER`/`UMAMI_DB_PASSWORD` in `/etc/battlestats-server.secrets.env`)
 - Bootstrap script: `umami/deploy/bootstrap_umami.sh`
 - Tracking script loaded via `<script>` tag in `client/app/layout.tsx`
+- **Custom events**: `client/app/lib/umami.ts` exports `trackEvent(name, data)` — an SSR-safe, no-throw wrapper over `window.umami.track`. Surfaced in the Umami **Events** report. Instrumented so far: `insights-tab` (`{tab}`) on the player Insights tab switch, and `battle-history-sort` (`{key, direction, mode, window}`) on the Battle History column sort — both to inform default-tab / default-sort decisions. Keep event names kebab-case and properties low-cardinality.
 - Hardening details: `agents/runbooks/runbook-umami-hardening-2026-06-02.md`
 
 ### Docker ports

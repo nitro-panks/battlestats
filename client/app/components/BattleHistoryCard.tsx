@@ -5,6 +5,7 @@ import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import wrColor from '../lib/wrColor';
 import { chartColors } from '../lib/chartTheme';
 import { useTheme } from '../context/ThemeContext';
+import { trackEvent } from '../lib/umami';
 
 export interface BattleHistoryByShip {
     ship_id: number;
@@ -722,9 +723,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     });
 
     const onSortClick = (key: SortKey) => {
-        setSort((s) => s.key === key
-            ? { key, direction: s.direction === 'asc' ? 'desc' : 'asc' }
-            : { key, direction: DEFAULT_DIRECTION[key] });
+        // Compute the next sort outside the state updater so the analytics event
+        // fires exactly once (a setState reducer can run twice under StrictMode).
+        const direction: SortDirection = sort.key === key
+            ? (sort.direction === 'asc' ? 'desc' : 'asc')
+            : DEFAULT_DIRECTION[key];
+        setSort({ key, direction });
+        trackEvent('battle-history-sort', { key, direction, mode, window });
     };
 
     const visibleByShip = useMemo(() => {
