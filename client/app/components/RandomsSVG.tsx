@@ -553,7 +553,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
 
         const applyResult = (data: unknown, updatedAt: string | null) => {
             const result = normalizeRandomsRows(data)
-                .filter((row) => row.ship_type && row.ship_type.toLowerCase() !== 'unknown');
+                .filter((row) => row.ship_type && row.ship_type.toLowerCase() !== 'unknown')
+                .filter((row) => row.pvp_battles > 0);
             setAllShips(result);
             setRandomsUpdatedAt(updatedAt);
 
@@ -797,7 +798,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                             <span className="font-semibold text-[var(--text-primary)]">{(hoveredShip.win_ratio * 100).toFixed(1)}% win rate</span>
                         </span>
                     ) : (
-                        <span className="text-[var(--text-secondary)]">Hover a bar for ship details.</span>
+                        <span className="text-[var(--text-secondary)]">Hover a bar or ship name for ship details.</span>
                     )}
                 </div>
             ) : null}
