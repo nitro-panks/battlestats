@@ -826,21 +826,18 @@ describe('PlayerDetail ship-badge banner', () => {
 
     const badge = (over: Record<string, unknown> = {}) => ({
         ship_id: 10, ship_name: 'Shimakaze', rank: 1, win_rate: 64.0, battles: 312,
-        avg_damage: 62431, kdr: 1.85, survival_rate: 68, window_days: 14, ...over,
+        avg_damage: 62431, window_days: 14, ...over,
     });
 
-    it('renders a banner card per ship placement with the window stats', () => {
+    it('renders a banner card per ship placement with avg damage', () => {
         renderWithBadges([
             badge(),
-            badge({ ship_id: 20, ship_name: 'Zao', rank: 2, avg_damage: 41200, kdr: 1.4, survival_rate: 55 }),
+            badge({ ship_id: 20, ship_name: 'Zao', rank: 2, avg_damage: 41200 }),
         ]);
 
         expect(screen.getByText('Shimakaze')).toBeInTheDocument();
         expect(screen.getByText('Zao')).toBeInTheDocument();
-        // Stats line: avg dmg | KDR | survival.
-        expect(screen.getByText(/62,431 dmg/)).toBeInTheDocument();
-        expect(screen.getByText(/1\.85 KDR/)).toBeInTheDocument();
-        expect(screen.getByText(/68% survival/)).toBeInTheDocument();
+        expect(screen.getByText(/62,431 avg dmg/)).toBeInTheDocument();
         // Links to the ship standings page.
         const link = screen.getByTitle(/#1 in Shimakaze over the last 14 days/);
         expect(link).toHaveAttribute('href', expect.stringContaining('/ship/10-shimakaze'));

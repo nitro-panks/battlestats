@@ -243,9 +243,10 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertEqual(len(badges), 1)
         b = badges[0]
         self.assertEqual(b["avg_damage"], 62_400)        # 6_240_000 / 100
-        self.assertAlmostEqual(b["kdr"], 4.69)            # 150 / (100-68)=4.6875
-        self.assertAlmostEqual(b["survival_rate"], 68.0)  # 100 * 68/100
         self.assertEqual(b["window_days"], 14)
+        # KDR / survival are intentionally not exposed (not accurately computable).
+        self.assertNotIn("kdr", b)
+        self.assertNotIn("survival_rate", b)
 
     def test_snapshot_persists_window_aggregates_from_events(self):
         # End-to-end: events carrying damage/frags/survived → run → stored row.

@@ -155,10 +155,13 @@ Registered unconditionally; the **task** is the no-op gate (not folded under `EN
   battles).
 - **Banner** (updated 2026-06-05) — `ShipTopPlayerBanner` renders one stacked card per top-3 badge
   **above the Battle History card** (moved out of the player header, where wrapping pills pushed the
-  Next-update/Share buttons down). Each card: `#<rank> <ship> for <N> days | <avg dmg> | <KDR> |
-  <survival %>`, ~sparkline height, links to `/ship/<id>`. The old header-pill
-  `ShipTopPlayerBadgeIcon` was removed. The badge payload gained `avg_damage`/`kdr`/`survival_rate`/
-  `window_days` (derived from the new `damage`/`frags`/`survived` snapshot fields).
+  Next-update/Share buttons down). Each card: `#<rank> <ship> for <N> days` + `<avg dmg>`,
+  ~sparkline height, links to `/ship/<id>`. The old header-pill `ShipTopPlayerBadgeIcon` was removed.
+  The badge payload gained `avg_damage`/`window_days`. **Only avg damage is shown** — KDR (kills/death)
+  and survival% need per-battle survival, but `BattleEvent.survived` is only recorded for single-battle
+  intervals (NULL for ~48% of NA events, all `battles_delta>1`), so they read ~0/understated and aren't
+  exposed. The snapshot still stores `damage`/`frags`/`survived` (migration `0061`, dormant for
+  frags/survived) so accurate survival can be added later via a capture change (`survived_delta`).
 - **(superseded) Badge** — `ShipTopPlayerBadgeIcon` was a labeled pill (`<medal> ShipName`) linking via
   `buildShipPath`; rendered in `PlayerDetail` header (capped at 6 + `+N`), passed `realm={player.realm}`.
 

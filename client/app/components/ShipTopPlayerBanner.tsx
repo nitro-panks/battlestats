@@ -19,8 +19,6 @@ export interface ShipBadge {
     win_rate: number;
     battles: number;
     avg_damage: number;
-    kdr: number;
-    survival_rate: number;
     window_days: number;
 }
 
@@ -57,11 +55,7 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
                                 <span className="text-[var(--text-muted)]">for {b.window_days} days</span>
                             </div>
                             <div className="mt-0.5 truncate text-xs tabular-nums text-[var(--text-muted)]">
-                                {b.avg_damage.toLocaleString()} dmg
-                                <span className="mx-1.5 opacity-50">|</span>
-                                {b.kdr.toFixed(2)} KDR
-                                <span className="mx-1.5 opacity-50">|</span>
-                                {b.survival_rate.toFixed(0)}% survival
+                                {b.avg_damage.toLocaleString()} avg dmg
                             </div>
                         </div>
                     </Link>

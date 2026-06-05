@@ -5884,11 +5884,13 @@ def get_player_ship_badges(player: Player) -> list:
         return []
 
     def _badge(r) -> dict:
+        # Only avg damage is exposed: it's an accurate windowed delta. KDR and
+        # survival% would need per-battle survival, which BattleEvent only records
+        # for single-battle intervals (NULL for multi-battle), so they can't be
+        # computed accurately for the window. The `frags`/`survived` columns stay
+        # stored (dormant) in case accurate survival capture lands later.
         battles = r.battles or 0
-        deaths = max(battles - (r.survived or 0), 0)
         avg_damage = round((r.damage or 0) / battles) if battles else 0
-        kdr = round((r.frags or 0) / deaths, 2) if deaths else float(r.frags or 0)
-        survival_rate = round(100.0 * (r.survived or 0) / battles, 1) if battles else 0.0
         return {
             'ship_id': r.ship_id,
             'ship_name': r.ship_name,
@@ -5896,8 +5898,6 @@ def get_player_ship_badges(player: Player) -> list:
             'win_rate': r.win_rate,
             'battles': battles,
             'avg_damage': avg_damage,
-            'kdr': kdr,
-            'survival_rate': survival_rate,
             'window_days': SHIP_LEADERBOARD_WINDOW_DAYS,
         }
 

@@ -133,8 +133,6 @@ class PlayerViewSetTests(TestCase):
         self.assertEqual(badges[0]["win_rate"], 64.0)
         self.assertEqual(badges[0]["battles"], 312)
         self.assertEqual(badges[0]["avg_damage"], 62_000)        # 19_344_000/312
-        self.assertAlmostEqual(badges[0]["kdr"], 3.57)           # 400/(312-200)
-        self.assertAlmostEqual(badges[0]["survival_rate"], 64.1)  # 100*200/312
         self.assertEqual(badges[0]["window_days"], 14)
 
     @patch("warships.views.update_clan_members_task.delay")
