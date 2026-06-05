@@ -1899,15 +1899,17 @@ def sitemap_entities(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def realm_top_ships(request, realm: str) -> Response:
-    """Most-played ships on a realm over the last N hours (default 24).
+    """Most-played ships on a realm over the previous 7 full UTC days.
 
     Powers the landing treemap: each ship is a tile sized by battles, colored
     by type and shaded by tier. Sums BattleEvent.battles_delta per ship over the
-    rolling window (using detected_at), then joins Ship for type + tier.
-    Recomputed at most once per hour; served from the Redis cache otherwise.
+    window [midnight_utc - 7d, midnight_utc) — the current UTC day is excluded —
+    then joins Ship for type + tier. A static daily count: recomputed once per
+    day (day-tagged Redis key) and served from cache otherwise.
 
     Response shape:
-        {realm, hours, mode, ships: [{ship_id, ship_name, ship_type, tier, battles}]}
+        {realm, days, window_start, window_end, mode,
+         ships: [{ship_id, ship_name, ship_type, tier, battles}]}
     """
     from warships.data import compute_realm_top_ships
 
@@ -1915,11 +1917,11 @@ def realm_top_ships(request, realm: str) -> Response:
     if realm not in VALID_REALMS:
         return Response({"detail": "Unknown realm."}, status=status.HTTP_404_NOT_FOUND)
 
-    # The shared helper clamps hours/limit/mode and handles the Redis cache
-    # (1h TTL); the hourly warmer calls the same helper with use_cache=False.
+    # The shared helper fixes the 7-day window, clamps limit/mode, and handles
+    # the Redis cache (day-tagged key, TTL to next midnight); the daily warmer
+    # calls the same helper with use_cache=False.
     payload = compute_realm_top_ships(
         realm,
-        hours=request.query_params.get("hours", 24),
         limit=request.query_params.get("limit", 25),
         mode=request.query_params.get("mode", "random"),
     )

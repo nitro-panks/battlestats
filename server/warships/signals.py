@@ -181,15 +181,18 @@ def register_periodic_schedules(sender, **kwargs):
     PeriodicTask.objects.filter(name="landing-page-warmer").delete()
 
     # -- Realm top-ships treemap warmer --
-    # Pre-populates the landing treemap caches (random + ranked) per realm so a
-    # visit never eats the ~1s BattleEvent aggregation. Hourly, striped per realm.
-    top_ships_warm_minutes = int(os.getenv("TOP_SHIPS_WARM_MINUTES", "60"))
+    # The treemap is a static daily count over the previous 7 full UTC days
+    # (current day excluded), so it only needs warming once per day, just after
+    # UTC midnight when the prior day has closed. Fires at hour 0, striped per
+    # realm by a few minutes (NA :05, EU :10, ASIA :15 by default) so the three
+    # realms don't recompute concurrently on the background worker.
+    top_ships_warm_minute = int(os.getenv("TOP_SHIPS_WARM_MINUTE", "5"))
     for realm in sorted(VALID_REALMS):
-        minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, top_ships_warm_minutes)
+        realm_minute = (top_ships_warm_minute +
+                        REALM_INTERVAL_OFFSETS.get(realm, 0) * 5) % 60
         top_ships_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute=minute_str,
-            hour=hour_str,
+            minute=str(realm_minute),
+            hour="0",
             day_of_week="*",
             day_of_month="*",
             month_of_year="*",
@@ -204,7 +207,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
-                "description": f"Pre-populates top-ships treemap caches, random+ranked ({realm.upper()}).",
+                "description": f"Daily warm of top-ships treemap caches, prev 7 UTC days, random+ranked ({realm.upper()}).",
             },
         )
 

@@ -904,10 +904,11 @@ def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REAL
 def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
     """Pre-populate the realm top-ships treemap caches (random + ranked).
 
-    Recomputes both modes for the realm once per hour (force-refresh, so the
-    rolling 24h window stays current) and writes them to Redis, so visitors
-    always hit a warm cache instead of the ~1s aggregation. Mirrors the other
-    per-realm landing warmers.
+    Recomputes both modes for the realm once per day (just after UTC midnight,
+    force-refresh) and writes them to Redis under the new day-tagged key, so the
+    first visitor of the day hits a warm cache instead of the ~1s aggregation.
+    The treemap is a static daily count over the previous 7 full UTC days (the
+    current day is excluded). Mirrors the other per-realm landing warmers.
     """
     from warships.data import compute_realm_top_ships
 
@@ -921,7 +922,7 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
         results = {}
         for mode in ("random", "ranked"):
             payload = compute_realm_top_ships(
-                realm, hours=24, limit=25, mode=mode, use_cache=False)
+                realm, limit=25, mode=mode, use_cache=False)
             results[mode] = len(payload.get("ships", []))
         logger.info("Warmed top-ships realm=%s modes=%s", realm, results)
         return {"status": "completed", "realm": realm, "results": results}

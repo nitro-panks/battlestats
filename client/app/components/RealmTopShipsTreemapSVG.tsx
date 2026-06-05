@@ -1,12 +1,12 @@
 'use client';
 
-// Realm top-ships treemap (DEV PREVIEW).
+// Realm top-ships treemap.
 //
-// The 25 most-played ships on the active realm over the last 24 hours, as a
-// treemap: each tile is one ship, sized by battles, COLORED BY SHIP TYPE and
-// SHADED BY TIER (lighter = low tier, darker = high tier). Fed by
-// `/api/realm/<realm>/top-ships`, which aggregates BattleEvent over the rolling
-// window and joins Ship for type/tier. Dev-gated by the caller.
+// The 25 most-played ships on the active realm over the PREVIOUS 7 FULL UTC DAYS
+// (the current day is excluded), as a treemap: each tile is one ship, sized by
+// battles, COLORED BY SHIP TYPE and SHADED BY TIER (lighter = low tier, darker =
+// high tier). Fed by `/api/realm/<realm>/top-ships`, a static daily count that
+// aggregates BattleEvent over the 7-day window and joins Ship for type/tier.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
@@ -27,7 +27,7 @@ type ShipMode = 'random' | 'ranked';
 
 interface RealmTopShips {
     realm: string;
-    hours: number;
+    days?: number;
     mode?: ShipMode;
     ships: TopShip[];
 }
@@ -36,7 +36,10 @@ const SHIP_MODES: ShipMode[] = ['random', 'ranked'];
 const SHIP_MODE_LABEL: Record<ShipMode, string> = { random: 'Random', ranked: 'Ranked' };
 
 const SHIP_LIMIT = 25;
-const TOP_SHIPS_FETCH_TTL_MS = 3_600_000; // 1h — mirrors the backend's hourly Redis TTL
+// 1h client TTL. The payload only changes once per day (static daily count), but
+// a short client TTL keeps a tab left open across UTC midnight from showing the
+// stale window for long; the backend serves it from a warm day-tagged cache.
+const TOP_SHIPS_FETCH_TTL_MS = 3_600_000;
 
 const TYPE_LABEL: Record<string, string> = {
     Destroyer: 'DD',
@@ -47,13 +50,13 @@ const TYPE_LABEL: Record<string, string> = {
 };
 const TYPE_ORDER = ['Destroyer', 'Cruiser', 'Battleship', 'AirCarrier', 'Submarine'];
 
-const fetchRealmTopShips = (realm: string, hours: number, mode: ShipMode): Promise<RealmTopShips> =>
+const fetchRealmTopShips = (realm: string, mode: ShipMode): Promise<RealmTopShips> =>
     fetchSharedJson<RealmTopShips>(
-        `/api/realm/${encodeURIComponent(realm)}/top-ships?hours=${hours}&mode=${mode}&limit=${SHIP_LIMIT}`,
+        `/api/realm/${encodeURIComponent(realm)}/top-ships?mode=${mode}&limit=${SHIP_LIMIT}`,
         {
-            label: `RealmTopShips:${realm}:${hours}:${mode}`,
+            label: `RealmTopShips:${realm}:${mode}`,
             ttlMs: TOP_SHIPS_FETCH_TTL_MS,
-            cacheKey: `top-ships:${realm}:${hours}:${mode}:${SHIP_LIMIT}`,
+            cacheKey: `top-ships:${realm}:${mode}:${SHIP_LIMIT}`,
         },
     ).then(({ data }) => data);
 
@@ -66,7 +69,7 @@ interface HoverState {
     y: number;
 }
 
-const RealmTopShipsTreemapSVG: React.FC<{ hours?: number }> = ({ hours = 24 }) => {
+const RealmTopShipsTreemapSVG: React.FC = () => {
     const { realm } = useRealm();
     const { theme } = useTheme();
     const palette = chartColors[theme];
@@ -99,11 +102,11 @@ const RealmTopShipsTreemapSVG: React.FC<{ hours?: number }> = ({ hours = 24 }) =
 
     useEffect(() => {
         let cancelled = false;
-        fetchRealmTopShips(realm, hours, mode)
+        fetchRealmTopShips(realm, mode)
             .then((d) => { if (!cancelled) setData(d); })
             .catch(() => { if (!cancelled) setData(null); });
         return () => { cancelled = true; };
-    }, [realm, hours, mode]);
+    }, [realm, mode]);
 
     useEffect(() => {
         if (!containerRef.current) return undefined;
@@ -202,7 +205,7 @@ const RealmTopShipsTreemapSVG: React.FC<{ hours?: number }> = ({ hours = 24 }) =
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex items-center gap-3">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                        {realm.toUpperCase()} most-played ships · last {hours}h
+                        {realm.toUpperCase()} most-played ships · Previous 7D
                     </h2>
                     <div className="flex items-center gap-1 text-xs" role="group" aria-label="Battle mode">
                         {SHIP_MODES.map((m) => (
@@ -235,7 +238,7 @@ const RealmTopShipsTreemapSVG: React.FC<{ hours?: number }> = ({ hours = 24 }) =
                 </div>
             </div>
             <div ref={containerRef} className="relative w-full">
-                <svg ref={svgRef} role="img" aria-label={`${realm} top ${SHIP_LIMIT} most-played ships over ${hours} hours`} />
+                <svg ref={svgRef} role="img" aria-label={`${realm} top ${SHIP_LIMIT} most-played ships over the previous 7 days`} />
                 {hover && (
                     <div
                         className="pointer-events-none absolute z-10 rounded bg-[var(--bg-page)] px-2 py-1 text-xs shadow-md ring-1 ring-[var(--accent-faint)]"
