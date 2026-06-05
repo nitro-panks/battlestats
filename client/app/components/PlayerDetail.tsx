@@ -29,6 +29,7 @@ interface PlayerDetailProps {
         id: number;
         name: string;
         player_id: number;
+        realm?: string;
         kill_ratio: number | null;
         actual_kdr?: number | null;
         player_score: number | null;
@@ -431,7 +432,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
                                 {!player.is_hidden && player.ship_badges && player.ship_badges.length > 0
                                     ? player.ship_badges.slice(0, 6).map((badge) => (
-                                        <ShipTopPlayerBadgeIcon key={`${badge.ship_id}-${badge.rank}`} badge={badge} size="header" />
+                                        <ShipTopPlayerBadgeIcon key={`${badge.ship_id}-${badge.rank}`} badge={badge} realm={player.realm} size="header" />
                                     ))
                                     : null}
                                 {!player.is_hidden && player.ship_badges && player.ship_badges.length > 6

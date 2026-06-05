@@ -109,6 +109,7 @@ Player enrichment runs on the droplet's Celery `background` worker via `warships
 - `/` — Landing page with search, featured players/clans, discovery charts
 - `/player/[playerName]` — Player detail (URL-encoded name, reload-safe)
 - `/clan/[clanSlug]` — Clan detail (`<clan_id>-<optional-slug>`, reload-safe)
+- `/ship/[shipSlug]` — Ship standings (`<ship_id>-<optional-slug>`, reload-safe). Fortnight leaderboard of the best players in a Tier-10 ship on the active realm, snapshot-backed (`GET /api/realm/<realm>/ship/<ship_id>/leaderboard`). Reached by clicking a T10 tile on the landing treemap or a profile ship badge.
 - `/umami` — Umami analytics dashboard (admin login required)
 
 ### API proxy
@@ -135,7 +136,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - `client/app/globals.css` — CSS custom properties for theming (`--bg-*`, `--text-*`, `--accent-*`), dark mode via `[data-theme="dark"]`
 - `client/app/components/HeaderSearch.tsx` — Dual-mode player/clan search with toggle, debounced autocomplete, client-side suggestion cache per mode, and themed input
 - `client/app/components/SearchModeToggle.tsx` — Compact pill toggle (P/C) for switching between player and clan search modes
-- Shared icon components in `client/app/components/` — 8 player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon, ShipTopPlayerBadgeIcon) with `size` prop for surface variants. ShipTopPlayerBadgeIcon renders a gold/silver/bronze medal per weekly T10 top-3 finish, fed by the player payload's `ship_badges` field.
+- Shared icon components in `client/app/components/` — 8 player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon, ShipTopPlayerBadgeIcon) with `size` prop for surface variants. ShipTopPlayerBadgeIcon renders a gold/silver/bronze medal + ship name as a link to `/ship/<id>` per fortnight T10 top-3 finish, fed by the player payload's `ship_badges` field.
 
 ### Caching strategy
 
@@ -151,6 +152,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Clan search suggestions**: Same three-tier pattern as player suggestions. Endpoint: `/api/landing/clan-suggestions`. Matches on `Clan.name` OR `Clan.tag` via `ILIKE` with `pg_trgm` GIN indexes (`clan_name_trgm_idx`, `clan_tag_trgm_idx`). Redis key: `{realm}:clan-suggest:{query}`, 600s TTL. Ordered by prefix match → `members_count` DESC → name. Client-side cache is keyed separately per search mode.
 - **Clan battle seasons (clan-level)**: Request-driven — first visit queues `update_clan_battle_summary_task` which calls `refresh_clan_battle_seasons_cache()`. This fetches per-member CB stats from the WG API via ThreadPoolExecutor, aggregates by season, and writes to **Redis only** (TTL-based). Configured clans are pre-warmed by `warm_clan_battle_summaries_task` (env: `CLAN_BATTLE_WARM_CLAN_IDS`). Subsequent visits hit Redis until TTL expiry.
 - **Clan battle summary (per-player)**: Per-player CB stats (`clan_battle_total_battles`, `clan_battle_seasons_participated`, `clan_battle_overall_win_rate`) are persisted to **Postgres** on `PlayerExplorerSummary` via `_persist_player_clan_battle_summary()`. Populated by: enrichment pipeline (Phase 3e), player CB tab visits, and the `backfill_clan_battle_data` management command.
+- **Ship standings (`/ship/<id>`)**: Fully precomputed — the weekly `snapshot_ship_top_players_task` writes `ShipTopPlayerSnapshot` rows to **Postgres**; the `ship_leaderboard` endpoint serves them via a thin Redis read-cache (`{realm}:ship-lb:{ship_id}`, 15-min TTL, `SHIP_LEADERBOARD_CACHE_TTL`). No live aggregation, no warmer — the snapshot itself only changes weekly.
 - Redis-backed in production (capped at **3 GB** with **`allkeys-lru`** eviction policy as of 2026-05-02 — see `runbook-cache-capacity-expansion-2026-05-02.md`), LocMemCache in tests
 
 ### Celery queue architecture
@@ -201,7 +203,7 @@ Player detail pages coordinate chart rendering vs hydration polling:
 
 ### Data models (server/warships/models.py)
 
-Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot/LandingRecentPlayersSnapshot (landing durable fallbacks), MvPlayerDistributionStats (population distribution materialized stats), ShipTopPlayerSnapshot (weekly per-realm top-3 players per T10 ship — backs the profile "top ship player" badges; see `runbook-ship-top-player-badges-2026-06-05.md`), StreamerSubmission.
+Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot/LandingRecentPlayersSnapshot (landing durable fallbacks), MvPlayerDistributionStats (population distribution materialized stats), ShipTopPlayerSnapshot (weekly per-realm top-`SHIP_BADGE_LIST_SIZE` players per "ranked" T10 ship over a rolling fortnight — backs both the `/ship/<id>` leaderboard and the top-3 profile badges; see `runbook-ship-top-player-badges-2026-06-05.md`), StreamerSubmission.
 
 Battle-history pipeline (rollout runbook): BattleObservation (raw `ships/stats/` payload snapshots, JSON), BattleEvent (per-event deltas — `battles_delta`/`damage_delta`/etc. plus the Phase 7 widening: `main_shots_delta`, `main_hits_delta`, `main_frags_delta`, `secondary_shots_delta`, `secondary_hits_delta`, `secondary_frags_delta`, `torpedo_shots_delta`, `torpedo_hits_delta`, `torpedo_frags_delta`, `damage_scouting_delta`, `ships_spotted_delta`, `capture_points_delta`, `dropped_capture_points_delta`, `team_capture_points_delta`), PlayerDailyShipStats (per-day per-ship aggregate of every BattleEvent column), PlayerWeeklyShipStats / PlayerMonthlyShipStats / PlayerYearlyShipStats (period rollup tiers; populated only when the period writer is reactivated).
 
@@ -317,13 +319,14 @@ Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which
 - `BATTLE_HISTORY_API_ENABLED` — When `1`, exposes `GET /api/player/<name>/battle-history?days=N` (default 7, max 30). Reads `PlayerDailyShipStats` only; cached in Redis under `{realm}:battle-history:{name}:{days}` with a 5-minute TTL. Returns 404 when off so the absence is indistinguishable from a missing route. Default `0`. (Phase 4)
 - `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED` — When `1`, `update_battle_data` makes a third WG call (`seasons/shipstats/`) per refresh and stores the payload on `BattleObservation.ranked_ships_stats_json`. The diff lane in `record_observation_from_payloads` then emits per-(ship, season) `BattleEvent(mode='ranked')` rows on the second observation, which feed `PlayerDailyShipStats(mode='ranked')` via the same on-write rollup writer used for randoms. Default `0`. See `agents/runbooks/runbook-ranked-battle-history-rollout-2026-05-02.md`
 - `BATTLE_HISTORY_RANKED_CAPTURE_REALMS` — Comma-separated realm gate for ranked capture. Capture only runs when both `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=1` AND the player's realm appears in this list. Lets ranked rollout proceed realm-by-realm without rewiring code. Default: `na` (NA-only rollout). Widen to `na,eu,asia` once each realm's baseline fill (`establish_ranked_baseline`) has run.
-- `SHIP_BADGE_SNAPSHOT_ENABLED` — Master gate for the weekly per-realm "top ship player" badge snapshot (`snapshot_ship_top_players_task`). The beat schedule is always registered; the task is a no-op unless this is `1`. Default `0`. See `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
-- `SHIP_BADGE_MIN_BATTLES` — Minimum random battles a player must have in a ship over the trailing 7d to qualify for that ship's badge ranking (default `10`). Read at task call time, so a re-run picks up changes without a redeploy.
-- `SHIP_BADGE_MIN_SHIP_POPULATION` — Minimum qualifying players a ship needs before any badge is minted for it (default `25`). Suppresses meaningless "#1" badges on rarely-played ships.
-- `SHIP_BADGE_TOP_N` — Placements awarded per ship (default `3` → gold/silver/bronze).
-- `SHIP_BADGE_TIER` — Ship tier in scope (default `10`).
+- `SHIP_BADGE_SNAPSHOT_ENABLED` — Master gate for the weekly per-realm ship-standings snapshot (`snapshot_ship_top_players_task`), which backs both the `/ship/<id>` leaderboard and the profile badges. The beat schedule is always registered; the task is a no-op unless this is `1`. Default `0`. See `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
+- `SHIP_BADGE_MIN_BATTLES` — Minimum random battles a player must have in a ship over the rolling **14-day** window to qualify for that ship's ranking (default `10`). Read at task call time, so a re-run picks up changes without a redeploy.
+- `SHIP_BADGE_MIN_SHIP_POPULATION` — Minimum qualifying players a ship needs before it is "ranked" for the window — i.e. before any snapshot rows (and therefore any `/ship/<id>` board or badge) are written for it (default `25`). Suppresses meaningless boards/"#1"s on rarely-played ships.
+- `SHIP_BADGE_LIST_SIZE` — How many ranked players to store per ship (the `/ship/<id>` leaderboard length; default `50`). Profile badges are ranks 1..`SHIP_BADGE_TOP_N` of this same list.
+- `SHIP_BADGE_TOP_N` — Placements that become profile badges per ship (default `3` → gold/silver/bronze).
+- `SHIP_BADGE_TIER` — Ship tier in scope (default `10`). Only this tier's treemap tiles navigate to `/ship/<id>`.
 - `SHIP_BADGE_RETENTION_DAYS` — Prune `ShipTopPlayerSnapshot` rows older than this (default `21`).
-- `SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK` / `SHIP_BADGE_SNAPSHOT_HOUR` — Weekly cron day/hour (UTC base) for the snapshot; per-realm hour offset via `REALM_CRAWL_CRON_HOURS` (defaults: `1` Monday / `2`).
+- `SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK` / `SHIP_BADGE_SNAPSHOT_HOUR` — Weekly cron day/hour (UTC base) for the snapshot; per-realm hour offset via `REALM_CRAWL_CRON_HOURS` (defaults: `1` Monday / `2`). The lookback window is a rolling 14 days (`SHIP_LEADERBOARD_WINDOW_DAYS` in `data.py`), recomputed weekly.
 
 ### Client env
 

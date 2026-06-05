@@ -9,11 +9,17 @@
 // window and joins Ship for type/tier. Dev-gated by the caller.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import * as d3 from 'd3';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useTheme } from '../context/ThemeContext';
 import { chartColors } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
+import { buildShipPath } from '../lib/entityRoutes';
+
+// Only Tier-10 ships have a snapshot-backed standings page (the badge feature is
+// T10-scoped), so only T10 tiles navigate.
+const SHIP_PAGE_TIER = 10;
 
 interface TopShip {
     ship_id: number;
@@ -68,6 +74,7 @@ interface HoverState {
 
 const RealmTopShipsTreemapSVG: React.FC<{ hours?: number }> = ({ hours = 24 }) => {
     const { realm } = useRealm();
+    const router = useRouter();
     const { theme } = useTheme();
     const palette = chartColors[theme];
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -143,7 +150,12 @@ const RealmTopShipsTreemapSVG: React.FC<{ hours?: number }> = ({ hours = 24 }) =
             .attr('fill', (d: { data: TopShip }) => shadeByTier(typeColor(d.data.ship_type), d.data.tier))
             .attr('stroke', 'var(--bg-card)')
             .attr('stroke-width', 1)
-            .style('cursor', 'pointer')
+            .style('cursor', (d: { data: TopShip }) => (d.data.tier === SHIP_PAGE_TIER ? 'pointer' : 'default'))
+            .on('click', function onClick(this: SVGRectElement, _event: MouseEvent, d: { data: TopShip }) {
+                if (d.data.tier === SHIP_PAGE_TIER) {
+                    router.push(buildShipPath(d.data.ship_id, d.data.ship_name, realm));
+                }
+            })
             .on('mousemove', function onMove(this: SVGRectElement, event: MouseEvent, d: { data: TopShip }) {
                 const rect = containerRef.current?.getBoundingClientRect();
                 setHover({
@@ -186,7 +198,7 @@ const RealmTopShipsTreemapSVG: React.FC<{ hours?: number }> = ({ hours = 24 }) =
                     .text(`${d.data.battles.toLocaleString()} · T${d.data.tier ?? '?'}`);
             }
         });
-    }, [data, width, height, palette, typeColor]);
+    }, [data, width, height, palette, typeColor, realm, router]);
 
     const presentTypes = useMemo(() => {
         if (!data) return [] as string[];

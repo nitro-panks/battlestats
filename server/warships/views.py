@@ -1928,6 +1928,41 @@ def realm_top_ships(request, realm: str) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def ship_leaderboard(request, realm: str, ship_id: int) -> Response:
+    """Fortnight leaderboard of ranked players for one ship on a realm.
+
+    Snapshot-backed (no live aggregation): serves the latest
+    `ShipTopPlayerSnapshot` rows written weekly by
+    `snapshot_ship_top_players_task`. 404 on unknown realm or unknown ship; an
+    empty `players` list means the ship was not "ranked" in the latest window
+    (qualifying pool below the population guard). Cached 15 min.
+
+    Response shape:
+        {realm, window_days, captured_on, ship: {...},
+         players: [{rank, player_name, win_rate, battles}]}
+    See agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
+    """
+    from warships.data import get_ship_leaderboard, SHIP_LEADERBOARD_CACHE_TTL
+
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    if realm not in VALID_REALMS:
+        return Response({"detail": "Unknown realm."}, status=status.HTTP_404_NOT_FOUND)
+
+    cache_key = f"{realm}:ship-lb:{ship_id}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached)
+
+    payload = get_ship_leaderboard(realm, ship_id)
+    if payload is None:
+        return Response({"detail": "Unknown ship."}, status=status.HTTP_404_NOT_FOUND)
+
+    cache.set(cache_key, payload, SHIP_LEADERBOARD_CACHE_TTL)
+    return Response(payload)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def player_name_suggestions(request) -> Response:
     query = (request.query_params.get('q') or '').strip().replace('\x00', '')
     if len(query) < 3:

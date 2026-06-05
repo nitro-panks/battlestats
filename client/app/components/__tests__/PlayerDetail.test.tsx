@@ -830,14 +830,14 @@ describe('PlayerDetail ship-badge icons', () => {
             { ship_id: 20, ship_name: 'Zao', rank: 2, win_rate: 61.5, battles: 280 },
         ]);
 
-        expect(screen.getByTitle(/#1 Shimakaze · 64.0% WR · 312 battles \(last 7d\)/)).toBeInTheDocument();
-        expect(screen.getByTitle(/#2 Zao · 61.5% WR · 280 battles \(last 7d\)/)).toBeInTheDocument();
+        expect(screen.getByTitle(/#1 Shimakaze · 64.0% WR · 312 battles \(last 14d\)/)).toBeInTheDocument();
+        expect(screen.getByTitle(/#2 Zao · 61.5% WR · 280 battles \(last 14d\)/)).toBeInTheDocument();
     });
 
     it('renders no badge icons when ship_badges is empty', () => {
         renderWithBadges([]);
 
-        expect(screen.queryByTitle(/WR · .* battles \(last 7d\)/)).not.toBeInTheDocument();
+        expect(screen.queryByTitle(/WR · .* battles \(last 14d\)/)).not.toBeInTheDocument();
     });
 
     it('caps visible badges at six and shows a +N overflow', () => {

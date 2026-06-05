@@ -1,19 +1,23 @@
-"""Tests for the weekly T10 top-player badge snapshot.
+"""Tests for the fortnight ship leaderboard + top-player badge snapshot.
 
 Covers `data.compute_ship_top_player_snapshot` (ranking, the per-player battle
 floor, the per-ship population guard, tier scope, realm isolation, hidden
-exclusion, idempotency, rolling-window exclusion) and the task's env gate.
+exclusion, the rolling 14-day window, idempotency), `get_player_ship_badges`
+(badges = ranks 1..N only), `get_ship_leaderboard` + the `ship_leaderboard`
+endpoint, and the task's env gate.
 See agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
 """
 from datetime import timedelta
 from unittest import mock
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import (
     compute_ship_top_player_snapshot,
     get_player_ship_badges,
+    get_ship_leaderboard,
 )
 from warships.models import (
     BattleEvent,
@@ -30,6 +34,7 @@ BADGE_ENV = {
     "SHIP_BADGE_MIN_BATTLES": "10",
     "SHIP_BADGE_MIN_SHIP_POPULATION": "3",
     "SHIP_BADGE_TOP_N": "3",
+    "SHIP_BADGE_LIST_SIZE": "50",
     "SHIP_BADGE_TIER": "10",
     "SHIP_BADGE_RETENTION_DAYS": "21",
 }
@@ -41,6 +46,7 @@ T9_SHIP = 99    # tier 9 — must be ignored
 
 class ShipBadgeSnapshotTests(TestCase):
     def setUp(self):
+        cache.clear()
         Ship.objects.create(ship_id=SHIMA, name="Shimakaze",
                             nation="japan", ship_type="Destroyer", tier=10)
         Ship.objects.create(ship_id=ZAO, name="Zao",
@@ -80,12 +86,16 @@ class ShipBadgeSnapshotTests(TestCase):
         with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
             return compute_ship_top_player_snapshot(realm=realm)
 
-    def test_top3_by_win_rate_with_floor(self):
+    def _badge_ranks(self, player):
+        with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
+            return [b["rank"] for b in get_player_ship_badges(player)]
+
+    def test_ranks_by_win_rate_badges_are_top_three(self):
         # Shimakaze pool: 4 qualifiers + 1 sub-floor player.
         a = self._player("Ace")     # 90%
         b = self._player("Bravo")   # 80%
         c = self._player("Charlie")  # 70%
-        d = self._player("Delta")   # 60% — qualifies but ranks 4th (dropped)
+        d = self._player("Delta")   # 60% — ranked #4 (on the page, not a badge)
         e = self._player("Echo")    # below the battle floor
         self._event(a, SHIMA, battles=20, wins=18)
         self._event(b, SHIMA, battles=15, wins=12)
@@ -95,26 +105,26 @@ class ShipBadgeSnapshotTests(TestCase):
 
         result = self._run("na")
 
+        # The full ranked list (page) has all 4 qualifiers; badges are top 3.
+        self.assertEqual(result["ranked_rows"], 4)
         self.assertEqual(result["badges"], 3)
         rows = list(ShipTopPlayerSnapshot.objects.filter(ship_id=SHIMA)
                     .order_by("rank"))
-        self.assertEqual([r.player_id for r in rows], [a.id, b.id, c.id])
-        self.assertEqual([r.rank for r in rows], [1, 2, 3])
-        self.assertAlmostEqual(rows[0].win_rate, 90.0)
-        self.assertEqual(rows[0].battles, 20)
+        self.assertEqual([r.player_id for r in rows], [a.id, b.id, c.id, d.id])
+        self.assertEqual([r.rank for r in rows], [1, 2, 3, 4])
         self.assertEqual(rows[0].ship_name, "Shimakaze")
-        # Sub-floor player never minted.
+        self.assertAlmostEqual(rows[0].win_rate, 90.0)
+        # Badges only for ranks 1-3; #4 is on the page but holds no badge.
+        self.assertEqual(self._badge_ranks(a), [1])
+        self.assertEqual(self._badge_ranks(d), [])
+        # Sub-floor player never ranked at all.
         self.assertFalse(
             ShipTopPlayerSnapshot.objects.filter(player=e).exists())
-        # Qualifying-but-4th player dropped by top-N.
-        self.assertFalse(
-            ShipTopPlayerSnapshot.objects.filter(player=d).exists())
 
     def test_population_guard_suppresses_sparse_ship(self):
-        # Only 2 qualifiers for Zao (< population floor of 3) → no badge.
+        # Only 2 qualifiers for Zao (< population floor of 3) → not ranked.
         for i in range(2):
             self._event(self._player(f"Zp{i}"), ZAO, battles=20, wins=10)
-        # And a fully-qualifying Shimakaze pool to prove the run did work.
         for i in range(3):
             self._event(self._player(f"Sp{i}"), SHIMA, battles=20, wins=10 + i)
 
@@ -127,7 +137,6 @@ class ShipBadgeSnapshotTests(TestCase):
             ShipTopPlayerSnapshot.objects.filter(ship_id=SHIMA).count(), 3)
 
     def test_realm_isolation(self):
-        # EU ace with the best WR must not appear in the NA snapshot.
         eu_ace = self._player("EuAce", realm="eu")
         self._event(eu_ace, SHIMA, battles=50, wins=50)
         for i in range(3):
@@ -157,19 +166,29 @@ class ShipBadgeSnapshotTests(TestCase):
 
         result = self._run("na")
 
-        self.assertEqual(result["badges"], 0)
+        self.assertEqual(result["ranked_rows"], 0)
         self.assertFalse(
             ShipTopPlayerSnapshot.objects.filter(ship_id=T9_SHIP).exists())
 
-    def test_rolling_window_excludes_old_events(self):
-        # All Shimakaze battles happened 10 days ago → outside the 7d window.
+    def test_rolling_14d_window_excludes_older_events(self):
+        # Battles 20 days ago fall outside the 14-day fortnight window.
         for i in range(3):
             self._event(self._player(f"Old{i}"), SHIMA,
-                        battles=20, wins=10, detected_days_ago=10)
+                        battles=20, wins=10, detected_days_ago=20)
 
         result = self._run("na")
 
-        self.assertEqual(result["badges"], 0)
+        self.assertEqual(result["ranked_rows"], 0)
+
+    def test_rolling_14d_window_includes_recent_events(self):
+        # 10 days ago is inside the fortnight window.
+        for i in range(3):
+            self._event(self._player(f"Recent{i}"), SHIMA,
+                        battles=20, wins=10 + i, detected_days_ago=10)
+
+        result = self._run("na")
+
+        self.assertEqual(result["ranked_rows"], 3)
 
     def test_idempotent_rerun(self):
         for i in range(3):
@@ -189,14 +208,62 @@ class ShipBadgeSnapshotTests(TestCase):
             self._event(p, SHIMA, battles=20, wins=18 - i)
         self._run("na")
 
-        top = players[0]
-        badges = get_player_ship_badges(top)
-        self.assertEqual(len(badges), 1)
-        self.assertEqual(badges[0]["ship_id"], SHIMA)
-        self.assertEqual(badges[0]["rank"], 1)
-        self.assertEqual(badges[0]["ship_name"], "Shimakaze")
+        badges = self._badge_ranks(players[0])
+        self.assertEqual(badges, [1])
         # A player who earned nothing has no badges.
-        self.assertEqual(get_player_ship_badges(self._player("Nobody")), [])
+        self.assertEqual(self._badge_ranks(self._player("Nobody")), [])
+
+    def test_get_ship_leaderboard_returns_ranked_players(self):
+        ace = self._player("Ace")
+        mid = self._player("Mid")
+        low = self._player("Low")
+        self._event(ace, SHIMA, battles=20, wins=18)   # 90%
+        self._event(mid, SHIMA, battles=20, wins=14)   # 70%
+        self._event(low, SHIMA, battles=20, wins=10)   # 50%
+        self._run("na")
+
+        board = get_ship_leaderboard("na", SHIMA)
+        self.assertEqual(board["ship"]["name"], "Shimakaze")
+        self.assertEqual(board["window_days"], 14)
+        self.assertEqual([p["player_name"] for p in board["players"]],
+                        ["Ace", "Mid", "Low"])
+        self.assertEqual([p["rank"] for p in board["players"]], [1, 2, 3])
+        self.assertAlmostEqual(board["players"][0]["win_rate"], 90.0)
+
+    def test_get_ship_leaderboard_unknown_ship_returns_none(self):
+        self.assertIsNone(get_ship_leaderboard("na", 1234567))
+
+    def test_get_ship_leaderboard_empty_when_ship_not_ranked(self):
+        # Below the population guard → no snapshot rows, but ship meta present.
+        for i in range(2):
+            self._event(self._player(f"Zp{i}"), ZAO, battles=20, wins=10)
+        self._run("na")
+
+        board = get_ship_leaderboard("na", ZAO)
+        self.assertEqual(board["ship"]["name"], "Zao")
+        self.assertEqual(board["players"], [])
+        self.assertIsNone(board["captured_on"])
+
+    def test_ship_leaderboard_endpoint(self):
+        for i in range(3):
+            self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=18 - i)
+        self._run("na")
+
+        response = self.client.get(f"/api/realm/na/ship/{SHIMA}/leaderboard/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["ship"]["ship_id"], SHIMA)
+        self.assertEqual(len(payload["players"]), 3)
+        self.assertEqual(payload["players"][0]["rank"], 1)
+
+    def test_ship_leaderboard_endpoint_unknown_ship_404(self):
+        response = self.client.get("/api/realm/na/ship/7654321/leaderboard/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_ship_leaderboard_endpoint_unknown_realm_404(self):
+        response = self.client.get(f"/api/realm/xx/ship/{SHIMA}/leaderboard/")
+        self.assertEqual(response.status_code, 404)
 
     def test_task_noop_when_flag_off(self):
         for i in range(3):
