@@ -2,7 +2,7 @@
 
 _Created: 2026-06-05_
 _Context: The landing page surfaces the most-played ships per realm via the `RealmTopShipsTreemapSVG` treemap (`compute_realm_top_ships`, `data.py`), which aggregates `BattleEvent` over a rolling window. But ship-level **player** standing was invisible: no way to see who is best in a given ship, and the treemap tiles were dead ends. This feature adds (1) a **`/ship/<id>` standings page** — a fortnight leaderboard of the best players in a Tier-10 ship on the active realm — reachable by clicking a T10 treemap tile, and (2) a **durable profile badge** (gold/silver/bronze) for the top-3 players in each ranked T10 ship, which links back to that ship's page. Both are powered by a single weekly snapshot; nothing is computed per request._
-_Status: ENABLED in prod for all realms (na/eu/asia) — 2026-06-05. Flag pinned in the backend deploy script so it survives the `.env.cloud` overwrite. — 2026-06-05. Backend `ShipTopPlayerSnapshot` model + `compute_ship_top_player_snapshot` + `get_ship_leaderboard` + `snapshot_ship_top_players_task` + weekly per-realm schedule + `ship_leaderboard` endpoint + `PlayerSerializer.ship_badges` shipped; frontend `/ship/[shipSlug]` page + `ShipRouteView` + labeled-link `ShipTopPlayerBadgeIcon` + treemap T10 navigation shipped. Migration `0060_shiptopplayersnapshot`. Tests green locally (see Validation results). Not yet enabled in prod — `SHIP_BADGE_SNAPSHOT_ENABLED=0`._
+_Status: ENABLED in prod for all realms (na/eu/asia) — 2026-06-05. Flag pinned in the backend deploy script so it survives the `.env.cloud` overwrite. — 2026-06-05. Backend `ShipTopPlayerSnapshot` model + `compute_ship_top_player_snapshot` + `get_ship_leaderboard` + `snapshot_ship_top_players_task` + weekly per-realm schedule + `ship_leaderboard` endpoint + `PlayerSerializer.ship_badges` shipped; frontend `/ship/[shipSlug]` page + `ShipRouteView` + labeled-link `ShipTopPlayerBadgeIcon` + treemap T10 navigation shipped. Migration `0060_shiptopplayersnapshot`. Tests green locally (see Validation results). **Live in prod for na/eu/asia** (`SHIP_BADGE_SNAPSHOT_ENABLED=1`, flag pinned in the backend deploy script) — confirmed all three realms have current `ShipTopPlayerSnapshot` rows on 2026-06-05._
 
 ## Purpose
 
@@ -165,6 +165,27 @@ Registered unconditionally; the **task** is the no-op gate (not folded under `EN
 > **landing** payloads (best overall/wr/cb/ranked/efficiency + recent), bulk-fetched via
 > `data.get_players_ship_badges_bulk(player_pks, realm=None)` (2 queries/list, no N+1). The `ShipHonors`
 > panel was relocated to the **bottom of the player page, below the Insights tabs**.
+
+> **2026-06-05 (later): badge freshness chained off the weekly snapshot.** The landing Best-player
+> lists bake `ship_badges` into `LandingPlayerBestSnapshot.payload_json` at **materialize** time, not at
+> request/cache-warm time — so after a weekly `snapshot_ship_top_players_task` rewrote the standings, the
+> new medals didn't surface on the landing rows until the **next daily** `landing-best-player-snapshot-materializer`
+> run (≤~23h lag), and even then not in Redis until the independent ~55-min landing warmer republished.
+> Two changes close that gap (`warships/tasks.py`):
+> - `snapshot_ship_top_players_task` now dispatches `materialize_landing_player_best_snapshots_task(realm)`
+>   (`queue='background'`) on a **real** completion — gated on `result["status"] == "completed"`, so a
+>   lock-skip or the `SHIP_BADGE_SNAPSHOT_ENABLED=0` disabled path does **not** trigger it. The snapshot
+>   rows commit inside `compute_ship_top_player_snapshot`'s `transaction.atomic()` before `_run_locked_task`
+>   returns, so the materialize reads committed data.
+> - `materialize_landing_player_best_snapshots_task` gained `warm_after=True` and, on success, self-dispatches
+>   `warm_landing_page_content_task(scope='players', include_recent=False, realm)` (`queue='background'`) to
+>   republish the Redis Best-player payloads immediately. This streamlines **every** materialize run (daily
+>   + the new snapshot-triggered one), not just the badge case. The warmer holds a *different* lock
+>   (`_landing_page_warm_lock_key`); if an all-scope warm is mid-flight the players-scope republish no-ops
+>   and the in-flight/next warmer picks up the fresh snapshot — a bounded ≤1-cycle fallback, never a stale
+>   strand. No queue re-routing of the periodic tasks (they stay on the default worker); only the new
+>   follow-up dispatches target `background`. Covered by `test_ship_badges.py` (`*_dispatch_rematerialize`,
+>   `MaterializeBestSnapshotWarmChainTests`).
 
 - **Routing** — `lib/entityRoutes.ts`: `buildShipPath(shipId, shipName?, realm?)` →
   `/ship/<id>-<slug>?realm=`, and `parseShipIdFromRouteSegment` (mirrors the clan helpers).

@@ -821,12 +821,28 @@ def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
     from warships.data import compute_ship_top_player_snapshot
 
     logger.info("Starting snapshot_ship_top_players_task realm=%s", realm)
-    return _run_locked_task(
+    result = _run_locked_task(
         "snapshot_ship_top_players",
         realm,
         self.request.id,
         lambda: compute_ship_top_player_snapshot(realm=realm),
     )
+
+    # A real snapshot just rewrote this realm's top-3 ship standings, so
+    # re-materialize the landing Best-player snapshots to refresh their baked-in
+    # `ship_badges` (added/removed medals) without waiting for the next daily
+    # materializer — that task then self-republishes the Redis payloads. The
+    # snapshot rows commit inside compute_ship_top_player_snapshot's
+    # transaction.atomic() before _run_locked_task returns, so the materialize
+    # reads committed data. `status != "completed"` means a lock-skip (the
+    # disabled path already returned above) — nothing was rewritten, so skip.
+    if isinstance(result, dict) and result.get("status") == "completed":
+        materialize_landing_player_best_snapshots_task.apply_async(
+            kwargs={"realm": realm},
+            queue="background",
+        )
+
+    return result
 
 
 @app.task(bind=True, **TASK_OPTS)
@@ -1037,13 +1053,14 @@ def warm_player_distributions_task(self, realm=DEFAULT_REALM):
 
 
 @app.task(bind=True, **TASK_OPTS)
-def materialize_landing_player_best_snapshots_task(self, realm=DEFAULT_REALM, sorts=None):
+def materialize_landing_player_best_snapshots_task(self, realm=DEFAULT_REALM, sorts=None, warm_after=True):
     from warships.landing import materialize_landing_player_best_snapshots
 
     logger.info(
-        "Starting materialize_landing_player_best_snapshots_task realm=%s sorts=%s",
+        "Starting materialize_landing_player_best_snapshots_task realm=%s sorts=%s warm_after=%s",
         realm,
         sorts,
+        warm_after,
     )
 
     lock_key = _landing_player_best_snapshot_refresh_lock_key(realm)
@@ -1069,9 +1086,23 @@ def materialize_landing_player_best_snapshots_task(self, realm=DEFAULT_REALM, so
             "Finished materialize_landing_player_best_snapshots_task: %s",
             result,
         )
-        return result
     finally:
         cache.delete(lock_key)
+
+    # Republish the Redis Best-player payloads straight from the snapshot we just
+    # materialized, so changes (notably new ship badges after the weekly ship
+    # snapshot) reach the live API within seconds instead of waiting up to a full
+    # landing-warmer cycle (~55 min). The warmer holds a *different* lock
+    # (`_landing_page_warm_lock_key`); if an all-scope warm is already mid-flight
+    # this players-scope republish no-ops and the in-flight/next warmer picks up
+    # the fresh snapshot — a bounded ≤1-cycle fallback, never a stale strand.
+    if warm_after:
+        warm_landing_page_content_task.apply_async(
+            kwargs={"include_recent": False, "realm": realm, "scope": "players"},
+            queue="background",
+        )
+
+    return result
 
 
 @app.task(bind=True, **TASK_OPTS)

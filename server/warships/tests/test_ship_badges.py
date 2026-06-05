@@ -403,3 +403,114 @@ class ShipBadgeSnapshotTests(TestCase):
 
         self.assertEqual(result["badges"], 3)
         self.assertEqual(ShipTopPlayerSnapshot.objects.count(), 3)
+
+    def test_completion_dispatches_landing_best_rematerialize(self):
+        # A real snapshot run re-materializes this realm's landing Best-player
+        # snapshots (on the background queue) so new badges surface promptly.
+        for i in range(3):
+            self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
+
+        env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "1"}
+        with mock.patch.dict("os.environ", env, clear=False), \
+                mock.patch(
+                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
+                ) as dispatch:
+            snapshot_ship_top_players_task.apply(kwargs={"realm": "na"}).get()
+
+        dispatch.assert_called_once_with(
+            kwargs={"realm": "na"}, queue="background")
+
+    def test_disabled_run_does_not_dispatch_rematerialize(self):
+        env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "0"}
+        with mock.patch.dict("os.environ", env, clear=False), \
+                mock.patch(
+                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
+                ) as dispatch:
+            snapshot_ship_top_players_task.apply(kwargs={"realm": "na"}).get()
+
+        dispatch.assert_not_called()
+
+    def test_lock_skip_does_not_dispatch_rematerialize(self):
+        # When another snapshot holds the lock the task no-ops; nothing was
+        # rewritten, so it must not trigger a re-materialize.
+        from warships.tasks import _task_lock_key
+
+        for i in range(3):
+            self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
+        cache.add(_task_lock_key("snapshot_ship_top_players", "na"), "held")
+
+        env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "1"}
+        with mock.patch.dict("os.environ", env, clear=False), \
+                mock.patch(
+                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
+                ) as dispatch:
+            result = snapshot_ship_top_players_task.apply(
+                kwargs={"realm": "na"}).get()
+
+        self.assertEqual(result.get("status"), "skipped")
+        dispatch.assert_not_called()
+
+
+class MaterializeBestSnapshotWarmChainTests(TestCase):
+    """The materialize task self-republishes the Redis Best-player payloads on
+    success so a fresh snapshot reaches the live API without waiting for the
+    independent landing warmer. `warm_after=False` opts out."""
+
+    def setUp(self):
+        cache.clear()
+
+    def test_success_dispatches_players_scope_warm(self):
+        from warships.tasks import (
+            materialize_landing_player_best_snapshots_task,
+        )
+
+        with mock.patch(
+            "warships.landing.materialize_landing_player_best_snapshots",
+            return_value={"status": "completed", "realm": "na", "results": []},
+        ), mock.patch(
+            "warships.tasks.warm_landing_page_content_task.apply_async"
+        ) as warm:
+            materialize_landing_player_best_snapshots_task.apply(
+                kwargs={"realm": "na"}).get()
+
+        warm.assert_called_once_with(
+            kwargs={"include_recent": False, "realm": "na", "scope": "players"},
+            queue="background",
+        )
+
+    def test_warm_after_false_suppresses_warm(self):
+        from warships.tasks import (
+            materialize_landing_player_best_snapshots_task,
+        )
+
+        with mock.patch(
+            "warships.landing.materialize_landing_player_best_snapshots",
+            return_value={"status": "completed", "realm": "na", "results": []},
+        ), mock.patch(
+            "warships.tasks.warm_landing_page_content_task.apply_async"
+        ) as warm:
+            materialize_landing_player_best_snapshots_task.apply(
+                kwargs={"realm": "na", "warm_after": False}).get()
+
+        warm.assert_not_called()
+
+    def test_lock_skip_does_not_dispatch_warm(self):
+        from warships.tasks import (
+            materialize_landing_player_best_snapshots_task,
+            _landing_player_best_snapshot_refresh_lock_key,
+        )
+
+        cache.add(
+            _landing_player_best_snapshot_refresh_lock_key("na"), "held")
+
+        with mock.patch(
+            "warships.landing.materialize_landing_player_best_snapshots"
+        ) as inner, mock.patch(
+            "warships.tasks.warm_landing_page_content_task.apply_async"
+        ) as warm:
+            result = materialize_landing_player_best_snapshots_task.apply(
+                kwargs={"realm": "na"}).get()
+
+        self.assertEqual(result.get("status"), "skipped")
+        inner.assert_not_called()
+        warm.assert_not_called()
