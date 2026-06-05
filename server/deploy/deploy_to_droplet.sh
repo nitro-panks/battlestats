@@ -183,6 +183,19 @@ else
   echo 'BATTLE_OBSERVATION_FLOOR_HOURS=8' >> /etc/battlestats-server.env
 fi
 
+# Enable the weekly per-realm T10 top-ship-player badge snapshot
+# (snapshot_ship_top_players_task self-gates on this flag; the schedule is
+# always registered but no-ops without it). Pinned here because the cp of
+# .env.cloud above wipes any manual /etc edit — same trap that left the
+# ranked-capture flag dark for five deploys. Drives /ship/<id> boards +
+# profile badges for all realms. Runbook:
+# agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
+if grep -q '^SHIP_BADGE_SNAPSHOT_ENABLED=' /etc/battlestats-server.env; then
+  sed -i 's|^SHIP_BADGE_SNAPSHOT_ENABLED=.*|SHIP_BADGE_SNAPSHOT_ENABLED=1|' /etc/battlestats-server.env
+else
+  echo 'SHIP_BADGE_SNAPSHOT_ENABLED=1' >> /etc/battlestats-server.env
+fi
+
 get_env_value() {
   local key="$1"
   local raw

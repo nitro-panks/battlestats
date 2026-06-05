@@ -2,7 +2,7 @@
 
 _Created: 2026-06-05_
 _Context: The landing page surfaces the most-played ships per realm via the `RealmTopShipsTreemapSVG` treemap (`compute_realm_top_ships`, `data.py`), which aggregates `BattleEvent` over a rolling window. But ship-level **player** standing was invisible: no way to see who is best in a given ship, and the treemap tiles were dead ends. This feature adds (1) a **`/ship/<id>` standings page** — a fortnight leaderboard of the best players in a Tier-10 ship on the active realm — reachable by clicking a T10 treemap tile, and (2) a **durable profile badge** (gold/silver/bronze) for the top-3 players in each ranked T10 ship, which links back to that ship's page. Both are powered by a single weekly snapshot; nothing is computed per request._
-_Status: implemented (flag default-off, awaiting prod first-run) — 2026-06-05. Backend `ShipTopPlayerSnapshot` model + `compute_ship_top_player_snapshot` + `get_ship_leaderboard` + `snapshot_ship_top_players_task` + weekly per-realm schedule + `ship_leaderboard` endpoint + `PlayerSerializer.ship_badges` shipped; frontend `/ship/[shipSlug]` page + `ShipRouteView` + labeled-link `ShipTopPlayerBadgeIcon` + treemap T10 navigation shipped. Migration `0060_shiptopplayersnapshot`. Tests green locally (see Validation results). Not yet enabled in prod — `SHIP_BADGE_SNAPSHOT_ENABLED=0`._
+_Status: ENABLED in prod for all realms (na/eu/asia) — 2026-06-05. Flag pinned in the backend deploy script so it survives the `.env.cloud` overwrite. — 2026-06-05. Backend `ShipTopPlayerSnapshot` model + `compute_ship_top_player_snapshot` + `get_ship_leaderboard` + `snapshot_ship_top_players_task` + weekly per-realm schedule + `ship_leaderboard` endpoint + `PlayerSerializer.ship_badges` shipped; frontend `/ship/[shipSlug]` page + `ShipRouteView` + labeled-link `ShipTopPlayerBadgeIcon` + treemap T10 navigation shipped. Migration `0060_shiptopplayersnapshot`. Tests green locally (see Validation results). Not yet enabled in prod — `SHIP_BADGE_SNAPSHOT_ENABLED=0`._
 
 ## Purpose
 
@@ -219,5 +219,22 @@ gate (on/off). Plus `test_views.py` `ship_badges` payload tests. Frontend:
   ship-path helpers). `npm run lint` clean; `npm run build` + TypeScript pass; `/ship/[shipSlug]`
   route registered.
 
-**Prod first-run (pending):** record `ships_qualified` per realm and a sample board + badged profile
-after the manual NA run, then flip `SHIP_BADGE_SNAPSHOT_ENABLED=1`.
+**Prod all-realm enablement (2026-06-05):** NA was populated first (manual run, 73 ships ranked, 1095
+rows, real damage/frags/survived aggregates). EU/ASIA were empty: the scheduled task self-gates on
+`SHIP_BADGE_SNAPSHOT_ENABLED`, which was never set in `/etc/battlestats-server.env` (defaults `0`), so
+the weekly per-realm schedule no-op'd for every realm.
+
+**Incident — code-behind-schema (2026-06-05):** while enabling, manual EU/ASIA/NA runs all failed with
+`IntegrityError: null value in column "damage"`. Root cause: the live `current` release
+(`20260605020826`, ~02:08 UTC) was **behind `origin/main`** — its `ShipTopPlayerSnapshot` model + write
+path lacked the `damage`/`frags`/`survived` fields (added by `d048394` + migration `0061`), but migration
+`0061` had already been applied to the DB (columns present, NOT NULL, no DB default, and recorded in
+`django_migrations`). So the stale code inserted rows omitting three NOT NULL columns → null violation.
+NA's pre-existing 1095 rows were written earlier by correct (HEAD-equivalent) code and survived because the
+failed re-runs rolled back inside `transaction.atomic()`.
+
+Fix: (1) pinned `SHIP_BADGE_SNAPSHOT_ENABLED=1` in `server/deploy/deploy_to_droplet.sh` (same idempotent
+grep/sed pattern as `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED`, so the `.env.cloud` cp doesn't wipe it);
+(2) redeployed the backend from `origin/main` (`b898b9a`) to bring code level with the schema — `migrate`
+was a no-op since `0061` was already recorded; (3) re-ran the snapshot for all three realms and verified
+non-zero `damage`/`frags`/`survived`, not just row counts.
