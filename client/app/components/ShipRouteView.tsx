@@ -9,6 +9,10 @@ import wrColor from '../lib/wrColor';
 
 
 const SHIP_LEADERBOARD_FETCH_TTL_MS = 900_000; // 15 min — mirrors the backend cache
+// Display cap. The backend already limits each board to SHIP_BADGE_LIST_SIZE
+// (15), but this guarantees the page never shows more than the top 15 even if a
+// payload was cached when the limit was higher.
+const MAX_VISIBLE_PLAYERS = 15;
 
 
 interface ShipLeaderboardPlayer {
@@ -138,7 +142,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                         </tr>
                     </thead>
                     <tbody>
-                        {players.map((p) => (
+                        {players.slice(0, MAX_VISIBLE_PLAYERS).map((p) => (
                             <tr key={p.rank}>
                                 <td className="py-1.5 pr-3 tabular-nums text-[var(--text-muted)]">{p.rank}</td>
                                 <td className="py-1.5 pr-8">
