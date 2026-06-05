@@ -5,7 +5,11 @@ import Link from 'next/link';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { buildPlayerPath, parseShipIdFromRouteSegment } from '../lib/entityRoutes';
 import { useRealm } from '../context/RealmContext';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import wrColor from '../lib/wrColor';
+
+const RANKING_TOOLTIP = "Ranked by win rate adjusted for battles played (an empirical-Bayes shrinkage toward 50%), so a short hot streak doesn't outrank a high-volume player. Shows the top 15 for the window.";
 
 
 const SHIP_LEADERBOARD_FETCH_TTL_MS = 900_000; // 15 min — mirrors the backend cache
@@ -122,8 +126,15 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                     </h1>
                     <span className="text-sm text-[var(--text-muted)]">{subtitle}</span>
                 </div>
-                <p className="mt-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                    {realm.toUpperCase()} · best players · last {data.window_days} days
+                <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                    {realm.toUpperCase()} · best players · last {data.window_days} days ·
+                    <span
+                        title={RANKING_TOOLTIP}
+                        aria-label={RANKING_TOOLTIP}
+                        className="inline-flex cursor-help"
+                    >
+                        <FontAwesomeIcon icon={faCircleInfo} aria-hidden="true" />
+                    </span>
                 </p>
             </header>
 
