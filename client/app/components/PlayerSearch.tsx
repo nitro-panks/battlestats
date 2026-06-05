@@ -184,8 +184,6 @@ const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SHOW_PLAYER_EXPLORER = false;
-// Dev-only: realm most-played-ships treemap above the Players list.
-const SHOW_DEV_TOP_SHIPS = process.env.NODE_ENV !== 'production';
 // Backend caches recent players (7-day most-active rollup, rebuilt every 3 h)
 // and best/random for 6 h, so a 60-second client-side TTL lets SPA
 // back-navigations to the landing page hit the in-memory cache (no network,
@@ -501,13 +499,11 @@ const PlayerSearch: React.FC = () => {
                 <div>
                     {error && <p className="text-red-600 dark:text-red-400">{error}</p>}
 
-                    {/* Dev preview: realm most-played-ships treemap, above the
-                        Players (Recent/Best) list. */}
-                    {SHOW_DEV_TOP_SHIPS && (
-                        <div className="mt-2 pt-6">
-                            <RealmTopShipsTreemapSVG />
-                        </div>
-                    )}
+                    {/* Realm most-played-ships treemap, above the Players
+                        (Recent/Best) list. */}
+                    <div className="mt-2 pt-6">
+                        <RealmTopShipsTreemapSVG />
+                    </div>
 
                     {/* Toolbar is always visible once the landing pane is mounted —
                      keeps the empty-state UX coherent for both Recent and Best

@@ -222,19 +222,16 @@ const RealmTopShipsTreemapSVG: React.FC<{ hours?: number }> = ({ hours = 24 }) =
                         ))}
                     </div>
                 </div>
-                <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                        {presentTypes.map((t) => (
-                            <span key={t} className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-                                <span
-                                    className="inline-block h-2 w-2 rounded-sm"
-                                    style={{ backgroundColor: typeColor(t) }}
-                                />
-                                {TYPE_LABEL[t] ?? t}
-                            </span>
-                        ))}
-                    </div>
-                    <span className="text-[10px] uppercase tracking-wider text-[var(--accent-mid)]">dev preview</span>
+                <div className="flex items-center gap-2">
+                    {presentTypes.map((t) => (
+                        <span key={t} className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+                            <span
+                                className="inline-block h-2 w-2 rounded-sm"
+                                style={{ backgroundColor: typeColor(t) }}
+                            />
+                            {TYPE_LABEL[t] ?? t}
+                        </span>
+                    ))}
                 </div>
             </div>
             <div ref={containerRef} className="relative w-full">
