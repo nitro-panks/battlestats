@@ -318,7 +318,13 @@ matches the data.
     seasons. Watch the boundary Mondays; if one is missed, run the backfill.
 - **Backfill.** `python manage.py backfill_ship_seasons --wipe` clears the rolling-era rows (keyed by
   arbitrary run-days) and replays W20-21 → last completed, one snapshot+award set per season —
-  retroactively populating the board and the durable Ship Honors history.
+  retroactively populating the board and the durable Ship Honors history. After writing, it dispatches
+  `materialize_landing_player_best_snapshots_task` per affected realm (background queue) — the landing
+  Best-player snapshots bake in each row's `ship_badges` and are otherwise rebuilt only by a daily cron,
+  so a direct snapshot rewrite without this chain leaves the landing list and the profile disagreeing on
+  medal counts until the next daily run (observed 2026-06-05: a mid-day re-run left `hachiminyan` showing
+  2 medals on landing vs 1 on the profile). Added 2026-06-05 alongside the existing
+  `snapshot_ship_top_players_task` chain; pass `--no-landing-refresh` to skip when no broker is reachable.
 - **Rollout:** deploy backend → run `backfill_ship_seasons --wipe` (all realms) → deploy frontend.
   Confirmed dense across realms for W20-21 (NA 46 / EU 55 / ASIA 63 ranked T10 ships). Next auto-finalize:
   **Mon 8 Jun** (W22-23).
@@ -360,3 +366,21 @@ Scope widened from **T10 only** to **T8–T10** after a per-tier density study o
   for the weekly job + one-off backfill.
 - **Rollout:** deploy backend → `backfill_ship_seasons --wipe` (rebuilds completed seasons across all
   tiers via the now-multi-tier compute) → deploy frontend.
+
+## Addendum (2026-06-05, later): landing treemap aligned to the completed season
+
+The `RealmTopShipsTreemapSVG` / `compute_realm_top_ships` window was switched from a
+rolling window (24h → 7d earlier in the day) to the **most recently completed fixed
+2-week ship season** — the exact window the `/ship/<id>` leaderboard + profile medals
+reflect (`most_recent_completed_season()` / `_season_window_datetimes`). This supersedes
+the original "complements the live treemap with a *distinct* horizon" rationale above:
+the treemap and the standings now share one season window, so a clicked T10 tile and its
+`/ship` board describe the same period and the landing page is internally consistent.
+
+- Payload gained `season_index` / `season_start` / `season_end` (date-only ISO, UTC
+  midnight; `days` now 14). Cache key is season-tagged (`top-ships:<mode>:season<idx>:<limit>`),
+  TTL runs to the next season boundary; the daily warmer still keeps it warm across the flip.
+- Treemap header now shows the season range (e.g. "11–24 May") via `formatSeasonLabel`.
+- Verified dense on the cloud DB for season 0 (11–24 May): NA 227k / EU 284k / ASIA 209k
+  random `BattleEvent` rows, ~900 distinct ships each.
+- Tests: `test_realm_top_ships.py` rewritten to pin the completed-season boundaries.
