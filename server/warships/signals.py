@@ -293,6 +293,36 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
+    # -- Weekly T10 Top-Ship-Player badge snapshot (per realm, striped) --
+    # Schedule is always registered; the task self-gates on
+    # SHIP_BADGE_SNAPSHOT_ENABLED. See
+    # agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
+    ship_badge_hour = int(os.getenv("SHIP_BADGE_SNAPSHOT_HOUR", "2"))
+    ship_badge_dow = os.getenv("SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK", "1")  # Monday
+    for realm in sorted(VALID_REALMS):
+        realm_hour = (ship_badge_hour +
+                      REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+        ship_badge_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute="30",
+            hour=str(realm_hour),
+            day_of_week=ship_badge_dow,
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"ship-top-player-snapshot-{realm}",
+            defaults={
+                "task": "warships.tasks.snapshot_ship_top_players_task",
+                "crontab": ship_badge_schedule,
+                "interval": None,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Weekly T10 top-player badge snapshot ({realm.upper()}).",
+            },
+        )
+
     # -- Player Distribution Warmer (split from landing warmer) --
     dist_warm_minutes = int(os.getenv("DISTRIBUTION_WARM_MINUTES", "360"))
     for realm in sorted(VALID_REALMS):

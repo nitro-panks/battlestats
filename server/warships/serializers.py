@@ -3,7 +3,7 @@ import time
 
 from rest_framework import serializers
 from .models import Player, Clan, Ship, StreamerSubmission
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges
 
 
 TWITCH_URL_RE = re.compile(
@@ -96,6 +96,7 @@ class PlayerSerializer(serializers.ModelSerializer):
     clan_battle_header_overall_win_rate = serializers.SerializerMethodField()
     clan_battle_header_updated_at = serializers.SerializerMethodField()
     is_pve_player = serializers.SerializerMethodField()
+    ship_badges = serializers.SerializerMethodField()
 
     class Meta:
         model = Player
@@ -147,6 +148,11 @@ class PlayerSerializer(serializers.ModelSerializer):
             return explorer_summary.player_score
 
         return build_player_summary(obj, use_cached_summary=False).get('player_score')
+
+    def get_ship_badges(self, obj):
+        # Current-week T10 top-player badges. One indexed lookup per player;
+        # bounded N+1 on the bulk-cache warmers is accepted (see runbook).
+        return get_player_ship_badges(obj)
 
     def _get_efficiency_rank_payload(self, obj):
         payload_cache = getattr(self, '_efficiency_rank_payload_cache', None)

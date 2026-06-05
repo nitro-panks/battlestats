@@ -796,3 +796,56 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.getByText('Loading player...')).toBeInTheDocument();
     });
 });
+describe('PlayerDetail ship-badge icons', () => {
+    let consoleErrorSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+        mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: null });
+        mockClanBattleSummary = undefined;
+        mockRankedHeatmapVisibility = undefined;
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockImplementation(() => Promise.resolve({ data: [], headers: {} }));
+        consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+        jest.useRealTimers();
+    });
+
+    afterEach(() => {
+        mockUseClanMembers.mockClear();
+        consoleErrorSpy.mockRestore();
+    });
+
+    const renderWithBadges = (ship_badges: unknown) =>
+        render(
+            <PlayerDetail
+                player={{ ...basePlayer, ship_badges } as never}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+    it('renders a tiered badge icon for each ship placement', () => {
+        renderWithBadges([
+            { ship_id: 10, ship_name: 'Shimakaze', rank: 1, win_rate: 64.0, battles: 312 },
+            { ship_id: 20, ship_name: 'Zao', rank: 2, win_rate: 61.5, battles: 280 },
+        ]);
+
+        expect(screen.getByTitle(/#1 Shimakaze · 64.0% WR · 312 battles \(last 14d\)/)).toBeInTheDocument();
+        expect(screen.getByTitle(/#2 Zao · 61.5% WR · 280 battles \(last 14d\)/)).toBeInTheDocument();
+    });
+
+    it('renders no badge icons when ship_badges is empty', () => {
+        renderWithBadges([]);
+
+        expect(screen.queryByTitle(/WR · .* battles \(last 14d\)/)).not.toBeInTheDocument();
+    });
+
+    it('caps visible badges at six and shows a +N overflow', () => {
+        const badges = Array.from({ length: 8 }, (_, i) => ({
+            ship_id: i + 1, ship_name: `Ship${i + 1}`, rank: ((i % 3) + 1), win_rate: 60, battles: 100,
+        }));
+        renderWithBadges(badges);
+
+        expect(screen.getByText('+2')).toBeInTheDocument();
+    });
+});

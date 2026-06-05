@@ -5719,6 +5719,211 @@ def bulk_load_entity_caches(
     }
 
 
+SHIP_LEADERBOARD_WINDOW_DAYS = 14  # rolling fortnight (recomputed weekly)
+SHIP_LEADERBOARD_CACHE_TTL = 900   # 15 min — the snapshot itself changes weekly
+
+
+def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
+    """Per-realm ranked players for each Tier-N ship over a rolling fortnight.
+
+    Aggregates `BattleEvent` random-battle deltas over the trailing
+    `SHIP_LEADERBOARD_WINDOW_DAYS` (14) days, grouped by (ship, player) — the
+    inverse grouping of `compute_realm_top_ships`. Keeps players with
+    >= `SHIP_BADGE_MIN_BATTLES` battles; a ship is "ranked" only if its
+    qualifying pool is >= `SHIP_BADGE_MIN_SHIP_POPULATION`. For each ranked ship
+    it writes the top `SHIP_BADGE_LIST_SIZE` (50) players as `ShipTopPlayerSnapshot`
+    rows (ranks 1..N) — the ship-page leaderboard — of which ranks
+    1..`SHIP_BADGE_TOP_N` (3) are the gold/silver/bronze profile badges.
+    Idempotent per (realm, today). Invalidates the badged (top-3) players' cached
+    detail payloads so the icons surface before TTL.
+
+    The job is meant to run weekly; the 14-day lookback is always a full window
+    (no calendar-edge sparsity). Thresholds are read from the environment at call
+    time (not module load) so an operator can re-tune and re-run without a
+    redeploy. See `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
+    """
+    from warships.models import BattleEvent, ShipTopPlayerSnapshot
+
+    min_battles = int(os.getenv('SHIP_BADGE_MIN_BATTLES', '10'))
+    min_population = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION', '25'))
+    top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
+    list_size = int(os.getenv('SHIP_BADGE_LIST_SIZE', '50'))
+    tier = int(os.getenv('SHIP_BADGE_TIER', '10'))
+    retention_days = int(os.getenv('SHIP_BADGE_RETENTION_DAYS', '21'))
+
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    today = django_timezone.now().date()
+    since = django_timezone.now() - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS)
+
+    t10_ids = list(
+        Ship.objects.filter(tier=tier).values_list('ship_id', flat=True)
+    )
+    if not t10_ids:
+        logger.info(
+            "ship-badge snapshot realm=%s: no tier-%s ships found", realm, tier)
+        return {'realm': realm, 'captured_on': today, 'ships_qualified': 0,
+                'ships_total': 0, 'badges': 0, 'ranked_rows': 0}
+
+    ship_names = {
+        s.ship_id: s.name for s in Ship.objects.filter(ship_id__in=t10_ids)
+    }
+
+    rows = (
+        BattleEvent.objects
+        .filter(ship_id__in=t10_ids, mode='random', detected_at__gte=since,
+                player__realm=realm, player__is_hidden=False)
+        # player_id is the FK PK (used for the snapshot FK); player__player_id
+        # is the WG account id (used for cache invalidation) — keep both.
+        .values('ship_id', 'player_id', 'player__player_id', 'player__name')
+        .annotate(battles=Sum('battles_delta'), wins=Sum('wins_delta'))
+        .filter(battles__gte=min_battles)
+    )
+
+    by_ship: dict = {}
+    for r in rows:
+        by_ship.setdefault(r['ship_id'], []).append(r)
+
+    snapshot_rows = []
+    invalidate_wg_ids = []
+    qualified = 0
+    badge_count = 0
+    for ship_id, pool in by_ship.items():
+        if len(pool) < min_population:
+            continue
+        qualified += 1
+        for entry in pool:
+            b = entry['battles'] or 0
+            entry['win_rate'] = (100.0 * (entry['wins'] or 0) / b) if b else 0.0
+        pool.sort(key=lambda e: (-e['win_rate'], -(e['battles'] or 0)))
+        for rank, entry in enumerate(pool[:list_size], start=1):
+            snapshot_rows.append(ShipTopPlayerSnapshot(
+                captured_on=today,
+                realm=realm,
+                ship_id=ship_id,
+                ship_name=ship_names.get(ship_id) or entry['player__name'] or '',
+                rank=rank,
+                player_id=entry['player_id'],
+                win_rate=round(entry['win_rate'], 2),
+                battles=entry['battles'] or 0,
+            ))
+            # Only the top-N rows are profile badges → only they change a
+            # player's cached detail payload.
+            if rank <= top_n:
+                invalidate_wg_ids.append(entry['player__player_id'])
+                badge_count += 1
+
+    with transaction.atomic():
+        ShipTopPlayerSnapshot.objects.filter(
+            realm=realm, captured_on=today).delete()
+        if snapshot_rows:
+            ShipTopPlayerSnapshot.objects.bulk_create(snapshot_rows)
+        prune_before = today - timedelta(days=retention_days)
+        ShipTopPlayerSnapshot.objects.filter(
+            realm=realm, captured_on__lt=prune_before).delete()
+
+    for wg_id in invalidate_wg_ids:
+        invalidate_player_detail_cache(wg_id, realm=realm)
+
+    logger.info(
+        "ship-badge snapshot realm=%s window=%sd ships_qualified=%s/%s "
+        "ranked_rows=%s badges=%s", realm, SHIP_LEADERBOARD_WINDOW_DAYS,
+        qualified, len(t10_ids), len(snapshot_rows), badge_count,
+    )
+    return {'realm': realm, 'captured_on': today, 'ships_qualified': qualified,
+            'ships_total': len(t10_ids), 'badges': badge_count,
+            'ranked_rows': len(snapshot_rows)}
+
+
+def get_player_ship_badges(player: Player) -> list:
+    """Current-window ship badges (ranks 1..SHIP_BADGE_TOP_N) for a player.
+
+    Read path for the profile badge icons; one indexed lookup on
+    `ship_badge_player_captured_idx`. Returns [] when the player holds none. The
+    `rank <= top_n` filter keeps mid-list ranked finishes (4..50) — which appear
+    on the ship page but are not badges — off the profile.
+    """
+    from warships.models import ShipTopPlayerSnapshot
+
+    top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
+    latest = (
+        ShipTopPlayerSnapshot.objects.filter(player=player)
+        .order_by('-captured_on')
+        .values_list('captured_on', flat=True)
+        .first()
+    )
+    if latest is None:
+        return []
+    return [
+        {
+            'ship_id': r.ship_id,
+            'ship_name': r.ship_name,
+            'rank': r.rank,
+            'win_rate': r.win_rate,
+            'battles': r.battles,
+        }
+        for r in ShipTopPlayerSnapshot.objects
+        .filter(player=player, captured_on=latest, rank__lte=top_n)
+        .order_by('rank', 'ship_name')
+    ]
+
+
+def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
+    """Latest fortnight leaderboard for one ship on one realm (snapshot read).
+
+    Powers the `/ship/<id>` page. Reads the most recent `captured_on`'s rows for
+    the ship (precomputed by `compute_ship_top_player_snapshot`, ≤
+    `SHIP_BADGE_LIST_SIZE`), joins `Ship` for the header, and shapes a payload.
+    Returns None when the ship_id is unknown; an empty `players` list when the
+    ship was not "ranked" in the latest window (pool below the population guard).
+    Cached by the view (`SHIP_LEADERBOARD_CACHE_TTL`). No live aggregation.
+    """
+    from warships.models import ShipTopPlayerSnapshot
+
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    ship = Ship.objects.filter(ship_id=ship_id).first()
+    if ship is None:
+        return None
+
+    latest = (
+        ShipTopPlayerSnapshot.objects.filter(realm=realm, ship_id=ship_id)
+        .order_by('-captured_on')
+        .values_list('captured_on', flat=True)
+        .first()
+    )
+    players = []
+    if latest is not None:
+        rows = (
+            ShipTopPlayerSnapshot.objects
+            .filter(realm=realm, ship_id=ship_id, captured_on=latest)
+            .order_by('rank')
+            .select_related('player')
+        )
+        players = [
+            {
+                'rank': r.rank,
+                'player_name': r.player.name,
+                'win_rate': r.win_rate,
+                'battles': r.battles,
+            }
+            for r in rows
+        ]
+
+    return {
+        'realm': realm,
+        'window_days': SHIP_LEADERBOARD_WINDOW_DAYS,
+        'captured_on': latest.isoformat() if latest else None,
+        'ship': {
+            'ship_id': ship.ship_id,
+            'name': ship.name,
+            'tier': ship.tier,
+            'ship_type': ship.ship_type,
+            'nation': ship.nation,
+            'is_premium': ship.is_premium,
+        },
+        'players': players,
+    }
+
+
 def compute_realm_top_ships(realm, hours=24, limit=25, mode="random", use_cache=True):
     """Most-played ships on a realm over the last ``hours`` (the treemap source).
 

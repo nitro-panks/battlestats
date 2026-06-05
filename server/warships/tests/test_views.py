@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
-from warships.models import Player, Clan, PlayerDailyShipStats, PlayerExplorerSummary, realm_cache_key, LandingRecentPlayersSnapshot, LandingPlayerBestSnapshot
+from warships.models import Player, Clan, PlayerDailyShipStats, PlayerExplorerSummary, realm_cache_key, LandingRecentPlayersSnapshot, LandingPlayerBestSnapshot, Ship, ShipTopPlayerSnapshot
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
@@ -99,6 +99,57 @@ class PlayerViewSetTests(TestCase):
         mock_update_player_task.assert_called_once()
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_exposes_ship_badges(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="BadgeHolder", player_id=9077, realm="na", last_fetch=now,
+        )
+        Ship.objects.create(ship_id=10, name="Shimakaze", nation="japan",
+                            ship_type="Destroyer", tier=10)
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=now.date(), realm="na", ship_id=10,
+            ship_name="Shimakaze", rank=1, player=player,
+            win_rate=64.0, battles=312,
+        )
+
+        response = self.client.get("/api/player/BadgeHolder/")
+
+        self.assertEqual(response.status_code, 200)
+        badges = response.json()["ship_badges"]
+        self.assertEqual(len(badges), 1)
+        self.assertEqual(badges[0]["ship_id"], 10)
+        self.assertEqual(badges[0]["ship_name"], "Shimakaze")
+        self.assertEqual(badges[0]["rank"], 1)
+        self.assertEqual(badges[0]["win_rate"], 64.0)
+        self.assertEqual(badges[0]["battles"], 312)
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_ship_badges_empty_when_none(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        Player.objects.create(
+            name="NoBadges", player_id=9078, realm="na",
+            last_fetch=timezone.now(),
+        )
+
+        response = self.client.get("/api/player/NoBadges/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["ship_badges"], [])
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")

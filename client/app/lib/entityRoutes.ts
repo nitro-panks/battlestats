@@ -35,3 +35,26 @@ export const parseClanIdFromRouteSegment = (segment: string): number | null => {
 
     return clanId;
 };
+
+
+export const buildShipPath = (shipId: number | string, shipName?: string, realm?: string): string => {
+    const normalizedId = String(shipId).trim();
+    const slug = slugifySegment(shipName || '');
+    const base = slug ? `/ship/${normalizedId}-${slug}` : `/ship/${normalizedId}`;
+    return realm ? `${base}?realm=${realm}` : base;
+};
+
+
+export const parseShipIdFromRouteSegment = (segment: string): number | null => {
+    const match = segment.match(/^(\d+)/);
+    if (!match) {
+        return null;
+    }
+
+    const shipId = Number(match[1]);
+    if (!Number.isInteger(shipId) || shipId <= 0) {
+        return null;
+    }
+
+    return shipId;
+};

@@ -17,6 +17,7 @@ import PveEnjoyerIcon from './PveEnjoyerIcon';
 import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
+import ShipTopPlayerBadgeIcon, { ShipBadge } from './ShipTopPlayerBadgeIcon';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
 import { useTheme } from '../context/ThemeContext';
@@ -28,6 +29,7 @@ interface PlayerDetailProps {
         id: number;
         name: string;
         player_id: number;
+        realm?: string;
         kill_ratio: number | null;
         actual_kdr?: number | null;
         player_score: number | null;
@@ -66,6 +68,8 @@ interface PlayerDetailProps {
         clan_battle_header_seasons_played?: number | null;
         clan_battle_header_overall_win_rate?: number | null;
         clan_battle_header_updated_at?: string | null;
+        // Weekly top-3 finishes in a Tier-10 ship (gold/silver/bronze badges).
+        ship_badges?: ShipBadge[];
         verdict: string | null;
         randoms_json?: Array<{
             ship_name?: string | null;
@@ -426,6 +430,14 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}
                                 {isClanBattleEnjoyer && clanBattleSummary ? <ClanBattleShieldIcon winRate={clanBattleSummary.overallWinRate} size="header" /> : null}
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
+                                {!player.is_hidden && player.ship_badges && player.ship_badges.length > 0
+                                    ? player.ship_badges.slice(0, 6).map((badge) => (
+                                        <ShipTopPlayerBadgeIcon key={`${badge.ship_id}-${badge.rank}`} badge={badge} realm={player.realm} size="header" />
+                                    ))
+                                    : null}
+                                {!player.is_hidden && player.ship_badges && player.ship_badges.length > 6
+                                    ? <span className="text-xs text-[var(--text-muted)]">+{player.ship_badges.length - 6}</span>
+                                    : null}
                             </div>
                             <div className="flex items-center gap-2 self-start">
                                 {refreshStatus && !player.is_hidden ? (
