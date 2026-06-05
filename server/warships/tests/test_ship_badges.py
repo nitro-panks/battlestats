@@ -120,6 +120,26 @@ class ShipBadgeSnapshotTests(TestCase):
         # Display still uses the raw win rate, not the shrunk score.
         self.assertAlmostEqual(rows[0].win_rate, 70.0)
 
+    def test_composite_ranking_breaks_winrate_ties_on_damage_and_kills(self):
+        # Equal win rate + equal battles → the win-rate signal is flat, so the
+        # damage and kills components decide the order (wins-led blend, but here
+        # wins is a wash). Higher damage/kills ranks higher.
+        carry = self._player("Carry")    # 60% — most dmg + kills
+        avg = self._player("Average")    # 60% — middling dmg + kills
+        passive = self._player("Passive")  # 60% — least dmg + kills
+        self._event(carry, SHIMA, battles=50, wins=30, damage=4_000_000, frags=75)
+        self._event(avg, SHIMA, battles=50, wins=30, damage=2_500_000, frags=50)
+        self._event(passive, SHIMA, battles=50, wins=30, damage=1_500_000, frags=25)
+
+        self._run("na")
+
+        rows = list(ShipTopPlayerSnapshot.objects.filter(ship_id=SHIMA)
+                    .order_by("rank"))
+        self.assertEqual([r.player_id for r in rows],
+                        [carry.id, avg.id, passive.id])
+        # All three share the raw win rate; only the composite order differs.
+        self.assertAlmostEqual(rows[0].win_rate, 60.0)
+
     def test_battle_floor_excludes_sub_floor_players(self):
         a = self._player("Ace")
         b = self._player("Bravo")
@@ -289,7 +309,7 @@ class ShipBadgeSnapshotTests(TestCase):
         ace = self._player("Ace")
         mid = self._player("Mid")
         low = self._player("Low")
-        self._event(ace, SHIMA, battles=20, wins=18)   # 90%
+        self._event(ace, SHIMA, battles=20, wins=18, damage=1_000_000, frags=30)  # 90%, 50k avg, 1.5 kpb
         self._event(mid, SHIMA, battles=20, wins=14)   # 70%
         self._event(low, SHIMA, battles=20, wins=10)   # 50%
         self._run("na")
@@ -301,6 +321,8 @@ class ShipBadgeSnapshotTests(TestCase):
                         ["Ace", "Mid", "Low"])
         self.assertEqual([p["rank"] for p in board["players"]], [1, 2, 3])
         self.assertAlmostEqual(board["players"][0]["win_rate"], 90.0)
+        self.assertEqual(board["players"][0]["avg_damage"], 50_000)  # 1_000_000 / 20
+        self.assertEqual(board["players"][0]["kills_per_battle"], 1.5)  # 30 / 20
 
     def test_get_ship_leaderboard_unknown_ship_returns_none(self):
         self.assertIsNone(get_ship_leaderboard("na", 1234567))

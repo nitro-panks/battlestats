@@ -9,7 +9,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import wrColor from '../lib/wrColor';
 
-const RANKING_TOOLTIP = "Ranked by win rate adjusted for battles played (an empirical-Bayes shrinkage toward 50%), so a short hot streak doesn't outrank a high-volume player. Shows the top 15 for the window.";
+const RANKING_TOOLTIP = "Ranked by a blend of win rate, average damage, and kills per battle (win rate weighted most), each tempered for games played (empirical-Bayes shrinkage) so a short hot streak doesn't outrank a high-volume player. Shows the top 15 for the window.";
 
 
 const SHIP_LEADERBOARD_FETCH_TTL_MS = 900_000; // 15 min — mirrors the backend cache
@@ -24,6 +24,8 @@ interface ShipLeaderboardPlayer {
     player_name: string;
     win_rate: number;
     battles: number;
+    avg_damage: number;
+    kills_per_battle: number;
 }
 
 interface ShipLeaderboard {
@@ -149,7 +151,9 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                             <th className="py-2 pr-3">#</th>
                             <th className="py-2 pr-8">Player</th>
                             <th className="py-2 pr-8">Win rate</th>
-                            <th className="py-2">Battles</th>
+                            <th className="py-2 pr-8">Battles</th>
+                            <th className="py-2 pr-8">Avg dmg</th>
+                            <th className="py-2">Kills/battle</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -167,8 +171,14 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                                 <td className="py-1.5 pr-8 tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>
                                     {p.win_rate.toFixed(1)}%
                                 </td>
-                                <td className="py-1.5 tabular-nums text-[var(--text-muted)]">
+                                <td className="py-1.5 pr-8 tabular-nums text-[var(--text-muted)]">
                                     {p.battles.toLocaleString()}
+                                </td>
+                                <td className="py-1.5 pr-8 tabular-nums text-[var(--text-muted)]">
+                                    {p.avg_damage.toLocaleString()}
+                                </td>
+                                <td className="py-1.5 tabular-nums text-[var(--text-muted)]">
+                                    {p.kills_per_battle.toFixed(2)}
                                 </td>
                             </tr>
                         ))}

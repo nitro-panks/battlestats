@@ -5723,6 +5723,25 @@ SHIP_LEADERBOARD_WINDOW_DAYS = 14  # rolling fortnight (recomputed weekly)
 SHIP_LEADERBOARD_CACHE_TTL = 900   # 15 min — the snapshot itself changes weekly
 
 
+def _pool_zscores(values: list) -> list:
+    """Population z-scores for a list of numbers (mean 0, unit std within pool).
+
+    Used to put the three ship-ranking signals (win rate, damage, kills) on a
+    common scale before the weighted blend. Returns all-zeros when the pool has
+    no spread (e.g. a metric that is uniform/absent across the pool), so that
+    metric contributes nothing rather than NaN.
+    """
+    n = len(values)
+    if n == 0:
+        return []
+    mean = sum(values) / n
+    var = sum((v - mean) ** 2 for v in values) / n
+    std = math.sqrt(var)
+    if std == 0:
+        return [0.0] * n
+    return [(v - mean) / std for v in values]
+
+
 def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
     """Per-realm ranked players for each Tier-N ship over a rolling fortnight.
 
@@ -5763,6 +5782,16 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
     # demotes short hot streaks; the population guard sets board depth.
     prior_battles = int(os.getenv('SHIP_BADGE_PRIOR_BATTLES', '50'))
     prior_wr = float(os.getenv('SHIP_BADGE_PRIOR_WR', '0.5'))
+    # Composite ranking weights. Players are scored on a weighted blend of three
+    # within-pool z-scores — win rate, damage/battle, kills/battle — each first
+    # tempered by `prior_battles` pseudo-games so a small sample regresses toward
+    # a baseline (win rate → `prior_wr`; damage/kills → the ship's pool mean).
+    # High-volume players keep ~their true rate, so activity is never penalized.
+    # Wins-led default (0.50/0.35/0.15): win rate stays dominant, damage a strong
+    # secondary, kills a light tertiary (it overlaps damage).
+    w_wins = float(os.getenv('SHIP_BADGE_WEIGHT_WINS', '0.5'))
+    w_damage = float(os.getenv('SHIP_BADGE_WEIGHT_DAMAGE', '0.35'))
+    w_kills = float(os.getenv('SHIP_BADGE_WEIGHT_KILLS', '0.15'))
 
     realm = (realm or DEFAULT_REALM).lower().strip()
     today = django_timezone.now().date()
@@ -5819,15 +5848,31 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
         if len(pool) < min_population:
             continue
         qualified += 1
+        # Pool per-game baselines (battle-weighted) that damage/kills temper
+        # toward. Win rate tempers toward `prior_wr` (the universal ~50% prior),
+        # which damage/kills lack — hence the per-metric baseline split.
+        pool_battles = sum((e['battles'] or 0) for e in pool)
+        mean_dpb = (sum((e['damage'] or 0) for e in pool) / pool_battles) if pool_battles else 0.0
+        mean_kpb = (sum((e['frags'] or 0) for e in pool) / pool_battles) if pool_battles else 0.0
         for entry in pool:
             b = entry['battles'] or 0
             w = entry['wins'] or 0
             entry['win_rate'] = (100.0 * w / b) if b else 0.0
-            # Shrink the win proportion toward `prior_wr` by `prior_battles`
-            # pseudo-battles, so a short hot streak doesn't outrank a high-volume
-            # player with a slightly lower raw win rate. Rank by this score;
-            # display still uses the raw win_rate.
-            entry['_score'] = (w + prior_battles * prior_wr) / (b + prior_battles)
+            # Empirical-Bayes shrink each per-game signal by `prior_battles`
+            # pseudo-games: a short hot streak regresses toward the baseline,
+            # while a high-volume record stays at ~its true rate (never penalized
+            # for activity — large n swamps the prior).
+            denom = b + prior_battles
+            entry['_shr_wr'] = (w + prior_battles * prior_wr) / denom if denom else 0.0
+            entry['_shr_dpb'] = ((entry['damage'] or 0) + prior_battles * mean_dpb) / denom if denom else 0.0
+            entry['_shr_kpb'] = ((entry['frags'] or 0) + prior_battles * mean_kpb) / denom if denom else 0.0
+        # Put the three tempered signals on a common scale (within-pool z-score)
+        # and blend by the configured weights. Display still uses raw win_rate.
+        z_wr = _pool_zscores([e['_shr_wr'] for e in pool])
+        z_dpb = _pool_zscores([e['_shr_dpb'] for e in pool])
+        z_kpb = _pool_zscores([e['_shr_kpb'] for e in pool])
+        for entry, zw, zd, zk in zip(pool, z_wr, z_dpb, z_kpb):
+            entry['_score'] = w_wins * zw + w_damage * zd + w_kills * zk
         pool.sort(key=lambda e: (-e['_score'], -(e['battles'] or 0)))
         for rank, entry in enumerate(pool[:list_size], start=1):
             snapshot_rows.append(ShipTopPlayerSnapshot(
@@ -6016,6 +6061,12 @@ def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
                 'player_name': r.player.name,
                 'win_rate': r.win_rate,
                 'battles': r.battles,
+                # Windowed average damage and kills/battle — both accurate delta
+                # sums (same basis as the profile ship badges). Survival%/KDR stay
+                # omitted (per-battle survival isn't available for multi-battle
+                # windows, so it would undercount).
+                'avg_damage': round((r.damage or 0) / r.battles) if r.battles else 0,
+                'kills_per_battle': round((r.frags or 0) / r.battles, 2) if r.battles else 0.0,
             }
             for r in rows
         ]

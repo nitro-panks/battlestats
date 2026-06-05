@@ -59,12 +59,24 @@ Per realm, per `since = now - 14d`:
    worst-case #1 sample.
 3. **Per-ship guard:** ship is "ranked" only if its qualifying pool ≥ `SHIP_BADGE_MIN_SHIP_POPULATION`
    (default **20**).
-4. **Rank** by a **volume-aware composite score** (empirical-Bayes): the win proportion shrunk toward
-   `SHIP_BADGE_PRIOR_WR` (default **0.5**) by `SHIP_BADGE_PRIOR_BATTLES` (default **30**) pseudo-battles
-   — `score = (wins + prior_battles·prior_wr) / (battles + prior_battles)` — tiebreak raw `battles`
-   desc. This demotes short hot streaks (a 25-0 no longer outranks a 300-battle 65% grinder) while the
-   stored/displayed `win_rate` stays the raw rate. Persist the top `SHIP_BADGE_LIST_SIZE` (default
+4. **Rank** by a **volume-aware composite score** blending three signals — win rate, damage/battle,
+   kills/battle. Each signal is first tempered by an empirical-Bayes shrinkage over
+   `SHIP_BADGE_PRIOR_BATTLES` (default **50**) pseudo-battles, then converted to a within-pool z-score,
+   then blended by weights `SHIP_BADGE_WEIGHT_WINS`/`_DAMAGE`/`_KILLS` (defaults **0.5 / 0.35 / 0.15**,
+   "wins-led"):
+   - win rate shrinks toward `SHIP_BADGE_PRIOR_WR` (default **0.5**, the universal ~50% prior);
+   - damage/battle and kills/battle shrink toward the **ship's pool mean** (they have no universal baseline).
+   `score = w_wins·z(shr_wr) + w_dmg·z(shr_dpb) + w_kills·z(shr_kpb)`, tiebreak raw `battles` desc.
+   Shrinkage demotes short hot streaks (a 25-0 no longer outranks a 300-battle grinder) while
+   high-volume players keep ~their true rate (activity is never penalized). The stored/displayed
+   `win_rate`/`avg_damage`/`kills_per_battle` stay raw. Persist the top `SHIP_BADGE_LIST_SIZE` (default
    **15**) as ranks 1..N; ranks 1..`SHIP_BADGE_TOP_N` (default **3**) are badges.
+
+   > **2026-06-05 (later):** ranking upgraded from WR-only to the three-signal composite above. The
+   > `/ship/<id>` board now also surfaces `avg_damage` and `kills_per_battle` per player (read-path
+   > derivations off the snapshot's `damage`/`frags` columns — no migration, no re-snapshot needed for
+   > the columns; only the *ordering* change needs a re-run). Survival%/KDR remain omitted —
+   > `BattleEvent.survived` is NULL for multi-battle deltas, so a windowed rate would undercount.
 
 > Tuning history (NA, 2026-06-05): raw-WR ranking + a 10-battle floor minted #1s dominated by
 > 100%-on-10-battles streaks. Fix #1 was the composite score; fix #2 was a parameter sweep against
@@ -171,7 +183,8 @@ Registered unconditionally; the **task** is the no-op gate (not folded under `EN
 |---|---|---|
 | `SHIP_BADGE_SNAPSHOT_ENABLED` | `0` | Master gate for the weekly snapshot task. |
 | `SHIP_BADGE_MIN_BATTLES` | `15` | Min random battles in 14d to qualify. |
-| `SHIP_BADGE_PRIOR_BATTLES` / `SHIP_BADGE_PRIOR_WR` | `50` / `0.5` | Composite-ranking shrinkage (pseudo-battles / baseline WR). |
+| `SHIP_BADGE_PRIOR_BATTLES` / `SHIP_BADGE_PRIOR_WR` | `50` / `0.5` | Composite-ranking shrinkage (pseudo-battles / baseline WR; damage & kills shrink toward pool mean). |
+| `SHIP_BADGE_WEIGHT_WINS` / `_DAMAGE` / `_KILLS` | `0.5` / `0.35` / `0.15` | Composite blend weights (wins-led). Re-tune + re-run to reorder boards & badges. |
 | `SHIP_BADGE_MIN_SHIP_POPULATION` | `20` | Min qualifiers before a ship is "ranked". |
 | `SHIP_BADGE_LIST_SIZE` | `15` | Ranked players stored per ship (ship-page length). |
 | `SHIP_BADGE_TOP_N` | `3` | Placements that become profile badges. |
