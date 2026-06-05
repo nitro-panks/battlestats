@@ -1,28 +1,20 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) when working in this repository.
 
 ## Permissions & Autonomy
 
-Operate autonomously. Do not pause for confirmation on:
-
-- File reads, edits, creation, and deletion within this repo
-- Git operations (add, commit, branch, checkout, rebase, push)
-- Running tests, linters, builds, and dev servers
-- Shell commands: curl, npm, npx, python, pip, pipenv, docker compose, ssh
-- Deployment scripts in `client/deploy/` and `server/deploy/`
-- Installing dependencies (npm install, pipenv install)
-- Database migrations (makemigrations, migrate)
+Operate autonomously. Do not pause for confirmation on: file reads/edits/creation/deletion in this repo; git operations (add, commit, branch, checkout, rebase, push); tests, linters, builds, dev servers; shell commands (curl, npm, npx, python, pip, pipenv, docker compose, ssh); deploy scripts in `client/deploy/` and `server/deploy/`; dependency installs; database migrations.
 
 Only confirm before: force-pushing to main, dropping database tables, or deleting remote branches.
 
 ## Project
 
-Battlestats is a World of Warships player and clan statistics platform. Live at https://battlestats.online. Current version is in `VERSION` at the repo root (semver, surfaced in the client footer).
+Battlestats is a World of Warships player and clan statistics platform. Live at https://battlestats.online. Version is in `VERSION` at the repo root (semver, surfaced in the client footer).
 
-- **Frontend**: Next.js 16 (App Router) + React 18 + Tailwind CSS + D3 charts — in `client/`
-- **Backend**: Django 5 + DRF + Celery (RabbitMQ + Redis) + PostgreSQL — in `server/`
-- **Agent personas & runbooks**: Role definitions, knowledge base, and operational runbooks — in `agents/` (these are markdown briefs for Claude Code subagents, not a runtime — the experimental in-process LangGraph/CrewAI runtime was retired in v1.12.1 / `f0fbbe3`)
+- **Frontend**: Next.js 16 (App Router) + React 18 + Tailwind + D3 charts — `client/`
+- **Backend**: Django 5 + DRF + Celery (RabbitMQ + Redis) + PostgreSQL — `server/`
+- **Agents**: markdown personas, knowledge base, and operational runbooks for Claude Code subagents — `agents/` (not a runtime)
 
 ## Common Commands
 
@@ -30,7 +22,6 @@ Battlestats is a World of Warships player and clan statistics platform. Live at 
 
 ```bash
 docker compose up -d                              # Start all services
-docker compose up -d db redis rabbitmq server react-app task-runner  # Selective
 ./run_test_suite.sh                               # Lean release gate (docker-based)
 ```
 
@@ -39,78 +30,50 @@ docker compose up -d db redis rabbitmq server react-app task-runner  # Selective
 ```bash
 cd server
 python -m pytest warships/tests/test_views.py warships/tests/test_landing.py warships/tests/test_realm_isolation.py warships/tests/test_data_product_contracts.py -x --tb=short  # Release gate
-python -m pytest warships/tests/test_views.py -x --tb=short   # Single release-gate file
 python -m pytest warships/tests/test_views.py::TestPlayerViewSet::test_player_detail -x  # Single test
-python manage.py makemigrations && python manage.py migrate  # Migrations
+python manage.py makemigrations && python manage.py migrate
 ```
 
 ### Frontend (Next.js)
 
 ```bash
 cd client
-npm run dev                                       # Dev server (port 3000)
-npm run build                                     # Production build
-npm run lint                                      # ESLint
-npm test                                          # Lean frontend release gate
-npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single release-gate file
+npm run dev          # Dev server (port 3000)
+npm run build        # Production build
+npm run lint         # ESLint
+npm test             # Lean frontend release gate
+npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single file
 ```
 
-### Database
+### Database / Deploy / Release
 
 ```bash
-./server/scripts/switch_db_target.sh cloud        # Use cloud-managed DB
-./server/scripts/switch_db_target.sh local        # Use local Postgres
-```
-
-### Deployment
-
-```bash
+./server/scripts/switch_db_target.sh cloud|local          # Switch DB target
 ./client/deploy/deploy_to_droplet.sh battlestats.online   # Deploy frontend
 ./server/deploy/deploy_to_droplet.sh battlestats.online   # Deploy backend
-./umami/deploy/bootstrap_umami.sh battlestats.online       # Bootstrap/update Umami analytics
+./scripts/release.sh patch|minor|major                    # Bump VERSION, commit, tag, push
 ```
-
-Backend dependencies install from `server/requirements.txt`. (The experimental `requirements-agentic.txt` and `DEPLOY_AGENTIC_RUNTIME=1` deploy path were removed in v1.12.1 / `f0fbbe3` along with the in-process agentic runtime.)
 
 ### Operations
 
 ```bash
-./server/scripts/check_enrichment_crawler.sh [host]  # Enrichment crawler status (default: battlestats.online)
+./server/scripts/check_enrichment_crawler.sh [host]   # Enrichment crawler health (default host: battlestats.online)
+cd server && python manage.py backfill_clan_battle_data --realm na --batch 500 [--partition 0 --num-partitions 2]
 ```
 
-Single SSH call to the droplet. Reports worker health (memory/swap/CPU/uptime/OOM risk), Redis lock state, batch history + throughput + ETA, errors (enrichment/WorkerLost/SIGTERM/SIGKILL), live progress, clan crawl interference, and periodic task state. See `agents/runbooks/runbook-enrichment-crawler-2026-04-03.md` for the progress log.
+`check_enrichment_crawler.sh` is a single SSH call reporting worker health, Redis lock state, batch throughput/ETA, errors, live progress, and periodic-task state. `backfill_clan_battle_data` fills per-player CB fields on `PlayerExplorerSummary` (only needed for players enriched before the Phase 3e enrichment CB fetch).
 
-```bash
-cd server
-python manage.py backfill_clan_battle_data --realm eu --batch 500  # CB backfill for enriched players missing CB data
-python manage.py backfill_clan_battle_data --realm na --batch 500 --partition 0 --num-partitions 2  # Partitioned for parallelism
-```
-
-Backfills per-player clan battle data (`clan_battle_total_battles`, `clan_battle_seasons_participated`, `clan_battle_overall_win_rate`) for enriched players whose `PlayerExplorerSummary` is missing CB fields. The enrichment pipeline now includes CB fetch (Phase 3e), so this command is only needed for players enriched before 2026-04-05.
-
-### Background enrichment
-
-Player enrichment runs on the droplet's Celery `background` worker via `warships.tasks.enrich_player_data_task`. The task self-chains between batches (~17–20 min per 500 players at steady state) and is kickstarted periodically by Celery Beat (`player-enrichment-kickstart`, every 15 min — a no-op if a batch is already running). Kickstart is also dispatched by the Gunicorn `when_ready` startup warmer.
-
-**Historical note:** An experimental DigitalOcean Functions migration (`functions/packages/enrichment/enrich-batch`) was reverted on 2026-04-08 because DO Functions egress from a rotating IP pool that cannot be whitelisted by the Wargaming `application_id`, causing every call to fail with `407 INVALID_IP_ADDRESS`. See `agents/runbooks/archive/spec-serverless-background-workers-2026-04-04.md` for the post-mortem. The `functions/` directory and `db-test` function remain for potential future workers that do not touch the WG API.
-
-### Releases
-
-```bash
-./scripts/release.sh patch    # 1.2.0 → 1.2.1  (bug fixes)
-./scripts/release.sh minor    # 1.2.0 → 1.3.0  (new features)
-./scripts/release.sh major    # 1.2.0 → 2.0.0  (breaking changes)
-```
+Background enrichment runs on the Celery `background` worker via `enrich_player_data_task`, self-chaining between batches and kickstarted every 15 min by Beat (`player-enrichment-kickstart`).
 
 ## Architecture
 
 ### Routing
 
-- `/` — Landing page with search, featured players/clans, discovery charts
+- `/` — Landing: search, featured players/clans, discovery charts
 - `/player/[playerName]` — Player detail (URL-encoded name, reload-safe)
-- `/clan/[clanSlug]` — Clan detail (`<clan_id>-<optional-slug>`, reload-safe)
-- `/ship/[shipSlug]` — Ship standings (`<ship_id>-<optional-slug>`, reload-safe). Fortnight leaderboard of the best players in a Tier-10 ship on the active realm, snapshot-backed (`GET /api/realm/<realm>/ship/<ship_id>/leaderboard`). Reached by clicking a T10 tile on the landing treemap or a profile ship badge.
-- `/umami` — Umami analytics dashboard (admin login required)
+- `/clan/[clanSlug]` — Clan detail (`<clan_id>-<optional-slug>`)
+- `/ship/[shipSlug]` — Ship standings (`<ship_id>-<optional-slug>`). Snapshot-backed T10 leaderboard for the active realm (`GET /api/realm/<realm>/ship/<ship_id>/leaderboard`)
+- `/umami` — Umami analytics dashboard (admin login)
 
 ### API proxy
 
@@ -118,240 +81,136 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 
 ### Key backend modules
 
-- `server/warships/data.py` (~5.7K lines) — Core hydration, chart payload assembly, cache warming, hot entity warming, population correlations/distributions, `score_best_clans()` composite ranking. Analytical queries use elevated `work_mem` via `_elevated_work_mem()` context manager.
-- `server/warships/landing.py` — Landing page modes (Best, Random, Sigma, Popular) with published-cache + durable fallback
-- `server/warships/tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing warmup, distribution/correlation warming
-- `server/warships/signals.py` — Registers all Celery Beat periodic tasks via `@receiver(post_migrate)` (landing warmer, hot entity warmer, clan crawl, player refresh, etc.)
-- `server/warships/views.py` — DRF views, `@api_view` endpoints, `player_name_suggestions()` and `clan_name_suggestions()` autocomplete views
+- `data.py` (~5.7K lines) — hydration, chart payloads, cache/hot-entity warming, distributions/correlations, `score_best_clans()`. Analytical queries use `_elevated_work_mem()`.
+- `landing.py` — landing modes (Best, Random, Sigma, Popular) with published-cache + durable fallback
+- `tasks.py` — Celery tasks: player/clan refresh, ranked incrementals, landing/distribution/correlation warming
+- `signals.py` — registers all Celery Beat periodic tasks via `@receiver(post_migrate)`
+- `views.py` — DRF views, `@api_view` endpoints, player/clan name suggestion autocompletes
 
 ### Key frontend patterns
 
-- D3-based SVG chart components (TierSVG, TypeSVG, ActivitySVG, RankedWRBattlesHeatmapSVG, etc.)
-- `client/app/context/ThemeContext.tsx` — Dark/light theme with localStorage persistence
-- `client/app/components/ThemeToggle.tsx` — Theme selection dropdown (light/dark/system)
-- `client/app/lib/chartTheme.ts` — D3 color schemes keyed to active theme
-- `client/app/lib/wrColor.ts` — Shared win-rate → color mapping used across all surfaces
-- `client/app/lib/sharedJsonFetch.ts` — Fetch with retry, cache, and chart fetch priority counter (`chartFetchesInFlight`) for coordinating request priority between chart rendering and hydration polling
-- `client/app/lib/entityRoutes.ts` — URL encoding/decoding for player/clan routes
-- `client/app/globals.css` — CSS custom properties for theming (`--bg-*`, `--text-*`, `--accent-*`), dark mode via `[data-theme="dark"]`
-- `client/app/components/HeaderSearch.tsx` — Dual-mode player/clan search with toggle, debounced autocomplete, client-side suggestion cache per mode, and themed input
-- `client/app/components/SearchModeToggle.tsx` — Compact pill toggle (P/C) for switching between player and clan search modes
-- Shared icon components in `client/app/components/` — 7 player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon) with `size` prop for surface variants. `TopShipIcon` adds a rank-colored medal (one per current top-spot) to the same trays — driven by each player row's `ship_badges`, tooltip `Currently #<n> <ship> on <REALM>`, tooltip-only (not a link). The trays are NOT a shared component: the same icon list is inlined per surface in `PlayerDetail.tsx` (header), `ClanMembers.tsx` (clan page + player-page left rail), and `PlayerSearch.tsx` (landing/home rows).
-- `client/app/components/ShipTopPlayerBanner.tsx` — stacked banner card(s) shown above the Battle History card on the player page (NOT a header icon — it was moved out of the header to stop the badges wrapping the Next-update/Share buttons). One card per fortnight T10 top-3 finish: `#<rank> <ship> last <N> days` + `<avg dmg>`, with the gold/silver/bronze medal stacked over the realm label (awards are per-realm; realm comes from `player.realm`), links to `/ship/<id>`. Fed by the player payload's `ship_badges` field (`{ship_id, ship_name, rank, win_rate, battles, avg_damage, window_days}`), produced by `data.get_player_ship_badges` (top-3 rows of the latest snapshot). Only avg damage is shown: KDR/survival% need per-battle survival, which `BattleEvent.survived` only records for single-battle intervals (NULL for multi-battle), so they're not accurately computable for the window. The snapshot still stores `damage`/`frags`/`survived` (dormant) for a future accurate-survival capture.
-- `client/app/components/ShipHonors.tsx` — durable "Ship Honors" panel below the banner: per-ship career record from the append-only `ShipAward` ledger (`#1 ×N · M windows top-3 · currently #r / last held <date>`). Unlike the live banner (current standing only), this persists through inactivity. Fed by the player payload's `ship_awards` (`{ship_id, ship_name, times_first, times_top3, best_rank, current_rank, first_on, last_on}`), produced by `data.get_player_ship_awards`. `times_first` = number of snapshot runs held #1 (≈ weeks held).
+- D3-based SVG chart components (TierSVG, TypeSVG, ActivitySVG, RankedWRBattlesHeatmapSVG, …)
+- `app/context/ThemeContext.tsx` + `app/components/ThemeToggle.tsx` — dark/light/system theme, localStorage-persisted; `app/lib/chartTheme.ts` D3 colors; `app/globals.css` CSS custom properties (`--bg-*`/`--text-*`/`--accent-*`, `[data-theme="dark"]`)
+- `app/lib/wrColor.ts` — shared win-rate → color mapping
+- `app/lib/sharedJsonFetch.ts` — fetch with retry/cache + `chartFetchesInFlight` priority counter
+- `app/lib/entityRoutes.ts` — URL encode/decode for player/clan routes
+- `app/components/HeaderSearch.tsx` + `SearchModeToggle.tsx` — dual-mode player/clan search, debounced autocomplete, per-mode client cache
+- Player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon, TopShipIcon) — inlined per surface in `PlayerDetail.tsx`, `ClanMembers.tsx`, `PlayerSearch.tsx` (NOT a shared component), driven by each row's `ship_badges`
+- `ShipTopPlayerBanner.tsx` — per-fortnight T10 top-3 cards above Battle History, fed by `ship_badges` (`data.get_player_ship_badges`), links to `/ship/<id>`
+- `ShipHonors.tsx` — durable per-ship career record from the append-only `ShipAward` ledger, fed by `ship_awards` (`data.get_player_ship_awards`)
 
 ### Caching strategy
 
-- **Cache-first with lazy-refresh**: Return cached payload immediately, queue background refresh
-- **Durable fallback**: Keep last-published copy after TTL expiry
-- **Stale-while-revalidate**: `X-Clan-Plot-Pending: true` header signals pending warm-up
-- **Hot entity warmer**: Periodic task (every 30 min) keeps top-visited + pinned + recently-viewed players/clans warm. Pinned players configured via `HOT_ENTITY_PINNED_PLAYER_NAMES` env var. Recently-viewed players (last N visitors within M minutes) configured via `RECENTLY_VIEWED_PLAYER_LIMIT` and `RECENTLY_VIEWED_WARM_MINUTES` env vars.
-- **Bulk entity cache loader**: Periodic task (every 12h) pre-loads top 50 players + members of 25 best-scored clans + top 25 clans into Redis. Uses `score_best_clans()` composite ranking (WR 30%, activity 25%, member score 20%, CB recency 15%, volume 10%). See `runbook-best-clan-eligibility.md`.
-- **Landing page warmer**: Periodic task (every 55 min) refreshes all landing payloads + population distributions + population correlations; Best clan mode also uses `score_best_clans()`. `queue_landing_page_warm()` short-circuits when the warm-task lock is already held, preventing the cache-fallback paths inside the warm itself from re-enqueueing duplicates while the parent task runs.
-- **Distribution & correlation warming**: Proactive warming of player population distributions (WR, battles, avg tier) and correlations (tier-type, ranked WR-battles, WR-survival) every 55 min via the landing page task and on startup. TTL is 2 hours. Eliminates cold-cache penalty (10-30s full table scans).
-- **Startup cache warming**: Gunicorn `when_ready` hook (`gunicorn.conf.py`) dispatches `startup_warm_caches_task` to the Celery background queue — sequentially warms landing page, hot entities, bulk cache, distributions, and correlations. Runs inside an existing worker rather than spawning a subprocess. Controlled by `WARM_CACHES_ON_STARTUP` env var (default `1`). See `agents/runbooks/archive/runbook-deploy-oom-startup-warmers.md`.
-- **Player search suggestions**: Three-tier cache — client-side `Map` (instant, session-scoped, 200-entry cap) → Redis (10 min TTL, `suggest:<query>` keys) → Postgres with `pg_trgm` GIN index (`player_name_trgm_idx`). Minimum 3-character query. Raw `ILIKE` in `views.py` (Django's `icontains` generates `UPPER()` which bypasses trigram indexes).
-- **Clan search suggestions**: Same three-tier pattern as player suggestions. Endpoint: `/api/landing/clan-suggestions`. Matches on `Clan.name` OR `Clan.tag` via `ILIKE` with `pg_trgm` GIN indexes (`clan_name_trgm_idx`, `clan_tag_trgm_idx`). Redis key: `{realm}:clan-suggest:{query}`, 600s TTL. Ordered by prefix match → `members_count` DESC → name. Client-side cache is keyed separately per search mode.
-- **Clan battle seasons (clan-level)**: Request-driven — first visit queues `update_clan_battle_summary_task` which calls `refresh_clan_battle_seasons_cache()`. This fetches per-member CB stats from the WG API via ThreadPoolExecutor, aggregates by season, and writes to **Redis only** (TTL-based). Configured clans are pre-warmed by `warm_clan_battle_summaries_task` (env: `CLAN_BATTLE_WARM_CLAN_IDS`). Subsequent visits hit Redis until TTL expiry.
-- **Clan battle summary (per-player)**: Per-player CB stats (`clan_battle_total_battles`, `clan_battle_seasons_participated`, `clan_battle_overall_win_rate`) are persisted to **Postgres** on `PlayerExplorerSummary` via `_persist_player_clan_battle_summary()`. Populated by: enrichment pipeline (Phase 3e), player CB tab visits, and the `backfill_clan_battle_data` management command.
-- **Ship standings (`/ship/<id>`)**: Fully precomputed — `snapshot_ship_top_players_task` writes `ShipTopPlayerSnapshot` rows to **Postgres** once per fixed 2-week season (board shows the most recently completed season); the `ship_leaderboard` endpoint serves them via a thin Redis read-cache (`{realm}:ship-lb:{ship_id}`, 15-min TTL, `SHIP_LEADERBOARD_CACHE_TTL`) and includes `season_start`/`season_end`/`next_window_open` for the page countdown. No live aggregation, no warmer — the snapshot only changes at a season boundary.
-- Redis-backed in production (capped at **3 GB** with **`allkeys-lru`** eviction policy as of 2026-05-02 — see `runbook-cache-capacity-expansion-2026-05-02.md`), LocMemCache in tests
+- **Cache-first / lazy-refresh** — serve cached payload, queue background refresh; **durable fallback** keeps last-published copy past TTL; `X-Clan-Plot-Pending: true` signals pending warm-up
+- **Warmers** (Beat periodic tasks): hot-entity (30 min), bulk entity loader (12h, uses `score_best_clans()`), landing page + distributions/correlations (55 min), startup warmer via Gunicorn `when_ready`
+- **Search suggestions** — three-tier: client `Map` → Redis (10 min TTL) → Postgres `pg_trgm` GIN index; raw `ILIKE` (Django `icontains` bypasses trigram indexes). Player and clan endpoints; clan matches name OR tag
+- **Clan battle seasons** — request-driven, Redis-only TTL; configured clans pre-warmed (`CLAN_BATTLE_WARM_CLAN_IDS`). Per-player CB stats persist to Postgres on `PlayerExplorerSummary`
+- **Ship standings** — fully precomputed: `snapshot_ship_top_players_task` writes `ShipTopPlayerSnapshot` once per fixed 2-week season; `ship_leaderboard` serves via thin Redis read-cache
+- Redis in production (3 GB cap, `allkeys-lru`); LocMemCache in tests
 
-### Celery queue architecture
+### Celery queues
 
-Four queues with dedicated workers:
+Four queues with dedicated workers: **default** (`-c 3`, light API refreshes), **hydration** (`-c 5`, request-driven upstream refreshes), **background** (`-c 3`, warmers/incrementals/snapshots/enrichment), **crawls** (`-c 1`, the multi-day clan crawl + watchdog only).
 
-- **default** (`-c 3`) — lightweight API-triggered entity refreshes and general work
-- **hydration** (`-c 5`) — heavier request-driven upstream/data refreshes. Tasks include ranked, efficiency, battle-data, clan-members, clan-battle, and clan-battle-summary refreshes. Bumped from `-c 3` on 2026-05-02 to reduce tail latency on cold-profile visits — see `runbook-cache-capacity-expansion-2026-05-02.md`.
-- **background** (`-c 3`) — warmers, incremental refreshes, startup warmers, snapshots, and enrichment. Bumped from `-c 2` on 2026-05-02.
-- **crawls** (`-c 1`) — multi-day clan crawl + its watchdog only. Carved out from `background` on 2026-04-30 so the days-long `crawl_all_clans_task` no longer camps a slot the rest of the workload needs. See `agents/runbooks/runbook-clan-crawl-blocker-2026-04-30.md`.
-
-Resilience mechanisms:
-- **`CELERY_TASK_ACKS_LATE = True`** — messages are not acknowledged until task completion, providing at-least-once delivery for crash recovery
-- **RabbitMQ `consumer_timeout` disabled** — via `/etc/rabbitmq/advanced.config` (`[{rabbit, [{consumer_timeout, undefined}]}].`). Required because `acks_late` + the default 30-min timeout causes `PRECONDITION_FAILED` on long-running tasks (enrichment, crawls), leaving workers in zombie state
-- **Consumer watchdog** — systemd timer (`battlestats-celery-watchdog.timer`) checks consumer counts every 5 min via `rabbitmqctl list_queues` and restarts zombie workers (process alive, 0 consumers)
-- **Soft systemd dependencies** — service units use `Wants=` (not `Requires=`) for Redis/RabbitMQ to prevent cascading stops during dependency restarts
+Resilience: `CELERY_TASK_ACKS_LATE = True` (at-least-once delivery); RabbitMQ `consumer_timeout` disabled (long tasks); consumer watchdog systemd timer restarts zombie workers (alive process, 0 consumers); soft systemd deps (`Wants=`, not `Requires=`).
 
 ### Per-realm schedule striping
 
-Periodic tasks that run per realm (NA, EU, ASIA) are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` in `signals.py` so at most one realm is mid-cycle at any moment on the `background` worker. Striped families: landing/recent-players/distribution/correlation/hot-entity/recently-viewed warmers, incremental player refresh, incremental ranked refresh, and the rolling BattleObservation floor. The `_realm_crontab_for_cycle(realm, cycle_minutes, base_minute=0)` helper computes per-realm crontab `(minute_str, hour_str)` from the cycle length and offset index. Daily/weekly-cron families that already had hour offsets (clan crawl, clan-tier-dist warmer, best-player snapshot, the weekly ship-badge snapshot) continue to use `REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}`.
+Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` in `signals.py` so at most one realm is mid-cycle at a time. `_realm_crontab_for_cycle()` computes per-realm crontabs. Daily/weekly-cron families use `REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}`. The rolling 6-hourly BattleObservation floor guarantees no active-7d player goes >`BATTLE_OBSERVATION_FLOOR_HOURS` without a fresh observation.
 
-Battle pickup latency: the rolling 6-hourly observation floor (active-7d players whose latest observation > `BATTLE_OBSERVATION_FLOOR_HOURS` = 8h) guarantees no active player goes >8h without a fresh `BattleObservation`, regardless of whether the tiered crawler reached them. Combined with the page-load 15-min staleness check on visited players, the worst-case "battle landed in DB" lag for any active player on any realm is roughly 8h.
+### Infra notes
 
-### Nginx / HTTP
+- **HTTP/2** on the nginx 443 listeners (removes the HTTP/1.1 6-connection-per-origin limit)
+- **Frontend fetch priority** — player pages fire 4 chart requests via `requestIdleCallback`; clan-member fetch deferred until warmup settles; `useClanMembers` backs off while charts in-flight
+- **DB** — `CONN_HEALTH_CHECKS` enabled; analytical queries use elevated `work_mem` (`ANALYTICAL_WORK_MEM`, default 8MB) via `SET LOCAL`
+- **SEO** — per-page `generateMetadata()`; dynamic `app/sitemap.ts` from `/api/sitemap-entities/`; `WebSite`+`SearchAction` JSON-LD; GA4 via `NEXT_PUBLIC_GA_MEASUREMENT_ID`
 
-- **HTTP/2** enabled on the production nginx 443 listeners. Eliminates the browser's 6-connection-per-origin limit under HTTP/1.1, allowing all concurrent chart and hydration requests to proceed without slot contention.
+### Data models (`server/warships/models.py`)
 
-### Frontend fetch priority
+Player, Clan, Ship, Snapshot (daily summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily, PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot/LandingRecentPlayersSnapshot (landing fallbacks), MvPlayerDistributionStats, ShipTopPlayerSnapshot (ephemeral current standing per ship per season — pruned; backs `/ship/<id>` + profile badges), ShipAward (append-only career ledger — never pruned; backs Ship Honors), StreamerSubmission.
 
-Player detail pages coordinate chart rendering vs hydration polling:
-
-- Tab warmup fires 4 parallel chart requests via `requestIdleCallback` (250ms timeout)
-- Clan member fetch is deferred until warmup settles (with 10s hard timeout fallback)
-- `sharedJsonFetch.ts` exposes a `chartFetchesInFlight` counter; `useClanMembers` backs off to 6s poll intervals while charts are in-flight
-- See `agents/runbooks/archive/runbook-player-page-load-priority.md` for full diagnosis and architecture
-
-### Database optimizations
-
-- **`CONN_HEALTH_CHECKS`**: Enabled — Django validates connections before use, preventing stale-connection errors with managed Postgres
-- **Elevated `work_mem`**: Analytical queries (distribution bins, tier-type/ranked/survival correlations) use `SET LOCAL work_mem` within `transaction.atomic()` to get 8MB (configurable via `ANALYTICAL_WORK_MEM`) instead of the default 2MB. This improves sort/hash performance for full table scans over ~194K players.
-
-### SEO
-
-- **Dynamic metadata**: Player and clan pages export `generateMetadata()` with per-page title, description, OG tags, Twitter cards, and canonical URLs
-- **Dynamic sitemap**: `app/sitemap.ts` fetches recently-visited entities from `/api/sitemap-entities/` (hourly revalidation). Backend endpoint queries `EntityVisitDaily` for players/clans with ≥2 deduped views in last 30 days
-- **Structured data**: Homepage includes `WebSite` + `SearchAction` JSON-LD for Google sitelinks search box
-- **Google Analytics**: GA4 measurement ID configured via `NEXT_PUBLIC_GA_MEASUREMENT_ID` env var (build-time). Deploy script sources `/etc/battlestats-client.env` before `npm run build`
-
-### Data models (server/warships/models.py)
-
-Player, Clan, Ship, Snapshot (daily battle summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily (analytics), PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot/LandingRecentPlayersSnapshot (landing durable fallbacks), MvPlayerDistributionStats (population distribution materialized stats), ShipTopPlayerSnapshot (per-realm top-`SHIP_BADGE_LIST_SIZE` players per "ranked" ship over a fixed 2-week season, keyed by season-start `captured_on` — the *ephemeral current standing* for the latest completed season, overwritten + pruned; backs both the `/ship/<id>` leaderboard and the top-3 profile badges; see `runbook-ship-top-player-badges-2026-06-05.md`), ShipAward (append-only ledger of each top-3 placement — the *durable career record*, never pruned; backs the profile "Ship Honors" panel via `data.get_player_ship_awards`; see `runbook-ship-award-ledger-2026-06-05.md`), StreamerSubmission.
-
-Battle-history pipeline (rollout runbook): BattleObservation (raw `ships/stats/` payload snapshots, JSON), BattleEvent (per-event deltas — `battles_delta`/`damage_delta`/etc. plus the Phase 7 widening: `main_shots_delta`, `main_hits_delta`, `main_frags_delta`, `secondary_shots_delta`, `secondary_hits_delta`, `secondary_frags_delta`, `torpedo_shots_delta`, `torpedo_hits_delta`, `torpedo_frags_delta`, `damage_scouting_delta`, `ships_spotted_delta`, `capture_points_delta`, `dropped_capture_points_delta`, `team_capture_points_delta`), PlayerDailyShipStats (per-day per-ship aggregate of every BattleEvent column), PlayerWeeklyShipStats / PlayerMonthlyShipStats / PlayerYearlyShipStats (period rollup tiers; populated only when the period writer is reactivated).
+Battle-history pipeline: BattleObservation (raw `ships/stats/` JSON), BattleEvent (per-event deltas + Phase 7 widening columns), PlayerDailyShipStats (per-day per-ship aggregate), PlayerWeekly/Monthly/YearlyShipStats (period rollup tiers, populated only when the period writer is reactivated).
 
 ## Team Doctrine (Pre-commit Requirements)
 
-**Agents must read `agents/knowledge/agentic-team-doctrine.json` before planning or executing multi-step work.** It contains the authoritative decision rules, pre-commit checklist, and quality gates that govern all changes in this repository.
+**Read `agents/knowledge/agentic-team-doctrine.json` before planning or executing multi-step work** — it holds the authoritative decision rules, pre-commit checklist, and quality gates.
 
-These rules from that file apply to every commit:
+Every commit must: (1) update durable docs for new behavior/contracts/state; (2) reconcile uncertain docs against live code/tests; (3) keep touched behavior under automated test coverage; (4) archive superseded runbooks to `agents/runbooks/archive/`; (5) update contract docs + API tests when an endpoint/payload changes; (6) reconcile any runbook/spec being implemented.
 
-1. **Documentation review** — Update or synthesize durable docs that describe new behavior, contracts, or operational state.
-2. **Doc-vs-code reconciliation** — When documentation is uncertain, verify against live code and tests before committing.
-3. **Test coverage** — Ensure touched behavior has automated coverage; add or update focused tests when the current suite no longer proves the changed behavior.
-4. **Runbook archiving** — Move superseded runbooks from `agents/runbooks/` to `agents/runbooks/archive/`.
-5. **Contract safety** — When an endpoint or payload changes, update contract docs and API-facing tests in the same commit.
-6. **Runbook reconciliation** — When implementing changes described in a runbook or spec, update it to reflect implementation status, fixes applied, and validation results.
-
-### Decision rules
-
-- Smallest safe vertical slice. Reversible changes over clever shortcuts.
-- Correctness before optimization. Preserve existing user-facing behavior unless the task explicitly changes it.
-- Avoid unbounded polling, queue fan-out, or retry loops.
-- Avoid new browser-triggered WG API calls when stored data already exists.
-- Avoid large unscoped refactors during feature delivery.
+**Decision rules:** smallest safe vertical slice; correctness before optimization; preserve user-facing behavior unless the task changes it; avoid unbounded polling/fan-out/retry loops; avoid new browser-triggered WG API calls when stored data exists; avoid large unscoped refactors during feature delivery.
 
 ## Claude Code Skills
 
-Project-scoped skills live in `.claude/skills/<name>/SKILL.md` and are auto-loaded by Claude Code when their trigger phrases are matched. Current skills:
+Project skills live in `.claude/skills/<name>/SKILL.md`, auto-loaded on trigger phrases:
 
-- **`doctrine-precommit`** — "ready to commit", "doctrine check". Walks the pre-commit checklist from `agents/knowledge/agentic-team-doctrine.json` against the current diff. Read-only.
-- **`release-gate`** — "run the release gate", "ready to release". Runs the curated lean release gate (4 backend pytest files + frontend `npm test`) in parallel and reports pass/fail. Read-only.
-- **`runbook-author`** — "write a runbook for X", "document this incident". Creates a new runbook with the project's naming + structural conventions; pre-populates from conversation context. Stages, does not commit.
-- **`runbook-archive`** — "archive this runbook", "this runbook is superseded". `git mv`'s a runbook to `agents/runbooks/archive/` and updates `doc_registry.json` if registered. Stages, does not commit.
-- **`deploy-droplet`** — "deploy frontend", "deploy backend", "ship to prod". Runs the deploy script, then post-deploy verify + healthcheck. Mutates production.
-- **`enrichment-status`** — "how's enrichment", "check the crawler". Runs `check_enrichment_crawler.sh` and interprets output against the enrichment + celery-zombie runbooks. Read-only.
-
-Rollout context and design rationale: `agents/runbooks/runbook-claude-skills-rollout-2026-04-26.md`.
+- **`doctrine-precommit`** ("ready to commit", "doctrine check") — runs the pre-commit checklist against the diff. Read-only.
+- **`release-gate`** ("run the release gate") — runs the lean release gate in parallel. Read-only.
+- **`runbook-author`** ("write a runbook for X") — creates a runbook with project conventions. Stages.
+- **`runbook-archive`** ("archive this runbook") — `git mv`s to `archive/`, updates `doc_registry.json`. Stages.
+- **`deploy-droplet`** ("deploy frontend/backend", "ship to prod") — deploys then verifies. Mutates production.
+- **`enrichment-status`** ("how's enrichment") — runs the crawler health check and interprets it. Read-only.
 
 ## Versioning
 
-The project uses semantic versioning with a root `VERSION` file as the single source of truth. The version is surfaced in the client footer at build time via `NEXT_PUBLIC_APP_VERSION`.
+Semantic versioning with root `VERSION` as the single source of truth, surfaced in the client footer at build time via `NEXT_PUBLIC_APP_VERSION`.
 
-### Semver levels
-
-- **patch** — bug fixes, performance tuning, doc-only changes
-- **minor** — new features, new surfaces, meaningful UX changes
-- **major** — breaking data model migrations, API contract changes, major UX overhauls
-
-### Commit message prefixes (Conventional Commits)
-
-Use these prefixes on all commit messages to enable future automation:
-
-- `feat:` — new feature or surface (maps to **minor**)
-- `fix:` — bug fix (maps to **patch**)
-- `perf:` — performance improvement (maps to **patch**)
-- `refactor:` — code change that neither fixes a bug nor adds a feature (maps to **patch**)
-- `docs:` — documentation only (maps to **patch**)
-- `chore:` — build, CI, deps, tooling (maps to **patch**)
-- `test:` — adding or updating tests (maps to **patch**)
-- Append `!` after the prefix (e.g. `feat!:`) for breaking changes (maps to **major**)
-
-### Release workflow
-
-Releases are cut manually with `./scripts/release.sh <patch|minor|major>`, which bumps VERSION, commits, tags, and pushes.
-
-- `patch` releases may skip the release gate.
-- `minor` and `major` releases run the curated release gate before bumping the version.
+- **patch** — bug fixes, perf, docs · **minor** — features, new surfaces, UX changes · **major** — breaking model/API/UX changes
+- Commit prefixes (Conventional Commits): `feat:` (minor), `fix:`/`perf:`/`refactor:`/`docs:`/`chore:`/`test:` (patch); append `!` for breaking (major)
+- Releases cut with `./scripts/release.sh`; `patch` may skip the release gate, `minor`/`major` run it first
 
 ### MANDATORY: Rebuild client after every version bump
 
-`NEXT_PUBLIC_APP_VERSION` is captured at frontend **build time**, so a `release.sh` bump alone leaves the production footer pinned to the previous version. After **every** version bump (patch, minor, or major), run `./client/deploy/deploy_to_droplet.sh battlestats.online` so the new version propagates to the web. This is non-negotiable — even backend-only changes must rebuild the client.
+`NEXT_PUBLIC_APP_VERSION` is captured at frontend **build time**, so a `release.sh` bump alone leaves the production footer on the old version. After **every** bump (even backend-only), run `./client/deploy/deploy_to_droplet.sh battlestats.online`. Non-negotiable.
 
 ## Environment
 
-### Server env files (in `server/`)
+### Server env files (`server/`)
 
-- `.env` — Non-secret connection values (DB_HOST, DB_ENGINE, DJANGO_ALLOWED_HOSTS)
-- `.env.secrets` — Secrets (WG_APP_ID, DB_PASSWORD, DJANGO_SECRET_KEY)
-- `.env.cloud` / `.env.secrets.cloud` — Cloud database overrides
+- `.env` — non-secret connection values (DB_HOST, DB_ENGINE, DJANGO_ALLOWED_HOSTS)
+- `.env.secrets` — secrets (WG_APP_ID, DB_PASSWORD, DJANGO_SECRET_KEY)
+- `.env.cloud` / `.env.secrets.cloud` — cloud database overrides
 
-### Server runtime env (configurable, not secrets)
+### Server runtime env (defaults in parentheses)
 
-- `HOT_ENTITY_PINNED_PLAYER_NAMES` — Comma-separated player names to always keep warm (default: empty — no player pinned unless configured; was `lil_boots` until 2026-05-28)
-- `CLAN_BATTLE_WARM_CLAN_IDS` — Comma-separated clan IDs for clan battle summary warming
-- `BEST_CLAN_EXCLUDED_IDS` — Comma-separated clan IDs excluded from Best clan ranking
-- `HOT_ENTITY_PLAYER_LIMIT` / `HOT_ENTITY_CLAN_LIMIT` — Hot entity cache size (defaults: 20/10)
-- `ENABLE_CRAWLER_SCHEDULES` — Master kill switch for the daily clan crawl, clan-crawl watchdog, incremental player refresh, and incremental ranked refresh schedules (set `1` in production)
-- `CLAN_CRAWL_SCHEDULE_HOUR` / `CLAN_CRAWL_SCHEDULE_MINUTE` — Base UTC hour/minute for the daily clan crawl cron; per-realm offsets come from `REALM_CRAWL_CRON_HOURS` in `signals.py` (defaults: hour=`3`, minute=`0`)
-- `CLAN_CRAWL_WATCHDOG_MINUTES` — Clan crawl watchdog poll interval in minutes (default: `5`)
-- `PLAYER_REFRESH_INTERVAL_MINUTES` — Incremental player refresh cycle length in minutes per realm (default: `180`). Realms are striped via `REALM_INTERVAL_OFFSETS` so NA fires at minute 0 of hours `0,3,6,9,12,15,18,21`, EU at `1,4,7,…`, ASIA at `2,5,8,…`. Each cycle walks the graduated hot/active/warm tiers and takes ~35-78 min/realm at steady state.
-- `PLAYER_REFRESH_HOT_STALE_HOURS` — Hot-tier staleness threshold for incremental player refresh (default: `12`). Players whose `last_lookup` is within this window are visited every cycle.
-- `PLAYER_REFRESH_ACTIVE_STALE_HOURS` — Active-tier staleness threshold (default: `24`).
-- `PLAYER_REFRESH_WARM_STALE_HOURS` — Warm-tier staleness threshold (default: `72`). Outside this window players drop to occasional refreshes.
-- `RANKED_REFRESH_INTERVAL_MINUTES` — Incremental ranked refresh cycle length in minutes per realm (default: `120`). Striped per realm via `REALM_INTERVAL_OFFSETS` (40-min stride) so NA, EU, and ASIA never fire concurrently.
-- `BATTLE_OBSERVATION_FLOOR_HOUR` / `BATTLE_OBSERVATION_FLOOR_MINUTE` — Base UTC hour/minute for the rolling 6-hourly BattleObservation floor (defaults: `1` / `15`). Each realm fires 4×/day with a 2h stride: NA at base, EU at base+2h, ASIA at base+4h.
-- `BATTLE_OBSERVATION_FLOOR_HOURS` — Active-7d staleness threshold for the floor sweep (default: `8`, tightened from `22h` on 2026-05-09 alongside the cadence promotion). Active players whose latest observation is older than this get a fresh fetch.
-- `BATTLE_OBSERVATION_FLOOR_LIMIT` / `BATTLE_OBSERVATION_FLOOR_DELAY` — Max players per floor sweep (default `3000`) and per-player pacing delay in seconds (default `0.3`).
-- `BATTLE_OBSERVATION_FLOOR_CRAWL_DELAY` / `BATTLE_OBSERVATION_FLOOR_CRAWL_LIMIT` — Pacing used when a clan crawl is concurrently running on the same realm (defaults: delay `0.8`, limit falls back to `BATTLE_OBSERVATION_FLOOR_LIMIT`). As of 2026-06-05 the floor no longer *skips* while a crawl holds the realm lock — it runs at this slower pace so combined WG load stays under the ~10 req/s app budget (the crawl paces ~4 req/s; running both at full tilt tripped a `407 REQUEST_LIMIT_EXCEEDED`). The previous hard skip starved active-player observations for the multi-day duration of each crawl. See `agents/runbooks/runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md`.
-- `CELERY_BROKER_HEARTBEAT` — amqp heartbeat in seconds; `0` disables (default: `0`). The default 60s heartbeat is starved by long-running tasks (`incremental_player_refresh_task`), causing `BrokenPipeError on stopping Hub` and systemd worker restarts. We rely on TCP keepalive instead.
-- `ANALYTICAL_WORK_MEM` — Per-query `work_mem` for analytical queries (default: `8MB`)
-- `RECENTLY_VIEWED_PLAYER_LIMIT` — Max recently-viewed players to warm (default: 10)
-- `RECENTLY_VIEWED_WARM_MINUTES` — Time window for recently-viewed player warming (default: 60)
-- `BATTLESTATS_DISABLE_LIVE_REFRESH` — Local-dev only. When `1`, `_player_refresh_signals()` short-circuits to "not pending", so player detail pages serve stale snapshots without queueing live WG refreshes. Keeps dev usable against a frozen DB copy. Default `0`.
-- `BATTLESTATS_ENABLE_STALE_RECENT_PLAYERS` — Local-dev only. When `1`, the landing "recent players" surface falls back to a `Player`-table ordering (by `last_battle_date`) when no `PlayerDailyShipStats` rollups exist, so the landing page isn't empty on a dev DB without the battle-history pipeline. `week_battles` is `None` in the fallback rows. Default `0`.
-- `ENRICH_REALMS` — Comma-separated realm list for enrichment crawler (e.g. `na`, `na,eu`). Empty or unset means all realms
-- `ENRICH_BATCH_SIZE` — Players enriched per `enrich_player_data_task` invocation before the task self-chains (default: `500`).
-- `ENRICH_MIN_PVP_BATTLES` — Minimum `pvp_battles` for a player to be enrichment-eligible (default: `500`). Filters out low-activity / new accounts.
-- `ENRICH_MIN_WR` — Minimum `pvp_ratio` (win rate %) for enrichment eligibility (default: `48.0`). Skips clearly sub-average accounts to focus the crawler.
-- `ENRICH_DELAY` — Per-player delay (seconds) inside the enrichment loop, paced for the WG API rate budget (default: `0.2`).
-- `ENRICH_PAUSE_BETWEEN_BATCHES` — Cooldown (seconds) between self-chained enrichment batches (default: `10`). Backs off if upstream is hot.
-- `BATTLE_TRACKING_PLAYER_NAMES` — Comma-separated player names tracked by the incremental-battle PoC dispatcher. Empty/unset on production = no-op. Local dev sets it to `lil_boots`. See `agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md`
-- `BATTLE_TRACKING_POLL_SECONDS` — Beat tick interval for the PoC dispatcher (default: `60`)
-- `BATTLE_HISTORY_CAPTURE_ENABLED` — When `1`, the tail of `update_battle_data` writes a `BattleObservation` (and any resulting `BattleEvent` rows) for every refreshed player as a side-effect of the existing `ships/stats/` fetch. No new WG calls. Default `0`. See `agents/runbooks/runbook-battle-history-rollout-2026-04-28.md` (Phase 2)
-- `BATTLE_HISTORY_ROLLUP_ENABLED` — When `1`, the on-write incremental writer fills `PlayerDailyShipStats` rows from `BattleEvent` deltas as they're created, and the nightly `roll_up_player_daily_ship_stats_task` rebuilds the previous calendar day from scratch. Default `0`. (Phase 3)
-- `BATTLE_HISTORY_ROLLUP_HOUR` / `BATTLE_HISTORY_ROLLUP_MINUTE` — Cron hour/minute (UTC) for the nightly rollup sweeper (defaults: `4` / `30`)
-- `BATTLE_HISTORY_API_ENABLED` — When `1`, exposes `GET /api/player/<name>/battle-history?days=N` (default 7, max 30). Reads `PlayerDailyShipStats` only; cached in Redis under `{realm}:battle-history:{name}:{days}` with a 5-minute TTL. Returns 404 when off so the absence is indistinguishable from a missing route. Default `0`. (Phase 4)
-- `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED` — When `1`, `update_battle_data` makes a third WG call (`seasons/shipstats/`) per refresh and stores the payload on `BattleObservation.ranked_ships_stats_json`. The diff lane in `record_observation_from_payloads` then emits per-(ship, season) `BattleEvent(mode='ranked')` rows on the second observation, which feed `PlayerDailyShipStats(mode='ranked')` via the same on-write rollup writer used for randoms. Default `0`. See `agents/runbooks/runbook-ranked-battle-history-rollout-2026-05-02.md`
-- `BATTLE_HISTORY_RANKED_CAPTURE_REALMS` — Comma-separated realm gate for ranked capture. Capture only runs when both `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=1` AND the player's realm appears in this list. Lets ranked rollout proceed realm-by-realm without rewiring code. Default: `na` (NA-only rollout). Widen to `na,eu,asia` once each realm's baseline fill (`establish_ranked_baseline`) has run.
-- `SHIP_BADGE_SNAPSHOT_ENABLED` — Master gate for the weekly per-realm ship-standings snapshot (`snapshot_ship_top_players_task`), which backs both the `/ship/<id>` leaderboard and the profile badges. The beat schedule is always registered; the task is a no-op unless this is `1`. Default `0`. See `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
-- `SHIP_BADGE_MIN_BATTLES` — Minimum random battles a player must have in a ship over the rolling **14-day** window to qualify for that ship's ranking (default `15`). Caps the worst-case #1 sample. Read at task call time, so a re-run picks up changes without a redeploy.
-- `SHIP_BADGE_PRIOR_BATTLES` / `SHIP_BADGE_PRIOR_WR` — Volume-aware ranking parameters. Players are scored by a **composite** of three within-pool z-scores — win rate, damage/battle, kills/battle — each first tempered by an empirical-Bayes shrinkage over `SHIP_BADGE_PRIOR_BATTLES` (default `50`) pseudo-battles. Win rate shrinks toward `SHIP_BADGE_PRIOR_WR` (default `0.5`, the universal ~50% prior); damage/kills shrink toward the ship's pool mean (no universal baseline exists for them). Higher prior battles = more shrinkage, so a short hot streak doesn't outrank a high-volume player; high-volume players keep ~their true rate (activity is never penalized). Tiebreak raw battles. The stored/displayed `win_rate` remains the raw rate. (Defaults tuned against real NA data on 2026-06-05 — see runbook.)
-- `SHIP_BADGE_WEIGHT_WINS` / `SHIP_BADGE_WEIGHT_DAMAGE` / `SHIP_BADGE_WEIGHT_KILLS` — Composite blend weights for the ranking above (defaults `0.5` / `0.35` / `0.15`, "wins-led"). Win rate stays dominant; damage is a strong secondary; kills is a light tertiary (it overlaps damage, ~0.7 correlation). Read at task call time, so a re-tune + re-run picks them up without a redeploy. Changing these reorders both the `/ship/<id>` board and the gold/silver/bronze profile badges (ranks 1–3 of the same list).
-- `SHIP_BADGE_MIN_SHIP_POPULATION` — Minimum qualifying players a ship needs before it is "ranked" for the window — i.e. before any snapshot rows (and therefore any `/ship/<id>` board or badge) are written for it (default `20`). Sets board depth and suppresses boards on rarely-played ships.
-- `SHIP_BADGE_LIST_SIZE` — How many ranked players to store per ship (the `/ship/<id>` leaderboard length; default `15`). Profile badges are ranks 1..`SHIP_BADGE_TOP_N` of this same list.
-- `SHIP_BADGE_TOP_N` — Placements that become profile badges per ship (default `3` → gold/silver/bronze).
-- `SHIP_BADGE_TIERS` — Comma list of ship tiers in scope (default `10`; prod pins `8,9,10` in the backend deploy script). Each ship is ranked within its own pool, so multi-tier is just a wider target set (no cross-tier comparison). The badge/board/Ship-Honors UI shows a `T<n>` label so tiers aren't conflated, and badges/awards order tier-desc. Extended to T8–T10 on 2026-06-05 after a per-tier density study (NA ~46/10/9 ranked ships at T10/9/8; T5 excluded as sparse + seal-clubby) — see `runbook-ship-top-player-badges-2026-06-05.md`. (Legacy `SHIP_BADGE_TIER` single-value is still read as a fallback.) All treemap tiles navigate to `/ship/<id>` (any tier); a non-ranked ship just shows an empty board.
-- `SHIP_BADGE_RETENTION_DAYS` — Prune `ShipTopPlayerSnapshot` rows older than this (default `30`, ≈2 seasons so the displayed last-completed season survives until the next finalize; the `ShipAward` ledger is never pruned).
-- `SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK` / `SHIP_BADGE_SNAPSHOT_HOUR` — Cron day/hour (UTC base) for the snapshot beat; per-realm hour offset via `REALM_CRAWL_CRON_HOURS` (defaults: `1` Monday / `2`). **Fixed-season pivot (2026-06-05):** standings are now **fixed, non-overlapping 2-week calendar seasons** anchored to **Mon 11 May 2026 UTC** (`SHIP_SEASON_EPOCH`/`SHIP_SEASON_LENGTH_DAYS` in `data.py`, mirrored by `client/app/lib/shipSeason.ts`); `SHIP_LEADERBOARD_WINDOW_DAYS` is the season length. The board/badges show the **most recently completed season**. Beat still ticks weekly (Monday), but `snapshot_ship_top_players_task` self-gates on `is_season_boundary()`, so it finalizes each season exactly once (effectively bi-weekly). Backfill historical seasons with `python manage.py backfill_ship_seasons --wipe`. See `runbook-ship-top-player-badges-2026-06-05.md` (Fixed-season pivot section).
+Cache/warming:
+- `HOT_ENTITY_PINNED_PLAYER_NAMES` (empty), `HOT_ENTITY_PLAYER_LIMIT`/`HOT_ENTITY_CLAN_LIMIT` (20/10)
+- `RECENTLY_VIEWED_PLAYER_LIMIT` (10), `RECENTLY_VIEWED_WARM_MINUTES` (60), `WARM_CACHES_ON_STARTUP` (1)
+- `CLAN_BATTLE_WARM_CLAN_IDS`, `BEST_CLAN_EXCLUDED_IDS`, `ANALYTICAL_WORK_MEM` (8MB)
+
+Crawlers/refresh (`ENABLE_CRAWLER_SCHEDULES`=1 in prod is the master kill switch):
+- `CLAN_CRAWL_SCHEDULE_HOUR`/`_MINUTE` (3/0), `CLAN_CRAWL_WATCHDOG_MINUTES` (5)
+- `PLAYER_REFRESH_INTERVAL_MINUTES` (180); tier staleness `PLAYER_REFRESH_HOT/ACTIVE/WARM_STALE_HOURS` (12/24/72)
+- `RANKED_REFRESH_INTERVAL_MINUTES` (120)
+- BattleObservation floor: `BATTLE_OBSERVATION_FLOOR_HOUR`/`_MINUTE` (1/15), `_HOURS` (8), `_LIMIT`/`_DELAY` (3000/0.3), `_CRAWL_DELAY`/`_CRAWL_LIMIT` (0.8/falls back to LIMIT — floor coexists with crawls instead of skipping)
+- `CELERY_BROKER_HEARTBEAT` (0; rely on TCP keepalive)
+
+Enrichment:
+- `ENRICH_REALMS` (all), `ENRICH_BATCH_SIZE` (500), `ENRICH_MIN_PVP_BATTLES` (500), `ENRICH_MIN_WR` (48.0), `ENRICH_DELAY` (0.2), `ENRICH_PAUSE_BETWEEN_BATCHES` (10)
+
+Battle-history pipeline (phased gates, all default 0):
+- `BATTLE_HISTORY_CAPTURE_ENABLED` (write BattleObservation/BattleEvent as a side-effect of `update_battle_data`)
+- `BATTLE_HISTORY_ROLLUP_ENABLED` + `_HOUR`/`_MINUTE` (4/30) (fill PlayerDailyShipStats + nightly rebuild)
+- `BATTLE_HISTORY_API_ENABLED` (exposes `GET /api/player/<name>/battle-history?days=N`, 404 when off)
+- `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED` + `_REALMS` (`na`) (third WG call `seasons/shipstats/`, ranked-mode events)
+- `BATTLE_TRACKING_PLAYER_NAMES`/`_POLL_SECONDS` (60) — incremental-battle PoC dispatcher
+
+Ship badges / standings (master gate `SHIP_BADGE_SNAPSHOT_ENABLED`=0):
+- `SHIP_BADGE_MIN_BATTLES` (15), `SHIP_BADGE_MIN_SHIP_POPULATION` (20), `SHIP_BADGE_LIST_SIZE` (15), `SHIP_BADGE_TOP_N` (3), `SHIP_BADGE_TIERS` (default `10`; prod pins `8,9,10`; legacy `SHIP_BADGE_TIER` fallback), `SHIP_BADGE_RETENTION_DAYS` (30)
+- Ranking: composite of win-rate/damage/kills z-scores with empirical-Bayes shrinkage — `SHIP_BADGE_PRIOR_BATTLES` (50), `SHIP_BADGE_PRIOR_WR` (0.5), weights `SHIP_BADGE_WEIGHT_WINS`/`_DAMAGE`/`_KILLS` (0.5/0.35/0.15). Read at task-call time (re-tune without redeploy)
+- `SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK`/`_HOUR` (1 Mon/2). Fixed non-overlapping 2-week seasons anchored to `SHIP_SEASON_EPOCH` (Mon 11 May 2026 UTC) in `data.py`, mirrored by `client/app/lib/shipSeason.ts`. Board/badges show the most recently completed season; task self-gates on `is_season_boundary()`. Backfill: `python manage.py backfill_ship_seasons --wipe`
+
+Local-dev only: `BATTLESTATS_DISABLE_LIVE_REFRESH` (serve stale snapshots, no live WG refresh), `BATTLESTATS_ENABLE_STALE_RECENT_PLAYERS` (landing fallback ordering without the battle-history pipeline).
+
+See `agents/runbooks/` for the rationale, dates, and incident history behind these settings.
 
 ### Client env
 
-- `BATTLESTATS_API_ORIGIN` — Backend URL (default `http://localhost:8888`)
-- `NEXT_PUBLIC_GA_MEASUREMENT_ID` — GA4 measurement ID (optional)
+- `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`), `NEXT_PUBLIC_GA_MEASUREMENT_ID` (optional)
 
 ### Umami analytics
 
-- Dashboard: `https://battlestats.online/umami/` — dashboard + admin API restricted to a **home-IP allowlist** (nginx `allow … ; deny all;` on `location /umami`; rotate the IP if it changes). The collection endpoints (`/umami/script.js`, `/umami/api/send`) are public. (Not Basic auth — that collides with umami's `Authorization: Bearer` API auth and breaks login; see the runbook.)
-- Runs as a standalone Next.js app (**v2.20.2**) on port 3002 (bound to `127.0.0.1`) behind nginx
-- Uses the same managed Postgres (separate `umami` database), connecting via a **least-privilege `umami_app` role** scoped to that database only — NOT the `doadmin` cluster superuser (`UMAMI_DB_USER`/`UMAMI_DB_PASSWORD` in `/etc/battlestats-server.secrets.env`)
-- Bootstrap script: `umami/deploy/bootstrap_umami.sh`
-- Tracking script loaded via `<script>` tag in `client/app/layout.tsx`
-- **Custom events**: `client/app/lib/umami.ts` exports `trackEvent(name, data)` — an SSR-safe, no-throw wrapper over `window.umami.track`. Surfaced in the Umami **Events** report. Instrumented so far: `insights-tab` (`{tab}`) on the player Insights tab switch; `battle-history-sort` (`{key, direction, mode, window}`) on the Battle History column sort; the top-nav interactions — `theme-change` (`{theme}`) in `ThemeToggle`, `realm-change` (`{realm}`) in `RealmSelector`, `search-mode-toggle` (`{mode}` = the mode switched *to*) in `HeaderSearch`, and `search` (`{mode, realm, via}` where `via` is `text`|`suggestion`) fired exactly once per navigation from `HeaderSearch` (the search query string is intentionally NOT sent — high cardinality); and the chart/navigation interactions — `chart-scale` (`{chart, scale}`) on the clan members plot log/linear toggle, `clan-chart-mode` (`{mode}`) on the clan page 2D/3D toggle (fired only on an actual change), `treemap-ship` (`{ship_id, ship_name, mode, realm}`) on a landing treemap tile click into `/ship/<id>`, and `ship-player` (`{ship_id, ship_name, rank, realm}`) on a ship-standings leaderboard player click. Keep event names kebab-case and properties low-cardinality. Realm is persisted by browser preference in `localStorage['bs-realm']` (restored pre-paint by the inline script in `layout.tsx` + `RealmContext`).
-- Hardening details: `agents/runbooks/runbook-umami-hardening-2026-06-02.md`
+Standalone Next.js app (v2.20.2) on port 3002 (`127.0.0.1`) behind nginx at `/umami/`; dashboard + admin API restricted to a home-IP allowlist (collection endpoints public). Uses the shared managed Postgres (separate `umami` DB, least-privilege `umami_app` role). Bootstrap: `umami/deploy/bootstrap_umami.sh`. Custom events via `client/app/lib/umami.ts` `trackEvent(name, data)` — keep names kebab-case and properties low-cardinality. See `agents/runbooks/runbook-umami-hardening-2026-06-02.md`.
 
 ### Docker ports
 
-- 8888: Django/Gunicorn
-- 3001: Next.js (Docker dev)
-- 3002: Umami analytics (production droplet only)
-- 15672: RabbitMQ management
+8888 Django/Gunicorn · 3001 Next.js (Docker dev) · 3002 Umami (prod only) · 15672 RabbitMQ management
