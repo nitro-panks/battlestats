@@ -7,9 +7,9 @@ _Status: implemented (flag default-off, awaiting prod first-run) — 2026-06-05.
 ## Purpose
 
 Once per week, per realm, rank players for each **Tier-10** ship by **random-battle win rate** over a
-**rolling 14-day window**, and persist the top `SHIP_BADGE_LIST_SIZE` (50) as `ShipTopPlayerSnapshot`
+**rolling 14-day window**, and persist the top `SHIP_BADGE_LIST_SIZE` (15) as `ShipTopPlayerSnapshot`
 rows. Two surfaces read that snapshot:
-- **`/ship/<id>` page** — the full ranked list (top 50) for one ship/realm. Snapshot-backed, thin
+- **`/ship/<id>` page** — the ranked list (top 15) for one ship/realm. Snapshot-backed, thin
   15-min Redis read-cache, no live aggregation, no warmer (a loading message covers the cold path).
 - **Profile badges** — ranks 1–3 become gold/silver/bronze medals on those players' profiles, each a
   labeled link (`<medal> ShipName`) to the ship page.
@@ -55,20 +55,24 @@ Per realm, per `since = now - 14d`:
 1. Aggregate `BattleEvent` (`ship_id ∈ T10`, `mode='random'`, `detected_at >= since`,
    `player__realm=realm`, `player__is_hidden=False`) grouped by `(ship_id, player)`, summing
    `battles_delta→battles`, `wins_delta→wins`.
-2. **Per-player floor:** keep `battles >= SHIP_BADGE_MIN_BATTLES` (default **25**).
+2. **Per-player floor:** keep `battles >= SHIP_BADGE_MIN_BATTLES` (default **15**). Caps the
+   worst-case #1 sample.
 3. **Per-ship guard:** ship is "ranked" only if its qualifying pool ≥ `SHIP_BADGE_MIN_SHIP_POPULATION`
-   (default **25**).
+   (default **20**).
 4. **Rank** by a **volume-aware composite score** (empirical-Bayes): the win proportion shrunk toward
    `SHIP_BADGE_PRIOR_WR` (default **0.5**) by `SHIP_BADGE_PRIOR_BATTLES` (default **30**) pseudo-battles
    — `score = (wins + prior_battles·prior_wr) / (battles + prior_battles)` — tiebreak raw `battles`
    desc. This demotes short hot streaks (a 25-0 no longer outranks a 300-battle 65% grinder) while the
    stored/displayed `win_rate` stays the raw rate. Persist the top `SHIP_BADGE_LIST_SIZE` (default
-   **50**) as ranks 1..N; ranks 1..`SHIP_BADGE_TOP_N` (default **3**) are badges.
+   **15**) as ranks 1..N; ranks 1..`SHIP_BADGE_TOP_N` (default **3**) are badges.
 
-> First-run validation (NA, 2026-06-05): with the original raw-WR ranking + a 10-battle floor, the #1
-> spots were dominated by 100%-on-10-battles streaks — hence the move to the 25-battle floor + the
-> composite score. 90/202 T10 ships qualified on NA, so the bar is not too strict. Thresholds are
-> env-tunable and the task logs `ships_qualified`.
+> Tuning history (NA, 2026-06-05): raw-WR ranking + a 10-battle floor minted #1s dominated by
+> 100%-on-10-battles streaks. Fix #1 was the composite score; fix #2 was a parameter sweep against
+> real NA data. The sweep showed `prior` is a free quality lever (more shrinkage cuts thin #1s at no
+> coverage cost, which depends only on floor+pop), and the floor caps the worst-case #1 sample.
+> Chosen defaults — floor **15**, pop **20**, prior **50** — yield ~73 of ~159 active T10 ships on NA
+> (≈219 badges), median #1 ≈ 41 battles, no #1 under 15 battles. Thresholds are env-tunable; the task
+> logs `ships_qualified`.
 
 ## Storage shape
 
@@ -156,10 +160,10 @@ Registered unconditionally; the **task** is the no-op gate (not folded under `EN
 | Var | Default | Meaning |
 |---|---|---|
 | `SHIP_BADGE_SNAPSHOT_ENABLED` | `0` | Master gate for the weekly snapshot task. |
-| `SHIP_BADGE_MIN_BATTLES` | `25` | Min random battles in 14d to qualify. |
-| `SHIP_BADGE_PRIOR_BATTLES` / `SHIP_BADGE_PRIOR_WR` | `30` / `0.5` | Composite-ranking shrinkage (pseudo-battles / baseline WR). |
-| `SHIP_BADGE_MIN_SHIP_POPULATION` | `25` | Min qualifiers before a ship is "ranked". |
-| `SHIP_BADGE_LIST_SIZE` | `50` | Ranked players stored per ship (ship-page length). |
+| `SHIP_BADGE_MIN_BATTLES` | `15` | Min random battles in 14d to qualify. |
+| `SHIP_BADGE_PRIOR_BATTLES` / `SHIP_BADGE_PRIOR_WR` | `50` / `0.5` | Composite-ranking shrinkage (pseudo-battles / baseline WR). |
+| `SHIP_BADGE_MIN_SHIP_POPULATION` | `20` | Min qualifiers before a ship is "ranked". |
+| `SHIP_BADGE_LIST_SIZE` | `15` | Ranked players stored per ship (ship-page length). |
 | `SHIP_BADGE_TOP_N` | `3` | Placements that become profile badges. |
 | `SHIP_BADGE_TIER` | `10` | Ship tier in scope. |
 | `SHIP_BADGE_RETENTION_DAYS` | `21` | Prune rows older than this. |

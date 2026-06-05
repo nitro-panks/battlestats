@@ -5748,16 +5748,20 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM) -> dict:
     """
     from warships.models import BattleEvent, ShipTopPlayerSnapshot
 
-    min_battles = int(os.getenv('SHIP_BADGE_MIN_BATTLES', '25'))
-    min_population = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION', '25'))
+    min_battles = int(os.getenv('SHIP_BADGE_MIN_BATTLES', '15'))
+    min_population = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION', '20'))
     top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
-    list_size = int(os.getenv('SHIP_BADGE_LIST_SIZE', '50'))
+    list_size = int(os.getenv('SHIP_BADGE_LIST_SIZE', '15'))
     tier = int(os.getenv('SHIP_BADGE_TIER', '10'))
     retention_days = int(os.getenv('SHIP_BADGE_RETENTION_DAYS', '21'))
     # Volume-aware ranking: empirical-Bayes shrinkage of the win proportion
     # toward a baseline. `prior_battles` is the pseudo-sample weight (higher =
     # more shrinkage of small samples); `prior_wr` is the baseline (50%).
-    prior_battles = int(os.getenv('SHIP_BADGE_PRIOR_BATTLES', '30'))
+    # Defaults tuned against real NA data (sweep 2026-06-05): floor 15 + pop 20 +
+    # prior 50 → ~73 of ~159 active T10 ships qualify, median #1 ≈ 41 battles, no
+    # #1 under 15 battles. The floor caps the worst-case #1 sample; the prior
+    # demotes short hot streaks; the population guard sets board depth.
+    prior_battles = int(os.getenv('SHIP_BADGE_PRIOR_BATTLES', '50'))
     prior_wr = float(os.getenv('SHIP_BADGE_PRIOR_WR', '0.5'))
 
     realm = (realm or DEFAULT_REALM).lower().strip()
