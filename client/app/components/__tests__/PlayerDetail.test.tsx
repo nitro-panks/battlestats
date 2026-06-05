@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import PlayerDetail from '../PlayerDetail';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 
@@ -847,6 +847,21 @@ describe('PlayerDetail ship-badge banner', () => {
         renderWithBadges([]);
 
         expect(screen.queryByText(/dmg/)).not.toBeInTheDocument();
+    });
+
+    it('shows the realm under the medal and in the tooltip (awards are per realm)', () => {
+        render(
+            <PlayerDetail
+                player={{ ...basePlayer, realm: 'na', ship_badges: [badge()] } as never}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        const banner = screen.getByLabelText('Top ship rankings');
+        expect(within(banner).getByText('NA')).toBeInTheDocument();
+        expect(screen.getByTitle(/#1 in Shimakaze on NA over the last 14 days/)).toBeInTheDocument();
     });
 
     it('stacks multiple badges (no overflow cap — backend already limits to top 3)', () => {
