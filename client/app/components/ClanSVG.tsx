@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
 import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
@@ -123,6 +123,49 @@ const drawClanChartStatus = (
         .text(message);
 };
 
+// Pick a default x-axis scale from the shape of the clan's battle distribution.
+// A few very-high-battle members blow out a linear axis (pack squished left ->
+// log spreads them out); but a low-battle straggler blows out a log axis (pack
+// squished right -> linear is better). We compare the largest empty gap between
+// consecutive members under each scale and pick whichever packs more evenly,
+// biased toward linear (the less-distorting choice) on near-ties.
+const pickClanScaleType = (data: ClanData[]): 'linear' | 'log' => {
+    const battles = data
+        .map((datum) => Math.max(1, datum.pvp_battles || 0))
+        .filter((value) => Number.isFinite(value))
+        .sort((a, b) => a - b);
+    if (battles.length < 4) {
+        return 'linear';
+    }
+    const min = battles[0];
+    const max = battles[battles.length - 1];
+    if (max <= min) {
+        return 'linear';
+    }
+    const maxGap = (project: (value: number) => number): number => {
+        const lo = project(min);
+        const span = project(max) - lo;
+        if (span <= 0) {
+            return 1;
+        }
+        let previous = 0;
+        let worst = 0;
+        for (const value of battles) {
+            const position = (project(value) - lo) / span;
+            const gap = position - previous;
+            if (gap > worst) {
+                worst = gap;
+            }
+            previous = position;
+        }
+        return worst;
+    };
+    const linearGap = maxGap((value) => value);
+    const logGap = maxGap((value) => Math.log(value));
+    // Switch to log only when it clearly spreads the pack better.
+    return logGap < linearGap - 0.05 ? 'log' : 'linear';
+};
+
 const drawClanPlot = (
     containerElement: HTMLDivElement,
     onSelectMember: ClanProps['onSelectMember'],
@@ -132,6 +175,8 @@ const drawClanPlot = (
     chartMembers: ClanChartMemberActivity[],
     plotData: ClanData[],
     theme: ChartTheme,
+    xScaleType: 'linear' | 'log' = 'log',
+    showGridlines: boolean = false,
 ) => {
     const colors = chartColors[theme];
     const compact = svgWidth < 480;
@@ -288,13 +333,45 @@ const drawClanPlot = (
             applyBucketFilter();
         });
 
-    const x = d3.scaleLinear()
-        .domain([0, max])
-        .range([0, width]);
+    // x = battles. A few very-high-battle members blow out the linear domain and
+    // compress everyone else near the origin; a log scale spreads the pack out.
+    const battlesMin = d3.min(data, (datum: ClanData) => datum.pvp_battles) || 0;
+    const xMinDomain = Math.max(1, battlesMin);
+    const x = xScaleType === 'log'
+        ? d3.scaleLog()
+            .domain([xMinDomain, Math.max(xMinDomain * 10, max)])
+            .range([0, width])
+            .clamp(true)
+        : d3.scaleLinear()
+            .domain([0, max])
+            .range([0, width]);
+    // Guard against log(0)/log(negative) when placing points.
+    const xVal = (battles: number): number => x(Math.max(1, battles));
+
+    const xTicks = x.ticks(compact ? 3 : 5);
+    if (showGridlines) {
+        svg.append('g')
+            .attr('class', 'x-grid')
+            .selectAll('line')
+            .data(xTicks)
+            .enter()
+            .append('line')
+            .attr('x1', (tick: number) => x(tick))
+            .attr('x2', (tick: number) => x(tick))
+            .attr('y1', 0)
+            .attr('y2', height)
+            .attr('stroke', colors.gridLine)
+            .attr('stroke-width', 1)
+            .attr('stroke-opacity', 0.35);
+    }
+
+    const xAxis = xScaleType === 'log'
+        ? d3.axisBottom(x).ticks(compact ? 3 : 5, '~s').tickSizeOuter(0)
+        : d3.axisBottom(x).ticks(compact ? 3 : 5).tickSizeOuter(0);
     svg.append('g')
         .style('color', colors.labelText)
         .attr('transform', `translate(0, ${height})`)
-        .call(d3.axisBottom(x).ticks(compact ? 3 : 5).tickSizeOuter(0))
+        .call(xAxis)
         .selectAll('text')
         .attr('transform', 'translate(-10,0)rotate(-45)')
         .style('text-anchor', 'end')
@@ -371,7 +448,7 @@ const drawClanPlot = (
         .data(data)
         .enter()
         .append('g')
-        .attr('transform', (datum: ClanPlotPoint) => `translate(${x(datum.pvp_battles)}, ${y(datum.pvp_ratio)})`);
+        .attr('transform', (datum: ClanPlotPoint) => `translate(${xVal(datum.pvp_battles)}, ${y(datum.pvp_ratio)})`);
 
     const dotSelection = points
         .append('circle')
@@ -511,15 +588,56 @@ const drawClanPlot = (
     };
 };
 
+// The default x-axis scale is auto-picked per clan from its battle distribution
+// (see pickClanScaleType); a manual log/linear pick is remembered per clan in
+// localStorage.
+const CLAN_SCALE_PREF_KEY = 'bs:clan-scale';
+
 const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [], theme = 'light' }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const { realm } = useRealm();
+    // null = follow the per-clan auto default; otherwise the user's stored pick.
+    const [userScalePref, setUserScalePref] = useState<'linear' | 'log' | null>(null);
     const onSelectMemberRef = useRef(onSelectMember);
     const chartMemberActivitySignature = useMemo(() => buildClanChartMemberActivitySignature(membersData), [membersData]);
     const chartMemberActivity = useMemo(() => buildClanChartMemberActivity(membersData), [membersData]);
     const [plotData, setPlotData] = useState<ClanData[] | null>(null);
     const [plotError, setPlotError] = useState(false);
     const [isPlotPendingRefresh, setIsPlotPendingRefresh] = useState(false);
+
+    // Per-clan default from the data shape; the user's stored pick overrides it.
+    const autoScaleType = useMemo(
+        () => (plotData && plotData.length > 0 ? pickClanScaleType(plotData) : 'linear'),
+        [plotData],
+    );
+    const effectiveScaleType = userScalePref ?? autoScaleType;
+
+    // Load this clan's remembered pick (read in an effect, not at render, to
+    // avoid an SSR/hydration mismatch on the localStorage value).
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+        let stored: string | null = null;
+        try {
+            stored = window.localStorage.getItem(`${CLAN_SCALE_PREF_KEY}:${clanId}`);
+        } catch {
+            stored = null;
+        }
+        setUserScalePref(stored === 'log' || stored === 'linear' ? stored : null);
+    }, [clanId]);
+
+    const handleScaleSelect = useCallback((scale: 'linear' | 'log') => {
+        setUserScalePref(scale);
+        if (typeof window === 'undefined') {
+            return;
+        }
+        try {
+            window.localStorage.setItem(`${CLAN_SCALE_PREF_KEY}:${clanId}`, scale);
+        } catch {
+            // ignore storage failures (private mode / quota)
+        }
+    }, [clanId]);
 
     useEffect(() => {
         let cancelled = false;
@@ -650,6 +768,8 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                     chartMemberActivity,
                     plotData,
                     theme,
+                    effectiveScaleType,
+                    true,
                 );
             };
 
@@ -663,9 +783,31 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                 window.removeEventListener('resize', onResize);
             };
         }
-    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme]);
+    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme, effectiveScaleType]);
 
-    return <div ref={containerRef} style={{ minHeight: svgHeight }}></div>;
+    return (
+        <div>
+            <div className="mb-0.5 flex items-center justify-end gap-1 text-[10px] lowercase tracking-wide text-[var(--text-secondary)]">
+                {(['log', 'linear'] as const).map((scale) => (
+                    <button
+                        key={scale}
+                        type="button"
+                        onClick={() => handleScaleSelect(scale)}
+                        aria-pressed={effectiveScaleType === scale}
+                        className={`rounded px-1.5 py-0.5 transition-colors ${
+                            effectiveScaleType === scale
+                                ? 'bg-[var(--bg-hover)] font-semibold text-[var(--text-primary)]'
+                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                        }`}
+                        title={`${scale} battles axis`}
+                    >
+                        {scale}
+                    </button>
+                ))}
+            </div>
+            <div ref={containerRef} style={{ minHeight: svgHeight }}></div>
+        </div>
+    );
 };
 
 const areClanSvgPropsEqual = (previousProps: ClanProps, nextProps: ClanProps): boolean => {
