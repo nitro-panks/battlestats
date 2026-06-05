@@ -61,7 +61,7 @@ const drawLandingPlayerChart = (
     sort: PlayerBestSort = 'overall',
 ) => {
     const isCbMode = sort === 'cb';
-    const margin = { top: 56, right: 16, bottom: 32, left: 48 };
+    const margin = { top: 42, right: 16, bottom: 32, left: 48 };
     const width = containerWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
 

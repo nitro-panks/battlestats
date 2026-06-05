@@ -901,6 +901,35 @@ def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REAL
 
 
 @app.task(bind=True, **TASK_OPTS)
+def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
+    """Pre-populate the realm top-ships treemap caches (random + ranked).
+
+    Recomputes both modes for the realm once per hour (force-refresh, so the
+    rolling 24h window stays current) and writes them to Redis, so visitors
+    always hit a warm cache instead of the ~1s aggregation. Mirrors the other
+    per-realm landing warmers.
+    """
+    from warships.data import compute_realm_top_ships
+
+    lock_key = f"warships:tasks:warm_realm_top_ships:{realm}:lock"
+    if not cache.add(lock_key, self.request.id, timeout=300):
+        logger.info(
+            "Skipping warm_realm_top_ships_task realm=%s — already running", realm)
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        results = {}
+        for mode in ("random", "ranked"):
+            payload = compute_realm_top_ships(
+                realm, hours=24, limit=25, mode=mode, use_cache=False)
+            results[mode] = len(payload.get("ships", []))
+        logger.info("Warmed top-ships realm=%s modes=%s", realm, results)
+        return {"status": "completed", "realm": realm, "results": results}
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, **TASK_OPTS)
 def warm_landing_recent_players_task(self, realm=DEFAULT_REALM):
     # Rebuilds the landing "recent players" rollup (top 7-day random-battles
     # leaders) and writes BOTH the durable DB snapshot

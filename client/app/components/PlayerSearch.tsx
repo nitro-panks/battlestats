@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import ClanDetail from './ClanDetail';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier, type EfficiencyRankTier } from './EfficiencyRankIcon';
 import PlayerDetail from './PlayerDetail';
+import RealmTopShipsTreemapSVG from './RealmTopShipsTreemapSVG';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import type { LandingClan, LandingPlayer, PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
@@ -183,6 +184,8 @@ const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SHOW_PLAYER_EXPLORER = false;
+// Dev-only: realm most-played-ships treemap above the Players list.
+const SHOW_DEV_TOP_SHIPS = process.env.NODE_ENV !== 'production';
 // Backend caches recent players (7-day most-active rollup, rebuilt every 3 h)
 // and best/random for 6 h, so a 60-second client-side TTL lets SPA
 // back-navigations to the landing page hit the in-memory cache (no network,
@@ -498,11 +501,19 @@ const PlayerSearch: React.FC = () => {
                 <div>
                     {error && <p className="text-red-600 dark:text-red-400">{error}</p>}
 
+                    {/* Dev preview: realm most-played-ships treemap, above the
+                        Players (Recent/Best) list. */}
+                    {SHOW_DEV_TOP_SHIPS && (
+                        <div className="mt-2 pt-6">
+                            <RealmTopShipsTreemapSVG />
+                        </div>
+                    )}
+
                     {/* Toolbar is always visible once the landing pane is mounted —
                      keeps the empty-state UX coherent for both Recent and Best
                      when the underlying lists return zero rows. */}
                     {true && (
-                        <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
+                        <div className={`${error ? 'mt-6' : 'mt-2'} pt-12`}>
                             <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Players</h3>
                                 <button
@@ -579,7 +590,8 @@ const PlayerSearch: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                            <div className="mt-3">
+                            {/* 964 = ~900px chart + the SVG container's 64px (pr-16) right gutter. */}
+                            <div className="mt-1 max-w-[964px]">
                                 <LandingPlayerSVG
                                     players={visibleLandingPlayers}
                                     onSelectPlayer={(player) => handleSelectMember(player.name)}
@@ -663,7 +675,7 @@ const PlayerSearch: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                            <div className="mt-3">
+                            <div className="mt-3 max-w-[964px]">
                                 {isBestClanFallbackActive ? (
                                     <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
                                         {BEST_CLAN_FALLBACK_NOTICE}

@@ -1898,6 +1898,36 @@ def sitemap_entities(request) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def realm_top_ships(request, realm: str) -> Response:
+    """Most-played ships on a realm over the last N hours (default 24).
+
+    Powers the landing treemap: each ship is a tile sized by battles, colored
+    by type and shaded by tier. Sums BattleEvent.battles_delta per ship over the
+    rolling window (using detected_at), then joins Ship for type + tier.
+    Recomputed at most once per hour; served from the Redis cache otherwise.
+
+    Response shape:
+        {realm, hours, mode, ships: [{ship_id, ship_name, ship_type, tier, battles}]}
+    """
+    from warships.data import compute_realm_top_ships
+
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    if realm not in VALID_REALMS:
+        return Response({"detail": "Unknown realm."}, status=status.HTTP_404_NOT_FOUND)
+
+    # The shared helper clamps hours/limit/mode and handles the Redis cache
+    # (1h TTL); the hourly warmer calls the same helper with use_cache=False.
+    payload = compute_realm_top_ships(
+        realm,
+        hours=request.query_params.get("hours", 24),
+        limit=request.query_params.get("limit", 25),
+        mode=request.query_params.get("mode", "random"),
+    )
+    return Response(payload)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def player_name_suggestions(request) -> Response:
     query = (request.query_params.get('q') or '').strip().replace('\x00', '')
     if len(query) < 3:

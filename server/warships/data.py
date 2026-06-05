@@ -5717,3 +5717,67 @@ def bulk_load_entity_caches(
         'players': player_result,
         'clans': clan_result,
     }
+
+
+def compute_realm_top_ships(realm, hours=24, limit=25, mode="random", use_cache=True):
+    """Most-played ships on a realm over the last ``hours`` (the treemap source).
+
+    Sums ``BattleEvent.battles_delta`` per ship — filtered by realm + mode, with
+    ``detected_at`` as the rolling-window clock — joins ``Ship`` for type/tier,
+    and returns the top-``limit`` as a payload dict. Writes the result to the
+    Redis cache (1h TTL) so it refreshes at most once per hour. Shared by the
+    ``realm_top_ships`` API view and the hourly ``warm_realm_top_ships_task``
+    warmer; pass ``use_cache=False`` to force a recompute (the warmer does).
+    """
+    from warships.models import BattleEvent
+
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    mode = (str(mode) if mode is not None else "random").lower().strip()
+    if mode not in ("random", "ranked"):
+        mode = "random"
+    try:
+        hours = int(hours)
+    except (TypeError, ValueError):
+        hours = 24
+    hours = max(1, min(hours, 168))
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 25
+    limit = max(5, min(limit, 50))
+
+    cache_key = realm_cache_key(realm, f"top-ships:{mode}:{hours}:{limit}")
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    since = django_timezone.now() - timedelta(hours=hours)
+    rows = list(
+        BattleEvent.objects
+        .filter(detected_at__gte=since, player__realm=realm, mode=mode)
+        .values("ship_id", "ship_name")
+        .annotate(battles=Sum("battles_delta"))
+        .filter(battles__gt=0)
+        .order_by("-battles")[:limit]
+    )
+    ship_ids = [r["ship_id"] for r in rows]
+    ships = {s.ship_id: s for s in Ship.objects.filter(ship_id__in=ship_ids)}
+
+    payload_ships = [
+        {
+            "ship_id": r["ship_id"],
+            "ship_name": (
+                (ships[r["ship_id"]].name if r["ship_id"] in ships and ships[r["ship_id"]].name
+                 else r["ship_name"]) or f"Ship {r['ship_id']}"
+            ),
+            "ship_type": ships[r["ship_id"]].ship_type if r["ship_id"] in ships else None,
+            "tier": ships[r["ship_id"]].tier if r["ship_id"] in ships else None,
+            "battles": int(r["battles"] or 0),
+        }
+        for r in rows
+    ]
+
+    payload = {"realm": realm, "hours": hours, "mode": mode, "ships": payload_ships}
+    cache.set(cache_key, payload, timeout=3600)
+    return payload

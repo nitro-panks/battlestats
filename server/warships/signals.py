@@ -180,6 +180,34 @@ def register_periodic_schedules(sender, **kwargs):
 
     PeriodicTask.objects.filter(name="landing-page-warmer").delete()
 
+    # -- Realm top-ships treemap warmer --
+    # Pre-populates the landing treemap caches (random + ranked) per realm so a
+    # visit never eats the ~1s BattleEvent aggregation. Hourly, striped per realm.
+    top_ships_warm_minutes = int(os.getenv("TOP_SHIPS_WARM_MINUTES", "60"))
+    for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, top_ships_warm_minutes)
+        top_ships_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"top-ships-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_realm_top_ships_task",
+                "crontab": top_ships_warm_schedule,
+                "interval": None,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Pre-populates top-ships treemap caches, random+ranked ({realm.upper()}).",
+            },
+        )
+
     # -- Recent-players warmer (7-day random-battle leaders) --
     # Pure-cache read path on the landing endpoint, rebuilt every 3h
     # out-of-band so a rebuild never adds latency to a request.
