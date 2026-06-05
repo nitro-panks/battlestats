@@ -393,6 +393,8 @@ def _classify_clan_member_activity(days_since_last_battle):
 
 class ClanMemberSerializer(serializers.Serializer):
     name = serializers.CharField()
+    realm = serializers.CharField(required=False)
+    ship_badges = serializers.ListField(child=serializers.DictField(), required=False, default=list)
     is_hidden = serializers.BooleanField()
     is_streamer = serializers.BooleanField()
     pvp_ratio = serializers.FloatField(allow_null=True)

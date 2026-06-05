@@ -875,6 +875,25 @@ describe('PlayerDetail ship-badge banner', () => {
         expect(screen.getByText('ShipB')).toBeInTheDocument();
         expect(screen.getByText('ShipC')).toBeInTheDocument();
     });
+
+    it('renders a top-spot medal in the header tray per badge, with a rank tooltip', () => {
+        render(
+            <PlayerDetail
+                player={{ ...basePlayer, realm: 'na', ship_badges: [
+                    badge({ ship_id: 10, ship_name: 'Shimakaze', rank: 1 }),
+                    badge({ ship_id: 20, ship_name: 'Zao', rank: 2 }),
+                ] } as never}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        // Tray icons use the "Currently #<n> <ship> on <REALM>" tooltip (distinct
+        // from the banner card's "#<n> in <ship> … over the last N days" tooltip).
+        expect(screen.getByTitle('Currently #1 Shimakaze on NA')).toBeInTheDocument();
+        expect(screen.getByTitle('Currently #2 Zao on NA')).toBeInTheDocument();
+    });
 });
 
 describe('PlayerDetail ship-honors panel', () => {

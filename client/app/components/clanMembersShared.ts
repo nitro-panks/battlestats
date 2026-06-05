@@ -1,4 +1,5 @@
 import type { RankedLeagueName } from './rankedLeague';
+import type { ShipBadge } from './ShipTopPlayerBanner';
 
 export type ActivityBucketKey = 'active_7d' | 'active_30d' | 'cooling_90d' | 'dormant_180d' | 'inactive_180d_plus' | 'unknown';
 
@@ -24,4 +25,6 @@ export interface ClanMemberData {
     efficiency_rank_population_size?: number | null;
     efficiency_rank_updated_at?: string | null;
     activity_bucket: ActivityBucketKey;
+    realm?: string;
+    ship_badges?: ShipBadge[];
 }

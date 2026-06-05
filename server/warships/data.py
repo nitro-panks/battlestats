@@ -5976,6 +5976,61 @@ def get_player_ship_badges(player: Player) -> list:
     ]
 
 
+def get_players_ship_badges_bulk(player_pks, realm: Optional[str] = None) -> dict:
+    """Bulk variant of `get_player_ship_badges` for player lists (avoids N+1).
+
+    Returns ``{player_pk: [badge_dict, ...]}`` for the given players, each using
+    that player's own latest snapshot date. Two queries total regardless of list
+    size — used by the landing and clan-member payloads so a 50-row list doesn't
+    fan out to 100 per-player lookups. ``player_pks`` are ``Player`` PKs (the
+    snapshot FK), NOT WG account ids. ``realm`` is an optional narrowing filter
+    (a player only has snapshots for their own realm, so it's safe to omit).
+    Players holding no top-spot are absent from the result. Same badge shape as
+    `get_player_ship_badges`.
+    """
+    from warships.models import ShipTopPlayerSnapshot
+
+    pks = [pk for pk in (player_pks or []) if pk is not None]
+    if not pks:
+        return {}
+    top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
+
+    base = ShipTopPlayerSnapshot.objects.filter(player_id__in=pks)
+    if realm:
+        base = base.filter(realm=(realm or '').lower().strip())
+    latest_per_player = {
+        row['player_id']: row['latest']
+        for row in base.values('player_id').annotate(latest=Max('captured_on'))
+    }
+    if not latest_per_player:
+        return {}
+
+    result: dict = {}
+    rows = (
+        ShipTopPlayerSnapshot.objects
+        .filter(player_id__in=latest_per_player.keys(),
+                captured_on__in=set(latest_per_player.values()),
+                rank__lte=top_n)
+        .order_by('rank', 'ship_name')
+    )
+    for r in rows:
+        # captured_on__in widens to every player's latest; keep only the row that
+        # matches THIS player's own latest snapshot date.
+        if r.captured_on != latest_per_player.get(r.player_id):
+            continue
+        battles = r.battles or 0
+        result.setdefault(r.player_id, []).append({
+            'ship_id': r.ship_id,
+            'ship_name': r.ship_name,
+            'rank': r.rank,
+            'win_rate': r.win_rate,
+            'battles': battles,
+            'avg_damage': round((r.damage or 0) / battles) if battles else 0,
+            'window_days': SHIP_LEADERBOARD_WINDOW_DAYS,
+        })
+    return result
+
+
 def get_player_ship_awards(player: Player, current_badges: Optional[list] = None) -> list:
     """Durable per-ship career summary from the append-only `ShipAward` ledger.
 

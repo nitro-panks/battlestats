@@ -1193,6 +1193,44 @@ class ClanMembersEndpointTests(TestCase):
 
     @patch("warships.data.update_clan_members")
     @patch("warships.data.update_clan_data")
+    def test_clan_members_include_current_ship_badges(
+        self,
+        mock_update_clan_data,
+        mock_update_clan_members,
+    ):
+        # A member who currently holds a top spot gets `ship_badges` (+ realm)
+        # in the clan-member payload, so the roster tray can render the medal.
+        today = timezone.now().date()
+        clan = Clan.objects.create(clan_id=4244, name="Badge Clan", members_count=2)
+        holder = Player.objects.create(
+            name="Holder", player_id=20, clan=clan, realm="na", is_hidden=False,
+            last_battle_date=today,
+        )
+        Player.objects.create(
+            name="Plain", player_id=21, clan=clan, realm="na", is_hidden=False,
+            last_battle_date=today - timedelta(days=1),
+        )
+        Ship.objects.create(ship_id=10, name="Shimakaze", nation="japan",
+                            ship_type="Destroyer", tier=10)
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=today, realm="na", ship_id=10, ship_name="Shimakaze",
+            rank=1, player=holder, win_rate=64.0, battles=312,
+            damage=19_344_000, frags=400, survived=200,
+        )
+
+        response = self.client.get("/api/fetch/clan_members/4244/")
+
+        self.assertEqual(response.status_code, 200)
+        by_name = {row["name"]: row for row in response.json()}
+        self.assertEqual(by_name["Holder"]["realm"], "na")
+        holder_badges = by_name["Holder"]["ship_badges"]
+        self.assertEqual(len(holder_badges), 1)
+        self.assertEqual(holder_badges[0]["ship_id"], 10)
+        self.assertEqual(holder_badges[0]["rank"], 1)
+        self.assertEqual(by_name["Plain"]["ship_badges"], [])
+
+    @patch("warships.data.update_clan_members")
+    @patch("warships.data.update_clan_data")
     def test_clan_members_days_since_last_battle_derives_from_last_battle_date(
         self,
         mock_update_clan_data,
@@ -1249,6 +1287,8 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(response.json(), [
                          {
                              "name": "MemberOne",
+                             "realm": "na",
+                             "ship_badges": [],
                              "is_hidden": False,
                              "is_streamer": False,
                              "pvp_ratio": None,

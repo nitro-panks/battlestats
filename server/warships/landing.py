@@ -14,7 +14,7 @@ from django.db.models.functions import Cast, Coalesce
 from django.core.serializers.json import DjangoJSONEncoder
 from django.utils import timezone
 
-from warships.data import calculate_tier_filtered_pvp_record, get_clan_battle_activity_badge, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
+from warships.data import calculate_tier_filtered_pvp_record, get_clan_battle_activity_badge, get_highest_ranked_league_name, get_players_ship_badges_bulk, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
 from warships.data_support import clamp
 from warships.models import Clan, DEFAULT_REALM, LandingPlayerBestSnapshot, LandingRecentPlayersSnapshot, Player, realm_cache_key
 from warships.visit_analytics import get_top_entities
@@ -958,6 +958,10 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
         )
     }
 
+    # Current top-spot ship badges for the whole list in two queries (no N+1).
+    badges_by_pk = get_players_ship_badges_bulk(
+        [p.pk for p in players_by_id.values()])
+
     for row in rows:
         player_id = int(row.get('player_id') or 0)
         high_tier_battles, high_tier_ratio = calculate_tier_filtered_pvp_record(
@@ -1020,6 +1024,8 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             row['has_efficiency_rank_icon'] = False
             row['efficiency_rank_population_size'] = None
             row['efficiency_rank_updated_at'] = None
+        row['ship_badges'] = (
+            badges_by_pk.get(player_obj.pk, []) if player_obj else [])
         row.pop('days_since_last_battle', None)
 
     return rows
@@ -1369,6 +1375,7 @@ def _build_best_ranked_landing_players(limit: int, realm: str = DEFAULT_REALM) -
             'explorer_summary__efficiency_rank_updated_at',
         )
     )
+    badges_by_pk = get_players_ship_badges_bulk([p.pk for p in players])
     ranked_rows = []
     for player in players:
         explorer_summary = getattr(player, 'explorer_summary', None)
@@ -1413,6 +1420,7 @@ def _build_best_ranked_landing_players(limit: int, realm: str = DEFAULT_REALM) -
             'latest_ranked_battles': getattr(explorer_summary, 'latest_ranked_battles', None),
             'latest_ranked_win_rate': ranked_history[0].get('win_rate') if isinstance(ranked_history, list) and ranked_history and isinstance(ranked_history[0], dict) else None,
             'ranked_updated_at': player.ranked_updated_at,
+            'ship_badges': badges_by_pk.get(player.pk, []),
             **medal_summary,
         }
         row['ranked_sort_score'] = _calculate_landing_ranked_sort_score(row)
@@ -1477,6 +1485,7 @@ def _build_best_efficiency_landing_players(limit: int, realm: str = DEFAULT_REAL
         )[:limit]
     )
 
+    badges_by_pk = get_players_ship_badges_bulk([p.pk for p in players])
     rows = []
     for player in players:
         explorer_summary = getattr(player, 'explorer_summary', None)
@@ -1486,6 +1495,7 @@ def _build_best_efficiency_landing_players(limit: int, realm: str = DEFAULT_REAL
         rows.append({
             'player_id': player.player_id,
             'name': player.name,
+            'ship_badges': badges_by_pk.get(player.pk, []),
             'pvp_ratio': player.pvp_ratio,
             'is_hidden': player.is_hidden,
             'is_streamer': player.is_streamer,
@@ -1701,11 +1711,13 @@ _LANDING_PLAYER_ROW_ONLY_FIELDS = (
 )
 
 
-def _serialize_landing_player_row(player_obj) -> dict:
+def _serialize_landing_player_row(player_obj, ship_badges=None) -> dict:
     """Shared row builder for the Recent and other landing surfaces.
 
     Recent now sources its ordering from the trailing 7-day random-battle
-    rollup over PlayerDailyShipStats; the row shape is unchanged.
+    rollup over PlayerDailyShipStats; the row shape is unchanged. `ship_badges`
+    is the player's current top-spot list (bulk-fetched by the caller to avoid
+    N+1); defaults to empty.
     """
     ranked_rows = player_obj.ranked_json
     es = getattr(player_obj, 'explorer_summary', None)
@@ -1742,6 +1754,7 @@ def _serialize_landing_player_row(player_obj) -> dict:
         row['has_efficiency_rank_icon'] = False
         row['efficiency_rank_population_size'] = None
         row['efficiency_rank_updated_at'] = None
+    row['ship_badges'] = ship_badges or []
     return row
 
 
@@ -1764,9 +1777,11 @@ def _build_stale_recent_players_fallback(realm: str = DEFAULT_REALM) -> list[dic
         .order_by(F('last_battle_date').desc(nulls_last=True), F('pvp_battles').desc(nulls_last=True), 'name')[:LANDING_RECENT_PLAYERS_LIMIT]
     )
 
+    badges_by_pk = get_players_ship_badges_bulk([p.pk for p in candidates])
     payload = []
     for player_obj in candidates:
-        row = _serialize_landing_player_row(player_obj)
+        row = _serialize_landing_player_row(
+            player_obj, ship_badges=badges_by_pk.get(player_obj.pk, []))
         row['week_battles'] = None
         payload.append(row)
     return payload
@@ -1825,6 +1840,7 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
         .order_by(F('last_random_battle_at').desc(nulls_last=True), 'name')[:overfetch_cap]
     )
 
+    badges_by_pk = get_players_ship_badges_bulk([p.pk for p in candidates])
     payload = []
     for player_obj in candidates:
         week_battles = int(battle_counts.get(player_obj.pk, 0))
@@ -1834,7 +1850,8 @@ def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
         pvp_battles = int(getattr(player_obj, 'pvp_battles', 0) or 0)
         if week_battles > pvp_battles + LANDING_RECENT_PLAYERS_PVP_SLACK:
             continue
-        row = _serialize_landing_player_row(player_obj)
+        row = _serialize_landing_player_row(
+            player_obj, ship_badges=badges_by_pk.get(player_obj.pk, []))
         row['week_battles'] = week_battles
         payload.append(row)
         if len(payload) >= LANDING_RECENT_PLAYERS_LIMIT:

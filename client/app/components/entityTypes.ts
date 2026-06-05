@@ -1,4 +1,5 @@
 import type { RankedLeagueName } from './rankedLeague';
+import type { ShipBadge } from './ShipTopPlayerBanner';
 
 
 export interface LandingClan {
@@ -38,6 +39,7 @@ export interface LandingPlayer {
     has_efficiency_rank_icon?: boolean;
     efficiency_rank_population_size?: number | null;
     efficiency_rank_updated_at?: string | null;
+    ship_badges?: ShipBadge[];
 }
 
 

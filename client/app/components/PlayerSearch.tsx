@@ -19,6 +19,7 @@ import PveEnjoyerIcon from './PveEnjoyerIcon';
 import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
+import TopShipIcon from './TopShipIcon';
 import useIntervalRefresh from './useIntervalRefresh';
 import useClanHydrationPoll from './useClanHydrationPoll';
 import { useTheme } from '../context/ThemeContext';
@@ -80,7 +81,8 @@ const PlayerNameGrid: React.FC<{
     players: LandingPlayer[];
     onSelectMember: (playerName: string) => void;
     ariaLabelPrefix: string;
-}> = ({ players, onSelectMember, ariaLabelPrefix }) => (
+    realm: string;
+}> = ({ players, onSelectMember, ariaLabelPrefix, realm }) => (
     <div
         className="mt-4 flex max-w-[910px] flex-wrap items-center gap-x-4 gap-y-2 rounded-md py-1 text-sm"
         style={{ paddingInline: '0.3rem' }}
@@ -107,6 +109,9 @@ const PlayerNameGrid: React.FC<{
                             size="inline"
                         />
                     ) : null}
+                    {(player.ship_badges ?? []).map((b) => (
+                        <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} realm={realm} size="search" />
+                    ))}
                 </>
             );
 
@@ -602,6 +607,7 @@ const PlayerSearch: React.FC = () => {
                                 players={visibleLandingPlayers}
                                 onSelectMember={handleSelectMember}
                                 ariaLabelPrefix="Show"
+                                realm={realm}
                             />
                         </div>
                     )}

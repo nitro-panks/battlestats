@@ -19,6 +19,7 @@ import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import ShipTopPlayerBanner, { ShipBadge } from './ShipTopPlayerBanner';
 import ShipHonors, { ShipAward } from './ShipHonors';
+import TopShipIcon from './TopShipIcon';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
 import { useTheme } from '../context/ThemeContext';
@@ -433,6 +434,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}
                                 {isClanBattleEnjoyer && clanBattleSummary ? <ClanBattleShieldIcon winRate={clanBattleSummary.overallWinRate} size="header" /> : null}
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
+                                {!player.is_hidden && (player.ship_badges ?? []).map((b) => (
+                                    <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} realm={player.realm} size="header" />
+                                ))}
                             </div>
                             <div className="flex items-center gap-2 self-start">
                                 {refreshStatus && !player.is_hidden ? (
@@ -548,9 +552,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             {!player.is_hidden ? (
                                 <ShipTopPlayerBanner badges={player.ship_badges ?? []} realm={player.realm} />
                             ) : null}
-                            {!player.is_hidden ? (
-                                <ShipHonors awards={player.ship_awards ?? []} realm={player.realm} />
-                            ) : null}
                             <BattleHistoryCard
                                 playerName={player.name}
                                 realm={realm}
@@ -571,6 +572,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 onWarmupSettled={handleWarmupSettled}
                                 isLoading={isLoading}
                             />
+                            {!player.is_hidden ? (
+                                <ShipHonors awards={player.ship_awards ?? []} realm={player.realm} />
+                            ) : null}
                         </>
                     )}
                 </div>

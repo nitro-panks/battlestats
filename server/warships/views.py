@@ -1496,7 +1496,7 @@ def clan_members(request, clan_id: str) -> Response:
 
     _record_clan_lookup(clan, realm=realm)
 
-    from warships.data import queue_clan_efficiency_hydration, queue_clan_ranked_hydration, clan_battle_summary_is_stale, maybe_refresh_clan_battle_data, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT
+    from warships.data import queue_clan_efficiency_hydration, queue_clan_ranked_hydration, clan_battle_summary_is_stale, maybe_refresh_clan_battle_data, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT, get_players_ship_badges_bulk
     local_member_count = clan.player_set.exclude(name='').count()
     needs_clan_refresh = (
         not clan.members_count
@@ -1566,11 +1566,16 @@ def clan_members(request, clan_id: str) -> Response:
             return None
         return max(0, (today - member.last_battle_date).days)
 
+    # Current top-spot ship badges for every member in two queries (avoids N+1).
+    member_badges = get_players_ship_badges_bulk([m.pk for m in members], realm=realm)
+
     member_rows = []
     for member in members:
         days_since = _days_since_last_battle(member)
         member_rows.append({
             'name': member.name,
+            'realm': realm,
+            'ship_badges': member_badges.get(member.pk, []),
             'is_hidden': member.is_hidden,
             'is_streamer': member.is_streamer,
             'pvp_ratio': member.pvp_ratio,

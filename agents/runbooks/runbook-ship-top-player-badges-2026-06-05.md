@@ -156,6 +156,16 @@ Registered unconditionally; the **task** is the no-op gate (not folded under `EN
 
 ## Frontend
 
+> **2026-06-05 (later): top-spot tray icons + Ship Honors moved.** Current top-spot holders now also
+> get a small rank-colored medal in the player **classification-icon trays** (`TopShipIcon`,
+> tooltip `Currently #<n> <ship> on <REALM>`, tooltip-only), one per `ship_badges` entry, on **all three
+> tray surfaces**: `PlayerDetail` header, `ClanMembers` rows (clan page + player-page left rail), and
+> `PlayerSearch` landing/home rows. To feed the list surfaces, `ship_badges` was added to the
+> **clan-member** payload (`views.clan_members` + `ClanMemberSerializer`, also carries `realm`) and the
+> **landing** payloads (best overall/wr/cb/ranked/efficiency + recent), bulk-fetched via
+> `data.get_players_ship_badges_bulk(player_pks, realm=None)` (2 queries/list, no N+1). The `ShipHonors`
+> panel was relocated to the **bottom of the player page, below the Insights tabs**.
+
 - **Routing** — `lib/entityRoutes.ts`: `buildShipPath(shipId, shipName?, realm?)` →
   `/ship/<id>-<slug>?realm=`, and `parseShipIdFromRouteSegment` (mirrors the clan helpers).
 - **Treemap** — `RealmTopShipsTreemapSVG`: T10 tiles get `cursor:pointer` + an `onClick` →

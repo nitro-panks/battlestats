@@ -17,6 +17,7 @@ from django.utils import timezone
 from warships.data import (
     compute_ship_top_player_snapshot,
     get_player_ship_badges,
+    get_players_ship_badges_bulk,
     get_ship_leaderboard,
 )
 from warships.models import (
@@ -323,6 +324,26 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertAlmostEqual(board["players"][0]["win_rate"], 90.0)
         self.assertEqual(board["players"][0]["avg_damage"], 50_000)  # 1_000_000 / 20
         self.assertEqual(board["players"][0]["kills_per_battle"], 1.5)  # 30 / 20
+
+    def test_get_players_ship_badges_bulk_maps_pk_to_badges(self):
+        # Bulk fetch (used by landing/clan lists) returns each player's badges
+        # keyed by Player PK, matching the per-player function, with no row for
+        # a player who holds no top spot.
+        ace = self._player("Ace")
+        mid = self._player("Mid")
+        nobody = self._player("Nobody")  # below floor → no snapshot row
+        self._event(ace, SHIMA, battles=20, wins=18)
+        self._event(mid, SHIMA, battles=20, wins=14)
+        for i in range(3):  # pad pool past the population guard
+            self._event(self._player(f"Pad{i}"), SHIMA, battles=20, wins=10 + i)
+        self._event(nobody, SHIMA, battles=5, wins=5)  # 5 < floor (10)
+        self._run("na")
+
+        bulk = get_players_ship_badges_bulk([ace.pk, mid.pk, nobody.pk])
+        self.assertEqual(bulk[ace.pk], get_player_ship_badges(ace))
+        self.assertEqual(bulk[mid.pk], get_player_ship_badges(mid))
+        self.assertNotIn(nobody.pk, bulk)
+        self.assertEqual(bulk[ace.pk][0]["ship_name"], "Shimakaze")
 
     def test_get_ship_leaderboard_unknown_ship_returns_none(self):
         self.assertIsNone(get_ship_leaderboard("na", 1234567))
