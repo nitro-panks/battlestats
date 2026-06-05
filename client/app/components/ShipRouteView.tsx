@@ -112,15 +112,14 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
     return (
         <section className="mx-auto max-w-3xl">
             <header className="mb-4 border-b border-[var(--border)] pb-3">
-                <h1 className="text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
-                    {ship.name}
-                </h1>
-                <p className="mt-1 text-sm text-[var(--text-muted)]">{subtitle}</p>
+                <div className="flex flex-wrap items-baseline gap-3">
+                    <h1 className="text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
+                        {ship.name}
+                    </h1>
+                    <span className="text-sm text-[var(--text-muted)]">{subtitle}</span>
+                </div>
                 <p className="mt-2 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                     {realm.toUpperCase()} · best players · last {data.window_days} days
-                </p>
-                <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                    Ranked by win rate adjusted for battles played, so a short hot streak doesn&apos;t outrank a high-volume player.
                 </p>
             </header>
 
