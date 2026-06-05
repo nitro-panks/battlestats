@@ -8,7 +8,7 @@
 // high tier). Fed by `/api/realm/<realm>/top-ships`, a static daily count that
 // aggregates BattleEvent over the 7-day window and joins Ship for type/tier.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import * as d3 from 'd3';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
@@ -49,6 +49,15 @@ const TYPE_LABEL: Record<string, string> = {
     Battleship: 'BB',
     AirCarrier: 'CV',
     Submarine: 'SS',
+};
+
+// Shade the type color by tier around its own lightness: low tier lighter,
+// high tier darker — keeps the type hue recognizable while encoding tier.
+const shadeByTier = (base: string, tier: number | null): string => {
+    const c = d3.hsl(base);
+    const t = (tier == null ? 6 : Math.max(1, Math.min(11, tier))) / 11;
+    c.l = Math.max(0.16, Math.min(0.86, c.l * (1.28 - 0.56 * t)));
+    return c.toString();
 };
 
 const fetchRealmTopShips = (realm: string, mode: ShipMode): Promise<RealmTopShips> =>
@@ -93,14 +102,15 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
         }
     }, [palette]);
 
-    // Shade the type color by tier around its own lightness: low tier lighter,
-    // high tier darker — keeps the type hue recognizable while encoding tier.
-    const shadeByTier = (base: string, tier: number | null): string => {
+    // Resting fill for a tile. In dark mode tiles are knocked a bit darker so
+    // the lighten-on-hover highlight reads with more contrast.
+    const tileFill = useCallback((ship: TopShip): string => {
+        const base = shadeByTier(typeColor(ship.ship_type), ship.tier);
+        if (theme !== 'dark') return base;
         const c = d3.hsl(base);
-        const t = (tier == null ? 6 : Math.max(1, Math.min(11, tier))) / 11;
-        c.l = Math.max(0.16, Math.min(0.86, c.l * (1.28 - 0.56 * t)));
+        c.l = Math.max(0.10, c.l * 0.85);
         return c.toString();
-    };
+    }, [typeColor, theme]);
 
     useEffect(() => {
         let cancelled = false;
@@ -145,7 +155,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
             .attr('width', (d: { x0: number; x1: number }) => Math.max(0, d.x1 - d.x0))
             .attr('height', (d: { y0: number; y1: number }) => Math.max(0, d.y1 - d.y0))
             .attr('rx', 2)
-            .attr('fill', (d: { data: TopShip }) => shadeByTier(typeColor(d.data.ship_type), d.data.tier))
+            .attr('fill', (d: { data: TopShip }) => tileFill(d.data))
             .attr('stroke', 'var(--bg-card)')
             .attr('stroke-width', 1)
             .style('cursor', 'pointer')
@@ -162,12 +172,24 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
                     x: rect ? event.clientX - rect.left : 0,
                     y: rect ? event.clientY - rect.top : 0,
                 });
-                svg.selectAll('rect').attr('opacity', 0.4);
-                d3.select(this).attr('opacity', 1);
+                if (theme === 'dark') {
+                    // Dark by default, light on hover: lighten only the hovered
+                    // tile's own fill, leaving the rest of the map untouched.
+                    const c = d3.hsl(tileFill(d.data));
+                    c.l = Math.min(0.95, c.l + 0.22);
+                    d3.select(this).attr('fill', c.toString());
+                } else {
+                    svg.selectAll('rect').attr('opacity', 0.4);
+                    d3.select(this).attr('opacity', 1);
+                }
             })
-            .on('mouseleave', function onLeave() {
+            .on('mouseleave', function onLeave(this: SVGRectElement, _event: MouseEvent, d: { data: TopShip }) {
                 setHover(null);
-                svg.selectAll('rect').attr('opacity', 1);
+                if (theme === 'dark') {
+                    d3.select(this).attr('fill', tileFill(d.data));
+                } else {
+                    svg.selectAll('rect').attr('opacity', 1);
+                }
             });
 
         // Labels on tiles with enough room. Text color picks contrast off the
@@ -176,7 +198,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
             const w = d.x1 - d.x0;
             const h = d.y1 - d.y0;
             if (w < 46 || h < 24) return;
-            const fill = shadeByTier(typeColor(d.data.ship_type), d.data.tier);
+            const fill = tileFill(d.data);
             const textColor = d3.hsl(fill).l > 0.62 ? '#1a1a1a' : '#f5f5f5';
             const maxChars = Math.max(3, Math.floor((w - 8) / 6.2));
             const name = d.data.ship_name.length > maxChars
@@ -186,15 +208,17 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
             node.append('text')
                 .attr('x', 5).attr('y', 15)
                 .attr('font-size', 11).attr('font-weight', 600).attr('fill', textColor)
+                .style('pointer-events', 'none')
                 .text(name);
             if (h >= 38) {
                 node.append('text')
                     .attr('x', 5).attr('y', 29)
                     .attr('font-size', 10).attr('fill', textColor).attr('opacity', 0.85)
+                    .style('pointer-events', 'none')
                     .text(`${d.data.battles.toLocaleString()} · T${d.data.tier ?? '?'}`);
             }
         });
-    }, [data, width, height, palette, typeColor, realm, router]);
+    }, [data, width, height, palette, typeColor, realm, router, theme, tileFill]);
 
     return (
         <section
