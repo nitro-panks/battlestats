@@ -64,7 +64,11 @@ export function isoWeek(ms: number): { week: number; year: number } {
 // timestamp (ISO date-only strings parse as UTC midnight).
 export function formatWeek(ms: number, withYear = false): string {
     const { week, year } = isoWeek(ms);
-    return withYear ? `WK${week}'${String(year).slice(-2)}` : `WK${week}`;
+    // A season spans two ISO weeks; label it WK<n>-<n2> where n2 is the window's
+    // second calendar week (computed, so year-boundary wraps like 52→1 are correct).
+    const week2 = isoWeek(ms + 7 * 24 * 60 * 60 * 1000).week;
+    const base = `WK${week}-${week2}`;
+    return withYear ? `${base}'${String(year).slice(-2)}` : base;
 }
 
 // Compact human duration, e.g. "2d 14h", "14h 03m", "07m". Floors to the minute.

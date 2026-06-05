@@ -940,7 +940,7 @@ describe('PlayerDetail ship-honors panel', () => {
         expect(screen.getByText('Shimakaze')).toBeInTheDocument();
         // ×<count>: weeks shown oldest→newest, year-disambiguated.
         expect(screen.getByText(/×2/)).toBeInTheDocument();
-        expect(screen.getByText(/WK20'26, WK22'26/)).toBeInTheDocument();
+        expect(screen.getByText(/WK20-21'26, WK22-23'26/)).toBeInTheDocument();
     });
 
     it('persists through inactivity (year-disambiguated weeks, no current-standing text)', () => {
@@ -952,7 +952,7 @@ describe('PlayerDetail ship-honors panel', () => {
             },
         ]);
 
-        expect(screen.getByText(/×1: WK24'26/)).toBeInTheDocument();
+        expect(screen.getByText(/×1: WK24-25'26/)).toBeInTheDocument();
         expect(screen.queryByText(/currently/)).not.toBeInTheDocument();
         expect(screen.queryByText(/last held/)).not.toBeInTheDocument();
     });
