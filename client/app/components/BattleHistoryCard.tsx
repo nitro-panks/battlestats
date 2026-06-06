@@ -429,17 +429,21 @@ const OverallWrCell: React.FC<{
     );
 };
 
-const buildWindowedDays = (
+export const buildWindowedDays = (
     days: BattleHistoryByDay[],
     windowDays: number,
 ): BattleHistoryByDay[] => {
     const byDate = new Map(days.map((d) => [d.date, d]));
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Backend buckets battles by UTC calendar date (Django USE_TZ=False, TIME_ZONE=UTC),
+    // so anchor the window to UTC "today". Using the browser-local date would put the
+    // last slot a day behind the backend bucket for any viewer behind UTC, making
+    // today's battles fall outside the window and vanish from the sparkline.
+    const now = new Date();
+    const todayUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const padded: BattleHistoryByDay[] = [];
     for (let i = windowDays - 1; i >= 0; i -= 1) {
-        const d = new Date(today);
-        d.setDate(today.getDate() - i);
+        const d = new Date(todayUTC);
+        d.setUTCDate(d.getUTCDate() - i);
         const iso = d.toISOString().slice(0, 10);
         const existing = byDate.get(iso);
         padded.push(existing ?? {

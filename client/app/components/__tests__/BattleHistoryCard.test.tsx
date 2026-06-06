@@ -2,8 +2,10 @@ import React from 'react';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import BattleHistoryCard, {
     type BattleHistoryPayload,
+    type BattleHistoryByDay,
     battleHistoryCacheKey,
     battleHistoryFetchUrl,
+    buildWindowedDays,
     prefetchBattleHistory,
     BATTLE_HISTORY_FETCH_TTL_MS,
 } from '../BattleHistoryCard';
@@ -509,5 +511,38 @@ describe('battle-history prefetch dedupe contract', () => {
             cacheKey: 'battle-history:lil_boots:na:month:random:0:0',
             ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
         }));
+    });
+});
+
+describe('buildWindowedDays UTC anchoring', () => {
+    // The backend buckets battles by UTC calendar date (Django USE_TZ=False,
+    // TIME_ZONE=UTC). The sparkline window must anchor to the same UTC "today",
+    // or a viewer behind UTC sees today's battles fall past the last slot and
+    // vanish from the sparkline (the bug this guards against).
+    const day = (date: string, battles: number): BattleHistoryByDay => ({
+        date, battles, wins: 0, damage: 0, frags: 0,
+    });
+
+    beforeEach(() => {
+        jest.useFakeTimers();
+        // 02:34 UTC on 2026-06-06 — i.e. still 2026-06-05 in any timezone behind UTC.
+        jest.setSystemTime(new Date('2026-06-06T02:34:00Z'));
+    });
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
+    it('anchors the last slot to the UTC date, not the browser-local date', () => {
+        const padded = buildWindowedDays([], 30);
+        expect(padded).toHaveLength(30);
+        expect(padded[padded.length - 1].date).toBe('2026-06-06');
+        expect(padded[0].date).toBe('2026-05-08');
+    });
+
+    it("places today's UTC-keyed battles in the final slot (regression: sparkline dropped them)", () => {
+        const padded = buildWindowedDays([day('2026-06-06', 2)], 30);
+        const last = padded[padded.length - 1];
+        expect(last.date).toBe('2026-06-06');
+        expect(last.battles).toBe(2);
     });
 });
