@@ -312,3 +312,53 @@ _Phase 1 landed 2026-06-06 (flag default OFF — no production behavior change).
 **Validation (2026-06-06):** new `warships/tests/test_observations_bulk.py` (26 cases, incl. the read-only phase-2 shadow command `shadow_bulk_observation_parity` and its pure comparison logic). The parity test proves the **persistence/diff half**: identical in-memory payloads → identical `ships_stats_json` + `BattleEvent` rows (both paths funnel through the same `record_observation_from_payloads`). It does **NOT** prove **fetch-shape parity (D1)** — that `_bulk_fetch_account_info([pid])[0][str(pid)]` byte-equals `_fetch_player_personal_data(pid)`, and the bulk ships slice equals the single fetch. That cross-fetcher equality is only checkable against live WG and is the explicit job of the **phase-2 prod shadow** (`deep-equals` step). **Do not enable a realm without the phase-2 shadow run.** Full run on the sqlite gate (`--nomigrations`, `DB_ENGINE=sqlite3`): `test_observations_bulk` + `test_incremental_battles` + `test_enrichment_task` + `test_task_routing` = **177 passed**; curated release-gate subset = **262 passed**. Battle-history endpoint tests need `DJANGO_SECRET_KEY` set in the env. Parity test omits `last_battle_time` (sqlite rejects tz-aware datetimes under `USE_TZ=False`; prod Postgres accepts them).
 
 **Next (operational, not code):** phase 2 — run `shadow_bulk_observation_parity` on prod (read-only) until a clean run; then per-realm enable via `BULK_REALMS`; then R3 floor-limit raise. The phase-2 shadow tool shipped with phase 1.
+
+## Operator checklist (deploy → shadow → enable → R3)
+
+Concrete command-level companion to the Rollout section. **Prod facts:** systemd (not docker) backend; env in `/etc/battlestats-server.env` (+ `.secrets.env`), loaded as a systemd `EnvironmentFile`; venv at `/opt/battlestats-server/venv`. The floor task runs on the **default** Celery queue → `battlestats-celery` worker, and reads the bulk flags via `os.getenv` **at task runtime**, so a flag change needs that worker restarted. The deploy script **overwrites** `/etc/battlestats-server.env` from the local gitignored `server/.env.cloud` (+ `migrate_env_value` sed patches), so a manual `/etc/...env` edit is clobbered on the next deploy — see step 3 for the persistent path.
+
+**0 — Deploy phase-1 code (flag off, no behavior change).**
+- `./client/deploy/... ` not needed (backend-only). Run `./server/deploy/deploy_to_droplet.sh battlestats.online`.
+- Applies migration `0064` via the deploy's `manage.py migrate` (no-op alter — no DDL).
+- Verify: no `BATTLE_OBSERVATION_FLOOR_BULK_*` in `/etc/battlestats-server.env` ⇒ flags default off ⇒ legacy floor unchanged. Confirm observations/day stay steady.
+
+**1 — Pre-rollout sizing (read-only).** Bounds the phase-5 ranked sweep. Per realm (UTC dates; `USE_TZ=False`):
+```sql
+SELECT COUNT(*) FROM warships_player
+WHERE realm = :r AND is_hidden = false
+  AND last_battle_date >= (NOW()::date - 7)
+  AND ranked_json IS NOT NULL AND ranked_json <> '[]'::jsonb;
+```
+
+**2 — Phase-2 parity shadow (READ-ONLY — writes nothing).** On the droplet. `current/server` is the live symlink (systemd `WorkingDirectory`); its `server/.env`/`.env.secrets` symlink to `/etc/battlestats-server.env`, so manage.py auto-loads prod env (DB creds, WG_APP_ID) — no manual sourcing needed:
+```bash
+ssh root@battlestats.online
+cd /opt/battlestats-server/current/server
+/opt/battlestats-server/venv/bin/python manage.py shadow_bulk_observation_parity --realm asia --limit 5 --verbose
+# then widen:
+/opt/battlestats-server/venv/bin/python manage.py shadow_bulk_observation_parity --realm asia --limit 50
+```
+Repeat per realm. **GATE: `mismatch=0`.** Any `mismatch` ⇒ STOP, inspect with `--verbose`/`--json`, do not enable. `bulk_skips_capturable > 0` ⇒ investigate (sparse `BattleObservation`s, hidden, bad id) but it is a coverage gap, not data corruption.
+
+**3 — Enable one realm (smallest active = asia).**
+- _Controlled test (clobbered on next deploy — fine for a first look):_
+  ```bash
+  printf 'BATTLE_OBSERVATION_FLOOR_BULK_ENABLED=1\nBATTLE_OBSERVATION_FLOOR_BULK_REALMS=asia\n' >> /etc/battlestats-server.env
+  systemctl restart battlestats-celery   # default-queue worker; reloads EnvironmentFile. Beat needs no restart.
+  ```
+- _Persistent (survives deploys):_ add the two vars to the local gitignored `server/.env.cloud`, **or** add a `migrate_env_value` sed block in `deploy_to_droplet.sh` next to `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED`, then redeploy.
+- Keep `BATTLE_OBSERVATION_FLOOR_LIMIT=3000`. Watch over the next 6–24h (floor runs every 6h/realm, striped):
+  - 407 rate — the engine aborts a sweep on 407 (`"aborting sweep"` warning); should be rare.
+  - Coverage by source:
+    ```sql
+    SELECT source, COUNT(DISTINCT player_id) FROM warships_battleobservation
+    WHERE observed_at >= NOW() - INTERVAL '24 hours' GROUP BY source;
+    ```
+    expect `bulk_floor` rows for asia.
+  - events/day not collapsing; `random_prior_broken` warning frequency not spiking; chunk wall-time in floor logs.
+
+**4 — All realms.** `BATTLE_OBSERVATION_FLOOR_BULK_REALMS=na,eu,asia`; restart `battlestats-celery`. Confirm aggregate WG load stays under ~10 req/s alongside the clan crawl (the crawl-coexist chunk delay raises pacing automatically while the crawl lock is held).
+
+**5 — R3, raise the floor limit.** Step `BATTLE_OBSERVATION_FLOOR_LIMIT` up (3000 → 10000 → toward full active ~255k ≈ 5,100 WG calls, ~8.5 min @10/s). **Note:** the task currently passes one `limit` to both sweeps (the command's `--ranked-limit` defaults to it), so the per-player ranked sweep shares the cap. If the ranked-known set (step 1) is large enough to bottleneck, that needs a small follow-up — wire a `BATTLE_OBSERVATION_FLOOR_RANKED_LIMIT` env → task kwarg → command `ranked_limit` — and stage the ranked expansion separately.
+
+**Rollback (any phase, instant).** Drop the realm from `BATTLE_OBSERVATION_FLOOR_BULK_REALMS` or set `BATTLE_OBSERVATION_FLOOR_BULK_ENABLED=0`; restart `battlestats-celery`. Legacy per-player floor resumes on the next 6h tick. Nothing to unwind (migration `0064` is a no-op).
