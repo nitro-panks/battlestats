@@ -3,7 +3,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import ClanDetail from '../ClanDetail';
 
 const mockUseClanMembers = jest.fn();
+const mockUseClanMemberTiers = jest.fn();
 const mockClipboardWriteText = jest.fn();
+const trackEventMock = jest.fn();
 const onSelectMemberSpy = jest.fn();
 
 jest.mock('next/dynamic', () => {
@@ -44,12 +46,22 @@ jest.mock('../useClanMembers', () => ({
     useClanMembers: (...args: unknown[]) => mockUseClanMembers(...args),
 }));
 
+jest.mock('../useClanMemberTiers', () => ({
+    useClanMemberTiers: (...args: unknown[]) => mockUseClanMemberTiers(...args),
+}));
+
+jest.mock('../../lib/umami', () => ({
+    trackEvent: (...args: unknown[]) => trackEventMock(...args),
+}));
+
 describe('ClanDetail clan roster hydration wiring', () => {
     let consoleErrorSpy: jest.SpyInstance;
 
     beforeEach(() => {
         mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: '' });
+        mockUseClanMemberTiers.mockReturnValue({ data: [], loading: false });
         mockClipboardWriteText.mockReset();
+        trackEventMock.mockReset();
         onSelectMemberSpy.mockReset();
         Object.defineProperty(navigator, 'clipboard', {
             configurable: true,
@@ -198,5 +210,45 @@ describe('ClanDetail clan roster hydration wiring', () => {
 
         expect(await screen.findByText('Copy failed')).toBeInTheDocument();
         expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('fires a clan-share umami event when the share button is clicked', async () => {
+        mockClipboardWriteText.mockResolvedValue(undefined);
+
+        render(
+            <ClanDetail
+                clan={{ clan_id: 5555, name: 'Fixture Clan', tag: 'FX', members_count: 12 }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable clan URL' }));
+
+        expect(trackEventMock).toHaveBeenCalledWith('clan-share', expect.objectContaining({ realm: expect.any(String) }));
+    });
+
+    it('fires name-encoded clan-chart-3d / clan-chart-2d events for the dimension toggle', () => {
+        // >=50% KDR coverage makes the 3D toggle available.
+        mockUseClanMemberTiers.mockReturnValue({
+            data: [{ kdr: 1.2 }, { kdr: 0.9 }],
+            loading: false,
+        });
+
+        render(
+            <ClanDetail
+                clan={{ clan_id: 5555, name: 'Fixture Clan', tag: 'FX', members_count: 12 }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+            />,
+        );
+
+        // Default is 2D, so switching to 3D fires clan-chart-3d (not clan-chart-2d).
+        fireEvent.click(screen.getByRole('button', { name: '3D' }));
+        expect(trackEventMock).toHaveBeenCalledWith('clan-chart-3d', expect.objectContaining({ realm: expect.any(String) }));
+
+        // Switching back fires clan-chart-2d — the two states are distinct event names.
+        fireEvent.click(screen.getByRole('button', { name: '2D' }));
+        expect(trackEventMock).toHaveBeenCalledWith('clan-chart-2d', expect.objectContaining({ realm: expect.any(String) }));
     });
 });

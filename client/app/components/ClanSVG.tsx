@@ -629,8 +629,12 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
     }, [clanId]);
 
     const handleScaleSelect = useCallback((scale: 'linear' | 'log') => {
+        // Only an actual scale change is a meaningful toggle; re-clicking the
+        // active scale (which only re-pins the pref) stays out of the realtime feed.
+        if (effectiveScaleType !== scale) {
+            trackEvent(scale === 'log' ? 'clan-chart-log' : 'clan-chart-linear', { realm });
+        }
         setUserScalePref(scale);
-        trackEvent('chart-scale', { chart: 'clan-members', scale });
         if (typeof window === 'undefined') {
             return;
         }
@@ -639,7 +643,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
         } catch {
             // ignore storage failures (private mode / quota)
         }
-    }, [clanId]);
+    }, [clanId, effectiveScaleType, realm]);
 
     useEffect(() => {
         let cancelled = false;
