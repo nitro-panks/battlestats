@@ -178,6 +178,30 @@
                 "doc-system-replaced"
             ]
         },
+        "agents/runbooks/runbook-audience-device-optimization-2026-06-06.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "product",
+            "aliases": [
+                "audience device optimization",
+                "device os browser tuning",
+                "responsive support matrix",
+                "touch target 44px",
+                "ultrawide treemap"
+            ],
+            "tags": [
+                "umami",
+                "ux",
+                "responsive",
+                "accessibility",
+                "frontend"
+            ],
+            "archive_on": [
+                "heatmap-ultrawide-tranche-closed"
+            ]
+        },
         "agents/runbooks/runbook-umami-hardening-2026-06-02.md": {
             "kind": "runbook",
             "status": "active",

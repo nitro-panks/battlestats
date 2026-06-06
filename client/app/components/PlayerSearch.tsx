@@ -509,8 +509,11 @@ const PlayerSearch: React.FC = () => {
                     {error && <p className="text-red-600 dark:text-red-400">{error}</p>}
 
                     {/* Realm most-played-ships treemap, above the Players
-                        (Recent/Best) list. */}
-                    <div className="mt-2 pt-6">
+                        (Recent/Best) list. Breaks out of the landing's
+                        max-w-5xl column at xl+ so the dense viz can use
+                        ultrawide width (the treemap re-caps itself via its
+                        own max-w); prose/lists stay capped. */}
+                    <div className="mt-2 pt-6 xl:relative xl:left-1/2 xl:right-1/2 xl:-mx-[50vw] xl:flex xl:w-screen xl:justify-center">
                         <RealmTopShipsTreemapSVG />
                     </div>
 

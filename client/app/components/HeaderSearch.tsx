@@ -270,7 +270,7 @@ const HeaderSearch: React.FC = () => {
                     aria-autocomplete="list"
                     aria-controls={SEARCH_SUGGESTIONS_ID}
                     aria-activedescendant={highlightedSuggestionIndex >= 0 ? `header-player-search-suggestion-${highlightedSuggestionIndex}` : undefined}
-                    className="block w-full rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-sm placeholder:text-[var(--text-secondary)] focus:border-[var(--accent-light)] focus:outline-none focus:ring-[var(--accent-light)]"
+                    className="block w-full min-h-[44px] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-sm placeholder:text-[var(--text-secondary)] focus:border-[var(--accent-light)] focus:outline-none focus:ring-[var(--accent-light)]"
                 />
                 {isSuggestionListOpen && suggestions.length > 0 && (
                     <ul
@@ -292,7 +292,7 @@ const HeaderSearch: React.FC = () => {
                                             type="button"
                                             onMouseDown={() => handleSuggestionMouseDown(suggestion)}
                                             onMouseEnter={() => setHighlightedSuggestionIndex(index)}
-                                            className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${isHighlighted ? "bg-[var(--bg-hover)] text-[var(--accent-dark)]" : "text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]"}`}
+                                            className={`flex w-full min-h-[44px] items-center justify-between gap-3 px-3 py-2 text-left text-sm ${isHighlighted ? "bg-[var(--bg-hover)] text-[var(--accent-dark)]" : "text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]"}`}
                                         >
                                             <span className="inline-flex items-center gap-2">
                                                 <span className="font-semibold text-[var(--accent-mid)]">[{suggestion.tag}]</span>
@@ -315,10 +315,10 @@ const HeaderSearch: React.FC = () => {
                                         type="button"
                                         onMouseDown={() => handleSuggestionMouseDown(suggestion)}
                                         onMouseEnter={() => setHighlightedSuggestionIndex(index)}
-                                        className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${isHighlighted ? "bg-[var(--bg-hover)] text-[var(--accent-dark)]" : "text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]"}`}
+                                        className={`flex w-full min-h-[44px] items-center justify-between gap-3 px-3 py-2 text-left text-sm ${isHighlighted ? "bg-[var(--bg-hover)] text-[var(--accent-dark)]" : "text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]"}`}
                                     >
                                         <span className="inline-flex items-center gap-2">
-                                            <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u{1F79C}"}</span>
+                                            <span style={{ color: wrColor(player.pvp_ratio), WebkitTextStroke: "0.5px var(--border)" }} aria-hidden="true">{"\u{1F79C}"}</span>
                                             <span>{player.name}</span>
                                             {player.is_hidden ? <HiddenAccountIcon /> : null}
                                         </span>
@@ -331,7 +331,7 @@ const HeaderSearch: React.FC = () => {
             </div>
             <button
                 type="submit"
-                className={`rounded-md px-4 py-2 text-sm font-medium text-white transition-colors ${searchMode === "clan" ? "bg-emerald-500 hover:bg-emerald-600" : "bg-[var(--accent-mid)] hover:bg-[var(--accent-dark)]"}`}
+                className={`min-h-[44px] rounded-md px-4 py-2 text-sm font-medium text-white transition-colors ${searchMode === "clan" ? "bg-emerald-500 hover:bg-emerald-600" : "bg-[var(--accent-mid)] hover:bg-[var(--accent-dark)]"}`}
             >
                 Go
             </button>
