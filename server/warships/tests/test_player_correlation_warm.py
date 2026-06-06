@@ -43,27 +43,48 @@ class TierTypeWarmGateTests(SimpleTestCase):
         mock_fetch.assert_called_once_with(realm='eu', force_rebuild=True)
 
 
-class CorrelationForceRebuildBypassTests(SimpleTestCase):
-    """`force_rebuild=True` must skip the cached/published read short-circuit so
-    a stale or empty durable `published` payload can actually be replaced."""
+class TierTypePopulationRebuildTests(SimpleTestCase):
+    """The rebuild aggregates in Postgres (`_aggregate_tier_type_population_sql`),
+    builds tiles/trend from the result, and must bypass the durable `published`
+    fallback under force_rebuild. trend is derived from the raw tile_counts."""
 
-    @patch('warships.data._build_tier_type_y_values', return_value=[10])
-    @patch('warships.data._build_tier_type_x_labels', return_value=[])
-    @patch('warships.data.Player')
+    @patch('warships.data._aggregate_tier_type_population_sql')
     @patch('warships.data.cache')
-    def test_tier_type_force_rebuild_ignores_published_fallback(
-        self, mock_cache, mock_player, _mock_x, _mock_y,
-    ):
-        # Published holds a stale payload; without the bypass this would be
-        # returned verbatim. force_rebuild must recompute instead.
+    def test_force_rebuild_builds_from_sql_and_ignores_published(self, mock_cache, mock_sql):
+        # Published holds a stale payload; without the bypass it'd be returned verbatim.
         mock_cache.get.return_value = {'tracked_population': 999, 'stale': True}
-        mock_player.objects.filter.return_value.values_list.return_value.iterator.return_value = iter([])
+        # Two ship types, Cruiser spanning two tiers.
+        mock_sql.return_value = (
+            {('Cruiser', 10): 300, ('Cruiser', 8): 100, ('Destroyer', 9): 200},
+            42,
+        )
 
         with patch('warships.data.transaction.atomic'), patch('warships.data._elevated_work_mem'):
             result = data._fetch_player_tier_type_population_correlation(
                 realm='asia', force_rebuild=True)
 
-        # Recomputed from an empty population, NOT the stale published payload.
-        self.assertNotIn('stale', result)
-        self.assertEqual(result['tracked_population'], 0)
-        self.assertEqual(result['tiles'], [])
+        self.assertNotIn('stale', result)  # not the published payload
+        self.assertEqual(result['tracked_population'], 42)
+        # tile sums preserved
+        tile_counts = {(result['x_labels'][t['x_index']], result['y_values'][t['y_index']]): t['count']
+                       for t in result['tiles']}
+        self.assertEqual(tile_counts, {('Cruiser', 10): 300, ('Cruiser', 8): 100, ('Destroyer', 9): 200})
+        # trend = battle-weighted avg tier per type, derived from raw tiles
+        trend = {result['x_labels'][p['x_index']]: (p['avg_tier'], p['count']) for p in result['trend']}
+        self.assertEqual(trend['Destroyer'], (9.0, 200))
+        # Cruiser: (10*300 + 8*100) / 400 = 3800/400 = 9.5
+        self.assertEqual(trend['Cruiser'], (9.5, 400))
+
+    @patch('warships.data._aggregate_tier_type_population_python')
+    @patch('warships.data._aggregate_tier_type_population_sql', side_effect=RuntimeError('boom'))
+    @patch('warships.data.cache')
+    def test_sql_failure_falls_back_to_python_scan(self, mock_cache, _mock_sql, mock_py):
+        mock_cache.get.return_value = None
+        mock_py.return_value = ({('Battleship', 7): 75}, 3)
+
+        with patch('warships.data.transaction.atomic'), patch('warships.data._elevated_work_mem'):
+            result = data._fetch_player_tier_type_population_correlation(
+                realm='na', force_rebuild=True)
+
+        mock_py.assert_called_once()  # fell back to the Python scan
+        self.assertEqual(result['tracked_population'], 3)

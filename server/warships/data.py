@@ -3110,6 +3110,86 @@ def _build_tier_type_player_cells(battles_json: Any) -> list[dict]:
     return player_cells
 
 
+# Aggregates the tier-type population entirely inside Postgres (jsonb), so we
+# never stream every qualifying player's battles_json into Python — that
+# per-element parse + transfer was a ~8 min full scan per realm. The `()`
+# grouping-set row carries tracked_population (distinct players among non-Unknown
+# qualifying rows); the other rows are per-(ship_type, ship_tier) battle sums.
+# The WHERE clause mirrors `_extract_tier_type_battle_rows` exactly: object
+# elements, non-empty string ship_type, JSON-number ship_tier/pvp_battles both
+# truncated-to-int and > 0, the AirCarrier alias, and the Unknown exclusion.
+_TIER_TYPE_POPULATION_SQL = """
+WITH qualifying AS (
+    SELECT
+        p.player_id,
+        CASE WHEN btrim(elem->>'ship_type') = 'AirCarrier'
+             THEN 'Aircraft Carrier'
+             ELSE btrim(elem->>'ship_type') END AS ship_type,
+        trunc((elem->>'ship_tier')::numeric)::int   AS ship_tier,
+        trunc((elem->>'pvp_battles')::numeric)::int AS pvp_battles
+    FROM warships_player p
+    CROSS JOIN LATERAL jsonb_array_elements(p.battles_json) AS elem
+    WHERE p.realm = %s
+      AND p.is_hidden = false
+      AND p.pvp_battles >= %s
+      AND p.battles_json IS NOT NULL
+      AND jsonb_typeof(p.battles_json) = 'array'
+      AND jsonb_typeof(elem) = 'object'
+      AND jsonb_typeof(elem->'ship_type') = 'string'
+      AND btrim(elem->>'ship_type') <> ''
+      AND jsonb_typeof(elem->'ship_tier') = 'number'
+      AND jsonb_typeof(elem->'pvp_battles') = 'number'
+      AND trunc((elem->>'ship_tier')::numeric)::int > 0
+      AND trunc((elem->>'pvp_battles')::numeric)::int > 0
+)
+SELECT ship_type, ship_tier,
+       SUM(pvp_battles)::bigint AS battles,
+       COUNT(DISTINCT player_id) AS players
+FROM qualifying
+WHERE ship_type <> 'Unknown'
+GROUP BY GROUPING SETS ((ship_type, ship_tier), ())
+"""
+
+
+def _aggregate_tier_type_population_sql(realm: str, min_population_battles: int) -> tuple[dict[tuple[str, int], int], int]:
+    """Return (tile_counts, tracked_population) via a single in-Postgres jsonb
+    aggregation. See `_TIER_TYPE_POPULATION_SQL`."""
+    tile_counts: dict[tuple[str, int], int] = {}
+    tracked_population = 0
+    with connection.cursor() as cursor:
+        cursor.execute(_TIER_TYPE_POPULATION_SQL,
+                       [realm, min_population_battles])
+        for ship_type, ship_tier, battles, players in cursor.fetchall():
+            if ship_type is None and ship_tier is None:
+                tracked_population = int(players or 0)
+            else:
+                tile_counts[(ship_type, int(ship_tier))] = int(battles or 0)
+    return tile_counts, tracked_population
+
+
+def _aggregate_tier_type_population_python(realm: str, min_population_battles: int) -> tuple[dict[tuple[str, int], int], int]:
+    """Proven-correct fallback: stream battles_json and aggregate in Python
+    (the original ~8 min/realm path). Used only if the SQL aggregation raises."""
+    tile_counts: dict[tuple[str, int], int] = {}
+    tracked_population = 0
+    rows = Player.objects.filter(
+        realm=realm,
+        is_hidden=False,
+        pvp_battles__gte=min_population_battles,
+        battles_json__isnull=False,
+    ).values_list('battles_json', flat=True)
+    for battles_json in rows.iterator(chunk_size=1000):
+        normalized_rows = _extract_tier_type_battle_rows(battles_json)
+        if not normalized_rows:
+            continue
+        tracked_population += 1
+        for row in normalized_rows:
+            key = (str(row['ship_type']), int(row['ship_tier']))
+            tile_counts[key] = tile_counts.get(
+                key, 0) + int(row['pvp_battles'])
+    return tile_counts, tracked_population
+
+
 def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM, *, allow_rebuild: bool = True, force_rebuild: bool = False) -> dict:
     cache_key = _player_correlation_cache_key(
         PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
@@ -3134,38 +3214,31 @@ def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM, *
             return None
 
     config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
-    tile_counts: dict[tuple[str, int], int] = {}
+    min_population_battles = config['min_population_battles']
+
+    try:
+        with transaction.atomic(), _elevated_work_mem():
+            tile_counts, tracked_population = _aggregate_tier_type_population_sql(
+                realm, min_population_battles)
+    except Exception:
+        logging.exception(
+            "tier_type SQL aggregation failed for realm=%s; "
+            "falling back to the Python scan", realm)
+        with transaction.atomic(), _elevated_work_mem():
+            tile_counts, tracked_population = _aggregate_tier_type_population_python(
+                realm, min_population_battles)
+
+    # trend and the observed ship-type set are fully derivable from the raw
+    # per-(type, tier) battle sums (avg_tier = Σ tier·battles / Σ battles).
+    # Derive from the unfiltered tile_counts so any tier outside the 1–11 board
+    # still contributes to the trend exactly as the row-by-row scan did.
+    observed_ship_types: set[str] = {ship_type for (ship_type, _tier) in tile_counts}
     trend_tier_weighted_sum: dict[str, float] = {}
     trend_battles: dict[str, int] = {}
-    observed_ship_types: set[str] = set()
-    tracked_population = 0
-
-    with transaction.atomic(), _elevated_work_mem():
-        rows = Player.objects.filter(
-            realm=realm,
-            is_hidden=False,
-            pvp_battles__gte=config['min_population_battles'],
-            battles_json__isnull=False,
-        ).values_list('battles_json', flat=True)
-
-        for battles_json in rows.iterator(chunk_size=1000):
-            normalized_rows = _extract_tier_type_battle_rows(battles_json)
-            if not normalized_rows:
-                continue
-
-            tracked_population += 1
-            for row in normalized_rows:
-                ship_type = str(row['ship_type'])
-                ship_tier = int(row['ship_tier'])
-                pvp_battles = int(row['pvp_battles'])
-                observed_ship_types.add(ship_type)
-
-                tile_counts[(ship_type, ship_tier)] = tile_counts.get(
-                    (ship_type, ship_tier), 0) + pvp_battles
-                trend_tier_weighted_sum[ship_type] = trend_tier_weighted_sum.get(
-                    ship_type, 0.0) + (ship_tier * pvp_battles)
-                trend_battles[ship_type] = trend_battles.get(
-                    ship_type, 0) + pvp_battles
+    for (ship_type, ship_tier), count in tile_counts.items():
+        trend_tier_weighted_sum[ship_type] = trend_tier_weighted_sum.get(
+            ship_type, 0.0) + (ship_tier * count)
+        trend_battles[ship_type] = trend_battles.get(ship_type, 0) + count
 
     x_labels = _build_tier_type_x_labels(observed_ship_types)
     y_values = _build_tier_type_y_values()
