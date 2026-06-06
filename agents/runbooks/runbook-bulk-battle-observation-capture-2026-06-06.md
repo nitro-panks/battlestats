@@ -356,6 +356,25 @@ The **same-valid-id-twice** case is decisive: an id that returns `ok` alone cann
 
 **Also correct `analysis-update-process-cost-map-2026-06-06.md`** — its R1 row and the "~0.02/player bulk ships" figure are refuted by this measurement.
 
+## ✅ Reframed plan — the goal IS achievable (2026-06-06)
+
+A second bad number in the cost map flips the conclusion to positive. **Measured on prod:**
+
+| metric | cost-map claimed | measured |
+|---|---|---|
+| active-7d players (floor target) | 254,908 | **83,842 visible** (88,862 incl. hidden); active-1d 48,459; active-30d 129,559 |
+| productive-capture rate | 51.7% | **50.8%** (23,773 of 46,790 distinct players observed/24h had a real battle) |
+| realm split (active-7d visible) | — | asia 22k · eu 37k · na 25k |
+
+**Consequence:** the daily target is ~84k, not 255k — so **per-player ships at ~1 call/player ≈ ~84k WG calls/day ≈ ~1 req/s averaged**, which *fits* the ~10 req/s shared budget. The headline goal (daily battle history for every active player) was never blocked by the absence of bulk ships; it was blocked by a **3× overcounted population**. No bulk-ships endpoint is needed.
+
+**Recommended path (grounded in the verified numbers):**
+
+- **A. Ship R1 (bulk `account/info`) + raise the floor limit (R3) toward ~84k active-7d.** R1 halves the floor's per-player cost (2 → ~1, dropping the `account/info` call). Already built, parity-proven, flag-gated. At ~84k that's ~84k ships + ~840 bulk-account calls/day — feasible. This alone achieves daily coverage.
+- **B. (Optimization) Bulk `account/info` as a change-detector gate.** `account/info` bulks fine and returns `statistics.pvp.battles` + `last_battle_time`. Bulk-fetch the active set (~840 calls), compare each to the stored `Player.pvp_battles`/last observation, and issue the expensive per-player `ships/stats` **only for players whose battle count moved** — skipping the ~49% who didn't play. Cuts ships calls to ~24–30k/day (~0.3 req/s) and removes the wasted-capture problem the cost map flagged. Reuses the R1 `_bulk_fetch_account_info` already built — so R1 is the foundation, not wasted work.
+
+Net: keep R1, add the change-detector gate, raise the limit. The ~100× framing dies but the objective is comfortably reachable.
+
 ## Operator checklist (deploy → shadow → enable → R3)
 
 Concrete command-level companion to the Rollout section. **Prod facts:** systemd (not docker) backend; env in `/etc/battlestats-server.env` (+ `.secrets.env`), loaded as a systemd `EnvironmentFile`; venv at `/opt/battlestats-server/venv`. The floor task runs on the **default** Celery queue → `battlestats-celery` worker, and reads the bulk flags via `os.getenv` **at task runtime**, so a flag change needs that worker restarted. The deploy script **overwrites** `/etc/battlestats-server.env` from the local gitignored `server/.env.cloud` (+ `migrate_env_value` sed patches), so a manual `/etc/...env` edit is clobbered on the next deploy — see step 3 for the persistent path.
