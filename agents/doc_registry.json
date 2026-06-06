@@ -225,6 +225,30 @@
                 "umami-v3-migration"
             ]
         },
+        "agents/runbooks/runbook-wg-rate-limiter-token-bucket-2026-06-05.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "wg rate limiter",
+                "token bucket",
+                "shared rate limit across workers",
+                "seasonstats 407 fan-out",
+                "request limit exceeded"
+            ],
+            "tags": [
+                "wargaming-api",
+                "rate-limiting",
+                "redis",
+                "celery",
+                "clan-battle"
+            ],
+            "archive_on": [
+                "token-bucket-rate-limiter-implemented"
+            ]
+        },
         "agents/runbooks/runbook-api-surface.md": {
             "kind": "runbook",
             "status": "active",
