@@ -212,11 +212,16 @@ sweep is bounded:
       .exclude(ranked_json__isnull=True).exclude(ranked_json=[]).count()
 
 1. **Land code, flag off.** Legacy path live. Tests green.
-2. **Shadow / parity validation** (no cutover): ~50 active players on one realm, capture each via
-   both legacy `record_observation_and_diff` and a one-off `record_observations_bulk` over the same
-   ids → assert identical `BattleObservation.ships_stats_json` and identical `BattleEvent` rows.
-   Also assert `_fetch_player_personal_data(pid)` deep-equals `_bulk_fetch_account_info([pid])[0][str(pid)]`,
-   and single `ships/stats` deep-equals the bulk slice (incl. Phase 7 `main_battery`/`torpedoes`).
+2. **Shadow / parity validation** (no cutover) — run the **read-only** shadow command (ships with
+   phase 1, writes nothing): `python manage.py shadow_bulk_observation_parity --realm <r> --limit 50`.
+   It fetches each sampled player both ways and compares the **would-be observation payloads** —
+   the coerced+serialized `ships_stats_json` (incl. Phase 7 `main_battery`/`torpedoes`) and the
+   account aggregates — without persisting. Verdicts: `match`, `mismatch` (bulk would write wrong
+   data — **abort, do not enable**), `bulk_skips_capturable` (bulk would miss a player legacy
+   captures — coverage gap to investigate), `legacy_skips_only`. `--verbose` dumps per-player diffs;
+   `--json` for machine output; `--player-ids` to target specific accounts. **A clean run here is
+   the gate that the unit-test parity (persistence/diff only) cannot provide** — it exercises live
+   WG, proving the D1 fetch-shape equality.
 3. **Enable on one realm** (smallest active count). Watch: WG 407 rate, observations/day,
    events/day, `random_prior_broken` log frequency, chunk wall-time. Keep `FLOOR_LIMIT=3000`.
 4. **All realms.** Confirm aggregate WG load stays under budget alongside the crawl.
@@ -304,6 +309,6 @@ _Phase 1 landed 2026-06-06 (flag default OFF — no production behavior change).
 - `BATTLE_OBSERVATION_FLOOR_BULK_CHUNK_DELAY` (default `0.5`)
 - `BATTLE_OBSERVATION_FLOOR_BULK_CRAWL_CHUNK_DELAY` (default `1.0`)
 
-**Validation (2026-06-06):** new `warships/tests/test_observations_bulk.py` (18 cases). The parity test proves the **persistence/diff half**: identical in-memory payloads → identical `ships_stats_json` + `BattleEvent` rows (both paths funnel through the same `record_observation_from_payloads`). It does **NOT** prove **fetch-shape parity (D1)** — that `_bulk_fetch_account_info([pid])[0][str(pid)]` byte-equals `_fetch_player_personal_data(pid)`, and the bulk ships slice equals the single fetch. That cross-fetcher equality is only checkable against live WG and is the explicit job of the **phase-2 prod shadow** (`deep-equals` step). **Do not enable a realm without the phase-2 shadow run.** Full run on the sqlite gate (`--nomigrations`, `DB_ENGINE=sqlite3`): `test_observations_bulk` + `test_incremental_battles` + `test_enrichment_task` + `test_task_routing` = **177 passed**; curated release-gate subset = **262 passed**. Battle-history endpoint tests need `DJANGO_SECRET_KEY` set in the env. Parity test omits `last_battle_time` (sqlite rejects tz-aware datetimes under `USE_TZ=False`; prod Postgres accepts them).
+**Validation (2026-06-06):** new `warships/tests/test_observations_bulk.py` (26 cases, incl. the read-only phase-2 shadow command `shadow_bulk_observation_parity` and its pure comparison logic). The parity test proves the **persistence/diff half**: identical in-memory payloads → identical `ships_stats_json` + `BattleEvent` rows (both paths funnel through the same `record_observation_from_payloads`). It does **NOT** prove **fetch-shape parity (D1)** — that `_bulk_fetch_account_info([pid])[0][str(pid)]` byte-equals `_fetch_player_personal_data(pid)`, and the bulk ships slice equals the single fetch. That cross-fetcher equality is only checkable against live WG and is the explicit job of the **phase-2 prod shadow** (`deep-equals` step). **Do not enable a realm without the phase-2 shadow run.** Full run on the sqlite gate (`--nomigrations`, `DB_ENGINE=sqlite3`): `test_observations_bulk` + `test_incremental_battles` + `test_enrichment_task` + `test_task_routing` = **177 passed**; curated release-gate subset = **262 passed**. Battle-history endpoint tests need `DJANGO_SECRET_KEY` set in the env. Parity test omits `last_battle_time` (sqlite rejects tz-aware datetimes under `USE_TZ=False`; prod Postgres accepts them).
 
-**Next (operational, not code):** phase 2 prod parity-shadow by `source`, then per-realm enable via `BULK_REALMS`, then R3 floor-limit raise.
+**Next (operational, not code):** phase 2 — run `shadow_bulk_observation_parity` on prod (read-only) until a clean run; then per-realm enable via `BULK_REALMS`; then R3 floor-limit raise. The phase-2 shadow tool shipped with phase 1.

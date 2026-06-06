@@ -10,11 +10,12 @@ events to the legacy `record_observation_and_diff` path. The parity test below
 is the load-bearing assertion; the rest cover the bulk-only error taxonomy (D5)
 and per-player slice handling (D4).
 """
+import io
 import os
 from unittest import mock
 
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from warships.incremental_battles import (
@@ -462,3 +463,102 @@ class BulkObservationTaskTests(TestCase):
         self.assertFalse(result["bulk"])
         cc.assert_called_once()
         self.assertNotIn("bulk", cc.call_args.kwargs)  # legacy call shape
+
+
+# The command imports the fetchers function-locally, so patch them at source.
+SHADOW_ACCT = "warships.api.players._bulk_fetch_account_info"
+SHADOW_SHIP = "warships.api.ships._bulk_fetch_ship_stats"
+SHADOW_SINGLE_ACCT = "warships.api.players._fetch_player_personal_data"
+SHADOW_SINGLE_SHIP = "warships.api.ships._fetch_ship_stats_for_player"
+
+
+class ShadowParityCompareTests(SimpleTestCase):
+    """Pure comparison logic for the phase-2 parity shadow (no DB)."""
+
+    def _compare(self, acct_s, ships_s, acct_b, ships_b):
+        from warships.management.commands.shadow_bulk_observation_parity import (
+            compare_player,
+        )
+        return compare_player(acct_s, ships_s, acct_b, ships_b)
+
+    def test_identical_payloads_match(self):
+        acct = _account_payload(battles=101, wins=51)
+        ships = _ship_payload(battles=101, wins=51, damage=42_000)
+        verdict, _ = self._compare(acct, ships, dict(acct), list(ships))
+        self.assertEqual(verdict, "match")
+
+    def test_both_hidden_match(self):
+        acct = _account_payload(battles=0, hidden=True)
+        verdict, _ = self._compare(acct, [], dict(acct), [])
+        self.assertEqual(verdict, "match")
+
+    def test_bulk_absent_ships_flags_coverage_gap(self):
+        acct = _account_payload(battles=101, wins=51)
+        ships = _ship_payload(battles=101)
+        # Bulk slice absent (None) -> bulk would skip a player legacy captures.
+        verdict, _ = self._compare(acct, ships, dict(acct), None)
+        self.assertEqual(verdict, "bulk_skips_capturable")
+
+    def test_skip_sentinel_flags_coverage_gap(self):
+        acct = _account_payload(battles=101)
+        ships = _ship_payload(battles=101)
+        verdict, _ = self._compare(acct, ships, dict(acct), "SKIP")
+        self.assertEqual(verdict, "bulk_skips_capturable")
+
+    def test_divergent_ship_stats_are_mismatch(self):
+        acct = _account_payload(battles=101, wins=51)
+        ships_s = _ship_payload(battles=101, wins=51, damage=42_000)
+        ships_b = _ship_payload(battles=101, wins=51, damage=99_999)  # differs
+        verdict, detail = self._compare(acct, ships_s, dict(acct), ships_b)
+        self.assertEqual(verdict, "mismatch")
+        self.assertIn("ships", detail["diffs"])
+
+    def test_divergent_account_aggregate_is_mismatch(self):
+        ships = _ship_payload(battles=101)
+        acct_s = _account_payload(battles=101, wins=51)
+        acct_b = _account_payload(battles=101, wins=50)  # wins differ
+        verdict, detail = self._compare(acct_s, ships, acct_b, list(ships))
+        self.assertEqual(verdict, "mismatch")
+        self.assertIn("pvp_wins", detail["diffs"])
+
+
+class ShadowParityCommandTests(TestCase):
+    """Command-level: read-only, never writes observations."""
+
+    def test_command_reports_match_and_writes_nothing(self):
+        ids = [7001, 7002]
+        acct = {str(i): _account_payload(battles=101, wins=51) for i in ids}
+        ships = {str(i): _ship_payload(battles=101, wins=51) for i in ids}
+
+        out = io.StringIO()
+        with mock.patch(SHADOW_ACCT, return_value=(acct, None)), \
+                mock.patch(SHADOW_SHIP, return_value=(ships, None)), \
+                mock.patch(SHADOW_SINGLE_ACCT,
+                           side_effect=lambda pid, realm: acct[str(pid)]), \
+                mock.patch(SHADOW_SINGLE_SHIP,
+                           side_effect=lambda pid, realm: ships[str(pid)]):
+            call_command("shadow_bulk_observation_parity", realm="na",
+                         player_ids="7001,7002", stdout=out)
+
+        self.assertIn("match=2", out.getvalue())
+        self.assertIn("no payload mismatches", out.getvalue())
+        # Read-only: nothing persisted.
+        self.assertEqual(BattleObservation.objects.count(), 0)
+
+    def test_command_flags_mismatch(self):
+        acct = {"7003": _account_payload(battles=101, wins=51)}
+        ships_bulk = {"7003": _ship_payload(battles=101, wins=51, damage=1)}
+        ships_single = _ship_payload(battles=101, wins=51, damage=2)
+
+        out = io.StringIO()
+        with mock.patch(SHADOW_ACCT, return_value=(acct, None)), \
+                mock.patch(SHADOW_SHIP, return_value=(ships_bulk, None)), \
+                mock.patch(SHADOW_SINGLE_ACCT,
+                           side_effect=lambda pid, realm: acct[str(pid)]), \
+                mock.patch(SHADOW_SINGLE_SHIP,
+                           side_effect=lambda pid, realm: ships_single):
+            call_command("shadow_bulk_observation_parity", realm="na",
+                         player_ids="7003", stdout=out)
+
+        self.assertIn("mismatch=1", out.getvalue())
+        self.assertIn("PARITY MISMATCH", out.getvalue())
