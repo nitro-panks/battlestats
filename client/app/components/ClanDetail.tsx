@@ -95,6 +95,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
     }, [shareState]);
 
     const handleShare = async () => {
+        trackEvent('clan-share', { realm });
         try {
             const url = new URL(window.location.href);
             if (!url.searchParams.has('realm')) {
@@ -142,7 +143,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 <div className="inline-flex rounded-md border border-[var(--border)] text-xs font-medium">
                     <button
                         type="button"
-                        onClick={() => { if (chartMode !== '2d') { setChartMode('2d'); trackEvent('clan-chart-mode', { mode: '2d' }); } }}
+                        onClick={() => { if (chartMode !== '2d') { setChartMode('2d'); trackEvent('clan-chart-2d', { realm }); } }}
                         className={`px-3 py-1 rounded-l-md transition-colors ${chartMode === '2d'
                                 ? 'bg-[var(--accent-mid)] text-white'
                                 : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
@@ -152,7 +153,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                     </button>
                     <button
                         type="button"
-                        onClick={() => { if (is3DAvailable && chartMode !== '3d') { setChartMode('3d'); trackEvent('clan-chart-mode', { mode: '3d' }); } }}
+                        onClick={() => { if (is3DAvailable && chartMode !== '3d') { setChartMode('3d'); trackEvent('clan-chart-3d', { realm }); } }}
                         disabled={!is3DAvailable}
                         title={!is3DAvailable ? 'KDR data not yet available' : 'View 3D scatter with KDR'}
                         className={`px-3 py-1 rounded-r-md transition-colors ${chartMode === '3d'
