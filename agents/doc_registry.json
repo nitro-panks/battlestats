@@ -493,6 +493,50 @@
                 "queue-model-replaced"
             ]
         },
+        "agents/runbooks/ops-env-reference.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "env reference",
+                "environment variables",
+                "runtime env catalog"
+            ],
+            "tags": [
+                "environment",
+                "config",
+                "env vars",
+                "operations",
+                "reference"
+            ],
+            "archive_on": [
+                "env-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-claude-md-durability.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "claude.md durability",
+                "claude md slim",
+                "context creep"
+            ],
+            "tags": [
+                "claude-md",
+                "context",
+                "durability",
+                "documentation",
+                "maintenance"
+            ],
+            "archive_on": [
+                "claude-md-policy-replaced"
+            ]
+        },
         "agents/runbooks/runbook-deleted-account-purge.md": {
             "kind": "runbook",
             "status": "active",

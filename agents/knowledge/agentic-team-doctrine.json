@@ -35,5 +35,12 @@
         "Preserve current user-facing behavior unless the task explicitly changes it.",
         "When an endpoint or payload changes, update contract docs and API-facing tests in the same tranche.",
         "Do not commit until documentation review, code-vs-doc reconciliation for uncertainties, appropriate test updates, and runbook archiving have been completed."
+    ],
+    "claude_md_rules": [
+        "CLAUDE.md is always-loaded default context; keep it a thin dispatch file (repo-global defaults + pointers), targeting under ~1,500 words / ~200 lines.",
+        "Do not inline environment-variable catalogs in CLAUDE.md; move them to a runbook/reference doc and link it.",
+        "Do not inline deep architecture, queue/cache/scheduling internals, or incident history in CLAUDE.md; these belong in agents/runbooks/.",
+        "Recurring multi-step workflows belong in .claude/skills/, not as inline procedures in CLAUDE.md.",
+        "Prefer a file-path pointer over an embedded explanation whenever one exists. Full re-slim procedure: agents/runbooks/runbook-claude-md-durability.md."
     ]
 }
