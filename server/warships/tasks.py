@@ -1735,13 +1735,21 @@ def dispatch_tracked_player_polls_task():
     return {"status": "completed", "dispatched": dispatched, "tracked": len(players)}
 
 
-@app.task(queue='background', **TASK_OPTS)
-def roll_up_player_daily_ship_stats_task(target_date_iso=None):
-    """Nightly sweeper: rebuild PlayerDailyShipStats for the previous calendar
-    day from BattleEvent rows. No-op when BATTLE_HISTORY_ROLLUP_ENABLED!=1.
+@app.task(bind=True, queue='background', **TASK_OPTS)
+def roll_up_player_daily_ship_stats_task(self, target_date_iso=None):
+    """Nightly sweeper: rebuild PlayerDailyShipStats from BattleEvent rows.
 
-    Phase 3 of the battle-history rollout. Idempotent — re-running produces
-    identical row counts and values for the same target date.
+    Self-healing trailing window — rebuilds the last
+    BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS calendar days (default 3), not just
+    yesterday, so a short outage (disabled gate / down worker / Beat misfire)
+    no longer leaves a permanent hole: each nightly run re-closes the trailing
+    window. Idempotent delete+rebuild makes re-running an already-correct day
+    a no-op-equivalent. No-op when BATTLE_HISTORY_ROLLUP_ENABLED != 1.
+
+    A single explicit `target_date_iso` collapses the window to that one day
+    (manual single-date repair), matching the legacy behaviour.
+
+    See agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md.
     """
     if os.getenv("BATTLE_HISTORY_ROLLUP_ENABLED", "0") != "1":
         return {"status": "skipped", "reason": "rollup-disabled"}
@@ -1750,30 +1758,97 @@ def roll_up_player_daily_ship_stats_task(target_date_iso=None):
 
     from warships.incremental_battles import (
         rebuild_daily_ship_stats_for_date,
-        rebuild_period_rollups_for_date,
+        rebuild_period_rollups_for_window,
     )
 
     if target_date_iso:
-        target_date = datetime.strptime(target_date_iso, "%Y-%m-%d").date()
+        last_date = datetime.strptime(target_date_iso, "%Y-%m-%d").date()
+        lookback = 1
     else:
-        target_date = (
+        last_date = (
             datetime.now(dt_timezone.utc) - timedelta(days=1)
         ).date()
+        lookback = max(
+            1, int(os.getenv("BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS", "3")))
 
-    logger.info(
-        "Starting roll_up_player_daily_ship_stats_task for date=%s", target_date)
-    daily_result = rebuild_daily_ship_stats_for_date(target_date)
-    # Cascade into the weekly / monthly / yearly tiers covering the same
-    # date, so coarser views always reflect the latest daily layer.
-    period_result = rebuild_period_rollups_for_date(target_date)
-    logger.info(
-        "Finished roll_up_player_daily_ship_stats_task: daily=%s period=%s",
-        daily_result, period_result)
-    return {
-        "status": "completed",
-        "daily": daily_result,
-        "period": period_result,
-    }
+    # Oldest -> yesterday, so logs and period dedup read in calendar order.
+    dates = [
+        last_date - timedelta(days=offset)
+        for offset in range(lookback - 1, -1, -1)
+    ]
+
+    # Single-run global lock — the windowed run outlasts a single day and
+    # could overlap a slow prior run. Lock auto-expires if the worker dies.
+    lock_key = _task_lock_key("roll_up_player_daily_ship_stats", "global")
+    if not cache.add(lock_key, self.request.id,
+                     timeout=RESOURCE_TASK_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping roll_up_player_daily_ship_stats_task — another run is active")
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        logger.info(
+            "Starting roll_up_player_daily_ship_stats_task window=%s..%s (%d days)",
+            dates[0], dates[-1], len(dates))
+        daily_results = [rebuild_daily_ship_stats_for_date(d) for d in dates]
+        # Cascade into the weekly / monthly / yearly tiers covering the window,
+        # each distinct period rebuilt once, so coarser views always reflect
+        # the latest daily layer.
+        period_result = rebuild_period_rollups_for_window(dates)
+        logger.info(
+            "Finished roll_up_player_daily_ship_stats_task: days_rebuilt=%d "
+            "periods_rebuilt=w%d/m%d/y%d",
+            len(daily_results),
+            period_result["weeks_rebuilt"],
+            period_result["months_rebuilt"],
+            period_result["years_rebuilt"])
+        return {
+            "status": "completed",
+            "days_rebuilt": len(daily_results),
+            "daily": daily_results,
+            "period": period_result,
+        }
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(queue='background', **TASK_OPTS)
+def reconcile_battle_history_rollup_task():
+    """Alert-only reconciliation of the battle-history daily rollup.
+
+    Compares SUM(BattleEvent.battles_delta) vs SUM(PlayerDailyShipStats.battles)
+    per (date, mode) over an audit window and logs any date where BattleEvent
+    has battles the daily layer is missing or under-counts. Writes nothing —
+    repair beyond the self-heal window is the human-run
+    `rebuild_player_daily_ship_stats` command.
+
+    Gated by BATTLE_HISTORY_RECONCILE_ENABLED (default 0), INDEPENDENT of
+    BATTLE_HISTORY_ROLLUP_ENABLED so it can surface "rollup is off / holes
+    exist" even when the rollup gate is down. Audit window from
+    BATTLE_HISTORY_RECONCILE_AUDIT_DAYS (default 30). See
+    agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md.
+    """
+    if os.getenv("BATTLE_HISTORY_RECONCILE_ENABLED", "0") != "1":
+        return {"status": "skipped", "reason": "reconcile-disabled"}
+
+    from warships.incremental_battles import reconcile_daily_rollup_coverage
+
+    audit_days = max(
+        1, int(os.getenv("BATTLE_HISTORY_RECONCILE_AUDIT_DAYS", "30")))
+    report = reconcile_daily_rollup_coverage(audit_days=audit_days)
+    discrepancies = report["discrepancies"]
+    if discrepancies:
+        for d in discrepancies:
+            logger.warning(
+                "battle-history rollup hole: date=%s mode=%s be_battles=%d "
+                "pds_battles=%d delta=%d",
+                d["date"], d["mode"], d["be_battles"], d["pds_battles"],
+                d["delta"])
+    else:
+        logger.info(
+            "battle-history rollup reconciliation clean over %d days",
+            audit_days)
+    return {"status": "completed", **report}
 
 
 @app.task(bind=True, queue='background', **TASK_OPTS)

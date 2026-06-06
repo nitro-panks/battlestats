@@ -761,6 +761,34 @@ def register_periodic_schedules(sender, **kwargs):
             "enabled": True,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
-            "description": "Nightly rebuild of PlayerDailyShipStats from BattleEvent. No-op unless BATTLE_HISTORY_ROLLUP_ENABLED=1.",
+            "description": "Nightly rebuild of PlayerDailyShipStats from BattleEvent (self-healing trailing window). No-op unless BATTLE_HISTORY_ROLLUP_ENABLED=1.",
+        },
+    )
+
+    # -- Battle History Rollup reconciliation (alert-only) --
+    # Runbook: agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md
+    # Gate-independent of BATTLE_HISTORY_ROLLUP_ENABLED so it can surface holes
+    # even when the rollup gate is off. No-op unless
+    # BATTLE_HISTORY_RECONCILE_ENABLED=1. Fires after the rollup window (04:30)
+    # completes.
+    reconcile_hour = os.getenv("BATTLE_HISTORY_RECONCILE_HOUR", "5")
+    reconcile_minute = os.getenv("BATTLE_HISTORY_RECONCILE_MINUTE", "0")
+    battle_history_reconcile_schedule, _ = CrontabSchedule.objects.get_or_create(
+        minute=str(reconcile_minute),
+        hour=str(reconcile_hour),
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        timezone="UTC",
+    )
+    PeriodicTask.objects.update_or_create(
+        name="battle-history-rollup-reconcile",
+        defaults={
+            "task": "warships.tasks.reconcile_battle_history_rollup_task",
+            "crontab": battle_history_reconcile_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Alert-only reconciliation of PlayerDailyShipStats vs BattleEvent. No-op unless BATTLE_HISTORY_RECONCILE_ENABLED=1.",
         },
     )

@@ -37,7 +37,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from warships.incremental_battles import rebuild_daily_ship_stats_for_date
+        from warships.incremental_battles import (
+            _utc_day_bounds,
+            rebuild_daily_ship_stats_for_date,
+        )
         from warships.models import BattleEvent, PlayerDailyShipStats
 
         try:
@@ -60,8 +63,10 @@ class Command(BaseCommand):
         total_events = 0
         total_rows_written = 0
         while cursor <= until:
+            day_start, next_day_start = _utc_day_bounds(cursor)
             event_count = BattleEvent.objects.filter(
-                detected_at__date=cursor,
+                detected_at__gte=day_start,
+                detected_at__lt=next_day_start,
             ).count()
             existing_rows = PlayerDailyShipStats.objects.filter(
                 date=cursor,
