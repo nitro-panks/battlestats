@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Battlestats committed git hooks. Enable in a clone with:
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+
+# CLAUDE.md durability guard (no-op unless CLAUDE.md is staged).
+"$repo_root/scripts/check_claude_md.sh"
