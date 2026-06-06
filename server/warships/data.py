@@ -3110,22 +3110,28 @@ def _build_tier_type_player_cells(battles_json: Any) -> list[dict]:
     return player_cells
 
 
-def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM, *, allow_rebuild: bool = True) -> dict:
+def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM, *, allow_rebuild: bool = True, force_rebuild: bool = False) -> dict:
     cache_key = _player_correlation_cache_key(
         PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
     published_cache_key = _player_correlation_published_cache_key(
         PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        cache.set(published_cache_key, cached, timeout=None)
-        return cached
+    # force_rebuild (used by the periodic warmer) must skip the read
+    # short-circuit below — otherwise the durable `published` fallback is
+    # returned before the rebuild, so a once-published empty/stale payload can
+    # never be replaced. The rebuild overwrites both keys at the end, so the
+    # old published value keeps serving until the fresh one lands (no gap).
+    if not force_rebuild:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cache.set(published_cache_key, cached, timeout=None)
+            return cached
 
-    published = cache.get(published_cache_key)
-    if published is not None:
-        return published
+        published = cache.get(published_cache_key)
+        if published is not None:
+            return published
 
-    if not allow_rebuild:
-        return None
+        if not allow_rebuild:
+            return None
 
     config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
     tile_counts: dict[tuple[str, int], int] = {}
@@ -3209,18 +3215,27 @@ def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM, *
 
 
 def warm_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -> dict:
-    """Force-rebuild the tier-type population correlation cache."""
+    """Refresh the tier-type population correlation cache.
+
+    The rebuild is a full scan over every qualifying player's ``battles_json``
+    (~8 min/realm on prod), so we only force it when the TTL'd cache is stale
+    or empty — including a realm frozen at ``tracked_population=0`` by a warm
+    that ran before its population was enriched (the original asia bug). A
+    fresh, non-empty cache short-circuits to a cheap no-op, so the periodic
+    (≤55 min) warmer runs the heavy scan at most once per
+    ``PLAYER_CORRELATION_CACHE_TTL`` (12 h) per realm instead of every cycle.
+    """
     cache_key = _player_correlation_cache_key(
         PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
-    cache.delete(cache_key)
-    return _fetch_player_tier_type_population_correlation(realm=realm)
+    fresh = cache.get(cache_key)
+    if isinstance(fresh, dict) and fresh.get('tracked_population', 0) > 0:
+        return fresh
+    return _fetch_player_tier_type_population_correlation(realm=realm, force_rebuild=True)
 
 
 def warm_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
     """Force-rebuild the win-rate vs survival correlation cache."""
-    cache_key = _player_correlation_cache_key('win_rate_survival', realm=realm)
-    cache.delete(cache_key)
-    return fetch_player_wr_survival_correlation(realm=realm)
+    return fetch_player_wr_survival_correlation(realm=realm, force_rebuild=True)
 
 
 def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
@@ -3281,18 +3296,22 @@ def fetch_player_tier_type_correlation(player_id: str, player: Player | None = N
     }
 
 
-def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
+def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM, *, force_rebuild: bool = False) -> dict:
     cache_key = _player_correlation_cache_key('win_rate_survival', realm=realm)
     published_cache_key = _player_correlation_published_cache_key(
         'win_rate_survival', realm=realm)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        cache.set(published_cache_key, cached, timeout=None)
-        return cached
+    # force_rebuild (periodic warmer) skips the read short-circuit so a stale
+    # `published` payload can be replaced; see the tier-type builder for the
+    # full rationale. Both keys are overwritten at the end.
+    if not force_rebuild:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cache.set(published_cache_key, cached, timeout=None)
+            return cached
 
-    published = cache.get(published_cache_key)
-    if published is not None:
-        return published
+        published = cache.get(published_cache_key)
+        if published is not None:
+            return published
 
     config = PLAYER_WR_SURVIVAL_CORRELATION_CONFIG
     x_min = config['x_min']
