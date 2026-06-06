@@ -1,5 +1,13 @@
 # Crawler & Update-Process Cost Map — Where We Spend Time, Compute & Bandwidth
 
+> **🛑 Correction (2026-06-06, phase-2 prod measurement):** This doc's premise that `ships/stats`
+> can be **bulk-fetched at 100 players/call (~0.02 WG/player)** is **refuted**. WG `ships/stats/` is
+> single-account-only — it rejects ≥2 account_ids with `INVALID_ACCOUNT_ID`; enrichment's "bulk"
+> ships fetch has always silently fallen back to per-player. Only `account/info` bulks. The R1
+> optimization therefore saves ~2×, not ~100×, and R3 (daily every active player) is infeasible on
+> the ships budget. The "R1 bulk capture (~0.02/player)" figures below are wrong; see
+> `runbook-bulk-battle-observation-capture-2026-06-06.md` → "🛑 CRITICAL — bulk ships premise refuted".
+
 **Date:** 2026-06-06
 **Author role:** data architect / systems engineer
 **Goal of this doc:** Inventory every crawler and update process, when it runs, what fields it

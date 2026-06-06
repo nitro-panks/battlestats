@@ -2,7 +2,7 @@
 
 _Created: 2026-06-06_
 _Context: The observation floor captures battle history one player at a time at 2–3 WG calls/player, so only a slice of active players is covered each sweep. Enrichment already proves bulk `ships/stats`/`account/info` at 100 ids/call. This spec moves capture onto that bulk path (~100× cheaper) so we can observe every active player daily._
-_Status: **implemented — phase 1 (code landed, flag default OFF).** Not yet enabled on any realm; phases 2–5 (shadow/parity-on-prod, per-realm enable, all-realms, R3 floor-limit raise) remain operational. See "Implementation status" at the bottom._
+_Status: **implemented (phase 1, flag OFF) — but the cost premise is REFUTED by phase-2 prod validation. DO NOT enable; decision needed.** WG `ships/stats/` is single-account-only (rejects ≥2 account_ids with `INVALID_ACCOUNT_ID`), so the bulk ships fetch can never batch — it always falls back to per-player. R1 therefore bulks only `account/info` (~2→1 WG calls/player, a ~2× saving), NOT the ~100× the context line below assumed, and R3 (daily every active player) stays infeasible on the ships budget. See "🛑 CRITICAL — bulk ships premise refuted" below._
 
 ## Purpose
 
@@ -319,7 +319,31 @@ Backend deployed (release `20260606192653`, flag off, migration `0064` applied).
 
 - **Parity (D1) holds.** With the engine's poison-batch fallback applied, **all 10 players match** — bulk `account/info` + `ships/stats` slices produce byte-identical observation payloads (incl. Phase 7 `main_battery`/`torpedoes`) to the single-fetch path. `mismatch=0`. The bulk path is correct on real data.
 - **Shadow-command fix.** The first run reported `bulk_skips_capturable=10` because the command did **not** mirror the engine's D5 `INVALID_ACCOUNT_ID → _per_player_ship_fallback`. Fixed: the command now applies the same fallback and reports `poison_fallback_chunks`. Without the fix the tool gave a false "bulk would skip everyone."
-- **⚠️ Watch-item — poison-batch frequency.** The very first 10-player batch hit WG `INVALID_ACCOUNT_ID` (code 407, message-disambiguated; the active set contains accounts WG rejects in batch context — stale/deleted/renamed). The engine recovers parity via per-player fallback, **but a poison id forces the entire chunk (up to 100) onto the per-player path, erasing the ~100x bulk WG saving for that chunk.** If poison batches are common at 100-id chunks, R1's cost win erodes toward per-player. **Before R3, watch fallback frequency** (the new `poison_fallback_chunks` metric / the engine's fallback logs). **Follow-up options if frequent:** binary-split fallback (isolate the bad id in ~log₂ calls instead of 100), smaller chunk size, or pre-filtering known-`DeletedAccount` ids out of the candidate set.
+- **Poison-batch frequency was suspicious** — every 25-player sample on all 3 realms (asia/na/eu: 25/25 match, `poison_fallback_chunks=1` each) fell back to per-player. That triggered a deeper probe, which found the real cause below.
+
+## 🛑 CRITICAL — bulk ships premise refuted (2026-06-06)
+
+**WG `ships/stats/` is single-account-only. It cannot bulk.** Measured on prod (asia, 100 known-good active ids):
+
+| batch size | `ships/stats/` | `account/info/` |
+|---|---|---|
+| n=1 | OK (1 key) | OK |
+| n=2,3,5,10,20,50,100 | **`INVALID_ACCOUNT_ID`** (0 keys) | OK (n keys) |
+
+All 100 ids fetch fine individually (good=100, bad=0), so it is **not** a poison id — the multi-account `ships/stats/` request itself is rejected at n≥2. `account/info/` bulks correctly to 100.
+
+**Consequence — the cost model in the _Context_ line and in `analysis-update-process-cost-map-2026-06-06.md` is wrong.** The claim "enrichment fetches the same `ships/stats` data in bulk, 100 players/call (~0.02 WG/player)" is false: enrichment's `_bulk_fetch_ship_stats` has **always** been hitting `INVALID_ACCOUNT_ID` and silently falling back to `_per_player_ship_fallback` (1 call/player) on every batch. Nobody noticed because the fallback is transparent.
+
+**What R1 actually buys.** The bulk path = 1 bulked `account/info` per ~100 (~0.01/player) + **1 per-player `ships/stats` per player** (unavoidable). vs legacy 2/player (`account/info` + `ships/stats`). So R1 ≈ **2/player → ~1/player, a ~2× saving** — it removes the `account/info` call, not the binding `ships/stats` cost. The **~100× claim does not hold**, and **R3 (daily every active player) remains infeasible**: ~255k active randoms × 1 `ships/stats` call ≈ 255k WG calls/day for the ships half alone, far over the shared ~10 req/s budget.
+
+**Parity is still proven and the code is correct** — `record_observations_bulk` produces byte-identical observations (75/75 match across realms). It just doesn't deliver the cost win the project was justified on.
+
+**Decision needed (do NOT enable meanwhile):**
+1. **Ship R1 for the ~2× `account/info` saving anyway?** Low risk (flag-gated, parity-proven), modest benefit. The per-chunk fallback already works.
+2. **Drop R1/R3?** If the only goal was daily-every-active-player coverage, that needs bulk ships, which WG doesn't offer — so the goal is unreachable this way regardless.
+3. **Reframe.** Is there any other WG mechanism for ships deltas (e.g. a different endpoint, or accepting partial coverage)? Needs investigation.
+
+**Also correct `analysis-update-process-cost-map-2026-06-06.md`** — its R1 row and the "~0.02/player bulk ships" figure are refuted by this measurement.
 
 ## Operator checklist (deploy → shadow → enable → R3)
 
