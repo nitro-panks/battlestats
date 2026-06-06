@@ -254,7 +254,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
                             <button
                                 key={m}
                                 type="button"
-                                onClick={() => { if (mode !== m) { setMode(m); trackEvent('treemap-mode', { mode: m, realm }); } }}
+                                onClick={() => { if (mode !== m) { setMode(m); trackEvent(m === 'random' ? 'treemap-random' : 'treemap-ranked', { realm }); } }}
                                 aria-pressed={mode === m}
                                 className={`rounded px-2 py-0.5 transition-colors ${
                                     mode === m
