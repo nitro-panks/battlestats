@@ -366,8 +366,8 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     setActiveTab(tab.id);
                                 }}
                                 className={isActive
-                                    ? 'rounded-full border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-3 py-1.5 text-sm font-medium text-[var(--accent-mid)]'
-                                    : 'rounded-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-light)] hover:text-[var(--accent-mid)]'}
+                                    ? 'inline-flex min-h-[44px] items-center justify-center rounded-full border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-3 py-1.5 text-sm font-medium text-[var(--accent-mid)]'
+                                    : 'inline-flex min-h-[44px] items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-light)] hover:text-[var(--accent-mid)]'}
                             >
                                 {tab.label}
                             </button>
