@@ -829,15 +829,18 @@ describe('PlayerDetail ship-badge banner', () => {
         avg_damage: 62431, window_days: 14, ...over,
     });
 
-    it('renders a banner card per ship placement with avg damage', () => {
+    it('renders a banner card per ship placement with win rate and damage', () => {
         renderWithBadges([
             badge(),
-            badge({ ship_id: 20, ship_name: 'Zao', rank: 2, avg_damage: 41200 }),
+            badge({ ship_id: 20, ship_name: 'Zao', rank: 2, win_rate: 58.5, avg_damage: 41200 }),
         ]);
 
         expect(screen.getByText('Shimakaze')).toBeInTheDocument();
         expect(screen.getByText('Zao')).toBeInTheDocument();
-        expect(screen.getByText(/62,431 avg dmg/)).toBeInTheDocument();
+        // Stat row: emphasized win rate · average damage (compact "dmg" label).
+        expect(screen.getByText(/62,431 dmg/)).toBeInTheDocument();
+        expect(screen.getByText('64.0%')).toBeInTheDocument();
+        expect(screen.getByText('58.5%')).toBeInTheDocument();
         // Links to the ship standings page.
         const link = screen.getByTitle(/#1 in Shimakaze this season/);
         expect(link).toHaveAttribute('href', expect.stringContaining('/ship/10-shimakaze'));
@@ -960,7 +963,9 @@ describe('PlayerDetail ship-honors panel', () => {
             },
         ]);
 
-        expect(screen.getByText(/×1: WK24-25'26/)).toBeInTheDocument();
+        // Count chip and season-week history now render as distinct elements.
+        expect(screen.getByText('×1')).toBeInTheDocument();
+        expect(screen.getByText(/WK24-25'26/)).toBeInTheDocument();
         expect(screen.queryByText(/currently/)).not.toBeInTheDocument();
         expect(screen.queryByText(/last held/)).not.toBeInTheDocument();
     });
