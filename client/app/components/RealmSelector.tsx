@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck, faChevronDown, faGlobe } from '@fortawesome/free-solid-svg-icons';
-import { useRealm, type Realm } from '../context/RealmContext';
+import { useRealm, useDisplayRealm, type Realm } from '../context/RealmContext';
 import { useRouter } from 'next/navigation';
 import { trackEvent } from '../lib/umami';
 
@@ -24,6 +24,10 @@ const ACTIVE_OPTION_COLOR = 'var(--text-primary)';
 
 const RealmSelector: React.FC = () => {
     const { realm, setRealm } = useRealm();
+    // Rendered label must be hydration-safe (SSG renders 'NA'); the dropdown's
+    // active-option check below uses the live `realm` since it only renders
+    // once open (post-mount).
+    const displayRealm = useDisplayRealm();
     const [open, setOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
@@ -65,7 +69,7 @@ const RealmSelector: React.FC = () => {
         router.replace(`/?realm=${newRealm}`);
     };
 
-    const currentLabel = realm.toUpperCase();
+    const currentLabel = displayRealm.toUpperCase();
 
     return (
         <div ref={containerRef} className="relative">

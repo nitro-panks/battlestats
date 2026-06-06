@@ -15,7 +15,7 @@ import * as d3 from 'd3';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useTheme } from '../context/ThemeContext';
 import { chartColors } from '../lib/chartTheme';
-import { useRealm } from '../context/RealmContext';
+import { useRealm, useDisplayRealm } from '../context/RealmContext';
 import { buildShipPath } from '../lib/entityRoutes';
 import { formatSeasonLabel } from '../lib/shipSeason';
 import { trackEvent } from '../lib/umami';
@@ -88,6 +88,9 @@ interface HoverState {
 
 const RealmTopShipsTreemapSVG: React.FC = () => {
     const { realm } = useRealm();
+    // Hydration-safe realm for the heading/aria-label rendered in the SSG shell
+    // (the live `realm` drives fetches; this only feeds rendered text).
+    const displayRealm = useDisplayRealm();
     const router = useRouter();
     const { theme } = useTheme();
     const palette = chartColors[theme];
@@ -247,7 +250,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex items-center gap-3">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                        {realm.toUpperCase()} most-played ships{seasonLabel ? ` · ${seasonLabel}` : ' · Last season'}
+                        {displayRealm.toUpperCase()} most-played ships{seasonLabel ? ` · ${seasonLabel}` : ' · Last season'}
                     </h2>
                     <div className="flex items-center gap-1 text-xs" role="group" aria-label="Battle mode">
                         {SHIP_MODES.map((m) => (
@@ -269,7 +272,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
                 </div>
             </div>
             <div ref={containerRef} className="relative w-full max-w-[900px]">
-                <svg ref={svgRef} role="img" aria-label={`${realm} top ${SHIP_LIMIT} most-played ships over the most recently completed 2-week ship season`} />
+                <svg ref={svgRef} role="img" aria-label={`${displayRealm} top ${SHIP_LIMIT} most-played ships over the most recently completed 2-week ship season`} />
                 {hover && (
                     <div
                         className="pointer-events-none absolute z-10 rounded bg-[var(--bg-page)] px-2 py-1 text-xs shadow-md ring-1 ring-[var(--accent-faint)]"

@@ -17,8 +17,36 @@ const RealmContext = createContext<RealmContextValue>({
     setRealm: () => undefined,
 });
 
+// Resolve the realm synchronously at first render from the same precedence the
+// navigation effect uses (explicit ?realm= wins, else the stored preference).
+// SSR has no window, so it falls back to 'na' there — the only place that then
+// differs from the client's first render is realm-dependent TEXT in the
+// statically-rendered shell (the realm selector label + the landing treemap
+// heading), which carry `suppressHydrationWarning`. Data fetches read this
+// resolved value, so a bare ?realm=-less entity link now fetches the stored
+// realm on the FIRST request instead of hitting the 'na' default and refetching
+// (which could flash "not found" for an EU/ASIA-only player).
+const resolveInitialRealm = (): Realm => {
+    if (typeof window === 'undefined') {
+        return 'na';
+    }
+    try {
+        const urlRealm = new URLSearchParams(window.location.search).get('realm') as Realm | null;
+        if (urlRealm && VALID_REALMS.includes(urlRealm)) {
+            return urlRealm;
+        }
+        const stored = localStorage.getItem('bs-realm') as Realm | null;
+        if (stored && VALID_REALMS.includes(stored)) {
+            return stored;
+        }
+    } catch {
+        // URL / localStorage unavailable
+    }
+    return 'na';
+};
+
 export const RealmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const [realm, setRealmState] = useState<Realm>('na');
+    const [realm, setRealmState] = useState<Realm>(resolveInitialRealm);
     const pathname = usePathname();
 
     // Resolve the realm on first mount AND on every client-side navigation
@@ -64,3 +92,18 @@ export const RealmProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 };
 
 export const useRealm = (): RealmContextValue => useContext(RealmContext);
+
+// Realm for RENDERED TEXT in the statically-prerendered shell (the realm
+// selector label, the landing treemap heading). The live `realm` is resolved
+// from localStorage at first client render, which the server can't know, so
+// rendering it directly would mismatch the SSG 'na' default. This returns the
+// SSR-safe default until mounted, then the real realm — so the first client
+// render matches the server HTML (no hydration mismatch) and the label settles
+// a tick later. Data fetches should keep using `useRealm()` (resolved
+// synchronously) — only attribute/text rendered during SSR needs this.
+export const useDisplayRealm = (): Realm => {
+    const { realm } = useRealm();
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => setMounted(true), []);
+    return mounted ? realm : 'na';
+};
