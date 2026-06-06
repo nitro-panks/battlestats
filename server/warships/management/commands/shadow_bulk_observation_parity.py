@@ -163,10 +163,12 @@ class Command(BaseCommand):
         from warships.api.players import (
             _bulk_fetch_account_info,
             _fetch_player_personal_data,
+            _per_player_account_fallback,
         )
         from warships.api.ships import (
             _bulk_fetch_ship_stats,
             _fetch_ship_stats_for_player,
+            _per_player_ship_fallback,
         )
 
         realm = options["realm"]
@@ -190,17 +192,30 @@ class Command(BaseCommand):
             return
 
         # Bulk-fetch the whole sample in chunks of 100 (as the real path does),
-        # then single-fetch each player and compare.
+        # then single-fetch each player and compare. To faithfully shadow the
+        # engine, mirror its D5 error taxonomy: INVALID_ACCOUNT_ID -> per-player
+        # fallback (the engine isolates the poison id rather than skipping the
+        # whole chunk). Without this the shadow would falsely report every
+        # player in a poison batch as bulk-absent.
         bulk_acct: dict = {}
         bulk_ships: dict = {}
+        poison_fallback_chunks = 0
         for start in range(0, len(player_ids), 100):
             chunk = player_ids[start:start + 100]
             acct_map, acct_err = _bulk_fetch_account_info(chunk, realm)
             ship_map, ship_err = _bulk_fetch_ship_stats(chunk, realm)
-            if acct_err or ship_err:
+            if ship_err == "INVALID_ACCOUNT_ID" or acct_err == "INVALID_ACCOUNT_ID":
+                poison_fallback_chunks += 1
+                if ship_err == "INVALID_ACCOUNT_ID":
+                    ship_map = _per_player_ship_fallback(chunk, realm)
+                if acct_err == "INVALID_ACCOUNT_ID":
+                    acct_map = _per_player_account_fallback(chunk, realm)
+            transient_acct = acct_err and acct_err != "INVALID_ACCOUNT_ID"
+            transient_ship = ship_err and ship_err != "INVALID_ACCOUNT_ID"
+            if transient_acct or transient_ship:
                 log.warning(
-                    "shadow: bulk fetch error on chunk (acct=%s ship=%s) — "
-                    "those players will read as bulk-absent", acct_err, ship_err)
+                    "shadow: transient bulk error on chunk (acct=%s ship=%s) — "
+                    "those players read as bulk-absent", acct_err, ship_err)
             bulk_acct.update(acct_map or {})
             bulk_ships.update(ship_map or {})
 
@@ -233,6 +248,7 @@ class Command(BaseCommand):
                 "realm": realm,
                 "total": total,
                 "verdicts": verdicts,
+                "poison_fallback_chunks": poison_fallback_chunks,
                 "details": details,
             }, indent=2, default=str))
             return
@@ -242,8 +258,16 @@ class Command(BaseCommand):
             f"mismatch={mismatched} "
             f"bulk_skips_capturable={verdicts.get('bulk_skips_capturable', 0)} "
             f"legacy_skips_only={verdicts.get('legacy_skips_only', 0)} "
-            f"single_fetch_error={verdicts.get('single_fetch_error', 0)}"
+            f"single_fetch_error={verdicts.get('single_fetch_error', 0)} "
+            f"poison_fallback_chunks={poison_fallback_chunks}"
         )
+        if poison_fallback_chunks:
+            self.stdout.write(self.style.WARNING(
+                f"{poison_fallback_chunks} chunk(s) hit INVALID_ACCOUNT_ID and "
+                f"fell back to per-player — the engine recovers parity but loses "
+                f"the bulk WG savings for those chunks. Watch fallback frequency "
+                f"before R3 (it erodes the ~100x cost win)."
+            ))
         if verbose and details:
             for d in details:
                 self.stdout.write(f"  {d}")

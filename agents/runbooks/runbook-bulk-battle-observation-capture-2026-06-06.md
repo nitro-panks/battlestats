@@ -313,6 +313,14 @@ _Phase 1 landed 2026-06-06 (flag default OFF — no production behavior change).
 
 **Next (operational, not code):** phase 2 — run `shadow_bulk_observation_parity` on prod (read-only) until a clean run; then per-realm enable via `BULK_REALMS`; then R3 floor-limit raise. The phase-2 shadow tool shipped with phase 1.
 
+### Phase-2 shadow findings (2026-06-06, asia)
+
+Backend deployed (release `20260606192653`, flag off, migration `0064` applied). First shadow run on 10 active asia players:
+
+- **Parity (D1) holds.** With the engine's poison-batch fallback applied, **all 10 players match** — bulk `account/info` + `ships/stats` slices produce byte-identical observation payloads (incl. Phase 7 `main_battery`/`torpedoes`) to the single-fetch path. `mismatch=0`. The bulk path is correct on real data.
+- **Shadow-command fix.** The first run reported `bulk_skips_capturable=10` because the command did **not** mirror the engine's D5 `INVALID_ACCOUNT_ID → _per_player_ship_fallback`. Fixed: the command now applies the same fallback and reports `poison_fallback_chunks`. Without the fix the tool gave a false "bulk would skip everyone."
+- **⚠️ Watch-item — poison-batch frequency.** The very first 10-player batch hit WG `INVALID_ACCOUNT_ID` (code 407, message-disambiguated; the active set contains accounts WG rejects in batch context — stale/deleted/renamed). The engine recovers parity via per-player fallback, **but a poison id forces the entire chunk (up to 100) onto the per-player path, erasing the ~100x bulk WG saving for that chunk.** If poison batches are common at 100-id chunks, R1's cost win erodes toward per-player. **Before R3, watch fallback frequency** (the new `poison_fallback_chunks` metric / the engine's fallback logs). **Follow-up options if frequent:** binary-split fallback (isolate the bad id in ~log₂ calls instead of 100), smaller chunk size, or pre-filtering known-`DeletedAccount` ids out of the candidate set.
+
 ## Operator checklist (deploy → shadow → enable → R3)
 
 Concrete command-level companion to the Rollout section. **Prod facts:** systemd (not docker) backend; env in `/etc/battlestats-server.env` (+ `.secrets.env`), loaded as a systemd `EnvironmentFile`; venv at `/opt/battlestats-server/venv`. The floor task runs on the **default** Celery queue → `battlestats-celery` worker, and reads the bulk flags via `os.getenv` **at task runtime**, so a flag change needs that worker restarted. The deploy script **overwrites** `/etc/battlestats-server.env` from the local gitignored `server/.env.cloud` (+ `migrate_env_value` sed patches), so a manual `/etc/...env` edit is clobbered on the next deploy — see step 3 for the persistent path.

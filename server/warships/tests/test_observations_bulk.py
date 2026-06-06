@@ -562,3 +562,27 @@ class ShadowParityCommandTests(TestCase):
 
         self.assertIn("mismatch=1", out.getvalue())
         self.assertIn("PARITY MISMATCH", out.getvalue())
+
+    def test_command_applies_poison_batch_fallback(self):
+        # A poison id makes the bulk ships call return INVALID_ACCOUNT_ID. The
+        # command must mirror the engine: per-player fallback isolates it and
+        # the good player still reads as a match (not a false bulk-skip).
+        acct = {"7004": _account_payload(battles=101, wins=51)}
+        ship_list = _ship_payload(battles=101, wins=51)
+
+        out = io.StringIO()
+        with mock.patch(SHADOW_ACCT, return_value=(acct, None)), \
+                mock.patch(SHADOW_SHIP,
+                           return_value=({}, "INVALID_ACCOUNT_ID")), \
+                mock.patch("warships.api.ships._per_player_ship_fallback",
+                           return_value={"7004": ship_list}) as fb, \
+                mock.patch(SHADOW_SINGLE_ACCT,
+                           side_effect=lambda pid, realm: acct[str(pid)]), \
+                mock.patch(SHADOW_SINGLE_SHIP,
+                           side_effect=lambda pid, realm: ship_list):
+            call_command("shadow_bulk_observation_parity", realm="na",
+                         player_ids="7004", stdout=out)
+
+        fb.assert_called_once()
+        self.assertIn("match=1", out.getvalue())
+        self.assertIn("poison_fallback_chunks=1", out.getvalue())
