@@ -69,6 +69,11 @@ PlayerDailyShipStats ─count──┤
 - Preserve `target_date_iso` for manual single-date runs; when supplied, lookback collapses to 1 (one day, one period pass) — back-compatible with the existing manual/`rebuild` semantics.
 - Add a **single-run global lock** (`cache.add(_task_lock_key("roll_up_player_daily_ship_stats","global"), …)`, pattern at `tasks.py:1797-1826`) since the windowed run outlasts a single day and could overlap a slow prior run.
 - Keep the `BATTLE_HISTORY_ROLLUP_ENABLED` gate and the start/finish log lines; log a per-run summary `{days_rebuilt, periods_rebuilt, per-day result dicts}`.
+- **Period rebuild is gated OFF by default** (`BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED`, default 0) — see "Operational note" below. When off, the daily layer still rebuilds and `period` is reported `{"status":"skipped","reason":"period-rollup-disabled"}`.
+
+#### Operational note — period rebuild gated off (B1 rollout, 2026-06-06)
+
+The B1 rollout verification found the nightly task hitting `SoftTimeLimitExceeded` (540s soft / 600s hard, from `TASK_OPTS`) **inside the period rebuild** (`rebuild_period_rollups_for_window` → the yearly-YTD `_aggregate_into_period_table` scan), *after* the daily layer had completed in seconds. The daily layer is the only consumed + reconciled tier; the weekly/monthly/yearly tiers are dormant + UI-hidden. So the period rebuild is now gated behind `BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED` (default 0): the nightly self-heal stays fast and error-free, and the long pole only runs when explicitly enabled. The proper fix when the tiers are reactivated is the deferred DB-side rewrite (see Out of scope). Re-enabling without that rewrite will re-introduce the timeout.
 
 ### 2. BRIN index + half-open range filter — guarded migration + `incremental_battles.py`
 
@@ -165,13 +170,14 @@ Extend the existing suites (`RebuildDailyShipStatsTests` 1481, `RankedRollupWrit
 
 - **DB-side rewrite of `rebuild_daily_ship_stats_for_date`** — retires the `TODO(2026-Q3)` at `incremental_battles.py:982-985`; prerequisite for a *wide* lookback window (the current per-day Python load is only safe at small N).
 - **Gap B accuracy** — battle-time attribution / observation-floor density work.
-- **Reactivating the weekly/monthly/yearly period tiers in the UI** — they remain dormant; this work only keeps them internally consistent via the dedup'd rebuild.
+- **Reactivating the weekly/monthly/yearly period tiers in the UI** — they remain dormant and the nightly period rebuild is gated OFF (`BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED=0`, see Operational note). Reactivation should land together with the DB-side rewrite above, then flip the flag — otherwise the 540s timeout returns.
 
 ## Env knobs (full catalog in `ops-env-reference.md`)
 
 | Knob | Default | Effect |
 |---|---|---|
 | `BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS` | `3` | Trailing-window size the nightly sweeper rebuilds (self-heal). `1` = legacy yesterday-only. |
+| `BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED` | `0` | Gates the nightly weekly/monthly/yearly rebuild (the 540s long pole). OFF by default; flip only when period tiers are reactivated (with the DB-side rewrite). |
 | `BATTLE_HISTORY_RECONCILE_ENABLED` | `0` | Gates the alert-only reconciliation task; independent of `BATTLE_HISTORY_ROLLUP_ENABLED`. |
 | `BATTLE_HISTORY_RECONCILE_AUDIT_DAYS` | `30` | Audit window the reconciliation task scans. |
 
