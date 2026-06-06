@@ -2261,7 +2261,13 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertIsNone(body["totals"]["lifetime_win_rate"])
         self.assertIsNone(body["totals"]["delta_win_rate"])
 
-    def test_mode_ranked_sums_across_seasons(self):
+    def test_mode_ranked_scopes_to_current_season(self):
+        # Ranked is current-season-scoped: a window spanning a season boundary
+        # surfaces ONLY the latest season's battles (not a cross-season sum),
+        # so the bars/totals stay consistent with the current-season WR/O
+        # baseline and the frontend walk-back can't go negative. With no
+        # ranked_json, the current season falls back to the latest ranked
+        # rollup season (22 here); the season-21 battles are excluded.
         today = django_timezone.now().date()
         PlayerDailyShipStats.objects.create(
             player=self.player, date=today, ship_id=42, ship_name="Yamato",
@@ -2282,8 +2288,117 @@ class BattleHistoryEndpointTests(TestCase):
                 "/api/player/api_test/battle-history/?days=7&mode=ranked",
             )
         body = r.json()
-        self.assertEqual(body["totals"]["battles"], 8)
-        self.assertEqual(body["totals"]["damage"], 180_000)
+        # Only the current/latest season (22) counts.
+        self.assertEqual(body["totals"]["battles"], 5)
+        self.assertEqual(body["totals"]["damage"], 120_000)
+        # No ranked_json → no WG cumulative → WR/O baseline stays empty.
+        self.assertIsNone(body["totals"]["lifetime_win_rate"])
+
+    def test_mode_ranked_current_season_overall_and_per_ship_wr(self):
+        # The current ranked season (ranked_json[0]) anchors the WR/O: the
+        # season's cumulative battles/wins drive the headline WR/O, and the
+        # per-ship WR/O comes from the season's ships/stats snapshot. The 30d
+        # window is a SUBSET of the season, so a real prior exists and both
+        # the headline and per-ship deltas are meaningful.
+        today = django_timezone.now().date()
+        season = 22
+        self.player.ranked_json = [
+            {"season_id": season, "season_name": "Season 22",
+             "total_battles": 20, "total_wins": 14, "win_rate": 0.7},
+            {"season_id": 21, "season_name": "Season 21",
+             "total_battles": 50, "total_wins": 25, "win_rate": 0.5},
+        ]
+        self.player.save(update_fields=["ranked_json"])
+        # Per-ship season cumulative snapshot. ship 42: 20b/14w this season
+        # (window is a subset → WR/O shows). ship 43: 3b/2w this season, all of
+        # which sit in the window → prior==0 → WR/O is redundant with WR/S.
+        BattleObservation.objects.create(
+            player=self.player,
+            ranked_ships_stats_json=[
+                {"ship_id": 42, "seasons": {str(season): {"1": {"rank_solo": {
+                    "battles": 20, "wins": 14, "losses": 6}}}}},
+                {"ship_id": 43, "seasons": {str(season): {"1": {"rank_solo": {
+                    "battles": 3, "wins": 2, "losses": 1}}}}},
+            ],
+        )
+        # Window holds only 6 of the 20 season battles for ship 42 ...
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=season,
+            battles=6, wins=3, damage=120_000,
+        )
+        # ... ship 43's entire season (3b/2w) sits in the window ...
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=43, ship_name="Dalian",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=season,
+            battles=3, wins=2, damage=45_000,
+        )
+        # ... and a prior-season row that must be excluded by the scope.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
+            battles=9, wins=8, damage=90_000,
+        )
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=ranked",
+            )
+        body = r.json()
+        t = body["totals"]
+        # Window scoped to season 22 → 6 (ship42) + 3 (ship43) = 9 battles;
+        # the season-21 row (9 battles) is excluded.
+        self.assertEqual(t["battles"], 9)
+        self.assertEqual(body["ranked_season_name"], "Season 22")
+        # Headline WR/O = current-season cumulative 14/20 = 70.0%.
+        self.assertEqual(t["lifetime_battles"], 20)
+        self.assertEqual(t["lifetime_win_rate"], 70.0)
+        # Overall delta: window 9b/5w, prior 11b/9w = 81.8%, season 70.0% → -11.8.
+        self.assertEqual(t["delta_win_rate"], -11.8)
+        ships = {s["ship_id"]: s for s in body["by_ship"]}
+        # Per-ship WR/O for ship 42 = season cumulative 14/20 = 70.0%.
+        ship42 = ships[42]
+        self.assertEqual(ship42["lifetime_battles"], 20)
+        self.assertEqual(ship42["lifetime_win_rate"], 70.0)
+        self.assertEqual(ship42["delta_win_rate"], -8.6)
+        self.assertFalse(ship42["is_new_ship"])
+        # ship 43's whole season is in-window (prior==0) → WR/O is redundant
+        # with WR/S, so it's suppressed rather than showing two equal columns.
+        ship43 = ships[43]
+        self.assertIsNone(ship43["lifetime_win_rate"])
+        self.assertIsNone(ship43["delta_win_rate"])
+        self.assertFalse(ship43["is_new_ship"])
+
+    def test_mode_ranked_baseline_skew_suppresses_overall_delta(self):
+        # ranked_json cumulative can lag the live rollup (WG snapshot cadence):
+        # the window's current-season battles exceed the reported season total.
+        # The WR/O still surfaces the season cumulative, but the overall delta
+        # is suppressed rather than computed from an impossible negative prior.
+        today = django_timezone.now().date()
+        season = 22
+        self.player.ranked_json = [
+            {"season_id": season, "season_name": "Season 22",
+             "total_battles": 4, "total_wins": 3, "win_rate": 0.75},
+        ]
+        self.player.save(update_fields=["ranked_json"])
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=season,
+            battles=6, wins=5, damage=120_000,
+        )
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?days=7&mode=ranked",
+            )
+        t = r.json()["totals"]
+        # Season cumulative still shown (3/4 = 75.0%) ...
+        self.assertEqual(t["lifetime_battles"], 4)
+        self.assertEqual(t["lifetime_win_rate"], 75.0)
+        # ... but the impossible prior (4 - 6 < 0) suppresses the delta.
+        self.assertIsNone(t["delta_win_rate"])
 
     def test_mode_combined_sums_random_and_ranked(self):
         today = django_timezone.now().date()

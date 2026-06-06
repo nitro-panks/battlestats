@@ -4,6 +4,62 @@ _Created: 2026-05-02_
 _Context: The randoms battle-history rollout (`runbook-battle-history-rollout-2026-04-28.md`) explicitly filed ranked-battles as Phase 7 / out-of-scope. The randoms pipeline is now stable in production (17K+ events captured across 2,400+ players as of 2026-05-01) and the orchestration is proven. This runbook scopes the parallel ranked rollout — same diff-and-aggregate shape against the WG `seasons/shipstats/` endpoint, with a `mode` discriminator on the existing capture/event/rollup tables._
 _Status: na-verified (pending baseline fill) — 2026-05-04. Phases 1–5 shipped + post-rollout fixes (`57bdce8` walk-back semantics, `d98cee1` baseline observation fix, `891bf0c` broken-prior guard, `191656e` auto-default to `combined`, `5952eee` collapse period-only WR cells in ranked mode). Live verification on NA via public-API probe of top 10 ranked players: 1/10 (`Sesame_Street`) shows `available_modes: ['random','ranked']` with 7 ranked battles + 2 ships rolled up — confirms capture seam, diff lane, partition-aware rollup writer, and API are functioning end-to-end. The other 9/10 have only one ranked observation (no prior to diff against), which is the expected pre-fill state. Phase 6 (NA baseline fill via `establish_ranked_baseline`) is the next step — running it converts those 9/10 from "diff-against-nothing" into "diff-against-baseline" and unlocks ranked rows for the entire eligible population. EU + ASIA capture remains gated by `BATTLE_HISTORY_RANKED_CAPTURE_REALMS=na` until per-realm baseline fills run._
 
+## 2026-06-06 follow-up: current-season WR/O baseline + season-scoped ranked view
+
+Ranked battles have no career-lifetime baseline the way randoms do
+(`Player.pvp_battles`), so the `BattleHistoryCard` rendered ranked with bars but
+no overall-win-rate (WR/O) trend line and a `—` WR/O column — and, because the
+single-mode pill row was suppressed, no label saying it was ranked at all
+(fixed first by a static "Ranked" badge, `f834da2`). This follow-up makes the
+ranked view **current-season-scoped** and gives it a real WR/O.
+
+**Behavior change (deliberate):** for `mode=ranked`, the window now scopes to
+the player's **current ranked season only** (was: cross-season sum of all
+ranked battles in the date window — see the now-rewritten
+`test_mode_ranked_scopes_to_current_season`). This is required, not cosmetic:
+the frontend bars and the WR/O walk-back line read the *same* `by_day` array, so
+the anchor (season cumulative) and the bars must agree or the walk-back goes
+negative across a season boundary. Random/combined are untouched.
+
+**Single season_id source.** `_current_ranked_season_context(player)`
+(`server/warships/views.py`) resolves everything from one season_id —
+`Player.ranked_json[0].season_id` (rows sorted season_id desc, so [0] is
+current):
+- **Window filter:** `PlayerDailyShipStats`/`BattleEvent` rows filtered to that
+  `season_id` (both carry it; `season_id` is populated only for `mode=ranked`).
+- **Headline WR/O baseline:** `ranked_json[0].total_battles` / `total_wins`.
+- **Per-ship WR/O baseline:** the latest `BattleObservation.ranked_ships_stats_json`
+  coerced via `_ranked_ships_from_iterable`, filtered to that season_id.
+- **`ranked_season_name`** (new top-level payload field, e.g. "Season 29"):
+  labels the card header in place of the date-window label.
+
+The per-ship/overall WR/O then flows through the **existing** lifetime-delta
+machinery (generalized from "random subset" to a per-mode `period_base`
+subtrahend). The sync-skew guard (`0 <= prior_wins <= prior_battles`) covers the
+case where `ranked_json`'s cumulative lags the live rollup (window battles >
+season total): the WR/O still shows, the delta is suppressed. NEW is suppressed
+for ranked (it's a random-mode "first time in this ship" affordance).
+
+**Hide-when-identical (per-ship).** When the window covers a ship's ENTIRE
+baseline (`prior_battles == 0` — career for random, season for ranked) the WR/O
+exactly duplicates the period WR/S, so the per-ship WR/O cell is suppressed
+rather than render two identical columns. For ranked this is the common
+early-season state on the month view (the whole young season fits in the 30-day
+window); the WR/O reappears per-ship on a narrower window (Week) or once the
+season ages past the window. The **headline** WR/O and the sparkline overlay
+line are NOT gated this way — they always surface the season cumulative when
+available, so the ranked card is never unlabeled.
+
+**Graceful fallback:** no `ranked_json` → season_id falls back to the latest
+ranked rollup season (window still scopes coherently) but baselines stay empty
+(WR/O line/column suppressed, as before) rather than guessed.
+
+**Tests:** `test_mode_ranked_scopes_to_current_season`,
+`test_mode_ranked_current_season_overall_and_per_ship_wr`,
+`test_mode_ranked_baseline_skew_suppresses_overall_delta`
+(`server/warships/tests/test_incremental_battles.py`); frontend season-header +
+"Ranked" badge in `client/app/components/__tests__/BattleHistoryCard.test.tsx`.
+
 ## Purpose
 
 Capture ranked-battle activity per-player per-ship per-season as a side-effect of the WG calls the site already makes (or with a single additional WG call piggybacked on the same chokepoint), surface it on the existing `BattleHistoryCard` via a mode toggle, and align the storage shape so the downstream weekly/monthly/yearly rollups absorb ranked transparently.

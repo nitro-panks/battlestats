@@ -318,6 +318,33 @@ describe('BattleHistoryCard', () => {
         expect(screen.getByText(/^Ranked$/)).toBeInTheDocument();
     });
 
+    test('labels the ranked header with the season name when provided', async () => {
+        // Ranked is current-season-scoped server-side, so the header reads the
+        // season (e.g. "Season 29") instead of the date-window label.
+        mockByMode({ available_modes: ['ranked'], ranked_season_name: 'Season 29' }, {
+            ranked: {
+                totals: {
+                    battles: 12, wins: 8, losses: 4, win_rate: 66.7,
+                    damage: 480_000, avg_damage: 40_000, frags: 18,
+                    xp: 7_200, planes_killed: 0, survived_battles: 8,
+                    survival_rate: 66.7, lifetime_battles: 40,
+                    lifetime_win_rate: 60.0,
+                },
+            },
+        });
+        render(<BattleHistoryCard playerName="ranked_only" realm="na" />);
+        await waitFor(() => {
+            expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
+        });
+        expect(
+            screen.getByRole('heading', { name: /season 29/i }),
+        ).toBeInTheDocument();
+        // The date-window label is replaced, not appended.
+        expect(
+            screen.queryByRole('heading', { name: /last 30 days/i }),
+        ).not.toBeInTheDocument();
+    });
+
     test('renders mode pill row with three options + defaults to Random when both modes available', async () => {
         // Dual-mode availability → the card keeps its initial 'random' default
         // (no auto-switch); Ranked/All pills remain reachable.

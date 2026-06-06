@@ -60,6 +60,10 @@ export interface BattleHistoryPayload {
     period?: 'daily' | 'weekly' | 'monthly' | 'yearly';
     mode?: 'random' | 'ranked' | 'combined';
     available_modes?: ('random' | 'ranked')[];
+    // Present (e.g. "Season 29") when the card is scoped to the player's
+    // current ranked season — used to label the ranked header in place of
+    // the date-window label. Null/absent for random/combined.
+    ranked_season_name?: string | null;
     has_recent_24h_activity?: boolean;
     as_of: string;
     totals: BattleHistoryTotals;
@@ -813,7 +817,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             <header className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex flex-wrap items-baseline gap-3">
                     <h2 className="whitespace-nowrap text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                        {WINDOW_HEADER[window]}
+                        {/* Ranked is season-scoped server-side, so label it
+                            with the season (e.g. "Season 29") rather than the
+                            date-window — the bars/totals/WR are all that
+                            season, and the season framing is how players think
+                            about ranked. Falls back to the window label. */}
+                        {mode === 'ranked' && payload?.ranked_season_name
+                            ? payload.ranked_season_name
+                            : WINDOW_HEADER[window]}
                     </h2>
                     <div className="flex items-center gap-1 text-xs" role="group" aria-label="Lookback window">
                         {VISIBLE_WINDOWS.map((w) => {
