@@ -853,6 +853,21 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         })}
                     </div>
                 </div>
+                {/* A single non-random mode (e.g. a player who only plays
+                    ranked this season) gets a static label instead of a toggle:
+                    with nothing to switch to the pill row is otherwise
+                    suppressed, leaving the card silently reading as Random —
+                    its conventional default — when it's actually Ranked. */}
+                {visibleModes.length === 1 && visibleModes[0] !== 'random' && (
+                    <span
+                        className="ml-auto rounded bg-[var(--accent-mid)] px-2 py-0.5 text-xs font-semibold text-[var(--bg-card)]"
+                        title={visibleModes[0] === 'ranked'
+                            ? 'Ranked battles only (sums across active seasons)'
+                            : 'Random + ranked combined (lifetime delta unavailable)'}
+                    >
+                        {MODE_LABEL[visibleModes[0]]}
+                    </span>
+                )}
                 {visibleModes.length >= 2 && (
                     <div
                         className="flex items-center gap-1 text-xs ml-auto"

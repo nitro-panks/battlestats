@@ -309,10 +309,13 @@ describe('BattleHistoryCard', () => {
         await waitFor(() => {
             expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
         });
-        // No pill row (single visible mode → group hidden).
+        // No interactive pill row (nothing to switch to), but a static
+        // "Ranked" label so the card isn't silently misread as Random.
         expect(screen.queryByRole('group', { name: /battle mode/i })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^Random$/ })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^All$/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^Ranked$/ })).not.toBeInTheDocument();
+        expect(screen.getByText(/^Ranked$/)).toBeInTheDocument();
     });
 
     test('renders mode pill row with three options + defaults to Random when both modes available', async () => {
