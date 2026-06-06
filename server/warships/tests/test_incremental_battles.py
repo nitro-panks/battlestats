@@ -3637,6 +3637,36 @@ class RollupDurabilityTests(TestCase):
         self.assertTrue(PlayerWeeklyShipStats.objects.filter(
             period_start=monday).exists())
 
+    def test_period_rebuild_skipped_by_default(self):
+        # Period tiers are dormant + UI-hidden and are the long pole that blew
+        # the 540s soft limit, so the nightly sweeper skips them unless
+        # BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED=1. The daily layer still builds.
+        self._event_on(self.yesterday, battles=2)
+        result = self._run_sweeper(lookback=3)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["period"]["status"], "skipped")
+        self.assertEqual(result["period"]["reason"], "period-rollup-disabled")
+        self.assertTrue(
+            PlayerDailyShipStats.objects.filter(date=self.yesterday).exists())
+        self.assertEqual(PlayerWeeklyShipStats.objects.count(), 0)
+        self.assertEqual(PlayerMonthlyShipStats.objects.count(), 0)
+        self.assertEqual(PlayerYearlyShipStats.objects.count(), 0)
+
+    def test_period_rebuild_runs_when_flag_enabled(self):
+        from warships.incremental_battles import _week_start
+        from warships.tasks import roll_up_player_daily_ship_stats_task
+        self._event_on(self.yesterday, battles=2)
+        with mock.patch.dict("os.environ", {
+            "BATTLE_HISTORY_ROLLUP_ENABLED": "1",
+            "BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS": "3",
+            "BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED": "1",
+        }):
+            result = roll_up_player_daily_ship_stats_task.apply().get()
+        self.assertEqual(result["status"], "completed")
+        self.assertGreaterEqual(result["period"]["weeks_rebuilt"], 1)
+        self.assertTrue(PlayerWeeklyShipStats.objects.filter(
+            period_start=_week_start(self.yesterday)).exists())
+
 
 class RollupReconciliationTests(TestCase):
     """Alert-only reconciliation of PlayerDailyShipStats vs BattleEvent.

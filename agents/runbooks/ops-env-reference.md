@@ -34,6 +34,7 @@ Battle-history pipeline (phased gates, all default 0):
 - `BATTLE_HISTORY_CAPTURE_ENABLED` (write BattleObservation/BattleEvent as a side-effect of `update_battle_data`)
 - `BATTLE_HISTORY_ROLLUP_ENABLED` + `_HOUR`/`_MINUTE` (4/30) (fill PlayerDailyShipStats + nightly rebuild)
 - `BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS` (3) — trailing-window size the nightly sweeper rebuilds (self-heal); `1` = legacy yesterday-only. See `runbook-battle-history-rollup-durability-2026-06-06.md`.
+- `BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED` (0) — gates the nightly weekly/monthly/yearly rebuild; OFF by default because those tiers are dormant/UI-hidden and the yearly-YTD aggregate is the long pole that exceeded the task's 540s soft time limit (the daily layer still builds). Flip to `1` only when the period tiers are reactivated.
 - `BATTLE_HISTORY_RECONCILE_ENABLED` (0) — gates the alert-only rollup reconciliation task; **independent** of `BATTLE_HISTORY_ROLLUP_ENABLED` (so it can detect rollup-off / holes)
 - `BATTLE_HISTORY_RECONCILE_AUDIT_DAYS` (30) — audit window the reconciliation task scans
 - `BATTLE_HISTORY_API_ENABLED` (exposes `GET /api/player/<name>/battle-history?days=N`, 404 when off)
