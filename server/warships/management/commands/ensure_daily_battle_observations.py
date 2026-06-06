@@ -94,6 +94,22 @@ def _ranked_capture_active_for_realm(realm: str) -> bool:
     return realm in realms
 
 
+def _ranked_known_ids(realm: str, candidate_ids: list[int]) -> set[int]:
+    """Subset of `candidate_ids` (in `realm`) that have a non-empty ranked_json.
+
+    Marks "ranked-known" players so the bulk floor (D6) routes them to the
+    per-player ranked path instead of the random-only bulk sweep — they must
+    not get two observations per tick. Mirrors the ranked-known marker in
+    `management/commands/incremental_ranked_data.py`.
+    """
+    return set(
+        Player.objects.filter(realm=realm, player_id__in=candidate_ids)
+        .exclude(ranked_json__isnull=True)
+        .exclude(ranked_json=[])
+        .values_list("player_id", flat=True)
+    )
+
+
 class Command(BaseCommand):
     help = (
         "Daily floor for BattleObservation coverage on active players. "
@@ -131,6 +147,28 @@ class Command(BaseCommand):
             help=f"Per-player delay (s) for WG-budget pacing. Default: {DEFAULT_DELAY}.",
         )
         parser.add_argument(
+            "--bulk", action="store_true",
+            help=(
+                "Capture random observations via the bulk ships/stats + "
+                "account/info path (R1, ~100x fewer WG calls). Ranked-known "
+                "players still go through the per-player ranked path."
+            ),
+        )
+        parser.add_argument(
+            "--ranked-limit", type=int, default=None, dest="ranked_limit",
+            help=(
+                "Max ranked-known players to sweep per-player when --bulk is on "
+                "and ranked capture is active for the realm. Defaults to --limit."
+            ),
+        )
+        parser.add_argument(
+            "--chunk-delay", type=float, default=0.0, dest="chunk_delay",
+            help=(
+                "Per-CHUNK pacing (s) for the --bulk path. Distinct from the "
+                "legacy per-player --delay. Default: 0.0."
+            ),
+        )
+        parser.add_argument(
             "--dry-run", action="store_true",
             help="Print the candidate count without making WG API calls.",
         )
@@ -147,6 +185,9 @@ class Command(BaseCommand):
         limit = options["limit"]
         delay = options["delay"]
         dry_run = options["dry_run"]
+        bulk = options["bulk"]
+        ranked_limit = options["ranked_limit"]
+        chunk_delay = options["chunk_delay"]
 
         if days < 1:
             raise CommandError("--days must be >= 1")
@@ -154,8 +195,19 @@ class Command(BaseCommand):
             raise CommandError("--stale-hours must be >= 1")
         if delay < 0:
             raise CommandError("--delay must be >= 0")
+        if chunk_delay < 0:
+            raise CommandError("--chunk-delay must be >= 0")
 
         ranked = _ranked_capture_active_for_realm(realm)
+
+        if bulk:
+            self._handle_bulk(
+                realm=realm, days=days, stale_hours=stale_hours, limit=limit,
+                delay=delay, ranked_limit=ranked_limit, chunk_delay=chunk_delay,
+                ranked=ranked, dry_run=dry_run,
+                ranked_worker=record_ranked_observation_and_diff,
+            )
+            return
         worker = (
             record_ranked_observation_and_diff if ranked
             else record_observation_and_diff
@@ -236,4 +288,112 @@ class Command(BaseCommand):
             f"done in {elapsed:.0f}s — completed={completed} "
             f"(baseline={baseline}, events={events_emitted}) "
             f"wg_failed={wg_failed} not_found={not_found} other={other}"
+        ))
+
+    def _handle_bulk(self, *, realm, days, stale_hours, limit, delay,
+                     ranked_limit, chunk_delay, ranked, dry_run, ranked_worker):
+        """Bulk capture path (R1, D6).
+
+        Random observations go through the bulk engine; ranked-known players
+        (only when ranked capture is active for the realm) go through the
+        per-player ranked worker. The two candidate sets are mutually exclusive
+        so a ranked-known player never gets two observations per tick.
+        """
+        from warships.incremental_battles import record_observations_bulk
+
+        candidates = _candidates(realm, days, stale_hours, limit)
+        candidate_ids = [row[0] for row in candidates]
+
+        if ranked:
+            ranked_known = _ranked_known_ids(realm, candidate_ids)
+            bulk_ids = [pid for pid in candidate_ids if pid not in ranked_known]
+            ranked_ids = [pid for pid in candidate_ids if pid in ranked_known]
+            # Ranked sweep gets its own bound (defaults to --limit). Players
+            # trimmed here are simply deferred — they are still excluded from
+            # the bulk sweep, so they never double-capture.
+            eff_ranked_limit = ranked_limit if ranked_limit is not None else limit
+            if eff_ranked_limit and eff_ranked_limit > 0:
+                ranked_ids = ranked_ids[:eff_ranked_limit]
+        else:
+            bulk_ids = candidate_ids
+            ranked_ids = []
+
+        self.stdout.write(
+            f"realm={realm} active-{days}d stale>{stale_hours}h: "
+            f"{len(candidate_ids)} candidates — bulk_random={len(bulk_ids)} "
+            f"(~{(len(bulk_ids) + 99) // 100 * 2:,} WG calls @ {chunk_delay}s/chunk), "
+            f"ranked_known={len(ranked_ids)} per-player "
+            f"(~{len(ranked_ids) * 3:,} WG calls @ {delay}s) "
+            f"(ranked_capture={'on' if ranked else 'off'})"
+        )
+
+        if dry_run:
+            self.stdout.write(self.style.WARNING("--dry-run: no WG calls made"))
+            return
+
+        started = time.time()
+
+        # ── Bulk random sweep ────────────────────────────────────────────
+        tally = {}
+        if bulk_ids:
+            tally = record_observations_bulk(
+                bulk_ids, realm, chunk_delay=chunk_delay,
+            )
+            self.stdout.write(
+                f"  bulk random: completed={tally.get('completed', 0)} "
+                f"(baseline={tally.get('baseline', 0)}, "
+                f"events={tally.get('events', 0)}) "
+                f"wg_failed={tally.get('wg_failed', 0)} "
+                f"not_found={tally.get('not_found', 0)} "
+                f"skipped_missing={tally.get('skipped_missing', 0)} "
+                f"other={tally.get('other', 0)} "
+                f"aborted={tally.get('aborted', False)}"
+            )
+
+        # ── Per-player ranked sweep (ranked-known subset) ─────────────────
+        r_completed = r_events = r_wg_failed = r_not_found = r_other = 0
+        for index, player_id in enumerate(ranked_ids, start=1):
+            try:
+                result = ranked_worker(player_id, realm=realm)
+            except Exception as exc:
+                log.exception(
+                    "observation-floor ranked exception for player_id=%s "
+                    "realm=%s: %s", player_id, realm, exc,
+                )
+                r_other += 1
+                if delay:
+                    time.sleep(delay)
+                continue
+
+            status = result.get("status")
+            reason = result.get("reason")
+            if status == "completed":
+                r_completed += 1
+                r_events += (
+                    int(result.get("random_events_created") or 0)
+                    + int(result.get("ranked_events_created") or 0)
+                )
+            elif reason == "wg-fetch-failed-or-hidden":
+                r_wg_failed += 1
+            elif reason == "player-not-found":
+                r_not_found += 1
+            else:
+                r_other += 1
+
+            if delay:
+                time.sleep(delay)
+
+        if ranked_ids:
+            self.stdout.write(
+                f"  ranked per-player: completed={r_completed} "
+                f"events={r_events} wg_failed={r_wg_failed} "
+                f"not_found={r_not_found} other={r_other}"
+            )
+
+        elapsed = time.time() - started
+        self.stdout.write(self.style.SUCCESS(
+            f"bulk done in {elapsed:.0f}s — "
+            f"random_completed={tally.get('completed', 0)} "
+            f"ranked_completed={r_completed} "
+            f"aborted={tally.get('aborted', False)}"
         ))

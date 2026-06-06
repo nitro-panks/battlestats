@@ -280,7 +280,7 @@
         "agents/runbooks/runbook-bulk-battle-observation-capture-2026-06-06.md": {
             "kind": "runbook",
             "status": "active",
-            "lifecycle": "active-spec",
+            "lifecycle": "dated-active",
             "section": "spec",
             "owner": "platform",
             "aliases": [

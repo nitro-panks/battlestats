@@ -2,7 +2,7 @@
 
 _Created: 2026-06-06_
 _Context: The observation floor captures battle history one player at a time at 2–3 WG calls/player, so only a slice of active players is covered each sweep. Enrichment already proves bulk `ships/stats`/`account/info` at 100 ids/call. This spec moves capture onto that bulk path (~100× cheaper) so we can observe every active player daily._
-_Status: **design only — not implemented.**_
+_Status: **implemented — phase 1 (code landed, flag default OFF).** Not yet enabled on any realm; phases 2–5 (shadow/parity-on-prod, per-realm enable, all-realms, R3 floor-limit raise) remain operational. See "Implementation status" at the bottom._
 
 ## Purpose
 
@@ -282,3 +282,28 @@ migration for `SOURCE_BULK_FLOOR` — nothing to unwind.
 - **R2 — clan crawl `core_only`.** Frees the dominant consumer that pre-empts capture today.
 - **D8 optimization** — bulk-prefetch latest observation per chunk (optional `previous=` param) only
   if walk-back queries measurably dominate chunk wall-time.
+
+## Implementation status
+
+_Phase 1 landed 2026-06-06 (flag default OFF — no production behavior change). Branch `work`._
+
+**Code as built (matches the design; deltas noted):**
+
+| Decision | File | Notes / delta from spec |
+|---|---|---|
+| D10 relocation | `api/ships.py`, `api/players.py`, `enrich_player_data.py` | `_bulk_fetch_ship_stats` + `_per_player_ship_fallback` moved to `api/ships.py` (verbatim, logger → module `logging`); `_bulk_fetch_account_info` + `_per_player_account_fallback` **added** to `api/players.py`. Enrichment imports them function-locally. Pure relocation — enrichment + task-routing tests green. |
+| D1 typed account fetcher | `api/players.py` | As specced (no fields filter → per-key parity with `_fetch_player_personal_data`). |
+| D9 source constant | `models.py` + migration `0064_alter_battleobservation_source.py` | `SOURCE_BULK_FLOOR='bulk_floor'`. `sqlmigrate` confirms the AlterField is `-- (no-op)` (choices-only, no DDL). |
+| D2–D8 engine | `incremental_battles.py` `record_observations_bulk()` | As specced. **Delta:** added an explicit `isinstance(ships, dict) → []` coercion in the per-player slice (D4) to match legacy `record_observation_and_diff`'s `if isinstance(ship_data, dict): ship_data = []` — required for byte parity. `ThreadPoolExecutor` import added to the module. |
+| D6 command | `ensure_daily_battle_observations.py` | `--bulk`, `--ranked-limit`, `--chunk-delay` added; legacy per-player `handle()` left byte-identical (rollback). Bulk path in `_handle_bulk()`; `_ranked_known_ids()` does the split. `--ranked-limit` defaults to `--limit`. |
+| Task + flags | `tasks.py` | `_bulk_floor_active_for_realm()` gates on `BULK_ENABLED==1` **and** realm ∈ `BULK_REALMS` (mirrors `_ranked_capture_active_for_realm`; empty `BULK_REALMS` ⇒ no realm ⇒ off — phase-4 "all realms" must list all realms). Crawl-coexist preserved; **added** `BATTLE_OBSERVATION_FLOOR_BULK_CRAWL_CHUNK_DELAY` (default `1.0`) to raise per-chunk pacing while the crawl lock is held. |
+
+**Flags (all default to the legacy path):**
+- `BATTLE_OBSERVATION_FLOOR_BULK_ENABLED` (default `0`)
+- `BATTLE_OBSERVATION_FLOOR_BULK_REALMS` (csv, default empty)
+- `BATTLE_OBSERVATION_FLOOR_BULK_CHUNK_DELAY` (default `0.5`)
+- `BATTLE_OBSERVATION_FLOOR_BULK_CRAWL_CHUNK_DELAY` (default `1.0`)
+
+**Validation (2026-06-06):** new `warships/tests/test_observations_bulk.py` (18 cases). The parity test proves the **persistence/diff half**: identical in-memory payloads → identical `ships_stats_json` + `BattleEvent` rows (both paths funnel through the same `record_observation_from_payloads`). It does **NOT** prove **fetch-shape parity (D1)** — that `_bulk_fetch_account_info([pid])[0][str(pid)]` byte-equals `_fetch_player_personal_data(pid)`, and the bulk ships slice equals the single fetch. That cross-fetcher equality is only checkable against live WG and is the explicit job of the **phase-2 prod shadow** (`deep-equals` step). **Do not enable a realm without the phase-2 shadow run.** Full run on the sqlite gate (`--nomigrations`, `DB_ENGINE=sqlite3`): `test_observations_bulk` + `test_incremental_battles` + `test_enrichment_task` + `test_task_routing` = **177 passed**; curated release-gate subset = **262 passed**. Battle-history endpoint tests need `DJANGO_SECRET_KEY` set in the env. Parity test omits `last_battle_time` (sqlite rejects tz-aware datetimes under `USE_TZ=False`; prod Postgres accepts them).
+
+**Next (operational, not code):** phase 2 prod parity-shadow by `source`, then per-realm enable via `BULK_REALMS`, then R3 floor-limit raise.
