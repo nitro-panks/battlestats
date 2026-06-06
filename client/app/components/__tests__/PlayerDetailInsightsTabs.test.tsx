@@ -10,6 +10,11 @@ jest.mock('../../lib/sharedJsonFetch', () => ({
     decrementChartFetches: jest.fn(),
 }));
 
+const mockTrackEvent = jest.fn();
+jest.mock('../../lib/umami', () => ({
+    trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}));
+
 let mockRankedHeatmapVisibility: boolean | undefined;
 const mockFetchSharedJson = fetchSharedJson as jest.MockedFunction<typeof fetchSharedJson>;
 
@@ -66,6 +71,7 @@ jest.mock('../SectionHeadingWithTooltip', () => {
 describe('PlayerDetailInsightsTabs', () => {
     beforeEach(() => {
         mockRankedHeatmapVisibility = undefined;
+        mockTrackEvent.mockReset();
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockImplementation((url) => {
             if (url.includes('/api/fetch/player_correlation/tier_type/')) {
@@ -104,6 +110,37 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.queryByText('Loading profile charts...')).not.toBeInTheDocument();
         expect(screen.queryByText('Ranked Seasons')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
+    });
+
+    it('fires name-baked player-insights events per tab (readable label, not the internal id)', () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                playerScore={1.8}
+                hasKnownRankedGames
+                hasClan
+                efficiencyRows={[]}
+            />,
+        );
+
+        // Ships is the default tab; switching to others fires distinct named events.
+        fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
+        expect(mockTrackEvent).toHaveBeenCalledWith('player-insights-ranked', expect.objectContaining({ realm: expect.any(String) }));
+
+        // 'Clan Battles' (id: career) and 'Efficiency' (id: badges) use the readable label slug.
+        fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
+        expect(mockTrackEvent).toHaveBeenCalledWith('player-insights-clan-battles', expect.objectContaining({ realm: expect.any(String) }));
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
+        expect(mockTrackEvent).toHaveBeenCalledWith('player-insights-efficiency', expect.objectContaining({ realm: expect.any(String) }));
+
+        // Re-clicking the already-active tab does not re-fire.
+        mockTrackEvent.mockReset();
+        fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
+        expect(mockTrackEvent).not.toHaveBeenCalled();
     });
 
     it('switches across the insights tabs one at a time', () => {

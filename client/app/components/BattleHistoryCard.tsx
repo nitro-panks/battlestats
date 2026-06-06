@@ -829,6 +829,9 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                     type="button"
                                     onClick={() => {
                                         if (dayDisabled) return;
+                                        if (!isActive) {
+                                            trackEvent(`player-history-${w}`, { realm });
+                                        }
                                         setWindow(w);
                                         setUserPickedWindow(true);
                                     }}

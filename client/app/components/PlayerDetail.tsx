@@ -24,6 +24,7 @@ import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
 import { useTheme } from '../context/ThemeContext';
 import { useRealm } from '../context/RealmContext';
+import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
 
 interface PlayerDetailProps {
@@ -336,6 +337,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     }, [player.clan_id, player.is_hidden, player.player_id]);
 
     const handleShare = async () => {
+        trackEvent('player-share', { realm });
         try {
             const url = new URL(window.location.href);
             if (!url.searchParams.has('realm')) {

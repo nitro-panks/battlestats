@@ -15,6 +15,11 @@ jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
 }));
 
+const mockTrackEvent = jest.fn();
+jest.mock('../../lib/umami', () => ({
+    trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}));
+
 const mockFetchSharedJson = fetchSharedJson as jest.MockedFunction<typeof fetchSharedJson>;
 
 const buildPayload = (overrides: Partial<BattleHistoryPayload> = {}): BattleHistoryPayload => ({
@@ -117,6 +122,7 @@ const mainFetchCalls = (mode?: string): unknown[] =>
 describe('BattleHistoryCard', () => {
     beforeEach(() => {
         mockFetchSharedJson.mockReset();
+        mockTrackEvent.mockReset();
         // Default response for the always-month sparkline fetch (second useEffect call).
         // Individual tests override the main window fetch via resolveWith().
         mockFetchSharedJson.mockResolvedValue({ data: buildPayload({ by_day: [] }), headers: {} });
@@ -376,6 +382,26 @@ describe('BattleHistoryCard', () => {
             const lastUrl = mockFetchSharedJson.mock.calls[beforeCount][0] as string;
             expect(lastUrl).toContain(`window=${w}`);
         }
+    });
+
+    test('fires name-baked player-history-<window> events when a non-active pill is picked', async () => {
+        resolveWith(buildPayload({ has_recent_24h_activity: true }));
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+
+        // Default window is 'month', so switching to Week/Day fires distinct named events.
+        await act(async () => { screen.getByRole('button', { name: /^Week$/ }).click(); });
+        expect(mockTrackEvent).toHaveBeenCalledWith('player-history-week', expect.objectContaining({ realm: 'na' }));
+
+        await act(async () => { screen.getByRole('button', { name: /^Day$/ }).click(); });
+        expect(mockTrackEvent).toHaveBeenCalledWith('player-history-day', expect.objectContaining({ realm: 'na' }));
+
+        // Re-clicking the now-active Day pill does not re-fire.
+        mockTrackEvent.mockClear();
+        await act(async () => { screen.getByRole('button', { name: /^Day$/ }).click(); });
+        expect(mockTrackEvent).not.toHaveBeenCalledWith('player-history-day', expect.anything());
     });
 
     test('Day pill is disabled when has_recent_24h_activity is false', async () => {

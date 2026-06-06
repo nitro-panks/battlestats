@@ -10,8 +10,13 @@ jest.mock('../../lib/sharedJsonFetch', () => ({
     decrementChartFetches: jest.fn(),
 }));
 
+jest.mock('../../lib/umami', () => ({
+    trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}));
+
 const mockUseClanMembers = jest.fn();
 const mockClipboardWriteText = jest.fn();
+const mockTrackEvent = jest.fn();
 const mockClanSvg = jest.fn();
 let mockClanBattleSummary:
     | { seasonsPlayed: number; totalBattles: number; overallWinRate: number; }
@@ -119,6 +124,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
 
     beforeEach(() => {
         mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: null });
+        mockTrackEvent.mockReset();
         mockClanSvg.mockReset();
         mockClanBattleSummary = undefined;
         mockRankedHeatmapVisibility = undefined;
@@ -758,6 +764,23 @@ describe('PlayerDetail efficiency-rank icon', () => {
 
         expect(await screen.findByText('Copy failed')).toBeInTheDocument();
         expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('fires a player-share umami event when the share button is clicked', () => {
+        mockClipboardWriteText.mockResolvedValue(undefined);
+
+        render(
+            <PlayerDetail
+                player={basePlayer}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable player URL' }));
+
+        expect(mockTrackEvent).toHaveBeenCalledWith('player-share', expect.objectContaining({ realm: expect.any(String) }));
     });
 
     it('renders the default ships insight tab on the player page', async () => {
