@@ -137,7 +137,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
     }, []);
 
     const height = useMemo(
-        () => Math.max(280, Math.min(560, Math.round(width * 0.4))),
+        () => Math.max(280, Math.min(440, Math.round(width * 0.4))),
         [width],
     );
 
@@ -268,7 +268,7 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
                     </div>
                 </div>
             </div>
-            <div ref={containerRef} className="relative w-full max-w-[900px] xl:max-w-[1100px] 2xl:max-w-[1280px]">
+            <div ref={containerRef} className="relative w-full max-w-[900px]">
                 <svg ref={svgRef} role="img" aria-label={`${realm} top ${SHIP_LIMIT} most-played ships over the most recently completed 2-week ship season`} />
                 {hover && (
                     <div
