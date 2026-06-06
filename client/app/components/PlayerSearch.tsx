@@ -25,6 +25,7 @@ import useClanHydrationPoll from './useClanHydrationPoll';
 import { useTheme } from '../context/ThemeContext';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
+import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -522,7 +523,7 @@ const PlayerSearch: React.FC = () => {
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Players</h3>
                                 <button
                                     type="button"
-                                    onClick={() => { setPlayerMode('recent'); setPlayerBestSort('overall'); }}
+                                    onClick={() => { if (playerMode !== 'recent') { setPlayerMode('recent'); setPlayerBestSort('overall'); trackEvent('landing-filter', { entity: 'player', mode: 'recent', realm }); } }}
                                     className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={playerMode === 'recent'}
                                 >
@@ -530,7 +531,7 @@ const PlayerSearch: React.FC = () => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setPlayerMode('best')}
+                                    onClick={() => { if (playerMode !== 'best') { setPlayerMode('best'); trackEvent('landing-filter', { entity: 'player', mode: 'best', realm }); } }}
                                     className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={playerMode === 'best'}
                                 >
@@ -548,7 +549,7 @@ const PlayerSearch: React.FC = () => {
                                             {i > 0 && <span className="text-xs text-[var(--text-secondary)]">&middot;</span>}
                                             <button
                                                 type="button"
-                                                onClick={() => setPlayerBestSort(sort)}
+                                                onClick={() => { if (playerBestSort !== sort) { setPlayerBestSort(sort); trackEvent('landing-best-sort', { entity: 'player', sort, realm }); } }}
                                                 disabled={!showPlayerBestSortBar}
                                                 tabIndex={showPlayerBestSortBar ? 0 : -1}
                                                 className={`text-sm font-medium transition-colors disabled:cursor-default ${playerBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
@@ -618,7 +619,7 @@ const PlayerSearch: React.FC = () => {
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Clans</h3>
                                 <button
                                     type="button"
-                                    onClick={() => setClanMode('best')}
+                                    onClick={() => { if (clanMode !== 'best') { setClanMode('best'); trackEvent('landing-filter', { entity: 'clan', mode: 'best', realm }); } }}
                                     className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={clanMode === 'best'}
                                 >
@@ -626,7 +627,7 @@ const PlayerSearch: React.FC = () => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => { setClanMode('recent'); setClanBestSort('overall'); }}
+                                    onClick={() => { if (clanMode !== 'recent') { setClanMode('recent'); setClanBestSort('overall'); trackEvent('landing-filter', { entity: 'clan', mode: 'recent', realm }); } }}
                                     className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
                                     aria-pressed={clanMode === 'recent'}
                                 >
@@ -644,7 +645,7 @@ const PlayerSearch: React.FC = () => {
                                             {i > 0 && <span className="text-xs text-[var(--text-secondary)]">&middot;</span>}
                                             <button
                                                 type="button"
-                                                onClick={() => setClanBestSort(sort)}
+                                                onClick={() => { if (clanBestSort !== sort) { setClanBestSort(sort); trackEvent('landing-best-sort', { entity: 'clan', sort, realm }); } }}
                                                 disabled={!showClanBestSortBar}
                                                 tabIndex={showClanBestSortBar ? 0 : -1}
                                                 className={`text-sm font-medium transition-colors disabled:cursor-default ${clanBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
