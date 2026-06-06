@@ -121,6 +121,17 @@ const panelSectionIdByTab: Record<InsightsTabId, string> = {
     career: 'insights-career',
 };
 
+// Umami event name per tab — value baked into the name (readable label, not the
+// internal id) so each tab reads as a distinct row in the realtime feed.
+const insightsTabEventByTab: Record<InsightsTabId, string> = {
+    ships: 'player-insights-ships',
+    profile: 'player-insights-profile',
+    ranked: 'player-insights-ranked',
+    career: 'player-insights-clan-battles',
+    badges: 'player-insights-efficiency',
+    population: 'player-insights-population',
+};
+
 const TAB_DATA_WARMUP_DELAY_MS = 250;
 const TAB_DATA_WARMUP_IDLE_TIMEOUT_MS = 1500;
 const PROFILE_FETCH_RETRY_DELAY_MS = 350;
@@ -349,8 +360,10 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 aria-controls={`player-insights-panel-${tab.id}`}
                                 tabIndex={isActive ? 0 : -1}
                                 onClick={() => {
+                                    if (tab.id !== activeTab) {
+                                        trackEvent(insightsTabEventByTab[tab.id], { realm });
+                                    }
                                     setActiveTab(tab.id);
-                                    trackEvent('insights-tab', { tab: tab.id });
                                 }}
                                 className={isActive
                                     ? 'rounded-full border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-3 py-1.5 text-sm font-medium text-[var(--accent-mid)]'
