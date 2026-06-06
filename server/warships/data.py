@@ -3703,6 +3703,19 @@ CLAN_BATTLE_SEASONS_CACHE_KEY = 'clan_battles:seasons:metadata'
 CLAN_BATTLE_SEASONS_CACHE_TTL = 86400
 CLAN_BATTLE_PLAYER_STATS_CACHE_TTL = 21600
 CLAN_BATTLE_SUMMARY_CACHE_TTL = 3600
+# Short negative-cache TTL for a player's CB season stats when the upstream
+# fetch fails (commonly REQUEST_LIMIT_EXCEEDED during warm bursts). Keeps us
+# from poisoning the 6h cache — and the aggregated clan summary — with a wrong
+# "0 clan-battle battles" until the next retry.
+CLAN_BATTLE_PLAYER_STATS_ERROR_TTL = max(
+    1, int(os.getenv('CLAN_BATTLE_PLAYER_STATS_ERROR_TTL', '300')))
+# Per-task thread fan-out for the per-member clans/seasonstats/ fetch in
+# refresh_clan_battle_seasons_cache. WG rejects batched account_id on this
+# endpoint, so each member is a separate call; capped low (× the hydration
+# worker concurrency) to stay under WG's ~10 req/s per-app-id ceiling,
+# especially while the clan crawl is also hitting the API.
+CLAN_BATTLE_SUMMARY_FETCH_CONCURRENCY = max(
+    1, int(os.getenv('CLAN_BATTLE_SUMMARY_FETCH_CONCURRENCY', '3')))
 
 
 def _get_clan_battle_summary_cache_key(clan_id: str, realm: str = DEFAULT_REALM) -> str:
@@ -3806,7 +3819,14 @@ def _get_player_clan_battle_season_stats(account_id: int, realm: str = DEFAULT_R
         return cached
 
     raw = _fetch_clan_battle_season_stats(account_id, realm=realm)
-    seasons = raw.get('seasons', []) if raw else []
+    if raw is None:
+        # Upstream fetch failed (often REQUEST_LIMIT_EXCEEDED during warm
+        # bursts). Cache empty only briefly so we retry soon instead of
+        # persisting a wrong "no seasons" for the full TTL.
+        cache.set(cache_key, [], CLAN_BATTLE_PLAYER_STATS_ERROR_TTL)
+        return []
+
+    seasons = raw.get('seasons', []) or []
     cache.set(cache_key, seasons, CLAN_BATTLE_PLAYER_STATS_CACHE_TTL)
     return seasons
 
@@ -3957,7 +3977,7 @@ def refresh_clan_battle_seasons_cache(clan_id: str, realm: str = DEFAULT_REALM) 
     season_meta = _get_clan_battle_seasons_metadata()
     season_summaries = {}
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    with ThreadPoolExecutor(max_workers=CLAN_BATTLE_SUMMARY_FETCH_CONCURRENCY) as executor:
         futures = {
             executor.submit(_get_player_clan_battle_season_stats, member['player_id'], realm=realm): member
             for member in members

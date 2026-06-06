@@ -37,15 +37,23 @@ def _fetch_clan_battle_seasons_info(realm: str = DEFAULT_REALM) -> Dict:
     return data if data else {}
 
 
-def _fetch_clan_battle_season_stats(account_id: int, realm: str = DEFAULT_REALM) -> Dict:
-    """Fetch clan battle season stats for a single player account."""
+def _fetch_clan_battle_season_stats(account_id: int, realm: str = DEFAULT_REALM) -> Optional[Dict]:
+    """Fetch clan battle season stats for a single player account.
+
+    Returns the per-account payload on success (``{}`` when the player simply
+    has no clan-battle history), or ``None`` when the upstream request fails
+    (e.g. REQUEST_LIMIT_EXCEEDED). Callers must treat ``None`` as "unknown",
+    not "no seasons", so a transient error doesn't get cached as real zeros.
+    """
     params = {
         "account_id": account_id,
     }
     logging.info(
         f' ---> Remote fetching clan battle season stats for account_id: {account_id}')
     data = _make_api_request("clans/seasonstats/", params, realm=realm)
-    return data.get(str(account_id), {}) if data else {}
+    if data is None:
+        return None
+    return data.get(str(account_id), {}) or {}
 
 
 def _fetch_player_data_from_list(players: List[int], realm: str = DEFAULT_REALM) -> Dict:

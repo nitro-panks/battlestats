@@ -19,6 +19,7 @@ Cache/warming:
 - `HOT_ENTITY_PINNED_PLAYER_NAMES` (empty), `HOT_ENTITY_PLAYER_LIMIT`/`HOT_ENTITY_CLAN_LIMIT` (20/10)
 - `RECENTLY_VIEWED_PLAYER_LIMIT` (10), `RECENTLY_VIEWED_WARM_MINUTES` (60), `WARM_CACHES_ON_STARTUP` (1)
 - `CLAN_BATTLE_WARM_CLAN_IDS`, `BEST_CLAN_EXCLUDED_IDS`, `ANALYTICAL_WORK_MEM` (8MB)
+- Clan-battle summary fetch (per-member `clans/seasonstats/`, WG won't batch account_id): `CLAN_BATTLE_SUMMARY_FETCH_CONCURRENCY` (3) caps the per-task thread fan-out to stay under WG's ~10 req/s; `CLAN_BATTLE_PLAYER_STATS_ERROR_TTL` (300) short-caches a failed fetch so a transient `REQUEST_LIMIT_EXCEEDED` isn't persisted as a wrong "0 CB battles" for the 6h player TTL
 
 Crawlers/refresh (`ENABLE_CRAWLER_SCHEDULES`=1 in prod is the master kill switch):
 - `CLAN_CRAWL_SCHEDULE_HOUR`/`_MINUTE` (3/0), `CLAN_CRAWL_WATCHDOG_MINUTES` (5)
