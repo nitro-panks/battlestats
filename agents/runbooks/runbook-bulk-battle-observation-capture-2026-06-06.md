@@ -332,6 +332,17 @@ Backend deployed (release `20260606192653`, flag off, migration `0064` applied).
 
 All 100 ids fetch fine individually (good=100, bad=0), so it is **not** a poison id — the multi-account `ships/stats/` request itself is rejected at n≥2. `account/info/` bulks correctly to 100.
 
+**Independently confirmed via raw `curl` directly against WG (bypassing all our code):**
+
+| raw request | result |
+|---|---|
+| `ships/stats/?account_id=<X>` | `status=ok`, 1 key |
+| `ships/stats/?account_id=<X>,<X>` (same valid id twice) | `status=error` `INVALID_ACCOUNT_ID` |
+| `ships/stats/?account_id=<X>,<Y>` (two distinct valid ids) | `status=error` `INVALID_ACCOUNT_ID` |
+| `account/info/?account_id=<X>,<Y>` (control) | `status=ok`, 2 keys |
+
+The **same-valid-id-twice** case is decisive: an id that returns `ok` alone cannot be "invalid," so `X,X → INVALID_ACCOUNT_ID` can only mean the endpoint rejects multiple `account_id` values. Rules out poison ids, our param encoding, and realm-specificity.
+
 **Consequence — the cost model in the _Context_ line and in `analysis-update-process-cost-map-2026-06-06.md` is wrong.** The claim "enrichment fetches the same `ships/stats` data in bulk, 100 players/call (~0.02 WG/player)" is false: enrichment's `_bulk_fetch_ship_stats` has **always** been hitting `INVALID_ACCOUNT_ID` and silently falling back to `_per_player_ship_fallback` (1 call/player) on every batch. Nobody noticed because the fallback is transparent.
 
 **What R1 actually buys.** The bulk path = 1 bulked `account/info` per ~100 (~0.01/player) + **1 per-player `ships/stats` per player** (unavoidable). vs legacy 2/player (`account/info` + `ships/stats`). So R1 ≈ **2/player → ~1/player, a ~2× saving** — it removes the `account/info` call, not the binding `ships/stats` cost. The **~100× claim does not hold**, and **R3 (daily every active player) remains infeasible**: ~255k active randoms × 1 `ships/stats` call ≈ 255k WG calls/day for the ships half alone, far over the shared ~10 req/s budget.
