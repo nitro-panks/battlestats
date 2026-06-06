@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import PlayerSearch from '../PlayerSearch';
 
 const pushMock = jest.fn();
+const trackEventMock = jest.fn();
 const capturedPlayerDetailProps: { current: null | Record<string, unknown> } = { current: null };
 
 const buildJsonResponse = (payload: unknown) => ({
@@ -310,11 +311,16 @@ jest.mock('../LandingClanSVG', () => {
     };
 });
 
+jest.mock('../../lib/umami', () => ({
+    trackEvent: (...args: unknown[]) => trackEventMock(...args),
+}));
+
 describe('PlayerSearch landing efficiency icon', () => {
     let consoleErrorSpy: jest.SpyInstance;
 
     beforeEach(() => {
         pushMock.mockReset();
+        trackEventMock.mockReset();
         capturedPlayerDetailProps.current = null;
         window.history.replaceState({}, '', '/');
         jest.useRealTimers();
@@ -344,6 +350,39 @@ describe('PlayerSearch landing efficiency icon', () => {
     const switchToBestMode = async () => {
         fireEvent.click(await getPlayerBestButton());
     };
+
+    it('tracks landing-filter and landing-best-sort umami events for the player toolbar', async () => {
+        render(<PlayerSearch />);
+        await waitFor(() => {
+            expect(screen.getByRole('heading', { name: 'Players' })).toBeInTheDocument();
+        });
+
+        // Recent is the default; switching to Best fires a player landing-filter.
+        await switchToBestMode();
+        expect(trackEventMock).toHaveBeenCalledWith(
+            'landing-filter', expect.objectContaining({ entity: 'player', mode: 'best' }));
+
+        // Selecting a Best sub-sort fires landing-best-sort with the chosen sort.
+        const rankedSort = within(screen.getByTestId('player-best-sort-bar'))
+            .getByRole('button', { name: 'Ranked' });
+        fireEvent.click(rankedSort);
+        expect(trackEventMock).toHaveBeenCalledWith(
+            'landing-best-sort', expect.objectContaining({ entity: 'player', sort: 'ranked' }));
+
+        // Re-clicking the already-active mode does not double-fire.
+        trackEventMock.mockReset();
+        fireEvent.click(await getPlayerBestButton());
+        expect(trackEventMock).not.toHaveBeenCalledWith(
+            'landing-filter', expect.objectContaining({ entity: 'player', mode: 'best' }));
+    });
+
+    it('tracks a landing-filter umami event for the clan toolbar', async () => {
+        render(<PlayerSearch />);
+        const clanRecentButton = await getClanRecentButton();
+        fireEvent.click(clanRecentButton);
+        expect(trackEventMock).toHaveBeenCalledWith(
+            'landing-filter', expect.objectContaining({ entity: 'clan', mode: 'recent' }));
+    });
 
     it('renders the sigma only for Expert landing rows while preserving existing landing icons', async () => {
         render(<PlayerSearch />);

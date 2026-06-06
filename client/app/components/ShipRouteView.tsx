@@ -108,6 +108,11 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                 if (!cancelled) {
                     setData(payload);
                     setIsLoading(false);
+                    trackEvent('ship-page-view', {
+                        ship_id: shipId,
+                        ship_name: payload.ship.name,
+                        realm,
+                    });
                 }
             })
             .catch(() => {
