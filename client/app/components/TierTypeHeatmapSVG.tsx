@@ -6,7 +6,7 @@ import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import type { TierTypePayload, TierTypePlayerCell } from './playerProfileChartData';
-import { getTierTypeShipTypes, getTierTypeTiers, getTierTypeTileKey, resolveTierTypeTiles, resolveTierTypeTrend, type ResolvedTierTypeTile, type ResolvedTierTypeTrendPoint } from './tierTypeHeatmapPayload';
+import { getTierTypeShipTypes, getTierTypeTiers, getTierTypeTileKey, resolveTierTypeTiles, type ResolvedTierTypeTile } from './tierTypeHeatmapPayload';
 
 type SvgGroupSelection = ReturnType<typeof d3.select>;
 
@@ -64,7 +64,6 @@ const renderSummaryCard = (
     summaryGroup: SvgGroupSelection,
     tile: ResolvedTierTypeTile,
     playerCell: TierTypePlayerCell | undefined,
-    trendDelta: number | null,
     colors: Colors,
     chartWidth?: number,
 ) => {
@@ -143,7 +142,6 @@ const drawChart = (
     }
 
     const resolvedTiles = resolveTierTypeTiles(payload);
-    const resolvedTrend = resolveTierTypeTrend(payload);
 
     const compact = svgWidth < 480;
     const margin = compact
@@ -172,16 +170,8 @@ const drawChart = (
         .range([0, height])
         .padding(0.12);
 
-    const minTier = Math.min(...tiers);
-    const maxTier = Math.max(...tiers);
-    const yCenterOffset = y.bandwidth() / 2;
-    const yTrend = d3.scaleLinear()
-        .domain([minTier, maxTier])
-        .range([height - yCenterOffset, yCenterOffset]);
-
     const tileByKey = new Map(resolvedTiles.map((row: ResolvedTierTypeTile) => [getTierTypeTileKey(row.ship_type, row.ship_tier), row]));
     const playerCellByKey = new Map(payload.player_cells.map((row: TierTypePlayerCell) => [getTierTypeTileKey(row.ship_type, row.ship_tier), row]));
-    const trendByType = new Map(resolvedTrend.map((row: ResolvedTierTypeTrendPoint) => [row.ship_type, row]));
     const maxTileCount = d3.max(resolvedTiles, (row: ResolvedTierTypeTile) => row.count) || 1;
     const maxPlayerBattles = d3.max(payload.player_cells, (row: TierTypePlayerCell) => row.pvp_battles) || 1;
     const tileColor = theme === 'dark'
@@ -238,10 +228,8 @@ const drawChart = (
         summaryGroup.selectAll('*').remove();
 
         const playerCell = playerCellByKey.get(getTierTypeTileKey(tile.ship_type, tile.ship_tier));
-        const trendPoint = trendByType.get(tile.ship_type);
-        const trendDelta = trendPoint ? tile.ship_tier - trendPoint.avg_tier : null;
 
-        renderSummaryCard(summaryGroup, tile, playerCell, trendDelta, colors, svgWidth);
+        renderSummaryCard(summaryGroup, tile, playerCell, colors, svgWidth);
     };
 
     const tileNodes = svg.selectAll('.tier-type-tile')
@@ -267,34 +255,6 @@ const drawChart = (
                 .attr('stroke', 'transparent')
                 .attr('stroke-width', 0);
         });
-
-    const trendLine = d3.line()
-        .x((row: unknown) => {
-            const point = row as ReturnType<typeof resolveTierTypeTrend>[number];
-            return (x(point.ship_type) ?? 0) + (x.bandwidth() / 2);
-        })
-        .y((row: unknown) => {
-            const point = row as ReturnType<typeof resolveTierTypeTrend>[number];
-            return yTrend(point.avg_tier);
-        })
-        .curve(d3.curveMonotoneX);
-
-    svg.append('path')
-        .datum(resolvedTrend)
-        .attr('fill', 'none')
-        .attr('stroke', colors.labelStrong)
-        .attr('stroke-width', 1.6)
-        .attr('d', trendLine);
-
-    svg.selectAll('.trend-marker')
-        .data(resolvedTrend)
-        .enter()
-        .append('circle')
-        .attr('class', 'trend-marker')
-        .attr('cx', (row: ResolvedTierTypeTrendPoint) => (x(row.ship_type) ?? 0) + (x.bandwidth() / 2))
-        .attr('cy', (row: ResolvedTierTypeTrendPoint) => yTrend(row.avg_tier))
-        .attr('r', 2.8)
-        .attr('fill', colors.labelStrong);
 
     svg.selectAll('.player-cell')
         .data(payload.player_cells)
