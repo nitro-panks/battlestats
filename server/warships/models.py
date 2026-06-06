@@ -585,6 +585,14 @@ class BattleEvent(models.Model):
             models.Index(fields=['player', '-detected_at'],
                          name='battle_event_player_time_idx'),
         ]
+        # NOTE: a Postgres BRIN index on `detected_at` (monotonic insert-time
+        # NOW()) range-prunes the per-day rollup + reconciliation scans at
+        # negligible write cost. It is added via the guarded raw-SQL migration
+        # 0063 (CREATE INDEX CONCURRENTLY ... USING brin) rather than declared
+        # here, mirroring the pg_trgm GIN index pattern (migration 0019): the
+        # release gate builds the SQLite test DB straight from this Meta with
+        # `--nomigrations`, and SQLite has no BRIN. See
+        # runbook-battle-history-rollup-durability-2026-06-06.md.
 
     def __str__(self):
         return (

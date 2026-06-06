@@ -957,6 +957,19 @@ def _invalidate_battle_history_cache(player) -> None:
     cache.delete_many(keys)
 
 
+def _utc_day_bounds(target_date) -> Tuple[datetime, datetime]:
+    """Half-open naive-UTC datetime bounds ``[day_start, next_day_start)``.
+
+    The project runs ``USE_TZ=False`` / UTC, so ``BattleEvent.detected_at`` is
+    a naive UTC datetime. Filtering with a half-open range predicate lets the
+    BRIN index on ``detected_at`` range-prune; a ``detected_at__date=`` lookup
+    wraps the column in a function and cannot use the index. See
+    ``agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md``.
+    """
+    day_start = datetime(target_date.year, target_date.month, target_date.day)
+    return day_start, day_start + timedelta(days=1)
+
+
 def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
     """Rebuild `PlayerDailyShipStats` rows for `target_date` from BattleEvent.
 
@@ -968,6 +981,8 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
     has explicitly asked for a rebuild.
     """
     from warships.models import BattleEvent, PlayerDailyShipStats
+
+    day_start, next_day_start = _utc_day_bounds(target_date)
 
     with transaction.atomic():
         deleted, _ = PlayerDailyShipStats.objects.filter(
@@ -984,7 +999,8 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
         # values().annotate() group-by (Count(filter=survived) for survived,
         # grouped by player/ship/mode/season_id) like the period aggregator.
         events = BattleEvent.objects.filter(
-            detected_at__date=target_date,
+            detected_at__gte=day_start,
+            detected_at__lt=next_day_start,
         ).order_by("detected_at")
 
         rows: Dict[tuple, Dict[str, Any]] = {}
@@ -1037,7 +1053,8 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
         "rows_deleted": deleted,
         "rows_written": len(rows),
         "events_seen": events.count() if rows else BattleEvent.objects.filter(
-            detected_at__date=target_date,
+            detected_at__gte=day_start,
+            detected_at__lt=next_day_start,
         ).count(),
     }
 
@@ -1254,12 +1271,30 @@ def _week_start(d) -> "date":
     return d - _td(days=d.weekday())
 
 
+def _week_end(week_start) -> "date":
+    from datetime import timedelta as _td
+    return week_start + _td(days=6)
+
+
 def _month_start(d) -> "date":
     return d.replace(day=1)
 
 
+def _month_end(month_start) -> "date":
+    from datetime import timedelta as _td
+    if month_start.month == 12:
+        next_month = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        next_month = month_start.replace(month=month_start.month + 1)
+    return next_month - _td(days=1)
+
+
 def _year_start(d) -> "date":
     return d.replace(month=1, day=1)
+
+
+def _year_end(year_start) -> "date":
+    return year_start.replace(month=12, day=31)
 
 
 def _aggregate_into_period_table(
@@ -1356,11 +1391,11 @@ def _aggregate_into_period_table(
 def rebuild_period_rollups_for_date(target_date) -> Dict[str, Any]:
     """Rebuild weekly + monthly + yearly rollup rows that cover `target_date`.
 
-    Called by the nightly sweeper after `rebuild_daily_ship_stats_for_date`,
-    so the period rollups always reflect the latest daily layer. Idempotent.
+    Called for single-date manual repair so the period rollups reflect the
+    latest daily layer. Idempotent. The nightly sweeper uses
+    `rebuild_period_rollups_for_window` instead, which dedups across the
+    trailing window so each period is rebuilt only once.
     """
-    from datetime import timedelta as _td
-
     from warships.models import (
         PlayerMonthlyShipStats,
         PlayerWeeklyShipStats,
@@ -1368,24 +1403,15 @@ def rebuild_period_rollups_for_date(target_date) -> Dict[str, Any]:
     )
 
     week_start = _week_start(target_date)
-    week_end = week_start + _td(days=6)
-
     month_start = _month_start(target_date)
-    if month_start.month == 12:
-        next_month = month_start.replace(year=month_start.year + 1, month=1)
-    else:
-        next_month = month_start.replace(month=month_start.month + 1)
-    month_end = next_month - _td(days=1)
-
     year_start = _year_start(target_date)
-    year_end = year_start.replace(month=12, day=31)
 
     weekly = _aggregate_into_period_table(
-        week_start, week_end, PlayerWeeklyShipStats)
+        week_start, _week_end(week_start), PlayerWeeklyShipStats)
     monthly = _aggregate_into_period_table(
-        month_start, month_end, PlayerMonthlyShipStats)
+        month_start, _month_end(month_start), PlayerMonthlyShipStats)
     yearly = _aggregate_into_period_table(
-        year_start, year_end, PlayerYearlyShipStats)
+        year_start, _year_end(year_start), PlayerYearlyShipStats)
 
     return {
         "status": "completed",
@@ -1394,6 +1420,113 @@ def rebuild_period_rollups_for_date(target_date) -> Dict[str, Any]:
         "monthly": monthly,
         "yearly": yearly,
     }
+
+
+def rebuild_period_rollups_for_window(dates) -> Dict[str, Any]:
+    """Rebuild weekly/monthly/yearly rollups covering every date in `dates`,
+    touching each distinct period exactly once.
+
+    The nightly sweeper rebuilds a trailing window of N days. A naive per-day
+    call to `rebuild_period_rollups_for_date` would re-aggregate the same
+    week/month/year up to N times (yearly is a full-YTD DB scan), so this
+    dedups to the distinct per-tier anchor set first, then aggregates each
+    anchor once. Idempotent. See
+    `agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md`.
+    """
+    from warships.models import (
+        PlayerMonthlyShipStats,
+        PlayerWeeklyShipStats,
+        PlayerYearlyShipStats,
+    )
+
+    week_anchors = sorted({_week_start(d) for d in dates})
+    month_anchors = sorted({_month_start(d) for d in dates})
+    year_anchors = sorted({_year_start(d) for d in dates})
+
+    weekly = [
+        _aggregate_into_period_table(a, _week_end(a), PlayerWeeklyShipStats)
+        for a in week_anchors
+    ]
+    monthly = [
+        _aggregate_into_period_table(a, _month_end(a), PlayerMonthlyShipStats)
+        for a in month_anchors
+    ]
+    yearly = [
+        _aggregate_into_period_table(a, _year_end(a), PlayerYearlyShipStats)
+        for a in year_anchors
+    ]
+
+    return {
+        "status": "completed",
+        "weeks_rebuilt": len(week_anchors),
+        "months_rebuilt": len(month_anchors),
+        "years_rebuilt": len(year_anchors),
+        "weekly": weekly,
+        "monthly": monthly,
+        "yearly": yearly,
+    }
+
+
+def reconcile_daily_rollup_coverage(audit_days: int = 30) -> Dict[str, Any]:
+    """Alert-only audit: compare BattleEvent vs PlayerDailyShipStats coverage.
+
+    Per `(date, mode)` over the trailing `audit_days` window (excluding today,
+    which is still mid-capture), compares `SUM(BattleEvent.battles_delta)`
+    against `SUM(PlayerDailyShipStats.battles)`. Both sides are DB-side
+    aggregates — no Python row load. Flags any date where BattleEvent has
+    battles the daily layer is missing or under-counts; legitimately-zero days
+    are ignored. Compares per mode because the daily layer carries random +
+    ranked while the period tiers are randoms-only — so we reconcile the daily
+    layer, never the period tiers.
+
+    Returns the discrepancy list; writes nothing. Repair beyond the self-heal
+    window is the human-run `rebuild_player_daily_ship_stats` command. See
+    `agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md`.
+    """
+    from django.db.models import Sum
+    from django.db.models.functions import TruncDate
+
+    from warships.models import BattleEvent, PlayerDailyShipStats
+
+    today = datetime.now(timezone.utc).date()
+    window_start = today - timedelta(days=audit_days)
+    start_dt = datetime(window_start.year, window_start.month, window_start.day)
+    end_dt = datetime(today.year, today.month, today.day)
+
+    be_rows = (
+        BattleEvent.objects
+        .filter(detected_at__gte=start_dt, detected_at__lt=end_dt)
+        .annotate(d=TruncDate("detected_at"))
+        .values("d", "mode")
+        .annotate(be_battles=Sum("battles_delta"))
+        .order_by()
+    )
+    be_map = {(r["d"], r["mode"]): (r["be_battles"] or 0) for r in be_rows}
+
+    pds_rows = (
+        PlayerDailyShipStats.objects
+        .filter(date__gte=window_start, date__lt=today)
+        .values("date", "mode")
+        .annotate(pds_battles=Sum("battles"))
+        .order_by()
+    )
+    pds_map = {(r["date"], r["mode"]): (r["pds_battles"] or 0) for r in pds_rows}
+
+    discrepancies: List[Dict[str, Any]] = []
+    for (d, mode), be_battles in sorted(be_map.items()):
+        if be_battles <= 0:
+            continue  # ignore legitimately-zero days
+        pds_battles = pds_map.get((d, mode), 0)
+        if pds_battles < be_battles:
+            discrepancies.append({
+                "date": str(d),
+                "mode": mode,
+                "be_battles": be_battles,
+                "pds_battles": pds_battles,
+                "delta": be_battles - pds_battles,
+            })
+
+    return {"discrepancies": discrepancies, "audit_days": audit_days}
 
 
 def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:

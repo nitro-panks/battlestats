@@ -34,6 +34,8 @@ from warships.incremental_battles import (
     compute_ranked_battle_events,
     rebuild_daily_ship_stats_for_date,
     rebuild_period_rollups_for_date,
+    rebuild_period_rollups_for_window,
+    reconcile_daily_rollup_coverage,
     record_observation_and_diff,
     record_observation_from_payloads,
     record_ranked_observation_and_diff,
@@ -3511,3 +3513,237 @@ class CompactBattleObservationPayloadsTests(TestCase):
             keep_per_player=1, batch_size=1)
         self.assertEqual(result["cleared"], 4)
         self.assertGreaterEqual(result["batches"], 4)
+
+
+class RollupDurabilityTests(TestCase):
+    """Self-healing trailing window + dedup'd period rebuild for the sweeper.
+
+    Runbook: agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md
+    """
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="durability_test", player_id=77777, realm="na",
+            pvp_battles=100,
+        )
+        Ship.objects.create(
+            ship_id=42, name="Yamato", nation="japan",
+            ship_type="Battleship", tier=10,
+        )
+        self.today = django_timezone.now().date()
+        self.yesterday = self.today - timedelta(days=1)
+
+    def _event_on(self, target_date, *, battles=1, mode="random",
+                  season_id=None, survived=True):
+        a = BattleObservation.objects.create(player=self.player, pvp_battles=0)
+        b = BattleObservation.objects.create(player=self.player, pvp_battles=0)
+        ev = BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            battles_delta=battles, wins_delta=battles, frags_delta=1,
+            damage_delta=10_000, xp_delta=500, survived=survived,
+            mode=mode, season_id=season_id,
+            from_observation=a, to_observation=b,
+        )
+        # detected_at is auto_now_add; override to land the event on the
+        # intended capture day (naive UTC — USE_TZ=False project).
+        noon = datetime(target_date.year, target_date.month, target_date.day, 12)
+        BattleEvent.objects.filter(pk=ev.pk).update(detected_at=noon)
+        return ev
+
+    def _run_sweeper(self, lookback=3, target_date_iso=None):
+        from warships.tasks import roll_up_player_daily_ship_stats_task
+        with mock.patch.dict("os.environ", {
+            "BATTLE_HISTORY_ROLLUP_ENABLED": "1",
+            "BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS": str(lookback),
+        }):
+            kwargs = {"target_date_iso": target_date_iso} if target_date_iso else {}
+            return roll_up_player_daily_ship_stats_task.apply(kwargs=kwargs).get()
+
+    def test_sweeper_rebuilds_exactly_last_n_days(self):
+        for d in range(0, 4):  # yesterday, -1, -2, -3
+            self._event_on(self.yesterday - timedelta(days=d), battles=1)
+        result = self._run_sweeper(lookback=3)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["days_rebuilt"], 3)
+        built = set(PlayerDailyShipStats.objects.values_list("date", flat=True))
+        for d in range(0, 3):
+            self.assertIn(self.yesterday - timedelta(days=d), built)
+        # The 4th-oldest day is outside the lookback window — not built.
+        self.assertNotIn(self.yesterday - timedelta(days=3), built)
+
+    def test_sweeper_does_not_touch_days_outside_window(self):
+        canary = PlayerDailyShipStats.objects.create(
+            player=self.player, date=self.yesterday - timedelta(days=40),
+            ship_id=42, ship_name="Yamato", battles=99, wins=99, frags=99,
+        )
+        self._event_on(self.yesterday, battles=1)
+        self._run_sweeper(lookback=3)
+        canary.refresh_from_db()
+        self.assertEqual(canary.battles, 99)
+
+    def test_self_heal_restores_in_window_hole(self):
+        self._event_on(self.yesterday, battles=2)
+        self._run_sweeper(lookback=3)
+        # Simulate an outage that left a hole on a day now inside the window.
+        PlayerDailyShipStats.objects.filter(date=self.yesterday).delete()
+        self.assertFalse(
+            PlayerDailyShipStats.objects.filter(date=self.yesterday).exists())
+        # The next nightly run re-closes the trailing window.
+        self._run_sweeper(lookback=3)
+        row = PlayerDailyShipStats.objects.get(date=self.yesterday)
+        self.assertEqual(row.battles, 2)
+
+    def test_sweeper_idempotent_on_rerun(self):
+        self._event_on(self.yesterday, battles=2)
+        self._run_sweeper(lookback=3)
+        first = PlayerDailyShipStats.objects.count()
+        self._run_sweeper(lookback=3)
+        self.assertEqual(PlayerDailyShipStats.objects.count(), first)
+
+    def test_explicit_target_date_collapses_window_to_one_day(self):
+        self._event_on(self.yesterday, battles=1)
+        self._event_on(self.yesterday - timedelta(days=1), battles=1)
+        # Even with a wide lookback env, an explicit date rebuilds only that day.
+        result = self._run_sweeper(
+            lookback=7, target_date_iso=self.yesterday.isoformat())
+        self.assertEqual(result["days_rebuilt"], 1)
+        built = set(PlayerDailyShipStats.objects.values_list("date", flat=True))
+        self.assertEqual(built, {self.yesterday})
+
+    def test_sweeper_skipped_when_gate_off(self):
+        from warships.tasks import roll_up_player_daily_ship_stats_task
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_ROLLUP_ENABLED": "0"},
+        ):
+            result = roll_up_player_daily_ship_stats_task.apply().get()
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "rollup-disabled")
+
+    def test_period_window_dedups_distinct_anchors(self):
+        from warships.incremental_battles import _week_start
+        # A Monday and the prior Sunday fall in two distinct ISO weeks.
+        monday = self.today - timedelta(days=self.today.weekday())
+        sunday = monday - timedelta(days=1)
+        for d in (sunday, monday):
+            PlayerDailyShipStats.objects.create(
+                player=self.player, date=d, ship_id=42, ship_name="Yamato",
+                battles=1, wins=1, frags=1, mode="random",
+            )
+        # Duplicate `monday` in the input asserts the dedup collapses it.
+        result = rebuild_period_rollups_for_window([sunday, monday, monday])
+        self.assertEqual(result["weeks_rebuilt"], 2)
+        self.assertTrue(PlayerWeeklyShipStats.objects.filter(
+            period_start=_week_start(sunday)).exists())
+        self.assertTrue(PlayerWeeklyShipStats.objects.filter(
+            period_start=monday).exists())
+
+
+class RollupReconciliationTests(TestCase):
+    """Alert-only reconciliation of PlayerDailyShipStats vs BattleEvent.
+
+    Runbook: agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md
+    """
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="recon_test", player_id=88888, realm="na", pvp_battles=100,
+        )
+        Ship.objects.create(
+            ship_id=42, name="Yamato", nation="japan",
+            ship_type="Battleship", tier=10,
+        )
+        self.today = django_timezone.now().date()
+        self.day = self.today - timedelta(days=2)
+
+    def _event_on(self, target_date, *, battles=1, mode="random",
+                  season_id=None):
+        a = BattleObservation.objects.create(player=self.player, pvp_battles=0)
+        b = BattleObservation.objects.create(player=self.player, pvp_battles=0)
+        ev = BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            battles_delta=battles, wins_delta=battles, frags_delta=1,
+            damage_delta=10_000, xp_delta=500, survived=True,
+            mode=mode, season_id=season_id,
+            from_observation=a, to_observation=b,
+        )
+        noon = datetime(target_date.year, target_date.month, target_date.day, 12)
+        BattleEvent.objects.filter(pk=ev.pk).update(detected_at=noon)
+        return ev
+
+    def _pds(self, target_date, *, battles, mode="random", season_id=None):
+        return PlayerDailyShipStats.objects.create(
+            player=self.player, date=target_date, ship_id=42,
+            ship_name="Yamato", battles=battles, wins=battles, frags=1,
+            mode=mode, season_id=season_id,
+        )
+
+    def test_detects_missing_pds(self):
+        self._event_on(self.day, battles=3)
+        report = reconcile_daily_rollup_coverage(audit_days=30)
+        self.assertEqual(len(report["discrepancies"]), 1)
+        d = report["discrepancies"][0]
+        self.assertEqual(d["date"], str(self.day))
+        self.assertEqual(d["mode"], "random")
+        self.assertEqual(d["be_battles"], 3)
+        self.assertEqual(d["pds_battles"], 0)
+        self.assertEqual(d["delta"], 3)
+
+    def test_detects_undercount(self):
+        self._event_on(self.day, battles=5)
+        self._pds(self.day, battles=2)
+        report = reconcile_daily_rollup_coverage(audit_days=30)
+        self.assertEqual(len(report["discrepancies"]), 1)
+        self.assertEqual(report["discrepancies"][0]["delta"], 3)
+
+    def test_clean_when_consistent(self):
+        self._event_on(self.day, battles=4)
+        self._pds(self.day, battles=4)
+        report = reconcile_daily_rollup_coverage(audit_days=30)
+        self.assertEqual(report["discrepancies"], [])
+
+    def test_ignores_zero_battle_days(self):
+        self._event_on(self.day, battles=0)
+        report = reconcile_daily_rollup_coverage(audit_days=30)
+        self.assertEqual(report["discrepancies"], [])
+
+    def test_mode_partitioned(self):
+        # Random reconciles fine; ranked has a hole on the same day.
+        self._event_on(self.day, battles=2, mode="random")
+        self._pds(self.day, battles=2, mode="random")
+        self._event_on(self.day, battles=3, mode="ranked", season_id=10)
+        report = reconcile_daily_rollup_coverage(audit_days=30)
+        self.assertEqual(len(report["discrepancies"]), 1)
+        self.assertEqual(report["discrepancies"][0]["mode"], "ranked")
+        self.assertEqual(report["discrepancies"][0]["delta"], 3)
+
+    def test_performs_no_writes(self):
+        self._event_on(self.day, battles=3)
+        before = PlayerDailyShipStats.objects.count()
+        reconcile_daily_rollup_coverage(audit_days=30)
+        self.assertEqual(PlayerDailyShipStats.objects.count(), before)
+
+    def test_excludes_today(self):
+        # An event captured today is mid-window and must not be flagged.
+        self._event_on(self.today, battles=3)
+        report = reconcile_daily_rollup_coverage(audit_days=30)
+        self.assertEqual(report["discrepancies"], [])
+
+    def test_task_runs_independent_of_rollup_gate(self):
+        from warships.tasks import reconcile_battle_history_rollup_task
+        self._event_on(self.day, battles=3)
+        # RECONCILE on, ROLLUP off — the task must still detect the hole.
+        with mock.patch.dict("os.environ", {
+            "BATTLE_HISTORY_RECONCILE_ENABLED": "1",
+            "BATTLE_HISTORY_ROLLUP_ENABLED": "0",
+        }):
+            result = reconcile_battle_history_rollup_task.apply().get()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(result["discrepancies"]), 1)
+
+    def test_task_skipped_when_reconcile_gate_off(self):
+        from warships.tasks import reconcile_battle_history_rollup_task
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_RECONCILE_ENABLED": "0"},
+        ):
+            result = reconcile_battle_history_rollup_task.apply().get()
+        self.assertEqual(result["status"], "skipped")
