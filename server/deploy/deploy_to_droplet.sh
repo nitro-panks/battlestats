@@ -229,6 +229,16 @@ else
   echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na' >> /etc/battlestats-server.env
 fi
 
+# R2: clan crawl core-only (enabled 2026-06-07). Skips the redundant per-player
+# efficiency+achievements enrichment (~85% of the crawl's WG cost) that made it
+# hold the realm lock for hours and pre-empt the battle-history floor. Discovery
+# + Best Clans aggregates still run. ~6x less crawl WG; frees the floor.
+if grep -q '^CLAN_CRAWL_CORE_ONLY=' /etc/battlestats-server.env; then
+  sed -i 's|^CLAN_CRAWL_CORE_ONLY=.*|CLAN_CRAWL_CORE_ONLY=1|' /etc/battlestats-server.env
+else
+  echo 'CLAN_CRAWL_CORE_ONLY=1' >> /etc/battlestats-server.env
+fi
+
 # Enable the weekly per-realm T10 top-ship-player badge snapshot
 # (snapshot_ship_top_players_task self-gates on this flag; the schedule is
 # always registered but no-ops without it). Pinned here because the cp of
