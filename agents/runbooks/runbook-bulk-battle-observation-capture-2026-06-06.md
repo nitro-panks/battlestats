@@ -396,6 +396,18 @@ Built option B. `record_observations_bulk(..., change_gate=True)` restructures e
 - **Expected effect** (from the digging-pass measurement): ~51% of stale candidates are `gated_skipped`, cutting per-player ships calls roughly in half.
 - **Tests:** 6 gate cases (skip-unchanged, fetch-mover, no-prior→baseline, hidden-skip, mixed-chunk-only-fetches-movers, gate-off-fetches-all) + command/task flag wiring. **199 across the battle-history + enrichment suite.**
 
+### Live enable on asia — validated (2026-06-07)
+
+Enabled on asia: `BATTLE_OBSERVATION_FLOOR_BULK_ENABLED=1`, `_BULK_REALMS=asia`, `_CHANGE_GATE_ENABLED=1` in `/etc/battlestats-server.env` (ad-hoc edit — **wiped on next deploy**; promote to `.env.cloud` to persist), `battlestats-celery` restarted.
+
+- **Scheduled task ran healthily:** `bulk_floor` observations in prod jumped to **108 in the last hour** (movers captured via the gate), `poll` (legacy + ranked) unchanged. No `REQUEST_LIMIT_EXCEEDED` in logs — only the expected `INVALID_ACCOUNT_ID` on the bulk `ships/stats` call (the can't-bulk rejection), each handled by per-player fallback.
+- **Bounded watch sweep** (`--limit 200`): of 18 bulk candidates, `gated_skipped=17`, `skipped_missing=1`, `aborted=False` — the gate correctly skipped non-movers (non-ranked-known active players are mostly inactive; skip rate ~94% here, higher than the 51% general figure).
+- **Write path validated:** a found mover → `record_observations_bulk(change_gate=True)` → `completed=1, events=1`, one `bulk_floor` observation + one `BattleEvent` written. Gate → ships-fallback → persist → diff confirmed end-to-end on prod.
+- **Incidental finding:** WG `account/info` also caps at **100 ids/call** (`ACCOUNT_ID_LIST_LIMIT_EXCEEDED` at 300) — the engine already chunks at 100, so it's unaffected.
+- **Minor follow-up:** `make_api_request_typed` logs the (expected, handled) bulk-`ships/stats` `INVALID_ACCOUNT_ID` at ERROR every chunk — log noise now that the bulk floor runs each sweep. Consider downgrading anticipated bulk-ships rejections to WARNING/INFO.
+
+Rollback: drop the three flags from `/etc/battlestats-server.env` + restart `battlestats-celery`.
+
 ## Operator checklist (deploy → shadow → enable → R3)
 
 Concrete command-level companion to the Rollout section. **Prod facts:** systemd (not docker) backend; env in `/etc/battlestats-server.env` (+ `.secrets.env`), loaded as a systemd `EnvironmentFile`; venv at `/opt/battlestats-server/venv`. The floor task runs on the **default** Celery queue → `battlestats-celery` worker, and reads the bulk flags via `os.getenv` **at task runtime**, so a flag change needs that worker restarted. The deploy script **overwrites** `/etc/battlestats-server.env` from the local gitignored `server/.env.cloud` (+ `migrate_env_value` sed patches), so a manual `/etc/...env` edit is clobbered on the next deploy — see step 3 for the persistent path.
