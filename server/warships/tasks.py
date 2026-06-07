@@ -1539,6 +1539,11 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
             if os.getenv(
                 "BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED", "0") == "1":
                 kwargs["change_gate"] = True
+            # Ranked-sweep gate: skip the 3-WG-call ranked worker for ranked-
+            # known players who haven't played since their last observation.
+            if os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED", "0") == "1":
+                kwargs["ranked_gate"] = True
         call_command("ensure_daily_battle_observations", **kwargs)
         return {
             "status": "completed",

@@ -406,7 +406,17 @@ Enabled on asia: `BATTLE_OBSERVATION_FLOOR_BULK_ENABLED=1`, `_BULK_REALMS=asia`,
 - **Incidental finding:** WG `account/info` also caps at **100 ids/call** (`ACCOUNT_ID_LIST_LIMIT_EXCEEDED` at 300) — the engine already chunks at 100, so it's unaffected.
 - **Minor follow-up:** `make_api_request_typed` logs the (expected, handled) bulk-`ships/stats` `INVALID_ACCOUNT_ID` at ERROR every chunk — log noise now that the bulk floor runs each sweep. Consider downgrading anticipated bulk-ships rejections to WARNING/INFO.
 
-Rollback: drop the three flags from `/etc/battlestats-server.env` + restart `battlestats-celery`.
+Rollback: drop the three flags from `/etc/battlestats-server.env` + restart `battlestats-celery`. **Persisted 2026-06-07** in `deploy_to_droplet.sh` (re-asserted every deploy, mirroring the RANKED_CAPTURE block) so a deploy no longer wipes them.
+
+## Ranked-sweep gate — built (2026-06-07)
+
+The bulk+gate above only helps the non-ranked-known minority — with ranked capture on for all realms, ~88% of stale candidates are ranked-known and go the per-player ranked sweep (3 WG calls each: `account/info` + `ships/stats` + `seasons/shipstats`). The ranked-sweep gate extends the change detector to them — **the bigger win**.
+
+- **Signal = `account/info` `last_battle_time`, NOT `pvp.battles`.** Ranked-known players play randoms *and* ranked; `last_battle_time` advances on ANY battle, so it never drops ranked-only activity (a `pvp.battles` random-only check would). Minor over-fetch for coop/ops-only players is accepted.
+- **`_ranked_movers(realm, ranked_ids)`** (command module): bulk `account/info` in 100-id chunks, compare each player's `last_battle_time` to their latest `BattleObservation.last_battle_time` (Subquery-annotated), keep only those who advanced or have no prior. Hidden/absent → dropped (the ranked worker would skip them anyway). On a bulk-fetch error → keep the whole chunk (never miss a capture because the gate couldn't read the signal). `_lbt_to_unix()` handles naive (USE_TZ=False) vs aware datetimes robustly.
+- **Flag:** `BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED` (default `0`), **separate** from the random `CHANGE_GATE` flag so it's validated/enabled independently. Command: `--ranked-gate`. NOT yet enabled in prod — deploying is behaviour-neutral for the ranked sweep until the flag is set.
+- **Tests:** `_ranked_movers` unit cases (mover via lbt advance, unchanged-skip, no-prior→baseline, hidden-skip, bulk-error→sweep-all) + command (`--ranked-gate` sweeps only movers) + task flag wiring. **204 across the battle-history + enrichment suite.**
+- **Expected effect:** the ranked sweep is the floor's dominant WG cost (~2,654 × 3 calls on asia); gating it to movers should cut that by roughly the productive-rate fraction — the largest single saving in this whole effort.
 
 ## Operator checklist (deploy → shadow → enable → R3)
 

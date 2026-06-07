@@ -10,8 +10,10 @@ events to the legacy `record_observation_and_diff` path. The parity test below
 is the load-bearing assertion; the rest cover the bulk-only error taxonomy (D5)
 and per-player slice handling (D4).
 """
+import calendar
 import io
 import os
+from datetime import datetime, timedelta
 from unittest import mock
 
 from django.core.management import call_command
@@ -562,6 +564,104 @@ class BulkObservationChangeGateTests(TestCase):
                                              change_gate=False)
         self.assertEqual(calls, [[9020]])
         self.assertEqual(tally["gated_skipped"], 0)
+
+
+CMD_MOD = "warships.management.commands.ensure_daily_battle_observations"
+RANKED_ACCT = "warships.api.players._bulk_fetch_account_info"
+
+
+class RankedSweepGateTests(TestCase):
+    """Ranked-sweep gate: run the 3-call ranked worker only for movers."""
+
+    def _ranked_player(self, pid, *, last_battle_time=None, observed_ago_h=10):
+        p = Player.objects.create(
+            name=f"p{pid}", player_id=pid, realm="na", is_hidden=False,
+            last_battle_date=timezone.now().date(), pvp_battles=100,
+            ranked_json=[{"season_id": 1}],
+        )
+        if last_battle_time is not None:
+            obs = BattleObservation.objects.create(
+                player=p, pvp_battles=100, last_battle_time=last_battle_time,
+                ships_stats_json=[], source="poll",
+            )
+            # Backdate so the player is a stale candidate (auto_now_add blocks
+            # setting observed_at at create time).
+            BattleObservation.objects.filter(pk=obs.pk).update(
+                observed_at=timezone.now() - timedelta(hours=observed_ago_h))
+        return p
+
+    def _acct(self, unix_lbt):
+        return {"last_battle_time": unix_lbt,
+                "statistics": {"pvp": {"battles": 1}}}
+
+    def test_ranked_movers_keeps_movers_and_no_prior_skips_unchanged(self):
+        from warships.management.commands.ensure_daily_battle_observations import (
+            _ranked_movers,
+        )
+        lbt = datetime(2024, 1, 1, 12, 0, 0)
+        base = calendar.timegm(lbt.timetuple())
+        self._ranked_player(6001, last_battle_time=lbt)   # will move
+        self._ranked_player(6002, last_battle_time=lbt)   # unchanged
+        self._ranked_player(6003, last_battle_time=None)  # no prior obs
+        acct = {
+            "6001": self._acct(base + 3600),  # last_battle_time advanced
+            "6002": self._acct(base),         # unchanged
+            "6003": self._acct(base),         # no prior → baseline
+        }
+        with mock.patch(RANKED_ACCT, return_value=(acct, None)):
+            movers = _ranked_movers("na", [6001, 6002, 6003])
+        self.assertEqual(set(movers), {6001, 6003})
+
+    def test_ranked_movers_skips_hidden(self):
+        from warships.management.commands.ensure_daily_battle_observations import (
+            _ranked_movers,
+        )
+        lbt = datetime(2024, 1, 1, 12, 0, 0)
+        base = calendar.timegm(lbt.timetuple())
+        self._ranked_player(6010, last_battle_time=lbt)
+        acct = {"6010": {"hidden_profile": True,
+                         "last_battle_time": base + 9999}}
+        with mock.patch(RANKED_ACCT, return_value=(acct, None)):
+            movers = _ranked_movers("na", [6010])
+        self.assertEqual(movers, [])  # hidden → ranked worker would skip anyway
+
+    def test_ranked_movers_fetches_all_on_bulk_error(self):
+        from warships.management.commands.ensure_daily_battle_observations import (
+            _ranked_movers,
+        )
+        self._ranked_player(6020, last_battle_time=datetime(2024, 1, 1))
+        with mock.patch(RANKED_ACCT, return_value=({}, "TRANSPORT_ERROR")):
+            movers = _ranked_movers("na", [6020])
+        self.assertEqual(movers, [6020])  # can't read signal → sweep, never miss
+
+    def test_command_ranked_gate_sweeps_only_movers(self):
+        lbt = datetime(2024, 1, 1, 12, 0, 0)
+        base = calendar.timegm(lbt.timetuple())
+        self._ranked_player(6101, last_battle_time=lbt)   # mover
+        self._ranked_player(6102, last_battle_time=lbt)   # unchanged
+        acct = {"6101": self._acct(base + 3600), "6102": self._acct(base)}
+        with mock.patch(f"{CMD_MOD}._ranked_capture_active_for_realm",
+                        return_value=True), \
+                mock.patch(ENGINE_BULK,
+                           return_value={"completed": 0, "baseline": 0,
+                                         "events": 0, "aborted": False}), \
+                mock.patch(RANKED_ACCT, return_value=(acct, None)), \
+                mock.patch(ENGINE_RANKED,
+                           return_value={"status": "completed"}) as rw:
+            call_command("ensure_daily_battle_observations", realm="na",
+                         bulk=True, ranked_gate=True)
+        swept = {c.args[0] for c in rw.call_args_list}
+        self.assertEqual(swept, {6101})  # only the mover got the 3-call sweep
+
+    def test_task_passes_ranked_gate_when_flag_on(self):
+        with mock.patch.dict(os.environ, {
+            "BATTLE_OBSERVATION_FLOOR_BULK_ENABLED": "1",
+            "BATTLE_OBSERVATION_FLOOR_BULK_REALMS": "na",
+            "BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED": "1",
+        }), mock.patch("django.core.management.call_command") as cc:
+            from warships.tasks import ensure_daily_battle_observations_task
+            ensure_daily_battle_observations_task.apply(args=["na"]).get()
+        self.assertTrue(cc.call_args.kwargs.get("ranked_gate"))
 
 
 class BulkObservationCommandTests(TestCase):
