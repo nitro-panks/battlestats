@@ -204,6 +204,14 @@ if grep -q '^BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED=' /etc/battlestats-ser
 else
   echo 'BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED=1' >> /etc/battlestats-server.env
 fi
+# Ranked-sweep gate (enabled + validated 2026-06-07: gated_out 105/276 with all
+# movers still captured, 369 events, 0 failures). Gates the dominant ranked
+# sweep via account/info last_battle_time.
+if grep -q '^BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED=' /etc/battlestats-server.env; then
+  sed -i 's|^BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED=.*|BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED=1|' /etc/battlestats-server.env
+else
+  echo 'BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED=1' >> /etc/battlestats-server.env
+fi
 
 # Enable the weekly per-realm T10 top-ship-player badge snapshot
 # (snapshot_ship_top_players_task self-gates on this flag; the schedule is
