@@ -841,6 +841,41 @@ class RandomFirstPathSwitchTests(TestCase):
         self.assertIsNone(obs[2].ranked_ships_stats_json)  # tick2 random-only
 
 
+class RankedLastSeasonBackfillTests(TestCase):
+    """The DB-only backfill populates ranked_last_season_id from ranked_json."""
+
+    def test_helper_picks_max_season_with_battles(self):
+        from warships.data import ranked_last_season_from_json
+        self.assertIsNone(ranked_last_season_from_json(None))
+        self.assertIsNone(ranked_last_season_from_json([]))
+        self.assertIsNone(ranked_last_season_from_json(
+            [{"season_id": 20, "total_battles": 0}]))  # history but no battles
+        self.assertEqual(ranked_last_season_from_json([
+            {"season_id": 20, "total_battles": 5},
+            {"season_id": 30, "total_battles": 3},
+            {"season_id": 31, "total_battles": 0},  # latest season, no battles
+        ]), 30)
+
+    def test_backfill_populates_field(self):
+        played = Player.objects.create(
+            name="b1", player_id=9501, realm="na", is_hidden=False,
+            last_battle_date=timezone.now().date(),
+            ranked_json=[{"season_id": 29, "total_battles": 4},
+                         {"season_id": 30, "total_battles": 2}],
+            ranked_last_season_id=None)
+        no_battles = Player.objects.create(
+            name="b2", player_id=9502, realm="na", is_hidden=False,
+            last_battle_date=timezone.now().date(),
+            ranked_json=[{"season_id": 20, "total_battles": 0}],
+            ranked_last_season_id=None)
+        call_command("backfill_ranked_last_season", realm="na", active_days=0,
+                     delay=0)
+        played.refresh_from_db()
+        no_battles.refresh_from_db()
+        self.assertEqual(played.ranked_last_season_id, 30)
+        self.assertIsNone(no_battles.ranked_last_season_id)
+
+
 class BenchmarkCommandTests(TestCase):
     """The read-only benchmark command runs and emits the metric structure."""
 
