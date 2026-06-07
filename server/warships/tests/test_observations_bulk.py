@@ -665,6 +665,18 @@ class RankedSweepGateTests(TestCase):
         self.assertTrue(cc.call_args.kwargs.get("random_first"))
         self.assertEqual(cc.call_args.kwargs.get("ranked_sweep_limit"), 5000)
 
+    def test_task_random_first_per_realm_gate(self):
+        # ENABLED=1 but REALMS=eu → na must NOT get random_first (staged rollout).
+        with mock.patch.dict(os.environ, {
+            "BATTLE_OBSERVATION_FLOOR_BULK_ENABLED": "1",
+            "BATTLE_OBSERVATION_FLOOR_BULK_REALMS": "na",
+            "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED": "1",
+            "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS": "eu",
+        }), mock.patch("django.core.management.call_command") as cc:
+            from warships.tasks import ensure_daily_battle_observations_task
+            ensure_daily_battle_observations_task.apply(args=["na"]).get()
+        self.assertNotIn("random_first", cc.call_args.kwargs)
+
     def test_task_daily_ranked_skips_off_slot(self):
         # na's ranked daily slot is hour 1; at any other hour, skip_ranked=True.
         with mock.patch.dict(os.environ, {

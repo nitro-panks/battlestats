@@ -1558,10 +1558,17 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
                 kwargs["ranked_gate"] = True
             # Random-first routing: heavy ranked path only for current-season
             # players; everyone else (incl. lapsed ranked) takes the fast random
-            # path so a niche mode stops throttling random coverage.
+            # path so a niche mode stops throttling random coverage. Optional
+            # per-realm gate (_REALMS csv) for a staged rollout; empty = all.
             if os.getenv(
-                "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED", "0") == "1":
-                kwargs["random_first"] = True
+                    "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED", "0") == "1":
+                rf_realms = {
+                    r.strip() for r in os.getenv(
+                        "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS", "",
+                    ).split(",") if r.strip()
+                }
+                if not rf_realms or realm in rf_realms:
+                    kwargs["random_first"] = True
             # Ranked sweep keeps its own modest bound as the random FLOOR_LIMIT
             # scales up (R3).
             kwargs["ranked_sweep_limit"] = int(os.getenv(
