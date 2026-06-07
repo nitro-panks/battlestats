@@ -1443,6 +1443,24 @@ def incremental_player_refresh_task(self, realm=DEFAULT_REALM):
         cache.delete(lock_key)
 
 
+def _bulk_floor_active_for_realm(realm: str) -> bool:
+    """Whether the bulk observation-floor path (R1) is enabled for `realm`.
+
+    Master switch `BATTLE_OBSERVATION_FLOOR_BULK_ENABLED` defaults off; the
+    realm must also be listed in `BATTLE_OBSERVATION_FLOOR_BULK_REALMS` (csv)
+    so rollout is per-realm. Mirrors `_ranked_capture_active_for_realm`. Flag
+    off => the legacy per-player floor runs, unchanged (instant rollback).
+    """
+    if os.getenv("BATTLE_OBSERVATION_FLOOR_BULK_ENABLED", "0") != "1":
+        return False
+    realms = {
+        r.strip() for r in os.getenv(
+            "BATTLE_OBSERVATION_FLOOR_BULK_REALMS", "",
+        ).split(",") if r.strip()
+    }
+    return realm in realms
+
+
 @app.task(bind=True, **CRAWL_TASK_OPTS)
 def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
     """Daily floor for BattleObservation coverage on active-7d players.
@@ -1482,6 +1500,7 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
 
     try:
         from django.core.management import call_command
+        bulk = _bulk_floor_active_for_realm(realm)
         if crawl_running:
             # Coexist with the crawl at a reduced pace instead of skipping.
             delay = float(os.getenv(
@@ -1489,21 +1508,48 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
             limit = int(os.getenv(
                 "BATTLE_OBSERVATION_FLOOR_CRAWL_LIMIT",
                 os.getenv("BATTLE_OBSERVATION_FLOOR_LIMIT", "3000")))
+            # Bulk path: raise per-chunk pacing while the crawl holds the lock.
+            chunk_delay = float(os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_BULK_CRAWL_CHUNK_DELAY", "1.0"))
             logger.info(
                 "Running observation floor in crawl-coexist mode "
-                "(realm=%s, delay=%s, limit=%s)", realm, delay, limit)
+                "(realm=%s, delay=%s, limit=%s, bulk=%s, chunk_delay=%s)",
+                realm, delay, limit, bulk, chunk_delay)
         else:
             delay = float(os.getenv("BATTLE_OBSERVATION_FLOOR_DELAY", "0.3"))
             limit = int(os.getenv("BATTLE_OBSERVATION_FLOOR_LIMIT", "3000"))
-        call_command(
-            "ensure_daily_battle_observations",
+            chunk_delay = float(os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_BULK_CHUNK_DELAY", "0.5"))
+        kwargs = dict(
             realm=realm,
             days=int(os.getenv("BATTLE_OBSERVATION_FLOOR_DAYS", "7")),
             stale_hours=int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOURS", "8")),
             limit=limit,
             delay=delay,
         )
-        return {"status": "completed", "crawl_coexist": crawl_running}
+        if bulk:
+            # R1: random observations via the bulk path; ranked-known players
+            # still go per-player inside the command. chunk_delay paces the
+            # bulk sweep (per-chunk), delay paces the ranked subset (per-player).
+            kwargs["bulk"] = True
+            kwargs["chunk_delay"] = chunk_delay
+            # Change-detector gate: only fetch per-player ships/stats for
+            # players whose battle count moved (cuts the ~half wasted ships
+            # calls). Separate flag so it can roll out / be measured on its own.
+            if os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED", "0") == "1":
+                kwargs["change_gate"] = True
+            # Ranked-sweep gate: skip the 3-WG-call ranked worker for ranked-
+            # known players who haven't played since their last observation.
+            if os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED", "0") == "1":
+                kwargs["ranked_gate"] = True
+        call_command("ensure_daily_battle_observations", **kwargs)
+        return {
+            "status": "completed",
+            "crawl_coexist": crawl_running,
+            "bulk": bulk,
+        }
     finally:
         cache.delete(lock_key)
 

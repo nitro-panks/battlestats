@@ -249,6 +249,61 @@
                 "token-bucket-rate-limiter-implemented"
             ]
         },
+        "agents/runbooks/analysis-update-process-cost-map-2026-06-06.md": {
+            "kind": "knowledge",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "crawler cost map",
+                "update process cost map",
+                "where bandwidth goes",
+                "wg api budget spend",
+                "battle history capture coverage"
+            ],
+            "tags": [
+                "crawlers",
+                "wargaming-api",
+                "rate-limiting",
+                "battle history",
+                "observation floor",
+                "clan crawl",
+                "enrichment",
+                "cost analysis",
+                "active players"
+            ],
+            "archive_on": [
+                "bulk-capture-shipped-and-coverage-stable"
+            ]
+        },
+        "agents/runbooks/runbook-bulk-battle-observation-capture-2026-06-06.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "spec",
+            "owner": "platform",
+            "aliases": [
+                "bulk battle observation capture",
+                "bulk observation floor",
+                "R1 bulk capture",
+                "battle history capture optimization"
+            ],
+            "tags": [
+                "battle history",
+                "observation floor",
+                "bulk fetch",
+                "wg api budget",
+                "battleobservation",
+                "battleevent",
+                "active players",
+                "capture",
+                "spec"
+            ],
+            "archive_on": [
+                "bulk-capture-shipped-and-coverage-stable"
+            ]
+        },
         "agents/runbooks/runbook-api-surface.md": {
             "kind": "runbook",
             "status": "active",

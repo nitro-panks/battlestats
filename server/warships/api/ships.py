@@ -4,7 +4,12 @@ from typing import Optional, Dict, Any
 
 from django.core.cache import cache
 
-from warships.api.client import DEFAULT_REALM, make_api_request, make_api_request_with_meta
+from warships.api.client import (
+    DEFAULT_REALM,
+    make_api_request,
+    make_api_request_typed,
+    make_api_request_with_meta,
+)
 from warships.models import Ship
 
 
@@ -247,6 +252,42 @@ def _fetch_ship_stats_for_player(player_id: str, realm: str = DEFAULT_REALM) -> 
             f'Unexpected response while loading ship data: {keys_to_print}')
 
     return data_dict
+
+
+def _bulk_fetch_ship_stats(player_ids: list[int], realm: str) -> tuple[dict, str | None]:
+    """Bulk-fetch ships/stats for up to 100 players. Returns (data, error_code).
+
+    Relocated from enrich_player_data.py per
+    runbook-bulk-battle-observation-capture-2026-06-06.md (D10): both the
+    enrichment crawler and the bulk observation floor import it from the shared
+    API layer rather than from a command module (which would invert the
+    command<-core dependency). Pure relocation — no behavior change.
+    """
+    params = {"account_id": ",".join(str(pid) for pid in player_ids)}
+    logging.info("Bulk fetching ships/stats for %d players [%s]", len(player_ids), realm.upper())
+    data, err = make_api_request_typed("ships/stats/", params, realm=realm)
+    return (data if isinstance(data, dict) else {}), err
+
+
+def _per_player_ship_fallback(player_ids: list[int], realm: str) -> dict:
+    """Fallback: fetch ships/stats individually to isolate poison IDs.
+
+    Relocated from enrich_player_data.py (D10). Returns
+    {str(pid): <ships list> | None | "SKIP"} where "SKIP" is a transient
+    per-player failure the caller must treat as 'skip this tick'.
+    """
+    out: dict = {}
+    for pid in player_ids:
+        try:
+            r = _fetch_ship_stats_for_player(pid, realm=realm)
+            if r is not None:
+                out[str(pid)] = r
+            else:
+                out[str(pid)] = None  # explicit empty -> EMPTY outcome
+        except Exception:
+            logging.warning("Per-player ship fallback failed for %s [%s]", pid, realm)
+            out[str(pid)] = "SKIP"  # sentinel: transient
+    return out
 
 
 def _fetch_ship_info(ship_id: str) -> Optional[Ship]:

@@ -468,9 +468,16 @@ class MvPlayerDistributionStats(models.Model):
 class BattleObservation(models.Model):
     SOURCE_POLL = 'poll'
     SOURCE_MANUAL = 'manual'
+    # Bulk-batched observation floor (runbook-bulk-battle-observation-capture
+    # -2026-06-06, D9). Tags observations written via the bulk ships/stats +
+    # account/info path so shadow/parity diffing and post-rollout auditing can
+    # isolate "which observations came from the bulk floor". 'bulk_floor' is 10
+    # chars, fits the max_length=12 source column.
+    SOURCE_BULK_FLOOR = 'bulk_floor'
     SOURCE_CHOICES = [
         (SOURCE_POLL, 'Poll'),
         (SOURCE_MANUAL, 'Manual'),
+        (SOURCE_BULK_FLOOR, 'Bulk Floor'),
     ]
 
     player = models.ForeignKey(

@@ -127,14 +127,9 @@ def _interleave(na_rows, eu_rows):
 
 
 # ── Bulk API fetchers ────────────────────────────────────────
-
-def _bulk_fetch_ship_stats(player_ids: list[int], realm: str) -> tuple[dict, str | None]:
-    """Fetch ships/stats for up to 100 players. Returns (data, error_code)."""
-    from warships.api.client import make_api_request_typed
-    params = {"account_id": ",".join(str(pid) for pid in player_ids)}
-    log.info("Bulk fetching ships/stats for %d players [%s]", len(player_ids), realm.upper())
-    data, err = make_api_request_typed("ships/stats/", params, realm=realm)
-    return (data if isinstance(data, dict) else {}), err
+# `_bulk_fetch_ship_stats` + `_per_player_ship_fallback` were relocated to
+# warships/api/ships.py (D10) so the bulk observation floor can share them
+# without a command<-core import inversion; imported at module top.
 
 
 def _bulk_fetch_ranked_account_info(player_ids: list[int], realm: str) -> tuple[dict, str | None]:
@@ -160,23 +155,6 @@ def _fetch_ranked_account_info_single(player_id: int, realm: str) -> dict | None
     if isinstance(data, dict):
         return data.get(str(player_id))
     return None
-
-
-def _per_player_ship_fallback(player_ids: list[int], realm: str) -> dict:
-    """Fallback: fetch ships/stats individually to isolate poison IDs."""
-    from warships.api.ships import _fetch_ship_stats_for_player
-    out: dict = {}
-    for pid in player_ids:
-        try:
-            r = _fetch_ship_stats_for_player(pid, realm=realm)
-            if r is not None:
-                out[str(pid)] = r
-            else:
-                out[str(pid)] = None  # explicit empty -> EMPTY outcome
-        except Exception:
-            log.warning("Per-player ship fallback failed for %s [%s]", pid, realm)
-            out[str(pid)] = "SKIP"  # sentinel: transient
-    return out
 
 
 def _per_player_rank_fallback(player_ids: list[int], realm: str) -> dict:
@@ -452,6 +430,10 @@ def enrich_players(
     num_partitions: int = 1,
 ) -> dict:
     """Run one enrichment pass.  Returns summary dict."""
+    # Relocated to the shared API layer (D10); imported here to match this
+    # module's function-local import style and avoid an import cycle.
+    from warships.api.ships import _bulk_fetch_ship_stats, _per_player_ship_fallback
+
     target_realms = realms or tuple(sorted(VALID_REALMS))
 
     per_realm = max(batch // len(target_realms), 1)
