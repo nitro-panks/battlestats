@@ -500,7 +500,7 @@ Totals (JSON, for exact diff): `active_1d=39,050 active_7d=81,776 distinct_obser
 
 **Change (flag `BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED`, default 0):**
 - New `Player.ranked_last_season_id` (migration `0065`, nullable, no index) = highest season with ranked battles, set by `data.update_ranked_data` on each ~2h ranked refresh. Routing self-heals: a player who (re)starts the current season is re-promoted within ~2h.
-- `_current_ranked_season_ids()` (reuses `_get_ranked_seasons_metadata`) → active season_ids today; `[]` off-season (everyone → random), `None` if metadata unavailable → **fall back to ever-ranked** (never silently drop ranked).
+- `_current_ranked_season_ids()` → `[max, max-1]` from the **highest `Player.ranked_last_season_id` in the DB** (the live season anyone is playing, enrichment-fed). **Not** `seasons/info` dates — those lag: observed 2026-06-07, `seasons/info` topped out at season 1028 ("ended" May 20) while players were accumulating battles in 1029, so date-based detection wrongly reported off-season and would have killed ranked capture. `None` when the field is cold → **fall back to ever-ranked** (never silently drop ranked).
 - `_ranked_active_ids()` filters candidates on `ranked_last_season_id in current_seasons` — simple indexed IN, bounded by `player_id__in`.
 - Renamed `--ranked-limit` -> `--ranked-sweep-limit` (`RANKED_SWEEP_LIMIT`, default 5000) with its **own** bound so it stays small as `FLOOR_LIMIT` rises. `--skip-ranked` + `RANKED_DAILY_ENABLED` run ranked once/day (realm's earliest slot), not every 6h.
 

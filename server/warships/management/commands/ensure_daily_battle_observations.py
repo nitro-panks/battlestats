@@ -114,25 +114,28 @@ def _ranked_known_ids(realm: str, candidate_ids: list[int]) -> set[int]:
 
 
 def _current_ranked_season_ids():
-    """Ranked season_ids active *today*, or None if season metadata is unavailable.
+    """The live ranked season(s), as a 2-element window `[max, max-1]`.
 
-    `[]` is meaningful: a genuine ranked off-season → route everyone to the fast
-    random path (no wasted ranked calls). `None` means we couldn't read the
-    season list (WG hiccup / cold cache) → the caller falls back to the broad
-    ever-ranked marker so ranked capture is never silently dropped. Season dates
-    are ISO 'YYYY-MM-DD' strings, so lexical comparison == date comparison.
+    Derived from the **highest `Player.ranked_last_season_id` in the playerbase**
+    — the latest season anyone currently has ranked battles in. This is fed by
+    `data.update_ranked_data` from WG `seasons/shipstats` (the same source as the
+    live season), so it tracks the *actual* current season — unlike `seasons/info`
+    dates, which lag (observed 2026-06-07: `seasons/info` topped out at season
+    1028 'ended' May 20 while players were accumulating battles in 1029). The
+    window of 2 covers a concurrent season+sprint and the rollover boundary.
+
+    Returns `None` when no ranked data exists yet (cold field) → the caller falls
+    back to the broad ever-ranked marker so ranked capture is never dropped.
     """
-    from warships.data import _get_ranked_seasons_metadata
+    from django.db.models import Max
 
-    meta = _get_ranked_seasons_metadata()
-    if not meta:
+    mx = (
+        Player.objects.filter(ranked_last_season_id__isnull=False)
+        .aggregate(m=Max("ranked_last_season_id"))["m"]
+    )
+    if mx is None:
         return None
-    today = timezone.now().date().isoformat()
-    return [
-        sid for sid, m in meta.items()
-        if m.get("start_date") and m.get("end_date")
-        and m["start_date"] <= today <= m["end_date"]
-    ]
+    return [mx, mx - 1]
 
 
 def _ranked_active_ids(realm: str, candidate_ids: list[int],

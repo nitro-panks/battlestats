@@ -701,37 +701,31 @@ class RankedSweepGateTests(TestCase):
         self.assertTrue(cc.call_args.kwargs.get("ranked_gate"))
 
 
-SEASONS_META = "warships.data._get_ranked_seasons_metadata"
-# season 30 active today; season 20 long past.
-_META = {
-    30: {"start_date": "2020-01-01", "end_date": "2099-12-31"},
-    20: {"start_date": "2019-01-01", "end_date": "2019-12-31"},
-}
-
-
 class RandomFirstRoutingTests(TestCase):
-    """Random-first routing: heavy ranked path only for current-season players."""
+    """Random-first routing: heavy ranked path only for current-season players.
 
-    def _player(self, pid, *, last_season):
-        p = Player.objects.create(
+    'Current season' = the highest Player.ranked_last_season_id in the DB (a
+    2-element [max, max-1] window), so the routing tracks the live season from
+    enrichment data, not seasons/info dates (which lag).
+    """
+
+    def _player(self, pid, *, last_season, ranked_history=False):
+        return Player.objects.create(
             name=f"p{pid}", player_id=pid, realm="na", is_hidden=False,
             last_battle_date=timezone.now().date(), pvp_battles=100,
-            ranked_json=([{"season_id": last_season}] if last_season else None),
+            ranked_json=([{"season_id": last_season}] if last_season
+                         else ([{"season_id": 20}] if ranked_history else None)),
             ranked_last_season_id=last_season,
         )
-        return p
 
     def test_current_ranked_season_ids(self):
         from warships.management.commands.ensure_daily_battle_observations import (
             _current_ranked_season_ids,
         )
-        with mock.patch(SEASONS_META, return_value=_META):
-            self.assertEqual(set(_current_ranked_season_ids()), {30})
-        with mock.patch(SEASONS_META, return_value={
-                20: _META[20]}):  # only a past season → off-season
-            self.assertEqual(_current_ranked_season_ids(), [])
-        with mock.patch(SEASONS_META, return_value={}):  # metadata unavailable
-            self.assertIsNone(_current_ranked_season_ids())
+        self.assertIsNone(_current_ranked_season_ids())  # no ranked data yet
+        self._player(9001, last_season=29)
+        self._player(9002, last_season=30)               # max
+        self.assertEqual(_current_ranked_season_ids(), [30, 29])
 
     def test_ranked_active_ids_filters_to_current_season(self):
         from warships.management.commands.ensure_daily_battle_observations import (
@@ -740,17 +734,16 @@ class RandomFirstRoutingTests(TestCase):
         self._player(8101, last_season=30)   # current
         self._player(8102, last_season=20)   # lapsed
         self._player(8103, last_season=None)  # never
-        active = _ranked_active_ids("na", [8101, 8102, 8103], [30])
+        active = _ranked_active_ids("na", [8101, 8102, 8103], [30, 29])
         self.assertEqual(active, {8101})
         self.assertEqual(_ranked_active_ids("na", [8101], []), set())  # off-season
 
     def test_command_random_first_routes_only_current_season_to_ranked(self):
-        self._player(8201, last_season=30)    # current → ranked path
+        self._player(8201, last_season=30)    # current (max) → ranked path
         self._player(8202, last_season=20)    # lapsed → random path
         self._player(8203, last_season=None)  # never → random path
         with mock.patch(f"{CMD}._ranked_capture_active_for_realm",
                         return_value=True), \
-                mock.patch(SEASONS_META, return_value=_META), \
                 mock.patch(ENGINE_BULK,
                            return_value={"completed": 0, "baseline": 0,
                                          "events": 0, "aborted": False}) as bulk_mock, \
@@ -763,12 +756,12 @@ class RandomFirstRoutingTests(TestCase):
         self.assertEqual(ranked_swept, {8201})            # only current-season
         self.assertEqual(bulk_ids, {8202, 8203})          # lapsed + never → random
 
-    def test_command_random_first_falls_back_when_season_meta_unavailable(self):
-        # Metadata unavailable → fall back to ever-ranked so ranked isn't dropped.
-        self._player(8301, last_season=20)  # lapsed but ranked_json present
+    def test_command_random_first_falls_back_when_no_ranked_data(self):
+        # No ranked_last_season_id populated yet (cold field) → can't tell the
+        # current season → fall back to ever-ranked so ranked isn't dropped.
+        self._player(8301, last_season=None, ranked_history=True)  # ranked_json, NULL field
         with mock.patch(f"{CMD}._ranked_capture_active_for_realm",
                         return_value=True), \
-                mock.patch(SEASONS_META, return_value={}), \
                 mock.patch(ENGINE_BULK,
                            return_value={"completed": 0, "baseline": 0,
                                          "events": 0, "aborted": False}), \
@@ -782,7 +775,6 @@ class RandomFirstRoutingTests(TestCase):
         self._player(8401, last_season=30)  # would be ranked, but skipped
         with mock.patch(f"{CMD}._ranked_capture_active_for_realm",
                         return_value=True), \
-                mock.patch(SEASONS_META, return_value=_META), \
                 mock.patch(ENGINE_BULK,
                            return_value={"completed": 0, "baseline": 0,
                                          "events": 0, "aborted": False}) as bulk_mock, \
