@@ -40,6 +40,10 @@ DEFAULT_DAYS = 7
 DEFAULT_STALE_HOURS = 8
 DEFAULT_LIMIT = 3000
 DEFAULT_DELAY = 0.3
+# The per-player ranked sweep gets its OWN bound (not --limit) so it can't grow
+# with FLOOR_LIMIT as random coverage (R3) scales up.
+DEFAULT_RANKED_SWEEP_LIMIT = 5000
+_CURRENT_RANKED_SEASONS_CACHE_KEY = "warships:floor:current_ranked_seasons"
 
 
 def _candidates(realm: str, days: int, stale_hours: int, limit: int):
@@ -107,6 +111,62 @@ def _ranked_known_ids(realm: str, candidate_ids: list[int]) -> set[int]:
         .exclude(ranked_json__isnull=True)
         .exclude(ranked_json=[])
         .values_list("player_id", flat=True)
+    )
+
+
+def _current_ranked_season_ids():
+    """The live ranked season(s), as a 2-element window `[max, max-1]`.
+
+    Derived from the **highest `Player.ranked_last_season_id` in the playerbase**
+    — the latest season anyone currently has ranked battles in. This is fed by
+    `data.update_ranked_data` from WG `seasons/shipstats` (the same source as the
+    live season), so it tracks the *actual* current season — unlike `seasons/info`
+    dates, which lag (observed 2026-06-07: `seasons/info` topped out at season
+    1028 'ended' May 20 while players were accumulating battles in 1029). The
+    window of 2 covers a concurrent season+sprint and the rollover boundary.
+
+    Returns `None` when no ranked data exists yet (cold field) → the caller falls
+    back to the broad ever-ranked marker so ranked capture is never dropped.
+
+    Cached 1h: the `Max` is a full scan over ~1M players (the column is
+    unindexed) and the live season is stable for weeks, so this must not run
+    per-cycle. A non-empty result is cached; `None` (cold) is not, so routing
+    becomes correct as soon as the field populates.
+    """
+    from django.core.cache import cache
+    from django.db.models import Max
+
+    cached = cache.get(_CURRENT_RANKED_SEASONS_CACHE_KEY)
+    if cached:
+        return cached
+    mx = (
+        Player.objects.filter(ranked_last_season_id__isnull=False)
+        .aggregate(m=Max("ranked_last_season_id"))["m"]
+    )
+    if mx is None:
+        return None
+    result = [mx, mx - 1]
+    cache.set(_CURRENT_RANKED_SEASONS_CACHE_KEY, result, 3600)
+    return result
+
+
+def _ranked_active_ids(realm: str, candidate_ids: list[int],
+                       current_season_ids) -> set[int]:
+    """Subset of `candidate_ids` who have ranked battles in a CURRENTLY-ACTIVE
+    season — the random-first routing marker.
+
+    Uses the denormalized `Player.ranked_last_season_id` (highest season with
+    ranked battles, refreshed every ~2h by `data.update_ranked_data`), so the
+    query is a simple indexed `IN` bounded by `player_id__in=<candidates>`. Empty
+    `current_season_ids` (off-season) → empty set (everyone goes random).
+    """
+    if not current_season_ids:
+        return set()
+    return set(
+        Player.objects.filter(
+            realm=realm, player_id__in=candidate_ids,
+            ranked_last_season_id__in=current_season_ids,
+        ).values_list("player_id", flat=True)
     )
 
 
@@ -218,10 +278,14 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
-            "--ranked-limit", type=int, default=None, dest="ranked_limit",
+            "--ranked-sweep-limit", "--ranked-limit", type=int,
+            default=DEFAULT_RANKED_SWEEP_LIMIT, dest="ranked_sweep_limit",
             help=(
-                "Max ranked-known players to sweep per-player when --bulk is on "
-                "and ranked capture is active for the realm. Defaults to --limit."
+                "Max players to sweep per-player on the heavy 3-call ranked "
+                f"path when --bulk + ranked capture are on. Default: "
+                f"{DEFAULT_RANKED_SWEEP_LIMIT} (its own bound, NOT --limit, so it "
+                "stays small as the random FLOOR_LIMIT scales). "
+                "(--ranked-limit is a deprecated alias.)"
             ),
         )
         parser.add_argument(
@@ -251,6 +315,24 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
+            "--random-first", action="store_true", dest="random_first",
+            help=(
+                "Random-first routing: send a player to the heavy 3-call ranked "
+                "path only if they have ranked battles in a CURRENTLY-ACTIVE "
+                "season (not just any old ranked history). Everyone else — incl. "
+                "lapsed ranked players — goes the fast bulk-random path, so a "
+                "niche mode stops throttling random coverage for the majority."
+            ),
+        )
+        parser.add_argument(
+            "--skip-ranked", action="store_true", dest="skip_ranked",
+            help=(
+                "Skip the per-player ranked sweep entirely (random only). Lets "
+                "the scheduler run ranked on a less-frequent cadence than the "
+                "6h random floor."
+            ),
+        )
+        parser.add_argument(
             "--dry-run", action="store_true",
             help="Print the candidate count without making WG API calls.",
         )
@@ -268,10 +350,12 @@ class Command(BaseCommand):
         delay = options["delay"]
         dry_run = options["dry_run"]
         bulk = options["bulk"]
-        ranked_limit = options["ranked_limit"]
+        ranked_sweep_limit = options["ranked_sweep_limit"]
         chunk_delay = options["chunk_delay"]
         change_gate = options["change_gate"]
         ranked_gate = options["ranked_gate"]
+        random_first = options["random_first"]
+        skip_ranked = options["skip_ranked"]
 
         if days < 1:
             raise CommandError("--days must be >= 1")
@@ -287,9 +371,10 @@ class Command(BaseCommand):
         if bulk:
             self._handle_bulk(
                 realm=realm, days=days, stale_hours=stale_hours, limit=limit,
-                delay=delay, ranked_limit=ranked_limit, chunk_delay=chunk_delay,
-                change_gate=change_gate, ranked_gate=ranked_gate, ranked=ranked,
-                dry_run=dry_run,
+                delay=delay, ranked_sweep_limit=ranked_sweep_limit,
+                chunk_delay=chunk_delay, change_gate=change_gate,
+                ranked_gate=ranked_gate, random_first=random_first,
+                skip_ranked=skip_ranked, ranked=ranked, dry_run=dry_run,
                 ranked_worker=record_ranked_observation_and_diff,
             )
             return
@@ -376,38 +461,58 @@ class Command(BaseCommand):
         ))
 
     def _handle_bulk(self, *, realm, days, stale_hours, limit, delay,
-                     ranked_limit, chunk_delay, change_gate, ranked_gate,
-                     ranked, dry_run, ranked_worker):
+                     ranked_sweep_limit, chunk_delay, change_gate, ranked_gate,
+                     random_first, skip_ranked, ranked, dry_run, ranked_worker):
         """Bulk capture path (R1, D6).
 
-        Random observations go through the bulk engine; ranked-known players
-        (only when ranked capture is active for the realm) go through the
-        per-player ranked worker. The two candidate sets are mutually exclusive
-        so a ranked-known player never gets two observations per tick.
+        Random observations go through the fast bulk engine; only a subset goes
+        the heavy per-player ranked worker. The two sets are mutually exclusive
+        so a player never gets two observations per tick.
+
+        Routing — `--random-first`: a player takes the ranked path only if they
+        have ranked battles in a CURRENTLY-ACTIVE season (`_ranked_active_ids`);
+        everyone else, including lapsed ranked players, takes the fast random
+        path so a niche mode stops throttling random coverage. Falls back to the
+        broad ever-ranked marker (`_ranked_known_ids`) when season metadata is
+        unavailable, so ranked capture is never silently dropped. Without
+        `--random-first`, routing is the legacy ever-ranked marker.
         """
         from warships.incremental_battles import record_observations_bulk
 
         candidates = _candidates(realm, days, stale_hours, limit)
         candidate_ids = [row[0] for row in candidates]
 
-        if ranked:
-            ranked_known = _ranked_known_ids(realm, candidate_ids)
-            bulk_ids = [pid for pid in candidate_ids if pid not in ranked_known]
-            ranked_ids = [pid for pid in candidate_ids if pid in ranked_known]
-            # Ranked sweep gets its own bound (defaults to --limit). Players
-            # trimmed here are simply deferred — they are still excluded from
-            # the bulk sweep, so they never double-capture.
-            eff_ranked_limit = ranked_limit if ranked_limit is not None else limit
-            if eff_ranked_limit and eff_ranked_limit > 0:
-                ranked_ids = ranked_ids[:eff_ranked_limit]
-        else:
+        routing = "ever-ranked"
+        if not ranked or skip_ranked:
             bulk_ids = candidate_ids
             ranked_ids = []
+            if skip_ranked:
+                routing = "skip-ranked"
+        else:
+            if random_first:
+                current_seasons = _current_ranked_season_ids()
+                if current_seasons is not None:
+                    ranked_set = _ranked_active_ids(
+                        realm, candidate_ids, current_seasons)
+                    routing = "current-season(" + (
+                        ",".join(map(str, current_seasons)) or "none") + ")"
+                else:
+                    ranked_set = _ranked_known_ids(realm, candidate_ids)
+                    routing = "ever-ranked(season-meta-unavailable)"
+            else:
+                ranked_set = _ranked_known_ids(realm, candidate_ids)
+            bulk_ids = [pid for pid in candidate_ids if pid not in ranked_set]
+            ranked_ids = [pid for pid in candidate_ids if pid in ranked_set]
+            # Ranked sweep gets its OWN bound (not --limit) so it stays small as
+            # the random FLOOR_LIMIT scales (R3). Trimmed players are deferred —
+            # still excluded from the bulk sweep, so they never double-capture.
+            if ranked_sweep_limit and ranked_sweep_limit > 0:
+                ranked_ids = ranked_ids[:ranked_sweep_limit]
 
-        # Ranked-sweep gate: drop ranked-known players who haven't played since
-        # their last observation (last_battle_time unchanged), so the 3-WG-call
-        # ranked worker only runs for movers. Done after the limit + before the
-        # summary so the reported count reflects what we'll actually sweep.
+        # Ranked-sweep gate: drop ranked players who haven't played since their
+        # last observation (last_battle_time unchanged), so the 3-WG-call ranked
+        # worker only runs for movers. Done after the limit + before the summary
+        # so the reported count reflects what we'll actually sweep.
         ranked_known_total = len(ranked_ids)
         ranked_gated = 0
         if ranked_gate and ranked_ids and not dry_run:
@@ -419,10 +524,10 @@ class Command(BaseCommand):
             f"realm={realm} active-{days}d stale>{stale_hours}h: "
             f"{len(candidate_ids)} candidates — bulk_random={len(bulk_ids)} "
             f"(~{(len(bulk_ids) + 99) // 100 * 2:,} WG calls @ {chunk_delay}s/chunk), "
-            f"ranked_known={ranked_known_total} → sweeping {len(ranked_ids)} "
+            f"ranked={ranked_known_total} → sweeping {len(ranked_ids)} "
             f"(gated_out={ranked_gated}) per-player "
             f"(~{len(ranked_ids) * 3:,} WG calls @ {delay}s) "
-            f"(ranked_capture={'on' if ranked else 'off'}, "
+            f"(routing={routing}, ranked_capture={'on' if ranked else 'off'}, "
             f"change_gate={'on' if change_gate else 'off'}, "
             f"ranked_gate={'on' if ranked_gate else 'off'})"
         )

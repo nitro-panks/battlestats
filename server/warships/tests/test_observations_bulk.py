@@ -12,6 +12,7 @@ and per-player slice handling (D4).
 """
 import calendar
 import io
+import json
 import os
 from datetime import datetime, timedelta
 from unittest import mock
@@ -653,6 +654,42 @@ class RankedSweepGateTests(TestCase):
         swept = {c.args[0] for c in rw.call_args_list}
         self.assertEqual(swept, {6101})  # only the mover got the 3-call sweep
 
+    def test_task_passes_random_first_when_flag_on(self):
+        with mock.patch.dict(os.environ, {
+            "BATTLE_OBSERVATION_FLOOR_BULK_ENABLED": "1",
+            "BATTLE_OBSERVATION_FLOOR_BULK_REALMS": "na",
+            "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED": "1",
+        }), mock.patch("django.core.management.call_command") as cc:
+            from warships.tasks import ensure_daily_battle_observations_task
+            ensure_daily_battle_observations_task.apply(args=["na"]).get()
+        self.assertTrue(cc.call_args.kwargs.get("random_first"))
+        self.assertEqual(cc.call_args.kwargs.get("ranked_sweep_limit"), 5000)
+
+    def test_task_daily_ranked_skips_off_slot(self):
+        # na's ranked daily slot is hour 1; at any other hour, skip_ranked=True.
+        with mock.patch.dict(os.environ, {
+            "BATTLE_OBSERVATION_FLOOR_BULK_ENABLED": "1",
+            "BATTLE_OBSERVATION_FLOOR_BULK_REALMS": "na",
+            "BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED": "1",
+        }), mock.patch("warships.tasks._is_ranked_daily_slot",
+                       return_value=False), \
+                mock.patch("django.core.management.call_command") as cc:
+            from warships.tasks import ensure_daily_battle_observations_task
+            ensure_daily_battle_observations_task.apply(args=["na"]).get()
+        self.assertTrue(cc.call_args.kwargs.get("skip_ranked"))
+
+    def test_task_daily_ranked_runs_on_slot(self):
+        with mock.patch.dict(os.environ, {
+            "BATTLE_OBSERVATION_FLOOR_BULK_ENABLED": "1",
+            "BATTLE_OBSERVATION_FLOOR_BULK_REALMS": "na",
+            "BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED": "1",
+        }), mock.patch("warships.tasks._is_ranked_daily_slot",
+                       return_value=True), \
+                mock.patch("django.core.management.call_command") as cc:
+            from warships.tasks import ensure_daily_battle_observations_task
+            ensure_daily_battle_observations_task.apply(args=["na"]).get()
+        self.assertNotIn("skip_ranked", cc.call_args.kwargs)
+
     def test_task_passes_ranked_gate_when_flag_on(self):
         with mock.patch.dict(os.environ, {
             "BATTLE_OBSERVATION_FLOOR_BULK_ENABLED": "1",
@@ -662,6 +699,182 @@ class RankedSweepGateTests(TestCase):
             from warships.tasks import ensure_daily_battle_observations_task
             ensure_daily_battle_observations_task.apply(args=["na"]).get()
         self.assertTrue(cc.call_args.kwargs.get("ranked_gate"))
+
+
+class RandomFirstRoutingTests(TestCase):
+    """Random-first routing: heavy ranked path only for current-season players.
+
+    'Current season' = the highest Player.ranked_last_season_id in the DB (a
+    2-element [max, max-1] window), so the routing tracks the live season from
+    enrichment data, not seasons/info dates (which lag).
+    """
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()  # the current-season detector is cached 1h; isolate tests
+
+    def _player(self, pid, *, last_season, ranked_history=False):
+        return Player.objects.create(
+            name=f"p{pid}", player_id=pid, realm="na", is_hidden=False,
+            last_battle_date=timezone.now().date(), pvp_battles=100,
+            ranked_json=([{"season_id": last_season}] if last_season
+                         else ([{"season_id": 20}] if ranked_history else None)),
+            ranked_last_season_id=last_season,
+        )
+
+    def test_current_ranked_season_ids(self):
+        from warships.management.commands.ensure_daily_battle_observations import (
+            _current_ranked_season_ids,
+        )
+        self.assertIsNone(_current_ranked_season_ids())  # no ranked data yet
+        self._player(9001, last_season=29)
+        self._player(9002, last_season=30)               # max
+        self.assertEqual(_current_ranked_season_ids(), [30, 29])
+
+    def test_ranked_active_ids_filters_to_current_season(self):
+        from warships.management.commands.ensure_daily_battle_observations import (
+            _ranked_active_ids,
+        )
+        self._player(8101, last_season=30)   # current
+        self._player(8102, last_season=20)   # lapsed
+        self._player(8103, last_season=None)  # never
+        active = _ranked_active_ids("na", [8101, 8102, 8103], [30, 29])
+        self.assertEqual(active, {8101})
+        self.assertEqual(_ranked_active_ids("na", [8101], []), set())  # off-season
+
+    def test_command_random_first_routes_only_current_season_to_ranked(self):
+        self._player(8201, last_season=30)    # current (max) → ranked path
+        self._player(8202, last_season=20)    # lapsed → random path
+        self._player(8203, last_season=None)  # never → random path
+        with mock.patch(f"{CMD}._ranked_capture_active_for_realm",
+                        return_value=True), \
+                mock.patch(ENGINE_BULK,
+                           return_value={"completed": 0, "baseline": 0,
+                                         "events": 0, "aborted": False}) as bulk_mock, \
+                mock.patch(ENGINE_RANKED,
+                           return_value={"status": "completed"}) as rw:
+            call_command("ensure_daily_battle_observations", realm="na",
+                         bulk=True, random_first=True)
+        bulk_ids = set(bulk_mock.call_args.args[0])
+        ranked_swept = {c.args[0] for c in rw.call_args_list}
+        self.assertEqual(ranked_swept, {8201})            # only current-season
+        self.assertEqual(bulk_ids, {8202, 8203})          # lapsed + never → random
+
+    def test_command_random_first_falls_back_when_no_ranked_data(self):
+        # No ranked_last_season_id populated yet (cold field) → can't tell the
+        # current season → fall back to ever-ranked so ranked isn't dropped.
+        self._player(8301, last_season=None, ranked_history=True)  # ranked_json, NULL field
+        with mock.patch(f"{CMD}._ranked_capture_active_for_realm",
+                        return_value=True), \
+                mock.patch(ENGINE_BULK,
+                           return_value={"completed": 0, "baseline": 0,
+                                         "events": 0, "aborted": False}), \
+                mock.patch(ENGINE_RANKED,
+                           return_value={"status": "completed"}) as rw:
+            call_command("ensure_daily_battle_observations", realm="na",
+                         bulk=True, random_first=True)
+        self.assertEqual({c.args[0] for c in rw.call_args_list}, {8301})
+
+    def test_skip_ranked_runs_random_only(self):
+        self._player(8401, last_season=30)  # would be ranked, but skipped
+        with mock.patch(f"{CMD}._ranked_capture_active_for_realm",
+                        return_value=True), \
+                mock.patch(ENGINE_BULK,
+                           return_value={"completed": 0, "baseline": 0,
+                                         "events": 0, "aborted": False}) as bulk_mock, \
+                mock.patch(ENGINE_RANKED) as rw:
+            call_command("ensure_daily_battle_observations", realm="na",
+                         bulk=True, random_first=True, skip_ranked=True)
+        rw.assert_not_called()                       # no ranked sweep
+        self.assertEqual(set(bulk_mock.call_args.args[0]), {8401})  # all → random
+
+
+class RandomFirstPathSwitchTests(TestCase):
+    """Load-bearing safety: a player moving between the ranked (combined) and
+    random-only paths across cycles keeps both diffs correct."""
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="sw", player_id=7777, realm="na", pvp_battles=100,
+            pvp_wins=50, pvp_losses=50, pvp_frags=80, pvp_survived_battles=60,
+        )
+        Ship.objects.create(ship_id=99, name="Petro", nation="ussr",
+                            ship_type="Cruiser", tier=10)
+
+    def _ranked_rows(self, battles):
+        return [{"ship_id": 99, "seasons": {"30": {
+            "battles": battles, "wins": battles, "frags": battles,
+            "damage_dealt": battles * 1000, "xp": battles * 100,
+            "survived_battles": battles}}}]
+
+    def _capture(self, rand_battles, ranked_battles=None):
+        return record_observation_from_payloads(
+            self.player,
+            player_data=_account_payload(battles=rand_battles),
+            ship_data=_ship_payload(battles=rand_battles, wins=1, damage=1, xp=1),
+            ranked_ship_data=(self._ranked_rows(ranked_battles)
+                              if ranked_battles is not None else None),
+        )
+
+    def test_ranked_then_random_only_then_ranked(self):
+        self._capture(100, ranked_battles=5)   # tick0: ranked baseline
+        self._capture(101, ranked_battles=7)   # tick1: ranked path (+1 rand, +2 ranked)
+        self._capture(103)                      # tick2: RANDOM-ONLY (demoted), ranked=NULL
+        self._capture(104, ranked_battles=10)  # tick3: ranked path again (+1 rand, ranked vs tick1)
+
+        rand = BattleEvent.objects.filter(
+            player=self.player, mode=BattleEvent.MODE_RANDOM)
+        ranked = BattleEvent.objects.filter(
+            player=self.player, mode=BattleEvent.MODE_RANKED)
+        # Random captured continuously across all three post-baseline ticks.
+        self.assertEqual(rand.count(), 3)
+        # deltas: tick1 101-100=1, tick2 103-101=2, tick3 104-103=1
+        self.assertEqual(sorted(e.battles_delta for e in rand), [1, 1, 2])
+        # Ranked: tick1 (+2) and tick3 — tick3 walks back PAST the random-only
+        # tick2 to tick1's ranked snapshot (7), so delta = 10-7 = 3. No ranked
+        # battles lost across the gap.
+        self.assertEqual(ranked.count(), 2)
+        self.assertEqual(sorted(e.battles_delta for e in ranked), [2, 3])
+        # The random-only obs persisted ranked=NULL (so the walk-back skips it).
+        obs = list(BattleObservation.objects.filter(
+            player=self.player).order_by("observed_at"))
+        self.assertIsNone(obs[2].ranked_ships_stats_json)  # tick2 random-only
+
+
+class BenchmarkCommandTests(TestCase):
+    """The read-only benchmark command runs and emits the metric structure."""
+
+    def test_benchmark_json_structure_and_coverage(self):
+        p = Player.objects.create(
+            name="bm1", player_id=4040, realm="na", is_hidden=False,
+            last_battle_date=timezone.now().date(), pvp_battles=100,
+        )
+        Ship.objects.create(ship_id=42, name="Yamato", nation="japan",
+                            ship_type="Battleship", tier=10)
+        o1 = BattleObservation.objects.create(
+            player=p, pvp_battles=100, ships_stats_json=[], source="bulk_floor")
+        o2 = BattleObservation.objects.create(
+            player=p, pvp_battles=101, ships_stats_json=[], source="bulk_floor")
+        BattleEvent.objects.create(
+            player=p, mode=BattleEvent.MODE_RANDOM, ship_id=42,
+            ship_name="Yamato", battles_delta=1,
+            from_observation=o1, to_observation=o2)
+
+        out = io.StringIO()
+        call_command("benchmark_observation_floor", json=True, stdout=out)
+        data = json.loads(out.getvalue())
+
+        self.assertIn("config", data)
+        self.assertIn("totals", data)
+        self.assertIn("na", data["realms"])
+        na = data["realms"]["na"]
+        self.assertEqual(na["active_7d"], 1)
+        self.assertEqual(na["distinct_observed"], 1)
+        self.assertEqual(na["distinct_productive"], 1)
+        self.assertEqual(na["obs_bulk_floor"], 2)
+        # 1 productive of 1 active-7d → coverage 1.0
+        self.assertEqual(na["coverage_ratio_vs_7d"], 1.0)
+        self.assertEqual(na["fresh_within_24h"], 1)
 
 
 class BulkObservationCommandTests(TestCase):

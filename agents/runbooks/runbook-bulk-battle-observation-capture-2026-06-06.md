@@ -2,7 +2,7 @@
 
 _Created: 2026-06-06_
 _Context: The observation floor captures battle history one player at a time at 2–3 WG calls/player, so only a slice of active players is covered each sweep. Enrichment already proves bulk `ships/stats`/`account/info` at 100 ids/call. This spec moves capture onto that bulk path (~100× cheaper) so we can observe every active player daily._
-_Status: **implemented (phase 1, flag OFF) — but the cost premise is REFUTED by phase-2 prod validation. DO NOT enable; decision needed.** WG `ships/stats/` is single-account-only (rejects ≥2 account_ids with `INVALID_ACCOUNT_ID`), so the bulk ships fetch can never batch — it always falls back to per-player. R1 therefore bulks only `account/info` (~2→1 WG calls/player, a ~2× saving), NOT the ~100× the context line below assumed, and R3 (daily every active player) stays infeasible on the ships budget. See "🛑 CRITICAL — bulk ships premise refuted" below._
+_Status: **LIVE on na/eu/asia (2026-06-07): R1 bulk capture + random change-gate + ranked change-gate, all enabled, validated, and persisted in `deploy_to_droplet.sh`.** The original ~100× premise was REFUTED on prod (WG `ships/stats/` is single-account-only — see "🛑 CRITICAL" below); reframed around the real ~84k active population, the goal is achievable and the gates cut floor WG load ~37%. **Next: R3** — raise `BATTLE_OBSERVATION_FLOOR_LIMIT` (currently default 3,000/realm/cycle) toward the full active set, now affordable. Baseline benchmark captured 2026-06-07 (28.5% of active-7d covered/24h) — see "Benchmarks" at the bottom; re-run before R3._
 
 ## Purpose
 
@@ -467,3 +467,43 @@ Repeat per realm. **GATE: `mismatch=0`.** Any `mismatch` ⇒ STOP, inspect with 
 **5 — R3, raise the floor limit.** Step `BATTLE_OBSERVATION_FLOOR_LIMIT` up (3000 → 10000 → toward full active ~255k ≈ 5,100 WG calls, ~8.5 min @10/s). **Note:** the task currently passes one `limit` to both sweeps (the command's `--ranked-limit` defaults to it), so the per-player ranked sweep shares the cap. If the ranked-known set (step 1) is large enough to bottleneck, that needs a small follow-up — wire a `BATTLE_OBSERVATION_FLOOR_RANKED_LIMIT` env → task kwarg → command `ranked_limit` — and stage the ranked expansion separately.
 
 **Rollback (any phase, instant).** Drop the realm from `BATTLE_OBSERVATION_FLOOR_BULK_REALMS` or set `BATTLE_OBSERVATION_FLOOR_BULK_ENABLED=0`; restart `battlestats-celery`. Legacy per-player floor resumes on the next 6h tick. Nothing to unwind (migration `0064` is a no-op).
+
+## Benchmarks — coverage/cost progress tracking
+
+**Reproduce identically** (read-only, ~seconds): `python manage.py benchmark_observation_floor [--json]` on the droplet (`/opt/battlestats-server/current/server`, venv python). Diff the `--json` totals day-over-day. Headline metric = `coverage_ratio_vs_7d` (distinct players productively captured in 24h ÷ active-7d) — R3 should drive it + `fresh_frac` toward 1.0 and shrink `never_observed`.
+
+**Protocol:** capture before each change (baseline → before R3 → after R3), same trailing-24h window. Note the trailing-24h here is mostly *legacy*-cadence data (gated cadence went live ~01:15 the same day), so this is effectively the pre-optimization baseline; the **before-R3** capture (a full day of gated cadence) is the one to compare R3 against.
+
+### Baseline — 2026-06-07 ~04:37 UTC (gated cadence live ~3.5h; FLOOR_LIMIT=3000 default)
+
+config: `BULK_ENABLED=1 BULK_REALMS=na,eu,asia CHANGE_GATE=1 RANKED_GATE=1 LIMIT=(default 3000) HOURS=8`
+
+| realm | active-7d | distinct observed | distinct productive | cov/7d | prodRate | fresh<24h | stale>24h | bulk_floor |
+|---|---|---|---|---|---|---|---|---|
+| asia | 21,369 | 15,129 | 8,152 | 38.2% | 53.9% | 14,192 | 248 | 124 |
+| eu | 36,582 | 14,874 | 7,767 | 21.2% | 52.2% | 13,793 | 4,405 | 133 |
+| na | 23,825 | 13,022 | 7,413 | 31.1% | 56.9% | 12,449 | 8,466 | 160 |
+| **TOTAL** | **81,776** | **43,025** | **23,332** | **28.5%** | **54.2%** | **40,434** | **13,119** | **417** |
+
+Totals (JSON, for exact diff): `active_1d=39,050 active_7d=81,776 distinct_observed=42,825 distinct_productive=23,288 coverage_ratio_vs_7d=0.285 coverage_ratio_vs_1d=0.596 productive_rate=0.544 fresh_within_24h=40,235 stale_over_24h=13,318 never_observed=28,223 fresh_frac=0.492 obs_bulk_floor=417 obs_poll=57,942`
+
+**Read:** only **28.5%** of active-7d players get their battles captured per 24h, and **28,223 (34%) have never been observed** — that is the coverage gap R3 closes. `coverage_ratio_vs_1d=59.6%` (active-1d players are covered better, as expected). `productive_rate 54%` (about half of observations catch a battle — the gates remove much of the other half's wasted ships calls). `bulk_floor` counts are small here only because the gated cadence had run ~3.5h; expect them far higher in the before-R3 capture.
+
+### Before R3 — _(capture 2026-06-08, full day of gated cadence; then start R3)_
+### After R3 — _(capture after the floor-limit raise settles)_
+
+## Random-first routing + R3 prep (2026-06-07, flags OFF)
+
+**Why:** the floor routed *ranked-known* players (ever-played-ranked, ~77-88% of active) to the slow 3-call path, so most players' **Random** capture rode the slow lane *because of* Ranked — a niche mode (only ~27% of NA ranked-known played Ranked in 7d). Standing rule: **Random > Ranked** (`feedback_prioritize_random_over_ranked`).
+
+**Constraint:** can't split Random/Ranked into two observations per tick (`(player, observed_at)` unique-constraint collision + rollup double-count). So we **route** each player to one path/cycle. Path-switching is safe: every obs carries `ships_stats_json` (Random diff continuous) and `_hydrate_previous_ranked_snapshot` walks back past intervening Random-only (`ranked=NULL`) obs (covered by `RandomFirstPathSwitchTests`).
+
+**Change (flag `BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED`, default 0):**
+- New `Player.ranked_last_season_id` (migration `0065`, nullable, no index) = highest season with ranked battles, set by `data.update_ranked_data` on each ~2h ranked refresh. Routing self-heals: a player who (re)starts the current season is re-promoted within ~2h.
+- `_current_ranked_season_ids()` → `[max, max-1]` from the **highest `Player.ranked_last_season_id` in the DB** (the live season anyone is playing, enrichment-fed). **Not** `seasons/info` dates — those lag: observed 2026-06-07, `seasons/info` topped out at season 1028 ("ended" May 20) while players were accumulating battles in 1029, so date-based detection wrongly reported off-season and would have killed ranked capture. `None` when the field is cold → **fall back to ever-ranked** (never silently drop ranked).
+- `_ranked_active_ids()` filters candidates on `ranked_last_season_id in current_seasons` — simple indexed IN, bounded by `player_id__in`.
+- Renamed `--ranked-limit` -> `--ranked-sweep-limit` (`RANKED_SWEEP_LIMIT`, default 5000) with its **own** bound so it stays small as `FLOOR_LIMIT` rises. `--skip-ranked` + `RANKED_DAILY_ENABLED` run ranked once/day (realm's earliest slot), not every 6h.
+
+**Rollout (flag-gated, benchmark-measured):** land flags OFF -> deploy (behaviour-neutral; `ranked_last_season_id` populates via the ~2h ranked refresh) -> capture *before-R3* benchmark -> enable `--random-first` on na, watch the floor summary (`routing=current-season(...)`, `bulk_random=` up, ranked count down, no 407) + re-benchmark -> expand -> enable daily-ranked -> **Phase B: ramp `FLOOR_LIMIT` toward active-1d** (na ~11k), benchmarking each step until Random `coverage_ratio_vs_1d`/`fresh_frac` near 1.0 with safe cycle time.
+
+**Tests:** `RandomFirstRoutingTests`, `RandomFirstPathSwitchTests`, daily-slot task wiring. 214 across battle-history + enrichment; 262 release-gate subset.

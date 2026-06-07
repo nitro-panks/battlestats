@@ -1461,6 +1461,18 @@ def _bulk_floor_active_for_realm(realm: str) -> bool:
     return realm in realms
 
 
+# Earliest 6h observation-floor slot per realm (mirrors the striped crontabs in
+# signals.py: na :15 of 1/7/13/19h, eu 3/9/15/21h, asia 5/11/17/23h). The daily
+# ranked sweep runs only on this slot.
+_RANKED_DAILY_HOUR = {"na": 1, "eu": 3, "asia": 5}
+
+
+def _is_ranked_daily_slot(realm: str) -> bool:
+    """True when the current cycle is `realm`'s once-a-day ranked slot."""
+    from django.utils import timezone as _tz
+    return _tz.now().hour == _RANKED_DAILY_HOUR.get(realm, 1)
+
+
 @app.task(bind=True, **CRAWL_TASK_OPTS)
 def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
     """Daily floor for BattleObservation coverage on active-7d players.
@@ -1544,6 +1556,22 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
             if os.getenv(
                 "BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED", "0") == "1":
                 kwargs["ranked_gate"] = True
+            # Random-first routing: heavy ranked path only for current-season
+            # players; everyone else (incl. lapsed ranked) takes the fast random
+            # path so a niche mode stops throttling random coverage.
+            if os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED", "0") == "1":
+                kwargs["random_first"] = True
+            # Ranked sweep keeps its own modest bound as the random FLOOR_LIMIT
+            # scales up (R3).
+            kwargs["ranked_sweep_limit"] = int(os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_RANKED_SWEEP_LIMIT", "5000"))
+            # Daily ranked cadence: ranked is niche/less time-sensitive, so run
+            # the heavy per-player sweep only on the realm's earliest 6h slot,
+            # not all four. Random keeps the full 6h cadence.
+            if (os.getenv("BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED", "0")
+                    == "1" and not _is_ranked_daily_slot(realm)):
+                kwargs["skip_ranked"] = True
         call_command("ensure_daily_battle_observations", **kwargs)
         return {
             "status": "completed",
