@@ -284,7 +284,7 @@ migration for `SOURCE_BULK_FLOOR` — nothing to unwind.
   `_request_api_payload`, so a gate placed only at `_request_api_payload` would be bypassed by the
   bulk path — the bucket must cover `make_api_request_typed` too, or both must be refactored onto
   one gated path.
-- **R2 — clan crawl `core_only`.** Frees the dominant consumer that pre-empts capture today.
+- **R2 — clan crawl `core_only` (IMPLEMENTED 2026-06-07, flag `CLAN_CRAWL_CORE_ONLY`, default 0).** The clan crawl is the dominant WG consumer and pre-empts the floor (crawl-coexist slows every realm — the cause of the 2026-06-07 coverage dip). ~85% of its WG cost (~100k of ~120k/pass) is per-player efficiency+achievements enrichment that is **redundant** with `enrich_player_data` and is what makes it hold the realm lock for hours. `core_only=True` skips that (the `save_player` enrichment at `clan_crawl.py:241` is already gated on it); Player/Clan discovery + `refresh_clan_cached_aggregates` (Best Clans, `clan_crawl.py:349`) still run, proven by `test_crawl_clan_members_populates_cached_aggregates_for_realm`. The flag is OR'd inside `crawl_all_clans_task` so the Beat schedule **and** the watchdog re-dispatch honour it. Net: crawl WG ~6× lower (~20k/pass) and the floor stops being throttled — likely a bigger coverage lever than the R3 limit ramp. Per-player efficiency/achievements just shift to the dedicated enrichment crawler.
 - **D8 optimization** — bulk-prefetch latest observation per chunk (optional `previous=` param) only
   if walk-back queries measurably dominate chunk wall-time.
 

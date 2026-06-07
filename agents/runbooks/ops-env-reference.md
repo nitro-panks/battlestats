@@ -23,6 +23,7 @@ Cache/warming:
 
 Crawlers/refresh (`ENABLE_CRAWLER_SCHEDULES`=1 in prod is the master kill switch):
 - `CLAN_CRAWL_SCHEDULE_HOUR`/`_MINUTE` (3/0), `CLAN_CRAWL_WATCHDOG_MINUTES` (5)
+- `CLAN_CRAWL_CORE_ONLY` (0) — **R2**: when 1, the clan crawl skips the per-player efficiency+achievements enrichment (2 WG calls/player, ~85% of the crawl's WG cost) that's redundant with `enrich_player_data` and made the crawl hold its realm lock for hours, pre-empting the battle-history floor. Honoured by both the Beat schedule and the watchdog re-dispatch. Clan/Player discovery + clan cached aggregates (Best Clans) still run. `_CORE_ONLY_RATE_LIMIT_DELAY` paces the (now cheaper) core-only pass. Cuts crawl WG ~6× (~120k→~20k/pass) and frees the floor.
 - `PLAYER_REFRESH_INTERVAL_MINUTES` (180); tier staleness `PLAYER_REFRESH_HOT/ACTIVE/WARM_STALE_HOURS` (12/24/72)
 - `RANKED_REFRESH_INTERVAL_MINUTES` (120)
 - BattleObservation floor: `BATTLE_OBSERVATION_FLOOR_HOUR`/`_MINUTE` (1/15), `_HOURS` (8), `_LIMIT`/`_DELAY` (3000/0.3), `_CRAWL_DELAY`/`_CRAWL_LIMIT` (0.8/falls back to LIMIT — floor coexists with crawls instead of skipping)

@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -6,6 +7,30 @@ from django.utils import timezone
 
 from warships.clan_crawl import crawl_clan_members
 from warships.models import Clan
+
+
+class CrawlCoreOnlyFlagTests(TestCase):
+    """R2: CLAN_CRAWL_CORE_ONLY env forces core_only for the scheduled crawl
+    AND the watchdog re-dispatch (both call the task without core_only=True)."""
+
+    @patch("warships.clan_crawl.run_clan_crawl")
+    def test_env_flag_forces_core_only(self, mock_run):
+        mock_run.return_value = {"players_saved": 0, "clans_found": 0}
+        from warships.tasks import crawl_all_clans_task
+        with patch.dict(os.environ, {"CLAN_CRAWL_CORE_ONLY": "1"}):
+            crawl_all_clans_task.apply(
+                kwargs={"realm": "na", "limit": 1}).get()
+        self.assertTrue(mock_run.call_args.kwargs.get("core_only"))
+
+    @patch("warships.clan_crawl.run_clan_crawl")
+    def test_no_flag_keeps_core_only_false(self, mock_run):
+        mock_run.return_value = {"players_saved": 0, "clans_found": 0}
+        from warships.tasks import crawl_all_clans_task
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAN_CRAWL_CORE_ONLY", None)
+            crawl_all_clans_task.apply(
+                kwargs={"realm": "eu", "limit": 1}).get()
+        self.assertFalse(mock_run.call_args.kwargs.get("core_only"))
 
 
 class ClanCrawlAggregateTests(TestCase):

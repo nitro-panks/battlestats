@@ -1289,6 +1289,14 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
     from warships.clan_crawl import run_clan_crawl
     from warships.models import VALID_REALMS as _realms
 
+    # R2: gut the expensive per-player enrichment (efficiency + achievements,
+    # ~85% of the crawl's WG cost) that's redundant with the dedicated
+    # enrichment crawler and makes the crawl hold its realm lock for hours,
+    # pre-empting the battle-history floor. Read the flag here (not just the
+    # arg) so BOTH the Beat schedule and the watchdog re-dispatch honour it.
+    # Discovery (Player/Clan rows) + clan cached aggregates still run.
+    core_only = core_only or os.getenv("CLAN_CRAWL_CORE_ONLY", "0") == "1"
+
     lock_key = _clan_crawl_lock_key(realm)
     heartbeat_key = _clan_crawl_heartbeat_key(realm)
 
