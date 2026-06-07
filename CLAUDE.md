@@ -98,6 +98,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - Player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon, TopShipIcon) — inlined per surface in `PlayerDetail.tsx`, `ClanMembers.tsx`, `PlayerSearch.tsx` (NOT a shared component), driven by each row's `ship_badges`
 - `ShipTopPlayerBanner.tsx` — per-fortnight T10 top-3 cards above Battle History, fed by `ship_badges` (`data.get_player_ship_badges`), links to `/ship/<id>`
 - `ShipHonors.tsx` — durable per-ship career record from the append-only `ShipAward` ledger, fed by `ship_awards` (`data.get_player_ship_awards`)
+- `ShipRouteView.tsx` — the `/ship/<id>` leaderboard page: masthead ship identity (class glyph + tier/class/nation chips + Premium marker via `app/lib/shipIdentity.ts`), restrained champion/podium treatment (`--metal-gold`/`--champion-tint`/`--champion-edge` tokens, `TopShipIcon size="podium"`), metric hierarchy, and a responsive desktop-table / mobile-card split. Identity is payload-only (no new fetch); presentation refresh spec: `agents/work-items/ship-leaderboard-ux-refresh-spec.md`
 
 ### Caching strategy
 
