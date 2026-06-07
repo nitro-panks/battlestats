@@ -53,14 +53,47 @@ interface ShipLeaderboard {
 }
 
 
-const LoadingPanel: React.FC<{ label: string }> = ({ label }) => (
-    <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
-        style={{ minHeight: 220 }}
-    >
-        {label}
-    </div>
+const SkeletonBar: React.FC<{ className?: string }> = ({ className = '' }) => (
+    <div className={`animate-pulse rounded bg-[var(--bg-hover)] ${className}`} />
 );
+
+// Loading skeleton that mirrors the real masthead + table shape (glyph, name,
+// chips, a few rows) so the page's structure is visible while data arrives,
+// rather than a single grey box that reads as "broken".
+const ShipSkeleton: React.FC = () => (
+    <section className="mx-auto max-w-3xl" aria-busy="true" aria-label="Loading ship standings">
+        <div className="mb-5">
+            <div className="flex items-center gap-2.5">
+                <SkeletonBar className="h-6 w-9" />
+                <SkeletonBar className="h-9 w-52" />
+            </div>
+            <div className="mt-2 flex gap-1.5">
+                <SkeletonBar className="h-5 w-12" />
+                <SkeletonBar className="h-5 w-24" />
+                <SkeletonBar className="h-5 w-16" />
+            </div>
+            <SkeletonBar className="mt-3 h-3 w-64" />
+        </div>
+        <div className="space-y-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+                <SkeletonBar key={i} className="h-9 w-full" />
+            ))}
+        </div>
+    </section>
+);
+
+// Derive a display label from the route slug (strip the leading "<id>-"), the
+// same shape the page's generateMetadata() uses — so the error state can still
+// name the ship the user was looking for.
+const slugToLabel = (slug: string): string => {
+    const decoded = decodeURIComponent(slug).replace(/^\d+-?/, '').replace(/-/g, ' ').trim();
+    return decoded ? decoded.replace(/\b\w/g, (c) => c.toUpperCase()) : '';
+};
+
+// Shared player-link styling — adds a visible keyboard focus ring on top of the
+// existing hover underline (used in both the desktop table and mobile cards).
+const PLAYER_LINK_CLASS =
+    'rounded-sm text-[var(--accent-mid)] hover:underline focus-visible:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)] focus-visible:ring-offset-1';
 
 
 interface ShipRouteViewProps {
@@ -128,14 +161,22 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
     }, [shipId, realm]);
 
     if (isLoading) {
-        return <LoadingPanel label="Loading ship standings…" />;
+        return <ShipSkeleton />;
     }
 
     if (error || !data) {
+        const label = slugToLabel(shipSlug);
         return (
-            <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-6 text-sm text-[var(--text-muted)]">
-                {error || 'Ship standings not found.'}
-            </div>
+            <section className="mx-auto max-w-3xl">
+                {label && (
+                    <h1 className="mb-3 break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
+                        {label}
+                    </h1>
+                )}
+                <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-6 text-sm text-[var(--text-muted)]">
+                    {error || 'Ship standings not found.'} The {realm.toUpperCase()} board may not have ranked this ship yet — check back as battles come in.
+                </div>
+            </section>
         );
     }
 
@@ -164,6 +205,13 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
     const nextOpenMs = data.next_window_open
         ? Date.parse(data.next_window_open)
         : (nowMs !== null ? nextWindowOpenMs(nowMs) : null);
+
+    // Provenance — when this board was captured. Hidden when the payload omits
+    // it (no "as of —"). Date-only ISO parses as UTC midnight; render in UTC.
+    const capturedMs = data.captured_on ? Date.parse(data.captured_on) : null;
+    const capturedLabel = capturedMs !== null && !Number.isNaN(capturedMs)
+        ? new Date(capturedMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+        : null;
 
     return (
         <section className="mx-auto max-w-3xl">
@@ -208,17 +256,21 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                 )}
                 <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                     {realm.toUpperCase()} · best players · {seasonLabel ? `season ${seasonLabel}` : `last ${data.window_days} days`} ·
-                    <span
+                    <button
+                        type="button"
                         title={RANKING_TOOLTIP}
                         aria-label={RANKING_TOOLTIP}
-                        className="inline-flex cursor-help"
+                        className="inline-flex cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)]"
                     >
                         <FontAwesomeIcon icon={faCircleInfo} aria-hidden="true" />
-                    </span>
+                    </button>
                 </p>
+                {capturedLabel && (
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">Standings captured {capturedLabel} UTC</p>
+                )}
                 {nowMs !== null && nextOpenMs !== null && (
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
-                        Next standings window opens in{' '}
+                        Next standings lock in{' '}
                         <span className="font-semibold text-[var(--accent-mid)] tabular-nums">
                             {formatCountdown(nextOpenMs - nowMs)}
                         </span>
@@ -232,7 +284,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
 
             {players.length === 0 ? (
                 <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-6 text-sm text-[var(--text-muted)]">
-                    Not enough players ranked this ship in the last {data.window_days} days yet. Check back soon.
+                    No ranked standings for this ship yet this season — check back as battles come in.
                 </div>
             ) : (
                 <>
@@ -269,7 +321,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                                             <span className="inline-flex items-center gap-2">
                                                 <Link
                                                     href={buildPlayerPath(p.player_name, realm)}
-                                                    className={`text-[var(--accent-mid)] hover:underline ${isChampion ? 'font-semibold' : ''}`}
+                                                    className={`${PLAYER_LINK_CLASS} ${isChampion ? 'font-semibold' : ''}`}
                                                     onClick={() => onPlayerClick(p.rank)}
                                                 >
                                                     {p.player_name}
@@ -317,7 +369,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                                             <span className="w-5 shrink-0 text-right tabular-nums text-[var(--text-muted)]">{p.rank}</span>
                                             <Link
                                                 href={buildPlayerPath(p.player_name, realm)}
-                                                className={`truncate text-[var(--accent-mid)] hover:underline ${isChampion ? 'font-semibold' : ''}`}
+                                                className={`${PLAYER_LINK_CLASS} truncate ${isChampion ? 'font-semibold' : ''}`}
                                                 onClick={() => onPlayerClick(p.rank)}
                                             >
                                                 {p.player_name}

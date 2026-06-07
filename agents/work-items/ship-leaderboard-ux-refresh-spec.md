@@ -1,6 +1,6 @@
 # Feature Spec: Ship Leaderboard UX & Typography Refresh
 
-_Drafted: 2026-06-07 · Author: UX/Design · Status: **P0 tranche (T1–T7) implemented + visually verified (both themes, desktop + 375px mobile); not committed.** P1/P2 not started._
+_Drafted: 2026-06-07 · Author: UX/Design · Status: **P0 (T1–T8) + P1 (T9–T11) implemented + visually verified (both themes, desktop + 375px mobile). P0 committed `1e2e3a6`; P1 committed.** T12 evaluated→skipped; P2 (T13 dropped, T14 deferred)._
 
 ## Implementation status (2026-06-07)
 
@@ -21,7 +21,16 @@ _Drafted: 2026-06-07 · Author: UX/Design · Status: **P0 tranche (T1–T7) impl
 
 **Validation:** `npm run build` ✓ · `eslint` ✓ · `shipIdentity` tests 7/7 ✓ · **visual: rendered `/ship/4282267344-shimakaze` in light + dark at 1024px and 375px — no horizontal scroll, champion gold edge-bar paints on the `<tr>`, both themes legible.**
 
-**Open before deploy:** commit-time doctrine reconciliation (CLAUDE.md "Key frontend patterns" `ShipRouteView` entry + the new `globals.css` tokens; `doctrine-precommit`). **Not yet built:** P1 (T8 separator polish, T9 season-lock + provenance, T10 ship-context states, T11 info-control a11y, T12 micro-encoding) and P2 (T13 dropped, T14 flags deferred).
+**P1 built (T9–T11), committed:**
+- T8 (podium/field separator) — already landed in P0 (rank-3 border).
+- T9 `ShipRouteView.tsx` — countdown reframed to convey stakes ("Next standings lock in …"); UTC provenance line ("Standings captured <date> UTC") shown when `captured_on` non-null, hidden when null.
+- T10 — structured loading skeleton mirroring the masthead+table (was a single grey box); error state now renders under a slug-derived ship name with warmer copy; empty state copy softened (already rendered under the real masthead).
+- T11 — ranking-info `ⓘ` converted from a `title`-only `<span>` to a focusable `<button>` with `aria-label` + focus ring (keyboard-reachable, in tab order); shared focus-visible ring added to player links in both layouts.
+- T12 (win-rate micro-encoding) — **evaluated → skipped.** `wrColor` already encodes win-rate magnitude (data-ink); a bar/tick would be redundant chartjunk on a dense board. No code.
+
+**Validation (P1):** `npm run build` ✓ · `eslint` ✓ · rendered both themes — provenance + reframed countdown legible, champion/podium/identity intact, no h-scroll at 375px.
+
+**Open before deploy:** a `release.sh` version bump + `./client/deploy/deploy_to_droplet.sh` (build-time `NEXT_PUBLIC_APP_VERSION`); P2 work if desired (T13 dropped, T14 flag ensigns deferred pending a licensed flat-flag asset set).
 
 ---
 
