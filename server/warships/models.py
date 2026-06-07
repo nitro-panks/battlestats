@@ -60,6 +60,14 @@ class Player(models.Model):
 
     ranked_json = models.JSONField(null=True, blank=True)
     ranked_updated_at = models.DateTimeField(null=True, blank=True)
+    # Highest ranked season_id in which this player has battles (derived from
+    # ranked_json), or NULL. The observation floor's random-first routing
+    # compares this to the currently-active ranked season(s) to decide who needs
+    # the heavy 3-call ranked sweep vs the fast bulk-random path. Populated by
+    # data.update_ranked_data on each ranked refresh (~2h cadence), so routing
+    # self-heals when a player (re)starts the current ranked season. No index:
+    # the routing query is already bounded by player_id__in=<candidates>.
+    ranked_last_season_id = models.IntegerField(null=True, blank=True)
 
     efficiency_json = models.JSONField(null=True, blank=True)
     efficiency_updated_at = models.DateTimeField(null=True, blank=True)

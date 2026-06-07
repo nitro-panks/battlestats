@@ -491,3 +491,19 @@ Totals (JSON, for exact diff): `active_1d=39,050 active_7d=81,776 distinct_obser
 
 ### Before R3 — _(capture 2026-06-08, full day of gated cadence; then start R3)_
 ### After R3 — _(capture after the floor-limit raise settles)_
+
+## Random-first routing + R3 prep (2026-06-07, flags OFF)
+
+**Why:** the floor routed *ranked-known* players (ever-played-ranked, ~77-88% of active) to the slow 3-call path, so most players' **Random** capture rode the slow lane *because of* Ranked — a niche mode (only ~27% of NA ranked-known played Ranked in 7d). Standing rule: **Random > Ranked** (`feedback_prioritize_random_over_ranked`).
+
+**Constraint:** can't split Random/Ranked into two observations per tick (`(player, observed_at)` unique-constraint collision + rollup double-count). So we **route** each player to one path/cycle. Path-switching is safe: every obs carries `ships_stats_json` (Random diff continuous) and `_hydrate_previous_ranked_snapshot` walks back past intervening Random-only (`ranked=NULL`) obs (covered by `RandomFirstPathSwitchTests`).
+
+**Change (flag `BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED`, default 0):**
+- New `Player.ranked_last_season_id` (migration `0065`, nullable, no index) = highest season with ranked battles, set by `data.update_ranked_data` on each ~2h ranked refresh. Routing self-heals: a player who (re)starts the current season is re-promoted within ~2h.
+- `_current_ranked_season_ids()` (reuses `_get_ranked_seasons_metadata`) → active season_ids today; `[]` off-season (everyone → random), `None` if metadata unavailable → **fall back to ever-ranked** (never silently drop ranked).
+- `_ranked_active_ids()` filters candidates on `ranked_last_season_id in current_seasons` — simple indexed IN, bounded by `player_id__in`.
+- Renamed `--ranked-limit` -> `--ranked-sweep-limit` (`RANKED_SWEEP_LIMIT`, default 5000) with its **own** bound so it stays small as `FLOOR_LIMIT` rises. `--skip-ranked` + `RANKED_DAILY_ENABLED` run ranked once/day (realm's earliest slot), not every 6h.
+
+**Rollout (flag-gated, benchmark-measured):** land flags OFF -> deploy (behaviour-neutral; `ranked_last_season_id` populates via the ~2h ranked refresh) -> capture *before-R3* benchmark -> enable `--random-first` on na, watch the floor summary (`routing=current-season(...)`, `bulk_random=` up, ranked count down, no 407) + re-benchmark -> expand -> enable daily-ranked -> **Phase B: ramp `FLOOR_LIMIT` toward active-1d** (na ~11k), benchmarking each step until Random `coverage_ratio_vs_1d`/`fresh_frac` near 1.0 with safe cycle time.
+
+**Tests:** `RandomFirstRoutingTests`, `RandomFirstPathSwitchTests`, daily-slot task wiring. 214 across battle-history + enrichment; 262 release-gate subset.

@@ -4191,6 +4191,7 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
         logging.info(f'No ranked data for {player.name}')
         player.ranked_json = []
         player.ranked_updated_at = datetime.now()
+        player.ranked_last_season_id = None
         player.save()
         return
 
@@ -4217,6 +4218,16 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
 
     player.ranked_json = result
     player.ranked_updated_at = datetime.now()
+    # Highest season_id the player actually has ranked battles in — drives the
+    # observation floor's random-first routing (heavy ranked sweep only for
+    # current-season players). NULL when they have no ranked battles.
+    seasons_with_battles = [
+        row['season_id'] for row in result
+        if int(row.get('total_battles') or 0) > 0
+    ]
+    player.ranked_last_season_id = (
+        max(seasons_with_battles) if seasons_with_battles else None
+    )
     player.save()
     refresh_player_explorer_summary(player, ranked_rows=result)
     logging.info(
