@@ -12,6 +12,7 @@ and per-player slice handling (D4).
 """
 import calendar
 import io
+import json
 import os
 from datetime import datetime, timedelta
 from unittest import mock
@@ -662,6 +663,42 @@ class RankedSweepGateTests(TestCase):
             from warships.tasks import ensure_daily_battle_observations_task
             ensure_daily_battle_observations_task.apply(args=["na"]).get()
         self.assertTrue(cc.call_args.kwargs.get("ranked_gate"))
+
+
+class BenchmarkCommandTests(TestCase):
+    """The read-only benchmark command runs and emits the metric structure."""
+
+    def test_benchmark_json_structure_and_coverage(self):
+        p = Player.objects.create(
+            name="bm1", player_id=4040, realm="na", is_hidden=False,
+            last_battle_date=timezone.now().date(), pvp_battles=100,
+        )
+        Ship.objects.create(ship_id=42, name="Yamato", nation="japan",
+                            ship_type="Battleship", tier=10)
+        o1 = BattleObservation.objects.create(
+            player=p, pvp_battles=100, ships_stats_json=[], source="bulk_floor")
+        o2 = BattleObservation.objects.create(
+            player=p, pvp_battles=101, ships_stats_json=[], source="bulk_floor")
+        BattleEvent.objects.create(
+            player=p, mode=BattleEvent.MODE_RANDOM, ship_id=42,
+            ship_name="Yamato", battles_delta=1,
+            from_observation=o1, to_observation=o2)
+
+        out = io.StringIO()
+        call_command("benchmark_observation_floor", json=True, stdout=out)
+        data = json.loads(out.getvalue())
+
+        self.assertIn("config", data)
+        self.assertIn("totals", data)
+        self.assertIn("na", data["realms"])
+        na = data["realms"]["na"]
+        self.assertEqual(na["active_7d"], 1)
+        self.assertEqual(na["distinct_observed"], 1)
+        self.assertEqual(na["distinct_productive"], 1)
+        self.assertEqual(na["obs_bulk_floor"], 2)
+        # 1 productive of 1 active-7d → coverage 1.0
+        self.assertEqual(na["coverage_ratio_vs_7d"], 1.0)
+        self.assertEqual(na["fresh_within_24h"], 1)
 
 
 class BulkObservationCommandTests(TestCase):
