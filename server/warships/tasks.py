@@ -1289,6 +1289,14 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
     from warships.clan_crawl import run_clan_crawl
     from warships.models import VALID_REALMS as _realms
 
+    # R2: gut the expensive per-player enrichment (efficiency + achievements,
+    # ~85% of the crawl's WG cost) that's redundant with the dedicated
+    # enrichment crawler and makes the crawl hold its realm lock for hours,
+    # pre-empting the battle-history floor. Read the flag here (not just the
+    # arg) so BOTH the Beat schedule and the watchdog re-dispatch honour it.
+    # Discovery (Player/Clan rows) + clan cached aggregates still run.
+    core_only = core_only or os.getenv("CLAN_CRAWL_CORE_ONLY", "0") == "1"
+
     lock_key = _clan_crawl_lock_key(realm)
     heartbeat_key = _clan_crawl_heartbeat_key(realm)
 
@@ -1558,10 +1566,17 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
                 kwargs["ranked_gate"] = True
             # Random-first routing: heavy ranked path only for current-season
             # players; everyone else (incl. lapsed ranked) takes the fast random
-            # path so a niche mode stops throttling random coverage.
+            # path so a niche mode stops throttling random coverage. Optional
+            # per-realm gate (_REALMS csv) for a staged rollout; empty = all.
             if os.getenv(
-                "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED", "0") == "1":
-                kwargs["random_first"] = True
+                    "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED", "0") == "1":
+                rf_realms = {
+                    r.strip() for r in os.getenv(
+                        "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS", "",
+                    ).split(",") if r.strip()
+                }
+                if not rf_realms or realm in rf_realms:
+                    kwargs["random_first"] = True
             # Ranked sweep keeps its own modest bound as the random FLOOR_LIMIT
             # scales up (R3).
             kwargs["ranked_sweep_limit"] = int(os.getenv(

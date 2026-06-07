@@ -8,6 +8,7 @@ import { useRealm } from '../context/RealmContext';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import wrColor from '../lib/wrColor';
+import { shipClass, nationLabel } from '../lib/shipIdentity';
 import TopShipIcon from './TopShipIcon';
 import { nextWindowOpenMs, formatCountdown, formatSeasonLabel } from '../lib/shipSeason';
 import { trackEvent } from '../lib/umami';
@@ -52,14 +53,47 @@ interface ShipLeaderboard {
 }
 
 
-const LoadingPanel: React.FC<{ label: string }> = ({ label }) => (
-    <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
-        style={{ minHeight: 220 }}
-    >
-        {label}
-    </div>
+const SkeletonBar: React.FC<{ className?: string }> = ({ className = '' }) => (
+    <div className={`animate-pulse rounded bg-[var(--bg-hover)] ${className}`} />
 );
+
+// Loading skeleton that mirrors the real masthead + table shape (glyph, name,
+// chips, a few rows) so the page's structure is visible while data arrives,
+// rather than a single grey box that reads as "broken".
+const ShipSkeleton: React.FC = () => (
+    <section className="mx-auto max-w-3xl" aria-busy="true" aria-label="Loading ship standings">
+        <div className="mb-5">
+            <div className="flex items-center gap-2.5">
+                <SkeletonBar className="h-6 w-9" />
+                <SkeletonBar className="h-9 w-52" />
+            </div>
+            <div className="mt-2 flex gap-1.5">
+                <SkeletonBar className="h-5 w-12" />
+                <SkeletonBar className="h-5 w-24" />
+                <SkeletonBar className="h-5 w-16" />
+            </div>
+            <SkeletonBar className="mt-3 h-3 w-64" />
+        </div>
+        <div className="space-y-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+                <SkeletonBar key={i} className="h-9 w-full" />
+            ))}
+        </div>
+    </section>
+);
+
+// Derive a display label from the route slug (strip the leading "<id>-"), the
+// same shape the page's generateMetadata() uses — so the error state can still
+// name the ship the user was looking for.
+const slugToLabel = (slug: string): string => {
+    const decoded = decodeURIComponent(slug).replace(/^\d+-?/, '').replace(/-/g, ' ').trim();
+    return decoded ? decoded.replace(/\b\w/g, (c) => c.toUpperCase()) : '';
+};
+
+// Shared player-link styling — adds a visible keyboard focus ring on top of the
+// existing hover underline (used in both the desktop table and mobile cards).
+const PLAYER_LINK_CLASS =
+    'rounded-sm text-[var(--accent-mid)] hover:underline focus-visible:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)] focus-visible:ring-offset-1';
 
 
 interface ShipRouteViewProps {
@@ -127,20 +161,39 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
     }, [shipId, realm]);
 
     if (isLoading) {
-        return <LoadingPanel label="Loading ship standings…" />;
+        return <ShipSkeleton />;
     }
 
     if (error || !data) {
+        const label = slugToLabel(shipSlug);
         return (
-            <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-6 text-sm text-[var(--text-muted)]">
-                {error || 'Ship standings not found.'}
-            </div>
+            <section className="mx-auto max-w-3xl">
+                {label && (
+                    <h1 className="mb-3 break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
+                        {label}
+                    </h1>
+                )}
+                <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-6 text-sm text-[var(--text-muted)]">
+                    {error || 'Ship standings not found.'} The {realm.toUpperCase()} board may not have ranked this ship yet — check back as battles come in.
+                </div>
+            </section>
         );
     }
 
     const { ship, players } = data;
-    const tierLabel = ship.tier ? `Tier ${ship.tier}` : '';
-    const subtitle = [tierLabel, ship.ship_type, ship.nation].filter(Boolean).join(' · ');
+    // Ship identity — all from the payload already in hand (no new fetch). Each
+    // mark is omitted cleanly when its field is absent, so the masthead stays
+    // intentional with 1, 2, or 3 attributes present.
+    const cls = shipClass(ship.ship_type);
+    const nation = nationLabel(ship.nation);
+    const tierLabel = ship.tier ? `T${ship.tier}` : null;
+    const chips = [tierLabel, cls?.label, nation].filter(Boolean) as string[];
+    const visible = players.slice(0, MAX_VISIBLE_PLAYERS);
+
+    const medal = (rank: number) =>
+        rank <= 3 ? <TopShipIcon rank={rank} shipName={ship.name} realm={data.realm} size="podium" /> : null;
+    const onPlayerClick = (rank: number) =>
+        trackEvent('ship-player', { ship_id: ship.ship_id, ship_name: ship.name, rank, realm });
 
     // Fixed-season boundaries from the payload (authoritative); ISO date-only
     // strings parse as UTC midnight. Fall back to lib/shipSeason.ts when an older
@@ -153,28 +206,71 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
         ? Date.parse(data.next_window_open)
         : (nowMs !== null ? nextWindowOpenMs(nowMs) : null);
 
+    // Provenance — when this board was captured. Hidden when the payload omits
+    // it (no "as of —"). Date-only ISO parses as UTC midnight; render in UTC.
+    const capturedMs = data.captured_on ? Date.parse(data.captured_on) : null;
+    const capturedLabel = capturedMs !== null && !Number.isNaN(capturedMs)
+        ? new Date(capturedMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+        : null;
+
     return (
         <section className="mx-auto max-w-3xl">
-            <header className="mb-4">
-                <div className="flex flex-wrap items-baseline gap-3">
-                    <h1 className="text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
+            <header className="mb-5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                    {cls && (
+                        // Decorative: the full class name is already conveyed by the
+                        // text chip below, so the glyph stays aria-hidden to avoid a
+                        // double screen-reader announcement. `title` is a sighted hover.
+                        <span
+                            title={cls.label}
+                            aria-hidden="true"
+                            className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--accent-faint)] px-1 text-[11px] font-bold tracking-tight text-[var(--accent-mid)]"
+                        >
+                            {cls.abbr}
+                        </span>
+                    )}
+                    <h1 className="break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)] sm:text-4xl">
                         {ship.name}
                     </h1>
-                    <span className="text-sm text-[var(--text-muted)]">{subtitle}</span>
+                    {ship.is_premium && (
+                        <span
+                            title="Premium ship"
+                            className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold"
+                            style={{ color: 'var(--metal-gold)', borderColor: 'var(--metal-gold)' }}
+                        >
+                            <span aria-hidden="true">★</span>Premium
+                        </span>
+                    )}
                 </div>
-                <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                {chips.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {chips.map((c) => (
+                            <span
+                                key={c}
+                                className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--accent-faint)] px-2 py-0.5 text-xs font-medium text-[var(--text-muted)]"
+                            >
+                                {c}
+                            </span>
+                        ))}
+                    </div>
+                )}
+                <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs uppercase tracking-wide text-[var(--text-muted)]">
                     {realm.toUpperCase()} · best players · {seasonLabel ? `season ${seasonLabel}` : `last ${data.window_days} days`} ·
-                    <span
+                    <button
+                        type="button"
                         title={RANKING_TOOLTIP}
                         aria-label={RANKING_TOOLTIP}
-                        className="inline-flex cursor-help"
+                        className="inline-flex cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)]"
                     >
                         <FontAwesomeIcon icon={faCircleInfo} aria-hidden="true" />
-                    </span>
+                    </button>
                 </p>
+                {capturedLabel && (
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">Standings captured {capturedLabel} UTC</p>
+                )}
                 {nowMs !== null && nextOpenMs !== null && (
                     <p className="mt-1 text-xs text-[var(--text-muted)]">
-                        Next standings window opens in{' '}
+                        Next standings lock in{' '}
                         <span className="font-semibold text-[var(--accent-mid)] tabular-nums">
                             {formatCountdown(nextOpenMs - nowMs)}
                         </span>
@@ -188,54 +284,117 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
 
             {players.length === 0 ? (
                 <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-6 text-sm text-[var(--text-muted)]">
-                    Not enough players ranked this ship in the last {data.window_days} days yet. Check back soon.
+                    No ranked standings for this ship yet this season — check back as battles come in.
                 </div>
             ) : (
-                <table className="text-sm">
-                    <thead>
-                        <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                            <th className="py-2 pr-3">#</th>
-                            <th className="py-2 pr-8">Player</th>
-                            <th className="py-2 pr-8">Win rate</th>
-                            <th className="py-2 pr-8">Battles</th>
-                            <th className="py-2 pr-8">Avg dmg</th>
-                            <th className="py-2">Kills/battle</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {players.slice(0, MAX_VISIBLE_PLAYERS).map((p) => (
-                            <tr key={p.rank}>
-                                <td className="py-1.5 pr-3 tabular-nums text-[var(--text-muted)]">{p.rank}</td>
-                                <td className="py-1.5 pr-8">
-                                    <span className="inline-flex items-center gap-1.5">
-                                        <Link
-                                            href={buildPlayerPath(p.player_name, realm)}
-                                            className="text-[var(--accent-mid)] hover:underline"
-                                            onClick={() => trackEvent('ship-player', { ship_id: ship.ship_id, ship_name: ship.name, rank: p.rank, realm })}
-                                        >
-                                            {p.player_name}
-                                        </Link>
-                                        {p.rank <= 3 && (
-                                            <TopShipIcon rank={p.rank} shipName={ship.name} realm={data.realm} size="header" />
-                                        )}
-                                    </span>
-                                </td>
-                                <td className="py-1.5 pr-8 tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>
-                                    {p.win_rate.toFixed(1)}%
-                                </td>
-                                <td className="py-1.5 pr-8 tabular-nums text-[var(--text-muted)]">
-                                    {p.battles.toLocaleString()}
-                                </td>
-                                <td className="py-1.5 pr-8 tabular-nums text-[var(--text-muted)]">
-                                    {p.avg_damage.toLocaleString()}
-                                </td>
-                                <td className="py-1.5 tabular-nums text-[var(--text-muted)]">
-                                    {p.kills_per_battle.toFixed(2)}
-                                </td>
+                <>
+                    {/* Desktop: dense ranked table. Numeric columns are right-aligned
+                        for clean decimal scanning; win rate keeps the only color, with
+                        battles/avg-damage lifted above the quietest column. */}
+                    <table className="hidden w-full text-sm sm:table">
+                        <thead>
+                            <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                                <th className="py-2 pl-2 pr-3 font-medium">#</th>
+                                <th className="py-2 pr-8 font-medium">Player</th>
+                                <th className="py-2 pr-8 text-right font-medium">Win rate</th>
+                                <th className="py-2 pr-8 text-right font-medium">Battles</th>
+                                <th className="py-2 pr-8 text-right font-medium">Avg dmg</th>
+                                <th className="py-2 text-right font-medium">Kills/battle</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {visible.map((p) => {
+                                const isChampion = p.rank === 1;
+                                // Subtle podium/field divider: only the rank-3 row carries
+                                // a border (when there's a field below it to separate from).
+                                // Avoids per-row border noise and the fragile `/40` opacity
+                                // modifier on a CSS var.
+                                const podiumEdge = p.rank === 3 && players.length > 3;
+                                return (
+                                    <tr
+                                        key={p.rank}
+                                        className={`transition-colors hover:bg-[var(--bg-hover)] ${podiumEdge ? 'border-b border-[var(--border)]' : ''} ${isChampion ? 'bg-[var(--champion-tint)]' : ''}`}
+                                        style={isChampion ? { boxShadow: 'inset 3px 0 0 var(--champion-edge)' } : undefined}
+                                    >
+                                        <td className="py-2 pl-2 pr-3 align-top tabular-nums text-[var(--text-muted)]">{p.rank}</td>
+                                        <td className="py-2 pr-8">
+                                            <span className="inline-flex items-center gap-2">
+                                                <Link
+                                                    href={buildPlayerPath(p.player_name, realm)}
+                                                    className={`${PLAYER_LINK_CLASS} ${isChampion ? 'font-semibold' : ''}`}
+                                                    onClick={() => onPlayerClick(p.rank)}
+                                                >
+                                                    {p.player_name}
+                                                </Link>
+                                                {medal(p.rank)}
+                                            </span>
+                                            {isChampion && (
+                                                <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--metal-gold)' }}>
+                                                    Reigning champion
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td className="py-2 pr-8 text-right align-top tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>
+                                            {p.win_rate.toFixed(1)}%
+                                        </td>
+                                        <td className="py-2 pr-8 text-right align-top tabular-nums text-[var(--text-primary)]">
+                                            {p.battles.toLocaleString()}
+                                        </td>
+                                        <td className="py-2 pr-8 text-right align-top tabular-nums text-[var(--text-primary)]">
+                                            {p.avg_damage.toLocaleString()}
+                                        </td>
+                                        <td className="py-2 text-right align-top tabular-nums text-[var(--text-muted)]">
+                                            {p.kills_per_battle.toFixed(2)}
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+
+                    {/* Mobile: stacked cards. Rank + player + win rate stay primary;
+                        battles/avg-damage/kills drop to a secondary line so six numeric
+                        columns never force a horizontal scroll on a phone. */}
+                    <ul className="space-y-2 sm:hidden">
+                        {visible.map((p) => {
+                            const isChampion = p.rank === 1;
+                            return (
+                                <li
+                                    key={p.rank}
+                                    className={`rounded-md border border-[var(--border)] p-3 ${isChampion ? 'bg-[var(--champion-tint)]' : 'bg-[var(--bg-surface)]'}`}
+                                    style={isChampion ? { boxShadow: 'inset 3px 0 0 var(--champion-edge)' } : undefined}
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="inline-flex min-w-0 items-center gap-2">
+                                            <span className="w-5 shrink-0 text-right tabular-nums text-[var(--text-muted)]">{p.rank}</span>
+                                            <Link
+                                                href={buildPlayerPath(p.player_name, realm)}
+                                                className={`${PLAYER_LINK_CLASS} truncate ${isChampion ? 'font-semibold' : ''}`}
+                                                onClick={() => onPlayerClick(p.rank)}
+                                            >
+                                                {p.player_name}
+                                            </Link>
+                                            {medal(p.rank)}
+                                        </span>
+                                        <span className="shrink-0 tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>
+                                            {p.win_rate.toFixed(1)}%
+                                        </span>
+                                    </div>
+                                    {isChampion && (
+                                        <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--metal-gold)' }}>
+                                            Reigning champion
+                                        </span>
+                                    )}
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums text-[var(--text-muted)]">
+                                        <span><span className="text-[var(--text-primary)]">{p.battles.toLocaleString()}</span> battles</span>
+                                        <span><span className="text-[var(--text-primary)]">{p.avg_damage.toLocaleString()}</span> avg dmg</span>
+                                        <span>{p.kills_per_battle.toFixed(2)} kills/battle</span>
+                                    </div>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </>
             )}
         </section>
     );

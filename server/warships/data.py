@@ -4176,6 +4176,22 @@ def fetch_ranked_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     return player.ranked_json or []
 
 
+def ranked_last_season_from_json(ranked_json) -> Optional[int]:
+    """Highest ranked season_id with battles in `ranked_json`, or None.
+
+    Drives the observation floor's random-first routing (heavy ranked sweep only
+    for current-season players). Shared by `update_ranked_data` and the
+    `backfill_ranked_last_season` command so both compute it identically.
+    """
+    if not ranked_json:
+        return None
+    seasons = [
+        row["season_id"] for row in ranked_json
+        if isinstance(row, dict) and int(row.get("total_battles") or 0) > 0
+    ]
+    return max(seasons) if seasons else None
+
+
 def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
     """Fetch ranked data from WG API, aggregate, and cache on Player model."""
     player = Player.objects.get(player_id=player_id, realm=realm)
@@ -4221,13 +4237,7 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
     # Highest season_id the player actually has ranked battles in — drives the
     # observation floor's random-first routing (heavy ranked sweep only for
     # current-season players). NULL when they have no ranked battles.
-    seasons_with_battles = [
-        row['season_id'] for row in result
-        if int(row.get('total_battles') or 0) > 0
-    ]
-    player.ranked_last_season_id = (
-        max(seasons_with_battles) if seasons_with_battles else None
-    )
+    player.ranked_last_season_id = ranked_last_season_from_json(result)
     player.save()
     refresh_player_explorer_summary(player, ranked_rows=result)
     logging.info(

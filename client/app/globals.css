@@ -22,6 +22,13 @@
      hue family, so the window pills don't read as the same control as
      the mode pills. */
   --accent-secondary-mid: #6a51a3;
+  /* Prestige metals for the ship leaderboard (champion row + premium chip).
+     The only new warm color on the page; confined to rank-1 and premium marks.
+     Muted goldenrod reads "award", not "neon", on the white surface. The disc
+     metals themselves stay inside MedalIcon (amber/zinc/orange). */
+  --metal-gold: #8a6a00; /* 5.07:1 on white — AA for the small Premium/champion text */
+  --champion-tint: rgba(154, 116, 0, 0.06);
+  --champion-edge: #c9a227;
 }
 
 [data-theme="dark"] {
@@ -41,6 +48,12 @@
   /* Dark-mode purple — Purples color 5 is bright enough to read on the
      dark surface, parallel to how `--accent-mid` lightens for dark. */
   --accent-secondary-mid: #b8a4dd;
+  /* Dark-mode metals — a brighter gold so the champion edge + premium chip
+     hold contrast on the #161b22 surface (the muted light-mode gold would
+     disappear there). Tint alpha lifted for the darker base. */
+  --metal-gold: #e3b341;
+  --champion-tint: rgba(227, 179, 65, 0.10);
+  --champion-edge: #e3b341;
 }
 
 html {
