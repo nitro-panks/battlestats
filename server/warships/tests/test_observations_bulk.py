@@ -709,6 +709,10 @@ class RandomFirstRoutingTests(TestCase):
     enrichment data, not seasons/info dates (which lag).
     """
 
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()  # the current-season detector is cached 1h; isolate tests
+
     def _player(self, pid, *, last_season, ranked_history=False):
         return Player.objects.create(
             name=f"p{pid}", player_id=pid, realm="na", is_hidden=False,

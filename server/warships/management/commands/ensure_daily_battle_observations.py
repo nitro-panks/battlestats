@@ -43,6 +43,7 @@ DEFAULT_DELAY = 0.3
 # The per-player ranked sweep gets its OWN bound (not --limit) so it can't grow
 # with FLOOR_LIMIT as random coverage (R3) scales up.
 DEFAULT_RANKED_SWEEP_LIMIT = 5000
+_CURRENT_RANKED_SEASONS_CACHE_KEY = "warships:floor:current_ranked_seasons"
 
 
 def _candidates(realm: str, days: int, stale_hours: int, limit: int):
@@ -126,16 +127,27 @@ def _current_ranked_season_ids():
 
     Returns `None` when no ranked data exists yet (cold field) → the caller falls
     back to the broad ever-ranked marker so ranked capture is never dropped.
+
+    Cached 1h: the `Max` is a full scan over ~1M players (the column is
+    unindexed) and the live season is stable for weeks, so this must not run
+    per-cycle. A non-empty result is cached; `None` (cold) is not, so routing
+    becomes correct as soon as the field populates.
     """
+    from django.core.cache import cache
     from django.db.models import Max
 
+    cached = cache.get(_CURRENT_RANKED_SEASONS_CACHE_KEY)
+    if cached:
+        return cached
     mx = (
         Player.objects.filter(ranked_last_season_id__isnull=False)
         .aggregate(m=Max("ranked_last_season_id"))["m"]
     )
     if mx is None:
         return None
-    return [mx, mx - 1]
+    result = [mx, mx - 1]
+    cache.set(_CURRENT_RANKED_SEASONS_CACHE_KEY, result, 3600)
+    return result
 
 
 def _ranked_active_ids(realm: str, candidate_ids: list[int],
