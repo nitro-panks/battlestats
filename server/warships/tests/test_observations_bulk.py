@@ -141,6 +141,47 @@ class BulkObservationParityTests(TestCase):
         self.assertEqual(bulk_obs.source, BattleObservation.SOURCE_BULK_FLOOR)
         self.assertEqual(legacy_obs.source, BattleObservation.SOURCE_POLL)
 
+    def test_parity_on_real_production_path_ships_fallback(self):
+        # PRODUCTION REALITY: WG ships/stats cannot bulk — it always returns
+        # INVALID_ACCOUNT_ID, so the engine falls back to per-player ships.
+        # This proves parity holds on the ACTUAL path (account/info bulks,
+        # ships arrives via _per_player_ship_fallback), not just the synthetic
+        # multi-key-bulk path the other tests mock.
+        legacy = self._seed_player_with_baseline(player_id=1212121212)
+        bulk = self._seed_player_with_baseline(player_id=2121212121)
+
+        after_acct = _account_payload(battles=101, wins=51, losses=50, frags=82,
+                                      survived=61)
+        after_ships = _ship_payload(battles=101, wins=51, frags=82,
+                                    damage=1_048_000, xp=81_500, survived=61)
+
+        with mock.patch(SINGLE_ACCT_PATH, return_value=after_acct), \
+                mock.patch(SINGLE_SHIP_PATH, return_value=after_ships):
+            record_observation_and_diff(player_id=legacy.player_id, realm="na")
+
+        with mock.patch(
+            ACCT_PATH, return_value=({str(bulk.player_id): after_acct}, None)
+        ), mock.patch(
+            SHIP_PATH, return_value=({}, "INVALID_ACCOUNT_ID")
+        ), mock.patch(
+            SHIP_FALLBACK_PATH,
+            return_value={str(bulk.player_id): after_ships},
+        ) as fb:
+            record_observations_bulk([bulk.player_id], realm="na")
+
+        fb.assert_called_once()  # the real path went through the fallback
+        legacy_obs = (BattleObservation.objects.filter(player=legacy)
+                      .order_by("-observed_at").first())
+        bulk_obs = (BattleObservation.objects.filter(player=bulk)
+                    .order_by("-observed_at").first())
+        self.assertEqual(legacy_obs.ships_stats_json, bulk_obs.ships_stats_json)
+        le = BattleEvent.objects.get(player=legacy)
+        be = BattleEvent.objects.get(player=bulk)
+        self.assertEqual(
+            (le.battles_delta, le.damage_delta, le.xp_delta),
+            (be.battles_delta, be.damage_delta, be.xp_delta),
+        )
+
 
 class BulkObservationEngineTests(TestCase):
     """Per-chunk behaviour: happy path, D4 slice handling, D5 taxonomy."""
@@ -167,7 +208,44 @@ class BulkObservationEngineTests(TestCase):
                                     damage=1_000_000, xp=80_000, survived=60),
         )
 
+    def test_production_path_bulk_ships_falls_back_per_player(self):
+        # THE production path: account/info bulks, but ships/stats returns
+        # INVALID_ACCOUNT_ID (it cannot bulk — verified on live WG), so the
+        # whole chunk falls back to per-player ships. Assert both players are
+        # still captured with the correct per-ship battle deltas.
+        p1 = self._make_player(8001)
+        p2 = self._make_player(8002)
+        self._baseline(p1)
+        self._baseline(p2)
+        acct = {
+            "8001": _account_payload(battles=102, wins=52, frags=84, survived=62),
+            "8002": _account_payload(battles=101, wins=51, frags=82, survived=61),
+        }
+        fallback_ships = {
+            "8001": _ship_payload(battles=102, wins=52, frags=84,
+                                  damage=2_000_000, xp=160_000, survived=62),
+            "8002": _ship_payload(battles=101, wins=51, frags=82,
+                                  damage=1_048_000, xp=81_500, survived=61),
+        }
+        with mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, return_value=({}, "INVALID_ACCOUNT_ID")), \
+                mock.patch(SHIP_FALLBACK_PATH, return_value=fallback_ships) as fb:
+            tally = record_observations_bulk([8001, 8002], realm="na")
+
+        fb.assert_called_once_with([8001, 8002], "na")
+        self.assertEqual(tally["completed"], 2)
+        self.assertEqual(tally["events"], 2)
+        self.assertEqual(
+            BattleEvent.objects.filter(player=p1).get().battles_delta, 2)
+        self.assertEqual(
+            BattleEvent.objects.filter(player=p2).get().battles_delta, 1)
+
     def test_happy_two_player_chunk_emits_events(self):
+        # NOTE: this mocks bulk ships returning a multi-key dict, which CANNOT
+        # happen against live WG (ships/stats rejects >=2 ids). It is a valid
+        # unit test of the per-player slice logic given such a response; the
+        # real production flow is covered by
+        # test_production_path_bulk_ships_falls_back_per_player above.
         p1 = self._make_player(3001)
         p2 = self._make_player(3002)
         self._baseline(p1)

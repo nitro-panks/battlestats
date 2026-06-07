@@ -375,6 +375,16 @@ A second bad number in the cost map flips the conclusion to positive. **Measured
 
 Net: keep R1, add the change-detector gate, raise the limit. The ~100× framing dies but the objective is comfortably reachable.
 
+### Digging pass — change-detector validated (2026-06-06)
+
+Pressure-tested the reframed plan's assumptions against prod before committing to it:
+
+- **Bulk `account/info` carries the change signal.** Verified the bulk response includes per-player `statistics.pvp.battles` + `last_battle_time` for every id (not stripped in bulk). The gate's data dependency holds.
+- **The stored prior is sound and the gate is selective.** On 80 stale na candidates, comparing live bulk `pvp.battles` to each player's latest `BattleObservation.pvp_battles`: **38 moved (need ships), 41 unchanged (skip ships), 0 missing-prior, 1 no-acct.** So the gate skips ~51% of ships calls — independently corroborating the 50.8% productive-rate measurement via a different method. Comparison is apples-to-apples (both are WG `account/info` `pvp.battles`).
+- **Budget headroom.** ~84k active-7d × ~1 ships call ≈ ~1 req/s; with the gate, ~24–42k ships/day ≈ ~0.3–0.5 req/s — a small slice of the ~10 req/s shared budget, alongside the (already crawl-coexist-paced) floor.
+
+**Test faithfulness fix.** The engine's happy-path tests mock bulk `ships/stats` returning a multi-key dict — which **cannot occur** on live WG (it rejects ≥2 ids). Added two tests for the *real* production path (account/info bulks, ships → `INVALID_ACCOUNT_ID` → `_per_player_ship_fallback`): a multi-player capture-with-correct-deltas test and a **legacy-vs-bulk parity test on the fallback path**. So parity is now proven on the flow production actually takes, not just the synthetic one. 29 cases in `test_observations_bulk.py`; 189 across the battle-history + enrichment suite.
+
 ## Operator checklist (deploy → shadow → enable → R3)
 
 Concrete command-level companion to the Rollout section. **Prod facts:** systemd (not docker) backend; env in `/etc/battlestats-server.env` (+ `.secrets.env`), loaded as a systemd `EnvironmentFile`; venv at `/opt/battlestats-server/venv`. The floor task runs on the **default** Celery queue → `battlestats-celery` worker, and reads the bulk flags via `os.getenv` **at task runtime**, so a flag change needs that worker restarted. The deploy script **overwrites** `/etc/battlestats-server.env` from the local gitignored `server/.env.cloud` (+ `migrate_env_value` sed patches), so a manual `/etc/...env` edit is clobbered on the next deploy — see step 3 for the persistent path.
