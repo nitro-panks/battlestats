@@ -26,7 +26,8 @@ Crawlers/refresh (`ENABLE_CRAWLER_SCHEDULES`=1 in prod is the master kill switch
 - `PLAYER_REFRESH_INTERVAL_MINUTES` (180); tier staleness `PLAYER_REFRESH_HOT/ACTIVE/WARM_STALE_HOURS` (12/24/72)
 - `RANKED_REFRESH_INTERVAL_MINUTES` (120)
 - BattleObservation floor: `BATTLE_OBSERVATION_FLOOR_HOUR`/`_MINUTE` (1/15), `_HOURS` (8), `_LIMIT`/`_DELAY` (3000/0.3), `_CRAWL_DELAY`/`_CRAWL_LIMIT` (0.8/falls back to LIMIT — floor coexists with crawls instead of skipping)
-- BattleObservation floor — bulk capture (R1, `runbook-bulk-battle-observation-capture-2026-06-06.md`): `BATTLE_OBSERVATION_FLOOR_BULK_ENABLED` (0 — master switch), `_BULK_REALMS` (csv, empty — per-realm gate; realm must be listed even when ENABLED=1), `_BULK_CHUNK_DELAY` (0.5 — per-chunk pacing), `_BULK_CRAWL_CHUNK_DELAY` (1.0 — per-chunk pacing while a crawl holds the lock). All default to the legacy per-player floor (instant rollback).
+- BattleObservation floor — bulk capture (R1, `runbook-bulk-battle-observation-capture-2026-06-06.md`): `BATTLE_OBSERVATION_FLOOR_BULK_ENABLED` (0 — master switch), `_BULK_REALMS` (csv, empty — per-realm gate; realm must be listed even when ENABLED=1), `_BULK_CHUNK_DELAY` (0.5 — per-chunk pacing), `_BULK_CRAWL_CHUNK_DELAY` (1.0 — per-chunk pacing while a crawl holds the lock). All default to the legacy per-player floor (instant rollback). NB WG `ships/stats` can't bulk (single-account-only), so bulk only saves the `account/info` call (~2×); `account/info` does bulk.
+- BattleObservation floor — change-detector gate: `BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED` (0). With bulk on, uses the cheap bulk `account/info` to fetch the expensive per-player `ships/stats` only for players whose random battle count moved since their last observation (~half are skipped). Separate flag from `_BULK_ENABLED` so it rolls out / is measured independently. Command flag: `--change-gate`.
 - `CELERY_BROKER_HEARTBEAT` (0; rely on TCP keepalive)
 
 Enrichment:

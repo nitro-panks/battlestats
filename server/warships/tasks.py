@@ -1533,6 +1533,12 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
             # bulk sweep (per-chunk), delay paces the ranked subset (per-player).
             kwargs["bulk"] = True
             kwargs["chunk_delay"] = chunk_delay
+            # Change-detector gate: only fetch per-player ships/stats for
+            # players whose battle count moved (cuts the ~half wasted ships
+            # calls). Separate flag so it can roll out / be measured on its own.
+            if os.getenv(
+                "BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED", "0") == "1":
+                kwargs["change_gate"] = True
         call_command("ensure_daily_battle_observations", **kwargs)
         return {
             "status": "completed",

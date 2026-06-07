@@ -385,6 +385,17 @@ Pressure-tested the reframed plan's assumptions against prod before committing t
 
 **Test faithfulness fix.** The engine's happy-path tests mock bulk `ships/stats` returning a multi-key dict — which **cannot occur** on live WG (it rejects ≥2 ids). Added two tests for the *real* production path (account/info bulks, ships → `INVALID_ACCOUNT_ID` → `_per_player_ship_fallback`): a multi-player capture-with-correct-deltas test and a **legacy-vs-bulk parity test on the fallback path**. So parity is now proven on the flow production actually takes, not just the synthetic one. 29 cases in `test_observations_bulk.py`; 189 across the battle-history + enrichment suite.
 
+## Change-detector gate — as built (2026-06-06)
+
+Built option B. `record_observations_bulk(..., change_gate=True)` restructures each chunk to **bulk `account/info` first**, then fetch the per-player `ships/stats` ONLY for players who need it:
+
+- **Decision** (`_gate_needs_ships(acct, prior_battles)`): `True` (fetch) if the player's current `account/info` `statistics.pvp.battles` exceeds their **latest `BattleObservation.pvp_battles`**, OR they have no prior (→ baseline). `False` (skip, counted `gated_skipped`) if the count is unchanged. `None` (counted `skipped_missing`) if the account is absent/hidden/has no pvp stats. The prior is read via a `Subquery` annotation on the per-chunk `Player` fetch — one extra query per chunk.
+- **Why account/info first** (not the old concurrent both-fetches): the gate needs the account battle count before deciding whether to pay for ships. The lost concurrency is negligible — ships always falls back to per-player anyway, which dominates and isn't parallelized either way. The non-gate path (`change_gate=False`) is behaviour-preserving (ships fetched for all), confirmed by the full existing suite.
+- **Error taxonomy** unchanged per fetch: 407 → abort sweep; `INVALID_ACCOUNT_ID` → per-player fallback (ships fallback now scoped to the gated subset); other transient → skip.
+- **Flag:** `BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED` (default `0`), separate from the bulk flag so it rolls out / is measured independently. Command: `--change-gate`. Task passes it when both bulk + gate flags are on.
+- **Expected effect** (from the digging-pass measurement): ~51% of stale candidates are `gated_skipped`, cutting per-player ships calls roughly in half.
+- **Tests:** 6 gate cases (skip-unchanged, fetch-mover, no-prior→baseline, hidden-skip, mixed-chunk-only-fetches-movers, gate-off-fetches-all) + command/task flag wiring. **199 across the battle-history + enrichment suite.**
+
 ## Operator checklist (deploy → shadow → enable → R3)
 
 Concrete command-level companion to the Rollout section. **Prod facts:** systemd (not docker) backend; env in `/etc/battlestats-server.env` (+ `.secrets.env`), loaded as a systemd `EnvironmentFile`; venv at `/opt/battlestats-server/venv`. The floor task runs on the **default** Celery queue → `battlestats-celery` worker, and reads the bulk flags via `os.getenv` **at task runtime**, so a flag change needs that worker restarted. The deploy script **overwrites** `/etc/battlestats-server.env` from the local gitignored `server/.env.cloud` (+ `migrate_env_value` sed patches), so a manual `/etc/...env` edit is clobbered on the next deploy — see step 3 for the persistent path.

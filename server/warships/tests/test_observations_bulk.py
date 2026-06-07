@@ -441,6 +441,129 @@ ENGINE_BULK = "warships.incremental_battles.record_observations_bulk"
 ENGINE_RANKED = "warships.incremental_battles.record_ranked_observation_and_diff"
 
 
+class BulkObservationChangeGateTests(TestCase):
+    """Change-detector gate: fetch ships only for players who actually played."""
+
+    def setUp(self):
+        Ship.objects.create(
+            ship_id=42, name="Yamato", nation="japan", ship_type="Battleship",
+            tier=10,
+        )
+
+    def _player_with_prior(self, pid, prior_battles):
+        p = Player.objects.create(
+            name=f"p{pid}", player_id=pid, realm="na",
+            pvp_battles=prior_battles, pvp_wins=50, pvp_losses=50,
+            pvp_frags=80, pvp_survived_battles=60,
+        )
+        # Establish a prior observation at `prior_battles` (the gate compares
+        # against the latest BattleObservation.pvp_battles, not the Player row).
+        record_observation_from_payloads(
+            p,
+            player_data=_account_payload(battles=prior_battles, wins=50,
+                                         losses=50, frags=80, survived=60),
+            ship_data=_ship_payload(battles=prior_battles, wins=50, frags=80,
+                                    damage=1_000_000, xp=80_000, survived=60),
+        )
+        return p
+
+    def _player_no_prior(self, pid):
+        return Player.objects.create(
+            name=f"p{pid}", player_id=pid, realm="na",
+            pvp_battles=10, pvp_wins=5, pvp_losses=5, pvp_frags=8,
+            pvp_survived_battles=6,
+        )
+
+    def _ship_recorder(self):
+        calls = []
+
+        def side(ids, realm):
+            calls.append(sorted(ids))
+            return ({str(i): _ship_payload(battles=999, wins=1, frags=1,
+                                           damage=1, xp=1, survived=1)
+                     for i in ids}, None)
+        return calls, side
+
+    def test_gate_skips_unchanged_player(self):
+        p = self._player_with_prior(9001, 100)
+        acct = {"9001": _account_payload(battles=100)}  # no change vs prior
+        calls, side = self._ship_recorder()
+        with mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, side_effect=side):
+            tally = record_observations_bulk([9001], realm="na",
+                                             change_gate=True)
+        self.assertEqual(tally["gated_skipped"], 1)
+        self.assertEqual(tally["completed"], 0)
+        self.assertEqual(calls, [])  # ships endpoint never hit
+        self.assertEqual(BattleObservation.objects.filter(player=p).count(), 1)
+
+    def test_gate_fetches_for_played_player(self):
+        p = self._player_with_prior(9002, 100)
+        acct = {"9002": _account_payload(battles=105)}  # +5 battles
+        calls, side = self._ship_recorder()
+        with mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, side_effect=side):
+            tally = record_observations_bulk([9002], realm="na",
+                                             change_gate=True)
+        self.assertEqual(calls, [[9002]])  # ships fetched for the mover
+        self.assertEqual(tally["completed"], 1)
+        self.assertEqual(BattleObservation.objects.filter(player=p).count(), 2)
+
+    def test_gate_baselines_player_with_no_prior(self):
+        self._player_no_prior(9003)
+        acct = {"9003": _account_payload(battles=50)}
+        calls, side = self._ship_recorder()
+        with mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, side_effect=side):
+            tally = record_observations_bulk([9003], realm="na",
+                                             change_gate=True)
+        self.assertEqual(calls, [[9003]])  # no prior → fetch a baseline
+        self.assertEqual(tally["completed"], 1)
+        self.assertEqual(tally["baseline"], 1)
+
+    def test_gate_skips_hidden(self):
+        self._player_with_prior(9004, 100)
+        acct = {"9004": _account_payload(battles=100, hidden=True)}
+        calls, side = self._ship_recorder()
+        with mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, side_effect=side):
+            tally = record_observations_bulk([9004], realm="na",
+                                             change_gate=True)
+        self.assertEqual(calls, [])  # hidden → no ships call wasted
+        self.assertEqual(tally["skipped_missing"], 1)
+
+    def test_gate_mixed_chunk_only_fetches_movers(self):
+        self._player_with_prior(9010, 100)   # will move
+        self._player_with_prior(9011, 200)   # unchanged
+        self._player_no_prior(9012)          # baseline
+        acct = {
+            "9010": _account_payload(battles=103),
+            "9011": _account_payload(battles=200),
+            "9012": _account_payload(battles=10),
+        }
+        calls, side = self._ship_recorder()
+        with mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, side_effect=side):
+            tally = record_observations_bulk([9010, 9011, 9012], realm="na",
+                                             change_gate=True)
+        self.assertEqual(calls, [[9010, 9012]])  # mover + baseline, NOT 9011
+        self.assertEqual(tally["gated_skipped"], 1)
+        self.assertEqual(tally["completed"], 2)
+
+    def test_gate_off_fetches_everyone(self):
+        # Regression: with the gate off, ships are fetched even for a player
+        # whose battle count did not move (preserves the pre-gate behaviour).
+        self._player_with_prior(9020, 100)
+        acct = {"9020": _account_payload(battles=100)}
+        calls, side = self._ship_recorder()
+        with mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, side_effect=side):
+            tally = record_observations_bulk([9020], realm="na",
+                                             change_gate=False)
+        self.assertEqual(calls, [[9020]])
+        self.assertEqual(tally["gated_skipped"], 0)
+
+
 class BulkObservationCommandTests(TestCase):
     """`--bulk` candidate routing (D6): ranked split vs ranked-off."""
 
@@ -504,6 +627,30 @@ class BulkObservationCommandTests(TestCase):
                          {a.player_id, b.player_id})
         ranked_mock.assert_not_called()  # no ranked sweep when capture off
 
+    def test_change_gate_flag_passes_through(self):
+        self._make_active_player(5301, ranked=False)
+        with mock.patch(
+            f"{CMD}._ranked_capture_active_for_realm", return_value=False
+        ), mock.patch(
+            ENGINE_BULK, return_value={"completed": 0, "baseline": 0,
+                                       "events": 0, "aborted": False}
+        ) as bulk_mock:
+            call_command("ensure_daily_battle_observations", realm="na",
+                         bulk=True, change_gate=True)
+        self.assertTrue(bulk_mock.call_args.kwargs.get("change_gate"))
+
+    def test_change_gate_defaults_off(self):
+        self._make_active_player(5302, ranked=False)
+        with mock.patch(
+            f"{CMD}._ranked_capture_active_for_realm", return_value=False
+        ), mock.patch(
+            ENGINE_BULK, return_value={"completed": 0, "baseline": 0,
+                                       "events": 0, "aborted": False}
+        ) as bulk_mock:
+            call_command("ensure_daily_battle_observations", realm="na",
+                         bulk=True)
+        self.assertFalse(bulk_mock.call_args.kwargs.get("change_gate"))
+
 
 class BulkObservationTaskTests(TestCase):
     """Task-level flag plumbing for the bulk floor."""
@@ -541,6 +688,28 @@ class BulkObservationTaskTests(TestCase):
         self.assertFalse(result["bulk"])
         cc.assert_called_once()
         self.assertNotIn("bulk", cc.call_args.kwargs)  # legacy call shape
+
+    def test_task_passes_change_gate_when_flag_on(self):
+        with mock.patch.dict(os.environ, {
+            "BATTLE_OBSERVATION_FLOOR_BULK_ENABLED": "1",
+            "BATTLE_OBSERVATION_FLOOR_BULK_REALMS": "na",
+            "BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED": "1",
+        }), mock.patch("django.core.management.call_command") as cc:
+            from warships.tasks import ensure_daily_battle_observations_task
+            ensure_daily_battle_observations_task.apply(args=["na"]).get()
+        self.assertTrue(cc.call_args.kwargs.get("change_gate"))
+
+    def test_task_omits_change_gate_when_flag_off(self):
+        with mock.patch.dict(os.environ, {
+            "BATTLE_OBSERVATION_FLOOR_BULK_ENABLED": "1",
+            "BATTLE_OBSERVATION_FLOOR_BULK_REALMS": "na",
+        }, clear=False), mock.patch("django.core.management.call_command") as cc:
+            os.environ.pop("BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED", None)
+            from warships.tasks import ensure_daily_battle_observations_task
+            ensure_daily_battle_observations_task.apply(args=["na"]).get()
+        # bulk on, gate off → bulk passed, change_gate absent
+        self.assertTrue(cc.call_args.kwargs.get("bulk"))
+        self.assertNotIn("change_gate", cc.call_args.kwargs)
 
 
 # The command imports the fetchers function-locally, so patch them at source.

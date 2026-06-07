@@ -169,6 +169,16 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
+            "--change-gate", action="store_true", dest="change_gate",
+            help=(
+                "With --bulk: use the cheap bulk account/info as a change "
+                "detector — only fetch the expensive per-player ships/stats for "
+                "players whose random battle count moved since their last "
+                "observation (or who have no prior). Skips the ~half who "
+                "didn't play."
+            ),
+        )
+        parser.add_argument(
             "--dry-run", action="store_true",
             help="Print the candidate count without making WG API calls.",
         )
@@ -188,6 +198,7 @@ class Command(BaseCommand):
         bulk = options["bulk"]
         ranked_limit = options["ranked_limit"]
         chunk_delay = options["chunk_delay"]
+        change_gate = options["change_gate"]
 
         if days < 1:
             raise CommandError("--days must be >= 1")
@@ -204,7 +215,7 @@ class Command(BaseCommand):
             self._handle_bulk(
                 realm=realm, days=days, stale_hours=stale_hours, limit=limit,
                 delay=delay, ranked_limit=ranked_limit, chunk_delay=chunk_delay,
-                ranked=ranked, dry_run=dry_run,
+                change_gate=change_gate, ranked=ranked, dry_run=dry_run,
                 ranked_worker=record_ranked_observation_and_diff,
             )
             return
@@ -291,7 +302,8 @@ class Command(BaseCommand):
         ))
 
     def _handle_bulk(self, *, realm, days, stale_hours, limit, delay,
-                     ranked_limit, chunk_delay, ranked, dry_run, ranked_worker):
+                     ranked_limit, chunk_delay, change_gate, ranked, dry_run,
+                     ranked_worker):
         """Bulk capture path (R1, D6).
 
         Random observations go through the bulk engine; ranked-known players
@@ -324,7 +336,8 @@ class Command(BaseCommand):
             f"(~{(len(bulk_ids) + 99) // 100 * 2:,} WG calls @ {chunk_delay}s/chunk), "
             f"ranked_known={len(ranked_ids)} per-player "
             f"(~{len(ranked_ids) * 3:,} WG calls @ {delay}s) "
-            f"(ranked_capture={'on' if ranked else 'off'})"
+            f"(ranked_capture={'on' if ranked else 'off'}, "
+            f"change_gate={'on' if change_gate else 'off'})"
         )
 
         if dry_run:
@@ -338,6 +351,7 @@ class Command(BaseCommand):
         if bulk_ids:
             tally = record_observations_bulk(
                 bulk_ids, realm, chunk_delay=chunk_delay,
+                change_gate=change_gate,
             )
             self.stdout.write(
                 f"  bulk random: completed={tally.get('completed', 0)} "
@@ -346,6 +360,7 @@ class Command(BaseCommand):
                 f"wg_failed={tally.get('wg_failed', 0)} "
                 f"not_found={tally.get('not_found', 0)} "
                 f"skipped_missing={tally.get('skipped_missing', 0)} "
+                f"gated_skipped={tally.get('gated_skipped', 0)} "
                 f"other={tally.get('other', 0)} "
                 f"aborted={tally.get('aborted', False)}"
             )

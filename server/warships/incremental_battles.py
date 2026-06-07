@@ -23,7 +23,6 @@ from __future__ import annotations
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -938,29 +937,61 @@ def record_observation_from_payloads(
 _BULK_OBSERVATION_CHUNK = 100
 
 
+def _gate_needs_ships(acct: Optional[Dict[str, Any]],
+                      prior_battles: Optional[int]):
+    """Change-detector decision: does this player need a `ships/stats` fetch?
+
+    The cheap bulk `account/info` slice (`acct`) carries the player's current
+    random battle count. Compared to `prior_battles` (their last observation's
+    `pvp_battles`), it tells us whether they played randoms since last capture —
+    so we can skip the expensive per-player `ships/stats` for the ~half who
+    didn't. Returns:
+
+    * ``True``  — fetch ships (player played, OR has no prior so needs a baseline)
+    * ``False`` — skip ships (battle count unchanged → nothing new to capture)
+    * ``None``  — can't/needn't fetch (account absent, hidden, or no pvp stats)
+    """
+    if not acct or acct.get("hidden_profile"):
+        return None
+    cur = ((acct.get("statistics") or {}).get("pvp") or {}).get("battles")
+    if cur is None:
+        return None
+    if prior_battles is None:
+        return True  # no prior observation → must establish a baseline
+    return cur > prior_battles
+
+
 def record_observations_bulk(
     player_ids: Iterable[int],
     realm: str,
     *,
     chunk_delay: float = 0.0,
     source: Optional[str] = None,
+    change_gate: bool = False,
     progress_callback=None,
 ) -> Dict[str, Any]:
     """Bulk-capture random battle observations for many players (R1).
 
-    Random-only: feeds the bulk `account/info` + `ships/stats` slices into the
-    zero-WG persistence core `record_observation_from_payloads`, so the per-player
-    persistence + diff is byte-identical to the legacy per-player path
-    (`record_observation_and_diff`) — parity-by-construction. Spec:
-    runbook-bulk-battle-observation-capture-2026-06-06.md (D2-D8).
+    Random-only: feeds the bulk `account/info` + (per-player) `ships/stats`
+    slices into the zero-WG persistence core `record_observation_from_payloads`,
+    so the per-player persistence + diff is byte-identical to the legacy
+    per-player path (`record_observation_and_diff`) — parity-by-construction.
+    Spec: runbook-bulk-battle-observation-capture-2026-06-06.md (D2-D8).
 
-    Per chunk of 100: two concurrent bulk WG fetches, then the D5 error
-    taxonomy, then per player a D4 slice → `record_observation_from_payloads`.
-    `chunk_delay` paces *per chunk* (NOT the legacy per-player `--delay`).
+    Per chunk of 100: bulk `account/info` (the only WG endpoint that truly
+    bulks), the D5 error taxonomy, then per player a D4 slice →
+    `record_observation_from_payloads`. NB `ships/stats` cannot bulk (WG rejects
+    ≥2 ids), so it always falls back to per-player; that is the dominant cost.
+
+    `change_gate=True` enables the change-detector: it issues the expensive
+    per-player `ships/stats` ONLY for players whose `account/info` random battle
+    count moved since their last observation (or who have no prior → baseline),
+    skipping the ~half who didn't play. `chunk_delay` paces *per chunk* (NOT the
+    legacy per-player `--delay`).
 
     Returns a tally dict:
     `{status, completed, baseline, events, wg_failed, not_found,
-      skipped_missing, other, aborted}`.
+      skipped_missing, gated_skipped, other, aborted}`.
     """
     # Function-local imports: match this module's convention and keep the
     # api<-core boundary clean (the bulk fetchers live in the shared API
@@ -988,6 +1019,7 @@ def record_observations_bulk(
         "wg_failed": 0,
         "not_found": 0,
         "skipped_missing": 0,
+        "gated_skipped": 0,
         "other": 0,
         "aborted": False,
     }
@@ -997,54 +1029,99 @@ def record_observations_bulk(
 
         # D7: resolve Player rows once per chunk, scoped to realm — player_id is
         # not globally unique, so the legacy single path uses get(.., realm=..).
-        players = {
-            p.player_id: p
-            for p in Player.objects.filter(player_id__in=chunk_ids, realm=realm)
-        }
+        players_qs = Player.objects.filter(player_id__in=chunk_ids, realm=realm)
+        if change_gate:
+            # Annotate each player's latest observed pvp_battles so the gate can
+            # decide who played randoms since their last capture, in one query.
+            from django.db.models import OuterRef, Subquery
 
-        # Two concurrent bulk WG fetches (mirror enrich_player_data's pattern).
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            acct_future = ex.submit(_bulk_fetch_account_info, chunk_ids, realm)
-            ship_future = ex.submit(_bulk_fetch_ship_stats, chunk_ids, realm)
-            acct_data, acct_err = acct_future.result()
-            ship_data, ship_err = ship_future.result()
-
-        # ── D5 error taxonomy (applied to BOTH fetches) ──────────────────
-        # 407 on either fetch aborts the whole sweep: the floor coexists with
-        # the clan crawl under the shared ~10 req/s budget and must not keep
-        # hammering (this DIVERGES from enrichment, which logs-and-continues).
-        if "REQUEST_LIMIT_EXCEEDED" in (acct_err, ship_err):
-            logger.warning(
-                "bulk observation floor hit 407 REQUEST_LIMIT_EXCEEDED "
-                "[%s] — aborting sweep, partial results persisted", realm.upper(),
+            from warships.models import BattleObservation as _BO
+            _latest = (
+                _BO.objects.filter(player=OuterRef("pk"))
+                .order_by("-observed_at").values("pvp_battles")[:1]
             )
+            players_qs = players_qs.annotate(_last_obs_battles=Subquery(_latest))
+        players = {p.player_id: p for p in players_qs}
+
+        # ── Bulk account/info FIRST — the only WG endpoint that truly bulks
+        # (ships/stats can't). Its error taxonomy mirrors the ships taxonomy
+        # below: 407 aborts the sweep (shared ~10 req/s budget; must not keep
+        # hammering); INVALID_ACCOUNT_ID isolates the bad id via per-player
+        # fallback; any other transient error skips the chunk.
+        acct_data, acct_err = _bulk_fetch_account_info(chunk_ids, realm)
+        if acct_err == "REQUEST_LIMIT_EXCEEDED":
+            logger.warning(
+                "bulk observation floor hit 407 on account/info [%s] — aborting "
+                "sweep, partial results persisted", realm.upper())
             tally["aborted"] = True
             tally["status"] = "aborted"
             break
-
-        # INVALID_ACCOUNT_ID → per-player fallback to isolate the bad id.
-        # Any other non-None error (transient / TRANSPORT_ERROR) → skip chunk.
-        skip_chunk = False
-        if ship_err == "INVALID_ACCOUNT_ID":
-            ship_data = _per_player_ship_fallback(chunk_ids, realm)
-        elif ship_err:
-            skip_chunk = True
         if acct_err == "INVALID_ACCOUNT_ID":
             acct_data = _per_player_account_fallback(chunk_ids, realm)
         elif acct_err:
-            skip_chunk = True
-        if skip_chunk:
             logger.warning(
-                "bulk observation floor skipping chunk [%s] on transient error "
-                "(acct_err=%s ship_err=%s)", realm.upper(), acct_err, ship_err,
-            )
+                "bulk observation floor skipping chunk [%s] on transient "
+                "account/info error (%s)", realm.upper(), acct_err)
             tally["wg_failed"] += len(chunk_ids)
             if chunk_delay:
                 time.sleep(chunk_delay)
             continue
 
-        # ── Per-player slice + persist (D4) ──────────────────────────────
-        for pid in chunk_ids:
+        # ── Change-detector gate (option B): fetch the expensive per-player
+        # ships/stats ONLY for players whose random battle count moved since
+        # their last observation (or who have no prior → baseline). The ~half
+        # who didn't play are skipped here, never paying a ships call.
+        if change_gate:
+            ships_ids = []
+            for pid in chunk_ids:
+                player = players.get(pid)
+                if player is None:
+                    tally["not_found"] += 1
+                    continue
+                decision = _gate_needs_ships(
+                    acct_data.get(str(pid)),
+                    getattr(player, "_last_obs_battles", None),
+                )
+                if decision is True:
+                    ships_ids.append(pid)
+                elif decision is False:
+                    tally["gated_skipped"] += 1
+                else:  # None — account absent / hidden / no pvp stats
+                    tally["skipped_missing"] += 1
+        else:
+            ships_ids = chunk_ids
+
+        if not ships_ids:
+            if progress_callback is not None:
+                progress_callback(dict(tally))
+            if chunk_delay:
+                time.sleep(chunk_delay)
+            continue
+
+        # ── Bulk ships/stats for the (gated) subset. WG rejects ≥2 ids with
+        # INVALID_ACCOUNT_ID, so this falls back to per-player; the gate keeps
+        # that fallback small. 407 aborts; other transient skips the subset.
+        ship_data, ship_err = _bulk_fetch_ship_stats(ships_ids, realm)
+        if ship_err == "REQUEST_LIMIT_EXCEEDED":
+            logger.warning(
+                "bulk observation floor hit 407 on ships/stats [%s] — aborting "
+                "sweep, partial results persisted", realm.upper())
+            tally["aborted"] = True
+            tally["status"] = "aborted"
+            break
+        if ship_err == "INVALID_ACCOUNT_ID":
+            ship_data = _per_player_ship_fallback(ships_ids, realm)
+        elif ship_err:
+            logger.warning(
+                "bulk observation floor skipping ships for chunk [%s] on "
+                "transient error (%s)", realm.upper(), ship_err)
+            tally["wg_failed"] += len(ships_ids)
+            if chunk_delay:
+                time.sleep(chunk_delay)
+            continue
+
+        # ── Per-player slice + persist (D4) over the players we fetched ships for.
+        for pid in ships_ids:
             player = players.get(pid)
             if player is None:
                 tally["not_found"] += 1
