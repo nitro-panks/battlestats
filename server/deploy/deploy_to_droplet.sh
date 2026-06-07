@@ -213,6 +213,22 @@ else
   echo 'BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED=1' >> /etc/battlestats-server.env
 fi
 
+# Random-first routing (enabled na 2026-06-07: dry-run + watch validated
+# routing=current-season(1029,1028), bulk_random 1947 vs ranked 1053 — moves
+# ~half the candidates off the slow ranked path). Per-realm during rollout via
+# _REALMS; expand as each realm is validated. Needs ranked_last_season_id
+# populated (backfill_ranked_last_season) — done for active-30d ranked-known.
+if grep -q '^BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED=' /etc/battlestats-server.env; then
+  sed -i 's|^BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED=.*|BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED=1|' /etc/battlestats-server.env
+else
+  echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED=1' >> /etc/battlestats-server.env
+fi
+if grep -q '^BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=' /etc/battlestats-server.env; then
+  sed -i 's|^BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=.*|BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na|' /etc/battlestats-server.env
+else
+  echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na' >> /etc/battlestats-server.env
+fi
+
 # Enable the weekly per-realm T10 top-ship-player badge snapshot
 # (snapshot_ship_top_players_task self-gates on this flag; the schedule is
 # always registered but no-ops without it). Pinned here because the cp of
