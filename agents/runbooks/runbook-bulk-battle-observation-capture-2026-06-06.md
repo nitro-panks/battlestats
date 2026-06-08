@@ -472,6 +472,12 @@ Repeat per realm. **GATE: `mismatch=0`.** Any `mismatch` ⇒ STOP, inspect with 
 
 **Reproduce identically** (read-only, ~seconds): `python manage.py benchmark_observation_floor [--json]` on the droplet (`/opt/battlestats-server/current/server`, venv python). Diff the `--json` totals day-over-day. Headline metric = `coverage_ratio_vs_7d` (distinct players productively captured in 24h ÷ active-7d) — R3 should drive it + `fresh_frac` toward 1.0 and shrink `never_observed`.
 
+**Automated daily snapshot (the durable series to diff).** A root cron on the droplet captures a validated `--json` snapshot every day at **04:30 UTC** (droplet runs on UTC):
+- **Snapshots:** `/opt/battlestats-server/shared/benchmarks/observation-floor/YYYY-MM-DD_HHMMZ.json` (under `shared/`, survives deploys; newest 180 retained)
+- **Script:** `/opt/battlestats-server/shared/bin/snapshot_observation_floor.sh` (stable copy, deploy-proof) — version-controlled source is `server/scripts/snapshot_observation_floor.sh`; if you edit it, re-`scp` to refresh the droplet copy
+- **Cron log:** `/opt/battlestats-server/shared/logs/observation-floor-snapshot.log`
+- **Pull the series locally:** `rsync -a root@battlestats.online:/opt/battlestats-server/shared/benchmarks/observation-floor/ logs/benchmarks/observation-floor/` (local `logs/` is gitignored)
+
 **Protocol:** capture before each change (baseline → before R3 → after R3), same trailing-24h window. Note the trailing-24h here is mostly *legacy*-cadence data (gated cadence went live ~01:15 the same day), so this is effectively the pre-optimization baseline; the **before-R3** capture (a full day of gated cadence) is the one to compare R3 against.
 
 ### Baseline — 2026-06-07 ~04:37 UTC (gated cadence live ~3.5h; FLOOR_LIMIT=3000 default)

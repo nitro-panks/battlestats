@@ -16,6 +16,11 @@ The headline metric is `coverage_ratio` = distinct players productively captured
 (got a BattleEvent) in the window ÷ active-7d players. R3 (raising the floor
 limit toward the full active set) should drive this toward 1.0 and cut the
 `stale_over_24h` fraction.
+
+A root cron on the droplet runs this command daily (04:30 UTC) via
+`server/scripts/snapshot_observation_floor.sh` and saves the JSON to
+`/opt/battlestats-server/shared/benchmarks/observation-floor/YYYY-MM-DD_HHMMZ.json`.
+See "Benchmarks" in agents/runbooks/runbook-bulk-battle-observation-capture-2026-06-06.md.
 """
 from __future__ import annotations
 
