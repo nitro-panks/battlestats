@@ -712,7 +712,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         )
             .then(({ data }) => {
                 if (cancelled) return;
-                setMonthByDay(data.by_day);
+                setMonthByDay(data.by_day ?? []);
                 setMonthLifetime({
                     battles: data.totals?.lifetime_battles ?? null,
                     winRate: data.totals?.lifetime_win_rate ?? null,
