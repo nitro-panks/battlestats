@@ -224,9 +224,9 @@ else
   echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED=1' >> /etc/battlestats-server.env
 fi
 if grep -q '^BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=' /etc/battlestats-server.env; then
-  sed -i 's|^BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=.*|BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na|' /etc/battlestats-server.env
+  sed -i 's|^BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=.*|BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na,eu,asia|' /etc/battlestats-server.env
 else
-  echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na' >> /etc/battlestats-server.env
+  echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na,eu,asia' >> /etc/battlestats-server.env
 fi
 
 # R2: clan crawl core-only (enabled 2026-06-07). Skips the redundant per-player
