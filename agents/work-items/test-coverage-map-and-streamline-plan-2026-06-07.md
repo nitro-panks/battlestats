@@ -39,7 +39,12 @@ Steps 1–4 are implemented and validated locally. Measurement overturned two pl
 
 **Corrected headline:** the full-suite expansion was **not** "free/clean" as first projected — it surfaced 1 real prod bug + 1 real FE robustness bug + a real test-isolation defect, all now fixed. The slim suite had been *hiding* defects, not merely under-covering. §1.5/§1.6 above reflect the pre-fix diagnosis; this section supersedes them where they differ.
 
-**Not yet done:** promote gate to required; Steps 5–7 (prune `test-retired/` duplicates, un-retire d3 chart tests, add ShipRouteView/serializer/WG-api tests). Validate broker fix + timings on the next real CI run.
+**Update (2026-06-08) — all steps complete, broker fix validated on real CI.** PR #37 (`work`→`main`) ran green end-to-end: **total wall-clock 1m19s** (was ~21min), server "Run Tests" step **20s** (was 20m16s) — the 20min→1min claim is now measured, not projected. Also done:
+- **Steps 5–6 (frontend):** un-retired 15 suites / 39 tests (incl. the d3 chart components; the transform issue was already fixed — they only needed to move back to `__tests__/`); deleted Footer/HeaderSearch retired duplicates + the dead LandingDropdowns test. FE suite now 32 suites / 199 tests. Remaining `test-retired/e2e/` are Playwright specs (need a live browser+site) — left out of the jest gate.
+- **Step 7 (targeted new coverage):** `ShipRouteView` (the `/ship/<id>` page, was zero-coverage), `api/players.py` WG fallback boundary (REQUEST_LIMIT vs INVALID_ACCOUNT vs success; per-player isolation), and `PlayerSummarySerializer` output-type/nullable shape. BE 600→609.
+- **Gate → required:** `main` branch protection now requires `Client Checks` + `Server Checks` (enabled only after the first green run, per plan). `strict: false` (no forced rebase), `enforce_admins: false` (admin override retained).
+
+**Still open (lower priority):** the `test-retired/e2e/` Playwright specs (separate live-site infra); the deliberately-uncovered surfaces named in Step 7 stay uncovered by design.
 
 ---
 
