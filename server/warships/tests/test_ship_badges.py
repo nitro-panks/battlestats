@@ -62,6 +62,9 @@ BADGE_ENV = {
     "SHIP_BADGE_RETENTION_DAYS": "21",
     "SHIP_BADGE_PRIOR_BATTLES": "30",
     "SHIP_BADGE_PRIOR_WR": "0.5",
+    # Durable award ledger defaults OFF in prod (held during the coverage ramp);
+    # the snapshot/award tests assert ledger writes, so enable it for them.
+    "SHIP_AWARD_LEDGER_ENABLED": "1",
 }
 
 SHIMA = 10      # T10

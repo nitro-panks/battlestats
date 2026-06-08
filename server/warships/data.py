@@ -6142,10 +6142,22 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
         ShipTopPlayerSnapshot.objects.filter(
             realm=realm, captured_on__lt=prune_before).delete()
 
-        # Durable award ledger: idempotent for today, never pruned.
-        ShipAward.objects.filter(realm=realm, captured_on=captured_on).delete()
-        if award_rows:
-            ShipAward.objects.bulk_create(award_rows)
+        # Durable award ledger: idempotent for today, never pruned. Gated
+        # separately from the ephemeral snapshot (SHIP_AWARD_LEDGER_ENABLED,
+        # default off) so the ephemeral leaderboards + profile badges can run
+        # during a battle-history coverage ramp WITHOUT permanently recording
+        # under-sampled "champions" into Ship Honors. The snapshot is overwritten
+        # and pruned each season (self-correcting); the award ledger is forever,
+        # so it stays paused until capture coverage is real. See the HELD/PURGED
+        # addendum in runbook-ship-top-player-badges-2026-06-05.md (2026-06-08).
+        if os.getenv("SHIP_AWARD_LEDGER_ENABLED", "0") == "1":
+            ShipAward.objects.filter(realm=realm, captured_on=captured_on).delete()
+            if award_rows:
+                ShipAward.objects.bulk_create(award_rows)
+        else:
+            logger.info(
+                "ship-award ledger write skipped (SHIP_AWARD_LEDGER_ENABLED!=1) "
+                "realm=%s captured_on=%s awards=%s", realm, captured_on, len(award_rows))
 
     for wg_id in invalidate_wg_ids:
         invalidate_player_detail_cache(wg_id, realm=realm)

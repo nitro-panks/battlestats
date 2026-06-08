@@ -287,6 +287,18 @@ else
   echo 'SHIP_BADGE_SNAPSHOT_ENABLED=1' >> /etc/battlestats-server.env
 fi
 
+# Durable Ship Honors ledger held OFF (2026-06-08) while battle-history capture
+# coverage of active-7d random players is too low (NA42/EU37/ASIA30%) — the
+# ephemeral leaderboards/badges above still run and self-correct each season,
+# but the append-only ShipAward ledger would permanently bake under-sampled
+# "champions" into Ship Honors. Flip to 1 to resume accruing honors once
+# coverage is real. See the HELD/PURGED addendum in the ship-badges runbook.
+if grep -q '^SHIP_AWARD_LEDGER_ENABLED=' /etc/battlestats-server.env; then
+  sed -i 's|^SHIP_AWARD_LEDGER_ENABLED=.*|SHIP_AWARD_LEDGER_ENABLED=0|' /etc/battlestats-server.env
+else
+  echo 'SHIP_AWARD_LEDGER_ENABLED=0' >> /etc/battlestats-server.env
+fi
+
 # Ship standings span Tiers 8–10 (per-tier density study, 2026-06-05). Pinned
 # here for the same .env.cloud-overwrite reason as the flag above.
 if grep -q '^SHIP_BADGE_TIERS=' /etc/battlestats-server.env; then

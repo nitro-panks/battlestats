@@ -23,6 +23,7 @@ from warships.models import (
     Player,
     Ship,
     ShipAward,
+    ShipTopPlayerSnapshot,
 )
 
 BADGE_ENV = {
@@ -34,6 +35,10 @@ BADGE_ENV = {
     "SHIP_BADGE_RETENTION_DAYS": "21",
     "SHIP_BADGE_PRIOR_BATTLES": "30",
     "SHIP_BADGE_PRIOR_WR": "0.5",
+    # Durable award ledger defaults OFF in prod (held during the coverage ramp);
+    # this suite asserts ledger writes, so enable it. The gate itself (snapshot
+    # writes but ledger skipped when off) is covered by test_ledger_gated_off.
+    "SHIP_AWARD_LEDGER_ENABLED": "1",
 }
 
 SHIMA = 10  # T10
@@ -92,6 +97,26 @@ class ShipAwardLedgerTests(TestCase):
         self.assertEqual([r.rank for r in rows], [1, 2, 3])
         self.assertTrue(all(r.captured_on == today for r in rows))
         self.assertEqual(rows[0].player_id, a.id)
+
+    def test_ledger_gated_off(self):
+        # Coverage-ramp hold (2026-06-08): with SHIP_AWARD_LEDGER_ENABLED off the
+        # ephemeral leaderboard snapshot still writes, but the durable award
+        # ledger does NOT — so boards/badges show while Ship Honors stays empty.
+        for i in range(3):
+            self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
+
+        today = timezone.now().date()
+        env = {**BADGE_ENV, "SHIP_AWARD_LEDGER_ENABLED": "0"}
+        with mock.patch.dict("os.environ", env, clear=False):
+            compute_ship_top_player_snapshot(
+                realm="na",
+                window_start=today - timedelta(days=14),
+                window_end=today + timedelta(days=1),
+                captured_on=today,
+            )
+
+        self.assertTrue(ShipTopPlayerSnapshot.objects.filter(ship_id=SHIMA).exists())
+        self.assertEqual(ShipAward.objects.count(), 0)
 
     def test_idempotent_same_day_rerun(self):
         for i in range(3):
