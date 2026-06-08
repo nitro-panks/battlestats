@@ -615,11 +615,17 @@ def register_periodic_schedules(sender, **kwargs):
     obs_floor_base_hour = int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOUR", "1"))
     obs_floor_base_minute = (
         obs_floor_base_hour * 60 + int(obs_floor_minute_str))
+    # Cycle length (minutes) is configurable so the floor frequency can be
+    # raised to use idle worker capacity once the clan crawl stops monopolising
+    # the box (R2 core-only crawl). Default 360 (6h). Set to 180 (3h, 2x) / 120
+    # (2h, 3x) etc. The realms stay striped `cycle_minutes // 3` apart so they
+    # don't pile onto the 1-vCPU DB at once. Use a divisor-friendly value
+    # (60/120/180/360/720) per _realm_crontab_for_cycle's contract.
+    obs_floor_cycle_minutes = int(
+        os.getenv("BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES", "360"))
     for realm in sorted(VALID_REALMS):
-        # 6h cycle = 360 minutes. Striped offsets: NA at base, EU at
-        # base+2h, ASIA at base+4h.
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, 360, base_minute=obs_floor_base_minute)
+            realm, obs_floor_cycle_minutes, base_minute=obs_floor_base_minute)
         obs_floor_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,

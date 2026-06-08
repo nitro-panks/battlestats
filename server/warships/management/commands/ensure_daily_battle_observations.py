@@ -73,11 +73,15 @@ def _candidates(realm: str, days: int, stale_hours: int, limit: int):
         )
     )
     # Two-step filter: Q-or covers null + stale.
-    from django.db.models import Q
+    from django.db.models import F, Q
     qs = qs.filter(
         Q(latest_obs_at__isnull=True) | Q(latest_obs_at__lt=stale_before)
     ).order_by(
-        "latest_obs_at",  # NULLS FIRST in Postgres for ASC by default
+        # Never-observed players (NULL latest_obs_at) must sweep FIRST. Postgres
+        # sorts NULLs LAST on plain ASC (sqlite sorts them first), so be explicit
+        # — relying on the default silently deprioritized never-observed players
+        # in production while passing on the sqlite-backed local gate.
+        F("latest_obs_at").asc(nulls_first=True),
         "-last_battle_date",
         "name",
     ).values_list("player_id", "name", "latest_obs_at")

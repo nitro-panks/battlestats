@@ -239,6 +239,24 @@ else
   echo 'CLAN_CRAWL_CORE_ONLY=1' >> /etc/battlestats-server.env
 fi
 
+# R3 (2026-06-08). With R2 freeing the crawl's grip on the box, the floor worker
+# sat idle ~5.5/6h. Two levers: bigger normal-cycle cap (LIMIT 3000->7500) AND
+# higher frequency (each realm every 3h not 6h, striped 60min apart) to use the
+# idle capacity + drain the now-honest active backlog. Coexist LIMIT pinned at
+# 3000 to stay gentle on the 1-vCPU DB while a crawl holds the realm lock.
+# CYCLE_MINUTES takes effect via post_migrate schedule re-registration.
+for kv in \
+  'BATTLE_OBSERVATION_FLOOR_LIMIT=7500' \
+  'BATTLE_OBSERVATION_FLOOR_CRAWL_LIMIT=3000' \
+  'BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES=180'; do
+  k="${kv%%=*}"
+  if grep -q "^${k}=" /etc/battlestats-server.env; then
+    sed -i "s|^${k}=.*|${kv}|" /etc/battlestats-server.env
+  else
+    echo "${kv}" >> /etc/battlestats-server.env
+  fi
+done
+
 # Enable the weekly per-realm T10 top-ship-player badge snapshot
 # (snapshot_ship_top_players_task self-gates on this flag; the schedule is
 # always registered but no-ops without it). Pinned here because the cp of

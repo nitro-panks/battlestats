@@ -29,7 +29,7 @@ docker compose up -d                              # Start all services
 
 ```bash
 cd server
-python -m pytest warships/tests/test_views.py warships/tests/test_landing.py warships/tests/test_realm_isolation.py warships/tests/test_data_product_contracts.py -x --tb=short  # Release gate
+python -m pytest warships/tests/ --tb=short  # Full release gate (~600 tests, ~15s on Postgres / ~7s sqlite)
 python -m pytest warships/tests/test_views.py::TestPlayerViewSet::test_player_detail -x  # Single test
 python manage.py makemigrations && python manage.py migrate
 ```
@@ -117,7 +117,7 @@ Resilience: `CELERY_TASK_ACKS_LATE = True` (at-least-once delivery); RabbitMQ `c
 
 ### Per-realm schedule striping
 
-Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` in `signals.py` so at most one realm is mid-cycle at a time. `_realm_crontab_for_cycle()` computes per-realm crontabs. Daily/weekly-cron families use `REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}`. The rolling 6-hourly BattleObservation floor guarantees no active-7d player goes >`BATTLE_OBSERVATION_FLOOR_HOURS` without a fresh observation.
+Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` in `signals.py` so at most one realm is mid-cycle at a time. `_realm_crontab_for_cycle()` computes per-realm crontabs. Daily/weekly-cron families use `REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}`. The rolling BattleObservation floor (cadence `BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES`, per-realm striped) guarantees no active-7d player goes >`BATTLE_OBSERVATION_FLOOR_HOURS` without a fresh observation.
 
 ### Infra notes
 
