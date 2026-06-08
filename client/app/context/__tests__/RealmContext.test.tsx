@@ -105,10 +105,17 @@ describe('RealmProvider URL realm sync', () => {
         window.history.replaceState({}, '', 'http://localhost/player/SomeAsiaPlayer');
         mockPathname = '/player/SomeAsiaPlayer';
 
+        // This test deliberately records the *first-render* realm to prove it
+        // resolves synchronously (a renderHook-style probe would only see the
+        // settled value and miss a "rendered 'na', corrected later" regression).
+        // Capturing render output into an outer variable is exactly what the
+        // react-hooks render-purity rules forbid for production components, so
+        // scope-disable them for this test-only render spy.
         let firstRealm: string | undefined;
         const CaptureFirstRender: React.FC = () => {
             const { realm } = useRealm();
             if (firstRealm === undefined) {
+                // eslint-disable-next-line react-hooks/globals
                 firstRealm = realm;
             }
             return <div>{realm}</div>;

@@ -1946,6 +1946,18 @@ class ClanMembersEndpointTests(TestCase):
 
 
 class ApiContractTests(TestCase):
+    def setUp(self):
+        # Cross-test leakage cleanup (see ApiThrottleTests.setUp for the full
+        # rationale): warm_landing_page_content's ThreadPoolExecutor commits the
+        # durable Landing*Snapshot rows on separate DB connections that survive a
+        # TestCase rollback, so an earlier landing test leaves a stale Tier-2
+        # snapshot the recent-players surface serves instead of rebuilding. This
+        # only bites under the full suite (test_landing sorts before test_views);
+        # the class passed in the curated CI order. Delete the leaked rows.
+        cache.clear()
+        LandingRecentPlayersSnapshot.objects.all().delete()
+        LandingPlayerBestSnapshot.objects.all().delete()
+
     def test_player_name_suggestions_prioritize_prefix_matches_and_limit_results(self):
         today = timezone.now().date()
         Player.objects.create(name="CaptainAlpha",
