@@ -257,6 +257,23 @@ for kv in \
   fi
 done
 
+# Feed-timing optimization (2026-06-08). Move the ASIA clan crawl out of its
+# measured 12:00-15:00 activity peak into its overnight quiet window so it stops
+# throttling the floor while fresh ASIA battles land (NA 09:00 / EU 03:00 already
+# sit in their troughs). Enable the nightly per-realm activity-curve aggregate
+# that persists the last-battle-hour histogram driving peak-aware scheduling.
+# Runbook: agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md
+for kv in \
+  'CLAN_CRAWL_SCHEDULE_HOUR_ASIA=22' \
+  'ACTIVITY_CURVE_ENABLED=1'; do
+  k="${kv%%=*}"
+  if grep -q "^${k}=" /etc/battlestats-server.env; then
+    sed -i "s|^${k}=.*|${kv}|" /etc/battlestats-server.env
+  else
+    echo "${kv}" >> /etc/battlestats-server.env
+  fi
+done
+
 # Enable the weekly per-realm T10 top-ship-player badge snapshot
 # (snapshot_ship_top_players_task self-gates on this flag; the schedule is
 # always registered but no-ops without it). Pinned here because the cp of

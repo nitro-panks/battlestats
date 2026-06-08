@@ -1588,13 +1588,122 @@ def ensure_daily_battle_observations_task(self, realm=DEFAULT_REALM):
                     == "1" and not _is_ranked_daily_slot(realm)):
                 kwargs["skip_ranked"] = True
         call_command("ensure_daily_battle_observations", **kwargs)
+        # Phase 2 (flag-gated): when self-chaining is on for this realm and no
+        # crawl is competing for the WG budget, re-dispatch while a stale
+        # backlog remains. This adaptively fills idle floor capacity and
+        # naturally runs more often in the realm's post-peak window (where the
+        # stale pool is largest), mirroring enrich_player_data_task. The fixed
+        # Beat schedule stays as the guaranteed backstop. See F2/Phase-2 in
+        # agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md.
+        chained = False
+        if not crawl_running and _floor_self_chain_enabled(realm):
+            chained = _maybe_redispatch_floor(
+                realm,
+                int(os.getenv("BATTLE_OBSERVATION_FLOOR_DAYS", "7")),
+                int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOURS", "8")),
+            )
         return {
             "status": "completed",
             "crawl_coexist": crawl_running,
             "bulk": bulk,
+            "self_chained": chained,
         }
     finally:
         cache.delete(lock_key)
+
+
+def _floor_self_chain_enabled(realm: str) -> bool:
+    """Whether the observation floor should self-chain for `realm`.
+
+    Gated by BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED, with an optional
+    per-realm allowlist (BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_REALMS csv, empty
+    = all realms) for a staged NA-first rollout.
+    """
+    if os.getenv("BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED", "0") != "1":
+        return False
+    realms_csv = os.getenv(
+        "BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_REALMS", "").strip()
+    if not realms_csv:
+        return True
+    gate = {r.strip() for r in realms_csv.split(",") if r.strip()}
+    return realm in gate
+
+
+def _floor_self_chain_interval(realm: str, base_interval: float) -> float:
+    """Optionally shorten the re-dispatch countdown during the realm's busy
+    hours so capture tightens when fresh battles are landing.
+
+    Reads the persisted PlayerActivityHourly curve (F3). Scales the interval
+    between 0.5× (at the realm's peak hour) and 1.0× (its quiet hours). A
+    no-op (returns base_interval) when the curve is empty or unavailable.
+    """
+    try:
+        from warships.models import PlayerActivityHourly
+        rows = list(
+            PlayerActivityHourly.objects.filter(realm=realm)
+            .values_list("hour", "player_count"))
+        if not rows:
+            return base_interval
+        peak = max((c for _, c in rows), default=0) or 1
+        current_hour = django_timezone.now().hour
+        current = next((c for h, c in rows if h == current_hour), 0)
+        ratio = min(max(current / peak, 0.0), 1.0)
+        return max(base_interval * (1.0 - 0.5 * ratio), base_interval * 0.5)
+    except Exception:
+        logger.exception(
+            "Floor self-chain interval lookup failed (realm=%s)", realm)
+        return base_interval
+
+
+def _maybe_redispatch_floor(realm: str, days: int, stale_hours: int) -> bool:
+    """Re-dispatch the observation floor for `realm` while a stale backlog
+    remains. Returns True when a re-dispatch was enqueued.
+
+    Bounded exactly like enrichment: the per-realm single-flight lock (released
+    in the caller's finally before the countdown elapses) plus a min-interval
+    countdown stop this from fanning out. Stops once the remaining stale pool
+    falls below BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_THRESHOLD.
+    """
+    try:
+        from warships.management.commands.ensure_daily_battle_observations import (
+            _candidates,
+        )
+        threshold = int(os.getenv(
+            "BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_THRESHOLD", "500"))
+        # _candidates slices to `threshold`, so len == threshold means at least
+        # `threshold` stale players still remain after the sweep just ran.
+        remaining = len(_candidates(realm, days, stale_hours, threshold))
+        if remaining < threshold:
+            logger.info(
+                "Floor self-chain stop (realm=%s, remaining=%d < %d)",
+                realm, remaining, threshold)
+            return False
+
+        base_interval = float(os.getenv(
+            "BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_INTERVAL", "120"))
+        interval = _floor_self_chain_interval(realm, base_interval)
+        for attempt in range(3):
+            try:
+                ensure_daily_battle_observations_task.apply_async(
+                    kwargs={"realm": realm}, countdown=interval)
+                logger.info(
+                    "Floor self-chain re-dispatched (realm=%s, %.0fs countdown, "
+                    "remaining>=%d)", realm, interval, threshold)
+                return True
+            except Exception:
+                wait = 5 * (attempt + 1)
+                logger.warning(
+                    "Floor self-chain dispatch failed (attempt %d/3), retry %ds",
+                    attempt + 1, wait)
+                time.sleep(wait)
+        logger.error(
+            "Floor self-chain re-dispatch failed after 3 attempts (realm=%s) — "
+            "Beat kickstart will recover", realm)
+        return False
+    except Exception:
+        logger.exception(
+            "Floor self-chain check failed (realm=%s)", realm)
+        return False
 
 
 @app.task(bind=True, **CRAWL_TASK_OPTS)
@@ -1914,6 +2023,81 @@ def roll_up_player_daily_ship_stats_task(self, target_date_iso=None):
             "daily": daily_results,
             "period": period_result,
         }
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, queue='background', **TASK_OPTS)
+def aggregate_player_activity_curve_task(self):
+    """Nightly rebuild of the per-realm hour-of-day activity histogram.
+
+    Buckets distinct players by the UTC hour of their `last_battle_time`
+    over the trailing ACTIVITY_CURVE_WINDOW_DAYS window (from
+    BattleObservation) and writes it to PlayerActivityHourly — the persisted
+    activity curve that peak-aware scheduling reads (densest capture in the
+    hours after each realm's peak, crawls parked in the trough). Idempotent
+    delete-and-replace per realm. No-op unless ACTIVITY_CURVE_ENABLED=1.
+
+    See agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md (F3).
+    """
+    if os.getenv("ACTIVITY_CURVE_ENABLED", "0") != "1":
+        return {"status": "skipped", "reason": "activity-curve-disabled"}
+
+    from datetime import timedelta
+
+    from django.db.models import Count
+    from django.db.models.functions import ExtractHour
+
+    from warships.models import (
+        BattleObservation, PlayerActivityHourly, VALID_REALMS)
+
+    lock_key = _task_lock_key("aggregate_player_activity_curve", "global")
+    if not cache.add(lock_key, self.request.id,
+                     timeout=RESOURCE_TASK_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping aggregate_player_activity_curve_task — another run is active")
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        window_days = max(
+            1, int(os.getenv("ACTIVITY_CURVE_WINDOW_DAYS", "7")))
+        cutoff = django_timezone.now() - timedelta(days=window_days)
+        rows = (
+            BattleObservation.objects
+            .filter(last_battle_time__isnull=False,
+                    last_battle_time__gte=cutoff)
+            .annotate(hour=ExtractHour('last_battle_time'))
+            .values('player__realm', 'hour')
+            .annotate(n=Count('player', distinct=True))
+        )
+
+        # Bucket into {realm: {hour: count}} so we can rebuild each realm
+        # wholesale (a realm with no recent battles is left untouched rather
+        # than wiped) and skip rows for unknown realms / null hours.
+        by_realm: dict[str, dict[int, int]] = {}
+        for row in rows:
+            realm = row['player__realm']
+            hour = row['hour']
+            if realm not in VALID_REALMS or hour is None:
+                continue
+            by_realm.setdefault(realm, {})[int(hour)] = row['n']
+
+        written = {}
+        for realm, hour_counts in by_realm.items():
+            PlayerActivityHourly.objects.filter(realm=realm).delete()
+            PlayerActivityHourly.objects.bulk_create([
+                PlayerActivityHourly(
+                    realm=realm, hour=hour,
+                    player_count=count, window_days=window_days)
+                for hour, count in sorted(hour_counts.items())
+            ])
+            written[realm] = len(hour_counts)
+
+        logger.info(
+            "aggregate_player_activity_curve_task rebuilt window=%dd realms=%s",
+            window_days, written)
+        return {"status": "completed",
+                "window_days": window_days, "realms": written}
     finally:
         cache.delete(lock_key)
 

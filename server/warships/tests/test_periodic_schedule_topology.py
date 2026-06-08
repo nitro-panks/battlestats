@@ -129,7 +129,14 @@ class RealmOffsetsDistinctTests(TestCase):
 
 
 class ObservationFloorRunsFourTimesADayTests(TestCase):
-    """Test 4: rolling 6-hourly floor fires 4× per day per realm."""
+    """Test 4: rolling floor fires the cycle's count per day per realm.
+
+    NOTE: tests register schedules with the *code default* cadence
+    (BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES unset → 360 = 6h → 4×/day). Prod
+    runs 180 (3h → 8×/day). The 180min ASIA-wrap regression is therefore NOT
+    exercised here — `RealmCrontabHelperTests.test_180min_floor_asia_wraps_to_8`
+    guards that directly against the helper.
+    """
 
     def test_observation_floor_fires_four_times_per_day(self):
         for realm in VALID_REALMS:
@@ -137,8 +144,8 @@ class ObservationFloorRunsFourTimesADayTests(TestCase):
             hour_segments = row.crontab.hour.split(",")
             self.assertEqual(
                 len(hour_segments), 4,
-                f"observation-floor-{realm} should fire 4×/day, "
-                f"got hour='{row.crontab.hour}'",
+                f"observation-floor-{realm} should fire 4×/day at the 360min "
+                f"default, got hour='{row.crontab.hour}'",
             )
 
 
@@ -218,6 +225,59 @@ class RealmCrontabHelperTests(TestCase):
         for realm in VALID_REALMS:
             self.assertIn(realm, REALM_INTERVAL_OFFSETS,
                           f"REALM_INTERVAL_OFFSETS missing realm {realm}")
+
+    def test_180min_floor_asia_wraps_to_8(self):
+        # Regression guard for the prod (180min) floor cadence: before the
+        # mod-1440 wrap fix, the ASIA-offset start (base_minute=75 + 120 = 195)
+        # truncated at `while t < 1440`, dropping the 8th fire and leaving a 6h
+        # hole (21:15→03:15). All three realms must now fire 8 evenly-spaced
+        # times. See agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md (F2).
+        expected = {
+            "na": ("15", "1,4,7,10,13,16,19,22"),
+            "eu": ("15", "2,5,8,11,14,17,20,23"),
+            "asia": ("15", "0,3,6,9,12,15,18,21"),
+        }
+        for realm, (exp_min, exp_hr) in expected.items():
+            minute_str, hour_str = _realm_crontab_for_cycle(
+                realm, 180, base_minute=75)
+            self.assertEqual(minute_str, exp_min, f"{realm} minute")
+            self.assertEqual(hour_str, exp_hr, f"{realm} hour")
+            self.assertEqual(
+                len(hour_str.split(",")), 8,
+                f"{realm} floor should fire 8×/day at 180min, got '{hour_str}'")
+
+
+class MinuteLaneDePileTests(TestCase):
+    """The hour-multiple striped families must each occupy a distinct NA
+    minute-of-hour lane so they don't stack onto the 1-vCPU DB at minute 0.
+
+    See agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md (F1).
+    """
+
+    # name prefix → registered NA crontab.minute lane (single-valued because
+    # these are hour-multiple cycles).
+    NA_LANE_FAMILIES = [
+        "incremental-player-refresh",
+        "incremental-ranked-refresh",
+        "observation-floor",
+        "player-distribution-warmer",
+        "player-correlation-warmer",
+        "landing-page-warmer",
+        "recent-players-warmer",
+        "recent-clans-warmer",
+    ]
+
+    def test_na_minute_lanes_are_distinct(self):
+        lanes = {}
+        for prefix in self.NA_LANE_FAMILIES:
+            row = PeriodicTask.objects.get(name=f"{prefix}-na")
+            lanes[prefix] = row.crontab.minute
+        # No family should sit on the minute-0 boundary, and no two may collide.
+        self.assertNotIn(
+            "0", lanes.values(), f"a family still anchors NA minute 0: {lanes}")
+        self.assertEqual(
+            len(set(lanes.values())), len(lanes),
+            f"NA minute lanes collide: {lanes}")
 
 
 class TrackedPlayerPollGateTests(TestCase):

@@ -700,6 +700,43 @@ class PlayerDailyShipStats(models.Model):
         )
 
 
+class PlayerActivityHourly(models.Model):
+    """Per-realm histogram of distinct active players by UTC hour-of-day.
+
+    A small (≤24 rows/realm) rolling aggregate of the hour-of-day at which
+    players last battled, computed nightly by
+    `aggregate_player_activity_curve_task` from
+    `BattleObservation.last_battle_time` over the trailing
+    `ACTIVITY_CURVE_WINDOW_DAYS` window. It is the persisted activity curve
+    that peak-aware scheduling reads — densest capture in the ~4h after each
+    realm's measured peak, crawls parked in the trough — instead of the
+    uniform stripe. Rebuilt delete-and-replace per realm (idempotent).
+    See `agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md` (F3).
+    """
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM)
+    hour = models.IntegerField()  # UTC hour-of-day, 0-23
+    player_count = models.IntegerField(default=0)
+    window_days = models.IntegerField(default=7)
+    computed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['realm', 'hour'], name='player_activity_hourly_uniq'),
+        ]
+        indexes = [
+            models.Index(fields=['realm', 'hour'],
+                         name='player_activity_realm_hour_idx'),
+        ]
+
+    def __str__(self):
+        return (
+            f"PlayerActivityHourly({self.realm} h{self.hour:02d} "
+            f"n={self.player_count})"
+        )
+
+
 class ShipTopPlayerSnapshot(models.Model):
     """Per-season per-realm top-N players for each in-scope-tier ship (T8–T10) by composite score.
 

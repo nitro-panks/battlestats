@@ -34,17 +34,23 @@ def _realm_crontab_for_cycle(
     Works for cycles that divide 60 (10, 30) or are multiples of an hour
     aligned with 1440 (60, 120, 180, 360, 720). Other values are rounded
     down at the stride and may produce a slightly off-pattern stripe.
+
+    Emits exactly ``1440 // cycle_minutes`` evenly-spaced fires per day,
+    wrapping past midnight modulo 1440. This matters for the largest
+    ``base_minute + offset`` start (e.g. the ASIA-offset observation floor
+    at base_minute=75, cycle 180): a naive ``while t < 1440`` truncation
+    would drop its final fire and leave a 2×-cycle hole overnight.
     """
     realm_count = max(len(REALM_INTERVAL_OFFSETS), 1)
     stride = max(cycle_minutes // realm_count, 1)
     offset_idx = REALM_INTERVAL_OFFSETS.get(realm, 0)
     start_minute_of_day = (base_minute + offset_idx * stride) % 1440
 
-    fire_times = []
-    t = start_minute_of_day
-    while t < 1440:
-        fire_times.append(t)
-        t += cycle_minutes
+    num_fires = max(1440 // cycle_minutes, 1)
+    fire_times = [
+        (start_minute_of_day + i * cycle_minutes) % 1440
+        for i in range(num_fires)
+    ]
 
     minutes = sorted({t % 60 for t in fire_times})
     hours = sorted({t // 60 for t in fire_times})
@@ -156,7 +162,7 @@ def register_periodic_schedules(sender, **kwargs):
     landing_warm_minutes = int(os.getenv("LANDING_PAGE_WARM_MINUTES", "120"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, landing_warm_minutes)
+            realm, landing_warm_minutes, base_minute=55)
         landing_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
@@ -219,7 +225,7 @@ def register_periodic_schedules(sender, **kwargs):
         os.getenv("LANDING_RECENT_PLAYERS_WARM_MINUTES", "180"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, recent_players_warm_minutes)
+            realm, recent_players_warm_minutes, base_minute=35)
         recent_players_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
@@ -250,7 +256,7 @@ def register_periodic_schedules(sender, **kwargs):
         os.getenv("LANDING_RECENT_CLANS_WARM_MINUTES", "60"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, recent_clans_warm_minutes)
+            realm, recent_clans_warm_minutes, base_minute=20)
         recent_clans_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
@@ -332,7 +338,7 @@ def register_periodic_schedules(sender, **kwargs):
     dist_warm_minutes = int(os.getenv("DISTRIBUTION_WARM_MINUTES", "360"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, dist_warm_minutes)
+            realm, dist_warm_minutes, base_minute=50)
         dist_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
@@ -358,7 +364,7 @@ def register_periodic_schedules(sender, **kwargs):
     corr_warm_minutes = int(os.getenv("CORRELATION_WARM_MINUTES", "360"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, corr_warm_minutes)
+            realm, corr_warm_minutes, base_minute=45)
         corr_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
@@ -384,7 +390,7 @@ def register_periodic_schedules(sender, **kwargs):
         os.getenv("HOT_ENTITY_CACHE_WARM_MINUTES", "30"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, hot_entity_warm_minutes)
+            realm, hot_entity_warm_minutes, base_minute=7)
         hot_entity_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
@@ -433,7 +439,7 @@ def register_periodic_schedules(sender, **kwargs):
         os.getenv("RECENTLY_VIEWED_WARM_MINUTES", "10"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, recently_viewed_warm_minutes)
+            realm, recently_viewed_warm_minutes, base_minute=2)
         recently_viewed_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
@@ -489,11 +495,24 @@ def register_periodic_schedules(sender, **kwargs):
     crawler_schedules_enabled = _env_flag("ENABLE_CRAWLER_SCHEDULES", False)
 
     # -- Daily Clan Crawl (per realm, staggered via REALM_CRAWL_CRON_HOURS) --
+    # Each realm's crawl should sit in that realm's measured activity *trough*
+    # so it doesn't throttle the battle-history floor into coexist mode while
+    # fresh battles are landing. The default REALM_CRAWL_CRON_HOURS offset put
+    # ASIA at 15:00 UTC — squarely inside ASIA's 12:00-15:00 peak — so the
+    # ASIA crawl hour is overridden to its 20:00-04:00 quiet window (default
+    # 22:00) without disturbing the snapshot/tier-dist families that also read
+    # REALM_CRAWL_CRON_HOURS. See F5 in
+    # agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md.
     clan_crawl_base_hour = int(os.getenv("CLAN_CRAWL_SCHEDULE_HOUR", "3"))
     clan_crawl_minute = os.getenv("CLAN_CRAWL_SCHEDULE_MINUTE", "0")
+    clan_crawl_hour_override = {
+        "asia": int(os.getenv("CLAN_CRAWL_SCHEDULE_HOUR_ASIA", "22")),
+    }
     for realm in sorted(VALID_REALMS):
-        realm_hour = (clan_crawl_base_hour +
-                      REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+        realm_hour = clan_crawl_hour_override.get(
+            realm,
+            (clan_crawl_base_hour + REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24,
+        )
         clan_crawl_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=clan_crawl_minute,
             hour=str(realm_hour),
@@ -541,15 +560,19 @@ def register_periodic_schedules(sender, **kwargs):
 
     # -- Incremental Player Refresh (per realm) --
     # Default 180 min cycle, striped per realm via REALM_INTERVAL_OFFSETS so
-    # NA fires at minute 0 of hours 0,3,6,…, EU at hours 1,4,7,…, ASIA at
-    # hours 2,5,8,…. Each cycle walks ~1200 players × 6 WG API calls + DB
-    # writes and takes 35-78 min/realm. Striping keeps at most one realm
-    # mid-cycle so the background worker stays utilised but not stacked.
+    # NA fires at hours 0,3,6,…, EU at hours 1,4,7,…, ASIA at hours 2,5,8,….
+    # The base_minute=5 lane (and the distinct lanes on every other striped
+    # family) keeps these off the minute-0 boundary so they don't stack onto
+    # the 1-vCPU DB at the top of the hour — see the minute-lane de-pile in
+    # agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md (F1).
+    # Each cycle walks ~1200 players × 6 WG API calls + DB writes and takes
+    # 35-78 min/realm. Striping keeps at most one realm mid-cycle so the
+    # background worker stays utilised but not stacked.
     player_refresh_minutes = int(
         os.getenv("PLAYER_REFRESH_INTERVAL_MINUTES", "180"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, player_refresh_minutes)
+            realm, player_refresh_minutes, base_minute=5)
         player_refresh_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
@@ -573,13 +596,14 @@ def register_periodic_schedules(sender, **kwargs):
 
     # -- Incremental Ranked Refresh (per realm) --
     # Default 120 min cycle, striped per realm. With 3 realms the stride is
-    # 40 min: NA at minute 0 of even hours, EU at minute 40 of even hours,
-    # ASIA at minute 20 of odd hours.
+    # 40 min, then shifted by the base_minute=25 lane: NA at :25 of even
+    # hours, EU at :05 of odd hours, ASIA at :45 of odd hours. The lane keeps
+    # ranked off the minute-0 DB-CPU stack (F1 minute-lane de-pile).
     ranked_refresh_minutes = int(
         os.getenv("RANKED_REFRESH_INTERVAL_MINUTES", "120"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, ranked_refresh_minutes)
+            realm, ranked_refresh_minutes, base_minute=25)
         ranked_refresh_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
@@ -601,15 +625,18 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
-    # -- Rolling BattleObservation Floor (per realm, every 6h) --
-    # Promoted from a daily cron to a 6-hourly cron on 2026-05-09 to tighten
-    # battle pickup. Each realm fires 4× per day, striped via
-    # REALM_INTERVAL_OFFSETS (2h stride within the 6h cycle) so NA, EU,
-    # and ASIA never run concurrently. The floor walks active-7d players
-    # whose latest BattleObservation is older than
-    # BATTLE_OBSERVATION_FLOOR_HOURS (default tightened to 8h alongside the
-    # cadence change). Most cycles return <100 candidates because the
-    # tiered crawler covers hot players within 12h.
+    # -- Rolling BattleObservation Floor (per realm, configurable cadence) --
+    # Promoted from a daily cron to a 6-hourly cron on 2026-05-09, then made
+    # cadence-configurable via BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES (prod
+    # runs 180 = 3h / 8 cycles per day as of R3, 2026-06-08; code default 360
+    # = 6h / 4 cycles). Each realm fires 1440 // cycle_minutes times per day,
+    # striped via REALM_INTERVAL_OFFSETS (cycle/3 stride) and wrapped modulo
+    # 1440 so the largest-offset realm (ASIA) gets its full cycle count with
+    # no overnight hole — see the F2 wrap fix in
+    # agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md. The
+    # floor walks active-7d players whose latest BattleObservation is older
+    # than BATTLE_OBSERVATION_FLOOR_HOURS (prod 8h). Most cycles return few
+    # candidates because the tiered crawler covers hot players within 12h.
     # Runbook: agents/runbooks/runbook-battle-observation-floor-2026-05-02.md
     obs_floor_minute_str = os.getenv("BATTLE_OBSERVATION_FLOOR_MINUTE", "15")
     obs_floor_base_hour = int(os.getenv("BATTLE_OBSERVATION_FLOOR_HOUR", "1"))
@@ -768,6 +795,34 @@ def register_periodic_schedules(sender, **kwargs):
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
             "description": "Nightly rebuild of PlayerDailyShipStats from BattleEvent (self-healing trailing window). No-op unless BATTLE_HISTORY_ROLLUP_ENABLED=1.",
+        },
+    )
+
+    # -- Player activity-curve aggregate (peak-aware scheduling input) --
+    # Runbook: agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md (F3)
+    # Nightly rebuild of the per-realm hour-of-day histogram from
+    # BattleObservation.last_battle_time. Cheap DB-only aggregate, scheduled in
+    # the 04:00 UTC quiet window. No-op unless ACTIVITY_CURVE_ENABLED=1.
+    activity_curve_hour = os.getenv("ACTIVITY_CURVE_HOUR", "4")
+    activity_curve_minute = os.getenv("ACTIVITY_CURVE_MINUTE", "0")
+    activity_curve_schedule, _ = CrontabSchedule.objects.get_or_create(
+        minute=str(activity_curve_minute),
+        hour=str(activity_curve_hour),
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        timezone="UTC",
+    )
+    PeriodicTask.objects.update_or_create(
+        name="player-activity-curve-aggregate",
+        defaults={
+            "task": "warships.tasks.aggregate_player_activity_curve_task",
+            "crontab": activity_curve_schedule,
+            "interval": None,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Nightly per-realm hour-of-day activity histogram (PlayerActivityHourly) from BattleObservation. No-op unless ACTIVITY_CURVE_ENABLED=1.",
         },
     )
 
