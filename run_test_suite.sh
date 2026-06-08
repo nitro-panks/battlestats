@@ -25,11 +25,8 @@ echo "[2/5] Running backend release gate"
 	CELERY_BROKER_URL=memory:// \
 	CELERY_RESULT_BACKEND=cache+memory:// \
 	"${PYTHON_BIN}" -m pytest --nomigrations \
-	warships/tests/test_views.py \
-	warships/tests/test_landing.py \
-	warships/tests/test_realm_isolation.py \
-	warships/tests/test_data_product_contracts.py \
-	-x --tb=short
+	warships/tests/ \
+	--tb=short
 
 echo "[3/5] Running frontend release gate"
 cd "$ROOT_DIR"

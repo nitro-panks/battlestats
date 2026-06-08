@@ -32,6 +32,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: ./client/.next/cache
+          # Bust when deps or source change; restore-keys lets an older cache
+          # warm an incremental build instead of a cold one.
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('./client/package-lock.json') }}-${{ hashFiles('./client/**/*.[jt]s', './client/**/*.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('./client/package-lock.json') }}-
+
       - name: Lint
         run: npm run lint
 
@@ -111,10 +121,15 @@ jobs:
           DJANGO_SECRET_KEY: ci-test-secret-key-do-not-use-in-production
           DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
           REDIS_URL: redis://127.0.0.1:6379/1
-        run: |
-          python -m pytest \
-            warships/tests/test_views.py \
-            warships/tests/test_landing.py \
-            warships/tests/test_realm_isolation.py \
-            warships/tests/test_data_product_contracts.py \
-            -x --tb=short
+          # No RabbitMQ runs in CI. Without this override, settings.py falls back
+          # to amqp://localhost:5672 and every task-dispatching test pays a broker
+          # connection-retry cost — which inflated the test step to ~20 min. The
+          # in-memory broker (same config the local release gate uses) keeps it
+          # to seconds.
+          CELERY_BROKER_URL: memory://
+          CELERY_RESULT_BACKEND: cache+memory://
+        # Full suite (~600 tests, ~15s on Postgres). Previously a hand-picked
+        # 4-file subset ran here — the rest were fast but unrun, and the curated
+        # file ordering masked cross-test isolation leaks (now fixed). No -x:
+        # surface every failure, the run is seconds.
+        run: python -m pytest warships/tests/ --tb=short

@@ -29,7 +29,7 @@ docker compose up -d                              # Start all services
 
 ```bash
 cd server
-python -m pytest warships/tests/test_views.py warships/tests/test_landing.py warships/tests/test_realm_isolation.py warships/tests/test_data_product_contracts.py -x --tb=short  # Release gate
+python -m pytest warships/tests/ --tb=short  # Full release gate (~600 tests, ~15s on Postgres / ~7s sqlite)
 python -m pytest warships/tests/test_views.py::TestPlayerViewSet::test_player_detail -x  # Single test
 python manage.py makemigrations && python manage.py migrate
 ```
