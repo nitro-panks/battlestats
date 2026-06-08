@@ -7,7 +7,6 @@ import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getHighestRankedLeagueName, type RankedLeagueName } from './rankedLeague';
 import PlayerDetailInsightsTabs from './PlayerDetailInsightsTabs';
-import BattleHistoryCard from './BattleHistoryCard';
 import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
@@ -558,14 +557,10 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             {!player.is_hidden ? (
                                 <ShipTopPlayerBanner badges={player.ship_badges ?? []} realm={player.realm} />
                             ) : null}
-                            <BattleHistoryCard
-                                playerName={player.name}
-                                realm={realm}
-                                refreshNonce={refreshNonce}
-                            />
                             <div className="mt-6" />
                             <PlayerDetailInsightsTabs
                                 playerId={player.player_id}
+                                playerName={player.name}
                                 refreshNonce={refreshNonce}
                                 pvpRatio={player.pvp_ratio}
                                 pvpSurvivalRate={player.pvp_survival_rate}

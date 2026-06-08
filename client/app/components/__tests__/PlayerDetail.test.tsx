@@ -25,6 +25,22 @@ let mockClanBattleSummary:
 let mockRankedHeatmapVisibility: boolean | undefined;
 const mockFetchSharedJson = fetchSharedJson as jest.MockedFunction<typeof fetchSharedJson>;
 
+// Valid-but-empty battle-history payload for the embedded Activity-tab card.
+// The card fetches battle-history on mount; without `by_day` as an array its
+// sparkline builder throws. Zero battles + random-only also makes the card
+// report "no activity", so the Activity tab darks out and selection falls back
+// to Ships — the default these PlayerDetail tab tests assert against.
+const emptyBattleHistoryPayload = {
+    as_of: '2026-06-06T00:00:00Z',
+    available_modes: ['random'],
+    totals: {
+        battles: 0, wins: 0, losses: 0, win_rate: 0, damage: 0, avg_damage: 0,
+        frags: 0, xp: 0, planes_killed: 0, survived_battles: 0, survival_rate: 0,
+    },
+    by_ship: [],
+    by_day: [],
+};
+
 jest.mock('next/dynamic', () => {
     return () => function MockDynamicComponent(props: {
         clanId?: number;
@@ -130,6 +146,9 @@ describe('PlayerDetail efficiency-rank icon', () => {
         mockRankedHeatmapVisibility = undefined;
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockImplementation((url: string) => {
+            if (typeof url === 'string' && url.includes('/battle-history/')) {
+                return Promise.resolve({ data: emptyBattleHistoryPayload, headers: {} });
+            }
             if (typeof url === 'string' && url.includes('/api/fetch/player_correlation/tier_type/')) {
                 return Promise.resolve({
                     data: {
@@ -668,7 +687,9 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        // Default tab is Ships; the profile/efficiency/clan panels are gated behind tabs.
+        // Activity is the default tab, but this fixture has no battle activity, so
+        // selection falls back to Ships; the profile/efficiency/clan panels stay
+        // gated behind their tabs.
         await waitFor(() => {
             expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
         });
@@ -783,7 +804,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(mockTrackEvent).toHaveBeenCalledWith('player-share', expect.objectContaining({ realm: expect.any(String) }));
     });
 
-    it('renders the default ships insight tab on the player page', async () => {
+    it('defaults to Activity, then falls back to Ships when the player has no battle activity', async () => {
         render(
             <PlayerDetail
                 player={{
@@ -796,10 +817,16 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
+        // Activity is the default (left-most) tab on initial render.
+        expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+
+        // The empty battle-history payload reports no activity, so the Activity
+        // tab darks out and selection falls back to Ships.
         await waitFor(() => {
-            expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
+            expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
         });
+        expect(screen.getByRole('tab', { name: 'Activity' })).toBeDisabled();
+        expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
         // Profile and Ranked lanes stay inactive until selected.
         expect(screen.queryByText('Tier vs Type Profile')).not.toBeInTheDocument();
         expect(screen.queryByText('Ranked Games vs Win Rate')).not.toBeInTheDocument();
@@ -827,7 +854,11 @@ describe('PlayerDetail ship-badge banner', () => {
         mockClanBattleSummary = undefined;
         mockRankedHeatmapVisibility = undefined;
         mockFetchSharedJson.mockReset();
-        mockFetchSharedJson.mockImplementation(() => Promise.resolve({ data: [], headers: {} }));
+        mockFetchSharedJson.mockImplementation((url: string) => (
+            typeof url === 'string' && url.includes('/battle-history/')
+                ? Promise.resolve({ data: emptyBattleHistoryPayload, headers: {} })
+                : Promise.resolve({ data: [], headers: {} })
+        ));
         consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
         jest.useRealTimers();
     });
@@ -937,7 +968,11 @@ describe('PlayerDetail ship-honors panel', () => {
         mockClanBattleSummary = undefined;
         mockRankedHeatmapVisibility = undefined;
         mockFetchSharedJson.mockReset();
-        mockFetchSharedJson.mockImplementation(() => Promise.resolve({ data: [], headers: {} }));
+        mockFetchSharedJson.mockImplementation((url: string) => (
+            typeof url === 'string' && url.includes('/battle-history/')
+                ? Promise.resolve({ data: emptyBattleHistoryPayload, headers: {} })
+                : Promise.resolve({ data: [], headers: {} })
+        ));
         consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
         jest.useRealTimers();
     });

@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import BattleHistoryCard from './BattleHistoryCard';
 import PlayerEfficiencyBadges from './PlayerEfficiencyBadges';
 import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
 import { resilientDynamicImport } from './resilientDynamicImport';
@@ -14,10 +15,12 @@ import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
 
-type InsightsTabId = 'profile' | 'ships' | 'ranked' | 'career' | 'badges' | 'population';
+type InsightsTabId = 'activity' | 'profile' | 'ships' | 'ranked' | 'career' | 'badges' | 'population';
 
 interface PlayerDetailInsightsTabsProps {
     playerId: number;
+    // Battle-history (Activity tab) is keyed by player name + realm, not id.
+    playerName: string;
     pvpRatio: number;
     pvpSurvivalRate: number;
     pvpBattles: number;
@@ -104,6 +107,7 @@ const PlayerScoreDistributionSVG = dynamic(() => resilientDynamicImport(() => im
 });
 
 const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; minHeight: number; }> = [
+    { id: 'activity', label: 'Activity', panelLabel: 'Recent battle activity', minHeight: 420 },
     { id: 'ships', label: 'Ships', panelLabel: 'Ship insights', minHeight: 560 },
     { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 920 },
     { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 620 },
@@ -113,6 +117,7 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; 
 ];
 
 const panelSectionIdByTab: Record<InsightsTabId, string> = {
+    activity: 'insights-activity',
     population: 'insights-population',
     ships: 'insights-ships',
     ranked: 'insights-ranked',
@@ -124,6 +129,7 @@ const panelSectionIdByTab: Record<InsightsTabId, string> = {
 // Umami event name per tab — value baked into the name (readable label, not the
 // internal id) so each tab reads as a distinct row in the realtime feed.
 const insightsTabEventByTab: Record<InsightsTabId, string> = {
+    activity: 'player-insights-activity',
     ships: 'player-insights-ships',
     profile: 'player-insights-profile',
     ranked: 'player-insights-ranked',
@@ -145,6 +151,7 @@ const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
 
 const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     playerId,
+    playerName,
     pvpRatio,
     pvpSurvivalRate,
     pvpBattles,
@@ -159,14 +166,30 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
 }) => {
     const { theme } = useTheme();
     const { realm } = useRealm();
-    const [activeTab, setActiveTab] = useState<InsightsTabId>('ships');
+    const [activeTab, setActiveTab] = useState<InsightsTabId>('activity');
+    // null = unknown (still resolving); true/false once the Activity card's first
+    // payload lands. Drives the default-tab choice and the dark Activity tab.
+    const [activityAvailable, setActivityAvailable] = useState<boolean | null>(null);
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
     const [profileChartPayload, setProfileChartPayload] = useState<TierTypePayload | null>(null);
     const [profileChartState, setProfileChartState] = useState<'idle' | 'loading' | 'ready' | 'warming' | 'error'>('idle');
 
+    // Reset BOTH together on player change: keeping a stale `activityAvailable`
+    // would let the previous player's empty verdict bounce the new player off the
+    // Activity tab before their card refetches.
     useEffect(() => {
-        setActiveTab('ships');
+        setActiveTab('activity');
+        setActivityAvailable(null);
     }, [playerId]);
+
+    const handleActivityAvailability = useCallback((available: boolean) => {
+        setActivityAvailable(available);
+        if (!available) {
+            // Nothing to show — fall back to Ships (the tab to the right) and
+            // dark-out Activity.
+            setActiveTab((current) => (current === 'activity' ? 'ships' : current));
+        }
+    }, []);
 
     useEffect(() => {
         setProfileChartPayload(null);
@@ -343,13 +366,26 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
 
     return (
         <section className="mt-5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4" data-perf-section="insights-tabs-shell">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] pb-3">
-                <div>
-                    <h2 className="text-lg font-semibold text-[var(--accent-dark)]">Insights</h2>
-                </div>
-                <div role="tablist" aria-label="Player insight tabs" className="flex flex-wrap gap-2">
+            {/* The tab strip is the section header now — the standalone "Insights"
+                title is gone and Activity sits in its place (left-most). Scrolls
+                horizontally on narrow viewports instead of stacking into rows. */}
+            <div className="mb-4 border-b border-[var(--border)] pb-3">
+                <div
+                    role="tablist"
+                    aria-label="Player insight tabs"
+                    className="-mx-1 flex flex-nowrap gap-2 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"
+                >
                     {TAB_CONFIG.map((tab) => {
                         const isActive = tab.id === activeTab;
+                        // Activity dark-outs (disabled) once we know the player has
+                        // no battle activity to show.
+                        const isDisabled = tab.id === 'activity' && activityAvailable === false;
+                        const base = 'inline-flex min-h-[44px] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium transition-colors';
+                        const stateClass = isDisabled
+                            ? 'cursor-not-allowed border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-muted)] opacity-40'
+                            : isActive
+                                ? 'border-[var(--accent-mid)] bg-[var(--accent-faint)] text-[var(--accent-mid)]'
+                                : 'border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--accent-light)] hover:text-[var(--accent-mid)]';
                         return (
                             <button
                                 key={tab.id}
@@ -358,16 +394,17 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 type="button"
                                 aria-selected={isActive}
                                 aria-controls={`player-insights-panel-${tab.id}`}
+                                aria-disabled={isDisabled}
+                                disabled={isDisabled}
                                 tabIndex={isActive ? 0 : -1}
                                 onClick={() => {
+                                    if (isDisabled) return;
                                     if (tab.id !== activeTab) {
                                         trackEvent(insightsTabEventByTab[tab.id], { realm });
                                     }
                                     setActiveTab(tab.id);
                                 }}
-                                className={isActive
-                                    ? 'inline-flex min-h-[44px] items-center justify-center rounded-full border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-3 py-1.5 text-sm font-medium text-[var(--accent-mid)]'
-                                    : 'inline-flex min-h-[44px] items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent-light)] hover:text-[var(--accent-mid)]'}
+                                className={`${base} ${stateClass}`}
                             >
                                 {tab.label}
                             </button>
@@ -380,10 +417,27 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 id={`player-insights-panel-${activeConfig.id}`}
                 role="tabpanel"
                 aria-labelledby={`player-insights-tab-${activeConfig.id}`}
-                className="min-w-0"
+                // Activity (the dense battle-history table) takes the full panel
+                // width; the chart lanes are capped at 1200px so they don't stretch
+                // and thin out on wide viewports.
+                className={activeTab === 'activity' ? 'min-w-0' : 'min-w-0 max-w-[1200px]'}
                 data-perf-section={panelSectionIdByTab[activeTab]}
                 style={{ minHeight: activeConfig.minHeight, contain: 'layout style' }}
             >
+                {activeTab === 'activity' ? (
+                    isLoading ? (
+                        <LoadingPanel label="Loading activity..." minHeight={360} />
+                    ) : (
+                        <BattleHistoryCard
+                            embedded
+                            playerName={playerName}
+                            realm={realm}
+                            refreshNonce={refreshNonce}
+                            onAvailabilityChange={handleActivityAvailability}
+                        />
+                    )
+                ) : null}
+
                 {activeTab === 'population' ? (
                     <div>
                         <SectionHeadingWithTooltip

@@ -247,6 +247,96 @@ describe('BattleHistoryCard', () => {
         expect(container).toBeEmptyDOMElement();
     });
 
+    test('embedded: renders chrome (not null) at the pristine-empty default instead of collapsing', async () => {
+        // Same zero-battle payload that hides the standalone card — embedded it
+        // must render the "no battles" chrome so the active Activity tab is never
+        // blank.
+        resolveWith(buildPayload({
+            totals: {
+                battles: 0, wins: 0, losses: 0, win_rate: 0,
+                damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                planes_killed: 0, survived_battles: 0, survival_rate: 0,
+            },
+            by_ship: [],
+            by_day: [],
+        }));
+        render(<BattleHistoryCard embedded playerName="empty" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(screen.getByText(/no random battles in this window/i)).toBeInTheDocument();
+    });
+
+    test('embedded: reports availability false for a zero-battle, random-only player', async () => {
+        const onAvailabilityChange = jest.fn();
+        resolveWith(buildPayload({
+            available_modes: ['random'],
+            totals: {
+                battles: 0, wins: 0, losses: 0, win_rate: 0,
+                damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                planes_killed: 0, survived_battles: 0, survival_rate: 0,
+            },
+            by_ship: [],
+            by_day: [],
+        }));
+        render(
+            <BattleHistoryCard
+                embedded
+                playerName="empty"
+                realm="na"
+                onAvailabilityChange={onAvailabilityChange}
+            />,
+        );
+        await waitFor(() => {
+            expect(onAvailabilityChange).toHaveBeenCalledWith(false);
+        });
+    });
+
+    test('embedded: reports availability true when the player has battles', async () => {
+        const onAvailabilityChange = jest.fn();
+        resolveWith(buildPayload());
+        render(
+            <BattleHistoryCard
+                embedded
+                playerName="active"
+                realm="na"
+                onAvailabilityChange={onAvailabilityChange}
+            />,
+        );
+        await waitFor(() => {
+            expect(onAvailabilityChange).toHaveBeenCalledWith(true);
+        });
+    });
+
+    test('embedded: reports availability true for a ranked-only player with zero random battles', async () => {
+        const onAvailabilityChange = jest.fn();
+        // First (default random) fetch reports ranked availability with no random
+        // battles — the player still has activity (the card auto-switches mode).
+        mockByMode({ available_modes: ['ranked'] }, {
+            ranked: {},
+            random: {
+                totals: {
+                    battles: 0, wins: 0, losses: 0, win_rate: 0,
+                    damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                    planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                },
+                by_ship: [],
+                by_day: [],
+            },
+        });
+        render(
+            <BattleHistoryCard
+                embedded
+                playerName="rankedonly"
+                realm="na"
+                onAvailabilityChange={onAvailabilityChange}
+            />,
+        );
+        await waitFor(() => {
+            expect(onAvailabilityChange).toHaveBeenCalledWith(true);
+        });
+    });
+
     test('renders nothing when the API returns 404 (capture API disabled)', async () => {
         mockFetchSharedJson.mockRejectedValueOnce(new Error('404 not found'));
         const { container } = render(<BattleHistoryCard playerName="x" realm="na" />);

@@ -78,6 +78,25 @@ describe('PlayerDetailInsightsTabs', () => {
                 return new Promise(() => { });
             }
 
+            // Activity tab card fetch — return a payload with battles so the
+            // Activity tab reports available and stays the default.
+            if (url.includes('/battle-history/')) {
+                return Promise.resolve({
+                    data: {
+                        as_of: '2026-06-06T00:00:00Z',
+                        available_modes: ['random'],
+                        totals: {
+                            battles: 42, wins: 24, losses: 18, win_rate: 57.1,
+                            damage: 4200000, avg_damage: 100000, frags: 60, xp: 0,
+                            planes_killed: 0, survived_battles: 20, survival_rate: 47.6,
+                        },
+                        by_ship: [],
+                        by_day: [],
+                    },
+                    headers: {},
+                });
+            }
+
             return Promise.resolve({ data: [], headers: {} });
         });
         jest.useFakeTimers();
@@ -90,10 +109,11 @@ describe('PlayerDetailInsightsTabs', () => {
         jest.useRealTimers();
     });
 
-    it('renders the ships lane by default and keeps other heavy panels inactive', () => {
+    it('defaults to the Activity tab (left-most) and keeps heavy chart lanes inactive', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -103,19 +123,68 @@ describe('PlayerDetailInsightsTabs', () => {
             />,
         );
 
-        // Ships is now the default, left-most tab; Profile is second.
-        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
-        // Profile and the other heavy lanes stay inactive until selected.
+        // Activity replaced the old "Insights" header and is the default tab;
+        // Ships is the tab to its right and is NOT active on load.
+        expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'false');
+        // The heavy chart lanes stay inactive until selected.
+        expect(screen.queryByText('Top Ships (Random Battles)')).not.toBeInTheDocument();
         expect(screen.queryByText('Loading profile charts...')).not.toBeInTheDocument();
         expect(screen.queryByText('Ranked Seasons')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
+    });
+
+    it('darks out the Activity tab and falls back to Ships when there is no activity', async () => {
+        // Battle-history payload with zero battles + only random mode → no activity.
+        mockFetchSharedJson.mockImplementation((url) => {
+            if (url.includes('/api/fetch/player_correlation/tier_type/')) {
+                return new Promise(() => { });
+            }
+            if (url.includes('/battle-history/')) {
+                return Promise.resolve({
+                    data: {
+                        as_of: '2026-06-06T00:00:00Z',
+                        available_modes: ['random'],
+                        totals: {
+                            battles: 0, wins: 0, losses: 0, win_rate: 0,
+                            damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                            planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                        },
+                        by_ship: [],
+                        by_day: [],
+                    },
+                    headers: {},
+                });
+            }
+            return Promise.resolve({ data: [], headers: {} });
+        });
+
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="QuietCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan
+                efficiencyRows={[]}
+            />,
+        );
+
+        await waitFor(() => {
+            expect(screen.getByRole('tab', { name: 'Activity' })).toBeDisabled();
+        });
+        // Fell back to the Ships tab (to the right of Activity).
+        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false');
     });
 
     it('fires name-baked player-insights events per tab (readable label, not the internal id)', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -147,6 +216,7 @@ describe('PlayerDetailInsightsTabs', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -186,6 +256,7 @@ describe('PlayerDetailInsightsTabs', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -205,6 +276,7 @@ describe('PlayerDetailInsightsTabs', () => {
         const { rerender } = render(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -219,6 +291,7 @@ describe('PlayerDetailInsightsTabs', () => {
         rerender(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={56}
                 pvpSurvivalRate={41}
                 pvpBattles={820}
@@ -236,6 +309,7 @@ describe('PlayerDetailInsightsTabs', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -256,6 +330,7 @@ describe('PlayerDetailInsightsTabs', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -277,6 +352,7 @@ describe('PlayerDetailInsightsTabs', () => {
         const { rerender } = render(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -297,6 +373,7 @@ describe('PlayerDetailInsightsTabs', () => {
             rerender(
                 <PlayerDetailInsightsTabs
                     playerId={101}
+                    playerName="TestCaptain"
                     pvpRatio={55}
                     pvpSurvivalRate={40}
                     pvpBattles={800}
@@ -315,10 +392,11 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            // 4 background warmup calls. Ships is the default tab now, so the
-            // profile chart does NOT self-fetch tier_type until Profile is selected
-            // (that previously added 2 calls; warmup still pre-warms tier_type once).
-            expect(mockFetchSharedJson).toHaveBeenCalledTimes(4);
+            // 4 background warmup calls + 2 from the embedded Activity card (its
+            // main window/mode fetch and the always-month sparkline fetch). The
+            // profile chart still does NOT self-fetch tier_type until Profile is
+            // selected; warmup pre-warms tier_type once.
+            expect(mockFetchSharedJson).toHaveBeenCalledTimes(6);
         });
 
         expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
@@ -333,6 +411,7 @@ describe('PlayerDetailInsightsTabs', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={202}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -349,9 +428,10 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            // 3 background warmup calls (no clan battle). Ships is the default tab,
-            // so the profile chart does not self-fetch tier_type until selected.
-            expect(mockFetchSharedJson).toHaveBeenCalledTimes(3);
+            // 3 background warmup calls (no clan battle) + 2 from the embedded
+            // Activity card (main fetch + month sparkline). The profile chart does
+            // not self-fetch tier_type until selected.
+            expect(mockFetchSharedJson).toHaveBeenCalledTimes(5);
         });
 
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith(
@@ -388,6 +468,7 @@ describe('PlayerDetailInsightsTabs', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
@@ -451,6 +532,7 @@ describe('PlayerDetailInsightsTabs', () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={102}
+                playerName="TestCaptain"
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}

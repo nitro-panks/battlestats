@@ -9,7 +9,10 @@ interface RankedSeasonsProps {
     isLoading?: boolean;
 }
 
-const RANKED_TABLE_VISIBLE_ROWS = 8;
+// Rows visible before the table scrolls. Sized so the scroll viewport fills the
+// Insights tab's ~800px of vertical room (2.5rem header + 13 * 3.5rem ≈ 768px),
+// matching the Activity table / Ships chart instead of a short pinned box.
+const RANKED_TABLE_VISIBLE_ROWS = 13;
 const RANKED_TABLE_HEADER_HEIGHT_REM = 2.5;
 const RANKED_TABLE_ROW_HEIGHT_REM = 3.5;
 
