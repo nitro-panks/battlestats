@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import BattleHistoryCard from './BattleHistoryCard';
+import BattleHistoryCard, {
+    BATTLE_HISTORY_FETCH_TTL_MS,
+    battleHistoryCacheKey,
+    battleHistoryFetchUrl,
+    battleHistoryIndicatesActivity,
+    type BattleHistoryPayload,
+} from './BattleHistoryCard';
 import PlayerEfficiencyBadges from './PlayerEfficiencyBadges';
 import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
 import { resilientDynamicImport } from './resilientDynamicImport';
@@ -190,6 +196,44 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
             setActiveTab((current) => (current === 'activity' ? 'ships' : current));
         }
     }, []);
+
+    // Re-light a dark Activity tab when a visit-driven WG fetch backfills battle
+    // history. Once the card reports empty, the parent switches focus to Ships
+    // and the card UNMOUNTS (it only renders while Activity is active), so it can
+    // never re-report on its own. Instead, while Activity is dark, re-probe the
+    // battle-history endpoint on each live-refresh (`refreshNonce` bump from
+    // usePlayerLiveRefresh) and, if data has now landed, light the tab back up.
+    // Crucially we route through handleActivityAvailability(true), which sets
+    // availability WITHOUT touching activeTab — the user stays on whatever tab
+    // they're reading; the Activity button just un-darkens so they can click in.
+    // Bounded, not a poll: gated to `activityAvailable === false` (rare — only
+    // players who loaded with no battle history) and fires at most once per
+    // refresh cycle, deduping onto the card's cache via the shared cacheKey.
+    useEffect(() => {
+        if (activityAvailable !== false) return;
+        if (isLoading) return;
+        // refreshNonce 0 is the initial mount, where the card itself is still
+        // doing its own first availability report — nothing to re-probe yet.
+        if (refreshNonce === 0) return;
+        let cancelled = false;
+        fetchSharedJson<BattleHistoryPayload>(
+            battleHistoryFetchUrl(playerName, realm),
+            {
+                label: `Activity re-probe ${playerName}`,
+                ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
+                cacheKey: battleHistoryCacheKey(playerName, realm, 'month', 'random', 0, refreshNonce),
+            },
+        )
+            .then(({ data }) => {
+                if (cancelled) return;
+                if (battleHistoryIndicatesActivity(data)) {
+                    // Light up only — never switches focus to Activity.
+                    handleActivityAvailability(true);
+                }
+            })
+            .catch(() => { /* leave the tab dark on error; next cycle retries */ });
+        return () => { cancelled = true; };
+    }, [activityAvailable, refreshNonce, isLoading, playerName, realm, handleActivityAvailability]);
 
     useEffect(() => {
         setProfileChartPayload(null);

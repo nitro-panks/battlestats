@@ -124,6 +124,19 @@ export const prefetchBattleHistory = (playerName: string, realm: string): void =
     }).catch(() => { /* the card re-fetches + surfaces errors on mount */ });
 };
 
+// Single source of truth for "does this payload represent activity worth
+// lighting the Activity tab for?" Shared by the card's own one-shot
+// availability report and PlayerDetailInsightsTabs' re-probe (which re-lights a
+// previously-dark tab when a visit-driven WG fetch backfills battle history).
+// Ranked-only players have 0 random battles at the default window but still
+// have activity (the card auto-switches to Ranked), so a ranked mode counts as
+// available even when the random totals are empty.
+export const battleHistoryIndicatesActivity = (payload: BattleHistoryPayload): boolean => {
+    const hasBattles = !!(payload.totals && payload.totals.battles > 0);
+    const modes = payload.available_modes ?? ['random'];
+    return hasBattles || modes.includes('ranked');
+};
+
 interface BattleHistoryCardProps {
     playerName: string;
     realm: string;
@@ -759,13 +772,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             return;
         }
         if (!payload) return;
-        const hasBattles = !!(payload.totals && payload.totals.battles > 0);
-        const modes = payload.available_modes ?? ['random'];
         availabilityReportedRef.current = true;
-        // Ranked-only players have 0 random battles at the default window but
-        // still have activity (the card auto-switches to Ranked), so a ranked
-        // mode counts as available even when the random totals are empty.
-        onAvailabilityChange(hasBattles || modes.includes('ranked'));
+        onAvailabilityChange(battleHistoryIndicatesActivity(payload));
     }, [payload, error, onAvailabilityChange]);
 
     const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({

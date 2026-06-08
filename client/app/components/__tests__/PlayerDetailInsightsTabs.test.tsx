@@ -180,6 +180,72 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false');
     });
 
+    it('re-lights a dark Activity tab when a refresh backfills battle history, without stealing focus', async () => {
+        // First load: zero battles → Activity darks out, focus falls to Ships.
+        // A later visit-driven WG fetch (refreshNonce bump) backfills battles.
+        let hasBattlesNow = false;
+        const battleHistoryPayload = (battles: number) => ({
+            data: {
+                as_of: '2026-06-06T00:00:00Z',
+                available_modes: ['random'],
+                totals: {
+                    battles, wins: battles, losses: 0, win_rate: battles ? 100 : 0,
+                    damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                    planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                },
+                by_ship: [],
+                by_day: [],
+            },
+            headers: {},
+        });
+        mockFetchSharedJson.mockImplementation((url) => {
+            if (url.includes('/api/fetch/player_correlation/tier_type/')) {
+                return new Promise(() => { });
+            }
+            if (url.includes('/battle-history/')) {
+                return Promise.resolve(battleHistoryPayload(hasBattlesNow ? 42 : 0));
+            }
+            return Promise.resolve({ data: [], headers: {} });
+        });
+
+        const props = {
+            playerId: 101,
+            playerName: 'LateBloomer',
+            pvpRatio: 55,
+            pvpSurvivalRate: 40,
+            pvpBattles: 800,
+            playerScore: null,
+            hasKnownRankedGames: true,
+            hasClan: true,
+            efficiencyRows: [],
+        };
+
+        const { rerender } = render(
+            <PlayerDetailInsightsTabs {...props} refreshNonce={0} />,
+        );
+
+        // Dark-out + focus fallback to Ships.
+        await waitFor(() => {
+            expect(screen.getByRole('tab', { name: 'Activity' })).toBeDisabled();
+        });
+        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
+
+        // The refresh lands with battle history present.
+        hasBattlesNow = true;
+        await act(async () => {
+            rerender(<PlayerDetailInsightsTabs {...props} refreshNonce={1} />);
+            await Promise.resolve();
+        });
+
+        // Activity lights back up...
+        await waitFor(() => {
+            expect(screen.getByRole('tab', { name: 'Activity' })).not.toBeDisabled();
+        });
+        // ...but focus stays where the user left it (Ships) — never yanked to Activity.
+        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false');
+    });
+
     it('fires name-baked player-insights events per tab (readable label, not the internal id)', () => {
         render(
             <PlayerDetailInsightsTabs
