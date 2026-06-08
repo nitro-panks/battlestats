@@ -214,8 +214,8 @@ describe('PlayerDetail efficiency-rank icon', () => {
         );
 
         const status = screen.getByTestId('live-refresh-status');
-        expect(status).toHaveTextContent('Loading');
-        // The in-progress "Loading…" pill uses the animated rainbow text so the
+        expect(status).toHaveTextContent('Updating');
+        // The in-progress "Updating…" pill uses the animated rainbow text so the
         // refresh is hard to miss; the steady-state "Next update" text does not.
         expect(status).toHaveClass('rainbow-text');
     });

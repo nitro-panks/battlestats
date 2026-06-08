@@ -9,10 +9,24 @@ import type { PlayerData } from './entityTypes';
 export const PLAYER_REFRESH_PENDING_HEADER = 'X-Player-Refresh-Pending';
 export const PLAYER_NEXT_REFRESH_HEADER = 'X-Player-Next-Refresh';
 
-const POLL_INTERVAL_MS = 6_000;
-const POLL_LIMIT = 30; // ~3 min ceiling — long enough to catch a queued refresh,
-// bounded so a slow/failed one can't poll forever. Polls are lightweight header
-// checks; the page only re-hydrates ONCE, when the refresh actually lands.
+// Poll cadence: FAST at first, then back off. A visit refresh typically lands
+// in ~2s (the upstream WG fetch + DB write), so polling every 2s for the first
+// few attempts clears the "Updating…" pill promptly once it's done — instead of
+// leaving it up for the better part of a 6s tick after the data is already
+// fresh (the "looks like it hung" complaint). After the fast window we settle to
+// a steady 6s so a slow/queued/failed refresh doesn't hammer the endpoint.
+const POLL_FAST_INTERVAL_MS = 2_000;
+const POLL_SLOW_INTERVAL_MS = 6_000;
+const POLL_FAST_ATTEMPTS = 4; // first ~8s polled at 2s spacing
+const POLL_LIMIT = 33; // ~3 min ceiling (4×2s + 29×6s ≈ 182s) — long enough to
+// catch a queued refresh, bounded so a slow/failed one can't poll forever. Polls
+// are lightweight header checks; the page only re-hydrates ONCE, when the refresh
+// actually lands.
+
+// Delay before the (attempt+1)-th poll. `attempt` is the number of polls already
+// completed (0 before the first), so the initial delay uses pollDelayMs(0).
+const pollDelayMs = (attempt: number): number =>
+    attempt < POLL_FAST_ATTEMPTS ? POLL_FAST_INTERVAL_MS : POLL_SLOW_INTERVAL_MS;
 
 export type LiveRefreshPhase = 'loading' | 'cooldown';
 
@@ -122,7 +136,7 @@ export const usePlayerLiveRefresh = ({
                 if (attempt < POLL_LIMIT) {
                     // Still refreshing — keep checking the header, but do NOT touch
                     // playerData/refreshNonce (no re-render storm, no chart reloads).
-                    timer = setTimeout(poll, POLL_INTERVAL_MS);
+                    timer = setTimeout(poll, pollDelayMs(attempt));
                 } else {
                     // Gave up waiting — stop the spinner without forcing a reload;
                     // the countdown reflects whatever freshness we have.
@@ -138,7 +152,7 @@ export const usePlayerLiveRefresh = ({
             }
         };
 
-        timer = setTimeout(poll, POLL_INTERVAL_MS);
+        timer = setTimeout(poll, pollDelayMs(0));
         return () => {
             cancelled = true;
             if (timer) clearTimeout(timer);

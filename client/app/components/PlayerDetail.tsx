@@ -470,7 +470,12 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                             aria-live="polite"
                                             data-testid="live-refresh-status"
                                         >
-                                            Loading…
+                                            {/* "Updating…" not "Loading…": the page already
+                                                shows full content (profile + cached battles);
+                                                this pill marks a background freshness top-up of
+                                                the whole profile. "Loading" read as a hang/timeout
+                                                to users when the refresh took tens of seconds. */}
+                                            Updating…
                                         </span>
                                     ) : refreshStatus.secondsRemaining > 0 ? (
                                         <span
