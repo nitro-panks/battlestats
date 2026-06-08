@@ -39,7 +39,9 @@ const DEFAULT_RANDOMS_DESIGN: RandomsChartDesign = 'design1';
 // at roughly the same density the old fixed-height (top-20) chart rendered at.
 const RANDOMS_ROW_HEIGHT_PX = 22;
 // Visible height of the scroll viewport; taller ship lists scroll within this.
-const RANDOMS_CHART_MAX_VIEWPORT_PX = 520;
+// Matches the Activity-tab battle-history table cap (800px) so the Ships chart
+// uses the same vertical room instead of being pinned to a shorter box.
+const RANDOMS_CHART_MAX_VIEWPORT_PX = 800;
 // Floor for the battles bar so low-volume tail ships stay visible rather than
 // collapsing to a 1px sliver on the linear scale. The wins overlay stays a true
 // fraction of this (possibly floored) width, so win rate reads correctly.

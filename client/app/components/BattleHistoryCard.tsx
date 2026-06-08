@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import wrColor from '../lib/wrColor';
 import { chartColors } from '../lib/chartTheme';
@@ -131,6 +131,20 @@ interface BattleHistoryCardProps {
     // Bumped by the live-update poll; folded into the fetch deps + cacheKey so
     // the battle-history re-fetches after a visit-driven refresh lands.
     refreshNonce?: number;
+    // `embedded` drops the standalone card chrome (border/bg/margin) so the card
+    // can live inside the Insights "Activity" tab panel, which already provides
+    // the surrounding surface. Embedded mode also never collapses to bare `null`
+    // on the pristine-empty default — it renders the sparkline/header/pills/
+    // "no battles" chrome instead, so an active tab is never blank. Hard `null`
+    // (error / no payload) is reserved for the no-content states the parent
+    // handles by switching tabs.
+    embedded?: boolean;
+    // Reports whether the card has any activity worth surfacing, so the parent
+    // can pick the default tab and dark-out the Activity tab when there's
+    // nothing to show. Fired once per (player, realm) from the first resolved
+    // payload — never re-fired on user window/mode switches, so toggling to an
+    // empty window can't retroactively disable the tab the user is on.
+    onAvailabilityChange?: (available: boolean) => void;
 }
 
 const formatInt = (n: number): string => n.toLocaleString();
@@ -602,6 +616,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     realm,
     days = 7,
     refreshNonce = 0,
+    embedded = false,
+    onAvailabilityChange,
 }) => {
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
     const [monthByDay, setMonthByDay] = useState<BattleHistoryByDay[]>([]);
@@ -726,6 +742,32 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         }
     }, [payload?.available_modes, mode, userPickedMode]);
 
+    // Availability is a one-shot, stable signal: report it from the FIRST
+    // resolved payload (or error) per (player, realm), then latch. Basing it on
+    // the live `window`/`mode` would let a user toggling to an empty window flip
+    // the signal false and disable the Activity tab they're actively reading.
+    const availabilityReportedRef = useRef(false);
+    useEffect(() => {
+        availabilityReportedRef.current = false;
+    }, [playerName, realm]);
+
+    useEffect(() => {
+        if (!onAvailabilityChange || availabilityReportedRef.current) return;
+        if (error) {
+            availabilityReportedRef.current = true;
+            onAvailabilityChange(false);
+            return;
+        }
+        if (!payload) return;
+        const hasBattles = !!(payload.totals && payload.totals.battles > 0);
+        const modes = payload.available_modes ?? ['random'];
+        availabilityReportedRef.current = true;
+        // Ranked-only players have 0 random battles at the default window but
+        // still have activity (the card auto-switches to Ranked), so a ranked
+        // mode counts as available even when the random totals are empty.
+        onAvailabilityChange(hasBattles || modes.includes('ranked'));
+    }, [payload, error, onAvailabilityChange]);
+
     const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
         key: 'battles', direction: 'desc',
     });
@@ -767,8 +809,21 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // made it blink out and back in, shifting the page content. Holding the
     // prior data lets React reconcile the new rows in place — a smooth swap.
     // (The header live-refresh pill already signals "Loading…" during the pull.)
-    if (error || !payload) {
+    if (error) {
         return null;
+    }
+    if (!payload) {
+        // Embedded in the Activity tab the panel is already active, so a bare
+        // null would read as a blank tab. Show a skeleton until the first
+        // payload (warmed by PlayerRouteView's prefetch, so usually instant).
+        return embedded ? (
+            <div
+                className="flex animate-pulse items-center justify-center rounded-md border border-[var(--accent-faint)] bg-[var(--bg-surface)] text-sm text-[var(--text-muted)]"
+                style={{ minHeight: 360 }}
+            >
+                Loading activity…
+            </div>
+        ) : null;
     }
     const totals = payload?.totals;
     const hasBattles = !!(totals && typeof totals.battles === 'number'
@@ -785,12 +840,15 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         : hasRanked
             ? ['ranked']
             : [];
-    // Hide the card only when the user is at the implicit defaults
+    // Standalone: hide the card when the user is at the implicit defaults
     // (mode=random, window=month — matching the always-month sparkline) AND
     // there's no data — the card never appears for players with no random
     // battles in the default 30d window. Any explicit user pick (different mode
     // or window) keeps the card visible so the pill row stays reachable.
-    if (!payload || (
+    // Embedded: never collapse to null here — the Activity tab is already active,
+    // so render the chrome (sparkline/header/pills/"no battles") instead. The
+    // parent dark-outs the tab and switches away when availability is false.
+    if (!embedded && (
         !hasBattles
         && mode === 'random' && !userPickedMode
         && window === 'month' && !userPickedWindow
@@ -809,11 +867,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     return (
         <section
             data-testid="battle-history-card"
-            className="mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5"
+            className={embedded
+                ? 'w-full'
+                : 'mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5'}
             aria-label="Recent battles"
         >
-            <div className="w-full pb-6">{sparkline}</div>
-            <hr className="mb-6 border-[var(--accent-faint)]" />
+            <div className="w-full pb-5">{sparkline}</div>
+            <hr className="mb-5 border-[var(--accent-faint)]" />
             <header className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex flex-wrap items-baseline gap-3">
                     <h2 className="whitespace-nowrap text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
@@ -952,9 +1012,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     </div>
                 );
             })()}
+            {/* Embedded in the Activity tab the card has the whole panel to grow
+                into, so give the table a tall cap (800px) instead of the short
+                60vh box — more ship rows show before the inner scroll kicks in.
+                Standalone keeps the compact 60vh. */}
             {hasBattles && (
-            <div className="mt-6 max-h-[60vh] overflow-auto border-t border-[var(--accent-faint)] pt-4">
-                <table className="w-full text-left text-sm">
+            <div className={`mt-5 overflow-auto border-t border-[var(--accent-faint)] pt-4 ${embedded ? 'max-h-[800px]' : 'max-h-[60vh]'}`}>
+                <table className="w-full min-w-[34rem] text-left text-sm">
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
                             <SortableTh sortKey="ship_name" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship played in the period. Click to sort A–Z.">Ship</SortableTh>

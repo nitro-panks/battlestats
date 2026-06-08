@@ -43,7 +43,10 @@ const BADGE_CHIP_CLASSNAMES: Record<number, string> = {
     4: 'border-[#cbd5e1] bg-[#f8fafc] text-[#64748b]',
 };
 
-const BADGE_TABLE_VISIBLE_ROWS = 10;
+// Rows visible before the table scrolls. Sized so the scroll viewport fills the
+// Insights tab's ~800px of vertical room (2.5rem header + 16 * 2.9rem ≈ 782px),
+// matching the Activity table / Ships chart instead of a short pinned box.
+const BADGE_TABLE_VISIBLE_ROWS = 16;
 const BADGE_TABLE_HEADER_HEIGHT_REM = 2.5;
 const BADGE_TABLE_ROW_HEIGHT_REM = 2.9;
 

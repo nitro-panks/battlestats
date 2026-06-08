@@ -24,7 +24,10 @@ interface PlayerClanBattleSeasonsProps {
     onSummaryChange?: (summary: PlayerClanBattleSummary | null) => void;
 }
 
-const CLAN_BATTLE_TABLE_VISIBLE_ROWS = 10;
+// Rows visible before the table scrolls. Sized so the scroll viewport fills the
+// Insights tab's ~800px of vertical room (2.25rem header + 14 * 3.25rem ≈ 764px),
+// matching the Activity table / Ships chart instead of a short pinned box.
+const CLAN_BATTLE_TABLE_VISIBLE_ROWS = 14;
 const CLAN_BATTLE_TABLE_HEADER_HEIGHT_REM = 2.25;
 const CLAN_BATTLE_TABLE_ROW_HEIGHT_REM = 3.25;
 
