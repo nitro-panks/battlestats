@@ -159,8 +159,9 @@ class EnrichmentLiftReportCommandTests(TestCase):
 
 
 class EnrichmentPoolMaintenanceTaskTests(TestCase):
-    """The daily DB-only maintenance task: reclassify drift + cooldown-guarded
-    re-queue of empty false-negatives, feeding the crawler's pending pool."""
+    """The daily DB-only maintenance task: cooldown-guarded re-queue of empty
+    false-negatives, feeding the crawler's pending pool. (Full-catalog reclassify
+    is intentionally NOT run here — it is a supervised manual op; see the runbook.)"""
 
     def _mk(self, **kw):
         defaults = dict(
@@ -171,11 +172,8 @@ class EnrichmentPoolMaintenanceTaskTests(TestCase):
         return Player.objects.create(**defaults)
 
     @mock.patch.dict(os.environ, {"ENRICHMENT_EMPTY_RETRY_AFTER_DAYS": "14"})
-    def test_maintenance_reclassifies_drift_and_requeues_stale_empties(self):
-        # un-hidden drift: still labelled skipped_hidden but now visible+eligible
-        drift = self._mk(name="UnHidden", player_id=6001,
-                        enrichment_status=Player.ENRICHMENT_SKIPPED_HIDDEN)
-        # empty false-negative, last attempt well past the cooldown
+    def test_maintenance_requeues_stale_empties_with_cooldown(self):
+        # empty false-negative, last attempt well past the cooldown -> re-queued
         stale_empty = self._mk(name="StaleEmpty", player_id=6002,
                                enrichment_status=Player.ENRICHMENT_EMPTY,
                                battles_json=[],
@@ -185,15 +183,9 @@ class EnrichmentPoolMaintenanceTaskTests(TestCase):
                               enrichment_status=Player.ENRICHMENT_EMPTY,
                               battles_json=[],
                               battles_updated_at=timezone.now() - timedelta(days=2))
-        # genuinely below the battle floor: must settle to skipped_low_battles
-        low_bat = self._mk(name="LowBat", player_id=6004, pvp_battles=100,
-                          enrichment_status=Player.ENRICHMENT_PENDING)
 
         result = enrichment_pool_maintenance_task()
         self.assertEqual(result["status"], "ok")
-
-        drift.refresh_from_db()
-        self.assertEqual(drift.enrichment_status, Player.ENRICHMENT_PENDING)
 
         stale_empty.refresh_from_db()
         self.assertEqual(stale_empty.enrichment_status, Player.ENRICHMENT_PENDING)
@@ -202,10 +194,6 @@ class EnrichmentPoolMaintenanceTaskTests(TestCase):
         fresh_empty.refresh_from_db()
         self.assertEqual(fresh_empty.enrichment_status, Player.ENRICHMENT_EMPTY)
         self.assertEqual(fresh_empty.battles_json, [])
-
-        low_bat.refresh_from_db()
-        self.assertEqual(low_bat.enrichment_status,
-                         Player.ENRICHMENT_SKIPPED_LOW_BATTLES)
 
     @mock.patch.dict(os.environ, {"ENRICHMENT_POOL_MAINTENANCE_ENABLED": "0"})
     def test_kill_switch_disables_task(self):

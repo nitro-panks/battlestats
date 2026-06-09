@@ -488,12 +488,14 @@ def register_periodic_schedules(sender, **kwargs):
     )
 
     # -- Enrichment Pool Maintenance (daily, DB-only, crawl-safe) --
-    # Keeps the `pending` pool honest so no eligible player stays parked invisibly:
-    # reclassifies skipped_* drift (un-hidden / threshold-crossers / WR-recoveries)
-    # and re-queues `empty` false-negatives with a per-row cooldown convergence
-    # guard. Issues no WG calls, so it coexists with multi-day crawls (it does not
-    # defer like enrichment itself). Single daily run; the task loops realms
-    # internally. Kill switch: ENRICHMENT_POOL_MAINTENANCE_ENABLED (default on).
+    # Re-surfaces `empty` false-negatives (private-at-fetch accounts now public)
+    # into `pending` with a per-row cooldown convergence guard, so they don't stay
+    # parked invisibly to the crawler. Index-backed (enrichment_status) + no WG
+    # calls, so it's cheap and coexists with multi-day crawls (no deferral). Kill
+    # switch: ENRICHMENT_POOL_MAINTENANCE_ENABLED (default on). The heavier
+    # full-catalog reclassify (skipped_* drift) is deliberately NOT scheduled —
+    # prod sizing showed ~36 min/run on the 1-vCPU PG; it stays a supervised manual
+    # op pending an incremental redesign. See runbook-enrichment-pool-maintenance.
     pool_maint_enabled = _env_flag("ENRICHMENT_POOL_MAINTENANCE_ENABLED", True)
     pool_maint_schedule, _ = CrontabSchedule.objects.get_or_create(
         minute="17",
@@ -512,7 +514,7 @@ def register_periodic_schedules(sender, **kwargs):
             "enabled": pool_maint_enabled,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
-            "description": "Daily DB-only pass that reclassifies enrichment_status drift and re-queues empty false-negatives (with a per-row cooldown) so the pending pool stays complete. Coexists with crawls.",
+            "description": "Daily DB-only, index-backed pass that re-queues empty enrichment false-negatives (with a per-row cooldown) so the pending pool stays complete. Coexists with crawls. Full reclassify is a separate supervised op.",
         },
     )
 

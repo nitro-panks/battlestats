@@ -407,21 +407,29 @@ Re-queued 2,691 visible+active+WR≥48 empties (`retry_empty_enrichments --apply
 
 **Broader lift** (`enrichment_lift_report --since 2026-06-09T03:10`): **5,680 profiles recovered to complete**, **5,674 high-tier rankable**, **3,037 newly Landing-Best board-eligible** (`>2500 battles ∧ ht≥50 ∧ active≤180d` — up from 0). But only **15** clear the live ~73% high-tier-WR top-25 bar, and the high-tier WR distribution is **84% (4,742) <60%**, 858 at 60–65%, just 31 ≥70%. **Conclusion:** the cohort is genuinely strong but upper-*middle* at high tier — career 60–75% WR collapses to ~55–60% at T5–10, far below the 73%+ ultra-elite top-25. The fix's value is **profile/coverage recovery (~5.7K complete profiles, ~3K back in the candidate pool)**, not the visible leaderboards. Commands are read-only by default; `retry_empty_enrichments` requires `--apply` to write.
 
-### SHIPPED 2026-06-09 (durable) — fix-priority #1 + #2 are now automatic
+### SHIPPED 2026-06-09 (durable) — fix #1 automated; fix #2 stays supervised
 
-The one-shot drain above stopped regrowing manually. Fixes **#1 (retry empties)** and
-**#2 (schedule reclassify)** are now a single daily DB-only task,
-`enrichment_pool_maintenance_task` (`enrichment-pool-maintenance`, 08:17 UTC), which
-**coexists with crawls** (issues no WG calls, so it does not defer). It runs per-realm
-`reclassify_enrichment_status` + `retry_empty_enrichments --apply --retry-after-days 14`.
+Fix **#1 (retry empties)** is now automatic: daily DB-only `enrichment_pool_maintenance_task`
+(`enrichment-pool-maintenance`, 08:17 UTC) runs `retry_empty_enrichments --apply
+--retry-after-days 14`. It is index-backed (`enrichment_status`) and issues no WG calls, so
+it's cheap and **coexists with crawls** (no deferral). The blocker that made scheduling it
+unsafe — an **unbounded re-fetch loop** on genuinely-empty rows — is closed by a
+**convergence guard**: the new `--retry-after-days N` flag gates on `battles_updated_at`
+(bumped on every empty write), so a stuck `empty` is re-fetched at most once per N days
+while accounts that went public still converge to `enriched`. Kill switch
+`ENRICHMENT_POOL_MAINTENANCE_ENABLED`.
 
-The blocker that made scheduling `retry_empty` unsafe — an **unbounded re-fetch loop** on
-genuinely-empty rows — is closed by a **convergence guard**: the new
-`--retry-after-days N` flag gates on `battles_updated_at` (bumped on every empty write), so
-a stuck `empty` is re-fetched at most once per N days while accounts that went public still
-converge to `enriched`. Kill switch `ENRICHMENT_POOL_MAINTENANCE_ENABLED`. Full runbook:
+Fix **#2 (schedule full reclassify)** was **deliberately NOT automated** after prod sizing
+(2026-06-09): the full-catalog `reclassify_enrichment_status` runs **na 879s / eu 639s /
+asia 668s ≈ 36 min** on the 1-vCPU PG, and the clan crawl is quasi-permanent so there is no
+scheduling trough. Its ~230K-row change-set (~71K `→enriched` benign corrections, ~47K
+`→pending` newly-eligible rescues) is a **one-time accumulated backlog**, not daily drift.
+So reclassify stays a **supervised manual op**; the durable automation path is an
+*incremental* reclassify scoped to `last_fetch` within ~25h, which needs a **`last_fetch`
+index** (currently unindexed) — a scoped follow-up. Full runbook + procedures:
 `agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md`.
 
-**Still open — fix #3 (decouple enrichment from hard crawl-deferral / WG token-bucket
-limiter).** This maintenance keeps the *pool* correct during a crawl, but the WG-fetch arm
-still only drains in crawl-free windows. That throughput fix is a larger, separate change.
+**Still open:** (a) the one-time ~230K reclassify backlog clear (supervised; surfaces ~47K
+eligible players + ~71K enriched corrections); (b) `last_fetch` index + `--recent-hours`
+incremental reclassify to automate drift rescue; (c) **fix #3** — decouple enrichment's
+WG-fetch arm from hard crawl-deferral (WG token-bucket limiter), the larger throughput change.
