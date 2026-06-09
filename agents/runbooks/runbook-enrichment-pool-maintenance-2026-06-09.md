@@ -102,9 +102,10 @@ command default) disables the cooldown for manual one-shot drains.
 | `ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUT` | `420` | Per-statement Postgres `statement_timeout` (seconds) for the drift task — sized above a single bucket UPDATE's ~2-3 min real cost so it caps a runaway without aborting normal work. |
 | `ENRICH_MIN_PVP_BATTLES` / `ENRICH_MIN_WR` | `500` / `48.0` | Shared eligibility thresholds; reclassify + retry read the same vars. |
 
-Task limits: drift task `soft_time_limit=720s` / `time_limit=840s`, per-realm single-flight
-lock 20 min (outlives the hard limit so a slow run can't lose its lock mid-pass); empty
-re-queue task 540s/600s.
+Task limits: drift task `soft_time_limit=1080s` / `time_limit=1200s` (eu, the heaviest
+realm, measured ~11 min under load — high variance, so generous headroom), per-realm
+single-flight lock 25 min (outlives the hard limit so a slow run can't lose its lock
+mid-pass); empty re-queue task 540s/600s.
 
 ## Operate
 

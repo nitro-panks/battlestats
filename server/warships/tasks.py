@@ -2256,7 +2256,7 @@ def startup_warm_caches_task():
 
 # Lock must outlive the per-realm reclassify hard time_limit so a slow run can't
 # lose its lock mid-pass and let a second invocation start on top of it.
-ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT = 20 * 60
+ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT = 25 * 60
 
 
 @app.task(
@@ -2315,8 +2315,8 @@ def enrichment_pool_maintenance_task():
 @app.task(
     bind=True,
     queue='background',
-    time_limit=840,         # 14 min hard — one realm's apply is ~6 min under load
-    soft_time_limit=720,    # 12 min soft
+    time_limit=1200,        # 20 min hard — generous headroom over the heaviest realm
+    soft_time_limit=1080,   # 18 min soft (eu measured ~11 min under load; variance is high)
     ignore_result=True,
 )
 def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
