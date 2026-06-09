@@ -105,6 +105,10 @@ def _daily_observation_floor_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:daily_observation_floor:{realm}:lock"
 
 
+def _snapshot_active_players_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:snapshot_active_players:{realm}:lock"
+
+
 def _landing_page_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_landing_page_content:{realm}:lock"
 
@@ -1445,6 +1449,39 @@ def incremental_player_refresh_task(self, realm=DEFAULT_REALM):
                 os.getenv('PLAYER_REFRESH_WARM_LOOKBACK_DAYS', '90')),
             max_errors=int(os.getenv('PLAYER_REFRESH_MAX_ERRORS', '25')),
             realm=realm,
+        )
+        return {"status": "completed"}
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, **CRAWL_TASK_OPTS)
+def snapshot_active_players_task(self, realm=DEFAULT_REALM):
+    """Write daily Snapshot rows for the active base.
+
+    Deliberately COEXISTS with clan crawls (no deferral) — it is light
+    (bulk account/info, ~1 WG call per 100 players) and must run every UTC
+    day regardless of crawl windows so day-over-day tracking has no gaps.
+    Idempotent per day: players already snapshotted today are skipped, so
+    frequent runs converge on full coverage without redundant work.
+    """
+    if os.getenv("SNAPSHOT_ACTIVE_PLAYERS_ENABLED", "1") != "1":
+        return {"status": "skipped", "reason": "disabled"}
+
+    lock_key = _snapshot_active_players_lock_key(realm)
+    if not cache.add(lock_key, self.request.id, timeout=PLAYER_REFRESH_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping snapshot_active_players_task — another snapshot run is active for %s", realm)
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        call_command(
+            'snapshot_active_players',
+            realm=realm,
+            active_days=int(os.getenv('SNAPSHOT_ACTIVE_DAYS', '7')),
+            limit=int(os.getenv('SNAPSHOT_ACTIVE_LIMIT', '3000')),
+            min_battles=int(os.getenv('SNAPSHOT_ACTIVE_MIN_BATTLES', '0')),
+            delay=float(os.getenv('SNAPSHOT_ACTIVE_DELAY', '0.2')),
         )
         return {"status": "completed"}
     finally:

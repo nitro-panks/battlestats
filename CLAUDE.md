@@ -117,7 +117,7 @@ Resilience: `CELERY_TASK_ACKS_LATE = True` (at-least-once delivery); RabbitMQ `c
 
 ### Per-realm schedule striping
 
-Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` in `signals.py` so at most one realm is mid-cycle at a time. `_realm_crontab_for_cycle()` computes per-realm crontabs. Daily/weekly-cron families use `REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}`. The rolling BattleObservation floor (cadence `BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES`, per-realm striped) guarantees no active-7d player goes >`BATTLE_OBSERVATION_FLOOR_HOURS` without a fresh observation.
+Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu': 1, 'asia': 2}` in `signals.py` so at most one realm is mid-cycle at a time. `_realm_crontab_for_cycle()` computes per-realm crontabs. Daily/weekly-cron families use `REALM_CRAWL_CRON_HOURS = {'eu': 0, 'na': 6, 'asia': 12}`. The rolling BattleObservation floor (cadence `BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES`, per-realm striped) guarantees no active-7d player goes >`BATTLE_OBSERVATION_FLOOR_HOURS` without a fresh observation. The daily-snapshot engine (`snapshot_active_players_task`, per-realm striped, **coexists with crawls** — does not defer) writes a daily `Snapshot` row for every active player via bulk account/info; kill switch `SNAPSHOT_ACTIVE_PLAYERS_ENABLED`. Runbook: `agents/runbooks/runbook-daily-active-snapshots-2026-06-09.md`.
 
 ### Infra notes
 

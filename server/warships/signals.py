@@ -594,6 +594,42 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
+    # -- Daily Active-Player Snapshots (per realm) --
+    # The value-prop engine: writes a daily Snapshot row (cumulative battles/
+    # wins + day-over-day interval) for every active player so progress tracking
+    # has no gaps. Light (bulk account/info, ~1 WG call per 100 players) and it
+    # COEXISTS with clan crawls (unlike incremental refresh, which defers), so
+    # coverage is guaranteed each UTC day. Idempotent per day → frequent runs
+    # converge on full coverage. Always enabled (independent of
+    # ENABLE_CRAWLER_SCHEDULES); kill via SNAPSHOT_ACTIVE_PLAYERS_ENABLED=0. The
+    # base_minute=15 lane keeps it off the incremental (:05) and minute-0
+    # boundaries on the 1-vCPU DB.
+    snapshot_active_minutes = int(
+        os.getenv("SNAPSHOT_ACTIVE_INTERVAL_MINUTES", "30"))
+    for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, snapshot_active_minutes, base_minute=15)
+        snapshot_active_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"snapshot-active-players-{realm}",
+            defaults={
+                "task": "warships.tasks.snapshot_active_players_task",
+                "crontab": snapshot_active_schedule,
+                "interval": None,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Daily active-player snapshot engine ({realm.upper()}). Coexists with clan crawls; kill via SNAPSHOT_ACTIVE_PLAYERS_ENABLED=0.",
+            },
+        )
+
     # -- Incremental Ranked Refresh (per realm) --
     # Default 120 min cycle, striped per realm. With 3 realms the stride is
     # 40 min, then shifted by the base_minute=25 lane: NA at :25 of even
