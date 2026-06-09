@@ -20,9 +20,11 @@ so reclassified rows stay consistent with what the live crawler will pick up):
 ``warships.tasks.enrich_player_data_task`` so the two stay in lockstep.
 """
 import os
+from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 
 from warships.models import Player
 
@@ -44,18 +46,34 @@ class Command(BaseCommand):
             '--dry-run', action='store_true',
             help='Print what would change without writing.',
         )
+        parser.add_argument(
+            '--recent-hours', type=int, default=0,
+            help='Incremental mode: only reclassify rows fetched within this many '
+                 'hours (last_fetch >= now - N hours). Drift-relevant fields '
+                 '(is_hidden / pvp_battles / pvp_ratio / days_since_last_battle) '
+                 'only change on a WG re-fetch, which bumps last_fetch — so the '
+                 'recent set holds every row that could have newly drifted, at a '
+                 'fraction of the full-catalog scan. Default 0 = full catalog. '
+                 'Misses pure-calendar inactivity crossings (no re-fetch) — run a '
+                 'periodic full pass for those.',
+        )
 
     def handle(self, *args, **opts):
         realm = opts.get('realm')
         dry_run = opts.get('dry_run', False)
+        recent_hours = opts.get('recent_hours', 0)
 
         base = Player.objects.all()
         if realm:
             base = base.filter(realm=realm)
+        if recent_hours and recent_hours > 0:
+            cutoff = timezone.now() - timedelta(hours=recent_hours)
+            base = base.filter(last_fetch__gte=cutoff)
 
+        scope = f"recent<={recent_hours}h" if recent_hours and recent_hours > 0 else "full-catalog"
         self.stdout.write(
             f"Thresholds: MIN_PVP_BATTLES={MIN_PVP_BATTLES} "
-            f"MIN_WR={MIN_WR} MAX_INACTIVE_DAYS={MAX_INACTIVE_DAYS}"
+            f"MIN_WR={MIN_WR} MAX_INACTIVE_DAYS={MAX_INACTIVE_DAYS} scope={scope}"
         )
 
         # Order matters: most specific buckets first so the cheaper updates

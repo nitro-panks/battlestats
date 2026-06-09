@@ -104,6 +104,46 @@ class RetryEmptyEnrichmentsCommandTests(TestCase):
         self.assertEqual(fresh.enrichment_status, Player.ENRICHMENT_PENDING)
 
 
+class ReclassifyRecentHoursTests(TestCase):
+    """Incremental reclassify: --recent-hours scopes the pass to recently-fetched
+    rows so the daily drift rescue doesn't scan the full catalog."""
+
+    def _mk(self, **kw):
+        # A skipped_hidden row that is now visible+eligible -> should reclassify
+        # to pending, but only if it falls inside the recency window.
+        defaults = dict(
+            realm="na", is_hidden=False, pvp_battles=3000, pvp_ratio=60.0,
+            days_since_last_battle=1, battles_json=None,
+            enrichment_status=Player.ENRICHMENT_SKIPPED_HIDDEN,
+        )
+        defaults.update(kw)
+        return Player.objects.create(**defaults)
+
+    def test_recent_hours_only_reclassifies_recently_fetched(self):
+        recent = self._mk(name="Recent", player_id=7001,
+                         last_fetch=timezone.now() - timedelta(hours=2))
+        old = self._mk(name="Old", player_id=7002,
+                      last_fetch=timezone.now() - timedelta(hours=72))
+        never = self._mk(name="Never", player_id=7003, last_fetch=None)
+
+        call_command("reclassify_enrichment_status", "--recent-hours", "25",
+                     stdout=StringIO())
+
+        recent.refresh_from_db()
+        self.assertEqual(recent.enrichment_status, Player.ENRICHMENT_PENDING)
+        # Outside the window (or never fetched) -> untouched by the incremental pass
+        for p in (old, never):
+            p.refresh_from_db()
+            self.assertEqual(p.enrichment_status, Player.ENRICHMENT_SKIPPED_HIDDEN)
+
+    def test_full_catalog_default_reclassifies_all(self):
+        old = self._mk(name="Old", player_id=7101,
+                      last_fetch=timezone.now() - timedelta(hours=72))
+        call_command("reclassify_enrichment_status", stdout=StringIO())  # no --recent-hours
+        old.refresh_from_db()
+        self.assertEqual(old.enrichment_status, Player.ENRICHMENT_PENDING)
+
+
 class EnrichmentLiftReportCommandTests(TestCase):
     def _mk(self, **kw):
         defaults = dict(
