@@ -41,8 +41,10 @@ within 25h. Drift-relevant fields (`is_hidden` / `pvp_battles` / `pvp_ratio` /
 `days_since_last_battle`) only change on a WG re-fetch, which bumps `last_fetch` — so the
 recent set holds every row that could have **newly** drifted. Index-backed by
 `player_last_fetch_idx` (migration 0067; the planner `BitmapAnd`s it with the realm/battles
-index — verified via `EXPLAIN`). Measured apply cost **~2.5–6 min/realm** depending on load
-(vs ~36 min for the full catalog).
+index — **verified via `EXPLAIN`**, which is the real guarantee of the bounded scan; the
+wall-time is load-noisy). Measured apply cost **~6–11 min/realm** depending on load (na ~6
+min, eu ~11 min) — still far under the full catalog's ~36 min, and the per-realm striping
+keeps it to one realm at a time.
 
 **Why per-realm + striped (na 08:20 / eu 08:40 / asia 09:00 UTC):** one realm at a time fits
 comfortably in a 12-min soft / 14-min hard task window, and the 1-vCPU PG sees ~6 min of
