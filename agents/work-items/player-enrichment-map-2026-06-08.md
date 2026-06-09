@@ -406,3 +406,22 @@ Re-queued 2,691 visible+active+WR≥48 empties (`retry_empty_enrichments --apply
 **Leaderboard outcome — null on the headline top-25** (recomputed landing Best, clean before/after): **0 new entrants** in any realm's `wr`/`overall` top-25.
 
 **Broader lift** (`enrichment_lift_report --since 2026-06-09T03:10`): **5,680 profiles recovered to complete**, **5,674 high-tier rankable**, **3,037 newly Landing-Best board-eligible** (`>2500 battles ∧ ht≥50 ∧ active≤180d` — up from 0). But only **15** clear the live ~73% high-tier-WR top-25 bar, and the high-tier WR distribution is **84% (4,742) <60%**, 858 at 60–65%, just 31 ≥70%. **Conclusion:** the cohort is genuinely strong but upper-*middle* at high tier — career 60–75% WR collapses to ~55–60% at T5–10, far below the 73%+ ultra-elite top-25. The fix's value is **profile/coverage recovery (~5.7K complete profiles, ~3K back in the candidate pool)**, not the visible leaderboards. Commands are read-only by default; `retry_empty_enrichments` requires `--apply` to write.
+
+### SHIPPED 2026-06-09 (durable) — fix-priority #1 + #2 are now automatic
+
+The one-shot drain above stopped regrowing manually. Fixes **#1 (retry empties)** and
+**#2 (schedule reclassify)** are now a single daily DB-only task,
+`enrichment_pool_maintenance_task` (`enrichment-pool-maintenance`, 08:17 UTC), which
+**coexists with crawls** (issues no WG calls, so it does not defer). It runs per-realm
+`reclassify_enrichment_status` + `retry_empty_enrichments --apply --retry-after-days 14`.
+
+The blocker that made scheduling `retry_empty` unsafe — an **unbounded re-fetch loop** on
+genuinely-empty rows — is closed by a **convergence guard**: the new
+`--retry-after-days N` flag gates on `battles_updated_at` (bumped on every empty write), so
+a stuck `empty` is re-fetched at most once per N days while accounts that went public still
+converge to `enriched`. Kill switch `ENRICHMENT_POOL_MAINTENANCE_ENABLED`. Full runbook:
+`agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md`.
+
+**Still open — fix #3 (decouple enrichment from hard crawl-deferral / WG token-bucket
+limiter).** This maintenance keeps the *pool* correct during a crawl, but the WG-fetch arm
+still only drains in crawl-free windows. That throughput fix is a larger, separate change.

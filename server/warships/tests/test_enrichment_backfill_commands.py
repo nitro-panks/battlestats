@@ -5,14 +5,17 @@
 
 See agents/work-items/player-enrichment-map-2026-06-08.md §12.
 """
+import os
 from datetime import timedelta
 from io import StringIO
+from unittest import mock
 
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
 from warships.models import Player, PlayerExplorerSummary
+from warships.tasks import enrichment_pool_maintenance_task
 
 
 class RetryEmptyEnrichmentsCommandTests(TestCase):
@@ -70,6 +73,36 @@ class RetryEmptyEnrichmentsCommandTests(TestCase):
         self.assertEqual(low_wr.enrichment_status, Player.ENRICHMENT_PENDING)
         self.assertIsNone(low_wr.battles_json)
 
+    def test_retry_after_days_skips_recently_attempted_empties(self):
+        # Convergence guard: a row re-emptied recently (battles_updated_at near
+        # now) must NOT be re-queued under a cooldown, so genuinely-empty rows
+        # aren't re-fetched every run. An older / never-attempted one is.
+        fresh = self._mk(name="Fresh", player_id=4301,
+                         battles_updated_at=timezone.now() - timedelta(days=2))
+        stale = self._mk(name="Stale", player_id=4302,
+                         battles_updated_at=timezone.now() - timedelta(days=30))
+        never = self._mk(name="Never", player_id=4303, battles_updated_at=None)
+
+        call_command("retry_empty_enrichments", "--apply",
+                     "--retry-after-days", "14", stdout=StringIO())
+
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.enrichment_status, Player.ENRICHMENT_EMPTY)
+        for p in (stale, never):
+            p.refresh_from_db()
+            self.assertEqual(p.enrichment_status, Player.ENRICHMENT_PENDING)
+            self.assertIsNone(p.battles_json)
+
+    def test_retry_after_days_zero_is_no_cooldown(self):
+        # Default behavior (one-shot): cooldown disabled re-queues even a
+        # just-attempted empty.
+        fresh = self._mk(name="Fresh", player_id=4401,
+                         battles_updated_at=timezone.now())
+        call_command("retry_empty_enrichments", "--apply",
+                     "--retry-after-days", "0", stdout=StringIO())
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.enrichment_status, Player.ENRICHMENT_PENDING)
+
 
 class EnrichmentLiftReportCommandTests(TestCase):
     def _mk(self, **kw):
@@ -123,3 +156,64 @@ class EnrichmentLiftReportCommandTests(TestCase):
         since = (timezone.now() - timedelta(hours=1)).isoformat()
         call_command("enrichment_lift_report", "--since", since, stdout=out)
         self.assertIn("Efficiency ranking: 1 now carry a percentile", out.getvalue())
+
+
+class EnrichmentPoolMaintenanceTaskTests(TestCase):
+    """The daily DB-only maintenance task: reclassify drift + cooldown-guarded
+    re-queue of empty false-negatives, feeding the crawler's pending pool."""
+
+    def _mk(self, **kw):
+        defaults = dict(
+            realm="na", is_hidden=False, pvp_battles=3000,
+            pvp_ratio=60.0, days_since_last_battle=1, battles_json=None,
+        )
+        defaults.update(kw)
+        return Player.objects.create(**defaults)
+
+    @mock.patch.dict(os.environ, {"ENRICHMENT_EMPTY_RETRY_AFTER_DAYS": "14"})
+    def test_maintenance_reclassifies_drift_and_requeues_stale_empties(self):
+        # un-hidden drift: still labelled skipped_hidden but now visible+eligible
+        drift = self._mk(name="UnHidden", player_id=6001,
+                        enrichment_status=Player.ENRICHMENT_SKIPPED_HIDDEN)
+        # empty false-negative, last attempt well past the cooldown
+        stale_empty = self._mk(name="StaleEmpty", player_id=6002,
+                               enrichment_status=Player.ENRICHMENT_EMPTY,
+                               battles_json=[],
+                               battles_updated_at=timezone.now() - timedelta(days=30))
+        # empty re-attempted recently: cooldown must protect it from re-queue
+        fresh_empty = self._mk(name="FreshEmpty", player_id=6003,
+                              enrichment_status=Player.ENRICHMENT_EMPTY,
+                              battles_json=[],
+                              battles_updated_at=timezone.now() - timedelta(days=2))
+        # genuinely below the battle floor: must settle to skipped_low_battles
+        low_bat = self._mk(name="LowBat", player_id=6004, pvp_battles=100,
+                          enrichment_status=Player.ENRICHMENT_PENDING)
+
+        result = enrichment_pool_maintenance_task()
+        self.assertEqual(result["status"], "ok")
+
+        drift.refresh_from_db()
+        self.assertEqual(drift.enrichment_status, Player.ENRICHMENT_PENDING)
+
+        stale_empty.refresh_from_db()
+        self.assertEqual(stale_empty.enrichment_status, Player.ENRICHMENT_PENDING)
+        self.assertIsNone(stale_empty.battles_json)
+
+        fresh_empty.refresh_from_db()
+        self.assertEqual(fresh_empty.enrichment_status, Player.ENRICHMENT_EMPTY)
+        self.assertEqual(fresh_empty.battles_json, [])
+
+        low_bat.refresh_from_db()
+        self.assertEqual(low_bat.enrichment_status,
+                         Player.ENRICHMENT_SKIPPED_LOW_BATTLES)
+
+    @mock.patch.dict(os.environ, {"ENRICHMENT_POOL_MAINTENANCE_ENABLED": "0"})
+    def test_kill_switch_disables_task(self):
+        empty = self._mk(name="Empty", player_id=6101,
+                        enrichment_status=Player.ENRICHMENT_EMPTY,
+                        battles_json=[],
+                        battles_updated_at=timezone.now() - timedelta(days=30))
+        result = enrichment_pool_maintenance_task()
+        self.assertEqual(result, {"status": "skipped", "reason": "disabled"})
+        empty.refresh_from_db()
+        self.assertEqual(empty.enrichment_status, Player.ENRICHMENT_EMPTY)

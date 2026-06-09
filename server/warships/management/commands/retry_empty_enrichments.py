@@ -22,9 +22,11 @@ matches what ``_candidates()`` will actually pick up.
 See ``agents/work-items/player-enrichment-map-2026-06-08.md`` §12.
 """
 import os
+from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 from django.db.models import Count, Q
+from django.utils import timezone
 
 from warships.models import Player
 
@@ -55,6 +57,12 @@ class Command(BaseCommand):
                             help=f'Re-queue only empties with pvp_ratio >= this (default ENRICH_MIN_WR={MIN_WR}). '
                                  'Pass 0 to re-queue all WR bands.')
         parser.add_argument('--max-inactive-days', type=int, default=MAX_INACTIVE_DAYS)
+        parser.add_argument('--retry-after-days', type=int, default=0,
+                            help='Convergence guard for scheduled use: only re-queue empties whose '
+                                 'last enrichment attempt (battles_updated_at) is older than this many '
+                                 'days, or has never been attempted. Default 0 = no cooldown (one-shot '
+                                 'behavior). A genuinely-empty row is then re-fetched at most once per '
+                                 'N days instead of every run, bounding WG-budget burn.')
         parser.add_argument('--include-hidden', action='store_true',
                             help='Also re-queue currently-hidden empties (they will likely re-empty).')
         parser.add_argument('--include-inactive', action='store_true',
@@ -71,6 +79,7 @@ class Command(BaseCommand):
         max_inactive = opts['max_inactive_days']
         include_hidden = opts['include_hidden']
         include_inactive = opts['include_inactive']
+        retry_after_days = opts['retry_after_days']
         apply = opts['apply'] and not opts['dry_run']
 
         scope = Player.objects.filter(
@@ -92,6 +101,17 @@ class Command(BaseCommand):
         if min_wr > 0:
             requeue_q &= Q(pvp_ratio__gte=min_wr)
             gate_labels.append(f"WR>={min_wr}")
+        if retry_after_days > 0:
+            # Convergence guard: a row re-emptied by enrichment has its
+            # battles_updated_at bumped to that attempt time (see
+            # enrich_player_data.py:_mark_empty). Re-queue only rows whose last
+            # attempt is older than the cooldown (or never attempted), so a
+            # persistently-empty account is re-fetched at most once per cooldown
+            # instead of every scheduled run.
+            cutoff = timezone.now() - timedelta(days=retry_after_days)
+            requeue_q &= (Q(battles_updated_at__lte=cutoff)
+                          | Q(battles_updated_at__isnull=True))
+            gate_labels.append(f"last-attempt>{retry_after_days}d-ago")
 
         # One pass for all sizing.
         band_aggs = {}

@@ -3,8 +3,11 @@ import logging
 import os
 import time
 
+from io import StringIO
+
 from django.core.cache import cache
 from django.core.management import call_command
+from django.db import connection
 from django.utils import timezone as django_timezone
 
 from battlestats.celery import app
@@ -2249,3 +2252,95 @@ def startup_warm_caches_task():
         logger.info("Dispatched enrichment kickstart after startup warm")
     except Exception:
         logger.exception("Failed to dispatch enrichment kickstart")
+
+
+@app.task(
+    queue='background',
+    time_limit=600,
+    soft_time_limit=540,
+    ignore_result=True,
+)
+def enrichment_pool_maintenance_task():
+    """Keep the enrichment ``pending`` pool honest so no eligible player is parked
+    invisibly to the crawler.
+
+    This is **DB-only** — it issues no Wargaming calls — so unlike enrichment
+    itself it is crawl-safe and never defers under a multi-day clan crawl. It runs
+    two idempotent passes that feed the pool the self-chaining
+    ``enrich_player_data_task`` reads:
+
+      1. ``reclassify_enrichment_status`` (per realm) — recomputes
+         ``enrichment_status`` from current row state, rescuing ``skipped_*`` drift
+         (un-hidden players, battle-count threshold-crossers, win-rate recoveries)
+         back to ``pending``.
+      2. ``retry_empty_enrichments --apply --retry-after-days N`` — re-queues
+         ``empty`` false-negatives (accounts private at fetch time that later went
+         public) that reclassify cannot rescue (its rule keeps ``battles_json==[]``
+         as ``empty``). The cooldown is the convergence guard: a genuinely-empty
+         row is re-fetched at most once per N days instead of every run, bounding
+         WG-budget burn.
+
+    The enrichment crawler then drains the refreshed pool on its next crawl-free
+    window. Kill switch: ``ENRICHMENT_POOL_MAINTENANCE_ENABLED`` (default on). See
+    ``agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md``.
+    """
+    if os.getenv("ENRICHMENT_POOL_MAINTENANCE_ENABLED", "1") != "1":
+        return {"status": "skipped", "reason": "disabled"}
+
+    lock_key = _task_lock_key("enrichment_pool_maintenance", "global")
+    if not cache.add(lock_key, "1", timeout=RESOURCE_TASK_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping enrichment_pool_maintenance_task — another run is active")
+        return {"status": "skipped", "reason": "already-running"}
+
+    retry_after_days = int(os.getenv("ENRICHMENT_EMPTY_RETRY_AFTER_DAYS", "14"))
+    timeout_s = int(
+        os.getenv("ENRICHMENT_POOL_MAINTENANCE_STATEMENT_TIMEOUT", "180"))
+    realms = ["na", "eu", "asia"]
+
+    # Bound each pass on the 1-vCPU managed PG. statement_timeout is a session
+    # GUC (not LOCAL — call_command opens its own transactions), so set it on the
+    # connection up front and RESET in the finally so it can't leak to the next
+    # task reusing this worker's connection. Postgres-only (sqlite test harness
+    # has no such GUC).
+    is_postgres = connection.vendor == "postgresql"
+    if is_postgres:
+        with connection.cursor() as cur:
+            cur.execute("SET statement_timeout = %s", [timeout_s * 1000])
+    try:
+        # Pass 1: per-realm reclassify, so each scan/UPDATE transaction stays
+        # scoped to one realm's slice rather than the whole ~1M-row catalog.
+        for realm in realms:
+            buf = StringIO()
+            try:
+                call_command(
+                    "reclassify_enrichment_status", "--realm", realm, stdout=buf)
+                logger.info(
+                    "enrichment_pool_maintenance reclassify[%s]: %s",
+                    realm, buf.getvalue().replace("\n", " | ").strip())
+            except Exception:
+                logger.exception(
+                    "enrichment_pool_maintenance reclassify failed for %s", realm)
+
+        # Pass 2: re-queue empty false-negatives with the convergence cooldown.
+        buf = StringIO()
+        try:
+            call_command(
+                "retry_empty_enrichments", "--apply",
+                "--retry-after-days", str(retry_after_days), stdout=buf)
+            logger.info(
+                "enrichment_pool_maintenance retry_empty: %s",
+                buf.getvalue().replace("\n", " | ").strip())
+        except Exception:
+            logger.exception(
+                "enrichment_pool_maintenance retry_empty_enrichments failed")
+    finally:
+        try:
+            with connection.cursor() as cur:
+                cur.execute("RESET statement_timeout")
+        except Exception:
+            logger.exception(
+                "enrichment_pool_maintenance failed to reset statement_timeout")
+        cache.delete(lock_key)
+
+    return {"status": "ok", "retry_after_days": retry_after_days}

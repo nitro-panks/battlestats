@@ -63,7 +63,7 @@ cd server && python manage.py backfill_clan_battle_data --realm na --batch 500 [
 
 `check_enrichment_crawler.sh` is a single SSH call reporting worker health, Redis lock state, batch throughput/ETA, errors, live progress, and periodic-task state. `backfill_clan_battle_data` fills per-player CB fields on `PlayerExplorerSummary` (only needed for players enriched before the Phase 3e enrichment CB fetch).
 
-Background enrichment runs on the Celery `background` worker via `enrich_player_data_task`, self-chaining between batches and kickstarted every 15 min by Beat (`player-enrichment-kickstart`).
+Background enrichment runs on the Celery `background` worker via `enrich_player_data_task`, self-chaining between batches and kickstarted every 15 min by Beat (`player-enrichment-kickstart`). A daily DB-only `enrichment_pool_maintenance_task` (`enrichment-pool-maintenance`, 08:17 UTC, **coexists with crawls**) keeps the `pending` pool complete — reclassifies `skipped_*` drift and re-queues `empty` false-negatives with a per-row cooldown convergence guard (`ENRICHMENT_EMPTY_RETRY_AFTER_DAYS`); kill switch `ENRICHMENT_POOL_MAINTENANCE_ENABLED`. Runbook: `agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md`.
 
 ## Architecture
 
@@ -170,6 +170,6 @@ Semantic versioning with root `VERSION` as the single source of truth, surfaced 
 Env files, the full runtime env-var catalog (defaults), Umami, and Docker ports live in `agents/runbooks/ops-env-reference.md`. Quick orientation:
 
 - Server secrets in `server/.env.secrets`; cloud overrides in `*.cloud` files.
-- Master kill switches: `ENABLE_CRAWLER_SCHEDULES` (crawlers), `BATTLE_HISTORY_*_ENABLED` (battle-history phases), `SHIP_BADGE_SNAPSHOT_ENABLED` (ship standings).
+- Master kill switches: `ENABLE_CRAWLER_SCHEDULES` (crawlers), `BATTLE_HISTORY_*_ENABLED` (battle-history phases), `SHIP_BADGE_SNAPSHOT_ENABLED` (ship standings), `ENRICHMENT_POOL_MAINTENANCE_ENABLED` (daily enrichment pool reclassify/retry).
 - Client: `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`).
 - Docker ports: 8888 Django · 3001 Next.js (dev) · 3002 Umami (prod) · 15672 RabbitMQ.

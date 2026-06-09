@@ -1792,6 +1792,31 @@
                 "crawler-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "data",
+            "aliases": [
+                "enrichment pool maintenance",
+                "scheduled reclassify",
+                "empty false-negative retry",
+                "enrichment pending pool"
+            ],
+            "tags": [
+                "enrichment",
+                "reclassify",
+                "empty",
+                "convergence guard",
+                "celery beat",
+                "backfill"
+            ],
+            "archive_on": [
+                "enrichment-crawl-deferral-decoupled",
+                "source-side-empty-handling-shipped"
+            ]
+        },
         "agents/runbooks/runbook-landing-best-player-subsort-materialization-2026-04-05.md": {
             "kind": "runbook",
             "status": "active",

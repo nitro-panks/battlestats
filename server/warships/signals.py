@@ -487,6 +487,35 @@ def register_periodic_schedules(sender, **kwargs):
         },
     )
 
+    # -- Enrichment Pool Maintenance (daily, DB-only, crawl-safe) --
+    # Keeps the `pending` pool honest so no eligible player stays parked invisibly:
+    # reclassifies skipped_* drift (un-hidden / threshold-crossers / WR-recoveries)
+    # and re-queues `empty` false-negatives with a per-row cooldown convergence
+    # guard. Issues no WG calls, so it coexists with multi-day crawls (it does not
+    # defer like enrichment itself). Single daily run; the task loops realms
+    # internally. Kill switch: ENRICHMENT_POOL_MAINTENANCE_ENABLED (default on).
+    pool_maint_enabled = _env_flag("ENRICHMENT_POOL_MAINTENANCE_ENABLED", True)
+    pool_maint_schedule, _ = CrontabSchedule.objects.get_or_create(
+        minute="17",
+        hour="8",
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        timezone="UTC",
+    )
+    PeriodicTask.objects.update_or_create(
+        name="enrichment-pool-maintenance",
+        defaults={
+            "task": "warships.tasks.enrichment_pool_maintenance_task",
+            "crontab": pool_maint_schedule,
+            "interval": None,
+            "enabled": pool_maint_enabled,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Daily DB-only pass that reclassifies enrichment_status drift and re-queues empty false-negatives (with a per-row cooldown) so the pending pool stays complete. Coexists with crawls.",
+        },
+    )
+
     # -- Clan Crawl + Incremental Refresh Families --
     # Gated by ENABLE_CRAWLER_SCHEDULES. These four families were retired on
     # 2026-04-04 for the DO Functions migration and restored on 2026-04-11
