@@ -419,17 +419,25 @@ unsafe — an **unbounded re-fetch loop** on genuinely-empty rows — is closed 
 while accounts that went public still converge to `enriched`. Kill switch
 `ENRICHMENT_POOL_MAINTENANCE_ENABLED`.
 
-Fix **#2 (schedule full reclassify)** was **deliberately NOT automated** after prod sizing
-(2026-06-09): the full-catalog `reclassify_enrichment_status` runs **na 879s / eu 639s /
-asia 668s ≈ 36 min** on the 1-vCPU PG, and the clan crawl is quasi-permanent so there is no
-scheduling trough. Its ~230K-row change-set (~71K `→enriched` benign corrections, ~47K
-`→pending` newly-eligible rescues) is a **one-time accumulated backlog**, not daily drift.
-So reclassify stays a **supervised manual op**; the durable automation path is an
-*incremental* reclassify scoped to `last_fetch` within ~25h, which needs a **`last_fetch`
-index** (currently unindexed) — a scoped follow-up. Full runbook + procedures:
+Fix **#2 (drift rescue)** is now automated too — as an **incremental** reclassify, after
+prod sizing showed the *full* `reclassify_enrichment_status` is **na 879s / eu 639s / asia
+668s ≈ 36 min** (a one-time ~230K-row backlog, not daily drift). Shipped: migration 0067
+adds `player_last_fetch_idx`, and the daily task runs per-realm
+`reclassify_enrichment_status --recent-hours 25` — recomputing only rows fetched in the last
+25h. Drift-relevant fields only change on a WG re-fetch (which bumps `last_fetch`), so the
+recent set holds every newly-drifted row; `EXPLAIN` confirms the index is used (BitmapAnd
+with the realm/battles index) → **~2.5 min/realm under crawl load**. Crucially, the daily
+active-snapshot engine refreshes core stats (`is_hidden`/`pvp_battles`/`pvp_ratio`) +
+`last_fetch` on every active player daily, so **active threshold-crossers / un-hid / WR
+recoveries self-clear** within a sweep+reclassify cycle.
+
+The **full** reclassify (no `--recent-hours`) stays a **supervised manual op**, now needed
+only for: the one-time ~230K pre-existing backlog (~47K eligible rescues + ~71K enriched
+corrections), and pure-calendar inactivity crossings (no re-fetch → not in the recent
+window). Full runbook + procedures:
 `agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md`.
 
 **Still open:** (a) the one-time ~230K reclassify backlog clear (supervised; surfaces ~47K
-eligible players + ~71K enriched corrections); (b) `last_fetch` index + `--recent-hours`
-incremental reclassify to automate drift rescue; (c) **fix #3** — decouple enrichment's
-WG-fetch arm from hard crawl-deferral (WG token-bucket limiter), the larger throughput change.
+eligible players); (b) a periodic supervised full reclassify for calendar drift; (c) **fix
+#3** — decouple enrichment's WG-fetch arm from hard crawl-deferral (WG token-bucket
+limiter), the larger throughput change.

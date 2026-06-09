@@ -235,6 +235,28 @@ class EnrichmentPoolMaintenanceTaskTests(TestCase):
         self.assertEqual(fresh_empty.enrichment_status, Player.ENRICHMENT_EMPTY)
         self.assertEqual(fresh_empty.battles_json, [])
 
+    @mock.patch.dict(os.environ, {"ENRICHMENT_RECLASSIFY_RECENT_HOURS": "25"})
+    def test_maintenance_incrementally_reclassifies_recent_drift(self):
+        # skipped_hidden but now visible+eligible, fetched recently -> rescued to
+        # pending by the incremental reclassify pass.
+        recent_drift = self._mk(name="RecentDrift", player_id=6201,
+                               enrichment_status=Player.ENRICHMENT_SKIPPED_HIDDEN,
+                               last_fetch=timezone.now() - timedelta(hours=2))
+        # same drift but not fetched in the window -> incremental pass skips it
+        # (it's left for a periodic full reclassify).
+        old_drift = self._mk(name="OldDrift", player_id=6202,
+                            enrichment_status=Player.ENRICHMENT_SKIPPED_HIDDEN,
+                            last_fetch=timezone.now() - timedelta(hours=72))
+
+        result = enrichment_pool_maintenance_task()
+        self.assertEqual(result["status"], "ok")
+
+        recent_drift.refresh_from_db()
+        self.assertEqual(recent_drift.enrichment_status, Player.ENRICHMENT_PENDING)
+        old_drift.refresh_from_db()
+        self.assertEqual(old_drift.enrichment_status,
+                         Player.ENRICHMENT_SKIPPED_HIDDEN)
+
     @mock.patch.dict(os.environ, {"ENRICHMENT_POOL_MAINTENANCE_ENABLED": "0"})
     def test_kill_switch_disables_task(self):
         empty = self._mk(name="Empty", player_id=6101,
