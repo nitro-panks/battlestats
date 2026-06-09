@@ -514,9 +514,38 @@ def register_periodic_schedules(sender, **kwargs):
             "enabled": pool_maint_enabled,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
-            "description": "Daily DB-only, index-backed pass that re-queues empty enrichment false-negatives (with a per-row cooldown) so the pending pool stays complete. Coexists with crawls. Full reclassify is a separate supervised op.",
+            "description": "Daily DB-only, index-backed pass that re-queues empty enrichment false-negatives (with a per-row cooldown) so the pending pool stays complete. Coexists with crawls. Drift reclassify is a separate striped per-realm task.",
         },
     )
+
+    # -- Incremental drift reclassify (per realm, striped, daily) --
+    # The skipped_* drift rescue (un-hidden / 500-battle crossers / WR recoveries),
+    # scoped to recently-fetched rows via player_last_fetch_idx. ~2.5-6 min/realm —
+    # striped 20 min apart so the 1-vCPU PG sees one realm's scan at a time, not a
+    # multi-realm burst. Gated by the same ENRICHMENT_POOL_MAINTENANCE_ENABLED flag.
+    reclass_drift_times = {"na": ("20", "8"), "eu": ("40", "8"), "asia": ("0", "9")}
+    for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = reclass_drift_times.get(realm, ("20", "8"))
+        reclass_drift_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"enrichment-reclassify-drift-{realm}",
+            defaults={
+                "task": "warships.tasks.enrichment_reclassify_drift_task",
+                "crontab": reclass_drift_schedule,
+                "interval": None,
+                "enabled": pool_maint_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Daily incremental enrichment_status drift rescue ({realm.upper()}) over last_fetch<=25h — index-backed, DB-only, coexists with crawls. Striped per realm.",
+            },
+        )
 
     # -- Clan Crawl + Incremental Refresh Families --
     # Gated by ENABLE_CRAWLER_SCHEDULES. These four families were retired on

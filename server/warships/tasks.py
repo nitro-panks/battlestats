@@ -2254,99 +2254,124 @@ def startup_warm_caches_task():
         logger.exception("Failed to dispatch enrichment kickstart")
 
 
-# Lock must outlive the hard time_limit so a long run can't lose its lock mid-pass
-# and let a second invocation start on top of it.
-ENRICHMENT_POOL_MAINTENANCE_LOCK_TIMEOUT = 30 * 60
+# Lock must outlive the per-realm reclassify hard time_limit so a slow run can't
+# lose its lock mid-pass and let a second invocation start on top of it.
+ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT = 20 * 60
 
 
 @app.task(
     queue='background',
-    time_limit=1080,        # 18 min hard — ~3 realms × ~2.5 min reclassify + headroom
-    soft_time_limit=900,    # 15 min soft
+    time_limit=600,
+    soft_time_limit=540,
     ignore_result=True,
 )
 def enrichment_pool_maintenance_task():
-    """Keep the enrichment ``pending`` pool honest so no eligible player is parked
-    invisibly to the crawler. **DB-only** (no Wargaming calls), so unlike enrichment
-    itself it is crawl-safe and never defers under a multi-day clan crawl. Two
-    idempotent passes feed the pool the self-chaining ``enrich_player_data_task`` reads:
+    """Daily DB-only re-queue of ``empty`` enrichment false-negatives.
 
-      1. ``retry_empty_enrichments --apply --retry-after-days N`` — re-queues
-         ``empty`` false-negatives (accounts private at fetch time that later went
-         public; WG ``ships/stats`` returned no ships → ``battles_json==[]``). These
-         are excluded from ``_candidates()`` and a reclassify keeps them ``empty``, so
-         nothing else retries them. The ``--retry-after-days`` cooldown is the
-         convergence guard: a genuinely-empty row is re-fetched at most once per N
-         days (it bumps ``battles_updated_at`` on each empty write), bounding WG burn,
-         while an account that went public enriches and leaves the pool. Index-backed
-         (``enrichment_status``), sub-second.
+    Runs ``retry_empty_enrichments --apply --retry-after-days N``: an ``empty`` row
+    (``battles_json==[]``) is recorded when WG ``ships/stats`` returns no ships —
+    overwhelmingly a *transient* failure or an account that was **private at fetch
+    time**. Those are excluded from ``_candidates()`` and a reclassify keeps them
+    ``empty``, so nothing else ever retries them. This re-queues them
+    (``status→pending``, ``battles_json→NULL``). The ``--retry-after-days`` cooldown
+    is the convergence guard: a genuinely-empty row is re-fetched at most once per N
+    days (each empty write bumps ``battles_updated_at``), bounding WG burn, while an
+    account that went public enriches and leaves the pool.
 
-      2. ``reclassify_enrichment_status --realm <r> --recent-hours H`` (per realm) —
-         **incremental** drift rescue: recomputes ``enrichment_status`` for rows
-         fetched within H hours. Drift-relevant fields (is_hidden / pvp_battles /
-         pvp_ratio / days_since_last_battle) only change on a WG re-fetch, which bumps
-         ``last_fetch`` — so the recent set holds every row that could have newly
-         drifted (un-hidden, 500-battle crossers, WR recoveries). Index-backed via
-         ``player_last_fetch_idx`` (BitmapAnd with the realm/battles index — verified);
-         ~2.5 min/realm under crawl load, vs ~36 min for the full catalog.
-
-    What this does NOT catch: pure-calendar inactivity crossings (no re-fetch, so no
-    ``last_fetch`` bump) and the one-time pre-existing backlog of rows not fetched in H
-    hours — both need a periodic/supervised full ``reclassify`` (no ``--recent-hours``).
-    Kill switch ``ENRICHMENT_POOL_MAINTENANCE_ENABLED`` (default on). See
-    ``agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md``.
+    Index-backed (``enrichment_status``) + no WG calls, so it's cheap and crawl-safe
+    (never defers). The ``skipped_*`` drift rescue is a *separate* per-realm task
+    (``enrichment_reclassify_drift_task``) — it's heavier and striped to avoid a
+    single multi-realm DB burst. Kill switch ``ENRICHMENT_POOL_MAINTENANCE_ENABLED``
+    (default on). See ``runbook-enrichment-pool-maintenance-2026-06-09.md``.
     """
     if os.getenv("ENRICHMENT_POOL_MAINTENANCE_ENABLED", "1") != "1":
         return {"status": "skipped", "reason": "disabled"}
 
     lock_key = _task_lock_key("enrichment_pool_maintenance", "global")
-    if not cache.add(lock_key, "1",
-                     timeout=ENRICHMENT_POOL_MAINTENANCE_LOCK_TIMEOUT):
+    if not cache.add(lock_key, "1", timeout=RESOURCE_TASK_LOCK_TIMEOUT):
         logger.info(
             "Skipping enrichment_pool_maintenance_task — another run is active")
         return {"status": "skipped", "reason": "already-running"}
 
     retry_after_days = int(os.getenv("ENRICHMENT_EMPTY_RETRY_AFTER_DAYS", "14"))
-    recent_hours = int(os.getenv("ENRICHMENT_RECLASSIFY_RECENT_HOURS", "25"))
-    timeout_s = int(
-        os.getenv("ENRICHMENT_POOL_MAINTENANCE_STATEMENT_TIMEOUT", "120"))
-    realms = ["na", "eu", "asia"]
+    try:
+        buf = StringIO()
+        call_command(
+            "retry_empty_enrichments", "--apply",
+            "--retry-after-days", str(retry_after_days), stdout=buf)
+        logger.info(
+            "enrichment_pool_maintenance retry_empty: %s",
+            buf.getvalue().replace("\n", " | ").strip())
+    except Exception:
+        logger.exception(
+            "enrichment_pool_maintenance retry_empty_enrichments failed")
+        return {"status": "error", "retry_after_days": retry_after_days}
+    finally:
+        cache.delete(lock_key)
 
-    # Per-statement blast-radius cap on the 1-vCPU PG. statement_timeout is a session
-    # GUC (not LOCAL — call_command opens its own transactions), set up front and
-    # RESET in finally so it can't leak to the next task on this worker's connection.
-    # Postgres-only (the sqlite test harness has no such GUC).
+    return {"status": "ok", "retry_after_days": retry_after_days}
+
+
+@app.task(
+    bind=True,
+    queue='background',
+    time_limit=840,         # 14 min hard — one realm's apply is ~6 min under load
+    soft_time_limit=720,    # 12 min soft
+    ignore_result=True,
+)
+def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
+    """Incremental ``skipped_*`` drift rescue for one realm — recompute
+    ``enrichment_status`` for rows fetched within the recency window.
+
+    Drift-relevant fields (is_hidden / pvp_battles / pvp_ratio /
+    days_since_last_battle) only change on a WG re-fetch, which bumps ``last_fetch``,
+    so reclassifying rows with ``last_fetch >= now - H hours`` covers every row that
+    could have **newly** drifted (un-hidden, 500-battle crossers, WR recoveries).
+    Index-backed via ``player_last_fetch_idx`` (BitmapAnd with the realm/battles
+    index — verified by EXPLAIN). ~2.5–6 min/realm depending on load, vs ~36 min for
+    the full catalog.
+
+    Scheduled **per realm, striped** (signals.py) rather than one multi-realm task,
+    so the DB sees ~6 min of scan at a time instead of an ~18 min continuous burst on
+    the 1-vCPU PG. DB-only, crawl-safe. Does NOT catch pure-calendar inactivity
+    crossings (no re-fetch) or the one-time pre-existing backlog (rows not fetched in
+    H hours) — those need a supervised full ``reclassify``. Kill switch
+    ``ENRICHMENT_POOL_MAINTENANCE_ENABLED``.
+    """
+    if os.getenv("ENRICHMENT_POOL_MAINTENANCE_ENABLED", "1") != "1":
+        return {"status": "skipped", "reason": "disabled"}
+
+    lock_key = _task_lock_key("enrichment_reclassify_drift", realm)
+    if not cache.add(lock_key, self.request.id or "1",
+                     timeout=ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping enrichment_reclassify_drift_task[%s] — another run is active",
+            realm)
+        return {"status": "skipped", "reason": "already-running", "realm": realm}
+
+    recent_hours = int(os.getenv("ENRICHMENT_RECLASSIFY_RECENT_HOURS", "25"))
+    # Per-statement blast-radius cap. Sized well above a single bucket UPDATE's real
+    # cost (~2-3 min under load) so it caps a runaway without aborting normal work —
+    # 120s was too tight and silently rolled back the whole pass. statement_timeout
+    # is a session GUC (call_command opens its own txns), so set up front + RESET in
+    # finally so it can't leak to the next task. Postgres-only.
+    timeout_s = int(os.getenv("ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUT", "420"))
     is_postgres = connection.vendor == "postgresql"
     if is_postgres:
         with connection.cursor() as cur:
             cur.execute("SET statement_timeout = %s", [timeout_s * 1000])
     try:
-        # Pass 1: re-queue empty false-negatives (cheap, index-backed).
         buf = StringIO()
-        try:
-            call_command(
-                "retry_empty_enrichments", "--apply",
-                "--retry-after-days", str(retry_after_days), stdout=buf)
-            logger.info(
-                "enrichment_pool_maintenance retry_empty: %s",
-                buf.getvalue().replace("\n", " | ").strip())
-        except Exception:
-            logger.exception(
-                "enrichment_pool_maintenance retry_empty_enrichments failed")
-
-        # Pass 2: per-realm incremental reclassify (recent-fetched drift only).
-        for realm in realms:
-            buf = StringIO()
-            try:
-                call_command(
-                    "reclassify_enrichment_status", "--realm", realm,
-                    "--recent-hours", str(recent_hours), stdout=buf)
-                logger.info(
-                    "enrichment_pool_maintenance reclassify[%s]: %s",
-                    realm, buf.getvalue().replace("\n", " | ").strip())
-            except Exception:
-                logger.exception(
-                    "enrichment_pool_maintenance reclassify failed for %s", realm)
+        call_command(
+            "reclassify_enrichment_status", "--realm", realm,
+            "--recent-hours", str(recent_hours), stdout=buf)
+        logger.info(
+            "enrichment_reclassify_drift[%s]: %s",
+            realm, buf.getvalue().replace("\n", " | ").strip())
+    except Exception:
+        logger.exception(
+            "enrichment_reclassify_drift_task failed for %s", realm)
+        return {"status": "error", "realm": realm}
     finally:
         if is_postgres:
             try:
@@ -2354,8 +2379,7 @@ def enrichment_pool_maintenance_task():
                     cur.execute("RESET statement_timeout")
             except Exception:
                 logger.exception(
-                    "enrichment_pool_maintenance failed to reset statement_timeout")
+                    "enrichment_reclassify_drift failed to reset statement_timeout")
         cache.delete(lock_key)
 
-    return {"status": "ok", "retry_after_days": retry_after_days,
-            "recent_hours": recent_hours}
+    return {"status": "ok", "realm": realm, "recent_hours": recent_hours}

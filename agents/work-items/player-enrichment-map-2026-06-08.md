@@ -422,11 +422,15 @@ while accounts that went public still converge to `enriched`. Kill switch
 Fix **#2 (drift rescue)** is now automated too — as an **incremental** reclassify, after
 prod sizing showed the *full* `reclassify_enrichment_status` is **na 879s / eu 639s / asia
 668s ≈ 36 min** (a one-time ~230K-row backlog, not daily drift). Shipped: migration 0067
-adds `player_last_fetch_idx`, and the daily task runs per-realm
+adds `player_last_fetch_idx`, and `enrichment_reclassify_drift_task` runs per-realm
 `reclassify_enrichment_status --recent-hours 25` — recomputing only rows fetched in the last
 25h. Drift-relevant fields only change on a WG re-fetch (which bumps `last_fetch`), so the
 recent set holds every newly-drifted row; `EXPLAIN` confirms the index is used (BitmapAnd
-with the realm/battles index) → **~2.5 min/realm under crawl load**. Crucially, the daily
+with the realm/battles index) → **~2.5–6 min/realm** depending on load (apply is heavier
+than the dry-run count). Scheduled **per realm, striped** (na 08:20 / eu 08:40 / asia 09:00
+UTC) so the 1-vCPU PG sees one realm's scan at a time, not an ~18 min multi-realm burst — a
+first single-task cut overran and a too-tight 120s statement_timeout silently rolled back
+each realm; the per-realm split + 420s statement cap fixes both. Crucially, the daily
 active-snapshot engine refreshes core stats (`is_hidden`/`pvp_battles`/`pvp_ratio`) +
 `last_fetch` on every active player daily, so **active threshold-crossers / un-hid / WR
 recoveries self-clear** within a sweep+reclassify cycle.

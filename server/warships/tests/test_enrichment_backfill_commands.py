@@ -15,7 +15,10 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.models import Player, PlayerExplorerSummary
-from warships.tasks import enrichment_pool_maintenance_task
+from warships.tasks import (
+    enrichment_pool_maintenance_task,
+    enrichment_reclassify_drift_task,
+)
 
 
 class RetryEmptyEnrichmentsCommandTests(TestCase):
@@ -235,28 +238,6 @@ class EnrichmentPoolMaintenanceTaskTests(TestCase):
         self.assertEqual(fresh_empty.enrichment_status, Player.ENRICHMENT_EMPTY)
         self.assertEqual(fresh_empty.battles_json, [])
 
-    @mock.patch.dict(os.environ, {"ENRICHMENT_RECLASSIFY_RECENT_HOURS": "25"})
-    def test_maintenance_incrementally_reclassifies_recent_drift(self):
-        # skipped_hidden but now visible+eligible, fetched recently -> rescued to
-        # pending by the incremental reclassify pass.
-        recent_drift = self._mk(name="RecentDrift", player_id=6201,
-                               enrichment_status=Player.ENRICHMENT_SKIPPED_HIDDEN,
-                               last_fetch=timezone.now() - timedelta(hours=2))
-        # same drift but not fetched in the window -> incremental pass skips it
-        # (it's left for a periodic full reclassify).
-        old_drift = self._mk(name="OldDrift", player_id=6202,
-                            enrichment_status=Player.ENRICHMENT_SKIPPED_HIDDEN,
-                            last_fetch=timezone.now() - timedelta(hours=72))
-
-        result = enrichment_pool_maintenance_task()
-        self.assertEqual(result["status"], "ok")
-
-        recent_drift.refresh_from_db()
-        self.assertEqual(recent_drift.enrichment_status, Player.ENRICHMENT_PENDING)
-        old_drift.refresh_from_db()
-        self.assertEqual(old_drift.enrichment_status,
-                         Player.ENRICHMENT_SKIPPED_HIDDEN)
-
     @mock.patch.dict(os.environ, {"ENRICHMENT_POOL_MAINTENANCE_ENABLED": "0"})
     def test_kill_switch_disables_task(self):
         empty = self._mk(name="Empty", player_id=6101,
@@ -267,3 +248,50 @@ class EnrichmentPoolMaintenanceTaskTests(TestCase):
         self.assertEqual(result, {"status": "skipped", "reason": "disabled"})
         empty.refresh_from_db()
         self.assertEqual(empty.enrichment_status, Player.ENRICHMENT_EMPTY)
+
+
+class EnrichmentReclassifyDriftTaskTests(TestCase):
+    """Per-realm incremental drift rescue task: reclassifies only recently-fetched
+    rows for its realm, striped so the DB sees one realm's scan at a time."""
+
+    def _mk(self, **kw):
+        defaults = dict(
+            realm="na", is_hidden=False, pvp_battles=3000, pvp_ratio=60.0,
+            days_since_last_battle=1, battles_json=None,
+            enrichment_status=Player.ENRICHMENT_SKIPPED_HIDDEN,
+        )
+        defaults.update(kw)
+        return Player.objects.create(**defaults)
+
+    @mock.patch.dict(os.environ, {"ENRICHMENT_RECLASSIFY_RECENT_HOURS": "25"})
+    def test_reclassifies_recent_drift_for_its_realm_only(self):
+        # skipped_hidden but now visible+eligible, fetched recently -> rescued.
+        recent = self._mk(name="Recent", player_id=6301,
+                         last_fetch=timezone.now() - timedelta(hours=2))
+        # outside the recency window -> left for a periodic full reclassify.
+        old = self._mk(name="Old", player_id=6302,
+                      last_fetch=timezone.now() - timedelta(hours=72))
+        # different realm -> not touched by the na task.
+        other_realm = self._mk(name="Eu", player_id=6303, realm="eu",
+                              last_fetch=timezone.now() - timedelta(hours=2))
+
+        result = enrichment_reclassify_drift_task.apply(
+            kwargs={"realm": "na"}).get()
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["realm"], "na")
+
+        recent.refresh_from_db()
+        self.assertEqual(recent.enrichment_status, Player.ENRICHMENT_PENDING)
+        for p in (old, other_realm):
+            p.refresh_from_db()
+            self.assertEqual(p.enrichment_status, Player.ENRICHMENT_SKIPPED_HIDDEN)
+
+    @mock.patch.dict(os.environ, {"ENRICHMENT_POOL_MAINTENANCE_ENABLED": "0"})
+    def test_kill_switch_disables_drift_task(self):
+        recent = self._mk(name="Recent", player_id=6401,
+                         last_fetch=timezone.now() - timedelta(hours=2))
+        result = enrichment_reclassify_drift_task.apply(
+            kwargs={"realm": "na"}).get()
+        self.assertEqual(result["status"], "skipped")
+        recent.refresh_from_db()
+        self.assertEqual(recent.enrichment_status, Player.ENRICHMENT_SKIPPED_HIDDEN)

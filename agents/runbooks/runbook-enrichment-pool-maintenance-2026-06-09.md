@@ -19,28 +19,36 @@ Both fixes existed but were **manual, unscheduled** one-shots, so the parked set
 re-grew every clan crawl. See `agents/work-items/player-enrichment-map-2026-06-08.md`
 §11–§12 and the `project_enrichment_misses_elite_empty_falseneg` memory.
 
-## What is automated — `enrichment_pool_maintenance_task`
+## What is automated — two DB-only task families
 
-A daily **DB-only** task (`enrichment-pool-maintenance`, **08:17 UTC**, queue `background`,
-single-flight lock, kill switch `ENRICHMENT_POOL_MAINTENANCE_ENABLED`). It issues **no WG
-calls**, so unlike enrichment's fetch arm it is **crawl-safe and never defers**. It only
-relabels/re-queues rows; the self-chaining `enrich_player_data_task` does the actual WG
-fetching on its next crawl-free window. Two idempotent passes:
+Both are **DB-only** (no WG calls), so unlike enrichment's fetch arm they are **crawl-safe
+and never defer**. They only relabel/re-queue rows; the self-chaining `enrich_player_data_task`
+does the actual WG fetching on its next crawl-free window. Both gated by
+`ENRICHMENT_POOL_MAINTENANCE_ENABLED`.
 
-### Pass 1 — `retry_empty_enrichments --apply --retry-after-days 14`
+### `enrichment-pool-maintenance` — empty re-queue (daily, 08:17 UTC)
 
-Re-surfaces `empty` false-negatives into `pending` (`status→pending`, `battles_json→NULL`).
-Index-backed on `enrichment_status`, touches only the ~500-row `empty` set — sub-second.
+`enrichment_pool_maintenance_task` runs `retry_empty_enrichments --apply
+--retry-after-days 14`: re-surfaces `empty` false-negatives into `pending`
+(`status→pending`, `battles_json→NULL`). Index-backed on `enrichment_status`, touches only
+the ~500-row `empty` set — sub-second.
 
-### Pass 2 — per-realm `reclassify_enrichment_status --realm <r> --recent-hours 25`
+### `enrichment-reclassify-drift-{realm}` — drift rescue (daily, striped per realm)
 
-**Incremental** drift rescue: recomputes `enrichment_status` only for rows fetched within
-25h. Drift-relevant fields (`is_hidden` / `pvp_battles` / `pvp_ratio` /
+`enrichment_reclassify_drift_task(realm)` runs `reclassify_enrichment_status --realm <r>
+--recent-hours 25` — **incremental**: recomputes `enrichment_status` only for rows fetched
+within 25h. Drift-relevant fields (`is_hidden` / `pvp_battles` / `pvp_ratio` /
 `days_since_last_battle`) only change on a WG re-fetch, which bumps `last_fetch` — so the
 recent set holds every row that could have **newly** drifted. Index-backed by
 `player_last_fetch_idx` (migration 0067; the planner `BitmapAnd`s it with the realm/battles
-index — verified via `EXPLAIN`). **~2.5 min/realm under crawl load** (~7–8 min total), vs
-~36 min for the full catalog.
+index — verified via `EXPLAIN`). Measured apply cost **~2.5–6 min/realm** depending on load
+(vs ~36 min for the full catalog).
+
+**Why per-realm + striped (na 08:20 / eu 08:40 / asia 09:00 UTC):** one realm at a time fits
+comfortably in a 12-min soft / 14-min hard task window, and the 1-vCPU PG sees ~6 min of
+scan at a time instead of an ~18 min continuous multi-realm burst. (The original single
+multi-realm task overran and — with a too-tight 120s `statement_timeout` — silently rolled
+back each realm's reclassify; the per-realm split + a 420s statement cap fixes both.)
 
 > **Why incremental is sufficient for the *active* population.** The daily active-snapshot
 > engine (`save_player(core_only=True)`) refreshes `is_hidden`/`pvp_battles`/`pvp_ratio`/
@@ -91,20 +99,25 @@ command default) disables the cooldown for manual one-shot drains.
 | `ENRICHMENT_POOL_MAINTENANCE_ENABLED` | `1` | Master kill switch (task no-ops at 0; schedule registered disabled). |
 | `ENRICHMENT_EMPTY_RETRY_AFTER_DAYS` | `14` | Empty re-queue cooldown — re-fetch a stuck `empty` at most once per N days. |
 | `ENRICHMENT_RECLASSIFY_RECENT_HOURS` | `25` | Incremental reclassify window (`last_fetch >= now - N h`). |
-| `ENRICHMENT_POOL_MAINTENANCE_STATEMENT_TIMEOUT` | `120` | Per-statement Postgres `statement_timeout` (seconds) — blast-radius cap. |
+| `ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUT` | `420` | Per-statement Postgres `statement_timeout` (seconds) for the drift task — sized above a single bucket UPDATE's ~2-3 min real cost so it caps a runaway without aborting normal work. |
 | `ENRICH_MIN_PVP_BATTLES` / `ENRICH_MIN_WR` | `500` / `48.0` | Shared eligibility thresholds; reclassify + retry read the same vars. |
 
-Task limits: `soft_time_limit=900s` / `time_limit=1080s`; single-flight lock 30 min (must
-outlive the hard limit so a slow run can't lose its lock mid-pass).
+Task limits: drift task `soft_time_limit=720s` / `time_limit=840s`, per-realm single-flight
+lock 20 min (outlives the hard limit so a slow run can't lose its lock mid-pass); empty
+re-queue task 540s/600s.
 
 ## Operate
 
 ```bash
-# Fire the daily task by hand (background worker):
+# Fire the empty re-queue task by hand:
 cd server && python manage.py shell -c \
   "from warships.tasks import enrichment_pool_maintenance_task as t; print(t())"
 
-# Incremental reclassify, one realm (what the task runs):
+# Fire one realm's drift reclassify task by hand:
+cd server && python manage.py shell -c \
+  "from warships.tasks import enrichment_reclassify_drift_task as t; print(t.apply(kwargs={'realm':'na'}).get())"
+
+# Incremental reclassify directly (what the drift task runs):
 cd server && python manage.py reclassify_enrichment_status --realm na --recent-hours 25 --dry-run
 
 # Empty re-queue, manually:
@@ -115,12 +128,13 @@ cd server && python manage.py reclassify_enrichment_status --realm na --dry-run 
 cd server && python manage.py reclassify_enrichment_status --realm na             # apply; repeat eu, asia
 ```
 
-Verify the schedule + index after deploy:
+Verify the schedules + index after deploy:
 
 ```bash
 cd server && python manage.py shell -c \
   "from django_celery_beat.models import PeriodicTask as P; \
-   r=P.objects.get(name='enrichment-pool-maintenance'); print(r.enabled, r.crontab)"
+   [print(r.name, r.enabled, r.crontab) for r in P.objects.filter(name__startswith='enrichment-')]"
+# expect: enrichment-pool-maintenance (08:17) + enrichment-reclassify-drift-{na,eu,asia}
 # index: SELECT indexname FROM pg_indexes WHERE indexname='player_last_fetch_idx';
 ```
 
