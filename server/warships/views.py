@@ -298,6 +298,12 @@ class PlayerViewSet(viewsets.ModelViewSet):
             update_player_data(player=obj, force_refresh=True, realm=realm)
             obj.refresh_from_db()
 
+            # New player just populated synchronously (this branch doesn't go
+            # through update_player_data_task, where the returning-player path
+            # hooks enrich-on-view) — fast-path enrich it here too if eligible.
+            from warships.tasks import _maybe_enrich_on_view
+            _maybe_enrich_on_view(obj, realm)
+
         needs_efficiency_refresh = (
             not obj.is_hidden and
             obj.efficiency_json is None and

@@ -7,16 +7,20 @@ dispatches dedup instead of each spawning a self-recurring chain. The defer
 path must also never run the heavy `_maybe_redispatch_enrichment` candidate
 scan. See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
 """
+import os
 from unittest.mock import patch
 
 from django.core.cache import cache
 from django.test import TestCase
 
+from warships.models import Player
 from warships.tasks import (
     ENRICH_PLAYER_DATA_LOCK_TIMEOUT,
     _clan_crawl_lock_key,
     _enrich_player_data_lock_key,
+    _maybe_enrich_on_view,
     enrich_player_data_task,
+    enrich_player_on_view_task,
 )
 
 
@@ -76,3 +80,71 @@ class EnrichPlayerDataTaskControlFlowTests(TestCase):
         mock_redispatch.assert_called_once()
         # Lock released after the batch.
         self.assertIsNone(cache.get(_enrich_player_data_lock_key()))
+
+
+class EnrichPlayerOnViewTaskTests(TestCase):
+    """The on-view fast-path: enrich a just-viewed, eligible, un-enriched player
+    immediately instead of waiting for the daily drift reclassify. Self-guards
+    on the same gate as the crawler so a tight ENRICH_MAX_INACTIVE_DAYS window
+    carries a low penalty (returning players re-enroll the moment they're seen).
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    def _mk(self, **kw):
+        defaults = dict(
+            realm="na", player_id=9001, name="Viewer", is_hidden=False,
+            pvp_battles=600, pvp_ratio=50.0, days_since_last_battle=2,
+            battles_json=None, enrichment_status=Player.ENRICHMENT_SKIPPED_INACTIVE,
+        )
+        defaults.update(kw)
+        return Player.objects.create(**defaults)
+
+    @patch.dict(os.environ, {"ENRICH_ON_VIEW_ENABLED": "1", "ENRICH_MAX_INACTIVE_DAYS": "7"})
+    @patch("warships.management.commands.enrich_player_data._enrich_player_parallel")
+    def test_enriches_eligible_unenriched_player(self, mock_enrich):
+        self._mk()
+        result = enrich_player_on_view_task.apply((9001, "na")).get()
+        self.assertEqual(result["status"], "enriched")
+        mock_enrich.assert_called_once_with(9001, "na")
+
+    @patch.dict(os.environ, {"ENRICH_ON_VIEW_ENABLED": "1", "ENRICH_MAX_INACTIVE_DAYS": "7"})
+    @patch("warships.management.commands.enrich_player_data._enrich_player_parallel")
+    def test_skips_already_enriched(self, mock_enrich):
+        # battles_json non-null (real data OR empty []) is terminal — never re-enrich.
+        self._mk(battles_json=[{"ship_id": 1}], enrichment_status=Player.ENRICHMENT_ENRICHED)
+        result = enrich_player_on_view_task.apply((9001, "na")).get()
+        self.assertEqual(result["reason"], "already-enriched")
+        mock_enrich.assert_not_called()
+
+    @patch.dict(os.environ, {"ENRICH_ON_VIEW_ENABLED": "1", "ENRICH_MAX_INACTIVE_DAYS": "7"})
+    @patch("warships.management.commands.enrich_player_data._enrich_player_parallel")
+    def test_skips_inactive_beyond_window(self, mock_enrich):
+        self._mk(days_since_last_battle=30)  # > 7d window
+        result = enrich_player_on_view_task.apply((9001, "na")).get()
+        self.assertEqual(result["reason"], "ineligible")
+        mock_enrich.assert_not_called()
+
+    @patch.dict(os.environ, {"ENRICH_ON_VIEW_ENABLED": "0"})
+    @patch("warships.management.commands.enrich_player_data._enrich_player_parallel")
+    def test_kill_switch_disables(self, mock_enrich):
+        self._mk()
+        result = enrich_player_on_view_task.apply((9001, "na")).get()
+        self.assertEqual(result["reason"], "disabled")
+        mock_enrich.assert_not_called()
+
+    @patch.dict(os.environ, {"ENRICH_ON_VIEW_ENABLED": "1"})
+    @patch("warships.tasks.enrich_player_on_view_task.apply_async")
+    def test_hook_enqueues_once_then_debounces(self, mock_apply):
+        player = self._mk()
+        _maybe_enrich_on_view(player, "na")
+        _maybe_enrich_on_view(player, "na")  # within cooldown → no second enqueue
+        self.assertEqual(mock_apply.call_count, 1)
+
+    @patch.dict(os.environ, {"ENRICH_ON_VIEW_ENABLED": "1"})
+    @patch("warships.tasks.enrich_player_on_view_task.apply_async")
+    def test_hook_skips_already_enriched(self, mock_apply):
+        player = self._mk(battles_json=[{"ship_id": 1}])
+        _maybe_enrich_on_view(player, "na")
+        mock_apply.assert_not_called()

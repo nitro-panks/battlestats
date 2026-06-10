@@ -40,6 +40,10 @@ CLAN_CRAWL_PASS_MARKER_TTL = 21 * 24 * 60 * 60
 RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
 RANKED_INCREMENTAL_LOCK_TIMEOUT = 6 * 60 * 60
 PLAYER_REFRESH_LOCK_TIMEOUT = 6 * 60 * 60
+# enrich-on-view: debounce so repeated profile views don't re-enqueue the same
+# player. A failed attempt still falls back to the daily drift reclassify, so a
+# generous window is fine.
+ENRICH_ON_VIEW_COOLDOWN = 6 * 60 * 60
 RANKED_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 # Ranked-observation refresh fires on profile render to capture a fresh
 # `BattleObservation.ranked_ships_stats_json` (3-WG-call path). Dedup
@@ -638,6 +642,12 @@ def update_player_data_task(self, player_id, realm=DEFAULT_REALM, force_refresh=
         player = Player.objects.get(player_id=player_id, realm=realm)
         update_player_data(
             player=player, force_refresh=force_refresh, realm=realm)
+        # The refresh just reset the activity clock (days_since_last_battle /
+        # last_fetch). If this now-fresh player is eligible but never enriched,
+        # fast-path it instead of waiting up to ~24h for the daily drift
+        # reclassify. update_player_data_task is dispatched only from the
+        # request/view path, so this is genuinely "enrich on view".
+        _maybe_enrich_on_view(player, realm)
 
     return _run_locked_task(
         "update_player_data",
@@ -645,6 +655,76 @@ def update_player_data_task(self, player_id, realm=DEFAULT_REALM, force_refresh=
         self.request.id,
         _refresh_player,
     )
+
+
+def _maybe_enrich_on_view(player, realm):
+    """Enqueue a single-player enrich for a just-viewed, eligible, un-enriched
+    player. Debounced (one enqueue per player per cooldown); the task re-checks
+    eligibility authoritatively. Kill switch: ENRICH_ON_VIEW_ENABLED."""
+    if os.getenv("ENRICH_ON_VIEW_ENABLED", "0") != "1":
+        return
+    # battles_json non-null => already enriched (data) or empty (no ships); both
+    # are terminal. Only null rows are still enrichment candidates.
+    if player.battles_json is not None:
+        return
+    # Best-effort: this runs inside the refresh task, so a broker/redis hiccup
+    # must never fail the (primary) refresh — the daily drift reclassify is the
+    # fallback enrichment path.
+    try:
+        if not cache.add(
+                f"enrich_on_view_seen:{realm}:{player.player_id}", "1",
+                ENRICH_ON_VIEW_COOLDOWN):
+            return
+        enrich_player_on_view_task.apply_async(
+            (player.player_id, realm), queue="background")
+    except Exception as exc:
+        logger.warning(
+            "enrich-on-view enqueue failed for %s/%s: %s",
+            realm, player.player_id, exc)
+
+
+@app.task(**TASK_OPTS)
+def enrich_player_on_view_task(player_id, realm=DEFAULT_REALM):
+    """Fast-path enrich a single un-enriched but now-eligible player, triggered
+    by a profile view's refresh. Closes the daily-drift-reclassify latency for
+    on-demand views. Self-guards (idempotent no-op) if disabled, already
+    enriched/empty, or no longer eligible. Eligibility mirrors the crawler gate
+    in ``enrich_player_data._candidates`` (same env thresholds)."""
+    from warships.models import Player
+
+    if os.getenv("ENRICH_ON_VIEW_ENABLED", "0") != "1":
+        return {"status": "skipped", "reason": "disabled"}
+
+    min_pvp = int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500"))
+    min_wr = float(os.getenv("ENRICH_MIN_WR", "48.0"))
+    max_inactive = int(os.getenv("ENRICH_MAX_INACTIVE_DAYS", "365"))
+
+    try:
+        player = Player.objects.get(player_id=player_id, realm=realm)
+    except Player.DoesNotExist:
+        return {"status": "skipped", "reason": "missing"}
+
+    if player.battles_json is not None:
+        return {"status": "skipped", "reason": "already-enriched"}
+    days = player.days_since_last_battle
+    if (player.is_hidden or not player.name
+            or (player.pvp_battles or 0) < min_pvp
+            or (player.pvp_ratio or 0) < min_wr
+            or days is None or days > max_inactive):
+        return {"status": "skipped", "reason": "ineligible"}
+
+    from warships.management.commands.enrich_player_data import (
+        _enrich_player_parallel,
+    )
+    try:
+        _enrich_player_parallel(player_id, realm)
+    except Exception as exc:  # network/WG hiccup — drift reclassify will retry
+        logger.warning(
+            "enrich_player_on_view_task failed for %s/%s: %s",
+            realm, player_id, exc)
+        return {"status": "error", "reason": str(exc)}
+    logger.info("enrich_player_on_view_task enriched %s/%s", realm, player_id)
+    return {"status": "enriched", "player_id": player_id}
 
 
 @app.task(bind=True, **TASK_OPTS)

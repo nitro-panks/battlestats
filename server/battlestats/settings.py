@@ -301,6 +301,7 @@ CELERY_TASK_ROUTES = {
     # clear a stale lock + restart. See runbook-clan-crawl-blocker-2026-04-30.md.
     'warships.tasks.ensure_crawl_all_clans_running_task': {'queue': 'default'},
     'warships.tasks.incremental_player_refresh_task': {'queue': 'background'},
+    'warships.tasks.enrich_player_on_view_task': {'queue': 'background'},
     'warships.tasks.snapshot_active_players_task': {'queue': 'background'},
     'warships.tasks.incremental_ranked_data_task': {'queue': 'background'},
     'warships.tasks.refresh_efficiency_rank_snapshot_task': {'queue': 'background'},
