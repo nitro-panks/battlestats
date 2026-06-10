@@ -558,7 +558,12 @@ set_env_value PLAYER_REFRESH_STATE_FILE "${APP_ROOT}/shared/logs/incremental_pla
 set_env_value RANKED_INCREMENTAL_STATE_FILE "${APP_ROOT}/shared/logs/incremental_ranked_data_state.json"
 set_env_value ENRICH_BATCH_SIZE 500
 set_env_value ENRICH_MIN_PVP_BATTLES 500
-set_env_value ENRICH_MIN_WR 48.0
+# WR floor relaxed to 0 + activity window tightened to 90d: enrich the active
+# low-WR base, paced by natural re-fetch (daily drift reclassify), not a bulk
+# push. ENRICH_MAX_INACTIVE_DAYS is read in lockstep by the live crawler gate
+# and the reclassify/retry classifiers (commit ed27912).
+set_env_value ENRICH_MIN_WR 0.0
+set_env_value ENRICH_MAX_INACTIVE_DAYS 90
 set_env_value ENRICH_DELAY 0.2
 set_env_value ENRICH_PAUSE_BETWEEN_BATCHES 10
 set_env_value PLAYER_REFRESH_INTERVAL_MINUTES 180
