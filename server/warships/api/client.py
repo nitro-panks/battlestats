@@ -68,6 +68,11 @@ def _request_api_payload(endpoint: str, params: Dict[str, Any], realm: str = DEF
 
     base_url = get_base_url(realm)
 
+    # Global WG rate limit (shared across all worker processes + request
+    # threads via Redis). No-op when disabled / no Redis / on error.
+    from warships.api.rate_limiter import acquire as _wg_rate_limit_acquire
+    _wg_rate_limit_acquire()
+
     try:
         response = _get_session().get(
             base_url + clean_endpoint,
@@ -139,6 +144,11 @@ def make_api_request_typed(endpoint: str, params: Dict[str, Any], realm: str = D
     clean_params = {key: value for key, value in params.items() if value is not None}
     clean_params.setdefault("application_id", APP_ID)
     base_url = get_base_url(realm)
+
+    # Global WG rate limit (shared across all worker processes + request
+    # threads via Redis). No-op when disabled / no Redis / on error.
+    from warships.api.rate_limiter import acquire as _wg_rate_limit_acquire
+    _wg_rate_limit_acquire()
 
     try:
         response = _get_session().get(

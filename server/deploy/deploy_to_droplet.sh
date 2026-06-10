@@ -583,6 +583,16 @@ set_env_value PLAYER_REFRESH_INTERVAL_MINUTES 180
 set_env_value RANKED_REFRESH_INTERVAL_MINUTES 120
 set_env_value CELERY_BROKER_HEARTBEAT 0
 set_env_value ENABLE_CRAWLER_SCHEDULES 1
+# Global WG token-bucket rate limiter (api/rate_limiter.py), shared across all
+# worker processes + gunicorn request threads via Redis. Enforces the single
+# WG_APP_ID's ~10 req/s budget at the WG egress, replacing the crude per-caller
+# delays as the real ceiling. Kept conservative (<10/s) since per-component
+# delays still exist; tighten/loosen here. PER_SEC=0 or ENABLED=0 disables.
+set_env_value WG_RATE_LIMIT_ENABLED 1
+set_env_value WG_RATE_LIMIT_PER_SEC 9
+set_env_value WG_RATE_LIMIT_BURST 18
+set_env_value WG_RATE_LIMIT_MAX_WAIT 8
+set_env_value WG_RATE_LIMIT_REQUEST_MAX_WAIT 0.5
 
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"

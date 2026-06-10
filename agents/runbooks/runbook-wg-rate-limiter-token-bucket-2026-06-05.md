@@ -2,7 +2,7 @@
 
 _Created: 2026-06-05_
 _Context: All backend workers (clan crawl, observation floor, clan-battle seasonstats warming, on-demand hydration, enrichment) share a single WG `application_id` and one ~10 req/s budget, but each path self-throttles independently with no cross-worker coordination. When two or more paths run hot at once they collectively blow the per-app-id ceiling and WG returns `407 REQUEST_LIMIT_EXCEEDED`. Observed this session as `clans/seasonstats/` 407 bursts (252 in 6h) overlapping the NA crawl; commit `8210db7` capped the CB fan-out as a stopgap but the systemic gap remains._
-_Status: **design only — not implemented.** This runbook is the spec for a future agent to build from._
+_Status: **SHIPPED 2026-06-10** (`warships/api/rate_limiter.py`). Implemented as designed: Redis-backed atomic Lua token bucket, clock from `redis.call('TIME')`, fail-open everywhere, single global bucket for the per-app-id budget. Two corrections vs this spec: (1) the egress is NOT a single point — both `_request_api_payload` AND `make_api_request_typed` issue their own GETs, so the `acquire()` call was added at **both**; (2) added caller-context wait budgets — background tasks block up to `WG_RATE_LIMIT_MAX_WAIT` (8s), request threads only `WG_RATE_LIMIT_REQUEST_MAX_WAIT` (0.5s) then fail open, because a synchronous WG call still exists on the request path (`_fetch_player_id_by_name`) and a saturated bucket must not park gunicorn threads. Env catalog in `ops-env-reference.md` (WG rate limiter section). Per-component delays kept as backstops pending a watch period. Lua bucket proven against real Redis in `test_rate_limiter.py`._
 
 ## Purpose
 
