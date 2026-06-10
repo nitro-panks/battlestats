@@ -146,6 +146,46 @@ class ReclassifyRecentHoursTests(TestCase):
         old.refresh_from_db()
         self.assertEqual(old.enrichment_status, Player.ENRICHMENT_PENDING)
 
+    @mock.patch(
+        "warships.management.commands.reclassify_enrichment_status.MIN_WR", 0.0)
+    @mock.patch(
+        "warships.management.commands.reclassify_enrichment_status.MAX_INACTIVE_DAYS", 90)
+    def test_relaxed_wr_and_tightened_window_promote_via_recent_drift(self):
+        # The "natural discovery" path: with ENRICH_MIN_WR=0 + ENRICH_MAX_INACTIVE_DAYS=90,
+        # the daily incremental drift pass rescues a recently-refetched, active,
+        # sub-48% skipped_low_wr row into pending (no bulk reclassify needed) — but
+        # ONLY inside the recency window, so intake is paced by natural re-fetches.
+        active = self._mk(
+            name="LowWrActive", player_id=7201, pvp_ratio=40.0,
+            days_since_last_battle=30,
+            enrichment_status=Player.ENRICHMENT_SKIPPED_LOW_WR,
+            last_fetch=timezone.now() - timedelta(hours=2))
+        # Recently re-fetched but now inactive past the tightened 90d window ->
+        # the 90d lever moves it the other way, to skipped_inactive.
+        stale = self._mk(
+            name="LowWrStale", player_id=7202, pvp_ratio=40.0,
+            days_since_last_battle=200,
+            enrichment_status=Player.ENRICHMENT_SKIPPED_LOW_WR,
+            last_fetch=timezone.now() - timedelta(hours=2))
+        # Same eligibility, but not re-fetched recently -> stays put until the
+        # crawler naturally re-touches it (this is what makes it a trickle, not a push).
+        untouched = self._mk(
+            name="LowWrUntouched", player_id=7203, pvp_ratio=40.0,
+            days_since_last_battle=30,
+            enrichment_status=Player.ENRICHMENT_SKIPPED_LOW_WR,
+            last_fetch=timezone.now() - timedelta(hours=72))
+
+        call_command("reclassify_enrichment_status", "--recent-hours", "25",
+                     stdout=StringIO())
+
+        active.refresh_from_db()
+        self.assertEqual(active.enrichment_status, Player.ENRICHMENT_PENDING)
+        self.assertIsNone(active.battles_json)
+        stale.refresh_from_db()
+        self.assertEqual(stale.enrichment_status, Player.ENRICHMENT_SKIPPED_INACTIVE)
+        untouched.refresh_from_db()
+        self.assertEqual(untouched.enrichment_status, Player.ENRICHMENT_SKIPPED_LOW_WR)
+
 
 class EnrichmentLiftReportCommandTests(TestCase):
     def _mk(self, **kw):

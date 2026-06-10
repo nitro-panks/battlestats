@@ -32,7 +32,7 @@ from warships.models import Player
 
 MIN_PVP_BATTLES = int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500"))
 MIN_WR = float(os.getenv("ENRICH_MIN_WR", "48.0"))
-MAX_INACTIVE_DAYS = 365
+MAX_INACTIVE_DAYS = int(os.getenv("ENRICH_MAX_INACTIVE_DAYS", "365"))
 
 # (label, low_inclusive, high_exclusive)
 WR_BANDS = [

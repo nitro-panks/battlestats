@@ -16,8 +16,9 @@ so reclassified rows stay consistent with what the live crawler will pick up):
   pvp_ratio < MIN_WR                    -> skipped_low_wr
   otherwise                             -> pending
 
-``MIN_PVP_BATTLES`` and ``MIN_WR`` read the same env vars as
-``warships.tasks.enrich_player_data_task`` so the two stay in lockstep.
+``MIN_PVP_BATTLES``, ``MIN_WR`` and ``MAX_INACTIVE_DAYS`` read the same env
+vars (``ENRICH_MIN_PVP_BATTLES`` / ``ENRICH_MIN_WR`` / ``ENRICH_MAX_INACTIVE_DAYS``)
+as the live crawler so the eligibility gate stays in lockstep.
 """
 import os
 from datetime import timedelta
@@ -31,7 +32,7 @@ from warships.models import Player
 
 MIN_PVP_BATTLES = int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500"))
 MIN_WR = float(os.getenv("ENRICH_MIN_WR", "48.0"))
-MAX_INACTIVE_DAYS = 365
+MAX_INACTIVE_DAYS = int(os.getenv("ENRICH_MAX_INACTIVE_DAYS", "365"))
 
 
 class Command(BaseCommand):

@@ -49,7 +49,7 @@ DEFAULT_BATCH = 500
 DEFAULT_MIN_PVP_BATTLES = 500
 DEFAULT_MIN_WR = 0.0
 DEFAULT_DELAY = 0.0
-DEFAULT_MAX_INACTIVE_DAYS = 365
+DEFAULT_MAX_INACTIVE_DAYS = int(os.environ.get("ENRICH_MAX_INACTIVE_DAYS", "365"))
 BULK_API_BATCH_SIZE = 100  # max account_ids per WG API call
 
 # Health-check tunables (env-overridable)

@@ -37,6 +37,7 @@ Crawlers/refresh (`ENABLE_CRAWLER_SCHEDULES`=1 in prod is the master kill switch
 
 Enrichment:
 - `ENRICH_REALMS` (all), `ENRICH_BATCH_SIZE` (500), `ENRICH_MIN_PVP_BATTLES` (500), `ENRICH_MIN_WR` (48.0), `ENRICH_DELAY` (0.2), `ENRICH_PAUSE_BETWEEN_BATCHES` (10)
+- `ENRICH_MAX_INACTIVE_DAYS` (365) — the eligibility activity window. Read in lockstep by the live crawler's candidate gate (`enrich_player_data._candidates`) and by the `reclassify_enrichment_status` / `retry_empty_enrichments` classifiers, so lowering it (e.g. `90`) tightens intake everywhere at once. The live gate filters stale rows at selection time regardless of `enrichment_status`; the daily incremental drift reclassify absorbs the change naturally as rows are re-fetched (no full-catalog reclassify / bulk drain required). `ENRICH_MIN_WR=0` similarly relaxes the win-rate floor — both levers let the crawler discover the broader active base organically rather than via a one-time push.
 
 Battle-history pipeline (phased gates, all default 0):
 - `BATTLE_HISTORY_CAPTURE_ENABLED` (write BattleObservation/BattleEvent as a side-effect of `update_battle_data`)
