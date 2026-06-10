@@ -240,13 +240,15 @@ else
 fi
 
 # R3 (2026-06-08). With R2 freeing the crawl's grip on the box, the floor worker
-# sat idle ~5.5/6h. Two levers: bigger normal-cycle cap (LIMIT 3000->7500) AND
-# higher frequency (each realm every 3h not 6h, striped 60min apart) to use the
-# idle capacity + drain the now-honest active backlog. Coexist LIMIT pinned at
-# 3000 to stay gentle on the 1-vCPU DB while a crawl holds the realm lock.
+# sat idle ~5.5/6h. Two levers: bigger normal-cycle cap (LIMIT 3000->7500, then
+# ->12000 on 2026-06-10 to push fresh_frac up — WG/DB have headroom) AND higher
+# frequency (each realm every 3h not 6h, striped 60min apart) to use the idle
+# capacity + drain the now-honest active backlog. Coexist LIMIT pinned at 3000
+# to stay gentle on the 1-vCPU DB while a crawl holds the realm lock (so the 12k
+# normal-cycle cap only fully applies on non-crawl cycles).
 # CYCLE_MINUTES takes effect via post_migrate schedule re-registration.
 for kv in \
-  'BATTLE_OBSERVATION_FLOOR_LIMIT=7500' \
+  'BATTLE_OBSERVATION_FLOOR_LIMIT=12000' \
   'BATTLE_OBSERVATION_FLOOR_CRAWL_LIMIT=3000' \
   'BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES=180'; do
   k="${kv%%=*}"
