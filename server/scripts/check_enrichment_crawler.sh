@@ -153,17 +153,17 @@ echo
 echo "## Batch History"
 echo
 
-JOURNAL_BATCHES=$(grep 'Enrichment pass complete' "$JLOG_24H" \
+JOURNAL_BATCHES=$( { grep 'Enrichment pass complete' "$JLOG_24H" || true; } \
     | sed "s/.*\[/[/" | cut -d, -f1 | sed 's/\[//' | sed 's/\]//')
 
-WINDOW_BATCHES=$(echo "$JOURNAL_BATCHES" | grep -c '.' 2>/dev/null || echo "0")
+WINDOW_BATCHES=$(echo "$JOURNAL_BATCHES" | grep -c '.' 2>/dev/null || true)
 TOTAL_ENRICHED=$(( BASELINE_ENRICHED + WINDOW_BATCHES * 500 ))
 TOTAL_BATCHES=$(( BASELINE_ENRICHED / 500 + WINDOW_BATCHES ))
 
-RECENT_BATCHES=$(grep 'Enrichment pass complete' "$JLOG_6H" \
+RECENT_BATCHES=$( { grep 'Enrichment pass complete' "$JLOG_6H" || true; } \
     | sed "s/.*\[/[/" | cut -d, -f1 | sed 's/\[//' | sed 's/\]//')
 
-RECENT_COUNT=$(echo "$RECENT_BATCHES" | grep -c '.' 2>/dev/null || echo "0")
+RECENT_COUNT=$(echo "$RECENT_BATCHES" | grep -c '.' 2>/dev/null || true)
 
 printf "  %-22s %s\n" "24h window batches:" "$WINDOW_BATCHES"
 printf "  %-22s %s\n" "Total batches:" "$TOTAL_BATCHES (includes baseline)"
@@ -239,7 +239,7 @@ echo
 echo "## Live Progress"
 echo
 
-LIVE=$(grep 'Enriched ' "$JLOG_3M" | tail -3)
+LIVE=$( { grep 'Enriched ' "$JLOG_3M" || true; } | tail -3)
 if [ -z "$LIVE" ]; then
     echo "  No enrichment activity in the last 3 minutes"
     echo
@@ -254,7 +254,7 @@ echo
 echo "## Clan Crawl Interference"
 echo
 
-CRAWL_PAGES=$(grep -c 'Page [0-9]*/[0-9]* —' "$JLOG_30M" || echo "0")
+CRAWL_PAGES=$(grep -c 'Page [0-9]*/[0-9]* —' "$JLOG_30M" || true)
 if [ "$CRAWL_PAGES" -gt 0 ]; then
     echo "  WARNING: Clan crawl activity in last 30 min ($CRAWL_PAGES page logs)"
     grep 'Page [0-9]*/[0-9]* —' "$JLOG_30M" | tail -3 | sed 's/^/  /'
