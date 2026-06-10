@@ -32,6 +32,7 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 ## Evergreen Operational Guides
 
 - `runbook-celery-queue-strategy.md`: current queue assessment for crawlers, warmers, and request-driven refresh tasks.
+- `runbook-pause-resume-clan-crawls-2026-06-10.md`: safe procedure to pause/resume clan crawls for a maintenance window (stop the single-slot crawls worker, clear locks while preserving pass markers, watchdog/lock gotchas).
 - `runbook-enrichment-crawler-2026-04-03.md`: enrichment progress log. Enrichment runs on the droplet's Celery `background` worker via `enrich_player_data_task`, re-seeded by the `player-enrichment-kickstart` Beat schedule.
 - `runbook-deleted-account-purge.md`: purge flow and safety notes for deleted accounts.
 - `runbook-dependency-audit.md`: dependency hygiene policy and current audit posture.

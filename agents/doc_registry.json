@@ -2133,6 +2133,30 @@
             "archive_on": [
                 "live-update-cooldown-ui-shipped"
             ]
+        },
+        "agents/runbooks/runbook-pause-resume-clan-crawls-2026-06-10.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "pause crawls",
+                "stop clan crawl",
+                "resume clan crawl",
+                "crawl maintenance window"
+            ],
+            "tags": [
+                "crawler",
+                "operations",
+                "celery",
+                "maintenance",
+                "wg-budget",
+                "enrichment"
+            ],
+            "archive_on": [
+                "crawl-control-model-replaced"
+            ]
         }
     }
 }
