@@ -28,7 +28,12 @@ class EnrichPlayerDataTaskControlFlowTests(TestCase):
     def setUp(self):
         cache.clear()
 
-    def test_defer_when_crawl_active_releases_lock_and_does_not_reenqueue(self):
+    @patch.dict(os.environ, {"ENRICH_DEFER_DURING_CRAWL": "1"})
+    def test_defer_when_crawl_active_and_kill_switch_set(self):
+        # Kill switch ENRICH_DEFER_DURING_CRAWL=1 restores the old behavior:
+        # defer entirely while a crawl is active. Regression guard for the
+        # 2026-05-27 fan-out — the defer path must release the lock, NOT
+        # re-enqueue, and NOT run the heavy candidate scan or touch WG.
         cache.set(_clan_crawl_lock_key('na'), '1', 300)
 
         with patch('warships.management.commands.enrich_player_data.enrich_players') as mock_enrich, \
@@ -46,6 +51,26 @@ class EnrichPlayerDataTaskControlFlowTests(TestCase):
         # …nor touch the WG API.
         mock_enrich.assert_not_called()
         # Lock released so the next kickstart can acquire it cleanly.
+        self.assertIsNone(cache.get(_enrich_player_data_lock_key()))
+
+    def test_coexists_with_crawl_by_default(self):
+        # Default (kill switch unset): enrichment runs ALONGSIDE an active crawl
+        # instead of deferring — the fix for backlog starvation through multi-day
+        # crawls. It runs a batch (at the gentler crawl delay) and self-chains.
+        cache.set(_clan_crawl_lock_key('na'), '1', 300)
+        summary = {'enriched': 5, 'remaining': 100}
+
+        with patch('warships.management.commands.enrich_player_data.enrich_players', return_value=summary) as mock_enrich, \
+                patch('warships.tasks._maybe_redispatch_enrichment') as mock_redispatch:
+            result = enrich_player_data_task.apply().get()
+
+        self.assertEqual(result, summary)
+        # Ran a real batch despite the active crawl…
+        mock_enrich.assert_called_once()
+        # …at the gentler during-crawl delay (default 0.5s, not the 0.2s baseline).
+        self.assertAlmostEqual(mock_enrich.call_args.kwargs['delay'], 0.5)
+        # …and self-chained so the drain continues through the crawl.
+        mock_redispatch.assert_called_once()
         self.assertIsNone(cache.get(_enrich_player_data_lock_key()))
 
     def test_skips_when_lock_already_held(self):

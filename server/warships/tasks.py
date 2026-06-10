@@ -1929,19 +1929,21 @@ def enrich_player_data_task(self):
             "Skipping enrich_player_data_task — another enrichment is already running")
         return {"status": "skipped", "reason": "already-running"}
 
-    # Defer while a clan crawl is active (shared WG API rate limit). We hold the
-    # lock, so release it and return WITHOUT re-enqueuing: the every-15-min Beat
-    # kickstart (player-enrichment-kickstart) is the retry, bounding deferrals to
-    # one no-op per cycle instead of a self-multiplying chain. (Benign race: a
-    # crawl may start between this check and enrich_players below; that batch
-    # competes for the WG budget once and the next dispatch defers. The 6h lock
-    # TTL + heartbeat lets a long-running batch hold the lock safely.)
+    # Coexist with clan crawls by default. The old blanket defer here predates
+    # any per-request WG throttling and was starving backlog drain through
+    # multi-day crawls — enrichment made ZERO progress for as long as a crawl
+    # held its realm lock (the `pending` pool piled up while `enriched` stayed
+    # flat). WG has rate headroom, so we run alongside the crawl but at a gentler
+    # per-player delay (ENRICH_DELAY_DURING_CRAWL) to bound the combined request
+    # rate and avoid 407s. Kill switch: ENRICH_DEFER_DURING_CRAWL=1 restores the
+    # old defer-entirely behavior. The lock-first acquisition above still
+    # prevents the 2026-05-27 deferral fan-out regardless of which branch runs.
     from warships.models import VALID_REALMS as _realms
     active_crawls = [
         r for r in sorted(_realms)
         if cache.get(_clan_crawl_lock_key(r)) is not None
     ]
-    if active_crawls:
+    if active_crawls and os.getenv("ENRICH_DEFER_DURING_CRAWL", "0") == "1":
         cache.delete(lock_key)
         logger.info(
             "Deferring enrichment — clan crawl active for %s; Beat kickstart will retry",
@@ -1956,11 +1958,18 @@ def enrich_player_data_task(self):
         realms_env = os.getenv("ENRICH_REALMS", "").strip()
         realms = tuple(r.strip()
                        for r in realms_env.split(",") if r.strip()) or None
+        # Gentler per-player pacing while a crawl shares the WG budget.
+        delay = (float(os.getenv("ENRICH_DELAY_DURING_CRAWL", "0.5"))
+                 if active_crawls else float(os.getenv("ENRICH_DELAY", "0.2")))
+        if active_crawls:
+            logger.info(
+                "Enrichment coexisting with active clan crawl(s) %s (delay=%.2fs)",
+                active_crawls, delay)
         summary = enrich_players(
             batch=batch_size,
             min_pvp_battles=int(os.getenv("ENRICH_MIN_PVP_BATTLES", "500")),
             min_wr=float(os.getenv("ENRICH_MIN_WR", "48.0")),
-            delay=float(os.getenv("ENRICH_DELAY", "0.2")),
+            delay=delay,
             realms=realms,
             heartbeat_callback=lambda: cache.set(
                 lock_key, self.request.id, timeout=ENRICH_PLAYER_DATA_LOCK_TIMEOUT,

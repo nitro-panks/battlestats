@@ -568,6 +568,14 @@ set_env_value ENRICH_MIN_WR 0.0
 set_env_value ENRICH_MAX_INACTIVE_DAYS 7
 set_env_value ENRICH_ON_VIEW_ENABLED 1
 set_env_value ENRICH_DELAY 0.2
+# Enrichment now COEXISTS with clan crawls (was: deferred entirely, which
+# starved backlog drain through multi-day crawls — `pending` piled up while
+# `enriched` stayed flat). Pinned to the code defaults for visibility/override:
+# DEFER=0 keeps coexist on; DELAY_DURING_CRAWL paces enrichment gentler while a
+# crawl shares the WG budget (no shared limiter yet — keep combined rate <~10/s).
+# Kill switch: set ENRICH_DEFER_DURING_CRAWL=1 to restore the old defer behavior.
+set_env_value ENRICH_DEFER_DURING_CRAWL 0
+set_env_value ENRICH_DELAY_DURING_CRAWL 0.5
 set_env_value ENRICH_PAUSE_BETWEEN_BATCHES 10
 set_env_value PLAYER_REFRESH_INTERVAL_MINUTES 180
 set_env_value RANKED_REFRESH_INTERVAL_MINUTES 120
