@@ -55,7 +55,7 @@ from warships.data import (
     PLAYER_BATTLE_DATA_STALE_AFTER,
     refresh_player_explorer_summary,
 )
-from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, invalidate_landing_clan_caches, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, invalidate_landing_clan_caches, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
 from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, queue_landing_best_entity_warm, update_clan_data_task, update_player_data_task, update_clan_members_task
 
@@ -145,7 +145,6 @@ def _record_clan_lookup(clan: Clan, realm: str = DEFAULT_REALM) -> None:
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
 LANDING_CLAN_FEATURED_COUNT = 30
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
-LANDING_RECENT_PLAYER_SCORE_WINDOW = 120
 LANDING_PLAYER_LIMIT = 25
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
@@ -1963,13 +1962,6 @@ def landing_clans(request) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
-def landing_recent_clans(request) -> Response:
-    realm = _get_realm(request)
-    return Response(get_landing_recent_clans_payload(realm=realm))
-
-
-@api_view(["GET"])
-@throttle_classes(PUBLIC_API_THROTTLES)
 def landing_players(request) -> Response:
     try:
         mode = normalize_landing_player_mode(request.query_params.get('mode'))
@@ -2003,19 +1995,6 @@ def landing_players(request) -> Response:
     response['X-Landing-Players-Cache-Expires-At'] = str(
         cache_metadata['expires_at'])
     return response
-
-
-@api_view(["GET"])
-@throttle_classes(PUBLIC_API_THROTTLES)
-def landing_recent_players(request) -> Response:
-    """Players who played the most random battles over the last 7 days.
-
-    Sourced from PlayerDailyShipStats and rebuilt every 3h by
-    `warm_landing_recent_players_task`. Reads are pure cache lookups —
-    rebuilds happen out-of-band so this endpoint never blocks on them.
-    """
-    realm = _get_realm(request)
-    return Response(get_landing_recent_players_payload(realm=realm))
 
 
 @api_view(["GET"])

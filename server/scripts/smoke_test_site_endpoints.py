@@ -150,8 +150,6 @@ def build_cases() -> list[SmokeCase]:
                   json_type="list", min_items=1),
         SmokeCase("landing_players", "/api/landing/players/",
                   json_type="list", min_items=1),
-        SmokeCase("landing_recent", "/api/landing/recent/",
-                  json_type="list", min_items=1),
         SmokeCase(
             "player_suggestions",
             "/api/landing/player-suggestions/?q=sh",

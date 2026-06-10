@@ -138,8 +138,8 @@ Targeted follow-up remains manual via the shared wrapper:
 
 ```bash
 ./scripts/post_deploy_operations.sh YOUR_DROPLET_IP snapshots --realm na --sort cb
-./scripts/post_deploy_operations.sh YOUR_DROPLET_IP invalidate --realm na --players --include-recent
-./scripts/post_deploy_operations.sh YOUR_DROPLET_IP warm-landing --realm na --include-recent
+./scripts/post_deploy_operations.sh YOUR_DROPLET_IP invalidate --realm na --players
+./scripts/post_deploy_operations.sh YOUR_DROPLET_IP warm-landing --realm na
 ./scripts/post_deploy_operations.sh YOUR_DROPLET_IP warm-best-entities --realm na --player-limit 25 --clan-limit 25
 ```
 

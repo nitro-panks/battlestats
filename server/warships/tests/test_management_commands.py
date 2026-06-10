@@ -313,7 +313,6 @@ class RunPostDeployOperationsCommandTests(TestCase):
             realm="eu",
             players=True,
             clans=True,
-            include_recent=True,
             stdout=out,
         )
         payload = json.loads(out.getvalue())
@@ -321,7 +320,6 @@ class RunPostDeployOperationsCommandTests(TestCase):
         self.assertEqual(payload["invalidated"], {
                          "players": ["eu"], "clans": ["eu"]})
         mock_invalidate_players.assert_called_once_with(
-            include_recent=True,
             realm="eu",
             queue_republish=False,
             bump_namespace=True,

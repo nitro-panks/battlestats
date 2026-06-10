@@ -37,7 +37,6 @@ from warships.signals import (
 # Tuples are (name_prefix, cycle_env_default_minutes).
 STRIPED_PER_REALM_FAMILIES = [
     ("landing-page-warmer", 120),
-    ("recent-players-warmer", 180),
     ("player-distribution-warmer", 360),
     ("player-correlation-warmer", 360),
     ("hot-entity-cache-warmer", 30),
@@ -263,8 +262,6 @@ class MinuteLaneDePileTests(TestCase):
         "player-distribution-warmer",
         "player-correlation-warmer",
         "landing-page-warmer",
-        "recent-players-warmer",
-        "recent-clans-warmer",
     ]
 
     def test_na_minute_lanes_are_distinct(self):

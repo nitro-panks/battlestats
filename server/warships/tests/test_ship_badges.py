@@ -690,7 +690,7 @@ class MaterializeBestSnapshotWarmChainTests(TestCase):
                 kwargs={"realm": "na"}).get()
 
         warm.assert_called_once_with(
-            kwargs={"include_recent": False, "realm": "na", "scope": "players"},
+            kwargs={"realm": "na", "scope": "players"},
             queue="background",
         )
 

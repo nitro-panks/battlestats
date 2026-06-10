@@ -7,24 +7,9 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
-from warships.models import Player, Clan, PlayerDailyShipStats, PlayerExplorerSummary, realm_cache_key, LandingRecentPlayersSnapshot, LandingPlayerBestSnapshot, Ship, ShipTopPlayerSnapshot, ShipAward
+from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
+from warships.models import Player, Clan, PlayerExplorerSummary, realm_cache_key, LandingPlayerBestSnapshot, Ship, ShipTopPlayerSnapshot, ShipAward
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
-
-
-def _seed_recent_active(player, *, battles=15, day_offset=0, ship_id=1):
-    """Test helper: stamp a PlayerDailyShipStats row so `player` shows up in
-    the landing recent-players surface (the >10 random-battles-in-7d floor
-    is part of the surface contract; default is 15 to clear it). Caller must
-    set `last_random_battle_at` on the Player for the row to be ordered.
-    """
-    return PlayerDailyShipStats.objects.create(
-        player=player,
-        date=timezone.now().date() - timedelta(days=day_offset),
-        ship_id=ship_id,
-        mode=PlayerDailyShipStats.MODE_RANDOM,
-        battles=battles,
-    )
 
 
 class PlayerViewSetTests(TestCase):
@@ -625,46 +610,8 @@ class LandingWarmupViewTests(TestCase):
         self.assertGreaterEqual(player.last_lookup, request_started_at)
         self.assertLessEqual(player.last_lookup, timezone.now())
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
-    def test_player_lookup_does_not_invalidate_recent_players_cache(
-        self,
-        _mock_update_player_task,
-        _mock_update_clan_task,
-        _mock_update_clan_members_task,
-    ):
-        """Recent now means recently-battled (Player.last_random_battle_at);
-        page views no longer drive that ordering, so visiting a player's
-        page must not mark the recent-players cache dirty.
-        Invalidation is the BattleEvent capture path's responsibility."""
-        now = timezone.now()
-        clan = Clan.objects.create(
-            clan_id=953,
-            name="CacheClan",
-            members_count=1,
-            last_fetch=now,
-        )
-        Player.objects.create(
-            name="CacheLookupPlayer",
-            player_id=9053,
-            clan=clan,
-            last_fetch=now,
-            last_lookup=None,
-        )
-        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY,
-                  [{'name': 'stale'}], 60)
-
-        response = self.client.get("/api/player/CacheLookupPlayer/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
-            {'name': 'stale'}])
-
-    def test_player_cache_hit_still_updates_last_lookup_without_invalidating_recent(self):
-        """Cache-hit path bumps last_lookup (analytics, hot-entity warmer)
-        but must not mark the recent-players cache dirty — Recent is now
-        battle-driven, not view-driven."""
+    def test_player_cache_hit_still_updates_last_lookup(self):
+        """Cache-hit path bumps last_lookup (analytics, hot-entity warmer)."""
         now = timezone.now()
         clan = Clan.objects.create(
             clan_id=954, name="CacheHitClan", members_count=1, last_fetch=now,
@@ -680,8 +627,6 @@ class LandingWarmupViewTests(TestCase):
         serialized = PlayerSerializer(player).data
         cache.set(_bulk_cache_key_player(player.player_id), serialized, 300)
 
-        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY, [{'name': 'stale'}], 60)
-
         request_started_at = timezone.now()
         response = self.client.get("/api/player/CacheHitPlayer/")
 
@@ -691,10 +636,6 @@ class LandingWarmupViewTests(TestCase):
         player.refresh_from_db()
         self.assertIsNotNone(player.last_lookup)
         self.assertGreaterEqual(player.last_lookup, request_started_at)
-        # Recent cache value must be preserved — the surface is rebuilt
-        # by the dedicated 3h periodic warmer, not by player views.
-        self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
-            {'name': 'stale'}])
 
     def test_clan_members_lookup_updates_clan_last_lookup_timestamp(self):
         cache.clear()
@@ -1947,15 +1888,11 @@ class ClanMembersEndpointTests(TestCase):
 
 class ApiContractTests(TestCase):
     def setUp(self):
-        # Cross-test leakage cleanup (see ApiThrottleTests.setUp for the full
-        # rationale): warm_landing_page_content's ThreadPoolExecutor commits the
-        # durable Landing*Snapshot rows on separate DB connections that survive a
-        # TestCase rollback, so an earlier landing test leaves a stale Tier-2
-        # snapshot the recent-players surface serves instead of rebuilding. This
-        # only bites under the full suite (test_landing sorts before test_views);
-        # the class passed in the curated CI order. Delete the leaked rows.
+        # Cross-test leakage cleanup: warm_landing_page_content's
+        # ThreadPoolExecutor commits the durable LandingPlayerBestSnapshot rows
+        # on separate DB connections that survive a TestCase rollback. Delete
+        # the leaked rows.
         cache.clear()
-        LandingRecentPlayersSnapshot.objects.all().delete()
         LandingPlayerBestSnapshot.objects.all().delete()
 
     def test_player_name_suggestions_prioritize_prefix_matches_and_limit_results(self):
@@ -2042,38 +1979,6 @@ class ApiContractTests(TestCase):
         response = self.client.get(
             "/api/landing/clan-suggestions/?q=test\x00")
         self.assertIn(response.status_code, [200, 400])
-
-    def test_landing_players_default_mode_rejects_hidden_via_recent_endpoint(self):
-        # The Random mode + its loose filters were retired 2026-05-07.
-        # Hidden-stats exclusion is now verified through the recent-players
-        # endpoint, whose filter is exercised by synthetic test players.
-        cache.clear()
-        now = timezone.now()
-        hidden = Player.objects.create(
-            name="HiddenLandingPlayer",
-            player_id=4242,
-            is_hidden=True,
-            pvp_ratio=61.5,
-            pvp_battles=900,
-            last_random_battle_at=now,
-        )
-        visible = Player.objects.create(
-            name="VisibleLandingPlayer",
-            player_id=4243,
-            is_hidden=False,
-            pvp_ratio=58.2,
-            pvp_battles=950,
-            last_random_battle_at=now,
-        )
-        _seed_recent_active(hidden, battles=15)
-        _seed_recent_active(visible, battles=15)
-
-        response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(response.status_code, 200)
-        names = [row["name"] for row in response.json()]
-        self.assertIn("VisibleLandingPlayer", names)
-        self.assertNotIn("HiddenLandingPlayer", names)
 
     def test_landing_activity_attrition_returns_monthly_cohorts(self):
         cache.clear()
@@ -3288,303 +3193,11 @@ class ApiContractTests(TestCase):
         names = [row["name"] for row in response.json()]
         self.assertNotIn("LandingInactivePlayer", names)
 
-    def test_landing_recent_players_orders_by_recency_with_battles_floor(self):
-        cache.clear()
-        now = timezone.now()
-        # All three pass the >10 battles floor; ordering is by
-        # last_random_battle_at desc.
-        oldest = Player.objects.create(
-            name="RecentOldest", player_id=4401, pvp_ratio=58.0,
-            last_random_battle_at=now - timedelta(hours=3))
-        middle = Player.objects.create(
-            name="RecentMiddle", player_id=4402, pvp_ratio=51.0,
-            last_random_battle_at=now - timedelta(hours=1))
-        newest = Player.objects.create(
-            name="RecentNewest", player_id=4403, pvp_ratio=54.0,
-            last_random_battle_at=now)
-        # Quiet player (5 battles) sits below the >10 floor — must not appear.
-        quiet = Player.objects.create(
-            name="QuietPlayer", player_id=4404, pvp_ratio=60.0,
-            last_random_battle_at=now - timedelta(minutes=2))
-        Player.objects.create(
-            name="NeverPlayedRandoms", player_id=4405, pvp_ratio=60.0,
-            last_lookup=now,
-        )
-
-        _seed_recent_active(oldest, battles=15)
-        _seed_recent_active(middle, battles=20)
-        _seed_recent_active(newest, battles=25)
-        _seed_recent_active(quiet, battles=5)
-
-        response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(response.status_code, 200)
-        names = [row["name"] for row in response.json()]
-        self.assertEqual(
-            names[:3], ["RecentNewest", "RecentMiddle", "RecentOldest"])
-        self.assertNotIn("QuietPlayer", names)
-        self.assertNotIn("NeverPlayedRandoms", names)
-
-    def test_landing_players_and_recent_players_expose_clan_battle_enjoyer_from_cache(self):
-        cache.clear()
-        today = timezone.now().date()
-        looked_up_at = timezone.now() - timedelta(minutes=1)
-        player = Player.objects.create(
-            name="LandingClanBattleMain",
-            player_id=4410,
-            is_hidden=False,
-            pvp_ratio=57.0,
-            total_battles=4200,
-            pvp_battles=3800,
-            last_battle_date=today,
-            last_lookup=looked_up_at,
-            last_random_battle_at=looked_up_at,
-        )
-        _seed_recent_active(player, battles=15)
-        PlayerExplorerSummary.objects.create(
-            player=player,
-            player_score=7.4,
-            clan_battle_total_battles=44,
-            clan_battle_seasons_participated=2,
-            clan_battle_overall_win_rate=56.8,
-            clan_battle_summary_updated_at=timezone.now(),
-        )
-
-        # Random-mode landing-players surface was retired 2026-05-07.
-        recent_response = self.client.get("/api/landing/recent/")
-        self.assertEqual(recent_response.status_code, 200)
-        recent_row = next(
-            row for row in recent_response.json() if row["name"] == "LandingClanBattleMain"
-        )
-        self.assertTrue(recent_row["is_clan_battle_player"])
-        self.assertEqual(recent_row["clan_battle_win_rate"], 56.8)
-
-    def test_landing_players_and_recent_players_prefer_durable_clan_battle_summary_when_cache_missing(self):
-        cache.clear()
-        today = timezone.now().date()
-        looked_up_at = timezone.now() - timedelta(minutes=1)
-        player = Player.objects.create(
-            name="LandingClanBattleDurable",
-            player_id=4411,
-            is_hidden=False,
-            pvp_ratio=57.0,
-            total_battles=4200,
-            pvp_battles=3800,
-            last_battle_date=today,
-            last_lookup=looked_up_at,
-            last_random_battle_at=looked_up_at,
-        )
-        _seed_recent_active(player, battles=15)
-        PlayerExplorerSummary.objects.create(
-            player=player,
-            player_score=7.4,
-            clan_battle_total_battles=44,
-            clan_battle_seasons_participated=2,
-            clan_battle_overall_win_rate=56.8,
-            clan_battle_summary_updated_at=timezone.now() - timedelta(minutes=5),
-        )
-
-        # Random-mode landing-players surface was retired 2026-05-07.
-        recent_response = self.client.get("/api/landing/recent/")
-        self.assertEqual(recent_response.status_code, 200)
-        recent_row = next(
-            row for row in recent_response.json() if row["name"] == "LandingClanBattleDurable"
-        )
-        self.assertTrue(recent_row["is_clan_battle_player"])
-        self.assertEqual(recent_row["clan_battle_win_rate"], 56.8)
-
-    def test_landing_players_and_recent_players_use_streamlined_pve_rule(self):
-        cache.clear()
-        today = timezone.now().date()
-        looked_up_at = timezone.now() - timedelta(minutes=1)
-        pve_yes = Player.objects.create(
-            name="LandingPveYes",
-            player_id=4412,
-            is_hidden=False,
-            pvp_ratio=56.0,
-            total_battles=9576,
-            pvp_battles=3111,
-            days_since_last_battle=7,
-            last_battle_date=today,
-            last_lookup=looked_up_at,
-            last_random_battle_at=looked_up_at,
-        )
-        pve_no = Player.objects.create(
-            name="LandingPveNoHighAbsolute",
-            player_id=4413,
-            is_hidden=False,
-            pvp_ratio=67.0,
-            total_battles=23851,
-            pvp_battles=19629,
-            days_since_last_battle=3,
-            last_battle_date=today,
-            last_lookup=looked_up_at - timedelta(minutes=1),
-            last_random_battle_at=looked_up_at - timedelta(minutes=1),
-        )
-        _seed_recent_active(pve_yes, battles=14)
-        _seed_recent_active(pve_no, battles=18)
-
-        # Random-mode landing-players surface was retired 2026-05-07; the
-        # field-exposure invariant is now verified only via the recent
-        # endpoint (Best mode has stricter prerequisites that synthetic
-        # test players don't satisfy).
-        recent_response = self.client.get("/api/landing/recent/")
-        self.assertEqual(recent_response.status_code, 200)
-        recent_rows = {row["name"]: row["is_pve_player"] for row in recent_response.json(
-        ) if row["name"] in {"LandingPveYes", "LandingPveNoHighAbsolute"}}
-        self.assertEqual(recent_rows, {
-            "LandingPveYes": True,
-            "LandingPveNoHighAbsolute": False,
-        })
-
-    def test_landing_players_and_recent_players_expose_streamer_flag(self):
-        cache.clear()
-        today = timezone.now().date()
-        looked_up_at = timezone.now() - timedelta(minutes=1)
-        streamer = Player.objects.create(
-            name="LandingStreamer",
-            player_id=4414,
-            is_hidden=False,
-            is_streamer=True,
-            pvp_ratio=58.0,
-            total_battles=4200,
-            pvp_battles=3900,
-            days_since_last_battle=2,
-            last_battle_date=today,
-            last_lookup=looked_up_at,
-            last_random_battle_at=looked_up_at,
-            battles_json=[
-                {"ship_tier": 10, "pvp_battles": 3900, "wins": 2262},
-            ],
-        )
-        _seed_recent_active(streamer, battles=14)
-
-        # Random-mode landing-players surface was retired 2026-05-07.
-        recent_response = self.client.get("/api/landing/recent/")
-        self.assertEqual(recent_response.status_code, 200)
-        recent_row = next(
-            row for row in recent_response.json() if row["name"] == "LandingStreamer"
-        )
-        self.assertTrue(recent_row["is_streamer"])
-
-    def test_landing_players_and_recent_players_expose_published_efficiency_fields(self):
-        cache.clear()
-        now = timezone.now()
-        today = now.date()
-        expert = Player.objects.create(
-            name="LandingEfficiencyExpert",
-            player_id=4414,
-            is_hidden=False,
-            pvp_ratio=59.0,
-            total_battles=6200,
-            pvp_battles=5400,
-            days_since_last_battle=4,
-            last_battle_date=today,
-            last_lookup=now - timedelta(minutes=2),
-            last_random_battle_at=now - timedelta(minutes=2),
-            efficiency_updated_at=now - timedelta(hours=3),
-            battles_updated_at=now - timedelta(hours=3),
-        )
-        grade_two = Player.objects.create(
-            name="LandingEfficiencyGradeTwo",
-            player_id=4415,
-            is_hidden=False,
-            pvp_ratio=56.0,
-            total_battles=5400,
-            pvp_battles=4700,
-            days_since_last_battle=2,
-            last_battle_date=today,
-            last_lookup=now - timedelta(minutes=1),
-            last_random_battle_at=now - timedelta(minutes=1),
-            efficiency_updated_at=now - timedelta(hours=3),
-            battles_updated_at=now - timedelta(hours=3),
-        )
-        hidden_recent = Player.objects.create(
-            name="LandingEfficiencyHidden",
-            player_id=4416,
-            is_hidden=True,
-            pvp_ratio=55.0,
-            total_battles=5100,
-            pvp_battles=4300,
-            days_since_last_battle=1,
-            last_battle_date=today,
-            last_lookup=now,
-            last_random_battle_at=now,
-            efficiency_updated_at=now - timedelta(hours=3),
-            battles_updated_at=now - timedelta(hours=3),
-        )
-        PlayerExplorerSummary.objects.create(
-            player=expert,
-            efficiency_rank_percentile=0.97,
-            efficiency_rank_tier='E',
-            has_efficiency_rank_icon=True,
-            efficiency_rank_population_size=367,
-            efficiency_rank_updated_at=now - timedelta(hours=1),
-        )
-        PlayerExplorerSummary.objects.create(
-            player=grade_two,
-            efficiency_rank_percentile=0.81,
-            efficiency_rank_tier='II',
-            has_efficiency_rank_icon=True,
-            efficiency_rank_population_size=124,
-            efficiency_rank_updated_at=now - timedelta(hours=1),
-        )
-        PlayerExplorerSummary.objects.create(
-            player=hidden_recent,
-            efficiency_rank_percentile=0.99,
-            efficiency_rank_tier='E',
-            has_efficiency_rank_icon=True,
-            efficiency_rank_population_size=500,
-            efficiency_rank_updated_at=now - timedelta(hours=1),
-        )
-        _seed_recent_active(expert, battles=20)
-        _seed_recent_active(grade_two, battles=15)
-        _seed_recent_active(hidden_recent, battles=12)
-
-        # Random-mode landing-players surface was retired 2026-05-07; the
-        # field-exposure invariant is now verified only via the recent
-        # endpoint.
-        recent_response = self.client.get("/api/landing/recent/")
-        self.assertEqual(recent_response.status_code, 200)
-        recent_rows = {
-            row["name"]: row
-            for row in recent_response.json()
-            if row["name"] in {"LandingEfficiencyExpert", "LandingEfficiencyGradeTwo", "LandingEfficiencyHidden"}
-        }
-
-        self.assertEqual(
-            recent_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
-        self.assertEqual(
-            recent_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_tier"], "II")
-        # Hidden players are excluded from the recent-players surface
-        # entirely — they opted out of public discovery.
-        self.assertNotIn("LandingEfficiencyHidden", recent_rows)
-
     def test_landing_players_reject_invalid_mode(self):
         response = self.client.get("/api/landing/players/?mode=invalid")
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("detail", response.json())
-
-    def test_landing_recent_players_expose_sleepy_player_flag(self):
-        cache.clear()
-        now = timezone.now()
-        sleeper = Player.objects.create(
-            name="RecentSleeper",
-            player_id=4411,
-            pvp_ratio=49.0,
-            days_since_last_battle=500,
-            last_lookup=now - timedelta(minutes=2),
-            last_random_battle_at=now - timedelta(minutes=2),
-        )
-        _seed_recent_active(sleeper, battles=14)
-
-        response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(response.status_code, 200)
-        row = next(item for item in response.json()
-                   if item["name"] == "RecentSleeper")
-        self.assertTrue(row["is_sleepy_player"])
 
     def test_warm_landing_page_content_populates_current_landing_cache_keys(self):
         cache.clear()
@@ -3604,7 +3217,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(result['status'], 'completed')
         # LANDING_CLANS_CACHE_KEY (the old random-clan cache) was retired
         # alongside the Random pill on 2026-05-07; we now only warm the
-        # best-clan caches plus recent.
+        # best-clan caches.
         self.assertIsNone(
             cache.get(realm_cache_key('na', LANDING_CLANS_CACHE_KEY)))
         self.assertIsNotNone(
@@ -3614,8 +3227,6 @@ class ApiContractTests(TestCase):
         self.assertIsNotNone(cache.get(landing_best_clan_cache_key('wr')))
         self.assertIsNotNone(
             cache.get(landing_best_clan_published_cache_key('wr')))
-        self.assertIsNotNone(cache.get(realm_cache_key(
-            'na', LANDING_RECENT_CLANS_CACHE_KEY)))
         self.assertIsNotNone(
             cache.get(landing_player_cache_key('popular', LANDING_PLAYER_LIMIT)))
         self.assertIsNotNone(
@@ -3640,47 +3251,6 @@ class ApiContractTests(TestCase):
             cache.get(landing_player_cache_key('best', LANDING_PLAYER_LIMIT, sort='cb')))
         self.assertIsNotNone(
             cache.get(landing_player_published_cache_key('best', LANDING_PLAYER_LIMIT, sort='cb')))
-        self.assertIsNotNone(cache.get(realm_cache_key(
-            'na', LANDING_RECENT_PLAYERS_CACHE_KEY)))
-
-    def test_landing_recent_clans_orders_by_last_lookup_desc(self):
-        cache.clear()
-        now = timezone.now()
-        old_clan = Clan.objects.create(
-            clan_id=5401,
-            name="OlderClan",
-            tag="OLD",
-            members_count=40,
-            last_lookup=now - timedelta(hours=2),
-        )
-        mid_clan = Clan.objects.create(
-            clan_id=5402,
-            name="MidClan",
-            tag="MID",
-            members_count=35,
-            last_lookup=now - timedelta(minutes=30),
-        )
-        new_clan = Clan.objects.create(
-            clan_id=5403,
-            name="NewestClan",
-            tag="NEW",
-            members_count=32,
-            last_lookup=now - timedelta(minutes=5),
-        )
-        Player.objects.create(name="OldClanPlayer", player_id=6401,
-                              clan=old_clan, pvp_wins=55, pvp_battles=100)
-        Player.objects.create(name="MidClanPlayer", player_id=6402,
-                              clan=mid_clan, pvp_wins=60, pvp_battles=100)
-        Player.objects.create(name="NewClanPlayer", player_id=6403,
-                              clan=new_clan, pvp_wins=65, pvp_battles=100)
-
-        response = self.client.get("/api/landing/recent-clans/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [row["name"] for row in response.json()[:3]],
-            ["NewestClan", "MidClan", "OlderClan"],
-        )
 
     def test_player_summary_returns_derived_metrics(self):
         now = timezone.now()
@@ -4737,65 +4307,16 @@ class ApiThrottleTests(TestCase):
     def setUp(self):
         # Cross-test leakage cleanup. Two stores survive a TestCase rollback:
         #   1. Redis (the CI cache) is not transactional — clear it.
-        #   2. Landing snapshot rows: warm_landing_page_content uses a
-        #      ThreadPoolExecutor, and those threads write the durable
-        #      Landing*Snapshot rows on separate DB connections that COMMIT
-        #      outside this test's transaction. An earlier warm test thus
-        #      leaves an empty recent-players snapshot that the endpoint serves
-        #      as the Tier-2 fallback here — making the surface return 0 rows
-        #      (only under the full suite; passes in isolation). Delete them.
+        #   2. LandingPlayerBestSnapshot rows: warm_landing_page_content uses a
+        #      ThreadPoolExecutor, and those threads write the durable rows on
+        #      separate DB connections that COMMIT outside this test's
+        #      transaction. Delete them.
         cache.clear()
-        LandingRecentPlayersSnapshot.objects.all().delete()
         LandingPlayerBestSnapshot.objects.all().delete()
 
     def test_landing_players_endpoint_declares_public_api_throttles(self):
         self.assertEqual(landing_players.cls.throttle_classes,
                          PUBLIC_API_THROTTLES)
-
-    def test_landing_recent_players_orders_by_recency_and_limits_to_25(self):
-        cache.delete(realm_cache_key('na', LANDING_RECENT_PLAYERS_CACHE_KEY))
-
-        # 30 players seeded with descending last_random_battle_at — index 0
-        # is the newest, 29 the oldest. All have 25 battles in the window
-        # so they pass the >10 floor and stay clear of the implausibility
-        # cap. The top-25 cut should drop the 5 oldest.
-        now = timezone.now()
-        for index in range(30):
-            player = Player.objects.create(
-                name=f"RecentPlayer{index}",
-                player_id=10000 + index,
-                pvp_battles=5000,
-                last_random_battle_at=now - timedelta(minutes=index),
-            )
-            _seed_recent_active(player, battles=25, ship_id=1)
-
-        response = self.client.get("/api/landing/recent/")
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(len(payload), 25)
-        self.assertEqual(payload[0]["name"], "RecentPlayer0")
-        self.assertEqual(payload[24]["name"], "RecentPlayer24")
-
-    def test_landing_recent_clans_orders_by_last_lookup_desc_and_limits_to_40(self):
-        cache.delete(LANDING_RECENT_CLANS_CACHE_KEY)
-        now = timezone.now()
-
-        for index in range(45):
-            Clan.objects.create(
-                clan_id=20000 + index,
-                name=f"RecentClan{index}",
-                tag=f"R{index}",
-                last_lookup=now - timedelta(minutes=index),
-            )
-
-        response = self.client.get("/api/landing/recent-clans/")
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(len(payload), 40)
-        self.assertEqual(payload[0]["name"], "RecentClan0")
-        self.assertEqual(payload[39]["name"], "RecentClan39")
 
     def test_clan_data_rejects_invalid_filter_type(self):
         response = self.client.get("/api/fetch/clan_data/42:invalid")

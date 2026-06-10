@@ -129,7 +129,7 @@ Future agent sessions need one high-density bootstrap file that explains the liv
   - `/api/fetch/player_distribution/{win_rate|survival_rate|battles_played}/`
   - `/api/fetch/player_correlation/{win_rate_survival|ranked_wr_battles|tier_type}/...`
   - `/api/players/explorer/`
-  - `/api/landing/clans/`, `/api/landing/players/`, `/api/landing/recent/`, `/api/landing/player-suggestions/`
+  - `/api/landing/clans/`, `/api/landing/players/`, `/api/landing/player-suggestions/`
   - `/api/stats/`
 - smoke coverage source: `agents/runbooks/runbook-api-surface.md`
 

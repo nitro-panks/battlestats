@@ -191,20 +191,13 @@ const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SHOW_PLAYER_EXPLORER = false;
-// Backend caches recent players (7-day most-active rollup, rebuilt every 3 h)
-// and best/random for 6 h, so a 60-second client-side TTL lets SPA
+// Backend caches best/random for 6 h, so a 60-second client-side TTL lets SPA
 // back-navigations to the landing page hit the in-memory cache (no network,
 // no empty-state flash) while still catching meaningful churn within a
 // single session.
 const LANDING_FETCH_TTL_MS = 60_000;
-// Recent players are server-rebuilt every 3 h; mirror that cadence on the
-// client so focus/visibilitychange events don't refetch (and rerender) the
-// landing card while the user tabs around.
-const LANDING_RECENT_FETCH_TTL_MS = 3 * 60 * 60_000;
 
-type LandingClanMode = 'best' | 'recent';
 type ClanBestSort = 'overall' | 'wr';
-type LandingPlayerMode = 'best' | 'recent';
 type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
 
 const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
@@ -216,7 +209,7 @@ const PLAYER_BEST_WR_FORMULA_APPROXIMATION = 'WR ≈ WR_5-10, then Battles_5-10,
 const PLAYER_BEST_CB_FORMULA_APPROXIMATION = 'CB ≈ 0.55·CB_WR + 0.25·CB_Volume + 0.20·CB_Seasons';
 const CLAN_BEST_OVERALL_FORMULA_APPROXIMATION = 'Overall ≈ 0.30·WR + 0.25·Activity + 0.20·MemberScore + 0.15·CB + 0.10·log(Battles)';
 const CLAN_BEST_WR_FORMULA_APPROXIMATION = 'WR ≈ WR + 0.40·max(CB_WR - WR, 0)·min(CB_battles/200, 1)·min(Active/25, 1)·min(MemberScore/6, 1)';
-const BEST_CLAN_FALLBACK_NOTICE = 'Best clan rankings are still warming up for this realm. Showing recent clans until enough tracked data is available.';
+const BEST_CLAN_WARMUP_NOTICE = 'Best clan rankings are still warming up for this realm. Check back shortly.';
 
 const PlayerSearch: React.FC = () => {
     const { theme } = useTheme();
@@ -226,33 +219,34 @@ const PlayerSearch: React.FC = () => {
     const [error, setError] = useState('');
     const [isLoadingPlayer, setIsLoadingPlayer] = useState(false);
     const [clans, setClans] = useState<LandingClan[]>([]);
-    const [clanMode, setClanMode] = useState<LandingClanMode>('best');
+    const [clansFetched, setClansFetched] = useState(false);
     const [clanBestSort, setClanBestSort] = useState<ClanBestSort>('overall');
-    const [recentClans, setRecentClans] = useState<LandingClan[]>([]);
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
-    const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('recent');
     const [playerBestSort, setPlayerBestSort] = useState<PlayerBestSort>('overall');
-    const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
     const lastSubmittedSearchRef = useRef<string>('');
     const bestLandingWarmupRequestedRef = useRef(false);
 
-    const fetchLandingClans = useCallback(async (mode: LandingClanMode, sort: ClanBestSort = 'overall') => {
+    const fetchLandingClans = useCallback(async (sort: ClanBestSort = 'overall') => {
         const params = new URLSearchParams({
-            mode,
+            mode: 'best',
             limit: String(LANDING_CLAN_LIMIT),
+            sort,
         });
-        if (mode === 'best') {
-            params.set('sort', sort);
-        }
 
-        const { data: payload } = await fetchSharedJson<LandingClan[]>(
-            withRealm(`/api/landing/clans?${params.toString()}`, realm),
-            {
-                label: `Landing clans (${mode}${mode === 'best' ? `:${sort}` : ''})`,
-                ttlMs: LANDING_FETCH_TTL_MS,
-            },
-        );
-        setClans(Array.isArray(payload) ? payload : []);
+        try {
+            const { data: payload } = await fetchSharedJson<LandingClan[]>(
+                withRealm(`/api/landing/clans?${params.toString()}`, realm),
+                {
+                    label: `Landing clans (best:${sort})`,
+                    ttlMs: LANDING_FETCH_TTL_MS,
+                },
+            );
+            setClans(Array.isArray(payload) ? payload : []);
+        } finally {
+            // Mark the surface as fetched so the warm-up notice only appears
+            // after a real (empty) response, not during the pre-fetch flash.
+            setClansFetched(true);
+        }
     }, [realm]);
 
     const triggerBestLandingWarmup = useCallback(() => {
@@ -269,43 +263,17 @@ const PlayerSearch: React.FC = () => {
         });
     }, [realm]);
 
-    const fetchLandingData = useCallback(() => {
-        triggerBestLandingWarmup();
-
-        // Fire the two recent fetches INDEPENDENTLY and commit each as it
-        // resolves — do not await them together. A single Promise.all here used
-        // to set both states only after BOTH responses landed, so a cold
-        // `recent-clans` (multi-second rebuild) blocked the recent-players chart
-        // even though `/api/landing/recent/` returned in ~50ms. Decoupling lets
-        // the player chart render the instant its own (usually warm) data lands.
-        void fetchSharedJson<LandingPlayer[]>(withRealm('/api/landing/recent/', realm), {
-            label: 'Recent players',
-            ttlMs: LANDING_RECENT_FETCH_TTL_MS,
-        })
-            .then(({ data }) => setRecentPlayers(Array.isArray(data) ? data : []))
-            .catch((err) => console.error('Error fetching recent players:', err));
-
-        void fetchSharedJson<LandingClan[]>(withRealm('/api/landing/recent-clans/', realm), {
-            label: 'Recent clans',
-            ttlMs: LANDING_RECENT_FETCH_TTL_MS,
-        })
-            .then(({ data }) => setRecentClans(Array.isArray(data) ? data : []))
-            .catch((err) => console.error('Error fetching recent clans:', err));
-    }, [realm, triggerBestLandingWarmup]);
-
-    const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode, sort: PlayerBestSort = 'overall') => {
+    const fetchLandingPlayers = useCallback(async (sort: PlayerBestSort = 'overall') => {
         try {
             const params = new URLSearchParams({
-                mode,
+                mode: 'best',
                 limit: String(LANDING_PLAYER_LIMIT),
+                sort,
             });
-            if (mode === 'best') {
-                params.set('sort', sort);
-            }
             const { data: payload } = await fetchSharedJson<LandingPlayer[]>(
                 withRealm(`/api/landing/players/?${params.toString()}`, realm),
                 {
-                    label: `Landing players (${mode}${mode === 'best' ? `:${sort}` : ''})`,
+                    label: `Landing players (best:${sort})`,
                     ttlMs: LANDING_FETCH_TTL_MS,
                 },
             );
@@ -316,9 +284,21 @@ const PlayerSearch: React.FC = () => {
         }
     }, [realm]);
 
+    // Best players + clans are the only landing surfaces now. This refreshes
+    // both (used on focus/visibility regain and on back-from-profile) and
+    // (re)triggers the best-entity warm-up.
+    const refreshLandingBest = useCallback(() => {
+        triggerBestLandingWarmup();
+        void fetchLandingPlayers(playerBestSort);
+        void fetchLandingClans(clanBestSort).catch((err) => {
+            console.error('Error fetching landing clans:', err);
+            setClans([]);
+        });
+    }, [triggerBestLandingWarmup, fetchLandingPlayers, fetchLandingClans, playerBestSort, clanBestSort]);
+
     useEffect(() => {
-        fetchLandingData();
-    }, [fetchLandingData]);
+        triggerBestLandingWarmup();
+    }, [triggerBestLandingWarmup]);
 
     useEffect(() => {
         const refreshLandingData = () => {
@@ -326,7 +306,7 @@ const PlayerSearch: React.FC = () => {
                 return;
             }
 
-            void fetchLandingData();
+            void refreshLandingBest();
         };
 
         const handleVisibilityChange = () => {
@@ -344,40 +324,33 @@ const PlayerSearch: React.FC = () => {
             window.removeEventListener('pageshow', refreshLandingData);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [fetchLandingData]);
+    }, [refreshLandingBest]);
 
     useEffect(() => {
-        if (clanMode === 'recent') return;
-        const sort = clanMode === 'best' ? clanBestSort : 'overall';
-        void fetchLandingClans(clanMode, sort).catch((err) => {
+        void fetchLandingClans(clanBestSort).catch((err) => {
             console.error('Error fetching landing clans:', err);
             setClans([]);
         });
-    }, [clanBestSort, clanMode, fetchLandingClans]);
+    }, [clanBestSort, fetchLandingClans]);
 
     useEffect(() => {
         setClanBestSort('overall');
     }, [realm]);
 
     useEffect(() => {
-        if (playerMode === 'recent') return;
-        void fetchLandingPlayers(playerMode, playerMode === 'best' ? playerBestSort : 'overall');
-    }, [fetchLandingPlayers, playerBestSort, playerMode]);
+        void fetchLandingPlayers(playerBestSort);
+    }, [fetchLandingPlayers, playerBestSort]);
 
     useEffect(() => {
         setPlayerBestSort('overall');
     }, [realm]);
 
     useIntervalRefresh(() => {
-        if (clanMode !== 'recent') {
-            void fetchLandingClans(clanMode, clanMode === 'best' ? clanBestSort : 'overall');
-        }
+        void fetchLandingClans(clanBestSort);
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
     useIntervalRefresh(() => {
-        if (playerMode !== 'recent') {
-            void fetchLandingPlayers(playerMode, playerMode === 'best' ? playerBestSort : 'overall');
-        }
+        void fetchLandingPlayers(playerBestSort);
     }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
     const fetchPlayerByName = useCallback(async (playerName: string): Promise<PlayerData | null> => {
@@ -419,29 +392,17 @@ const PlayerSearch: React.FC = () => {
         router.push(buildClanPath(clanId, clanName, realm));
     };
 
-    const visibleLandingClans = useMemo(() => {
-        if (clanMode === 'recent') {
-            return recentClans.slice(0, LANDING_CLAN_LIMIT);
-        }
+    const visibleLandingClans = useMemo(
+        () => clans.slice(0, LANDING_CLAN_LIMIT),
+        [clans],
+    );
 
-        if (clanMode === 'best' && clans.length === 0) {
-            return recentClans.slice(0, LANDING_CLAN_LIMIT);
-        }
+    // Best clans haven't warmed yet for this realm — show the warm-up notice
+    // above an empty board (there is no Recent fallback list to fall back to).
+    // Gated on a completed fetch so the notice doesn't flash on cold load.
+    const isClanWarmupActive = clansFetched && clans.length === 0;
 
-        return clans.slice(0, LANDING_CLAN_LIMIT);
-    }, [clanMode, clans, recentClans]);
-
-    const isBestClanFallbackActive = clanMode === 'best' && clans.length === 0 && recentClans.length > 0;
-    const showClanBestSortBar = clanMode === 'best';
-
-    const visibleLandingPlayers = useMemo(() => {
-        if (playerMode === 'recent') {
-            return recentPlayers.slice(0, LANDING_PLAYER_LIMIT);
-        }
-
-        return players;
-    }, [playerMode, players, recentPlayers]);
-    const showPlayerBestSortBar = playerMode === 'best';
+    const visibleLandingPlayers = players;
 
     const handleSelectMember = useCallback(async (memberName: string) => {
         router.push(buildPlayerPath(memberName, realm));
@@ -486,8 +447,8 @@ const PlayerSearch: React.FC = () => {
         setError('');
         setIsLoadingPlayer(false);
         resetClanHydrationAttempts();
-        fetchLandingData();
-    }, [fetchLandingData, resetClanHydrationAttempts]);
+        refreshLandingBest();
+    }, [refreshLandingBest, resetClanHydrationAttempts]);
 
     useEffect(() => {
         const onReset = () => handleBack();
@@ -523,33 +484,22 @@ const PlayerSearch: React.FC = () => {
                     <ShipLeaderboard />
 
                     {/* Toolbar is always visible once the landing pane is mounted —
-                     keeps the empty-state UX coherent for both Recent and Best
-                     when the underlying lists return zero rows. */}
+                     keeps the empty-state UX coherent when the Best list returns
+                     zero rows. Best is the only filter (no Recent toggle); its
+                     sub-sort bar sits inline to the right. */}
                     {true && (
                         <div className={`${error ? 'mt-6' : 'mt-2'} pt-12`}>
                             <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Players</h3>
-                                <button
-                                    type="button"
-                                    onClick={() => { if (playerMode !== 'recent') { setPlayerMode('recent'); setPlayerBestSort('overall'); trackEvent('landing-filter', { entity: 'player', mode: 'recent', realm }); } }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={playerMode === 'recent'}
-                                >
-                                    Recent
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => { if (playerMode !== 'best') { setPlayerMode('best'); trackEvent('landing-filter', { entity: 'player', mode: 'best', realm }); } }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={playerMode === 'best'}
+                                <span
+                                    className="inline-flex items-center rounded-md border border-[var(--accent-mid)] bg-[var(--accent-mid)] px-3 py-1.5 text-sm font-semibold uppercase tracking-wide text-white"
+                                    aria-current="true"
+                                    data-testid="player-best-pill"
                                 >
                                     Best
-                                </button>
-                            </div>
-                            <div className="mt-1.5 min-h-7 pl-1" data-testid="player-best-sort-bar-shell">
+                                </span>
                                 <div
-                                    className={`flex items-center gap-1.5 transition-opacity ${showPlayerBestSortBar ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'}`}
-                                    aria-hidden={!showPlayerBestSortBar}
+                                    className="flex items-center gap-1.5"
                                     data-testid="player-best-sort-bar"
                                 >
                                     {(['overall', 'ranked', 'efficiency', 'wr', 'cb'] as const).map((sort, i) => (
@@ -558,9 +508,7 @@ const PlayerSearch: React.FC = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => { if (playerBestSort !== sort) { setPlayerBestSort(sort); trackEvent('landing-best-sort', { entity: 'player', sort, realm }); } }}
-                                                disabled={!showPlayerBestSortBar}
-                                                tabIndex={showPlayerBestSortBar ? 0 : -1}
-                                                className={`text-sm font-medium transition-colors disabled:cursor-default ${playerBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
+                                                className={`text-sm font-medium transition-colors ${playerBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
                                             >
                                                 {sort === 'overall' ? 'Overall' : sort === 'ranked' ? 'Ranked' : sort === 'efficiency' ? 'Efficiency' : sort === 'wr' ? 'WR' : 'CB'}
                                             </button>
@@ -621,31 +569,19 @@ const PlayerSearch: React.FC = () => {
                         </div>
                     )}
 
-                    {(clans.length > 0 || recentClans.length > 0) && (
+                    {true && (
                         <div className="mt-6 border-t border-[var(--border)] pt-6">
                             <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Clans</h3>
-                                <button
-                                    type="button"
-                                    onClick={() => { if (clanMode !== 'best') { setClanMode('best'); trackEvent('landing-filter', { entity: 'clan', mode: 'best', realm }); } }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'best' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={clanMode === 'best'}
+                                <span
+                                    className="inline-flex items-center rounded-md border border-[var(--accent-mid)] bg-[var(--accent-mid)] px-3 py-1.5 text-sm font-semibold uppercase tracking-wide text-white"
+                                    aria-current="true"
+                                    data-testid="clan-best-pill"
                                 >
                                     Best
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => { if (clanMode !== 'recent') { setClanMode('recent'); setClanBestSort('overall'); trackEvent('landing-filter', { entity: 'clan', mode: 'recent', realm }); } }}
-                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'recent' ? 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white' : 'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'}`}
-                                    aria-pressed={clanMode === 'recent'}
-                                >
-                                    Recent
-                                </button>
-                            </div>
-                            <div className="mt-1.5 min-h-7 pl-1" data-testid="clan-best-sort-bar-shell">
+                                </span>
                                 <div
-                                    className={`flex items-center gap-1.5 transition-opacity ${showClanBestSortBar ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'}`}
-                                    aria-hidden={!showClanBestSortBar}
+                                    className="flex items-center gap-1.5"
                                     data-testid="clan-best-sort-bar"
                                 >
                                     {(['overall', 'wr'] as const).map((sort, i) => (
@@ -654,9 +590,7 @@ const PlayerSearch: React.FC = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => { if (clanBestSort !== sort) { setClanBestSort(sort); trackEvent('landing-best-sort', { entity: 'clan', sort, realm }); } }}
-                                                disabled={!showClanBestSortBar}
-                                                tabIndex={showClanBestSortBar ? 0 : -1}
-                                                className={`text-sm font-medium transition-colors disabled:cursor-default ${clanBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
+                                                className={`text-sm font-medium transition-colors ${clanBestSort === sort ? 'text-[var(--accent-mid)] underline decoration-[var(--accent-mid)] underline-offset-4' : 'text-[var(--text-secondary)] hover:text-[var(--accent-mid)] hover:underline hover:underline-offset-4'}`}
                                             >
                                                 {sort === 'overall' ? 'Overall' : 'WR'}
                                             </button>
@@ -690,9 +624,9 @@ const PlayerSearch: React.FC = () => {
                                 </div>
                             </div>
                             <div className="mt-3 max-w-[964px]">
-                                {isBestClanFallbackActive ? (
+                                {isClanWarmupActive ? (
                                     <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--text-secondary)]">
-                                        {BEST_CLAN_FALLBACK_NOTICE}
+                                        {BEST_CLAN_WARMUP_NOTICE}
                                     </p>
                                 ) : null}
                                 <LandingClanSVG

@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 
@@ -47,12 +48,15 @@ class Command(BaseCommand):
         )
         parser.add_argument('--players', action='store_true', default=False)
         parser.add_argument('--clans', action='store_true', default=False)
-        parser.add_argument('--include-recent',
-                            action='store_true', default=False)
         parser.add_argument('--force-refresh',
                             action='store_true', default=False)
         parser.add_argument('--player-limit', type=int, default=25)
         parser.add_argument('--clan-limit', type=int, default=25)
+        # Deprecated no-op: the landing Recent surface was removed. Still
+        # accepted (and ignored) so existing deploy scripts/runbooks/crons that
+        # pass `--include-recent` don't hard-fail argparse post-deploy.
+        parser.add_argument('--include-recent', action='store_true', default=False,
+                            help=argparse.SUPPRESS)
 
     def handle(self, *args, **options):
         operation = options['operation']
@@ -67,12 +71,10 @@ class Command(BaseCommand):
                 realms,
                 players=options['players'],
                 clans=options['clans'],
-                include_recent=options['include_recent'],
             )
         elif operation == 'warm-landing':
             result = self._handle_warm_landing(
                 realms,
-                include_recent=options['include_recent'],
                 force_refresh=options['force_refresh'],
             )
         else:
@@ -149,7 +151,7 @@ class Command(BaseCommand):
             'results': results,
         }
 
-    def _handle_invalidate(self, realms, players, clans, include_recent):
+    def _handle_invalidate(self, realms, players, clans):
         if not players and not clans:
             raise CommandError(
                 'invalidate requires at least one of --players or --clans')
@@ -162,7 +164,6 @@ class Command(BaseCommand):
         for realm in realms:
             if players:
                 invalidate_landing_player_caches(
-                    include_recent=include_recent,
                     realm=realm,
                     queue_republish=False,
                     bump_namespace=True,
@@ -179,16 +180,14 @@ class Command(BaseCommand):
             'status': 'completed',
             'operation': 'invalidate',
             'realms': realms,
-            'include_recent': include_recent,
             'queue_republish': False,
             'invalidated': invalidated,
         }
 
-    def _handle_warm_landing(self, realms, include_recent, force_refresh):
+    def _handle_warm_landing(self, realms, force_refresh):
         results = {
             realm: warm_landing_page_content(
                 force_refresh=force_refresh,
-                include_recent=include_recent,
                 realm=realm,
             )
             for realm in realms
@@ -197,7 +196,6 @@ class Command(BaseCommand):
             'status': 'completed',
             'operation': 'warm-landing',
             'realms': realms,
-            'include_recent': include_recent,
             'force_refresh': force_refresh,
             'results': results,
         }

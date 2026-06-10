@@ -59,7 +59,6 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 LANDING_PAGE_WARM_LOCK_TIMEOUT = 20 * 60
 LANDING_PAGE_WARM_DISPATCH_TIMEOUT = 30
-LANDING_RECENT_PLAYERS_WARM_LOCK_TIMEOUT = 15 * 60
 LANDING_PLAYER_BEST_SNAPSHOT_REFRESH_LOCK_TIMEOUT = 2 * 60 * 60
 DISTRIBUTION_WARM_LOCK_TIMEOUT = 15 * 60
 CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60
@@ -122,10 +121,6 @@ def _landing_page_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
 
 def _landing_page_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_landing_page_content:{realm}:dispatch"
-
-
-def _landing_recent_players_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:warm_landing_recent_players:{realm}:lock"
 
 
 def _distribution_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -268,20 +263,12 @@ def is_clan_battle_summary_refresh_pending(clan_id: object, realm: str = DEFAULT
     return bool(cache.get(_clan_battle_summary_refresh_dispatch_key(clan_id, realm=realm)))
 
 
-def queue_landing_page_warm(realm: str = DEFAULT_REALM, include_recent: bool = True, scope: str = 'all'):
+def queue_landing_page_warm(realm: str = DEFAULT_REALM, scope: str = 'all'):
     # If a warm is already executing for this realm, skip enqueue. The 30s
     # dispatch dedup expires while the 1200s task runs, so without this gate,
     # cache-fallback paths invoked from inside the warm itself would re-enqueue
     # in a loop (root cause of the 4581-message background-queue pileup
     # observed on 2026-04-27).
-    #
-    # `include_recent=False` is used by the invalidation-driven republish path
-    # (clan/player writes). Those writes don't change the recent-players 7-day
-    # rollup, but rebuilding it force-refreshes the 25s `week_battles` aggregate
-    # on every ~120s crawl-driven republish — which saturated the 1-vCPU DB on
-    # 2026-05-27 (~20 warms/40min during the ASIA crawl). The recent surfaces
-    # stay fresh via the scheduled beat warmers instead.
-    # See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
     if cache.get(_landing_page_warm_lock_key(realm)):
         return {"status": "skipped", "reason": "already-running"}
 
@@ -294,7 +281,7 @@ def queue_landing_page_warm(realm: str = DEFAULT_REALM, include_recent: bool = T
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_landing_page_content_task.delay(include_recent=include_recent, realm=realm, scope=scope)
+        warm_landing_page_content_task.delay(realm=realm, scope=scope)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -1020,12 +1007,11 @@ def warm_clan_battle_summaries_task(self, clan_ids=None, realm=DEFAULT_REALM):
 
 
 @app.task(bind=True, **TASK_OPTS)
-def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REALM, scope='all'):
+def warm_landing_page_content_task(self, realm=DEFAULT_REALM, scope='all'):
     from warships.landing import warm_landing_page_content
 
     logger.info(
-        "Starting warm_landing_page_content_task include_recent=%s realm=%s scope=%s",
-        include_recent,
+        "Starting warm_landing_page_content_task realm=%s scope=%s",
         realm,
         scope,
     )
@@ -1040,7 +1026,6 @@ def warm_landing_page_content_task(self, include_recent=True, realm=DEFAULT_REAL
     try:
         result = warm_landing_page_content(
             force_refresh=True,
-            include_recent=bool(include_recent),
             realm=realm,
             scope=scope,
         )
@@ -1078,67 +1063,6 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
             results[mode] = len(payload.get("ships", []))
         logger.info("Warmed top-ships realm=%s modes=%s", realm, results)
         return {"status": "completed", "realm": realm, "results": results}
-    finally:
-        cache.delete(lock_key)
-
-
-@app.task(bind=True, **TASK_OPTS)
-def warm_landing_recent_players_task(self, realm=DEFAULT_REALM):
-    # Rebuilds the landing "recent players" rollup (top 7-day random-battles
-    # leaders) and writes BOTH the durable DB snapshot
-    # (`LandingRecentPlayersSnapshot`) and the Redis cache. Reads never
-    # block on this — they hit Redis (Tier 1), fall back to the DB
-    # snapshot (Tier 2) if Redis was evicted, and only run an inline
-    # rebuild (Tier 3) when both stores are cold. Scheduled every 3h via
-    # `recent-players-warmer-{realm}`.
-    from warships.landing import materialize_landing_recent_players_snapshot
-
-    logger.info("Starting warm_landing_recent_players_task realm=%s", realm)
-
-    lock_key = _landing_recent_players_warm_lock_key(realm)
-    if not cache.add(lock_key, self.request.id, timeout=LANDING_RECENT_PLAYERS_WARM_LOCK_TIMEOUT):
-        logger.info(
-            "Skipping warm_landing_recent_players_task because another rebuild is already running"
-        )
-        return {"status": "skipped", "reason": "already-running"}
-
-    try:
-        meta = materialize_landing_recent_players_snapshot(realm=realm)
-        result = {
-            "status": "completed",
-            "rows": meta["count"],
-            "realm": realm,
-            "generated_at": meta["generated_at"],
-        }
-        logger.info("Finished warm_landing_recent_players_task: %s", result)
-        return result
-    finally:
-        cache.delete(lock_key)
-
-
-@app.task(bind=True, **TASK_OPTS)
-def warm_landing_recent_clans_task(self, realm=DEFAULT_REALM):
-    """Rebuild the landing "recent clans" payload out-of-band so reads stay warm.
-
-    `get_landing_recent_clans_payload` lazily rebuilds (a multi-second Clan
-    aggregation) on cache miss / TTL expiry / dirty-invalidation — and without
-    this warmer that cold rebuild lands on a user request, delaying the landing
-    clan chart (and, before the fetch decoupling, the player chart too). Mirrors
-    the recent-players warmer; force_refresh ignores the dirty flag.
-    """
-    from warships.landing import get_landing_recent_clans_payload
-
-    lock_key = f"warships:tasks:warm_landing_recent_clans:{realm}:lock"
-    if not cache.add(lock_key, self.request.id, timeout=300):
-        logger.info(
-            "Skipping warm_landing_recent_clans_task realm=%s — already running", realm)
-        return {"status": "skipped", "reason": "already-running"}
-
-    try:
-        payload = get_landing_recent_clans_payload(force_refresh=True, realm=realm)
-        result = {"status": "completed", "rows": len(payload), "realm": realm}
-        logger.info("Finished warm_landing_recent_clans_task: %s", result)
-        return result
     finally:
         cache.delete(lock_key)
 
@@ -1210,7 +1134,7 @@ def materialize_landing_player_best_snapshots_task(self, realm=DEFAULT_REALM, so
     # the fresh snapshot — a bounded ≤1-cycle fallback, never a stale strand.
     if warm_after:
         warm_landing_page_content_task.apply_async(
-            kwargs={"include_recent": False, "realm": realm, "scope": "players"},
+            kwargs={"realm": realm, "scope": "players"},
             queue="background",
         )
 

@@ -128,7 +128,7 @@ Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu
 
 ### Data models (`server/warships/models.py`)
 
-Player, Clan, Ship, Snapshot (daily summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily, PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot/LandingRecentPlayersSnapshot (landing fallbacks), MvPlayerDistributionStats, ShipTopPlayerSnapshot (ephemeral current standing per ship per season — pruned; backs `/ship/<id>` + profile badges), ShipAward (append-only career ledger — never pruned; backs Ship Honors), StreamerSubmission.
+Player, Clan, Ship, Snapshot (daily summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily, PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot (landing Best fallback), MvPlayerDistributionStats, ShipTopPlayerSnapshot (ephemeral current standing per ship per season — pruned; backs `/ship/<id>` + profile badges), ShipAward (append-only career ledger — never pruned; backs Ship Honors), StreamerSubmission.
 
 Battle-history pipeline: BattleObservation (raw `ships/stats/` JSON), BattleEvent (per-event deltas + Phase 7 widening columns), PlayerDailyShipStats (per-day per-ship aggregate), PlayerWeekly/Monthly/YearlyShipStats (period rollup tiers, populated only when the period writer is reactivated).
 

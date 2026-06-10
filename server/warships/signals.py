@@ -123,6 +123,17 @@ _RETIRED_SCHEDULE_NAMES = [
     "daily-observation-floor-na",
     "daily-observation-floor-eu",
     "daily-observation-floor-asia",
+    # Landing "Recent" players + clans surfaces retired 2026-06-10. The
+    # backing tasks (warm_landing_recent_players_task /
+    # warm_landing_recent_clans_task) were deleted, so any lingering
+    # PeriodicTask rows must be purged or celery-beat dispatches a
+    # non-existent task name.
+    "recent-players-warmer-na",
+    "recent-players-warmer-eu",
+    "recent-players-warmer-asia",
+    "recent-clans-warmer-na",
+    "recent-clans-warmer-eu",
+    "recent-clans-warmer-asia",
 ]
 
 
@@ -179,7 +190,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "interval": None,
                 "enabled": True,
                 "args": json.dumps([]),
-                "kwargs": json.dumps({"include_recent": True, "realm": realm}),
+                "kwargs": json.dumps({"realm": realm}),
                 "description": f"Refreshes landing page caches ({realm.upper()}).",
             },
         )
@@ -215,66 +226,6 @@ def register_periodic_schedules(sender, **kwargs):
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
                 "description": f"Daily warm of top-ships treemap caches, last completed ship season, random+ranked ({realm.upper()}).",
-            },
-        )
-
-    # -- Recent-players warmer (7-day random-battle leaders) --
-    # Pure-cache read path on the landing endpoint, rebuilt every 3h
-    # out-of-band so a rebuild never adds latency to a request.
-    recent_players_warm_minutes = int(
-        os.getenv("LANDING_RECENT_PLAYERS_WARM_MINUTES", "180"))
-    for realm in sorted(VALID_REALMS):
-        minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, recent_players_warm_minutes, base_minute=35)
-        recent_players_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute=minute_str,
-            hour=hour_str,
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"recent-players-warmer-{realm}",
-            defaults={
-                "task": "warships.tasks.warm_landing_recent_players_task",
-                "crontab": recent_players_warm_schedule,
-                "interval": None,
-                "enabled": True,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Rebuilds the landing recent-players 7-day rollup ({realm.upper()}).",
-            },
-        )
-
-    # -- Recent-clans warmer --
-    # recent-clans is lazily rebuilt on request (multi-second Clan aggregation)
-    # with a 6h TTL + dirty-invalidation on clan updates, so without a warmer the
-    # cold rebuild periodically lands on a user. Rebuild it out-of-band, striped
-    # per realm. Default hourly (well inside the 6h TTL, covers dirty churn).
-    recent_clans_warm_minutes = int(
-        os.getenv("LANDING_RECENT_CLANS_WARM_MINUTES", "60"))
-    for realm in sorted(VALID_REALMS):
-        minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, recent_clans_warm_minutes, base_minute=20)
-        recent_clans_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute=minute_str,
-            hour=hour_str,
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"recent-clans-warmer-{realm}",
-            defaults={
-                "task": "warships.tasks.warm_landing_recent_clans_task",
-                "crontab": recent_clans_warm_schedule,
-                "interval": None,
-                "enabled": True,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Rebuilds the landing recent-clans payload out-of-band ({realm.upper()}).",
             },
         )
 

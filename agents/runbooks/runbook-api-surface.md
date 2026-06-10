@@ -23,7 +23,6 @@ docker compose exec -T server python scripts/smoke_test_site_endpoints.py
 | -------------------------------------------- | ------ | -------------------- | ------- |
 | `/api/landing/clans/`                        | GET    | `landing_clans`      | Yes     |
 | `/api/landing/players/`                      | GET    | `landing_players`    | Yes     |
-| `/api/landing/recent/`                       | GET    | `landing_recent`     | Yes     |
 | `/api/landing/player-suggestions/?q=<query>` | GET    | `player_suggestions` | Yes     |
 
 ### Player (Router — PlayerViewSet)

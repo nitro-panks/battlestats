@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from warships.data import calculate_tier_filtered_pvp_record, get_clan_battle_activity_badge, get_highest_ranked_league_name, get_players_ship_badges_bulk, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player, score_best_clans
 from warships.data_support import clamp
-from warships.models import Clan, DEFAULT_REALM, LandingPlayerBestSnapshot, LandingRecentPlayersSnapshot, Player, realm_cache_key
+from warships.models import Clan, DEFAULT_REALM, LandingPlayerBestSnapshot, Player, realm_cache_key
 from warships.visit_analytics import get_top_entities
 
 
@@ -90,33 +90,6 @@ def _attach_clan_battle_activity_badges(rows: list[dict], realm: str = DEFAULT_R
 LANDING_CACHE_TTL = 60 * 60 * 6
 LANDING_CLAN_CACHE_TTL = 60 * 60 * 6
 LANDING_PLAYER_CACHE_TTL = 60 * 60 * 6
-# Recent players is now a 7-day "most-active" rollup over PlayerDailyShipStats,
-# rebuilt out-of-band every 3h by `warm_landing_recent_players_task`. The cache
-# is durable (no TTL) so reads never trigger rebuilds — that keeps page latency
-# flat even while the warmer is computing the next snapshot.
-LANDING_RECENT_PLAYERS_CACHE_TTL = None
-LANDING_RECENT_PLAYERS_LOOKBACK_DAYS = 7
-LANDING_RECENT_PLAYERS_LIMIT = 25
-# Activity floor: a player must have played strictly more than this many
-# random battles in the trailing lookback window to qualify. Filters out
-# "logged in for 3 matches" sessions while keeping anyone who had a real
-# session in the last 7 days. See
-# `agents/runbooks/runbook-recent-players-recency-filter-2026-05-04.md`.
-LANDING_RECENT_PLAYERS_MIN_WEEK_BATTLES = 10
-# Sanity ceiling for the trailing 7-day random-battle tally. Even the most
-# committed grinders rarely exceed ~60 randoms/day, so anything above this
-# cap is almost certainly a "first-observation phantom" emitted by the
-# BattleEvent diff lane (where a first observation pair can dump the
-# player's lifetime totals into a single huge delta). Filter these out so
-# the surface doesn't surface implausible counts to users.
-LANDING_RECENT_PLAYERS_MAX_WEEK_BATTLES = 1500
-# Tolerance band: a small lag between `pvp_battles` (refreshed by the
-# tiered crawler) and the rollup's running sum is expected, so accept
-# `week_battles` up to `pvp_battles + slack`. Beyond that the row is
-# definitionally bogus (you can't play more battles in a week than you've
-# played in your entire account history).
-LANDING_RECENT_PLAYERS_PVP_SLACK = 50
-LANDING_RECENT_PLAYERS_STALE_FALLBACK_ENV = 'BATTLESTATS_ENABLE_STALE_RECENT_PLAYERS'
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v4'
 LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v4:meta'
 LANDING_CLANS_PUBLISHED_CACHE_KEY = 'landing:clans:v4:published'
@@ -125,12 +98,9 @@ LANDING_CLANS_BEST_CACHE_KEY = 'landing:clans:best:v2:overall'
 LANDING_CLANS_BEST_CACHE_METADATA_KEY = 'landing:clans:best:v2:overall:meta'
 LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY = 'landing:clans:best:v2:overall:published'
 LANDING_CLANS_BEST_PUBLISHED_METADATA_KEY = 'landing:clans:best:v2:overall:published:meta'
-LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
-LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:recent25:v1'
 LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v13:namespace'
 LANDING_CLANS_DIRTY_KEY = 'landing:clans:dirty:v1'
 LANDING_PLAYERS_DIRTY_KEY = 'landing:players:dirty:v1'
-LANDING_RECENT_CLANS_DIRTY_KEY = 'landing:recent_clans:dirty:v1'
 
 # Debounce window for invalidation-driven landing republishes. Every clan/
 # player write calls _queue_landing_republish, as does the published-fallback
@@ -593,16 +563,10 @@ def _queue_landing_republish(realm: str = DEFAULT_REALM, scope: str = 'all') -> 
         if not cache.add(cooldown_key, '1', LANDING_REPUBLISH_COOLDOWN_SECONDS):
             return
 
-    # include_recent=False: invalidation comes from clan/player writes, which
-    # do not change the recent-players 7-day rollup. Rebuilding it here re-runs
-    # the 25s `week_battles` aggregate on every crawl-driven republish — the
-    # 2026-05-27 DB-CPU saturation. The recent surfaces are kept fresh by their
-    # dedicated beat warmers (recent-players-warmer / the 55-min landing warmer
-    # which dispatches the task directly with include_recent=True).
     # `scope` narrows the warm to the family that was invalidated (clan write ->
     # 'clans', player write -> 'players') so a clan write doesn't rebuild the
     # player surfaces and vice versa.
-    queue_landing_page_warm(realm=realm, include_recent=False, scope=scope)
+    queue_landing_page_warm(realm=realm, scope=scope)
 
 
 def _publish_landing_payload(
@@ -786,13 +750,12 @@ def normalize_landing_clan_limit(requested_limit: int | None) -> int:
 def invalidate_landing_clan_caches(realm: str = DEFAULT_REALM, queue_republish: bool = True) -> None:
     _mark_cache_family_dirty(
         realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),
-        realm_cache_key(realm, LANDING_RECENT_CLANS_DIRTY_KEY),
     )
     if queue_republish:
         _queue_landing_republish(realm=realm, scope='clans')
 
 
-def invalidate_landing_player_caches(include_recent: bool = False, realm: str = DEFAULT_REALM, queue_republish: bool = True, bump_namespace: bool = False) -> None:
+def invalidate_landing_player_caches(realm: str = DEFAULT_REALM, queue_republish: bool = True, bump_namespace: bool = False) -> None:
     # bump_namespace=True is reserved for deploy-time schema changes. Per-row
     # invalidations must NOT bump, because the bump orphans the published
     # fallback at the new namespace and forces every subsequent landing
@@ -800,11 +763,7 @@ def invalidate_landing_player_caches(include_recent: bool = False, realm: str = 
     # See agents/runbooks/runbook-landing-random-cold-queue-2026-04-07.md
     if bump_namespace:
         _bump_landing_players_cache_namespace(realm=realm)
-    dirty_keys = [realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY)]
-    # `include_recent` is a no-op now that Recent is a 7-day rollup rebuilt
-    # by a dedicated 3h periodic warmer; the parameter is kept for callsite
-    # compatibility but no dirty key needs flipping.
-    _mark_cache_family_dirty(*dirty_keys)
+    _mark_cache_family_dirty(realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY))
     if queue_republish:
         _queue_landing_republish(realm=realm, scope='players')
 
@@ -1051,38 +1010,6 @@ def get_landing_clans_payload(force_refresh: bool = False, realm: str = DEFAULT_
 def get_landing_best_clans_payload(force_refresh: bool = False, realm: str = DEFAULT_REALM, sort: str = 'overall') -> list[dict]:
     payload, _ = get_landing_best_clans_payload_with_cache_metadata(
         force_refresh=force_refresh, realm=realm, sort=sort)
-    return payload
-
-
-def _build_recent_clans(realm: str = DEFAULT_REALM) -> list[dict]:
-    return _attach_clan_battle_activity_badges(list(
-        Clan.objects.exclude(name__isnull=True).exclude(name='').filter(
-            realm=realm,
-        ).exclude(
-            last_lookup__isnull=True
-        ).annotate(
-            **_clan_agg_annotations(),
-        ).annotate(
-            **_clan_wr_annotation(),
-        ).values(
-            'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles'
-        ).order_by(
-            F('last_lookup').desc(nulls_last=True),
-            'name',
-        )[:40]
-    ), realm=realm)
-
-
-def get_landing_recent_clans_payload(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict]:
-    dirty_key = realm_cache_key(realm, LANDING_RECENT_CLANS_DIRTY_KEY)
-    cache_key = realm_cache_key(realm, LANDING_RECENT_CLANS_CACHE_KEY)
-    is_dirty = not force_refresh and cache.get(dirty_key) is not None
-    payload = None if force_refresh or is_dirty else cache.get(cache_key)
-    if payload is None:
-        payload = _build_recent_clans(realm=realm)
-        cache.set(cache_key, payload, LANDING_CACHE_TTL)
-        if is_dirty:
-            cache.delete(dirty_key)
     return payload
 
 
@@ -1758,216 +1685,27 @@ def _serialize_landing_player_row(player_obj, ship_badges=None) -> dict:
     return row
 
 
-def _stale_recent_players_fallback_enabled() -> bool:
-    return os.environ.get(LANDING_RECENT_PLAYERS_STALE_FALLBACK_ENV, '0') == '1'
-
-
-def _build_stale_recent_players_fallback(realm: str = DEFAULT_REALM) -> list[dict]:
-    candidates = list(
-        Player.objects
-        .filter(
-            realm=realm,
-            is_hidden=False,
-            last_battle_date__isnull=False,
-            pvp_battles__gte=LANDING_PLAYER_SIGMA_MIN_PVP_BATTLES,
-        )
-        .exclude(name='')
-        .select_related('explorer_summary')
-        .only(*_LANDING_PLAYER_ROW_ONLY_FIELDS, 'last_battle_date')
-        .order_by(F('last_battle_date').desc(nulls_last=True), F('pvp_battles').desc(nulls_last=True), 'name')[:LANDING_RECENT_PLAYERS_LIMIT]
-    )
-
-    badges_by_pk = get_players_ship_badges_bulk([p.pk for p in candidates])
-    payload = []
-    for player_obj in candidates:
-        row = _serialize_landing_player_row(
-            player_obj, ship_badges=badges_by_pk.get(player_obj.pk, []))
-        row['week_battles'] = None
-        payload.append(row)
-    return payload
-
-
-def _build_recent_players(realm: str = DEFAULT_REALM) -> list[dict]:
-    # Surface contract: the LANDING_RECENT_PLAYERS_LIMIT most-recently-active
-    # random-battle players who have crossed the >MIN_WEEK_BATTLES floor over
-    # the trailing LANDING_RECENT_PLAYERS_LOOKBACK_DAYS-day window. Eligibility
-    # is computed against the PlayerDailyShipStats rollup (random mode); the
-    # final order is `Player.last_random_battle_at` desc — that column is
-    # maintained by the BattleEvent capture hook so it tracks "really played
-    # most recently" rather than "polled most recently". See
-    # `agents/runbooks/runbook-recent-players-recency-filter-2026-05-04.md`.
-    from warships.models import PlayerDailyShipStats
-
-    lookback_floor = (
-        timezone.now().date() - timedelta(days=LANDING_RECENT_PLAYERS_LOOKBACK_DAYS)
-    )
-    eligibility = (
-        PlayerDailyShipStats.objects
-        .filter(
-            mode=PlayerDailyShipStats.MODE_RANDOM,
-            date__gte=lookback_floor,
-            player__realm=realm,
-            player__is_hidden=False,
-        )
-        .values('player')
-        .annotate(week_battles=Sum('battles'))
-        .filter(week_battles__gt=LANDING_RECENT_PLAYERS_MIN_WEEK_BATTLES,
-                week_battles__lte=LANDING_RECENT_PLAYERS_MAX_WEEK_BATTLES)
-    )
-    eligibility_rows = list(eligibility)
-    if not eligibility_rows:
-        if _stale_recent_players_fallback_enabled():
-            return _build_stale_recent_players_fallback(realm=realm)
-        return []
-
-    battle_counts = {r['player']: r['week_battles'] for r in eligibility_rows}
-    eligible_pks = list(battle_counts.keys())
-
-    # Over-fetch so the implausible-row filter below can drop phantom
-    # first-observation rows without shrinking the final list below LIMIT.
-    overfetch_cap = LANDING_RECENT_PLAYERS_LIMIT * 4
-    candidates = list(
-        Player.objects
-        .filter(
-            pk__in=eligible_pks,
-            realm=realm,
-            is_hidden=False,
-            last_random_battle_at__isnull=False,
-        )
-        .exclude(name='')
-        .select_related('explorer_summary')
-        .only(*_LANDING_PLAYER_ROW_ONLY_FIELDS, 'last_random_battle_at')
-        .order_by(F('last_random_battle_at').desc(nulls_last=True), 'name')[:overfetch_cap]
-    )
-
-    badges_by_pk = get_players_ship_badges_bulk([p.pk for p in candidates])
-    payload = []
-    for player_obj in candidates:
-        week_battles = int(battle_counts.get(player_obj.pk, 0))
-        # Definitional bound: a 7-day count cannot exceed lifetime battles.
-        # Allow a small slack so a refresh-lag mismatch doesn't drop a real
-        # active player.
-        pvp_battles = int(getattr(player_obj, 'pvp_battles', 0) or 0)
-        if week_battles > pvp_battles + LANDING_RECENT_PLAYERS_PVP_SLACK:
-            continue
-        row = _serialize_landing_player_row(
-            player_obj, ship_badges=badges_by_pk.get(player_obj.pk, []))
-        row['week_battles'] = week_battles
-        payload.append(row)
-        if len(payload) >= LANDING_RECENT_PLAYERS_LIMIT:
-            break
-    return payload
-
-
-def _get_landing_recent_players_snapshot(
-    realm: str = DEFAULT_REALM,
-) -> LandingRecentPlayersSnapshot | None:
-    """Read the durable Tier-2 fallback row for the recent-players surface."""
-    return (
-        LandingRecentPlayersSnapshot.objects
-        .filter(realm=realm)
-        .only('payload_json', 'generated_at')
-        .first()
-    )
-
-
-def materialize_landing_recent_players_snapshot(realm: str = DEFAULT_REALM) -> dict:
-    """Rebuild the recent-players payload from PlayerDailyShipStats and write
-    it to BOTH the durable DB snapshot AND the Redis cache.
-
-    Write order is DB-first, Redis-second by design — if the Redis write
-    fails after the DB write succeeds, the next read still finds Tier 2
-    intact. The reverse ordering would silently degrade subsequent
-    eviction-triggered reads to Tier 3 (slow inline rebuild) until the
-    next warmer tick.
-
-    Returns metadata + the freshly-built payload so `force_refresh=True`
-    callers can avoid an immediate re-read.
-    """
-    # Normalize datetimes → ISO strings before the JSONField write
-    # (mirrors `materialize_landing_player_best_snapshot`). Without this,
-    # rows like `efficiency_rank_updated_at` blow up the JSON encoder.
-    payload = _normalize_landing_player_snapshot_payload(
-        _build_recent_players(realm=realm)
-    )
-    snapshot, _created = LandingRecentPlayersSnapshot.objects.update_or_create(
-        realm=realm,
-        defaults={'payload_json': payload},
-    )
-    cache.set(
-        realm_cache_key(realm, LANDING_RECENT_PLAYERS_CACHE_KEY),
-        payload,
-        LANDING_RECENT_PLAYERS_CACHE_TTL,
-    )
-    return {
-        'realm': realm,
-        'count': len(payload),
-        'generated_at': snapshot.generated_at.isoformat(),
-        'payload': payload,
-    }
-
-
-def get_landing_recent_players_payload(force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict]:
-    """3-tier fallback for the landing recent-players surface:
-
-      Tier 1: Redis cache (`cache.get`) — steady-state ~5 ms.
-      Tier 2: DB snapshot (`LandingRecentPlayersSnapshot`) — Redis evicted
-              but the durable copy is intact (~10 ms). Re-warms Redis on
-              the way out.
-      Tier 3: Inline rebuild (`_build_recent_players`) — both stores
-              empty (cold start, post-deploy first touch). Logs a warning
-              because steady-state should never hit this.
-
-    `force_refresh=True` (used by the periodic warmer) bypasses Tiers 1+2
-    and runs the materializer, which writes BOTH stores.
-    """
-    cache_key = realm_cache_key(realm, LANDING_RECENT_PLAYERS_CACHE_KEY)
-    if force_refresh:
-        return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
-    cached = cache.get(cache_key)
-    if cached is not None:
-        if not cached and _stale_recent_players_fallback_enabled():
-            return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
-        return cached
-    snapshot = _get_landing_recent_players_snapshot(realm=realm)
-    if snapshot is not None:
-        if not snapshot.payload_json and _stale_recent_players_fallback_enabled():
-            return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
-        # Re-warm Redis with the same TTL=None as the materializer so the
-        # next reader hits Tier 1.
-        cache.set(cache_key, snapshot.payload_json,
-                  LANDING_RECENT_PLAYERS_CACHE_TTL)
-        # Defensive copy — JSONField returns the live model attribute
-        # reference; downstream callers must not mutate it.
-        return list(snapshot.payload_json)
-    logger.warning(
-        "recent_players: cold-start fallback to inline rebuild (realm=%s)",
-        realm,
-    )
-    return list(materialize_landing_recent_players_snapshot(realm=realm)['payload'])
-
-
 # Surface-scope sets for warm_landing_page_content(scope=...). Invalidation-
 # driven republishes pass the family that actually changed so a clan write does
 # not rebuild player surfaces (and vice versa). The periodic/startup warmers use
-# scope='all'. recent_clans/recent_players are intentionally members of their
-# family set; whether they actually rebuild is still gated by include_recent.
+# scope='all'.
 LANDING_CLAN_WARM_SURFACES = frozenset({
-    'clans_best_overall', 'clans_best_wr', 'recent_clans',
+    'clans_best_overall', 'clans_best_wr',
 })
 LANDING_PLAYER_WARM_SURFACES = frozenset({
     'players_best_overall', 'players_best_ranked', 'players_best_efficiency',
-    'players_best_wr', 'players_best_cb', 'players_popular', 'recent_players',
+    'players_best_wr', 'players_best_cb', 'players_popular',
 })
 
 
-def warm_landing_page_content(force_refresh: bool = False, include_recent: bool = True, realm: str = DEFAULT_REALM, scope: str = 'all') -> dict:
+def warm_landing_page_content(force_refresh: bool = False, realm: str = DEFAULT_REALM, scope: str = 'all') -> dict:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # 'players_random' + 'clans' (the random-clan cache) were retired
-    # alongside the Random landing pills on 2026-05-07; their warmers are
-    # gone here so the periodic landing-page warm doesn't waste cycles
-    # rebuilding caches no surface reads.
+    # alongside the Random landing pills on 2026-05-07; the Recent player +
+    # clan surfaces were retired 2026-06-10. Their warmers are gone here so
+    # the periodic landing-page warm doesn't waste cycles rebuilding caches
+    # no surface reads.
     surfaces = {
         'players_best_overall': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='overall')),
         'players_best_ranked': lambda: len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm, sort='ranked')),
@@ -1977,8 +1715,6 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
         'players_popular': lambda: len(get_landing_players_payload('popular', LANDING_PLAYER_LIMIT, force_refresh=force_refresh, realm=realm)),
         'clans_best_overall': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='overall')),
         'clans_best_wr': lambda: len(get_landing_best_clans_payload(force_refresh=force_refresh, realm=realm, sort='wr')),
-        'recent_clans': lambda: len(get_landing_recent_clans_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
-        'recent_players': lambda: len(get_landing_recent_players_payload(force_refresh=force_refresh if include_recent else False, realm=realm)),
     }
 
     # Narrow to the requested family. Unknown scope falls back to 'all' so a
@@ -2025,10 +1761,7 @@ def warm_landing_page_content(force_refresh: bool = False, include_recent: bool 
     # pending republish until the next periodic warm.
     dirty_keys = []
     if scope in ('all', 'clans'):
-        dirty_keys += [
-            realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY),
-            realm_cache_key(realm, LANDING_RECENT_CLANS_DIRTY_KEY),
-        ]
+        dirty_keys.append(realm_cache_key(realm, LANDING_CLANS_DIRTY_KEY))
     if scope in ('all', 'players'):
         dirty_keys.append(realm_cache_key(realm, LANDING_PLAYERS_DIRTY_KEY))
     _clear_cache_family_dirty(*dirty_keys)

@@ -3868,7 +3868,7 @@ def _persist_player_clan_battle_summary(
     if payload_changed:
         from warships.landing import invalidate_landing_player_caches
 
-        invalidate_landing_player_caches(include_recent=True)
+        invalidate_landing_player_caches()
 
 
 def fetch_player_clan_battle_seasons(account_id: int, realm: str = DEFAULT_REALM) -> list:
@@ -4776,7 +4776,7 @@ def update_player_data(player: Player, force_refresh: bool = False, realm: str |
         update_player_efficiency_data(
             player, force_refresh=force_refresh, realm=player.realm)
     refresh_player_explorer_summary(player)
-    invalidate_landing_player_caches(include_recent=True)
+    invalidate_landing_player_caches()
     invalidate_player_detail_cache(player.player_id, realm=player.realm)
     logging.info(f"Updated player personal data: {player.name}")
 
