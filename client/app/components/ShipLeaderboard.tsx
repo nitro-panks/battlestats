@@ -1,0 +1,431 @@
+'use client';
+
+// Inline ship leaderboard — the filterable ship explorer under the landing
+// treemap.
+//
+// Pick a TIER (8/9/10 — the tiers we compute ship data for) and a TYPE
+// (BB/CA/DD/CV/SS); the ship list (`/api/realm/<realm>/ships`) shows that bucket
+// ranked by realm-wide win rate, mirroring the BattleEvent population stats the
+// treemap above already uses. Clicking a ship swaps the list IN PLACE for that
+// ship's player board (the existing `/api/realm/<realm>/ship/<id>/leaderboard`),
+// and Clear returns to the list for the still-selected tier/type. No navigation,
+// no new full-page route.
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { useRealm } from '../context/RealmContext';
+import { shipClass } from '../lib/shipIdentity';
+import { buildShipPath, buildPlayerPath } from '../lib/entityRoutes';
+import { trackEvent } from '../lib/umami';
+import wrColor from '../lib/wrColor';
+
+type Tier = 8 | 9 | 10;
+// Raw `Ship.ship_type` strings the backend filters on (note: "AirCarrier", no
+// space). These are the `type` query-param values the new endpoint accepts.
+const SHIP_TYPES = ['Battleship', 'Cruiser', 'Destroyer', 'AirCarrier', 'Submarine'] as const;
+type ShipType = (typeof SHIP_TYPES)[number];
+const TIERS: Tier[] = [8, 9, 10];
+
+interface ListShip {
+    ship_id: number;
+    ship_name: string;
+    ship_type: string | null;
+    tier: number | null;
+    nation: string;
+    is_premium: boolean;
+    battles: number;
+    win_rate: number;
+    avg_damage: number;
+    kills_per_battle: number;
+}
+
+interface ShipsByTierType {
+    realm: string;
+    tier: number;
+    ship_type: string;
+    ships: ListShip[];
+}
+
+interface LeaderboardPlayer {
+    rank: number;
+    player_name: string;
+    win_rate: number;
+    battles: number;
+    avg_damage: number;
+    kills_per_battle: number;
+}
+
+interface ShipLeaderboardPayload {
+    realm: string;
+    ship: {
+        ship_id: number;
+        name: string;
+        tier: number | null;
+        ship_type: string | null;
+        nation: string;
+        is_premium: boolean;
+    };
+    players: LeaderboardPlayer[];
+}
+
+// The list only changes once per 2-week season; a 1h client TTL keeps a long-open
+// tab from showing a stale window past a boundary (backend serves it warm).
+const LIST_FETCH_TTL_MS = 3_600_000;
+const BOARD_FETCH_TTL_MS = 900_000; // 15 min, matching the /ship page.
+
+const HEADING_CLASS =
+    'mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]';
+const PILL_BASE =
+    'inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors';
+const PILL_ON = 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white';
+const PILL_OFF =
+    'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]';
+
+const ShipLeaderboard: React.FC = () => {
+    const { realm } = useRealm();
+
+    const [tier, setTier] = useState<Tier | null>(null);
+    const [type, setType] = useState<ShipType | null>(null);
+    const [selectedShip, setSelectedShip] = useState<{ id: number; name: string } | null>(null);
+
+    const [list, setList] = useState<ListShip[] | null>(null);
+    const [listLoading, setListLoading] = useState(false);
+    const [listError, setListError] = useState(false);
+
+    const [board, setBoard] = useState<ShipLeaderboardPayload | null>(null);
+    const [boardLoading, setBoardLoading] = useState(false);
+    const [boardError, setBoardError] = useState(false);
+
+    // Changing either filter abandons any open ship board (a stale ship under a
+    // new filter is nonsense) and resets the list.
+    const chooseTier = (t: Tier) => {
+        if (t === tier) return;
+        setTier(t);
+        setSelectedShip(null);
+        trackEvent('ship-leaderboard-filter', { realm, tier: t, type: type ?? '' });
+    };
+    const chooseType = (t: ShipType) => {
+        if (t === type) return;
+        setType(t);
+        setSelectedShip(null);
+        trackEvent('ship-leaderboard-filter', { realm, tier: tier ?? 0, type: t });
+    };
+
+    const bothSelected = tier != null && type != null;
+
+    // Ship list fetch (only with both filters set and no ship drilled into).
+    const listReqId = useRef(0);
+    useEffect(() => {
+        if (!bothSelected || selectedShip) return;
+        const reqId = ++listReqId.current;
+        setListLoading(true);
+        setListError(false);
+        fetchSharedJson<ShipsByTierType>(
+            `/api/realm/${encodeURIComponent(realm)}/ships?tier=${tier}&type=${encodeURIComponent(type as string)}`,
+            {
+                label: `ShipsByTierType:${realm}:${tier}:${type}`,
+                ttlMs: LIST_FETCH_TTL_MS,
+                cacheKey: `ships-by:${realm}:${tier}:${type}`,
+            },
+        )
+            .then(({ data }) => {
+                if (reqId !== listReqId.current) return;
+                setList(data.ships ?? []);
+                setListLoading(false);
+            })
+            .catch(() => {
+                if (reqId !== listReqId.current) return;
+                setListError(true);
+                setListLoading(false);
+            });
+    }, [realm, tier, type, bothSelected, selectedShip]);
+
+    // Ship board fetch (drill-down) — reuses the existing /ship leaderboard.
+    const boardReqId = useRef(0);
+    useEffect(() => {
+        if (!selectedShip) return;
+        const reqId = ++boardReqId.current;
+        setBoardLoading(true);
+        setBoardError(false);
+        setBoard(null);
+        fetchSharedJson<ShipLeaderboardPayload>(
+            `/api/realm/${encodeURIComponent(realm)}/ship/${selectedShip.id}/leaderboard`,
+            {
+                label: `ShipLeaderboard:${realm}:${selectedShip.id}`,
+                ttlMs: BOARD_FETCH_TTL_MS,
+                cacheKey: `ship-lb:${realm}:${selectedShip.id}`,
+            },
+        )
+            .then(({ data }) => {
+                if (reqId !== boardReqId.current) return;
+                setBoard(data);
+                setBoardLoading(false);
+            })
+            .catch(() => {
+                if (reqId !== boardReqId.current) return;
+                setBoardError(true);
+                setBoardLoading(false);
+            });
+    }, [realm, selectedShip]);
+
+    const openShip = (s: ListShip) => {
+        setSelectedShip({ id: s.ship_id, name: s.ship_name });
+        trackEvent('ship-leaderboard-drilldown', { realm, ship_id: s.ship_id });
+    };
+    const clearShip = () => setSelectedShip(null);
+
+    const typeLabel = useMemo(() => (type ? shipClass(type)?.label ?? type : null), [type]);
+
+    return (
+        <section className="mt-2 pt-8" aria-label="Ship leaderboard">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <h3 className={HEADING_CLASS}>Ships</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Tier</span>
+                    {TIERS.map((t) => (
+                        <button
+                            key={t}
+                            type="button"
+                            onClick={() => chooseTier(t)}
+                            className={`${PILL_BASE} ${tier === t ? PILL_ON : PILL_OFF}`}
+                            aria-pressed={tier === t}
+                        >
+                            {t}
+                        </button>
+                    ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Type</span>
+                    {SHIP_TYPES.map((t) => {
+                        const cls = shipClass(t);
+                        return (
+                            <button
+                                key={t}
+                                type="button"
+                                onClick={() => chooseType(t)}
+                                className={`${PILL_BASE} ${type === t ? PILL_ON : PILL_OFF}`}
+                                aria-pressed={type === t}
+                                title={cls?.label ?? t}
+                            >
+                                {cls?.abbr ?? t}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div className="mt-4">
+                {!bothSelected ? (
+                    <p className="py-6 text-sm text-[var(--text-muted)]">
+                        Pick a tier and a type to rank ships by win rate.
+                    </p>
+                ) : selectedShip ? (
+                    <ShipBoard
+                        realm={realm}
+                        fallbackName={selectedShip.name}
+                        board={board}
+                        loading={boardLoading}
+                        error={boardError}
+                        onClear={clearShip}
+                    />
+                ) : (
+                    <ShipList
+                        ships={list}
+                        loading={listLoading}
+                        error={listError}
+                        tierTypeLabel={`T${tier} ${typeLabel ?? ''}`.trim()}
+                        onOpen={openShip}
+                        realm={realm}
+                    />
+                )}
+            </div>
+        </section>
+    );
+};
+
+const SHIP_NAME_LINK =
+    'text-left font-medium text-[var(--accent-mid)] transition-colors hover:text-[var(--accent-dark)] hover:underline';
+const PLAYER_LINK =
+    'rounded-sm text-[var(--accent-mid)] hover:underline focus-visible:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)] focus-visible:ring-offset-1';
+
+const ShipList: React.FC<{
+    ships: ListShip[] | null;
+    loading: boolean;
+    error: boolean;
+    tierTypeLabel: string;
+    onOpen: (s: ListShip) => void;
+    realm: string;
+}> = ({ ships, loading, error, tierTypeLabel, onOpen, realm }) => {
+    if (loading && !ships) {
+        return <p className="py-6 text-sm text-[var(--text-muted)]">Loading ships…</p>;
+    }
+    if (error) {
+        return <p className="py-6 text-sm text-[var(--text-muted)]">Couldn’t load ships. Try another filter.</p>;
+    }
+    if (!ships || ships.length === 0) {
+        return <p className="py-6 text-sm text-[var(--text-muted)]">No ranked ships for {tierTypeLabel}.</p>;
+    }
+    return (
+        <>
+            {/* Desktop: dense table, win rate the only color, ship name the action. */}
+            <table className="hidden w-full text-sm sm:table">
+                <thead>
+                    <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                        <th className="py-2 pl-2 pr-8 font-medium">Ship</th>
+                        <th className="py-2 pr-8 text-right font-medium">Battles</th>
+                        <th className="py-2 pr-8 text-right font-medium">Avg dmg</th>
+                        <th className="py-2 pr-8 text-right font-medium">Kills/battle</th>
+                        <th className="py-2 text-right font-medium">Win rate</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {ships.map((s) => (
+                        <tr key={s.ship_id} className="transition-colors hover:bg-[var(--bg-hover)]">
+                            <td className="py-2 pl-2 pr-8">
+                                <span className="inline-flex items-center gap-2">
+                                    <button type="button" className={SHIP_NAME_LINK} onClick={() => onOpen(s)}>
+                                        {s.ship_name}
+                                    </button>
+                                    <a
+                                        href={buildShipPath(s.ship_id, s.ship_name, realm)}
+                                        className="text-[var(--text-muted)] hover:text-[var(--accent-mid)]"
+                                        title="Open full ship page"
+                                        aria-label={`Open ${s.ship_name} ship page`}
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        ↗
+                                    </a>
+                                </span>
+                            </td>
+                            <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">{s.battles.toLocaleString()}</td>
+                            <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">{s.avg_damage.toLocaleString()}</td>
+                            <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-muted)]">{s.kills_per_battle.toFixed(2)}</td>
+                            <td className="py-2 text-right tabular-nums font-semibold" style={{ color: wrColor(s.win_rate) }}>
+                                {s.win_rate.toFixed(1)}%
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+
+            {/* Mobile: stacked cards — ship + win rate primary, the rest secondary. */}
+            <ul className="space-y-2 sm:hidden">
+                {ships.map((s) => (
+                    <li key={s.ship_id} className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3">
+                        <div className="flex items-center justify-between gap-2">
+                            <button type="button" className={`${SHIP_NAME_LINK} truncate`} onClick={() => onOpen(s)}>
+                                {s.ship_name}
+                            </button>
+                            <span className="shrink-0 tabular-nums font-semibold" style={{ color: wrColor(s.win_rate) }}>
+                                {s.win_rate.toFixed(1)}%
+                            </span>
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums text-[var(--text-muted)]">
+                            <span><span className="text-[var(--text-primary)]">{s.battles.toLocaleString()}</span> battles</span>
+                            <span><span className="text-[var(--text-primary)]">{s.avg_damage.toLocaleString()}</span> avg dmg</span>
+                            <span>{s.kills_per_battle.toFixed(2)} kills/battle</span>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </>
+    );
+};
+
+const ShipBoard: React.FC<{
+    realm: string;
+    fallbackName: string;
+    board: ShipLeaderboardPayload | null;
+    loading: boolean;
+    error: boolean;
+    onClear: () => void;
+}> = ({ realm, fallbackName, board, loading, error, onClear }) => {
+    const ship = board?.ship;
+    const cls = ship ? shipClass(ship.ship_type) : null;
+    const subtitle = ship
+        ? `T${ship.tier ?? '?'} ${cls?.label ?? ship.ship_type ?? ''}`.trim()
+        : '';
+    const players = board?.players ?? [];
+    return (
+        <>
+            <div className="flex flex-wrap items-center gap-3">
+                <button
+                    type="button"
+                    onClick={onClear}
+                    className="inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--accent-mid)] transition-colors hover:bg-[var(--accent-faint)]"
+                >
+                    ‹ Clear
+                </button>
+                <span className="text-sm font-semibold text-[var(--text-strong)]">
+                    {ship?.name ?? fallbackName}
+                    {subtitle && <span className="ml-2 font-normal text-[var(--text-muted)]">· {subtitle}</span>}
+                </span>
+            </div>
+
+            <div className="mt-3">
+                {loading ? (
+                    <p className="py-6 text-sm text-[var(--text-muted)]">Loading leaderboard…</p>
+                ) : error ? (
+                    <p className="py-6 text-sm text-[var(--text-muted)]">Couldn’t load this ship’s leaderboard.</p>
+                ) : players.length === 0 ? (
+                    <p className="py-6 text-sm text-[var(--text-muted)]">No ranked players for this ship yet.</p>
+                ) : (
+                    <>
+                        <table className="hidden w-full text-sm sm:table">
+                            <thead>
+                                <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                                    <th className="py-2 pl-2 pr-3 font-medium">#</th>
+                                    <th className="py-2 pr-8 font-medium">Player</th>
+                                    <th className="py-2 pr-8 text-right font-medium">Win rate</th>
+                                    <th className="py-2 pr-8 text-right font-medium">Battles</th>
+                                    <th className="py-2 pr-8 text-right font-medium">Avg dmg</th>
+                                    <th className="py-2 text-right font-medium">Kills/battle</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {players.map((p) => (
+                                    <tr key={p.rank} className="transition-colors hover:bg-[var(--bg-hover)]">
+                                        <td className="py-2 pl-2 pr-3 tabular-nums text-[var(--text-muted)]">{p.rank}</td>
+                                        <td className="py-2 pr-8">
+                                            <Link href={buildPlayerPath(p.player_name, realm)} className={PLAYER_LINK}>
+                                                {p.player_name}
+                                            </Link>
+                                        </td>
+                                        <td className="py-2 pr-8 text-right tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>{p.win_rate.toFixed(1)}%</td>
+                                        <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">{p.battles.toLocaleString()}</td>
+                                        <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">{p.avg_damage.toLocaleString()}</td>
+                                        <td className="py-2 text-right tabular-nums text-[var(--text-muted)]">{p.kills_per_battle.toFixed(2)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+
+                        <ul className="space-y-2 sm:hidden">
+                            {players.map((p) => (
+                                <li key={p.rank} className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <span className="inline-flex min-w-0 items-center gap-2">
+                                            <span className="w-5 shrink-0 text-right tabular-nums text-[var(--text-muted)]">{p.rank}</span>
+                                            <Link href={buildPlayerPath(p.player_name, realm)} className={`${PLAYER_LINK} truncate`}>
+                                                {p.player_name}
+                                            </Link>
+                                        </span>
+                                        <span className="shrink-0 tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>{p.win_rate.toFixed(1)}%</span>
+                                    </div>
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums text-[var(--text-muted)]">
+                                        <span><span className="text-[var(--text-primary)]">{p.battles.toLocaleString()}</span> battles</span>
+                                        <span><span className="text-[var(--text-primary)]">{p.avg_damage.toLocaleString()}</span> avg dmg</span>
+                                        <span>{p.kills_per_battle.toFixed(2)} kills/battle</span>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    </>
+                )}
+            </div>
+        </>
+    );
+};
+
+export default ShipLeaderboard;

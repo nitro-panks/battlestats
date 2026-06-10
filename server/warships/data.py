@@ -6538,3 +6538,140 @@ def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
     ttl = max(3600, int((next_boundary_dt - now).total_seconds()) + 3600)
     cache.set(cache_key, payload, timeout=ttl)
     return payload
+
+
+# Raw WG ship-type strings as stored on `Ship.ship_type` (note: "AirCarrier",
+# no space — the spelling the treemap and shipIdentity.ts both key on). The
+# inline ship-leaderboard `type` filter accepts exactly these values.
+SHIP_LEADERBOARD_TYPES = ('Battleship', 'Cruiser', 'Destroyer', 'AirCarrier', 'Submarine')
+# Defensive secondary floor on the per-ship sample. The primary floor is the
+# snapshot restriction (only ships that cleared the population guard are listed),
+# so this just drops any oddly-thin row that still slipped through.
+SHIP_LIST_MIN_BATTLES = int(os.getenv('SHIP_LIST_MIN_BATTLES', '50'))
+
+
+def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
+                                     min_battles=None, use_cache=True):
+    """Ships of one tier+type on a realm, ranked by win rate over the last season.
+
+    Powers the landing-page inline ship leaderboard (the filterable table under
+    the treemap). Aggregates ``BattleEvent`` deltas per ship — realm + mode, over
+    the most recently *completed* fixed 2-week ship season (the same window the
+    treemap, the ``/ship/<id>`` board and profile medals reflect) — to realm-wide
+    win rate / avg damage / kills per battle, then orders by win rate descending.
+
+    The candidate set is restricted to ships that hold a ``ShipTopPlayerSnapshot``
+    row for that season (i.e. ships that cleared the population guard and have a
+    populated drill-down board), so every listed ship reliably opens a non-empty
+    leaderboard and the snapshot's population guard doubles as the sample floor.
+
+    A closed season's window is immutable, so this is computed once per season and
+    cached under a season-tagged key until the next boundary (mirrors
+    ``compute_realm_top_ships``). Returns a payload dict; ``ships`` is ``[]`` when
+    no ship in the bucket qualifies. ``tier``/``ship_type`` are assumed validated
+    by the caller (the view rejects out-of-range values).
+    """
+    from warships.models import BattleEvent, ShipTopPlayerSnapshot
+
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    mode = (str(mode) if mode is not None else "random").lower().strip()
+    if mode not in ("random", "ranked"):
+        mode = "random"
+    try:
+        tier = int(tier)
+    except (TypeError, ValueError):
+        tier = None
+    ship_type = (ship_type or "").strip()
+    if min_battles is None:
+        min_battles = SHIP_LIST_MIN_BATTLES
+
+    season_idx, season_start, season_end = most_recent_completed_season()
+    window_start, window_end = _season_window_datetimes(season_start, season_end)
+
+    cache_key = realm_cache_key(
+        realm, f"ships-by:{mode}:season{season_idx}:t{tier}:{ship_type}")
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    payload = {
+        "realm": realm,
+        "days": SHIP_SEASON_LENGTH_DAYS,
+        "tier": tier,
+        "ship_type": ship_type,
+        "mode": mode,
+        "season_index": season_idx,
+        "season_start": season_start.isoformat(),
+        "season_end": season_end.isoformat(),
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "ships": [],
+    }
+
+    # Candidate ships: this tier+type AND ranked in the latest snapshot season
+    # (guarantees a populated drill-down board for every listed ship).
+    snapshot_ids = set(
+        ShipTopPlayerSnapshot.objects
+        .filter(realm=realm, captured_on=season_start)
+        .values_list('ship_id', flat=True)
+    )
+    if not snapshot_ids:
+        return payload
+    ships = {
+        s.ship_id: s
+        for s in Ship.objects.filter(
+            ship_id__in=snapshot_ids, tier=tier, ship_type=ship_type)
+    }
+    if not ships:
+        return payload
+
+    # ship_id is a plain BigIntegerField (no FK), so there is no ORM join to
+    # Ship — aggregate the candidate ids directly, then attach metadata in Python.
+    rows = (
+        BattleEvent.objects
+        .filter(detected_at__gte=window_start, detected_at__lt=window_end,
+                player__realm=realm, mode=mode, ship_id__in=ships.keys())
+        .values("ship_id")
+        .annotate(
+            battles=Sum("battles_delta"),
+            wins=Sum("wins_delta"),
+            # damage_delta is nullable — Sum can return None; coalesced below.
+            damage=Sum("damage_delta"),
+            frags=Sum("frags_delta"),
+        )
+        .filter(battles__gte=min_battles)
+    )
+
+    payload_ships = []
+    for r in rows:
+        battles = int(r["battles"] or 0)
+        if battles <= 0:
+            continue
+        wins = int(r["wins"] or 0)
+        damage = int(r["damage"] or 0)
+        frags = int(r["frags"] or 0)
+        ship = ships.get(r["ship_id"])
+        payload_ships.append({
+            "ship_id": r["ship_id"],
+            "ship_name": (ship.name if ship and ship.name else f"Ship {r['ship_id']}"),
+            "ship_type": ship.ship_type if ship else ship_type,
+            "tier": ship.tier if ship else tier,
+            "nation": ship.nation if ship else "",
+            "is_premium": bool(ship.is_premium) if ship else False,
+            "battles": battles,
+            "win_rate": round(wins / battles * 100, 1),
+            "avg_damage": round(damage / battles),
+            "kills_per_battle": round(frags / battles, 2),
+        })
+
+    # Win rate descending; battles as a deterministic tie-break.
+    payload_ships.sort(key=lambda s: (-s["win_rate"], -s["battles"]))
+    payload["ships"] = payload_ships
+
+    now = django_timezone.now()
+    _, current_season_end = ship_season_bounds(current_season_index())
+    next_boundary_dt, _ = _season_window_datetimes(current_season_end, current_season_end)
+    ttl = max(3600, int((next_boundary_dt - now).total_seconds()) + 3600)
+    cache.set(cache_key, payload, timeout=ttl)
+    return payload

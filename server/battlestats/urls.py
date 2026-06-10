@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_tier_distribution, clan_member_tiers, clan_battle_seasons, player_clan_battle_seasons, landing_activity_attrition, landing_best_warmup, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, clan_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats, analytics_entity_view, analytics_top_entities, sitemap_entities, streamer_submission_view, battle_history, realm_top_ships, ship_leaderboard
+from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_tier_distribution, clan_member_tiers, clan_battle_seasons, player_clan_battle_seasons, landing_activity_attrition, landing_best_warmup, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, clan_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats, analytics_entity_view, analytics_top_entities, sitemap_entities, streamer_submission_view, battle_history, realm_top_ships, realm_ships_by_tier_type, ship_leaderboard
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -64,6 +64,10 @@ urlpatterns = [
          realm_top_ships, name='realm_top_ships'),
     path('api/realm/<str:realm>/top-ships',
          realm_top_ships, name='realm_top_ships_no_slash'),
+    path('api/realm/<str:realm>/ships/',
+         realm_ships_by_tier_type, name='realm_ships_by_tier_type'),
+    path('api/realm/<str:realm>/ships',
+         realm_ships_by_tier_type, name='realm_ships_by_tier_type_no_slash'),
     path('api/realm/<str:realm>/ship/<int:ship_id>/leaderboard/',
          ship_leaderboard, name='ship_leaderboard'),
     path('api/realm/<str:realm>/ship/<int:ship_id>/leaderboard',

@@ -2103,6 +2103,57 @@ def realm_top_ships(request, realm: str) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def realm_ships_by_tier_type(request, realm: str) -> Response:
+    """Ships of one tier+type on a realm, ranked by win rate over the last season.
+
+    Powers the landing-page inline ship leaderboard (filterable table under the
+    treemap). Realm-wide win rate / avg damage / kills per battle aggregated from
+    BattleEvent over the most recently completed fixed 2-week ship season, ordered
+    by win rate descending, restricted to ships with a populated drill-down board.
+    Requires `tier` (one of the badge tiers, prod 8/9/10) and `type` (a raw WG
+    ship-type string). 404 on unknown realm; 400 on missing/invalid tier or type.
+
+    Response shape:
+        {realm, days, tier, ship_type, mode, season_index, season_start,
+         season_end, window_start, window_end,
+         ships: [{ship_id, ship_name, ship_type, tier, nation, is_premium,
+                  battles, win_rate, avg_damage, kills_per_battle}]}
+    """
+    from warships.data import (
+        compute_realm_ships_by_tier_type, _badge_tiers, SHIP_LEADERBOARD_TYPES,
+    )
+
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    if realm not in VALID_REALMS:
+        return Response({"detail": "Unknown realm."}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        tier = int(request.query_params.get("tier", ""))
+    except (TypeError, ValueError):
+        tier = None
+    if tier not in _badge_tiers():
+        return Response(
+            {"detail": "tier must be one of the ranked ship tiers."},
+            status=status.HTTP_400_BAD_REQUEST)
+
+    ship_type = (request.query_params.get("type") or "").strip()
+    if ship_type not in SHIP_LEADERBOARD_TYPES:
+        return Response(
+            {"detail": "type must be one of "
+                       f"{', '.join(SHIP_LEADERBOARD_TYPES)}."},
+            status=status.HTTP_400_BAD_REQUEST)
+
+    payload = compute_realm_ships_by_tier_type(
+        realm,
+        tier=tier,
+        ship_type=ship_type,
+        mode=request.query_params.get("mode", "random"),
+    )
+    return Response(payload)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def ship_leaderboard(request, realm: str, ship_id: int) -> Response:
     """Fortnight leaderboard of ranked players for one ship on a realm.
 

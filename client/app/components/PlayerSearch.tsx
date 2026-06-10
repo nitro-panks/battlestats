@@ -9,6 +9,7 @@ import ClanDetail from './ClanDetail';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier, type EfficiencyRankTier } from './EfficiencyRankIcon';
 import PlayerDetail from './PlayerDetail';
 import RealmTopShipsTreemapSVG from './RealmTopShipsTreemapSVG';
+import ShipLeaderboard from './ShipLeaderboard';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import type { LandingClan, LandingPlayer, PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
@@ -516,6 +517,10 @@ const PlayerSearch: React.FC = () => {
                     <div className="mt-2 pt-6">
                         <RealmTopShipsTreemapSVG />
                     </div>
+
+                    {/* Inline ship leaderboard: filter by tier+type, rank ships by
+                        win rate, drill into any ship's player board in place. */}
+                    <ShipLeaderboard />
 
                     {/* Toolbar is always visible once the landing pane is mounted —
                      keeps the empty-state UX coherent for both Recent and Best
