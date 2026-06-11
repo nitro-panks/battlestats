@@ -11,6 +11,13 @@ Shared logic for the two-task engagement-capture loop:
 * ``capture_hot_players`` — sweep the hot set guaranteeing a ``BattleObservation``
   (skip-if-fresh) and a gap-free daily ``Snapshot`` per member. Backs
   ``capture_hot_player_observations_task``.
+* ``refresh_hot_player_freshness`` — a SEPARATE, frequent (<15-min) sweep that
+  keeps each hot member's ``Player.battles_updated_at`` inside the 15-min
+  visit-freshness window (``PLAYER_BATTLE_DATA_STALE_AFTER``) so a visit lands at
+  ``x-player-refresh-pending: false`` and resolves sub-second — no live WG
+  refresh on the request path. Tier 3 of
+  ``agents/runbooks/runbook-player-refresh-latency-2026-06-10.md``. Backs
+  ``refresh_hot_player_freshness_task``.
 
 Env knobs (read inline via ``os.getenv`` to match the FLOOR / SNAPSHOT / ENRICH
 families — no sibling domain knob is a settings.py constant). See the runbook:
@@ -70,6 +77,10 @@ def _hot_players_max() -> int:
 
 def _observe_floor_hours() -> int:
     return int(os.getenv("HOT_OBSERVE_FLOOR_HOURS", "20"))
+
+
+def _fresh_after_minutes() -> int:
+    return int(os.getenv("HOT_PLAYERS_FRESH_AFTER_MINUTES", "12"))
 
 
 def _capture_delay() -> float:
@@ -412,4 +423,90 @@ def capture_hot_players(realm: str, *, logger=logger) -> dict:
         'errors': errors,
     }
     logger.info("hot_players[%s] capture: %s", realm, result)
+    return result
+
+
+def refresh_hot_player_freshness(realm: str, *, logger=logger) -> dict:
+    """Keep hot players' ``battles_updated_at`` inside the 15-min visit window.
+
+    Tier 3 of the player-refresh-latency runbook. The daily capture sweep
+    (``capture_hot_players``) writes observations + snapshots but does NOT
+    advance ``Player.battles_updated_at`` — the only signal the visit path's
+    ``x-player-refresh-pending`` header keys off (``PLAYER_BATTLE_DATA_STALE_AFTER
+    = 15min``). This frequent (<15-min cadence) sweep closes that gap: for each
+    hot member whose ``battles_updated_at`` is older than
+    ``HOT_PLAYERS_FRESH_AFTER_MINUTES`` (default 12), it calls
+    ``update_battle_data(force_refresh=True)`` on the background queue so a
+    subsequent visit arrives at ``pending: false`` and resolves sub-second with
+    no live WG round-trip.
+
+    ``force_refresh=True`` is REQUIRED: ``update_battle_data`` has its own 15-min
+    cache guard that would early-return (without advancing the timestamp) for
+    exactly the ``[HOT_PLAYERS_FRESH_AFTER_MINUTES, 15min)`` band this sweep
+    targets — neutering the whole tier.
+
+    Bounded by ``HOT_PLAYERS_MAX`` (predictable WG cost), ordered by
+    ``hot_score``, paced by ``HOT_PLAYERS_CAPTURE_DELAY``. Skip-if-fresh against
+    ``battles_updated_at`` (independent of the observation floor, which does NOT
+    advance it). Hidden accounts are gated up front (``update_battle_data``
+    returns no status dict, so we cannot read "hidden" off its result the way
+    ``capture_hot_players`` does) — counted and skipped, no wasted WG call, no
+    retry storm. No-op when ``HOT_PLAYERS_ENABLED`` is off.
+    """
+    if not _enabled():
+        return {'realm': realm, 'status': 'disabled', 'refreshed': 0,
+                'skipped_fresh': 0, 'skipped_hidden': 0, 'errors': 0}
+
+    from warships.data import update_battle_data
+
+    now = timezone.now()
+    fresh_minutes = _fresh_after_minutes()
+    stale_before = now - timedelta(minutes=fresh_minutes)
+    delay = _capture_delay()
+    cap = _hot_players_max()
+
+    members = list(
+        HotPlayer.objects
+        .filter(realm=realm)
+        .select_related('player')
+        .order_by('-hot_score')[:cap]
+    )
+
+    refreshed = skipped_fresh = skipped_hidden = errors = 0
+
+    for hp in members:
+        player = hp.player
+        # Skip-if-fresh: already inside the visit window, nothing to do.
+        if (player.battles_updated_at is not None
+                and player.battles_updated_at >= stale_before):
+            skipped_fresh += 1
+            continue
+        # Hidden accounts return nothing from WG — gate up front (no wasted
+        # call, no retry storm).
+        if player.is_hidden:
+            skipped_hidden += 1
+            continue
+        try:
+            update_battle_data(player.player_id, realm=realm, force_refresh=True)
+            refreshed += 1
+        except Player.DoesNotExist:
+            errors += 1
+        except Exception:
+            errors += 1
+            logger.exception(
+                "hot_players[%s] freshness refresh failed for player_id=%s",
+                realm, player.player_id)
+
+        if delay:
+            time.sleep(delay)
+
+    result = {
+        'realm': realm,
+        'hot_set_size': len(members),
+        'refreshed': refreshed,
+        'skipped_fresh': skipped_fresh,
+        'skipped_hidden': skipped_hidden,
+        'errors': errors,
+    }
+    logger.info("hot_players[%s] freshness: %s", realm, result)
     return result

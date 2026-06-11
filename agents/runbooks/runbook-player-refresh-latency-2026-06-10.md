@@ -2,8 +2,8 @@
 
 **Status:** Tier 1 IMPLEMENTED 2026-06-11 (client UX: tightened live-refresh poll cadence +
 retry the initial `/api/player` load on 5xx/network with a distinct "temporarily unavailable"
-state). Tiers 2–3 PENDING — and Tier 3 is now **unblocked**: the hot-players engagement queue it
-extends shipped (`runbook-hot-players-engagement-queue-2026-06-10.md`). Sequenced Tier 1 → 3.
+state). **Tier 3 IMPLEMENTED 2026-06-11** (proactive freshness — see below). Tier 2 PENDING.
+Tier 3 extends the hot-players engagement queue (`runbook-hot-players-engagement-queue-2026-06-10.md`).
 
 ## Why
 
@@ -124,6 +124,48 @@ Document and trade off:
 ramping concurrency.
 
 ### Tier 3 — Proactive freshness (eliminate the live refresh for visits that matter)
+
+> **IMPLEMENTED 2026-06-11.** A SEPARATE frequent sweep extends the hot-players engagement
+> queue (NOT folded into the daily capture task — mirrors the queue's "separate task" design):
+> - **`refresh_hot_player_freshness(realm)`** (`server/warships/hot_players.py`) — iterates the
+>   `HotPlayer(realm)` set (bounded by `HOT_PLAYERS_MAX`, ordered by `hot_score`); for each member
+>   whose `Player.battles_updated_at` is older than `HOT_PLAYERS_FRESH_AFTER_MINUTES` (default 12)
+>   it calls `update_battle_data(player_id, realm, force_refresh=True)` — the random-battle refresh
+>   that advances `battles_updated_at`. Skip-if-fresh against `battles_updated_at` (independent of
+>   the observation floor, which does NOT advance it); hidden accounts gated up front; paced by
+>   `HOT_PLAYERS_CAPTURE_DELAY`; no-op under `HOT_PLAYERS_ENABLED=0`. Returns
+>   `{refreshed, skipped_fresh, skipped_hidden, errors}`.
+> - **`refresh_hot_player_freshness_task`** (`server/warships/tasks.py`) — `background` queue,
+>   single-flight per realm (`_hot_players_freshness_lock_key`), coexists with crawls, gated on
+>   `HOT_PLAYERS_ENABLED`. Route added in `settings.py` `CELERY_TASK_ROUTES`.
+> - **`hot-players-freshness-{realm}`** (`signals.py`) — striped via
+>   `_realm_crontab_for_cycle(realm, HOT_PLAYERS_FRESH_CYCLE_MINUTES=12)` → NA `:00,12,24,36,48` /
+>   EU `:04,16,28,40,52` / ASIA `:08,20,32,44,56`, hour `*` (cadence 12 min, **under** the 15-min
+>   window; stride 4 keeps realms on distinct minute lanes). Gated on `ENABLE_CRAWLER_SCHEDULES`
+>   (crawler-class WG consumer, like `hot-players-capture`).
+> - **The load-bearing nuance:** `update_battle_data` (`data.py`) has its OWN 15-min cache guard
+>   that early-returns *without* advancing `battles_updated_at` — which would neuter a 12-min
+>   cadence for exactly the [12, 15) staleness band this targets. A `force_refresh: bool = False`
+>   param was added to bypass that guard (default False ⇒ all existing callers unchanged, no
+>   migration). A real-function test (`test_real_update_battle_data_advances_timestamp`) pins it.
+> - **Env knobs:** `HOT_PLAYERS_FRESH_AFTER_MINUTES` (12), `HOT_PLAYERS_FRESH_CYCLE_MINUTES` (12),
+>   inline `os.getenv` per the hot-players convention; reuses `HOT_PLAYERS_ENABLED` /
+>   `HOT_PLAYERS_MAX` / `HOT_PLAYERS_CAPTURE_DELAY`.
+> - **Cost:** bounded by `HOT_PLAYERS_MAX` × cadence. `update_battle_data` makes **1 WG call**
+>   (`ships/stats/`) per refresh — the `update_randoms/tiers/type` follow-ups reuse the
+>   already-fetched payload / local ship data, and the battle-history capture hook
+>   (`record_observation_from_payloads`) reuses the same `ship_data` (no extra call) unless
+>   `BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=1` for the realm (then +1 `seasons/shipstats/`, default
+>   off everywhere). So at cap 500 × ~5 refreshes/hour the *ceiling* is ~2.5K refreshes/hour/realm
+>   ≈ ~60K WG calls/day/realm at full cap and full staleness. **Skip-if-fresh collapses this
+>   sharply** for any hot player the visit path or this same sweep already refreshed inside the
+>   12-min window. Still materially above the "few hundred/day" the engagement-queue runbook cites
+>   for *daily capture* — it is the spec's intended freshness cost, bounded by the cap.
+> - **Interaction with the daily capture sweep:** because the freshness sweep advances the
+>   `BattleObservation` baseline every ~12 min for refreshed players, the daily *capture* sweep's
+>   observation path (skip-if-fresh against `BattleObservation.observed_at` within
+>   `HOT_OBSERVE_FLOOR_HOURS`=20h) will usually now skip hot players. The two stay complementary:
+>   capture uniquely owns the gap-free daily `Snapshot` write, which freshness never does.
 
 Highest leverage. Tiers 1–2 make a *waited-on* refresh shorter and resilient; Tier 3 removes the
 wait for the visits that matter by keeping the right players' `battles_updated_at` **inside** the

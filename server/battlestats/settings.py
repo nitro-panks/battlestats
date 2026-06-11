@@ -305,6 +305,7 @@ CELERY_TASK_ROUTES = {
     'warships.tasks.snapshot_active_players_task': {'queue': 'background'},
     'warships.tasks.maintain_hot_players_task': {'queue': 'background'},
     'warships.tasks.capture_hot_player_observations_task': {'queue': 'background'},
+    'warships.tasks.refresh_hot_player_freshness_task': {'queue': 'background'},
     'warships.tasks.incremental_ranked_data_task': {'queue': 'background'},
     'warships.tasks.refresh_efficiency_rank_snapshot_task': {'queue': 'background'},
     'warships.tasks.warm_hot_entity_caches_task': {'queue': 'background'},
