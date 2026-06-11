@@ -1,12 +1,5 @@
 export type EntityType = 'player' | 'clan';
 
-declare global {
-    interface Window {
-        gtag?: (...args: unknown[]) => void;
-        dataLayer?: unknown[];
-    }
-}
-
 interface TrackEntityDetailViewInput {
     entityType: EntityType;
     entityId: number;
@@ -18,8 +11,6 @@ const ANALYTICS_ENDPOINT = '/api/analytics/entity-view';
 const VISITOR_COOKIE_NAME = 'battlestats_visitor_key';
 const SESSION_STORAGE_KEY = 'battlestats_session_key';
 const VISITOR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
-
-const getGaMeasurementId = (): string | undefined => process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 
 const generateId = (): string => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -98,28 +89,6 @@ const getSameOriginReferrerPath = (): string => {
     }
 };
 
-const emitGa4EntityDetailView = (payload: {
-    entity_type: EntityType;
-    entity_id: number;
-    entity_slug: string;
-    entity_name: string;
-    route_path: string;
-}) => {
-    const gaMeasurementId = getGaMeasurementId();
-    if (!gaMeasurementId || typeof window === 'undefined' || typeof window.gtag !== 'function') {
-        return;
-    }
-
-    window.gtag('event', 'entity_detail_view', {
-        send_to: gaMeasurementId,
-        entity_type: payload.entity_type,
-        entity_id: payload.entity_id,
-        entity_slug: payload.entity_slug,
-        entity_name: payload.entity_name,
-        route_path: payload.route_path,
-    });
-};
-
 export const trackEntityDetailView = async ({
     entityType,
     entityId,
@@ -143,14 +112,6 @@ export const trackEntityDetailView = async ({
         visitor_key: getOrCreateVisitorKey(),
         session_key: getOrCreateSessionKey(),
     };
-
-    emitGa4EntityDetailView({
-        entity_type: payload.entity_type,
-        entity_id: payload.entity_id,
-        entity_slug: payload.entity_slug,
-        entity_name: payload.entity_name,
-        route_path: payload.route_path,
-    });
 
     try {
         await fetch(ANALYTICS_ENDPOINT, {

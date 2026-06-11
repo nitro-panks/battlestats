@@ -38,7 +38,7 @@ The header search box only mirrors explicit search query usage. Visiting a playe
 
 Both routed detail headers now include a `Share` button that copies the current player or clan URL.
 
-Those routed detail views also emit first-party `entity_detail_view` analytics after a successful player or clan load. The canonical ingest path is `/api/analytics/entity-view/`, and optional GA4 emission is enabled only when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is present.
+Those routed detail views also emit first-party `entity_detail_view` analytics after a successful player or clan load. The canonical ingest path is `/api/analytics/entity-view/`.
 
 Hidden accounts now use a shared mask icon treatment across suggestions, landing lists, explorer rows, clan members, and player detail headers.
 
@@ -146,7 +146,6 @@ The client-side analytics helper lives in `app/lib/visitAnalytics.ts`.
 
 - It posts first-party page-view events for routed player and clan detail pages.
 - It is fire-and-forget and should not block route rendering.
-- It optionally emits a parallel GA4 `entity_detail_view` event when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is configured and `window.gtag` is available.
 
 ## Favicon
 
