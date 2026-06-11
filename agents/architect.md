@@ -55,8 +55,8 @@ When the task touches the repo's agentic setup:
 
 These are operational realities that constrain design decisions:
 
-- **Database**: DigitalOcean Managed PostgreSQL — Basic Premium AMD, 1 vCPU, 2 GB RAM, 47 usable connections (3 reserved for DO management). No configurable `shared_buffers` or `max_connections`. Plan for this budget.
-- **Connection budget**: Gunicorn (5 workers) + Celery default (3) + hydration (4) + background (2) + startup warmer (1) = 15 max. Well within 47 limit. `CONN_MAX_AGE=300` keeps connections alive.
+- **Database**: DigitalOcean Managed PostgreSQL — `db-s-2vcpu-4gb`, **2 vCPU, 4 GB RAM, ~97 usable connections** (`max_connections`=100, a few reserved for DO management), PG 18, 60 GB disk. Resized up from 1 vCPU / 2 GB on 2026-05-28 — **do not plan against the old 1-vCPU budget**. No configurable `shared_buffers` or `max_connections`. Authoritative sizing: `agents/runbooks/ops-infra-resources.md`.
+- **Connection budget**: Gunicorn (5 workers) + Celery default (3) + hydration (3) + background (3) + crawls (1) + startup warmer (1) + Beat ≈ 17 max. Well within the ~97 limit. `CONN_MAX_AGE=300` + `CONN_HEALTH_CHECKS` keep connections alive.
 - **Table sizes**: `warships_player` 861 MB (~275K rows), `warships_playerachievementstat` 591 MB (~2.5M rows), `warships_playerexplorersummary` 188 MB (~295K rows). Analytical queries on these tables need elevated `work_mem` and should use materialized views where possible.
 - **Materialized views**: `mv_player_distribution_stats` (~25 MB) serves distribution/correlation queries. Refreshed concurrently in `warm_player_distributions()`. New analytical surfaces should evaluate whether an MV would avoid full table scans.
 - **Upstream API**: All WG API calls go through Django. The frontend never calls WG directly. WG API has rate limits — all hydration is batched through Celery tasks, not triggered per-request.

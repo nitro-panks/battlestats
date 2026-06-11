@@ -8,6 +8,13 @@ optimization target.
 (battlestats.online), 56 enabled tasks, captured 2026-06-08, cross-referenced with
 `server/warships/signals.py`.
 
+> **Correction (2026-06-11):** this analysis repeatedly calls the managed Postgres
+> "1 vCPU" (§F1, §4 table, §scheduling). The DB was actually resized to **2 vCPU /
+> 4 GB** on 2026-05-28 (before this doc was written). The thundering-herd /
+> peak-overlap *findings* still hold qualitatively, but any sizing math anchored to a
+> single core should be revisited against the 2-core headroom before being acted on.
+> Current sizing: `agents/runbooks/ops-infra-resources.md`.
+
 ---
 
 > **✅ Correction & reconciliation (2026-06-08, code review + implementation).**

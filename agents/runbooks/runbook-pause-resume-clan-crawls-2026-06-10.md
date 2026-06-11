@@ -6,7 +6,7 @@ _Status: evergreen procedure._
 
 ## When to use
 
-Pause clan crawls when another WG-heavy job (a large enrichment drain, a backfill) needs the shared WG rate budget, or to stop crawls contending for the 1-vCPU DB / memory. **Enrichment, the BattleObservation floor, and the tiered/ranked refresh all DEFER per-realm while that realm's clan crawl holds its lock**, so a running crawl directly throttles those paths for its realm.
+Pause clan crawls when another WG-heavy job (a large enrichment drain, a backfill) needs the shared WG rate budget, or to stop crawls contending for the DB (2 vCPU / 4 GB, see `ops-infra-resources.md`) / memory. **Enrichment, the BattleObservation floor, and the tiered/ranked refresh all DEFER per-realm while that realm's clan crawl holds its lock**, so a running crawl directly throttles those paths for its realm.
 
 ## Mechanics you must know
 

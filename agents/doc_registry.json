@@ -646,6 +646,29 @@
                 "env-model-replaced"
             ]
         },
+        "agents/runbooks/ops-infra-resources.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "infra resources",
+                "droplet specs",
+                "db sizing",
+                "vcpu ram disk"
+            ],
+            "tags": [
+                "infrastructure",
+                "resources",
+                "sizing",
+                "operations",
+                "reference"
+            ],
+            "archive_on": [
+                "infra-model-replaced"
+            ]
+        },
         "agents/runbooks/runbook-claude-md-durability.md": {
             "kind": "runbook",
             "status": "active",
