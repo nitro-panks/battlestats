@@ -351,6 +351,69 @@ class EntityVisitDaily(models.Model):
         return f"{self.date} {self.entity_type}:{self.entity_id}"
 
 
+class HotPlayer(models.Model):
+    """Engagement-capture queue membership + audit row (one per player+realm).
+
+    A player qualifies for **guaranteed daily battle-history capture** by
+    *durable visitor interest* — recurrence of deduped detail-page views across
+    distinct days (`EntityVisitDaily`) — independent of their own play activity
+    or skill. This is the durable home for that queue: ``maintain_hot_players``
+    promotes/evicts/re-scores members (the brain) and
+    ``capture_hot_player_observations_task`` sweeps the set guaranteeing a
+    `BattleObservation` (skip-if-fresh) and a gap-free daily `Snapshot` (the
+    hands).
+
+    Distinct from the ``HOT_ENTITY_*`` / ``_get_hot_player_ids()`` read-cache
+    warming path (that's *serving*; this is *capture*). The audit columns
+    (`active_days_window` / `unique_sessions_window` / `views_deduped_window` /
+    `hot_score`) make every promotion/eviction explainable and back the
+    `HOT_PLAYERS_MAX` cap-trim ranking. ``source='pinned'`` is a manual override
+    that survives the engagement re-evaluation (durable replacement for the old
+    ``HOT_ENTITY_PINNED_PLAYER_NAMES`` / ``BATTLE_TRACKING_PLAYER_NAMES`` PoC).
+
+    Runbook: ``agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md``.
+    """
+    SOURCE_ENGAGEMENT = 'engagement'
+    SOURCE_PINNED = 'pinned'
+    SOURCE_CHOICES = [
+        (SOURCE_ENGAGEMENT, 'Engagement'),
+        (SOURCE_PINNED, 'Pinned'),
+    ]
+
+    player = models.ForeignKey(
+        Player, on_delete=models.CASCADE, related_name='hot_player_entries')
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
+    promoted_at = models.DateTimeField(auto_now_add=True)
+    # Most-recent deduped view (drives the inactivity-eviction rule).
+    last_engaged_at = models.DateTimeField(null=True, blank=True)
+    # Engagement snapshot at last evaluation (audit + cap ranking).
+    active_days_window = models.IntegerField(default=0)
+    unique_sessions_window = models.IntegerField(default=0)
+    views_deduped_window = models.IntegerField(default=0)
+    # Ranking value used to trim to HOT_PLAYERS_MAX (active_days primary,
+    # then unique_sessions, then views_deduped — encoded deterministically).
+    hot_score = models.FloatField(default=0.0, db_index=True)
+    source = models.CharField(
+        max_length=16, choices=SOURCE_CHOICES, default=SOURCE_ENGAGEMENT)
+    # Capture bookkeeping (skip-if-fresh + coverage reporting).
+    last_observed_at = models.DateTimeField(null=True, blank=True)
+    last_snapshotted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['player', 'realm'], name='unique_hot_player_realm'),
+        ]
+        indexes = [
+            models.Index(fields=['realm', '-hot_score'],
+                         name='hot_player_realm_score_idx'),
+        ]
+
+    def __str__(self):
+        return f"HotPlayer({self.player_id}/{self.realm} score={self.hot_score})"
+
+
 class PlayerAchievementStat(models.Model):
     player = models.ForeignKey(
         Player,
