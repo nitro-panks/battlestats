@@ -43,6 +43,7 @@ STRIPED_PER_REALM_FAMILIES = [
     ("recently-viewed-player-warmer", 10),
     ("incremental-player-refresh", 180),
     ("incremental-ranked-refresh", 120),
+    ("hot-players-capture", 1440),
 ]
 
 
@@ -262,6 +263,7 @@ class MinuteLaneDePileTests(TestCase):
         "player-distribution-warmer",
         "player-correlation-warmer",
         "landing-page-warmer",
+        "hot-players-capture",
     ]
 
     def test_na_minute_lanes_are_distinct(self):
@@ -275,6 +277,59 @@ class MinuteLaneDePileTests(TestCase):
         self.assertEqual(
             len(set(lanes.values())), len(lanes),
             f"NA minute lanes collide: {lanes}")
+
+
+class HotPlayersScheduleTopologyTests(TestCase):
+    """Pins the two hot-players engagement-queue families
+    (`runbook-hot-players-engagement-queue-2026-06-10.md`):
+
+    - `hot-players-maintain-{realm}` — DB-only daily brain, striped at fixed
+      times in the 08:00-09:00 UTC maintenance band (na 08:30 / eu 08:50 /
+      asia 09:10). Always-enabled (respects HOT_PLAYERS_ENABLED).
+    - `hot-players-capture-{realm}` — background daily sweep, striped via
+      `_realm_crontab_for_cycle` / `REALM_INTERVAL_OFFSETS` (covered for
+      existence + crontab + NA-lane de-pile by the families lists above).
+    """
+
+    def test_maintain_present_crontab_and_realm_kwarg(self):
+        for realm in VALID_REALMS:
+            row = PeriodicTask.objects.get(name=f"hot-players-maintain-{realm}")
+            self.assertIsNotNone(
+                row.crontab, f"hot-players-maintain-{realm} should be on a crontab")
+            self.assertIsNone(
+                row.interval,
+                f"hot-players-maintain-{realm} should not also have an interval")
+            self.assertIn(f'"realm": "{realm}"', row.kwargs)
+
+    def test_maintain_fixed_times_are_distinct_per_realm(self):
+        # The maintenance band is striped by fixed (minute, hour) per realm so
+        # at most one realm runs the analytical GROUP BY at a time.
+        sigs = {
+            realm: (
+                PeriodicTask.objects.get(
+                    name=f"hot-players-maintain-{realm}").crontab.minute,
+                PeriodicTask.objects.get(
+                    name=f"hot-players-maintain-{realm}").crontab.hour,
+            )
+            for realm in VALID_REALMS
+        }
+        self.assertEqual(
+            len(set(sigs.values())), len(VALID_REALMS),
+            f"hot-players-maintain schedules collide: {sigs}")
+
+    def test_capture_offsets_distinct_per_realm(self):
+        sigs = {
+            realm: (
+                PeriodicTask.objects.get(
+                    name=f"hot-players-capture-{realm}").crontab.minute,
+                PeriodicTask.objects.get(
+                    name=f"hot-players-capture-{realm}").crontab.hour,
+            )
+            for realm in VALID_REALMS
+        }
+        self.assertEqual(
+            len(set(sigs.values())), len(VALID_REALMS),
+            f"hot-players-capture schedules collide: {sigs}")
 
 
 class TrackedPlayerPollGateTests(TestCase):

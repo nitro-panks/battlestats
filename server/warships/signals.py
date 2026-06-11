@@ -683,13 +683,16 @@ def register_periodic_schedules(sender, **kwargs):
         )
 
     # capture: daily cron, striped per realm via REALM_INTERVAL_OFFSETS so realms
-    # don't overlap. Cycle = 1440 (once/day); base_minute=45 keeps it off the
-    # minute-0/15 DB-CPU lanes used by the floor/snapshot families.
+    # don't overlap. Cycle = 1440 (once/day); base_minute=10:35 puts the NA fire
+    # on minute lane :35 — a FREE lane (the de-pile invariant in
+    # test_periodic_schedule_topology.py enforces this: :45 collided with
+    # player-correlation-warmer, :05/:15/:25/:50/:55 are the other taken lanes on
+    # the 1-vCPU DB).
     hot_capture_cycle_minutes = int(
         os.getenv("HOT_PLAYERS_CAPTURE_CYCLE_MINUTES", "1440"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, hot_capture_cycle_minutes, base_minute=10 * 60 + 45)
+            realm, hot_capture_cycle_minutes, base_minute=10 * 60 + 35)
         hot_capture_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=minute_str,
             hour=hour_str,
