@@ -65,7 +65,7 @@ Local-dev only: `BATTLESTATS_DISABLE_LIVE_REFRESH` (serve stale snapshots, no li
 
 ## Client env
 
-- `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`), `NEXT_PUBLIC_GA_MEASUREMENT_ID` (optional)
+- `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`)
 
 ## Umami analytics
 

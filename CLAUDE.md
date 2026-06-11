@@ -124,7 +124,7 @@ Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu
 - **HTTP/2** on the nginx 443 listeners (removes the HTTP/1.1 6-connection-per-origin limit)
 - **Frontend fetch priority** — player pages fire 4 chart requests via `requestIdleCallback`; clan-member fetch deferred until warmup settles; `useClanMembers` backs off while charts in-flight
 - **DB** — `CONN_HEALTH_CHECKS` enabled; analytical queries use elevated `work_mem` (`ANALYTICAL_WORK_MEM`, default 8MB) via `SET LOCAL`
-- **SEO** — per-page `generateMetadata()`; dynamic `app/sitemap.ts` from `/api/sitemap-entities/`; `WebSite`+`SearchAction` JSON-LD; GA4 via `NEXT_PUBLIC_GA_MEASUREMENT_ID`
+- **SEO** — per-page `generateMetadata()`; dynamic `app/sitemap.ts` from `/api/sitemap-entities/`; `WebSite`+`SearchAction` JSON-LD; analytics via Umami + first-party entity tracking
 
 ### Data models (`server/warships/models.py`)
 

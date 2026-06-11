@@ -14,7 +14,7 @@
 | `lang="en"` | ✅ | Set on `<html>` |
 | Font optimization | ✅ | `next/font/google` (Inter, latin subset) |
 | Favicon + apple-icon | ✅ | `favicon.ico`, `apple-icon.png`, `icon.svg` in `app/` |
-| Analytics | ✅ | GA4 + Umami + custom entity tracking |
+| Analytics | ✅ | Umami + custom entity tracking |
 
 ### What's Missing
 | Feature | Impact | Effort |
@@ -320,7 +320,7 @@ Moving player/clan data fetching to the server component layer would give search
 2. ~~**Homepage metadata enhancement**~~ ✅ — expanded title/description, OG/Twitter cards, canonical URL
 3. ~~**Dynamic sitemap**~~ ✅ — backend `/api/sitemap-entities/` + dynamic `app/sitemap.ts` (hourly revalidation)
 4. ~~**Structured data (JSON-LD)**~~ ✅ — WebSite + SearchAction on homepage
-5. ~~**Google Analytics**~~ ✅ — GA4 measurement ID `G-Z4GN5CHTY5` configured; deploy script sources env at build time
+5. ~~**Analytics**~~ ✅ — Umami (self-hosted) + first-party entity tracking; Google Analytics removed 2026-06-10 in favor of Umami
 6. **OG image generation** — visual social sharing (future)
 7. **Full SSR** — complete search engine optimization (future)
 

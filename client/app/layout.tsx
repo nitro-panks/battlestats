@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import Script from "next/script";
 import { config } from "@fortawesome/fontawesome-svg-core";
 import "@fortawesome/fontawesome-svg-core/styles.css";
 import { Inter } from "next/font/google";
@@ -17,7 +16,6 @@ import "./globals.css";
 config.autoAddCss = false;
 
 const inter = Inter({ subsets: ["latin"] });
-const gaMeasurementId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 const enableUmami = process.env.NODE_ENV === "production";
 
 export const metadata: Metadata = {
@@ -49,23 +47,6 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('bs-theme');if(t!=='light'&&t!=='dark')t='dark';document.documentElement.dataset.theme=t;var r=localStorage.getItem('bs-realm');if(r&&['na','eu','asia'].indexOf(r)>=0)document.documentElement.dataset.realm=r;else document.documentElement.dataset.realm='na';})();` }} />
         {enableUmami ? <script defer src="/umami/script.js" data-website-id="27c0ee6a-f534-42d4-b49f-27bbadad9848" /> : null}
       </head>
-      {gaMeasurementId ? (
-        <>
-          <Script
-            src={`https://www.googletagmanager.com/gtag/js?id=${gaMeasurementId}`}
-            strategy="afterInteractive"
-          />
-          <Script id="google-analytics" strategy="afterInteractive">
-            {`
-              window.dataLayer = window.dataLayer || [];
-              function gtag(){dataLayer.push(arguments);}
-              window.gtag = gtag;
-              gtag('js', new Date());
-              gtag('config', '${gaMeasurementId}', { send_page_view: false });
-            `}
-          </Script>
-        </>
-      ) : null}
       <body className={inter.className}>
         <ThemeProvider>
           <RealmProvider>
