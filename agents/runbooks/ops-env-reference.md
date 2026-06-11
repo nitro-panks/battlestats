@@ -45,6 +45,15 @@ WG rate limiter (`warships/api/rate_limiter.py`; **prod-enabled**):
 - `WG_RATE_LIMIT_ENABLED` (1) — global token bucket gating outbound WG requests at the egress (`api/client.py` — note BOTH `_request_api_payload` and `make_api_request_typed` issue GETs and are gated). Process-shared via Redis + an atomic Lua bucket (clock from `redis.call('TIME')`), so the single `WG_APP_ID`'s ~10 req/s budget is enforced across every worker process AND gunicorn request threads. **Fail-open**: no-op when disabled, `REDIS_URL` unset (tests), or Redis errors. This is the real rate ceiling; the per-component delays (`ENRICH_DELAY*`, floor `_DELAY`/`_CRAWL_DELAY`, crawl `request_delay`) are now belt-and-suspenders and can be relaxed once the limiter is proven in prod.
 - `WG_RATE_LIMIT_PER_SEC` (9) — sustained refill rate (kept <10 for margin). `WG_RATE_LIMIT_BURST` (18) — bucket capacity. `WG_RATE_LIMIT_MAX_WAIT` (8) — max seconds a **background** task blocks for a token. `WG_RATE_LIMIT_REQUEST_MAX_WAIT` (0.5) — max seconds a **request thread** blocks before failing open (a synchronous WG call still exists on the request path, e.g. `_fetch_player_id_by_name`; this prevents gunicorn thread-pool exhaustion under saturation). `WG_RATE_LIMIT_KEY` (`wg:ratelimit`).
 
+Hot-players engagement capture queue (`warships/hot_players.py`; kill switch `HOT_PLAYERS_ENABLED`; capture gated on `ENABLE_CRAWLER_SCHEDULES`, maintenance is DB-only/always-enabled). Lets *durable visitor interest* (recurrence over `EntityVisitDaily`) qualify a player for guaranteed daily capture. Runbook: `runbook-hot-players-engagement-queue-2026-06-10.md`.
+- `HOT_PLAYERS_ENABLED` (1) — master kill switch (`maintain_hot_players_task` + `capture_hot_player_observations_task` both no-op at 0).
+- `HOT_PLAYERS_WINDOW_DAYS` (14) — trailing engagement window `W` for the active-days `GROUP BY`.
+- `HOT_PROMOTE_MIN_ACTIVE_DAYS` (3) / `HOT_PROMOTE_MAX_RECENCY_DAYS` (3) / `HOT_PROMOTE_MIN_SESSIONS` (2) — promotion rule: distinct deduped-view days in `W`, recency, and an anti-single-reload session floor. **No visitor-breadth gate** — a single devoted fan (`unique_visitors=1`, many active-days) must qualify.
+- `HOT_EVICT_INACTIVITY_DAYS` (14) / `HOT_EVICT_MIN_ACTIVE_DAYS` (2) — eviction with hysteresis (promote ≥3, evict <2 → no flapping).
+- `HOT_PLAYERS_MAX` (500) — per-realm cap, trimmed by `hot_score` (bounds marginal WG cost — only hot players *not* covered by the active-7d floor cost anything).
+- `HOT_OBSERVE_FLOOR_HOURS` (20) — skip-if-fresh: skip the observation when a `BattleObservation` is newer (the floor already got them).
+- `HOT_PLAYERS_CAPTURE_DELAY` (0.5) — WG pacing between hot captures (crawl-coexist value).
+
 Battle-history pipeline (phased gates, all default 0):
 - `BATTLE_HISTORY_CAPTURE_ENABLED` (write BattleObservation/BattleEvent as a side-effect of `update_battle_data`)
 - `BATTLE_HISTORY_ROLLUP_ENABLED` + `_HOUR`/`_MINUTE` (4/30) (fill PlayerDailyShipStats + nightly rebuild)
@@ -61,7 +70,7 @@ Ship badges / standings (master gate `SHIP_BADGE_SNAPSHOT_ENABLED`=0):
 - Ranking: composite of win-rate/damage/kills z-scores with empirical-Bayes shrinkage — `SHIP_BADGE_PRIOR_BATTLES` (50), `SHIP_BADGE_PRIOR_WR` (0.5), weights `SHIP_BADGE_WEIGHT_WINS`/`_DAMAGE`/`_KILLS` (0.5/0.35/0.15). Read at task-call time (re-tune without redeploy)
 - `SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK`/`_HOUR` (1 Mon/2). Fixed non-overlapping 2-week seasons anchored to `SHIP_SEASON_EPOCH` (Mon 11 May 2026 UTC) in `data.py`, mirrored by `client/app/lib/shipSeason.ts`. Board/badges show the most recently completed season; task self-gates on `is_season_boundary()`. Backfill: `python manage.py backfill_ship_seasons --wipe`
 
-Local-dev only: `BATTLESTATS_DISABLE_LIVE_REFRESH` (serve stale snapshots, no live WG refresh), `BATTLESTATS_ENABLE_STALE_RECENT_PLAYERS` (landing fallback ordering without the battle-history pipeline).
+Local-dev only: `BATTLESTATS_DISABLE_LIVE_REFRESH` (serve stale snapshots, no live WG refresh).
 
 ## Client env
 

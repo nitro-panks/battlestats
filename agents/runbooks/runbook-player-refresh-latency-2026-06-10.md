@@ -1,7 +1,9 @@
 # Runbook — Player-Detail Refresh Latency Remediation (2026-06-10)
 
-**Status:** PLAN / remediation spec. Documentation only — no code landed yet. This runbook is
-the executable plan; implementation is a later supervised tranche, sequenced Tier 1 → 3.
+**Status:** Tier 1 IMPLEMENTED 2026-06-11 (client UX: tightened live-refresh poll cadence +
+retry the initial `/api/player` load on 5xx/network with a distinct "temporarily unavailable"
+state). Tiers 2–3 PENDING — and Tier 3 is now **unblocked**: the hot-players engagement queue it
+extends shipped (`runbook-hot-players-engagement-queue-2026-06-10.md`). Sequenced Tier 1 → 3.
 
 ## Why
 

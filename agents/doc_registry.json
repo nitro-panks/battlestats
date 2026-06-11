@@ -1792,6 +1792,54 @@
                 "crawler-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "hot players engagement queue",
+                "engagement capture queue",
+                "hot player daily capture",
+                "visitor-interest capture"
+            ],
+            "tags": [
+                "hot players",
+                "engagement",
+                "entity visits",
+                "daily capture",
+                "celery beat",
+                "observation floor"
+            ],
+            "archive_on": [
+                "hot-players-v1-shipped"
+            ]
+        },
+        "agents/runbooks/runbook-player-refresh-latency-2026-06-10.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "platform",
+            "aliases": [
+                "player refresh latency",
+                "player page loading slow",
+                "updating chip stuck",
+                "live refresh poll cadence"
+            ],
+            "tags": [
+                "latency",
+                "player detail",
+                "live refresh",
+                "hydration queue",
+                "502",
+                "tiered remediation"
+            ],
+            "archive_on": [
+                "latency-tiers-1-3-shipped"
+            ]
+        },
         "agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md": {
             "kind": "runbook",
             "status": "active",

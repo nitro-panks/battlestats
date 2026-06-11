@@ -1,7 +1,9 @@
 # Runbook — Hot-Players Engagement Capture Queue (2026-06-10)
 
-**Status:** PLAN / design proposal. No code written yet. This runbook is the spec; a
-follow-up implementation tranche builds it.
+**Status:** v1 IMPLEMENTED 2026-06-11 (migration `0069_hotplayer`). The `HotPlayer` model,
+`maintain_hot_players_task` + `capture_hot_player_observations_task`, the `maintain_hot_players`
+/ `hot_players_status` commands, signals registration, env knobs, and tests are landed
+(`server/warships/hot_players.py`). Phase 2 (the depth/`event_type` signal) remains out of scope.
 
 ## Why
 
