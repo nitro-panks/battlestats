@@ -1,9 +1,16 @@
 # Runbook — Player-Detail Refresh Latency Remediation (2026-06-10)
 
-**Status:** Tier 1 IMPLEMENTED 2026-06-11 (client UX: tightened live-refresh poll cadence +
-retry the initial `/api/player` load on 5xx/network with a distinct "temporarily unavailable"
-state). **Tier 3 IMPLEMENTED 2026-06-11** (proactive freshness — see below). Tier 2 PENDING.
-Tier 3 extends the hot-players engagement queue (`runbook-hot-players-engagement-queue-2026-06-10.md`).
+**Status:** Tiers 1–3 IMPLEMENTED 2026-06-11. **Tier 1** — client UX: tightened live-refresh
+poll cadence + retry the initial `/api/player` load on 5xx/network with a distinct "temporarily
+unavailable" state. **Tier 2** — backend resilience: gunicorn `timeout=25`
+(`GUNICORN_TIMEOUT_SECONDS`) + a tight request-thread WG HTTP timeout
+(`WG_REQUEST_THREAD_TIMEOUT_SECONDS=4`, 20s preserved for background) so a cold-path WG call
+fails fast instead of hanging into a 502; `update_ranked_data_task` routed off `hydration` →
+`background`; hydration concurrency 3→5. One follow-up: the prod-droplet nginx
+`proxy_read_timeout`/`proxy_connect_timeout` is a documented TODO (see "PROD NGINX TODO" below) —
+gunicorn `timeout` is the primary 502 fix and ships now; the nginx timeouts are secondary
+connect-stall hardening. **Tier 3** — proactive freshness (see below). Tier 3 extends the
+hot-players engagement queue (`runbook-hot-players-engagement-queue-2026-06-10.md`).
 
 ## Why
 
