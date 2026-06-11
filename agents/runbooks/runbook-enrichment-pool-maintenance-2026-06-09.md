@@ -47,8 +47,9 @@ min, eu ~11 min) — still far under the full catalog's ~36 min, and the per-rea
 keeps it to one realm at a time.
 
 **Why per-realm + striped (na 08:20 / eu 08:40 / asia 09:00 UTC):** one realm at a time fits
-comfortably in a 12-min soft / 14-min hard task window, and the 1-vCPU PG sees ~6 min of
-scan at a time instead of an ~18 min continuous multi-realm burst. (The original single
+comfortably in a 12-min soft / 14-min hard task window, and the PG (2 vCPU / 4 GB, see
+`ops-infra-resources.md`) sees ~6 min of scan at a time instead of an ~18 min continuous
+multi-realm burst. (The original single
 multi-realm task overran and — with a too-tight 120s `statement_timeout` — silently rolled
 back each realm's reclassify; the per-realm split + a 420s statement cap fixes both.)
 
@@ -63,7 +64,7 @@ back each realm's reclassify; the per-realm split + a 420s statement cap fixes b
 ## What is NOT automated — the supervised full `reclassify`
 
 Run the full `reclassify_enrichment_status` (no `--recent-hours`) **manually, under
-observation** — it is ~10–15 min/realm (~36 min total) on the 1-vCPU PG. It is needed only
+observation** — it is ~10–15 min/realm (~36 min total) on the PG (2 vCPU / 4 GB). It is needed only
 for the residue the incremental pass can't see:
 
 - **The one-time pre-existing backlog** — rows last fetched >25h ago that accumulated while

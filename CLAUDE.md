@@ -121,6 +121,7 @@ Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu
 
 ### Infra notes
 
+- **Resources** — app droplet **2 vCPU / 8 GB**; managed Postgres **2 vCPU / 4 GB** (`db-s-2vcpu-4gb`, PG 18, ~97 usable connections), resized up from 1 vCPU / 2 GB on 2026-05-28. **Do not plan against a 1-vCPU DB** — that assumption is stale; `system_load15` saturates around 2. Full sizing + re-verify recipe: `agents/runbooks/ops-infra-resources.md`.
 - **HTTP/2** on the nginx 443 listeners (removes the HTTP/1.1 6-connection-per-origin limit)
 - **Frontend fetch priority** — player pages fire 4 chart requests via `requestIdleCallback`; clan-member fetch deferred until warmup settles; `useClanMembers` backs off while charts in-flight
 - **DB** — `CONN_HEALTH_CHECKS` enabled; analytical queries use elevated `work_mem` (`ANALYTICAL_WORK_MEM`, default 8MB) via `SET LOCAL`

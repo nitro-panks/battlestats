@@ -429,7 +429,7 @@ recent set holds every newly-drifted row; `EXPLAIN` confirms the index is used (
 with the realm/battles index — the EXPLAIN is the real bound; wall-time is load-noisy) →
 **~6–11 min/realm** (na ~6, eu ~11) — the apply is heavier than the dry-run count.
 Scheduled **per realm, striped** (na 08:20 / eu 08:40 / asia 09:00
-UTC) so the 1-vCPU PG sees one realm's scan at a time, not an ~18 min multi-realm burst — a
+UTC) so the PG (2 vCPU / 4 GB) sees one realm's scan at a time, not an ~18 min multi-realm burst — a
 first single-task cut overran and a too-tight 120s statement_timeout silently rolled back
 each realm; the per-realm split + 420s statement cap fixes both. Crucially, the daily
 active-snapshot engine refreshes core stats (`is_hidden`/`pvp_battles`/`pvp_ratio`) +
