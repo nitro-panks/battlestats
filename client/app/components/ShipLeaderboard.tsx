@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useRealm } from '../context/RealmContext';
 import { shipClass } from '../lib/shipIdentity';
-import { buildShipPath, buildPlayerPath } from '../lib/entityRoutes';
+import { buildPlayerPath } from '../lib/entityRoutes';
 import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
 
@@ -81,6 +81,61 @@ const PILL_BASE =
 const PILL_ON = 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white';
 const PILL_OFF =
     'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]';
+
+// Every column is click-sortable. Sort lives client-side over the already-fetched
+// rows; until a header is clicked the server's natural order (win rate for the
+// list, rank for the board) is preserved (`sort === null`). New numeric columns
+// open descending (best-first); text columns open ascending (A→Z).
+type SortDir = 'asc' | 'desc';
+
+function sortRows<T>(rows: T[], key: keyof T, dir: SortDir): T[] {
+    const factor = dir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+        const av = a[key];
+        const bv = b[key];
+        if (typeof av === 'string' && typeof bv === 'string') {
+            return av.localeCompare(bv) * factor;
+        }
+        return (Number(av) - Number(bv)) * factor;
+    });
+}
+
+function useTableSort<T>(textKeys: ReadonlyArray<keyof T>) {
+    const [sort, setSort] = useState<{ key: keyof T; dir: SortDir } | null>(null);
+    const onSort = (key: keyof T) =>
+        setSort((s) =>
+            s && s.key === key
+                ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+                : { key, dir: textKeys.includes(key) ? 'asc' : 'desc' },
+        );
+    return { sort, onSort };
+}
+
+const SortButton: React.FC<{ label: string; active: boolean; dir: SortDir; onClick: () => void }> = ({
+    label,
+    active,
+    dir,
+    onClick,
+}) => (
+    <button
+        type="button"
+        onClick={onClick}
+        className={`group inline-flex items-center gap-1 font-medium uppercase tracking-wide transition-colors hover:text-[var(--accent-mid)] ${
+            active ? 'text-[var(--accent-mid)]' : ''
+        }`}
+    >
+        <span>{label}</span>
+        <span
+            aria-hidden
+            className={`text-[9px] leading-none ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'}`}
+        >
+            {active && dir === 'asc' ? '▲' : '▼'}
+        </span>
+    </button>
+);
+
+const ariaSort = (active: boolean, dir: SortDir): 'ascending' | 'descending' | 'none' =>
+    active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none';
 
 const ShipLeaderboard: React.FC = () => {
     const { realm } = useRealm();
@@ -236,7 +291,6 @@ const ShipLeaderboard: React.FC = () => {
                         error={listError}
                         tierTypeLabel={`T${tier} ${typeLabel ?? ''}`.trim()}
                         onOpen={openShip}
-                        realm={realm}
                     />
                 )}
             </div>
@@ -255,48 +309,57 @@ const ShipList: React.FC<{
     error: boolean;
     tierTypeLabel: string;
     onOpen: (s: ListShip) => void;
-    realm: string;
-}> = ({ ships, loading, error, tierTypeLabel, onOpen, realm }) => {
+}> = ({ ships, loading, error, tierTypeLabel, onOpen }) => {
+    const { sort, onSort } = useTableSort<ListShip>(['ship_name']);
+    const sortedShips = useMemo(
+        () => (ships && sort ? sortRows(ships, sort.key, sort.dir) : ships),
+        [ships, sort],
+    );
+
     if (loading && !ships) {
         return <p className="py-6 text-sm text-[var(--text-muted)]">Loading ships…</p>;
     }
     if (error) {
         return <p className="py-6 text-sm text-[var(--text-muted)]">Couldn’t load ships. Try another filter.</p>;
     }
-    if (!ships || ships.length === 0) {
+    if (!sortedShips || sortedShips.length === 0) {
         return <p className="py-6 text-sm text-[var(--text-muted)]">No ranked ships for {tierTypeLabel}.</p>;
     }
+    const colSort = (key: keyof ListShip) => ({
+        active: sort?.key === key,
+        dir: (sort?.key === key ? sort.dir : 'desc') as SortDir,
+        onClick: () => onSort(key),
+    });
     return (
         <>
             {/* Desktop: dense table, win rate the only color, ship name the action. */}
-            <table className="hidden w-full text-sm sm:table">
+            <table className="hidden w-full max-w-[900px] text-sm sm:table">
                 <thead>
                     <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                        <th className="py-2 pl-2 pr-8 font-medium">Ship</th>
-                        <th className="py-2 pr-8 text-right font-medium">Battles</th>
-                        <th className="py-2 pr-8 text-right font-medium">Avg dmg</th>
-                        <th className="py-2 pr-8 text-right font-medium">Kills/battle</th>
-                        <th className="py-2 text-right font-medium">Win rate</th>
+                        <th className="py-2 pl-2 pr-8" aria-sort={ariaSort(sort?.key === 'ship_name', colSort('ship_name').dir)}>
+                            <SortButton label="Ship" {...colSort('ship_name')} />
+                        </th>
+                        <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'battles', colSort('battles').dir)}>
+                            <SortButton label="Battles" {...colSort('battles')} />
+                        </th>
+                        <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'avg_damage', colSort('avg_damage').dir)}>
+                            <SortButton label="Avg dmg" {...colSort('avg_damage')} />
+                        </th>
+                        <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'kills_per_battle', colSort('kills_per_battle').dir)}>
+                            <SortButton label="Kills/battle" {...colSort('kills_per_battle')} />
+                        </th>
+                        <th className="py-2 text-right" aria-sort={ariaSort(sort?.key === 'win_rate', colSort('win_rate').dir)}>
+                            <SortButton label="Win rate" {...colSort('win_rate')} />
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
-                    {ships.map((s) => (
+                    {sortedShips.map((s) => (
                         <tr key={s.ship_id} className="transition-colors hover:bg-[var(--bg-hover)]">
                             <td className="py-2 pl-2 pr-8">
-                                <span className="inline-flex items-center gap-2">
-                                    <button type="button" className={SHIP_NAME_LINK} onClick={() => onOpen(s)}>
-                                        {s.ship_name}
-                                    </button>
-                                    <a
-                                        href={buildShipPath(s.ship_id, s.ship_name, realm)}
-                                        className="text-[var(--text-muted)] hover:text-[var(--accent-mid)]"
-                                        title="Open full ship page"
-                                        aria-label={`Open ${s.ship_name} ship page`}
-                                        onClick={(e) => e.stopPropagation()}
-                                    >
-                                        ↗
-                                    </a>
-                                </span>
+                                <button type="button" className={SHIP_NAME_LINK} onClick={() => onOpen(s)}>
+                                    {s.ship_name}
+                                </button>
                             </td>
                             <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">{s.battles.toLocaleString()}</td>
                             <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">{s.avg_damage.toLocaleString()}</td>
@@ -310,8 +373,8 @@ const ShipList: React.FC<{
             </table>
 
             {/* Mobile: stacked cards — ship + win rate primary, the rest secondary. */}
-            <ul className="space-y-2 sm:hidden">
-                {ships.map((s) => (
+            <ul className="max-w-[900px] space-y-2 sm:hidden">
+                {sortedShips.map((s) => (
                     <li key={s.ship_id} className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3">
                         <div className="flex items-center justify-between gap-2">
                             <button type="button" className={`${SHIP_NAME_LINK} truncate`} onClick={() => onOpen(s)}>
@@ -346,7 +409,17 @@ const ShipBoard: React.FC<{
     const subtitle = ship
         ? `T${ship.tier ?? '?'} ${cls?.label ?? ship.ship_type ?? ''}`.trim()
         : '';
-    const players = board?.players ?? [];
+    const players = useMemo(() => board?.players ?? [], [board]);
+    const { sort, onSort } = useTableSort<LeaderboardPlayer>(['player_name']);
+    const sortedPlayers = useMemo(
+        () => (sort ? sortRows(players, sort.key, sort.dir) : players),
+        [players, sort],
+    );
+    const colSort = (key: keyof LeaderboardPlayer) => ({
+        active: sort?.key === key,
+        dir: (sort?.key === key ? sort.dir : 'desc') as SortDir,
+        onClick: () => onSort(key),
+    });
     return (
         <>
             <div className="flex flex-wrap items-center gap-3">
@@ -368,23 +441,35 @@ const ShipBoard: React.FC<{
                     <p className="py-6 text-sm text-[var(--text-muted)]">Loading leaderboard…</p>
                 ) : error ? (
                     <p className="py-6 text-sm text-[var(--text-muted)]">Couldn’t load this ship’s leaderboard.</p>
-                ) : players.length === 0 ? (
+                ) : sortedPlayers.length === 0 ? (
                     <p className="py-6 text-sm text-[var(--text-muted)]">No ranked players for this ship yet.</p>
                 ) : (
                     <>
-                        <table className="hidden w-full text-sm sm:table">
+                        <table className="hidden w-full max-w-[900px] text-sm sm:table">
                             <thead>
                                 <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                                    <th className="py-2 pl-2 pr-3 font-medium">#</th>
-                                    <th className="py-2 pr-8 font-medium">Player</th>
-                                    <th className="py-2 pr-8 text-right font-medium">Win rate</th>
-                                    <th className="py-2 pr-8 text-right font-medium">Battles</th>
-                                    <th className="py-2 pr-8 text-right font-medium">Avg dmg</th>
-                                    <th className="py-2 text-right font-medium">Kills/battle</th>
+                                    <th className="py-2 pl-2 pr-3" aria-sort={ariaSort(sort?.key === 'rank', colSort('rank').dir)}>
+                                        <SortButton label="#" {...colSort('rank')} />
+                                    </th>
+                                    <th className="py-2 pr-8" aria-sort={ariaSort(sort?.key === 'player_name', colSort('player_name').dir)}>
+                                        <SortButton label="Player" {...colSort('player_name')} />
+                                    </th>
+                                    <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'win_rate', colSort('win_rate').dir)}>
+                                        <SortButton label="Win rate" {...colSort('win_rate')} />
+                                    </th>
+                                    <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'battles', colSort('battles').dir)}>
+                                        <SortButton label="Battles" {...colSort('battles')} />
+                                    </th>
+                                    <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'avg_damage', colSort('avg_damage').dir)}>
+                                        <SortButton label="Avg dmg" {...colSort('avg_damage')} />
+                                    </th>
+                                    <th className="py-2 text-right" aria-sort={ariaSort(sort?.key === 'kills_per_battle', colSort('kills_per_battle').dir)}>
+                                        <SortButton label="Kills/battle" {...colSort('kills_per_battle')} />
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {players.map((p) => (
+                                {sortedPlayers.map((p) => (
                                     <tr key={p.rank} className="transition-colors hover:bg-[var(--bg-hover)]">
                                         <td className="py-2 pl-2 pr-3 tabular-nums text-[var(--text-muted)]">{p.rank}</td>
                                         <td className="py-2 pr-8">
@@ -401,8 +486,8 @@ const ShipBoard: React.FC<{
                             </tbody>
                         </table>
 
-                        <ul className="space-y-2 sm:hidden">
-                            {players.map((p) => (
+                        <ul className="max-w-[900px] space-y-2 sm:hidden">
+                            {sortedPlayers.map((p) => (
                                 <li key={p.rank} className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3">
                                     <div className="flex items-center justify-between gap-2">
                                         <span className="inline-flex min-w-0 items-center gap-2">
