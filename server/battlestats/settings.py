@@ -319,7 +319,13 @@ CELERY_TASK_ROUTES = {
     'warships.tasks.enrich_player_data_task': {'queue': 'background'},
     'warships.tasks.update_battle_data_task': {'queue': 'hydration'},
     'warships.tasks.update_clan_members_task': {'queue': 'hydration'},
-    'warships.tasks.update_ranked_data_task': {'queue': 'hydration'},
+    # Ranked refresh (2 WG calls) routed OFF hydration -> background so it stops
+    # competing with the chip-gating random task (update_battle_data_task) for
+    # the 3 hydration workers. The pending header keys only on the random side's
+    # battles_updated_at; ranked freshness is a 1h window
+    # (PLAYER_RANKED_DATA_STALE_AFTER), tolerant of background latency.
+    # See runbook-player-refresh-latency-2026-06-10.md (Tier 2c).
+    'warships.tasks.update_ranked_data_task': {'queue': 'background'},
     'warships.tasks.update_player_clan_battle_data_task': {'queue': 'hydration'},
     'warships.tasks.update_player_efficiency_data_task': {'queue': 'hydration'},
     'warships.tasks.update_clan_battle_summary_task': {'queue': 'hydration'},

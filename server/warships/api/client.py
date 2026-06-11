@@ -26,7 +26,34 @@ BASE_URL = os.getenv(
     "WG_API_BASE_URL", REALM_BASE_URLS[DEFAULT_REALM])
 APP_ID = os.getenv("WG_APP_ID")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("WG_REQUEST_TIMEOUT_SECONDS", "20"))
+# Synchronous WG calls still exist on the gunicorn request thread (the cold
+# player-lookup path: account/list/ + update_player_data, views.py get_object).
+# A slow/unreachable WG there hangs the worker into a 502. Bound the per-attempt
+# HTTP timeout much tighter on the request thread so the worker can never block
+# long. NOTE: the shared session mounts Retry(total=2), so this timeout applies
+# *per attempt* — worst-case request-thread block is ~timeout*3 + backoff
+# (4s -> ~13.5s), which still lands comfortably under the gunicorn 25s timeout.
+# Background tasks (nowhere to be) keep the longer budget. Tunable.
+REQUEST_THREAD_TIMEOUT_SECONDS = int(
+    os.getenv("WG_REQUEST_THREAD_TIMEOUT_SECONDS", "4"))
 RETRY_TOTAL = int(os.getenv("WG_API_RETRY_TOTAL", "2"))
+
+
+def _request_timeout_seconds() -> int:
+    """Pick the per-attempt HTTP timeout for the current caller context.
+
+    Mirrors the rate limiter's request-thread detection
+    (``api/rate_limiter._in_request_thread``): a gunicorn request thread gets a
+    tight bound so a stalled WG call fails fast (Tier-1 client retry then handles
+    the transient); a celery background task keeps the longer budget.
+    """
+    try:
+        from warships.api.rate_limiter import _in_request_thread
+        if _in_request_thread():
+            return REQUEST_THREAD_TIMEOUT_SECONDS
+    except Exception:
+        pass
+    return REQUEST_TIMEOUT_SECONDS
 
 
 @lru_cache(maxsize=1)
@@ -77,7 +104,7 @@ def _request_api_payload(endpoint: str, params: Dict[str, Any], realm: str = DEF
         response = _get_session().get(
             base_url + clean_endpoint,
             params=clean_params,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=_request_timeout_seconds(),
         )
         response.raise_for_status()
         payload = response.json()
@@ -154,7 +181,7 @@ def make_api_request_typed(endpoint: str, params: Dict[str, Any], realm: str = D
         response = _get_session().get(
             base_url + clean_endpoint,
             params=clean_params,
-            timeout=REQUEST_TIMEOUT_SECONDS,
+            timeout=_request_timeout_seconds(),
         )
         response.raise_for_status()
         payload = response.json()

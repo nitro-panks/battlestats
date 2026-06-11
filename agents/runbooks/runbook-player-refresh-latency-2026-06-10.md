@@ -163,6 +163,31 @@ the time the `[data-testid="live-refresh-status"]` chip flips "Updating…" → 
 time and 502 rate**, before vs after each tier. Capture the script under the runbook (appendix /
 `server/scripts/` or a one-off) so it is rerunnable as a regression gate.
 
+### PROD NGINX TODO (Tier 2a) — apply on next `client/deploy/bootstrap_droplet.sh` change
+
+Tier 2a's dev `server/nginx.conf` proxy timeouts and the gunicorn `timeout=25`
+shipped in this Tier-2 tranche. The **production** nginx is templated in the repo
+at `client/deploy/bootstrap_droplet.sh:88-95` (the `location /api/` block), but
+that file lives under `client/`, which the Tier-2 backend worktree was scoped
+**not** to touch (merge-safety with the parallel client work). So the prod-side
+mirror is intentionally deferred to whoever next edits that bootstrap script.
+
+**Exact change** — inside the `location /api/ {` block in
+`client/deploy/bootstrap_droplet.sh` (after the `proxy_set_header` lines, before
+the closing `}`), add the same two timeouts as the dev config:
+
+```nginx
+    proxy_read_timeout 20s;
+    proxy_connect_timeout 5s;
+```
+
+Rationale: sit above the gunicorn `timeout` (25s) so a wedged worker is recycled
+first and nginx returns a clean 504 rather than cascading into a 502; well below
+the implicit 60s/30s defaults so a stalled upstream sheds load fast. Re-run
+`nginx -t` (already invoked by the bootstrap script) and redeploy the client
+bootstrap to apply. No `server { … }` server-block edit beyond this block is
+needed.
+
 Per-tier checks:
 - **Tier 1** — Jest suites green (`usePlayerLiveRefresh`, `PlayerRouteView`, `sharedJsonFetch`); a
   manual cold visit shows the tighter cadence and a 5xx no longer strands the page.
