@@ -70,6 +70,43 @@ describe('usePlayerLiveRefresh auto-refresh on cooldown expiry', () => {
         unmount();
     });
 
+    it('polls the FAST window (6×2s) then settles to the 3s slow cadence', async () => {
+        // Always still-pending: drives the poll loop indefinitely so we can assert
+        // the spacing of successive polls. The header stays `true`, so the hook
+        // keeps scheduling the next poll at pollDelayMs(attempt).
+        mockFetch.mockResolvedValue({
+            data: { player_id: 1 } as never,
+            headers: { 'X-Player-Refresh-Pending': 'true' },
+        });
+
+        renderHook(() => usePlayerLiveRefresh({
+            playerName: 'lil_boots',
+            realm: 'na',
+            initialPending: true,
+            initialNextRefresh: null,
+            onRehydrate: jest.fn(),
+        }));
+
+        // First poll fires at pollDelayMs(0) = 2s. Each `act` flushes the pending
+        // fetch promise so the next setTimeout is scheduled before we advance.
+        const flush = async () => { await act(async () => { await Promise.resolve(); }); };
+
+        // Attempts 1–6 are the fast window: each scheduled 2s after the prior.
+        for (let i = 0; i < 6; i += 1) {
+            await act(async () => { jest.advanceTimersByTime(2_000); });
+            await flush();
+        }
+        expect(mockFetch).toHaveBeenCalledTimes(6);
+
+        // The 7th poll is the first SLOW one: 2s is NOT enough to fire it, 3s is.
+        await act(async () => { jest.advanceTimersByTime(2_000); });
+        await flush();
+        expect(mockFetch).toHaveBeenCalledTimes(6);
+        await act(async () => { jest.advanceTimersByTime(1_000); });
+        await flush();
+        expect(mockFetch).toHaveBeenCalledTimes(7);
+    });
+
     it('does NOT auto-fire when there is no cooldown anchor (avoids spurious refresh)', () => {
         const { result, unmount } = renderHook(() => usePlayerLiveRefresh({
             playerName: 'lil_boots',
