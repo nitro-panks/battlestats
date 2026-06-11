@@ -111,6 +111,10 @@ def _daily_observation_floor_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:daily_observation_floor:{realm}:lock"
 
 
+def _hot_players_capture_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:hot_players_capture:{realm}:lock"
+
+
 def _snapshot_active_players_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:snapshot_active_players:{realm}:lock"
 
@@ -2396,3 +2400,82 @@ def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
         cache.delete(lock_key)
 
     return {"status": "ok", "realm": realm, "recent_hours": recent_hours}
+
+
+@app.task(
+    queue='background',
+    time_limit=600,
+    soft_time_limit=540,
+    ignore_result=True,
+)
+def maintain_hot_players_task(realm=DEFAULT_REALM):
+    """Daily DB-only promote/evict/re-score of the engagement-capture queue.
+
+    The "brain" of the Hot-Players loop: mirrors ``enrichment_pool_maintenance_task``
+    (pure DB, no WG calls, coexists with crawls). Computes an active-days
+    ``GROUP BY`` over ``EntityVisitDaily`` (recurrence across distinct days, NOT
+    summed views) for the trailing ``HOT_PLAYERS_WINDOW_DAYS`` and applies the
+    promotion rule, the eviction rule (with hysteresis), and the
+    ``HOT_PLAYERS_MAX`` cap/trim by ``hot_score``. Kill switch
+    ``HOT_PLAYERS_ENABLED`` (default on). Runbook:
+    ``agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md``.
+    """
+    if os.getenv("HOT_PLAYERS_ENABLED", "1") != "1":
+        return {"status": "skipped", "reason": "disabled"}
+
+    lock_key = _task_lock_key("maintain_hot_players", realm)
+    if not cache.add(lock_key, "1", timeout=RESOURCE_TASK_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping maintain_hot_players_task[%s] — another run is active", realm)
+        return {"status": "skipped", "reason": "already-running", "realm": realm}
+
+    try:
+        from warships.hot_players import maintain_hot_players
+        result = maintain_hot_players(realm)
+    except Exception:
+        logger.exception("maintain_hot_players_task failed for %s", realm)
+        return {"status": "error", "realm": realm}
+    finally:
+        cache.delete(lock_key)
+
+    return {"status": "ok", **result}
+
+
+@app.task(bind=True, queue='background', **TASK_OPTS)
+def capture_hot_player_observations_task(self, realm=DEFAULT_REALM):
+    """Sweep the HotPlayer set, guaranteeing the two daily capture artifacts.
+
+    The "hands" of the Hot-Players loop. For each hot member: skip-if-fresh
+    against the latest ``BattleObservation`` within ``HOT_OBSERVE_FLOOR_HOURS``
+    (the observation floor already covers active hot players, so this costs them
+    nothing) else ``record_observation_and_diff``; and write a gap-free daily
+    ``Snapshot`` via ``update_snapshot_data(refresh_player=False)`` when today's
+    row is missing. Bounded by ``HOT_PLAYERS_MAX``, single-flight per realm,
+    paced by ``HOT_PLAYERS_CAPTURE_DELAY``. **Coexists with clan crawls** (no
+    deferral) — guaranteed coverage is the whole point. Hidden accounts return
+    nothing from WG and are recorded as skipped (no retry storm). Kill switch
+    ``HOT_PLAYERS_ENABLED``. Runbook:
+    ``agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md``.
+    """
+    if os.getenv("HOT_PLAYERS_ENABLED", "1") != "1":
+        return {"status": "skipped", "reason": "disabled"}
+
+    lock_key = _hot_players_capture_lock_key(realm)
+    if not cache.add(lock_key, self.request.id or "1",
+                     timeout=RESOURCE_TASK_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping capture_hot_player_observations_task[%s] — another sweep is active",
+            realm)
+        return {"status": "skipped", "reason": "already-running", "realm": realm}
+
+    try:
+        from warships.hot_players import capture_hot_players
+        result = capture_hot_players(realm)
+    except Exception:
+        logger.exception(
+            "capture_hot_player_observations_task failed for %s", realm)
+        return {"status": "error", "realm": realm}
+    finally:
+        cache.delete(lock_key)
+
+    return {"status": "ok", **result}

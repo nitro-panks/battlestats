@@ -641,6 +641,76 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
+    # -- Hot-Players Engagement Capture Queue (per realm) --
+    # The engagement-capture loop: durable visitor interest (recurrence of
+    # deduped detail-page views across distinct days) qualifies a player for
+    # guaranteed daily battle-history capture, independent of their own activity
+    # or skill. Two tasks (see runbook-hot-players-engagement-queue-2026-06-10):
+    #
+    #  * maintain (DB-only "brain") — promote/evict/re-score the HotPlayer set
+    #    from EntityVisitDaily. Coexists with crawls; ALWAYS enabled like the
+    #    snapshot/enrichment-maintenance families (still respects
+    #    HOT_PLAYERS_ENABLED). Striped in the 08:00-09:00 UTC maintenance band
+    #    (after the visit-daily rollup settles) so the analytical load clusters
+    #    with enrichment pool maintenance. na :30, eu :50 of 08, asia :10 of 09.
+    #  * capture (background "hands") — sweep the hot set, skip-if-fresh, write a
+    #    BattleObservation + a gap-free daily Snapshot. It is a crawler-class WG
+    #    consumer, so it gates on ENABLE_CRAWLER_SCHEDULES like the floor. Striped
+    #    via REALM_INTERVAL_OFFSETS on a daily cycle.
+    hot_maintain_enabled = _env_flag("HOT_PLAYERS_ENABLED", True)
+    hot_maintain_times = {"na": ("30", "8"), "eu": ("50", "8"), "asia": ("10", "9")}
+    for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = hot_maintain_times.get(realm, ("30", "8"))
+        hot_maintain_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"hot-players-maintain-{realm}",
+            defaults={
+                "task": "warships.tasks.maintain_hot_players_task",
+                "crontab": hot_maintain_schedule,
+                "interval": None,
+                "enabled": hot_maintain_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Daily DB-only promote/evict/re-score of the engagement-capture queue ({realm.upper()}) from EntityVisitDaily. Coexists with crawls; kill via HOT_PLAYERS_ENABLED=0.",
+            },
+        )
+
+    # capture: daily cron, striped per realm via REALM_INTERVAL_OFFSETS so realms
+    # don't overlap. Cycle = 1440 (once/day); base_minute=45 keeps it off the
+    # minute-0/15 DB-CPU lanes used by the floor/snapshot families.
+    hot_capture_cycle_minutes = int(
+        os.getenv("HOT_PLAYERS_CAPTURE_CYCLE_MINUTES", "1440"))
+    for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, hot_capture_cycle_minutes, base_minute=10 * 60 + 45)
+        hot_capture_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"hot-players-capture-{realm}",
+            defaults={
+                "task": "warships.tasks.capture_hot_player_observations_task",
+                "crontab": hot_capture_schedule,
+                "interval": None,
+                "enabled": crawler_schedules_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Daily sweep of the engagement-capture queue ({realm.upper()}): skip-if-fresh BattleObservation + gap-free daily Snapshot. Coexists with crawls; kill via HOT_PLAYERS_ENABLED=0.",
+            },
+        )
+
     # -- Incremental Ranked Refresh (per realm) --
     # Default 120 min cycle, striped per realm. With 3 realms the stride is
     # 40 min, then shifted by the base_minute=25 lane: NA at :25 of even
