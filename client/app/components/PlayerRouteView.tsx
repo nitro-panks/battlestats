@@ -7,7 +7,7 @@ import { prefetchBattleHistory } from './BattleHistoryCard';
 import type { PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
-import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, SharedJsonFetchError } from '../lib/sharedJsonFetch';
 import {
     PLAYER_NEXT_REFRESH_HEADER,
     PLAYER_REFRESH_PENDING_HEADER,
@@ -64,6 +64,12 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
                     label: `Player ${playerName}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                     responseHeaders: [PLAYER_REFRESH_PENDING_HEADER, PLAYER_NEXT_REFRESH_HEADER],
+                    // Short-backoff retry on a transient 5xx / network blip ONLY so a
+                    // single stalled upstream (the 502-on-the-request-thread tail) no
+                    // longer strands the page. A real 404 is NOT retried (see
+                    // sharedJsonFetch isRetriable) — it falls straight through to the
+                    // terminal "not found" branch below.
+                    retry: { attempts: 2, backoffMs: 600 },
                 });
                 if (!cancelled) {
                     setPlayerData(data);
@@ -74,7 +80,17 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
                 console.error('Error loading player route:', fetchError);
                 if (!cancelled) {
                     setPlayerData(null);
-                    setError('Player not found.');
+                    // Distinguish a genuine 4xx (the player really is missing) from a
+                    // transient server/network failure (5xx, dropped connection,
+                    // non-JSON 5xx). Only the former is the terminal "not found"
+                    // state; the latter, post-retry-exhaustion, gets non-terminal
+                    // copy so a momentary backend stall doesn't masquerade as a
+                    // deleted account.
+                    const status = fetchError instanceof SharedJsonFetchError ? fetchError.status : undefined;
+                    const isClientError = status !== undefined && status >= 400 && status < 500;
+                    setError(isClientError
+                        ? 'Player not found.'
+                        : 'Temporarily unavailable. Please refresh to try again.');
                 }
             } finally {
                 if (!cancelled) {

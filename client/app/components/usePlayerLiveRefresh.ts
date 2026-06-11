@@ -16,12 +16,14 @@ export const PLAYER_NEXT_REFRESH_HEADER = 'X-Player-Next-Refresh';
 // fresh (the "looks like it hung" complaint). After the fast window we settle to
 // a steady 6s so a slow/queued/failed refresh doesn't hammer the endpoint.
 const POLL_FAST_INTERVAL_MS = 2_000;
-const POLL_SLOW_INTERVAL_MS = 6_000;
-const POLL_FAST_ATTEMPTS = 4; // first ~8s polled at 2s spacing
-const POLL_LIMIT = 33; // ~3 min ceiling (4×2s + 29×6s ≈ 182s) — long enough to
-// catch a queued refresh, bounded so a slow/failed one can't poll forever. Polls
-// are lightweight header checks; the page only re-hydrates ONCE, when the refresh
-// actually lands.
+const POLL_SLOW_INTERVAL_MS = 3_000;
+const POLL_FAST_ATTEMPTS = 6; // first ~12s polled at 2s spacing
+const POLL_LIMIT = 62; // ~3 min ceiling (6×2s + 56×3s = 180s) — long enough to
+// catch a queued refresh, bounded so a slow/failed one can't poll forever. The
+// tighter slow cadence (3s, was 6s) and longer fast window (6 attempts, was 4)
+// shave up to ~3s of pure waiting off each resolve once the refresh actually
+// lands. Polls are lightweight header checks; the page only re-hydrates ONCE,
+// when the refresh actually lands.
 
 // Delay before the (attempt+1)-th poll. `attempt` is the number of polls already
 // completed (0 before the first), so the initial delay uses pollDelayMs(0).
