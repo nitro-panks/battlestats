@@ -15,8 +15,13 @@ odd tiers). Today, picking T9 + Submarine shows a flat dead-end:
 > No ranked ships for T9 Submarine.
 
 That dead-end is an opportunity. This plan replaces the T9-Submarine message with a small,
-theme-aware **D3 animation of an ASCII submarine cruising left→right** — a delight/easter-egg moment
+theme-aware **D3 animation of an ASCII submarine** — a delight/easter-egg moment
 for the curious player who pokes at impossible combinations.
+
+> **Update (2026-06-12, v1.25.1+):** the sub's ASCII art has its bow on the **left**, so it now
+> cruises **right→left** to face its heading (the original left→right swam it backwards). A **kraken**
+> rises from the bottom edge behind it — mantle partly offscreen, tendrils raking up at ~60° toward the
+> fleeing tail. See `SubmarineEasterEgg.tsx`.
 
 **Goal:** code a D3 SVG animation (900 × 300px, transparent background, theme-aware) and render it in
 place of the "No ranked ships for T9 Submarine." text for the **T9 + Submarine** combination only.
@@ -29,6 +34,11 @@ place of the "No ranked ships for T9 Submarine." text for the **T9 + Submarine**
 - **No new telemetry event.** Discovery is already measurable: selecting the Submarine pill fires the
   existing `trackEvent('ship-leaderboard-filter', { realm, control: 'type', tier: 9, type: 'Submarine' })`
   (`ShipLeaderboard.tsx:201-206`). Do **not** add a redundant event.
+  > **Superseded (2026-06-12, v1.25.2):** a dedicated, edge-triggered
+  > `trackEvent('ship-leaderboard-easter-egg', { realm, egg: 't9-submarine' })` now fires once each time
+  > the animation surfaces (fired off the `isSubEasterEgg` render predicate, not the pill click, so it
+  > counts the *view* regardless of click order and isn't tangled into the high-volume filter event).
+  > Reset-on-exit so re-entering counts again; a realm flip while it's on screen doesn't double-count.
 - **Minor version bump** on ship (new user-facing surface/UX per `CLAUDE.md` Versioning). Remember the
   mandatory client rebuild after any bump.
 

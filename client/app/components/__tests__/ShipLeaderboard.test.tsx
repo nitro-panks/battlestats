@@ -240,6 +240,31 @@ describe('ShipLeaderboard', () => {
                 );
             });
         });
+
+        it('tracks a umami event once each time the animation surfaces', async () => {
+            render(<ShipLeaderboard />);
+            await screen.findAllByText('Gearing');
+            mockTrack.mockClear();
+
+            fireEvent.click(screen.getByRole('button', { name: '9' }));
+            fireEvent.click(screen.getByRole('button', { name: 'SS' }));
+            await screen.findByLabelText(T9_SUB_LABEL);
+
+            const eggCalls = () =>
+                mockTrack.mock.calls.filter((c) => c[0] === 'ship-leaderboard-easter-egg');
+            expect(eggCalls()).toHaveLength(1);
+            expect(mockTrack).toHaveBeenCalledWith('ship-leaderboard-easter-egg', {
+                realm: 'na',
+                egg: 't9-submarine',
+            });
+
+            // Leaving and re-entering the combo counts as a fresh activation.
+            fireEvent.click(screen.getByRole('button', { name: 'DD' }));
+            expect(screen.queryByLabelText(T9_SUB_LABEL)).not.toBeInTheDocument();
+            fireEvent.click(screen.getByRole('button', { name: 'SS' }));
+            await screen.findByLabelText(T9_SUB_LABEL);
+            expect(eggCalls()).toHaveLength(2);
+        });
     });
 
     describe('umami tracking', () => {

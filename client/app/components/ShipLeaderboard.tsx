@@ -227,6 +227,23 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
     // prod. Gate both the fetch effect and the render branch on this predicate.
     const isSubEasterEgg = tier === 9 && type === 'Submarine';
 
+    // Count every time the T9-submarine animation surfaces. The render branch is
+    // the single source of truth for "the user is looking at it", so fire off the
+    // predicate — independent of whether they reached it tier-first or type-first.
+    // A ref edge-triggers it (once per activation, reset on exit) so a realm flip
+    // while it's on screen doesn't double-count.
+    const eggTrackedRef = useRef(false);
+    useEffect(() => {
+        if (isSubEasterEgg) {
+            if (!eggTrackedRef.current) {
+                eggTrackedRef.current = true;
+                trackEvent('ship-leaderboard-easter-egg', { realm, egg: 't9-submarine' });
+            }
+        } else {
+            eggTrackedRef.current = false;
+        }
+    }, [isSubEasterEgg, realm]);
+
     // Ship list fetch (only with both filters set and no ship drilled into).
     const listReqId = useRef(0);
     useEffect(() => {
