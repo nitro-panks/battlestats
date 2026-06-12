@@ -498,6 +498,53 @@ Totals (JSON, for exact diff): `active_1d=39,050 active_7d=81,776 distinct_obser
 ### Before R3 — _(capture 2026-06-08, full day of gated cadence; then start R3)_
 ### After R3 — _(capture after the floor-limit raise settles)_
 
+### Interpreting day-over-day variance — don't misread a settling floor as a regression (2026-06-11)
+
+A drop in total `observations`/`coverage_ratio_vs_7d` between two daily snapshots is **usually
+benign maturation, not a capture regression.** Decompose before crying regression:
+
+1. **Is the decline the never-observed backfill finishing?** Watch `never_observed` and
+   `obs_bulk_floor` *together* across the series. The bulk floor is front-loaded onto
+   never-seen players, so during initial population the daily observation count is **inflated**
+   by one-time catch-up and falls back to steady-state as the pool drains. Worked example
+   (na/eu/asia totals, all at FLOOR_LIMIT=7500, no config change):
+
+   | snapshot | observations | obs_bulk_floor | never_observed | cov/7d |
+   |---|---|---|---|---|
+   | 06-08 04:30Z | 53,055 | 21,890 | 47,601 | 17.8% |
+   | 06-09 04:30Z | 119,736 | 87,700 | 5,425 | 10.3% |
+   | 06-10 04:30Z | 58,598 | 25,701 | 245 | 15.1% |
+   | 06-11 04:30Z | 34,200 | 15,802 | 8 | 9.3% |
+
+   The 120k→34k slide is dominated by `never_observed` draining 47.6k→8 (one-time backfill done)
+   plus the **change gate** (`CHANGE_GATE_ENABLED=1`) skipping more already-fresh/unchanged players
+   as coverage matures. Fewer raw observations here is the floor getting *more selective*, not
+   falling behind: in the same window `productive_rate` **rose** (55.7%→65.5%) — less wasted polling.
+   The cost surfaces as higher `stale_over_24h`; at a fixed LIMIT a smaller slice is refreshed per
+   window. That staleness is exactly what raising `FLOOR_LIMIT` cuts (R3 / the 12000 bump).
+
+2. **Is the clan crawl involved?** It can be, but it's a *secondary contention* factor, never a
+   hard skip (floor coexists with crawls since 833851c). A crawl starting mid-window competes for
+   the **global WG rate-limiter token bucket** (shared egress) and **Postgres write capacity**
+   (2-vCPU DB), and back-to-back ~850–940s **enrichment** batches saturate the `background` worker
+   (`-c 3`), squeezing floor cycles. Confirm from logs over the window:
+   ```bash
+   journalctl -u battlestats-celery-crawls   --since "<L-24h>" --until "<L>" | grep -iE "crawl|resume|lock"
+   journalctl -u battlestats-celery-background --since "<L-24h>" --until "<L>" | grep -iE "floor|defer|skip|crawl"
+   ```
+   Tell:  a crawl that ran NA-only but EU/ASIA observations dropped *more* argues the crawl is **not**
+   the dominant cause — look to maturation (point 1) instead. (Real example: 06-11 window had a
+   mid-window NA `core_only` crawl + saturated enrichment queue, yet EU/ASIA fell harder — so the
+   floor settling, not the crawl, was the driver.)
+
+**Verdict discipline:** at a fixed *live* config, cov/7d bounces wide day-to-day (≈9–18% over four
+consecutive days here) from per-realm 6h striping, time-of-day, and crawl coexistence. One down day
+inside that band is noise. Only call a regression when it's **sustained ≥2–3 clean daily snapshots**
+under the same live config *and* `distinct_productive` is down while `active_7d` is flat. Also confirm
+the config block is **live** (the snapshot reads the env file at cron time, not the running worker —
+a `FLOOR_LIMIT` change only takes effect after the `background` worker restarts; see the `/observation`
+skill step 3).
+
 ## Random-first routing + R3 prep (2026-06-07, flags OFF)
 
 **Why:** the floor routed *ranked-known* players (ever-played-ranked, ~77-88% of active) to the slow 3-call path, so most players' **Random** capture rode the slow lane *because of* Ranked — a niche mode (only ~27% of NA ranked-known played Ranked in 7d). Standing rule: **Random > Ranked** (`feedback_prioritize_random_over_ranked`).
