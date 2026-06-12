@@ -13,6 +13,8 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useRealm } from '../context/RealmContext';
 import { shipClass } from '../lib/shipIdentity';
@@ -100,14 +102,21 @@ function sortRows<T>(rows: T[], key: keyof T, dir: SortDir): T[] {
     });
 }
 
-function useTableSort<T>(textKeys: ReadonlyArray<keyof T>) {
+function useTableSort<T>(
+    textKeys: ReadonlyArray<keyof T>,
+    onChange?: (key: keyof T, dir: SortDir) => void,
+) {
     const [sort, setSort] = useState<{ key: keyof T; dir: SortDir } | null>(null);
-    const onSort = (key: keyof T) =>
-        setSort((s) =>
-            s && s.key === key
-                ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
-                : { key, dir: textKeys.includes(key) ? 'asc' : 'desc' },
-        );
+    const onSort = (key: keyof T) => {
+        // Compute the next sort from the current render's value (not inside the
+        // setState updater) so analytics fire exactly once, never doubled.
+        const next: { key: keyof T; dir: SortDir } =
+            sort && sort.key === key
+                ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+                : { key, dir: textKeys.includes(key) ? 'asc' : 'desc' };
+        setSort(next);
+        onChange?.(next.key, next.dir);
+    };
     return { sort, onSort };
 }
 
@@ -140,24 +149,27 @@ const ariaSort = (active: boolean, dir: SortDir): 'ascending' | 'descending' | '
 const DATA_BASIS_HINT =
     'Stats are aggregated from battle observations recorded during the current two-week period.';
 
-// Small "ⓘ" affordance with a hover/focus tooltip. Reveal is CSS-only
-// (group-hover / group-focus-within) so it works without JS state.
+// Info affordance with a hover/focus tooltip — styled to match the circle-info
+// buttons in the Players/Clans landing sections below (FontAwesomeIcon + the
+// same accent-light icon button + `hidden group-hover:block` tooltip). Reveal is
+// CSS-only so it works without JS state. The tooltip is right-anchored because
+// this icon sits at the right edge of the filter row.
 const InfoHint: React.FC<{ text: string }> = ({ text }) => (
-    <span className="group relative inline-flex">
+    <div className="group relative inline-flex items-center">
         <button
             type="button"
             aria-label={text}
-            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--border)] text-[10px] font-semibold leading-none text-[var(--text-muted)] transition-colors hover:border-[var(--accent-mid)] hover:text-[var(--accent-mid)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)]"
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-[var(--accent-light)] transition-colors hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
         >
-            i
+            <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
         </button>
-        <span
+        <div
             role="tooltip"
-            className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-normal normal-case leading-snug tracking-normal text-[var(--text-primary)] opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+            className="pointer-events-none absolute right-0 top-full z-20 mt-2 hidden w-60 max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-2 text-left text-xs normal-case leading-snug tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block"
         >
             {text}
-        </span>
-    </span>
+        </div>
+    </div>
 );
 
 const ShipLeaderboard: React.FC = () => {
@@ -178,19 +190,25 @@ const ShipLeaderboard: React.FC = () => {
     const [boardError, setBoardError] = useState(false);
 
     // Changing either filter abandons any open ship board (a stale ship under a
-    // new filter is nonsense) and resets the list.
+    // new filter is nonsense) and resets the list. `control` records which pill
+    // the user clicked so the Umami log reads clearly (tier vs type).
     const chooseTier = (t: Tier) => {
         if (t === tier) return;
         setTier(t);
         setSelectedShip(null);
-        trackEvent('ship-leaderboard-filter', { realm, tier: t, type: type ?? '' });
+        trackEvent('ship-leaderboard-filter', { realm, control: 'tier', tier: t, type: type ?? '' });
     };
     const chooseType = (t: ShipType) => {
         if (t === type) return;
         setType(t);
         setSelectedShip(null);
-        trackEvent('ship-leaderboard-filter', { realm, tier: tier ?? 0, type: t });
+        trackEvent('ship-leaderboard-filter', { realm, control: 'type', tier: tier ?? 0, type: t });
     };
+
+    // Column-sort analytics, one event for both tables (scope distinguishes the
+    // ship list from the player board). Built here so realm lives in one place.
+    const trackSort = (scope: 'ships' | 'players') => (column: string, dir: SortDir) =>
+        trackEvent('ship-leaderboard-sort', { realm, scope, column, dir });
 
     const bothSelected = tier != null && type != null;
 
@@ -253,17 +271,17 @@ const ShipLeaderboard: React.FC = () => {
         setSelectedShip({ id: s.ship_id, name: s.ship_name });
         trackEvent('ship-leaderboard-drilldown', { realm, ship_id: s.ship_id });
     };
-    const clearShip = () => setSelectedShip(null);
+    const clearShip = () => {
+        setSelectedShip(null);
+        trackEvent('ship-leaderboard-clear', { realm });
+    };
 
     const typeLabel = useMemo(() => (type ? shipClass(type)?.label ?? type : null), [type]);
 
     return (
         <section className="mt-2 pt-8" aria-label="Ship leaderboard">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <span className="flex items-center gap-1.5">
-                    <h3 className={HEADING_CLASS}>Ships</h3>
-                    <InfoHint text={DATA_BASIS_HINT} />
-                </span>
+                <h3 className={HEADING_CLASS}>Ships</h3>
                 <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Tier</span>
                     {TIERS.map((t) => (
@@ -295,6 +313,8 @@ const ShipLeaderboard: React.FC = () => {
                             </button>
                         );
                     })}
+                    {/* Data-basis hint sits at the end of the row, right of SS. */}
+                    <InfoHint text={DATA_BASIS_HINT} />
                 </div>
             </div>
 
@@ -311,6 +331,7 @@ const ShipLeaderboard: React.FC = () => {
                         loading={boardLoading}
                         error={boardError}
                         onClear={clearShip}
+                        onSortChange={trackSort('players')}
                     />
                 ) : (
                     <ShipList
@@ -319,6 +340,7 @@ const ShipLeaderboard: React.FC = () => {
                         error={listError}
                         tierTypeLabel={`T${tier} ${typeLabel ?? ''}`.trim()}
                         onOpen={openShip}
+                        onSortChange={trackSort('ships')}
                     />
                 )}
             </div>
@@ -337,8 +359,9 @@ const ShipList: React.FC<{
     error: boolean;
     tierTypeLabel: string;
     onOpen: (s: ListShip) => void;
-}> = ({ ships, loading, error, tierTypeLabel, onOpen }) => {
-    const { sort, onSort } = useTableSort<ListShip>(['ship_name']);
+    onSortChange: (key: keyof ListShip, dir: SortDir) => void;
+}> = ({ ships, loading, error, tierTypeLabel, onOpen, onSortChange }) => {
+    const { sort, onSort } = useTableSort<ListShip>(['ship_name'], onSortChange);
     const sortedShips = useMemo(
         () => (ships && sort ? sortRows(ships, sort.key, sort.dir) : ships),
         [ships, sort],
@@ -435,14 +458,24 @@ const ShipBoard: React.FC<{
     loading: boolean;
     error: boolean;
     onClear: () => void;
-}> = ({ realm, fallbackName, board, loading, error, onClear }) => {
+    onSortChange: (key: keyof LeaderboardPlayer, dir: SortDir) => void;
+}> = ({ realm, fallbackName, board, loading, error, onClear, onSortChange }) => {
     const ship = board?.ship;
     const cls = ship ? shipClass(ship.ship_type) : null;
     const subtitle = ship
         ? `T${ship.tier ?? '?'} ${cls?.label ?? ship.ship_type ?? ''}`.trim()
         : '';
     const players = useMemo(() => board?.players ?? [], [board]);
-    const { sort, onSort } = useTableSort<LeaderboardPlayer>(['player_name']);
+    const { sort, onSort } = useTableSort<LeaderboardPlayer>(['player_name'], onSortChange);
+    // Player click-through analytics. ship_id + rank are low-cardinality and
+    // tell us which standings drive profile visits; player name is omitted to
+    // keep event-data cardinality low (Umami convention).
+    const trackPlayerClick = (rank: number) =>
+        trackEvent('ship-leaderboard-player-click', {
+            realm,
+            ship_id: ship?.ship_id ?? 0,
+            rank,
+        });
     const sortedPlayers = useMemo(
         () => (sort ? sortRows(players, sort.key, sort.dir) : players),
         [players, sort],
@@ -506,7 +539,7 @@ const ShipBoard: React.FC<{
                                     <tr key={p.rank} className="transition-colors hover:bg-[var(--bg-hover)]">
                                         <td className="py-2 pl-2 pr-3 tabular-nums text-[var(--text-muted)]">{p.rank}</td>
                                         <td className="py-2 pr-8">
-                                            <Link href={buildPlayerPath(p.player_name, realm)} className={PLAYER_LINK}>
+                                            <Link href={buildPlayerPath(p.player_name, realm)} className={PLAYER_LINK} onClick={() => trackPlayerClick(p.rank)}>
                                                 {p.player_name}
                                             </Link>
                                         </td>
@@ -526,7 +559,7 @@ const ShipBoard: React.FC<{
                                     <div className="flex items-center justify-between gap-2">
                                         <span className="inline-flex min-w-0 items-center gap-2">
                                             <span className="w-5 shrink-0 text-right tabular-nums text-[var(--text-muted)]">{p.rank}</span>
-                                            <Link href={buildPlayerPath(p.player_name, realm)} className={`${PLAYER_LINK} truncate`}>
+                                            <Link href={buildPlayerPath(p.player_name, realm)} className={`${PLAYER_LINK} truncate`} onClick={() => trackPlayerClick(p.rank)}>
                                                 {p.player_name}
                                             </Link>
                                         </span>

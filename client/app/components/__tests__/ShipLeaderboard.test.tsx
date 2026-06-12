@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import ShipLeaderboard from '../ShipLeaderboard';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
+import { trackEvent } from '../../lib/umami';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
@@ -16,6 +17,7 @@ jest.mock('../../lib/umami', () => ({
 }));
 
 const mockFetch = fetchSharedJson as jest.MockedFunction<typeof fetchSharedJson>;
+const mockTrack = trackEvent as jest.MockedFunction<typeof trackEvent>;
 
 const listFixture = {
     realm: 'na',
@@ -46,6 +48,7 @@ describe('ShipLeaderboard', () => {
     beforeEach(() => {
         mockFetch.mockReset();
         mockFetch.mockImplementation((url: string) => routeFetch(url));
+        mockTrack.mockClear();
     });
 
     const selectTierAndType = (typeAbbr = 'DD') => {
@@ -143,5 +146,63 @@ describe('ShipLeaderboard', () => {
         fireEvent.click(screen.getByRole('button', { name: 'BB' }));
         await screen.findAllByText('Gearing');
         expect(screen.queryByText('UsunU')).not.toBeInTheDocument();
+    });
+
+    describe('umami tracking', () => {
+        it('tracks tier and type filter clicks with a clear control field', async () => {
+            render(<ShipLeaderboard />);
+            await screen.findAllByText('Gearing');
+
+            fireEvent.click(screen.getByRole('button', { name: 'DD' }));
+            expect(mockTrack).toHaveBeenCalledWith(
+                'ship-leaderboard-filter',
+                expect.objectContaining({ realm: 'na', control: 'type', type: 'Destroyer' }),
+            );
+
+            fireEvent.click(screen.getByRole('button', { name: '8' }));
+            expect(mockTrack).toHaveBeenCalledWith(
+                'ship-leaderboard-filter',
+                expect.objectContaining({ realm: 'na', control: 'tier', tier: 8 }),
+            );
+        });
+
+        it('tracks ship-list column sorts with scope, column and direction', async () => {
+            render(<ShipLeaderboard />);
+            await screen.findAllByText('Gearing');
+
+            fireEvent.click(screen.getAllByRole('button', { name: /Battles/ })[0]);
+            expect(mockTrack).toHaveBeenCalledWith(
+                'ship-leaderboard-sort',
+                { realm: 'na', scope: 'ships', column: 'battles', dir: 'desc' },
+            );
+        });
+
+        it('tracks the drill-down and player click-through with clear event names', async () => {
+            render(<ShipLeaderboard />);
+            await clickShip('Shimakaze');
+            expect(mockTrack).toHaveBeenCalledWith(
+                'ship-leaderboard-drilldown',
+                expect.objectContaining({ realm: 'na', ship_id: 111 }),
+            );
+
+            await screen.findAllByText('UsunU');
+            fireEvent.click(screen.getAllByRole('link', { name: 'UsunU' })[0]);
+            expect(mockTrack).toHaveBeenCalledWith(
+                'ship-leaderboard-player-click',
+                { realm: 'na', ship_id: 111, rank: 1 },
+            );
+        });
+
+        it('tracks a player-board column sort under the players scope', async () => {
+            render(<ShipLeaderboard />);
+            await clickShip('Shimakaze');
+            await screen.findAllByText('UsunU');
+
+            fireEvent.click(screen.getAllByRole('button', { name: /Win rate/ })[0]);
+            expect(mockTrack).toHaveBeenCalledWith(
+                'ship-leaderboard-sort',
+                { realm: 'na', scope: 'players', column: 'win_rate', dir: 'desc' },
+            );
+        });
     });
 });
