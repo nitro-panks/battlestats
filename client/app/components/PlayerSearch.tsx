@@ -9,7 +9,7 @@ import ClanDetail from './ClanDetail';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier, type EfficiencyRankTier } from './EfficiencyRankIcon';
 import PlayerDetail from './PlayerDetail';
 import RealmTopShipsTreemapSVG from './RealmTopShipsTreemapSVG';
-import ShipLeaderboard from './ShipLeaderboard';
+import ShipLeaderboard, { type ShipLeaderboardHandle } from './ShipLeaderboard';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import type { LandingClan, LandingPlayer, PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
@@ -225,6 +225,7 @@ const PlayerSearch: React.FC = () => {
     const [playerBestSort, setPlayerBestSort] = useState<PlayerBestSort>('overall');
     const lastSubmittedSearchRef = useRef<string>('');
     const bestLandingWarmupRequestedRef = useRef(false);
+    const shipLeaderboardRef = useRef<ShipLeaderboardHandle>(null);
 
     const fetchLandingClans = useCallback(async (sort: ClanBestSort = 'overall') => {
         const params = new URLSearchParams({
@@ -476,12 +477,16 @@ const PlayerSearch: React.FC = () => {
                         reverted — it glued the strip to the viewport's left
                         edge; see runbook-audience-device-optimization). */}
                     <div className="mt-2 pt-6">
-                        <RealmTopShipsTreemapSVG />
+                        <RealmTopShipsTreemapSVG
+                            onSelect={(sel) => shipLeaderboardRef.current?.selectShip(sel)}
+                        />
                     </div>
 
                     {/* Inline ship leaderboard: filter by tier+type, rank ships by
-                        win rate, drill into any ship's player board in place. */}
-                    <ShipLeaderboard />
+                        win rate, drill into any ship's player board in place. A
+                        treemap tile click hands off here via the ref (in place);
+                        tiles the board can't represent fall back to /ship/<id>. */}
+                    <ShipLeaderboard ref={shipLeaderboardRef} />
 
                     {/* Toolbar is always visible once the landing pane is mounted —
                      keeps the empty-state UX coherent when the Best list returns

@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import ShipLeaderboard from '../ShipLeaderboard';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import ShipLeaderboard, { type ShipLeaderboardHandle } from '../ShipLeaderboard';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 import { trackEvent } from '../../lib/umami';
 
@@ -49,6 +49,8 @@ describe('ShipLeaderboard', () => {
         mockFetch.mockReset();
         mockFetch.mockImplementation((url: string) => routeFetch(url));
         mockTrack.mockClear();
+        // jsdom has no scrollIntoView; the imperative handle calls it.
+        Element.prototype.scrollIntoView = jest.fn();
     });
 
     const selectTierAndType = (typeAbbr = 'DD') => {
@@ -146,6 +148,60 @@ describe('ShipLeaderboard', () => {
         fireEvent.click(screen.getByRole('button', { name: 'BB' }));
         await screen.findAllByText('Gearing');
         expect(screen.queryByText('UsunU')).not.toBeInTheDocument();
+    });
+
+    describe('treemap handoff (selectShip handle)', () => {
+        it('drills straight to a ship board, scrolls, and sets the underlying filters', async () => {
+            const ref = React.createRef<ShipLeaderboardHandle>();
+            render(<ShipLeaderboard ref={ref} />);
+            // Let the default T10/BB list settle, then clear the call log so the
+            // assertions below only see fetches caused by the handle.
+            await screen.findAllByText('Gearing');
+            mockFetch.mockClear();
+
+            act(() => {
+                ref.current!.selectShip({ id: 111, name: 'Shimakaze', tier: 10, type: 'Destroyer' });
+            });
+
+            // (a) Board endpoint fetched and the player board renders...
+            await screen.findAllByText('UsunU');
+            expect(mockFetch).toHaveBeenCalledWith(
+                '/api/realm/na/ship/111/leaderboard',
+                expect.objectContaining({ cacheKey: 'ship-lb:na:111' }),
+            );
+            // (b) ...without needing the ship-list endpoint to reach the board.
+            expect(mockFetch).not.toHaveBeenCalledWith(
+                expect.stringContaining('/ships?'),
+                expect.anything(),
+            );
+            // (c) The section was scrolled into view.
+            expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+
+            // (d) Clear returns to the T10 Destroyer list — proves tier+type were set.
+            fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+            await waitFor(() => {
+                expect(mockFetch).toHaveBeenCalledWith(
+                    '/api/realm/na/ships?tier=10&type=Destroyer',
+                    expect.objectContaining({ cacheKey: 'ships-by:na:10:Destroyer' }),
+                );
+            });
+            expect(screen.getByRole('button', { name: '10' })).toHaveAttribute('aria-pressed', 'true');
+            expect(screen.getByRole('button', { name: 'DD' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        it('tags the drill-down event with source=treemap', async () => {
+            const ref = React.createRef<ShipLeaderboardHandle>();
+            render(<ShipLeaderboard ref={ref} />);
+            await screen.findAllByText('Gearing');
+
+            act(() => {
+                ref.current!.selectShip({ id: 111, name: 'Shimakaze', tier: 10, type: 'Destroyer' });
+            });
+            expect(mockTrack).toHaveBeenCalledWith(
+                'ship-leaderboard-drilldown',
+                expect.objectContaining({ realm: 'na', ship_id: 111, source: 'treemap' }),
+            );
+        });
     });
 
     describe('umami tracking', () => {

@@ -19,6 +19,7 @@ import { useRealm, useDisplayRealm } from '../context/RealmContext';
 import { buildShipPath } from '../lib/entityRoutes';
 import { formatSeasonLabel } from '../lib/shipSeason';
 import { trackEvent } from '../lib/umami';
+import { SHIP_TYPES, type ShipType, type Tier } from './ShipLeaderboard';
 
 interface TopShip {
     ship_id: number;
@@ -86,8 +87,20 @@ interface HoverState {
     y: number;
 }
 
-const RealmTopShipsTreemapSVG: React.FC = () => {
+interface RealmTopShipsTreemapSVGProps {
+    // When provided, clicking a tile whose tier+type the inline ShipLeaderboard
+    // can represent (T8/9/10 + a canonical type) drills there in place instead of
+    // navigating to /ship/<id>. Tiles outside that range keep the route fallback.
+    onSelect?: (sel: { id: number; name: string; tier: Tier; type: ShipType }) => void;
+}
+
+const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({ onSelect }) => {
     const { realm } = useRealm();
+    // Mirror the latest onSelect into a ref so the D3 click handler (bound inside
+    // the render effect below) reads the current callback without the render
+    // effect depending on it — avoids rebuilding the treemap when it changes.
+    const onSelectRef = useRef(onSelect);
+    useEffect(() => { onSelectRef.current = onSelect; });
     // Hydration-safe realm for the heading/aria-label rendered in the SSG shell
     // (the live `realm` drives fetches; this only feeds rendered text).
     const displayRealm = useDisplayRealm();
@@ -181,8 +194,20 @@ const RealmTopShipsTreemapSVG: React.FC = () => {
             .attr('stroke-width', 1)
             .style('cursor', 'pointer')
             .on('click', function onClick(this: SVGRectElement, _event: MouseEvent, d: { data: TopShip }) {
-                trackEvent('treemap-ship', { ship_id: d.data.ship_id, ship_name: d.data.ship_name, mode, realm });
-                router.push(buildShipPath(d.data.ship_id, d.data.ship_name, realm));
+                const { ship_id, ship_name, tier, ship_type } = d.data;
+                // The leaderboard only covers T8/9/10 + the five canonical types;
+                // anything else (sub-T8, null tier/type, unknown type) keeps the
+                // /ship/<id> route so no tile becomes a dead click.
+                const supported = !!onSelectRef.current
+                    && (tier === 8 || tier === 9 || tier === 10)
+                    && ship_type != null && (SHIP_TYPES as readonly string[]).includes(ship_type);
+                if (supported) {
+                    trackEvent('treemap-ship', { ship_id, ship_name, mode, realm, target: 'leaderboard' });
+                    onSelectRef.current!({ id: ship_id, name: ship_name, tier: tier as Tier, type: ship_type as ShipType });
+                } else {
+                    trackEvent('treemap-ship', { ship_id, ship_name, mode, realm, target: 'route' });
+                    router.push(buildShipPath(ship_id, ship_name, realm));
+                }
             })
             .on('mousemove', function onMove(this: SVGRectElement, event: MouseEvent, d: { data: TopShip }) {
                 const rect = containerRef.current?.getBoundingClientRect();
