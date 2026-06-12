@@ -2175,8 +2175,7 @@ def _aggregate_battles_by_key(battles_json: Any, group_key: str) -> list[dict]:
     return result
 
 
-def update_battle_data(player_id: str, realm: str = DEFAULT_REALM,
-                       force_refresh: bool = False) -> None:
+def update_battle_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     """
     Updates the battle data for a given player.
 
@@ -2186,13 +2185,6 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM,
     Args:
         player_id (str): The ID of the player whose battle data needs to be updated.
         realm (str): The realm to scope the query to.
-        force_refresh (bool): Bypass the 15-minute cache guard and always refetch.
-            The hot-players freshness sweep needs this: it re-refreshes hot players
-            at a sub-15-min cadence to keep ``battles_updated_at`` inside the
-            15-min visit-freshness window, but the default guard below (15 min)
-            would early-return without advancing the timestamp for exactly the
-            [cadence, 15min) band it targets. Default False keeps every existing
-            caller (incl. ``update_battle_data_task``) unchanged.
 
     Returns:
         None
@@ -2200,7 +2192,7 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM,
     player = Player.objects.get(player_id=player_id, realm=realm)
 
     # Check if the cached data is less than 15 minutes old
-    if not force_refresh and player.battles_json and player.battles_updated_at and datetime.now() - player.battles_updated_at < timedelta(minutes=15):
+    if player.battles_json and player.battles_updated_at and datetime.now() - player.battles_updated_at < timedelta(minutes=15):
         logging.debug(
             f'Cache exists and is fresh: returning cached data')
         return player.battles_json

@@ -15,12 +15,6 @@ errorlog = "-"
 capture_output = True
 # How verbose the Gunicorn error logs should be
 loglevel = "info"
-# Recycle a wedged worker before nginx's 60s proxy_read_timeout fires, so a
-# stalled upstream (e.g. a slow synchronous WG call on the cold-lookup path)
-# sheds load fast and clean instead of cascading into a 502. Below the implicit
-# 30s default; the bounded request-thread WG timeout (~13.5s worst case incl.
-# adapter retries) lands comfortably under this backstop. Tunable.
-timeout = int(os.getenv("GUNICORN_TIMEOUT_SECONDS", "25"))
 
 
 def when_ready(server):

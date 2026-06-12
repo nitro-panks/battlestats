@@ -115,10 +115,6 @@ def _hot_players_capture_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:hot_players_capture:{realm}:lock"
 
 
-def _hot_players_freshness_lock_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:hot_players_freshness:{realm}:lock"
-
-
 def _snapshot_active_players_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:snapshot_active_players:{realm}:lock"
 
@@ -1046,16 +1042,27 @@ def warm_landing_page_content_task(self, realm=DEFAULT_REALM, scope='all'):
 
 @app.task(bind=True, **TASK_OPTS)
 def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
-    """Pre-populate the realm top-ships treemap caches (random + ranked).
+    """Pre-populate the realm top-ships treemap + tier/type list caches.
 
-    Recomputes both modes for the realm once per day (force-refresh) and writes
-    them to Redis under the season-tagged key, so the first visitor hits a warm
-    cache instead of the aggregation. The treemap is a static per-season count
+    Recomputes both treemap modes (random + ranked) and every tier×type ship
+    list bucket for the realm once per day (force-refresh) and writes them to
+    Redis under their season-tagged keys, so the first visitor hits a warm cache
+    instead of the aggregation. Both surfaces are static per-season aggregations
     over the most recently completed fixed 2-week ship season; the daily warm
-    keeps the cache fresh across a season boundary (the key changes when the
+    keeps the caches fresh across a season boundary (the keys change when the
     completed season advances). Mirrors the other per-realm landing warmers.
+
+    The tier/type list (`compute_realm_ships_by_tier_type`, backing the landing
+    drill-down filter) is a live `BattleEvent` GROUP-BY — expensive to compute
+    cold. Without this warm, every first click of a new tier/type combination
+    paid that aggregation on the request path. Only `mode="random"` is warmed:
+    the landing `ShipLeaderboard` never passes a mode, so random is the only
+    bucket ever requested. Runbook: runbook-leaderboard-updates.md.
     """
-    from warships.data import compute_realm_top_ships
+    from warships.data import (
+        compute_realm_top_ships, compute_realm_ships_by_tier_type,
+        _badge_tiers, SHIP_LEADERBOARD_TYPES,
+    )
 
     lock_key = f"warships:tasks:warm_realm_top_ships:{realm}:lock"
     if not cache.add(lock_key, self.request.id, timeout=300):
@@ -1069,7 +1076,19 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
             payload = compute_realm_top_ships(
                 realm, limit=25, mode=mode, use_cache=False)
             results[mode] = len(payload.get("ships", []))
-        logger.info("Warmed top-ships realm=%s modes=%s", realm, results)
+
+        # Tier/type list buckets — only mode="random" is ever requested.
+        bucket_count = 0
+        for tier in sorted(_badge_tiers()):
+            for ship_type in SHIP_LEADERBOARD_TYPES:
+                compute_realm_ships_by_tier_type(
+                    realm, tier=tier, ship_type=ship_type,
+                    mode="random", use_cache=False)
+                bucket_count += 1
+        results["tier_type_buckets"] = bucket_count
+
+        logger.info(
+            "Warmed top-ships realm=%s modes+buckets=%s", realm, results)
         return {"status": "completed", "realm": realm, "results": results}
     finally:
         cache.delete(lock_key)
@@ -2478,49 +2497,6 @@ def capture_hot_player_observations_task(self, realm=DEFAULT_REALM):
     except Exception:
         logger.exception(
             "capture_hot_player_observations_task failed for %s", realm)
-        return {"status": "error", "realm": realm}
-    finally:
-        cache.delete(lock_key)
-
-    return {"status": "ok", **result}
-
-
-@app.task(bind=True, queue='background', **TASK_OPTS)
-def refresh_hot_player_freshness_task(self, realm=DEFAULT_REALM):
-    """Keep hot players inside the 15-min visit-freshness window.
-
-    Tier 3 of ``runbook-player-refresh-latency-2026-06-10.md``, extending the
-    hot-players engagement queue. A SEPARATE, frequent (<15-min cadence) sweep
-    that advances ``Player.battles_updated_at`` for hot members whose value is
-    older than ``HOT_PLAYERS_FRESH_AFTER_MINUTES`` (default 12) via
-    ``update_battle_data(force_refresh=True)`` — so a visit to a durably-engaged
-    player arrives at ``x-player-refresh-pending: false`` and resolves
-    sub-second with no live WG refresh on the request thread. The daily capture
-    sweep writes observations/snapshots but does NOT advance
-    ``battles_updated_at``; this closes that gap.
-
-    Background queue, single-flight per realm, **coexists with clan crawls** (no
-    deferral — guaranteed freshness is the point). Bounded by ``HOT_PLAYERS_MAX``,
-    skip-if-fresh against ``battles_updated_at``, hidden accounts gated up front.
-    Kill switch ``HOT_PLAYERS_ENABLED``.
-    """
-    if os.getenv("HOT_PLAYERS_ENABLED", "1") != "1":
-        return {"status": "skipped", "reason": "disabled"}
-
-    lock_key = _hot_players_freshness_lock_key(realm)
-    if not cache.add(lock_key, self.request.id or "1",
-                     timeout=RESOURCE_TASK_LOCK_TIMEOUT):
-        logger.info(
-            "Skipping refresh_hot_player_freshness_task[%s] — another sweep is active",
-            realm)
-        return {"status": "skipped", "reason": "already-running", "realm": realm}
-
-    try:
-        from warships.hot_players import refresh_hot_player_freshness
-        result = refresh_hot_player_freshness(realm)
-    except Exception:
-        logger.exception(
-            "refresh_hot_player_freshness_task failed for %s", realm)
         return {"status": "error", "realm": realm}
     finally:
         cache.delete(lock_key)

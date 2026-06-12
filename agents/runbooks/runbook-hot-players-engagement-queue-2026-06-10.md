@@ -5,24 +5,6 @@
 / `hot_players_status` commands, signals registration, env knobs, and tests are landed
 (`server/warships/hot_players.py`). Phase 2 (the depth/`event_type` signal) remains out of scope.
 
-## Freshness for the visit path (Tier 3 of the latency runbook)
-
-**IMPLEMENTED 2026-06-11.** This queue gained a third, SEPARATE sweep —
-`refresh_hot_player_freshness` / `refresh_hot_player_freshness_task`, scheduled as
-`hot-players-freshness-{realm}` on a 12-min striped cycle (`HOT_PLAYERS_FRESH_CYCLE_MINUTES`,
-under the 15-min visit-freshness window). It is the implementation of **Tier 3** of
-`runbook-player-refresh-latency-2026-06-10.md`. Whereas the *capture* sweep guarantees a
-`BattleObservation` + gap-free daily `Snapshot` (neither of which advances
-`Player.battles_updated_at`), the *freshness* sweep advances `battles_updated_at` itself — via
-`update_battle_data(force_refresh=True)` — so a visit to a durably-engaged player arrives at
-`x-player-refresh-pending: false` and resolves sub-second with no live WG refresh on the request
-thread. Same kill switch (`HOT_PLAYERS_ENABLED`), same cap (`HOT_PLAYERS_MAX`), same pacing
-(`HOT_PLAYERS_CAPTURE_DELAY`), same crawl-coexist posture. New knobs:
-`HOT_PLAYERS_FRESH_AFTER_MINUTES` (12, skip-if-fresh threshold) and
-`HOT_PLAYERS_FRESH_CYCLE_MINUTES` (12, schedule cadence). The engagement signal that earns a
-player gap-free history now *also* earns them a fast page. See that runbook's Tier 3 section for
-the full design (including the `update_battle_data` 15-min-guard bypass nuance).
-
 ## Why
 
 We guarantee fresh, granular per-day battle history for players we judge *important*

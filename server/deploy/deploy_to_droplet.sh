@@ -100,24 +100,6 @@ ssh "${DEPLOY_USER}@${HOST}" "cat > ${REMOTE_DEPLOY_SCRIPT}" <<'REMOTE'
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Failure guard (added after the 2026-06-11 ~33-min outage): the stop-first
-# barrier below stops every app service. If this remote script then bails before
-# the clean restart near the end — an error under `set -e`, or a SIGHUP/SIGTERM
-# when the local deploy is killed/interrupted mid-run — the box would be left
-# with gunicorn+celery down and nothing to bring them back. This trap restarts
-# the app services on ANY early exit so the site recovers on its currently-active
-# release. `systemctl start` is idempotent, so on a normally-completed run (which
-# sets `_deploy_done=1` at the end) the trap is a no-op.
-_deploy_done=0
-_restore_services_on_bail() {
-  [ "${_deploy_done}" -eq 1 ] && return 0
-  _deploy_done=1
-  echo "[deploy-trap] remote deploy exiting before completion — restarting app services so the site is not left down" >&2
-  systemctl start battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls battlestats-beat 2>/dev/null || true
-}
-trap _restore_services_on_bail EXIT
-trap '_restore_services_on_bail; exit 143' HUP INT TERM
-
 # Stop-first barrier: no app services may be running while /etc/battlestats-server.env
 # is being mutated below. `set_env_value` uses `sed -i`, which replaces the file inode,
 # and `configure_local_rabbitmq` rotates the broker password and restarts rabbitmq-server
@@ -668,12 +650,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-# Tier-2c latency: hydration default 3 -> 5 so chip-critical request-driven
-# refreshes drain queue wait faster. The global WG token bucket (9/s) caps the
-# actual WG rate regardless of worker count, so extra workers only shorten queue
-# wait, not exceed the WG ceiling. TUNABLE — watch droplet memory (each worker
-# is capped at CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB) on the 8GB box.
-ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q hydration -c "${CELERY_HYDRATION_CONCURRENCY:-5}" --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_HYDRATION_MAX_TASKS_PER_CHILD:-200}" --max-memory-per-child="${CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB:-393216}" --without-gossip --without-mingle -n hydration@%%h'
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q hydration -c "${CELERY_HYDRATION_CONCURRENCY:-3}" --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_HYDRATION_MAX_TASKS_PER_CHILD:-200}" --max-memory-per-child="${CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB:-393216}" --without-gossip --without-mingle -n hydration@%%h'
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
@@ -801,10 +778,6 @@ systemctl --no-pager --full status battlestats-gunicorn | sed -n '1,25p'
 
 # Release cleanup runs unconditionally — must not be gated by prior failures
 find "${APP_ROOT}/releases" -mindepth 1 -maxdepth 1 -type d | sort | head -n -"${KEEP_RELEASES}" | xargs -r rm -rf || true
-
-# Reached the end cleanly — services are up from the restart above. Disarm the
-# failure-guard trap so it does not redundantly restart on normal exit.
-_deploy_done=1
 REMOTE
 
 # Execute the script on the remote without stdin redirection. Env vars are

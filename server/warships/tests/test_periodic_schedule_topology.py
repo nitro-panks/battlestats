@@ -44,7 +44,6 @@ STRIPED_PER_REALM_FAMILIES = [
     ("incremental-player-refresh", 180),
     ("incremental-ranked-refresh", 120),
     ("hot-players-capture", 1440),
-    ("hot-players-freshness", 12),
 ]
 
 
@@ -331,45 +330,6 @@ class HotPlayersScheduleTopologyTests(TestCase):
         self.assertEqual(
             len(set(sigs.values())), len(VALID_REALMS),
             f"hot-players-capture schedules collide: {sigs}")
-
-    def test_freshness_offsets_distinct_per_realm(self):
-        # Tier 3 freshness sweep (runbook-player-refresh-latency-2026-06-10):
-        # a sub-15-min striped family. The 12-min cycle (stride=4) must put each
-        # realm on a distinct minute lane (NA :00.., EU :04.., ASIA :08..) so at
-        # most one realm fires at a time — same de-collision invariant the
-        # engagement-queue families guard against.
-        sigs = {
-            realm: (
-                PeriodicTask.objects.get(
-                    name=f"hot-players-freshness-{realm}").crontab.minute,
-                PeriodicTask.objects.get(
-                    name=f"hot-players-freshness-{realm}").crontab.hour,
-            )
-            for realm in VALID_REALMS
-        }
-        self.assertEqual(
-            len(set(sigs.values())), len(VALID_REALMS),
-            f"hot-players-freshness schedules collide: {sigs}")
-
-    def test_freshness_cadence_under_fifteen_minutes(self):
-        # The whole point of Tier 3: the cadence MUST be under the 15-min
-        # PLAYER_BATTLE_DATA_STALE_AFTER window. A sub-15-min cycle yields a
-        # minute LIST with a wildcard hour (not a single hour-multiple lane).
-        for realm in VALID_REALMS:
-            row = PeriodicTask.objects.get(name=f"hot-players-freshness-{realm}")
-            self.assertEqual(
-                row.crontab.hour, "*",
-                f"hot-players-freshness-{realm} should fire every hour")
-            minutes = sorted(int(m) for m in row.crontab.minute.split(","))
-            self.assertGreaterEqual(
-                len(minutes), 5,
-                f"hot-players-freshness-{realm} should fire >=5x/hour "
-                f"(sub-15-min cadence), got '{row.crontab.minute}'")
-            # Spacing between consecutive fires must be < 15 min.
-            gaps = [b - a for a, b in zip(minutes, minutes[1:])]
-            self.assertTrue(
-                all(g < 15 for g in gaps),
-                f"hot-players-freshness-{realm} has a >=15min gap: {minutes}")
 
 
 class TrackedPlayerPollGateTests(TestCase):

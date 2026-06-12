@@ -20,6 +20,7 @@ from warships.data import (
 )
 from warships.models import (
     BattleEvent, BattleObservation, Player, Ship, ShipTopPlayerSnapshot,
+    realm_cache_key,
 )
 
 # Distinct ship_ids; only T10 Destroyers/Battleships are exercised below.
@@ -155,6 +156,64 @@ class RealmShipsByTierTypeTests(TestCase):
         payload = compute_realm_ships_by_tier_type(
             "na", tier=10, ship_type="Destroyer", use_cache=False)
         self.assertEqual(payload["ships"], [])
+
+
+class RealmShipsByTierTypeWarmTests(TestCase):
+    """The daily warm_realm_top_ships_task pre-populates the tier/type buckets.
+
+    Without this warm, the first click of a new tier/type combination paid the
+    live BattleEvent aggregation on the request path (runbook-leaderboard-updates).
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.player = Player.objects.create(
+            name="warm_bench", player_id=888004, realm="na", pvp_battles=1000)
+        Ship.objects.create(ship_id=SHIMA, name="Shimakaze", nation="japan",
+                            ship_type="Destroyer", tier=10)
+        self.season_idx, self.season_start, self.season_end = (
+            most_recent_completed_season())
+        self.window_start, _ = _season_window_datetimes(
+            self.season_start, self.season_end)
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=self.season_start, realm="na", ship_id=SHIMA,
+            ship_name="Shimakaze", rank=1, player=self.player,
+            win_rate=50.0, battles=1)
+        obs_a = BattleObservation.objects.create(player=self.player, pvp_battles=1)
+        obs_b = BattleObservation.objects.create(player=self.player, pvp_battles=2)
+        ev = BattleEvent.objects.create(
+            player=self.player, ship_id=SHIMA, ship_name="x", mode="random",
+            battles_delta=200, wins_delta=120, losses_delta=80,
+            frags_delta=200, damage_delta=200 * 50_000,
+            from_observation=obs_a, to_observation=obs_b)
+        BattleEvent.objects.filter(pk=ev.pk).update(
+            detected_at=self.window_start + timedelta(days=1))
+
+    def _bucket_key(self, tier, ship_type):
+        return realm_cache_key(
+            "na",
+            f"ships-by:random:season{self.season_idx}:t{tier}:{ship_type}")
+
+    def test_warm_populates_tier_type_bucket_cache(self):
+        from warships.tasks import warm_realm_top_ships_task
+
+        # Cold before the warm.
+        self.assertIsNone(cache.get(self._bucket_key(10, "Destroyer")))
+
+        result = warm_realm_top_ships_task.apply(kwargs={"realm": "na"}).get()
+        self.assertEqual(result["status"], "completed")
+        # 1 badge tier (default {10}) x 5 ship types.
+        self.assertEqual(result["results"]["tier_type_buckets"], 5)
+
+        # The T10/Destroyer bucket is now a warm hit carrying the WR-ranked ship.
+        cached = cache.get(self._bucket_key(10, "Destroyer"))
+        self.assertIsNotNone(cached)
+        self.assertEqual([s["ship_id"] for s in cached["ships"]], [SHIMA])
+        self.assertEqual(cached["ships"][0]["win_rate"], 60.0)
+        # A bucket with no candidate ships (Battleship) short-circuits before the
+        # BattleEvent aggregation, so it isn't cached — and doesn't need to be:
+        # that cheap early-return path was never the source of the switch lag.
+        self.assertIsNone(cache.get(self._bucket_key(10, "Battleship")))
 
 
 class RealmShipsByTierTypeViewTests(TestCase):

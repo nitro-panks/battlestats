@@ -9,6 +9,7 @@ def test_heavy_request_driven_refreshes_route_to_hydration():
     expected_tasks = {
         "warships.tasks.update_battle_data_task",
         "warships.tasks.update_clan_members_task",
+        "warships.tasks.update_ranked_data_task",
         "warships.tasks.update_player_clan_battle_data_task",
         "warships.tasks.update_player_efficiency_data_task",
         "warships.tasks.update_clan_battle_summary_task",
@@ -26,10 +27,6 @@ def test_long_running_maintenance_tasks_route_to_background():
         "warships.tasks.incremental_ranked_data_task",
         "warships.tasks.warm_all_clan_tier_distributions_task",
         "warships.tasks.enrich_player_data_task",
-        # Tier-2c latency: ranked refresh moved off the chip-critical hydration
-        # queue so it stops competing with the chip-gating random task.
-        # See runbook-player-refresh-latency-2026-06-10.md.
-        "warships.tasks.update_ranked_data_task",
     }
 
     for task_name in expected_tasks:

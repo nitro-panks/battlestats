@@ -225,7 +225,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
-                "description": f"Daily warm of top-ships treemap caches, last completed ship season, random+ranked ({realm.upper()}).",
+                "description": f"Daily warm of top-ships treemap caches (random+ranked) + tier/type ship-list buckets, last completed ship season ({realm.upper()}).",
             },
         )
 
@@ -711,43 +711,6 @@ def register_periodic_schedules(sender, **kwargs):
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
                 "description": f"Daily sweep of the engagement-capture queue ({realm.upper()}): skip-if-fresh BattleObservation + gap-free daily Snapshot. Coexists with crawls; kill via HOT_PLAYERS_ENABLED=0.",
-            },
-        )
-
-    # freshness (Tier 3 of runbook-player-refresh-latency-2026-06-10): a SEPARATE
-    # frequent (<15-min) sweep that advances Player.battles_updated_at for hot
-    # members so a visit lands at x-player-refresh-pending:false and resolves
-    # sub-second (no live WG refresh on the request thread). Cadence MUST be under
-    # the 15-min PLAYER_BATTLE_DATA_STALE_AFTER window — default 12 min. The 12-min
-    # cycle stripes cleanly via _realm_crontab_for_cycle (stride=4): NA :00,12,24,
-    # 36,48 / EU :04,16,28,40,52 / ASIA :08,20,32,44,56 (hour wildcard) — distinct
-    # minute lanes, no collision. It is a crawler-class WG consumer, so it gates on
-    # ENABLE_CRAWLER_SCHEDULES like the floor / capture. Sub-hourly minute-list
-    # family, so (like recently-viewed-player-warmer) it is NOT in the NA-lane
-    # de-pile list — it does not anchor a single hour-multiple minute.
-    hot_fresh_cycle_minutes = int(
-        os.getenv("HOT_PLAYERS_FRESH_CYCLE_MINUTES", "12"))
-    for realm in sorted(VALID_REALMS):
-        minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, hot_fresh_cycle_minutes)
-        hot_fresh_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute=minute_str,
-            hour=hour_str,
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"hot-players-freshness-{realm}",
-            defaults={
-                "task": "warships.tasks.refresh_hot_player_freshness_task",
-                "crontab": hot_fresh_schedule,
-                "interval": None,
-                "enabled": crawler_schedules_enabled,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Frequent (<15min) freshness sweep of the hot set ({realm.upper()}): advance battles_updated_at so visits resolve sub-second. Coexists with crawls; kill via HOT_PLAYERS_ENABLED=0.",
             },
         )
 
