@@ -11,7 +11,7 @@
 // and Clear returns to the list for the still-selected tier/type. No navigation,
 // no new full-page route.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
@@ -21,13 +21,22 @@ import { shipClass } from '../lib/shipIdentity';
 import { buildPlayerPath } from '../lib/entityRoutes';
 import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
+import SubmarineEasterEgg from './SubmarineEasterEgg';
 
-type Tier = 8 | 9 | 10;
+export type Tier = 8 | 9 | 10;
 // Raw `Ship.ship_type` strings the backend filters on (note: "AirCarrier", no
 // space). These are the `type` query-param values the new endpoint accepts.
-const SHIP_TYPES = ['Battleship', 'Cruiser', 'Destroyer', 'AirCarrier', 'Submarine'] as const;
-type ShipType = (typeof SHIP_TYPES)[number];
+export const SHIP_TYPES = ['Battleship', 'Cruiser', 'Destroyer', 'AirCarrier', 'Submarine'] as const;
+export type ShipType = (typeof SHIP_TYPES)[number];
 const TIERS: Tier[] = [8, 9, 10];
+
+// Imperative handle the landing treemap drives to drill straight into a ship's
+// player board in place (see runbook-treemap-shipleaderboard-handoff). Kept as a
+// command rather than lifted state so this component keeps owning its list/board
+// state and there is no prop↔state sync race after the user hits Clear.
+export interface ShipLeaderboardHandle {
+    selectShip(sel: { id: number; name: string; tier: Tier; type: ShipType }): void;
+}
 
 interface ListShip {
     ship_id: number;
@@ -172,8 +181,9 @@ const InfoHint: React.FC<{ text: string }> = ({ text }) => (
     </div>
 );
 
-const ShipLeaderboard: React.FC = () => {
+const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
     const { realm } = useRealm();
+    const sectionRef = useRef<HTMLElement>(null);
 
     // Land on T10 Battleships so the board shows real standings immediately
     // (these buckets are pre-warmed daily — see warm_realm_top_ships_task).
@@ -211,11 +221,16 @@ const ShipLeaderboard: React.FC = () => {
         trackEvent('ship-leaderboard-sort', { realm, scope, column, dir });
 
     const bothSelected = tier != null && type != null;
+    // The T9 + Submarine combo (World of Warships has no such ship) short-circuits
+    // to the easter egg and must issue NO fetch — the endpoint would 400 in any
+    // env where SHIP_BADGE_TIERS excludes 9 (e.g. local dev) and is pointless in
+    // prod. Gate both the fetch effect and the render branch on this predicate.
+    const isSubEasterEgg = tier === 9 && type === 'Submarine';
 
     // Ship list fetch (only with both filters set and no ship drilled into).
     const listReqId = useRef(0);
     useEffect(() => {
-        if (!bothSelected || selectedShip) return;
+        if (!bothSelected || selectedShip || isSubEasterEgg) return;
         const reqId = ++listReqId.current;
         setListLoading(true);
         setListError(false);
@@ -237,7 +252,7 @@ const ShipLeaderboard: React.FC = () => {
                 setListError(true);
                 setListLoading(false);
             });
-    }, [realm, tier, type, bothSelected, selectedShip]);
+    }, [realm, tier, type, bothSelected, selectedShip, isSubEasterEgg]);
 
     // Ship board fetch (drill-down) — reuses the existing /ship leaderboard.
     const boardReqId = useRef(0);
@@ -269,17 +284,31 @@ const ShipLeaderboard: React.FC = () => {
 
     const openShip = (s: ListShip) => {
         setSelectedShip({ id: s.ship_id, name: s.ship_name });
-        trackEvent('ship-leaderboard-drilldown', { realm, ship_id: s.ship_id });
+        trackEvent('ship-leaderboard-drilldown', { realm, ship_id: s.ship_id, source: 'row' });
     };
     const clearShip = () => {
         setSelectedShip(null);
         trackEvent('ship-leaderboard-clear', { realm });
     };
 
+    // Imperative drill-down from the landing treemap: set tier+type+ship in one
+    // batched update (so the dormant list effect never fires for the new bucket)
+    // and scroll the board into view. tier/type are set directly rather than via
+    // chooseTier/chooseType so a later Clear lands on the right tier/type list.
+    useImperativeHandle(ref, () => ({
+        selectShip({ id, name, tier: t, type: ty }) {
+            setTier(t);
+            setType(ty);
+            setSelectedShip({ id, name });
+            trackEvent('ship-leaderboard-drilldown', { realm, ship_id: id, source: 'treemap' });
+            sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
+    }), [realm]);
+
     const typeLabel = useMemo(() => (type ? shipClass(type)?.label ?? type : null), [type]);
 
     return (
-        <section className="mt-2 pt-8" aria-label="Ship leaderboard">
+        <section ref={sectionRef} className="mt-2 pt-8" aria-label="Ship leaderboard">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <h3 className={HEADING_CLASS}>Ships</h3>
                 <div className="flex flex-wrap items-center gap-2">
@@ -323,6 +352,8 @@ const ShipLeaderboard: React.FC = () => {
                     <p className="py-6 text-sm text-[var(--text-muted)]">
                         Pick a tier and a type to rank ships by win rate.
                     </p>
+                ) : isSubEasterEgg ? (
+                    <SubmarineEasterEgg />
                 ) : selectedShip ? (
                     <ShipBoard
                         realm={realm}
@@ -346,7 +377,9 @@ const ShipLeaderboard: React.FC = () => {
             </div>
         </section>
     );
-};
+});
+
+ShipLeaderboard.displayName = 'ShipLeaderboard';
 
 const SHIP_NAME_LINK =
     'text-left font-medium text-[var(--accent-mid)] transition-colors hover:text-[var(--accent-dark)] hover:underline';

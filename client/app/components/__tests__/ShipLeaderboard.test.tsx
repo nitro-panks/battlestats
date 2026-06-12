@@ -1,11 +1,22 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import ShipLeaderboard from '../ShipLeaderboard';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
+import ShipLeaderboard, { type ShipLeaderboardHandle } from '../ShipLeaderboard';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 import { trackEvent } from '../../lib/umami';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
+}));
+
+// The real SubmarineEasterEgg runs a D3 animation effect that calls
+// window.matchMedia (unimplemented in jsdom) and schedules transition rAF
+// loops — neither is meaningful under Jest. Stub it to a container that
+// exposes the same aria-label so the wiring/branch assertions can find it.
+jest.mock('../SubmarineEasterEgg', () => ({
+    __esModule: true,
+    default: () => (
+        <div aria-label="There are no Tier 9 submarines — but here is one anyway." />
+    ),
 }));
 
 jest.mock('../../context/RealmContext', () => ({
@@ -49,6 +60,8 @@ describe('ShipLeaderboard', () => {
         mockFetch.mockReset();
         mockFetch.mockImplementation((url: string) => routeFetch(url));
         mockTrack.mockClear();
+        // jsdom has no scrollIntoView; the imperative handle calls it.
+        Element.prototype.scrollIntoView = jest.fn();
     });
 
     const selectTierAndType = (typeAbbr = 'DD') => {
@@ -146,6 +159,87 @@ describe('ShipLeaderboard', () => {
         fireEvent.click(screen.getByRole('button', { name: 'BB' }));
         await screen.findAllByText('Gearing');
         expect(screen.queryByText('UsunU')).not.toBeInTheDocument();
+    });
+
+    describe('treemap handoff (selectShip handle)', () => {
+        it('drills straight to a ship board, scrolls, and sets the underlying filters', async () => {
+            const ref = React.createRef<ShipLeaderboardHandle>();
+            render(<ShipLeaderboard ref={ref} />);
+            // Let the default T10/BB list settle, then clear the call log so the
+            // assertions below only see fetches caused by the handle.
+            await screen.findAllByText('Gearing');
+            mockFetch.mockClear();
+
+            act(() => {
+                ref.current!.selectShip({ id: 111, name: 'Shimakaze', tier: 10, type: 'Destroyer' });
+            });
+
+            // (a) Board endpoint fetched and the player board renders...
+            await screen.findAllByText('UsunU');
+            expect(mockFetch).toHaveBeenCalledWith(
+                '/api/realm/na/ship/111/leaderboard',
+                expect.objectContaining({ cacheKey: 'ship-lb:na:111' }),
+            );
+            // (b) ...without needing the ship-list endpoint to reach the board.
+            expect(mockFetch).not.toHaveBeenCalledWith(
+                expect.stringContaining('/ships?'),
+                expect.anything(),
+            );
+            // (c) The section was scrolled into view.
+            expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+
+            // (d) Clear returns to the T10 Destroyer list — proves tier+type were set.
+            fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+            await waitFor(() => {
+                expect(mockFetch).toHaveBeenCalledWith(
+                    '/api/realm/na/ships?tier=10&type=Destroyer',
+                    expect.objectContaining({ cacheKey: 'ships-by:na:10:Destroyer' }),
+                );
+            });
+            expect(screen.getByRole('button', { name: '10' })).toHaveAttribute('aria-pressed', 'true');
+            expect(screen.getByRole('button', { name: 'DD' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        it('tags the drill-down event with source=treemap', async () => {
+            const ref = React.createRef<ShipLeaderboardHandle>();
+            render(<ShipLeaderboard ref={ref} />);
+            await screen.findAllByText('Gearing');
+
+            act(() => {
+                ref.current!.selectShip({ id: 111, name: 'Shimakaze', tier: 10, type: 'Destroyer' });
+            });
+            expect(mockTrack).toHaveBeenCalledWith(
+                'ship-leaderboard-drilldown',
+                expect.objectContaining({ realm: 'na', ship_id: 111, source: 'treemap' }),
+            );
+        });
+    });
+
+    describe('T9 submarine easter egg', () => {
+        const T9_SUB_LABEL = 'There are no Tier 9 submarines — but here is one anyway.';
+
+        it('renders the easter egg for T9 + Submarine with NO fetch and no dead-end message', async () => {
+            render(<ShipLeaderboard />);
+            // Let the default T10/BB list settle, then clear the call log so the
+            // assertions below only see fetches caused by selecting T9 + SS.
+            await screen.findAllByText('Gearing');
+            mockFetch.mockClear();
+
+            fireEvent.click(screen.getByRole('button', { name: '9' }));
+            fireEvent.click(screen.getByRole('button', { name: 'SS' }));
+
+            // (a) The easter-egg container renders (query by its aria-label).
+            await screen.findByLabelText(T9_SUB_LABEL);
+            // (b) The dead-end "No ranked ships" message is absent.
+            expect(screen.queryByText(/no ranked ships/i)).not.toBeInTheDocument();
+            // (c) The short-circuit fired no T9+Submarine ships fetch.
+            await waitFor(() => {
+                expect(mockFetch).not.toHaveBeenCalledWith(
+                    expect.stringContaining('tier=9&type=Submarine'),
+                    expect.anything(),
+                );
+            });
+        });
     });
 
     describe('umami tracking', () => {
