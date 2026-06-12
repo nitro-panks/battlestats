@@ -238,6 +238,7 @@ Registered unconditionally; the **task** is the no-op gate (not folded under `EN
 | `SHIP_BADGE_PRIOR_BATTLES` / `SHIP_BADGE_PRIOR_WR` | `50` / `0.5` | Composite-ranking shrinkage (pseudo-battles / baseline WR; damage & kills shrink toward pool mean). |
 | `SHIP_BADGE_WEIGHT_WINS` / `_DAMAGE` / `_KILLS` | `0.5` / `0.35` / `0.15` | Composite blend weights (wins-led). Re-tune + re-run to reorder boards & badges. |
 | `SHIP_BADGE_MIN_SHIP_POPULATION` | `20` | Min qualifiers before a ship is "ranked". |
+| `SHIP_BADGE_MIN_SHIP_POPULATION_CV` | `10` | Carrier-only population floor (ship_type `AirCarrier`). CVs are a low-volume class — few players grind ≥`MIN_BATTLES` on a single CV per season — so the universal `20` left most T10 CVs off the standings (NA: only 3 of ~13 active cleared it, 2026-06-11). Lower floor restores CV coverage without loosening the guard for populous classes. |
 | `SHIP_BADGE_LIST_SIZE` | `15` | Ranked players stored per ship (ship-page length). |
 | `SHIP_BADGE_TOP_N` | `3` | Placements that become profile badges. |
 | `SHIP_BADGE_TIER` | `10` | Ship tier in scope. |

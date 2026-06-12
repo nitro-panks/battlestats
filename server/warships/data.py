@@ -5974,6 +5974,13 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
 
     min_battles = int(os.getenv('SHIP_BADGE_MIN_BATTLES', '15'))
     min_population = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION', '20'))
+    # Carriers (CVs) are a low-volume class: plenty of players touch a CV, but
+    # few grind >= min_battles on a *single* CV in a 2-week season, so the
+    # universal population guard leaves most T10 CVs off the standings (NA: only
+    # 3 of ~13 active CVs cleared pop=20). A class-specific, lower floor restores
+    # CV coverage without loosening the guard for the populous classes. Applied
+    # only to ship_type 'AirCarrier'; all other classes keep `min_population`.
+    min_population_cv = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION_CV', '10'))
     top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
     list_size = int(os.getenv('SHIP_BADGE_LIST_SIZE', '15'))
     # Ship tiers in scope. `SHIP_BADGE_TIERS` is a comma list (e.g. "8,9,10");
@@ -6039,10 +6046,10 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     # otherwise a popular T5/T6 ship would crown a "best player" we deliberately
     # excluded. The full ranked board is still written for every target ship.
     ship_rows_meta = {
-        s.ship_id: (s.name, s.tier)
+        s.ship_id: (s.name, s.tier, s.ship_type)
         for s in Ship.objects.filter(ship_id__in=target_ids)
     }
-    ship_names = {sid: name for sid, (name, _t) in ship_rows_meta.items()}
+    ship_names = {sid: name for sid, (name, _t, _ty) in ship_rows_meta.items()}
     tiers_set = set(tiers)
 
     rows = (
@@ -6074,7 +6081,11 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     qualified = 0
     badge_count = 0
     for ship_id, pool in by_ship.items():
-        if len(pool) < min_population:
+        # CVs use a lower, class-specific population floor (see min_population_cv).
+        floor = (min_population_cv
+                 if ship_rows_meta.get(ship_id, (None, None, None))[2] == 'AirCarrier'
+                 else min_population)
+        if len(pool) < floor:
             continue
         qualified += 1
         # Pool per-game baselines (battle-weighted) that damage/kills temper
@@ -6121,7 +6132,7 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
             # only they change a player's cached detail payload, and only they
             # accrete to the durable award ledger. Off-scope treemap-union ships
             # still get the full ranked board above, but never a badge/award.
-            if rank <= top_n and ship_rows_meta.get(ship_id, (None, None))[1] in tiers_set:
+            if rank <= top_n and ship_rows_meta.get(ship_id, (None, None, None))[1] in tiers_set:
                 invalidate_wg_ids.append(entry['player__player_id'])
                 badge_count += 1
                 award_rows.append(ShipAward(
