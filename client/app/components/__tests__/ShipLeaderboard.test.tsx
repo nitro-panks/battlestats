@@ -8,6 +8,17 @@ jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
 }));
 
+// The real SubmarineEasterEgg runs a D3 animation effect that calls
+// window.matchMedia (unimplemented in jsdom) and schedules transition rAF
+// loops — neither is meaningful under Jest. Stub it to a container that
+// exposes the same aria-label so the wiring/branch assertions can find it.
+jest.mock('../SubmarineEasterEgg', () => ({
+    __esModule: true,
+    default: () => (
+        <div aria-label="There are no Tier 9 submarines — but here is one anyway." />
+    ),
+}));
+
 jest.mock('../../context/RealmContext', () => ({
     useRealm: () => ({ realm: 'na' }),
 }));
@@ -201,6 +212,33 @@ describe('ShipLeaderboard', () => {
                 'ship-leaderboard-drilldown',
                 expect.objectContaining({ realm: 'na', ship_id: 111, source: 'treemap' }),
             );
+        });
+    });
+
+    describe('T9 submarine easter egg', () => {
+        const T9_SUB_LABEL = 'There are no Tier 9 submarines — but here is one anyway.';
+
+        it('renders the easter egg for T9 + Submarine with NO fetch and no dead-end message', async () => {
+            render(<ShipLeaderboard />);
+            // Let the default T10/BB list settle, then clear the call log so the
+            // assertions below only see fetches caused by selecting T9 + SS.
+            await screen.findAllByText('Gearing');
+            mockFetch.mockClear();
+
+            fireEvent.click(screen.getByRole('button', { name: '9' }));
+            fireEvent.click(screen.getByRole('button', { name: 'SS' }));
+
+            // (a) The easter-egg container renders (query by its aria-label).
+            await screen.findByLabelText(T9_SUB_LABEL);
+            // (b) The dead-end "No ranked ships" message is absent.
+            expect(screen.queryByText(/no ranked ships/i)).not.toBeInTheDocument();
+            // (c) The short-circuit fired no T9+Submarine ships fetch.
+            await waitFor(() => {
+                expect(mockFetch).not.toHaveBeenCalledWith(
+                    expect.stringContaining('tier=9&type=Submarine'),
+                    expect.anything(),
+                );
+            });
         });
     });
 

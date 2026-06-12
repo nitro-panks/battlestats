@@ -2229,6 +2229,30 @@
                 "crawl-control-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-ship-leaderboard-submarine-easter-egg-2026-06-11.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "frontend",
+            "owner": "product",
+            "aliases": [
+                "submarine easter egg",
+                "t9 submarine",
+                "ascii sub",
+                "ship leaderboard easter egg"
+            ],
+            "tags": [
+                "frontend",
+                "feature",
+                "landing-page",
+                "ship-leaderboard",
+                "easter-egg",
+                "ux"
+            ],
+            "archive_on": [
+                "submarine-easter-egg-superseded"
+            ]
+        },
         "agents/runbooks/runbook-treemap-shipleaderboard-handoff-2026-06-12.md": {
             "kind": "runbook",
             "status": "active",

@@ -21,6 +21,7 @@ import { shipClass } from '../lib/shipIdentity';
 import { buildPlayerPath } from '../lib/entityRoutes';
 import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
+import SubmarineEasterEgg from './SubmarineEasterEgg';
 
 export type Tier = 8 | 9 | 10;
 // Raw `Ship.ship_type` strings the backend filters on (note: "AirCarrier", no
@@ -220,11 +221,16 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
         trackEvent('ship-leaderboard-sort', { realm, scope, column, dir });
 
     const bothSelected = tier != null && type != null;
+    // The T9 + Submarine combo (World of Warships has no such ship) short-circuits
+    // to the easter egg and must issue NO fetch — the endpoint would 400 in any
+    // env where SHIP_BADGE_TIERS excludes 9 (e.g. local dev) and is pointless in
+    // prod. Gate both the fetch effect and the render branch on this predicate.
+    const isSubEasterEgg = tier === 9 && type === 'Submarine';
 
     // Ship list fetch (only with both filters set and no ship drilled into).
     const listReqId = useRef(0);
     useEffect(() => {
-        if (!bothSelected || selectedShip) return;
+        if (!bothSelected || selectedShip || isSubEasterEgg) return;
         const reqId = ++listReqId.current;
         setListLoading(true);
         setListError(false);
@@ -246,7 +252,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
                 setListError(true);
                 setListLoading(false);
             });
-    }, [realm, tier, type, bothSelected, selectedShip]);
+    }, [realm, tier, type, bothSelected, selectedShip, isSubEasterEgg]);
 
     // Ship board fetch (drill-down) — reuses the existing /ship leaderboard.
     const boardReqId = useRef(0);
@@ -346,6 +352,8 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
                     <p className="py-6 text-sm text-[var(--text-muted)]">
                         Pick a tier and a type to rank ships by win rate.
                     </p>
+                ) : isSubEasterEgg ? (
+                    <SubmarineEasterEgg />
                 ) : selectedShip ? (
                     <ShipBoard
                         realm={realm}
