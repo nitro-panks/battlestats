@@ -37,6 +37,16 @@ CLAN_CRAWL_HEARTBEAT_STALE_AFTER = 15 * 60
 # completion so the next scheduled pass starts fresh. See
 # runbook-na-crawl-restart-loop-starves-refresh.
 CLAN_CRAWL_PASS_MARKER_TTL = 21 * 24 * 60 * 60
+# Enqueue dedup: at most one crawl_all_clans_task per realm in flight (queued or
+# running), so the daily Beat cron + the 5-min watchdog can't pile up duplicate
+# crawl messages behind the single-slot (-c 1) crawls worker. The pending flag is
+# set at enqueue and cleared when the task starts; its TTL must outlive the time a
+# realm sits queued behind the other realms' passes — MAX_CONCURRENT_REALM_CRAWLS=1
+# serialises them and a pass is ~12-18h (post core_only), so a realm waits at most
+# ~2 passes — with generous margin. The watchdog also clears a stale flag if the
+# broker dropped the queued message. See runbook-crawls-queue-depth-alarm-2026-06-12.
+CLAN_CRAWL_PENDING_TTL = 4 * 24 * 60 * 60
+CLAN_CRAWL_PENDING_STALE_AFTER = 15 * 60
 RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
 RANKED_INCREMENTAL_LOCK_TIMEOUT = 6 * 60 * 60
 PLAYER_REFRESH_LOCK_TIMEOUT = 6 * 60 * 60
@@ -97,6 +107,10 @@ def _clan_crawl_heartbeat_key(realm: str = DEFAULT_REALM) -> str:
 
 def _clan_crawl_pass_marker_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:crawl_all_clans:{realm}:pass_started_at"
+
+
+def _clan_crawl_pending_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:crawl_all_clans:{realm}:pending"
 
 
 def _ranked_incremental_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -1338,6 +1352,12 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
     lock_key = _clan_crawl_lock_key(realm)
     heartbeat_key = _clan_crawl_heartbeat_key(realm)
 
+    # This message is now being processed, so it is no longer "pending in the
+    # queue" — clear the enqueue-dedup flag up front, BEFORE any early-return skip
+    # path below, so the next daily/watchdog tick can enqueue this realm's next
+    # pass instead of being suppressed by a stuck flag.
+    cache.delete(_clan_crawl_pending_key(realm))
+
     # Cross-realm crawl mutex: limit concurrent full crawls to prevent OOM.
     active_crawl_realms = [
         r for r in sorted(_realms)
@@ -1360,7 +1380,8 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
     try:
         touch_clan_crawl_heartbeat(realm=realm)
 
-        # Run-scoped resume. A full pass takes ~14 days and is regularly
+        # Run-scoped resume. A full pass takes ~12-18h (post core_only; it was
+        # ~14 days before R2 gutted the per-clan enrichment cost) and is regularly
         # interrupted by deploys (which SIGTERM the crawls worker) and the
         # per-task soft time limit. With acks_late the same crawl message is
         # redelivered on restart; honoring a stored pass marker lets that
@@ -1417,10 +1438,49 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
         cache.delete(heartbeat_key)
 
 
+def _enqueue_clan_crawl_if_absent(realm=DEFAULT_REALM, resume=True):
+    """Enqueue crawl_all_clans_task for `realm` unless one is already running or
+    already queued for that realm.
+
+    Per-realm dedup: at most one crawl_all_clans_task per realm is ever in flight
+    (queued or running), so the daily Beat cron and the 5-min watchdog can fire
+    freely without stacking duplicate crawl messages behind the single-slot
+    crawls worker. The `cache.add` pending flag is the atomic set-if-absent gate
+    (cleared at task start); the lock check skips when the realm is already
+    crawling. Returns an outcome string for logging/tests.
+    See runbook-crawls-queue-depth-alarm-2026-06-12.md.
+    """
+    if cache.get(_clan_crawl_lock_key(realm)) is not None:
+        return "skipped-running"
+    if not cache.add(_clan_crawl_pending_key(realm), time.time(),
+                     timeout=CLAN_CRAWL_PENDING_TTL):
+        return "skipped-already-queued"
+    crawl_all_clans_task.delay(resume=resume, realm=realm)
+    return "enqueued"
+
+
+@app.task(**TASK_OPTS)
+def dispatch_clan_crawl_task(realm=DEFAULT_REALM):
+    """Lightweight Beat entrypoint for the daily clan crawl.
+
+    Runs on `default` (NOT the single-slot `crawls` queue) and enqueues the heavy
+    crawl_all_clans_task only when one isn't already running/queued for the realm,
+    so the daily schedule can't pile up duplicate crawl messages (the old
+    behaviour that kept the crawls queue chronically above the healthcheck
+    threshold). See runbook-crawls-queue-depth-alarm-2026-06-12.md.
+    """
+    outcome = _enqueue_clan_crawl_if_absent(realm, resume=True)
+    logger.info("dispatch_clan_crawl_task realm=%s -> %s", realm, outcome)
+    return {"status": outcome, "realm": realm}
+
+
 @app.task(**TASK_OPTS)
 def ensure_crawl_all_clans_running_task(realm=DEFAULT_REALM):
+    from warships.models import VALID_REALMS
+
     heartbeat_key = _clan_crawl_heartbeat_key(realm)
     lock_key = _clan_crawl_lock_key(realm)
+    pending_key = _clan_crawl_pending_key(realm)
     heartbeat = cache.get(heartbeat_key)
     lock_value = cache.get(lock_key)
     now_ts = time.time()
@@ -1435,8 +1495,28 @@ def ensure_crawl_all_clans_running_task(realm=DEFAULT_REALM):
             "Crawl watchdog found stale crawl lock; clearing it and resuming crawl")
         cache.delete(lock_key)
         cache.delete(heartbeat_key)
-        crawl_all_clans_task.delay(resume=True, realm=realm)
-        return {"status": "scheduled", "reason": "stale-lock"}
+        # Route the resume through the dedup gate so a redelivered crawl message
+        # already sitting in the queue isn't duplicated.
+        outcome = _enqueue_clan_crawl_if_absent(realm, resume=True)
+        return {"status": "scheduled", "reason": "stale-lock", "enqueue": outcome}
+
+    # No lock for this realm. A pending flag here is normal while the realm waits
+    # its turn behind another realm's pass (MAX_CONCURRENT_REALM_CRAWLS=1). But if
+    # NO crawl is running on ANY realm and the flag is stale, the queued message
+    # was lost (broker purge/restart/deploy) — clear it so the next tick can
+    # re-enqueue instead of the realm staying wedged until the pending TTL.
+    pending_ts = cache.get(pending_key)
+    if pending_ts is not None:
+        any_crawl_running = any(
+            cache.get(_clan_crawl_lock_key(r)) is not None for r in VALID_REALMS)
+        if (not any_crawl_running
+                and now_ts - float(pending_ts) > CLAN_CRAWL_PENDING_STALE_AFTER):
+            logger.warning(
+                "Crawl watchdog clearing stale pending flag for realm=%s "
+                "(no crawl running anywhere; queued message likely lost)", realm)
+            cache.delete(pending_key)
+            return {"status": "recovered", "reason": "stale-pending-cleared"}
+        return {"status": "skipped", "reason": "pending"}
 
     logger.info(
         "Crawl watchdog found no active crawl; leaving the scheduler to start the next full crawl")

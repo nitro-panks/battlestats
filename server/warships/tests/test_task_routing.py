@@ -46,6 +46,11 @@ def test_clan_crawl_routes_to_crawls_but_watchdog_routes_to_default():
         routes["warships.tasks.ensure_crawl_all_clans_running_task"]["queue"]
         == "default"
     )
+    # The Beat dedup entrypoint must also stay off the single-slot crawls queue
+    # so it dispatches promptly instead of queueing behind the running pass.
+    assert (
+        routes["warships.tasks.dispatch_clan_crawl_task"]["queue"] == "default"
+    )
 
 
 def test_startup_cache_warm_task_declares_background_queue():

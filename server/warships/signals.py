@@ -535,16 +535,21 @@ def register_periodic_schedules(sender, **kwargs):
         PeriodicTask.objects.update_or_create(
             name=f"daily-clan-crawl-{realm}",
             defaults={
-                "task": "warships.tasks.crawl_all_clans_task",
+                # Beat fires the lightweight dispatcher (on `default`), which
+                # enqueues the heavy crawl_all_clans_task only if one isn't
+                # already running/queued for the realm — so the daily schedule
+                # can't pile up duplicate crawl messages behind the single-slot
+                # crawls worker. The dispatcher always uses resume=True so a
+                # deploy/SIGTERM mid-pass (acks_late redelivery) or the watchdog
+                # re-dispatch continues the interrupted pass via the run-scoped
+                # marker instead of restarting from clan 0; the marker clears on
+                # pass completion so each new pass still re-crawls every clan.
+                # See runbook-crawls-queue-depth-alarm-2026-06-12.md.
+                "task": "warships.tasks.dispatch_clan_crawl_task",
                 "crontab": clan_crawl_schedule,
                 "enabled": crawler_schedules_enabled,
                 "args": json.dumps([]),
-                # resume=True so a deploy/SIGTERM mid-pass (acks_late redelivery)
-                # or the watchdog re-dispatch continues the interrupted pass via
-                # the run-scoped pass marker instead of restarting from clan 0.
-                # The marker is cleared on pass completion, so each *new* pass
-                # still re-crawls every clan for periodic refresh.
-                "kwargs": json.dumps({"resume": True, "realm": realm}),
+                "kwargs": json.dumps({"realm": realm}),
                 "description": f"Daily full crawl of clans and players from the Wargaming API ({realm.upper()}).",
             },
         )

@@ -300,6 +300,11 @@ CELERY_TASK_ROUTES = {
     # crawl is healthy (lock held + fresh heartbeat → no-op), and can still
     # clear a stale lock + restart. See runbook-clan-crawl-blocker-2026-04-30.md.
     'warships.tasks.ensure_crawl_all_clans_running_task': {'queue': 'default'},
+    # The Beat entrypoint for the daily crawl: a lightweight dedup gate that
+    # enqueues crawl_all_clans_task only if one isn't already running/queued.
+    # Must run on `default` (not the single-slot `crawls` queue) so it dispatches
+    # promptly instead of queueing behind the running pass.
+    'warships.tasks.dispatch_clan_crawl_task': {'queue': 'default'},
     'warships.tasks.incremental_player_refresh_task': {'queue': 'background'},
     'warships.tasks.enrich_player_on_view_task': {'queue': 'background'},
     'warships.tasks.snapshot_active_players_task': {'queue': 'background'},

@@ -1,8 +1,12 @@
 # Runbook — Crawls Queue Depth Alarm (`queue:crawls depth>5`) — 2026-06-12
 
-**Status:** IMPLEMENTED (2026-06-12) — **Option A applied**: the `scripts/healthcheck.sh` crawls
-threshold was raised from `5` to `15` with an updated comment. Options B–D remain available as the
-durable follow-up (dedup enqueues so the queue idles near zero) but are not implemented.
+**Status:** IMPLEMENTED (2026-06-12) — **Options A + B applied.**
+- **A:** `scripts/healthcheck.sh` crawls threshold raised `5 → 15` with an updated comment.
+- **B:** per-realm enqueue dedup so the queue idles near zero — the daily Beat cron now fires a
+  lightweight `dispatch_clan_crawl_task` (on `default`) that enqueues `crawl_all_clans_task` only if
+  one isn't already running/queued for the realm; a Redis pending flag (cleared at task start)
+  enforces "at most one per realm in flight", and the watchdog clears a stale flag if the broker
+  dropped the queued message. Options C/D (cadence change) remain optional and are not implemented.
 
 **TL;DR:** The chronic `healthcheck.sh` failure `FAIL queue:crawls depth=N > 5` is a **false alarm
 from a too-tight threshold**, not a stuck worker or a regression. Post-fix steady-state for the
@@ -56,10 +60,12 @@ Recent distribution (Jun 10–12): `depth=7` ×125, `depth=6` ×93, `depth=8` ×
 | `daily-clan-crawl-{realm}` (cron) | once/day **per realm** → ~3/day | Enqueues `crawl_all_clans_task` regardless of whether a pass is already running. |
 | `clan-crawl-watchdog-{realm}` → `ensure_crawl_all_clans_running_task` | every `CLAN_CRAWL_WATCHDOG_MINUTES` (5) | Re-dispatches `crawl_all_clans_task` **only** on a stale lock (`tasks.py:1438`); a fresh heartbeat → no-op. |
 
-A single full pass takes **~14 days** (`tasks.py:1363`), but the queue has **one** worker
-(`-c 1`, prefetch 1, `acks_late`). While that worker is busy on a pass (one unacked message), every
-new daily-cron enqueue cannot be delivered and **stands in the queue**. Result: a small standing
-backlog of duplicate `crawl_all_clans_task` messages.
+A full pass takes **~12–18h** (measured 2026-06-12: a fresh NA pass at 00:38 was ~25% through
+35,640 items by ~05:00). NOTE: the `tasks.py:1363` "~14 days" comment is **stale** — it predates the
+R2 `core_only` optimization (`tasks.py:1330-1336`) that gutted ~85% of the per-clan WG cost. Even at
+~12–18h, the queue has **one** worker (`-c 1`, prefetch 1, `acks_late`); while it's busy on a pass
+(one unacked message), every new daily-cron enqueue cannot be delivered and **stands in the queue**.
+Result: a small standing backlog of duplicate `crawl_all_clans_task` messages (a few days' worth).
 
 **The duplicates are harmless.** `crawl_all_clans_task` is guarded:
 - per-realm Redis lock — `cache.add(lock_key, …)` fails → `return {"status":"skipped","reason":"already-running"}` (`tasks.py:1354-1357`);
@@ -95,10 +101,26 @@ alarm is purely the leftover threshold being below the new normal.
   reached the hundreds, so 15 trips well before that). Clears the chronic false alarm while keeping a
   genuine runaway detector. No production behavior change (the script runs locally via cron and only
   SSHes in to read queue depth).
-- **B — Deduplicate enqueues at the source (more correct, more code).** Make the daily dispatch (or
-  `crawl_all_clans_task` itself) idempotent so at most one copy is ever queued — e.g. a Redis
-  "crawl pending/queued" flag set on enqueue and cleared when the task starts, checked by the Beat
-  dispatch and the watchdog. Keeps depth at ~0–1. Pairs well with A (lower the threshold back near 1).
+- **B — Deduplicate enqueues at the source (DONE 2026-06-12).** Implemented as a **per-realm**
+  pending flag: at most one `crawl_all_clans_task` per realm is ever in flight (queued or running),
+  so depth is bounded at #realms (~3 — one running + the others queued for their turn under
+  `MAX_CONCURRENT_REALM_CRAWLS=1`, which are *next-in-line* tasks, not duplicates), and typically 1.
+  Continuity is preserved (the next realm is already queued when the running pass finishes — no gap).
+  Implementation:
+  - `_clan_crawl_pending_key(realm)` + `_enqueue_clan_crawl_if_absent(realm)` (`warships/tasks.py`):
+    `cache.add` set-if-absent gate; skips if the realm's lock is held (running) or pending is set.
+  - New `dispatch_clan_crawl_task(realm)` (routed to `default`); the `daily-clan-crawl-{realm}` Beat
+    schedule now points at it instead of `crawl_all_clans_task` (`warships/signals.py`,
+    `settings.py CELERY_TASK_ROUTES`).
+  - `crawl_all_clans_task` clears the pending flag at the very top (before the cross-realm-mutex and
+    already-running early returns) so a skip path can't wedge the realm.
+  - `ensure_crawl_all_clans_running_task` routes its stale-lock resume through the same gate and
+    clears a stale pending flag when **no** crawl is running on any realm (lost-message recovery),
+    making the `CLAN_CRAWL_PENDING_TTL` (4d) backstop safe.
+  - Tests: `ClanCrawlEnqueueDedupTests` in `test_clan_crawl.py` + routing assertion in
+    `test_task_routing.py`.
+  - NOTE: the healthcheck threshold (Option A) was left at 15, not lowered — it stays a runaway
+    tripwire with headroom for transient deploy churn; the queue now idles at ~0–1 (≤3 worst case).
 - **C — Reconsider the "daily" cadence.** A cron named *daily* that drives a ~14-day pass can never
   complete on schedule; it only manufactures duplicates. Lowering the cadence (e.g. weekly, or
   driven solely by the watchdog/self-chain) reduces dup generation regardless of A/B.
