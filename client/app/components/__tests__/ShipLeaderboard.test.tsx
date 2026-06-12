@@ -58,11 +58,23 @@ describe('ShipLeaderboard', () => {
     const clickShip = async (name: string) =>
         fireEvent.click((await screen.findAllByRole('button', { name }))[0]);
 
-    it('shows a prompt until both filters are chosen, then fetches the ship list', async () => {
+    it('defaults to T10 Battleships and fetches that list on mount', async () => {
         render(<ShipLeaderboard />);
-        expect(screen.getByText(/pick a tier and a type/i)).toBeInTheDocument();
-        expect(mockFetch).not.toHaveBeenCalled();
+        // No "pick a tier/type" prompt — both filters are pre-selected.
+        expect(screen.queryByText(/pick a tier and a type/i)).not.toBeInTheDocument();
+        await waitFor(() => {
+            expect(mockFetch).toHaveBeenCalledWith(
+                '/api/realm/na/ships?tier=10&type=Battleship',
+                expect.objectContaining({ cacheKey: 'ships-by:na:10:Battleship' }),
+            );
+        });
+        // T10 and BB pills render pre-pressed.
+        expect(screen.getByRole('button', { name: '10' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'BB' })).toHaveAttribute('aria-pressed', 'true');
+    });
 
+    it('switching type re-fetches and renders the list WR-desc', async () => {
+        render(<ShipLeaderboard />);
         selectTierAndType('DD');
 
         await screen.findAllByText('Gearing');

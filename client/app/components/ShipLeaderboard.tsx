@@ -137,11 +137,36 @@ const SortButton: React.FC<{ label: string; active: boolean; dir: SortDir; onCli
 const ariaSort = (active: boolean, dir: SortDir): 'ascending' | 'descending' | 'none' =>
     active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none';
 
+const DATA_BASIS_HINT =
+    'Stats are aggregated from battle observations recorded during the current two-week period.';
+
+// Small "ⓘ" affordance with a hover/focus tooltip. Reveal is CSS-only
+// (group-hover / group-focus-within) so it works without JS state.
+const InfoHint: React.FC<{ text: string }> = ({ text }) => (
+    <span className="group relative inline-flex">
+        <button
+            type="button"
+            aria-label={text}
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--border)] text-[10px] font-semibold leading-none text-[var(--text-muted)] transition-colors hover:border-[var(--accent-mid)] hover:text-[var(--accent-mid)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)]"
+        >
+            i
+        </button>
+        <span
+            role="tooltip"
+            className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-60 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-xs font-normal normal-case leading-snug tracking-normal text-[var(--text-primary)] opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+            {text}
+        </span>
+    </span>
+);
+
 const ShipLeaderboard: React.FC = () => {
     const { realm } = useRealm();
 
-    const [tier, setTier] = useState<Tier | null>(null);
-    const [type, setType] = useState<ShipType | null>(null);
+    // Land on T10 Battleships so the board shows real standings immediately
+    // (these buckets are pre-warmed daily — see warm_realm_top_ships_task).
+    const [tier, setTier] = useState<Tier | null>(10);
+    const [type, setType] = useState<ShipType | null>('Battleship');
     const [selectedShip, setSelectedShip] = useState<{ id: number; name: string } | null>(null);
 
     const [list, setList] = useState<ListShip[] | null>(null);
@@ -235,7 +260,10 @@ const ShipLeaderboard: React.FC = () => {
     return (
         <section className="mt-2 pt-8" aria-label="Ship leaderboard">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <h3 className={HEADING_CLASS}>Ships</h3>
+                <span className="flex items-center gap-1.5">
+                    <h3 className={HEADING_CLASS}>Ships</h3>
+                    <InfoHint text={DATA_BASIS_HINT} />
+                </span>
                 <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Tier</span>
                     {TIERS.map((t) => (
@@ -332,9 +360,11 @@ const ShipList: React.FC<{
     });
     return (
         <>
-            {/* Desktop: dense table, win rate the only color, ship name the action. */}
-            <table className="hidden w-full max-w-[900px] text-sm sm:table">
-                <thead>
+            {/* Desktop: dense table, win rate the only color, ship name the action.
+                Viewport caps to ~15 rows; the rest scroll under a sticky header. */}
+            <div className="hidden max-h-[580px] max-w-[900px] overflow-y-auto sm:block">
+            <table className="w-full text-sm">
+                <thead className="sticky top-0 z-10 bg-[var(--bg-page)]">
                     <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
                         <th className="py-2 pl-2 pr-8" aria-sort={ariaSort(sort?.key === 'ship_name', colSort('ship_name').dir)}>
                             <SortButton label="Ship" {...colSort('ship_name')} />
@@ -371,9 +401,11 @@ const ShipList: React.FC<{
                     ))}
                 </tbody>
             </table>
+            </div>
 
-            {/* Mobile: stacked cards — ship + win rate primary, the rest secondary. */}
-            <ul className="max-w-[900px] space-y-2 sm:hidden">
+            {/* Mobile: stacked cards — ship + win rate primary, the rest secondary.
+                Capped height with scroll, mirroring the desktop viewport. */}
+            <ul className="max-h-[560px] max-w-[900px] space-y-2 overflow-y-auto sm:hidden">
                 {sortedShips.map((s) => (
                     <li key={s.ship_id} className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3">
                         <div className="flex items-center justify-between gap-2">
@@ -445,8 +477,9 @@ const ShipBoard: React.FC<{
                     <p className="py-6 text-sm text-[var(--text-muted)]">No ranked players for this ship yet.</p>
                 ) : (
                     <>
-                        <table className="hidden w-full max-w-[900px] text-sm sm:table">
-                            <thead>
+                        <div className="hidden max-h-[580px] max-w-[900px] overflow-y-auto sm:block">
+                        <table className="w-full text-sm">
+                            <thead className="sticky top-0 z-10 bg-[var(--bg-page)]">
                                 <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
                                     <th className="py-2 pl-2 pr-3" aria-sort={ariaSort(sort?.key === 'rank', colSort('rank').dir)}>
                                         <SortButton label="#" {...colSort('rank')} />
@@ -485,8 +518,9 @@ const ShipBoard: React.FC<{
                                 ))}
                             </tbody>
                         </table>
+                        </div>
 
-                        <ul className="max-w-[900px] space-y-2 sm:hidden">
+                        <ul className="max-h-[560px] max-w-[900px] space-y-2 overflow-y-auto sm:hidden">
                             {sortedPlayers.map((p) => (
                                 <li key={p.rank} className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3">
                                     <div className="flex items-center justify-between gap-2">
