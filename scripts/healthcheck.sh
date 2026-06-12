@@ -240,11 +240,14 @@ check_queue_depth() {
 check_queue_depth "default"    100
 check_queue_depth "hydration"  100
 check_queue_depth "background" 2000
-# crawls runs the multi-day clan crawl on its own worker (-c 1). Steady-state
-# is 0 messages while the crawl is active, or 1 between Beat ticks. Anything
-# above 5 means the crawl is queueing instead of running — investigate.
-# See agents/runbooks/runbook-clan-crawl-blocker-2026-04-30.md.
-check_queue_depth "crawls"     5
+# crawls runs the multi-day clan crawl on its own worker (-c 1, acks_late). A
+# full pass takes ~14 days, but daily-clan-crawl-{realm} enqueues ~3/day, so a
+# small standing backlog of duplicate (lock-guarded, harmless) crawl_all_clans_task
+# messages parks behind the running pass. Post-fix steady-state is 6–8 (the old
+# threshold of 5 fired on every run); 15 clears that noise while still tripping
+# far below a real runaway — the pre-fix watchdog storm reached the hundreds.
+# See agents/runbooks/runbook-crawls-queue-depth-alarm-2026-06-12.md.
+check_queue_depth "crawls"     15
 
 # ── summary ──────────────────────────────────────────────────────────────────
 

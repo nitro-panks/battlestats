@@ -2276,6 +2276,32 @@
             "archive_on": [
                 "treemap-leaderboard-handoff-superseded"
             ]
+        },
+        "agents/runbooks/runbook-crawls-queue-depth-alarm-2026-06-12.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "ops",
+            "aliases": [
+                "crawls queue depth",
+                "queue:crawls alarm",
+                "crawls backlog",
+                "healthcheck crawls fail",
+                "crawl_all_clans_task duplicates"
+            ],
+            "tags": [
+                "operations",
+                "monitoring",
+                "healthcheck",
+                "celery",
+                "rabbitmq",
+                "crawls",
+                "false-alarm"
+            ],
+            "archive_on": [
+                "crawls-depth-threshold-recalibrated"
+            ]
         }
     }
 }
