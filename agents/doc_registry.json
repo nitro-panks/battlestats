@@ -2310,6 +2310,280 @@
             "archive_on": [
                 "crawls-depth-threshold-recalibrated"
             ]
+        },
+        "agents/runbooks/runbook-ship-award-ledger-2026-06-05.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "features",
+            "owner": "backend",
+            "aliases": [
+                "ship award ledger",
+                "ship honors",
+                "ShipAward ledger",
+                "durable ship awards"
+            ],
+            "tags": [
+                "ship-awards",
+                "ShipAward",
+                "ship-honors",
+                "ledger",
+                "career-record",
+                "badges"
+            ],
+            "archive_on": [
+                "ship-award-ledger-removed"
+            ]
+        },
+        "agents/runbooks/runbook-battle-history-rollout-2026-04-28.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "architecture",
+            "owner": "backend",
+            "aliases": [
+                "battle history rollout",
+                "battle-history pipeline",
+                "longitudinal battles",
+                "BattleObservation rollout"
+            ],
+            "tags": [
+                "battle-history",
+                "BattleObservation",
+                "BattleEvent",
+                "rollup",
+                "capture-hook"
+            ],
+            "archive_on": [
+                "battle-history-pipeline-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-ranked-battle-history-rollout-2026-05-02.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "architecture",
+            "owner": "backend",
+            "aliases": [
+                "ranked battle history",
+                "ranked rollout",
+                "ranked mode capture"
+            ],
+            "tags": [
+                "battle-history",
+                "ranked",
+                "seasons-shipstats",
+                "mode-discriminator",
+                "rollout"
+            ],
+            "archive_on": [
+                "ranked-battle-history-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-enriched-data-features-2026-04-12.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "features",
+            "owner": "backend",
+            "aliases": [
+                "enriched data features",
+                "enrichment-backed charts",
+                "population distribution features"
+            ],
+            "tags": [
+                "enrichment",
+                "PlayerExplorerSummary",
+                "distributions",
+                "correlations",
+                "population-charts"
+            ],
+            "archive_on": [
+                "all-queued-features-shipped-or-dropped"
+            ]
+        },
+        "agents/runbooks/runbook-ship-banner-ux-pass-2026-06-05.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "frontend",
+            "owner": "frontend",
+            "aliases": [
+                "ship banner UX",
+                "ship honors UX",
+                "ShipTopPlayerBanner design"
+            ],
+            "tags": [
+                "frontend",
+                "ux",
+                "ShipTopPlayerBanner",
+                "ShipHonors",
+                "design-tokens"
+            ],
+            "archive_on": [
+                "ship-award-surfaces-redesigned"
+            ]
+        },
+        "agents/runbooks/runbook-leaderboard-updates.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "ship leaderboard freshness",
+                "leaderboard cadence",
+                "is the leaderboard stale"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "freshness",
+                "snapshot-cadence",
+                "fortnight-season",
+                "ShipTopPlayerSnapshot"
+            ],
+            "archive_on": [
+                "leaderboard-freshness-model-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-search-toggle.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "frontend",
+            "owner": "frontend",
+            "aliases": [
+                "search toggle",
+                "player clan search toggle",
+                "header search modes"
+            ],
+            "tags": [
+                "frontend",
+                "search",
+                "HeaderSearch",
+                "SearchModeToggle",
+                "autocomplete"
+            ],
+            "archive_on": [
+                "search-toggle-removed"
+            ]
+        },
+        "agents/runbooks/runbook-incident-celery-zombie-worker-2026-04-12.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "celery zombie worker",
+                "zombie worker incident",
+                "background queue stuck",
+                "0 consumers"
+            ],
+            "tags": [
+                "celery",
+                "rabbitmq",
+                "consumer_timeout",
+                "zombie-worker",
+                "watchdog",
+                "acks-late",
+                "incident"
+            ],
+            "archive_on": [
+                "celery-zombie-failure-mode-eliminated"
+            ]
+        },
+        "agents/runbooks/runbook-floor-throughput-tuning-2026-06-13.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "floor throughput tuning",
+                "observation floor coverage tuning",
+                "background pool contention"
+            ],
+            "tags": [
+                "observation-floor",
+                "throughput",
+                "background-queue",
+                "enrichment-spin",
+                "coverage",
+                "tuning"
+            ],
+            "archive_on": [
+                "all-phases-landed-or-dropped"
+            ]
+        },
+        "agents/runbooks/runbook-daily-active-snapshots-2026-06-09.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "daily active snapshots",
+                "snapshot active players",
+                "daily snapshot engine"
+            ],
+            "tags": [
+                "snapshots",
+                "daily-active",
+                "snapshot_active_players",
+                "crawl-coexist",
+                "freshness"
+            ],
+            "archive_on": [
+                "daily-snapshot-engine-removed"
+            ]
+        },
+        "agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "features",
+            "owner": "backend",
+            "aliases": [
+                "ship top player badges",
+                "ship standings page",
+                "/ship leaderboard",
+                "ShipTopPlayerSnapshot"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "ship-badges",
+                "ShipTopPlayerSnapshot",
+                "snapshot-task",
+                "SHIP_BADGE_SNAPSHOT_ENABLED"
+            ],
+            "archive_on": [
+                "ship-standings-feature-removed"
+            ]
+        },
+        "agents/runbooks/runbook-droplet-hardening-2026-04-09.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "platform",
+            "owner": "platform",
+            "aliases": [
+                "droplet hardening",
+                "ssh hardening",
+                "security posture"
+            ],
+            "tags": [
+                "security",
+                "ssh",
+                "tls",
+                "nginx",
+                "systemd",
+                "droplet",
+                "hardening"
+            ],
+            "archive_on": [
+                "security-posture-doc-superseded"
+            ]
         }
     }
 }

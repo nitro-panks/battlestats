@@ -59,7 +59,7 @@ Walk the output sections and apply pattern-matching against known failure modes:
 
 **Clan Crawl Interference**
 - Active clan crawl during enrichment → expected occasional contention
-- Persistent interference → may need schedule retuning per `runbook-periodic-task-topology-2026-04-11.md`
+- Persistent interference → may need schedule retuning; the authoritative per-realm striping lives in `server/warships/signals.py` (`REALM_INTERVAL_OFFSETS` / `_realm_crontab_for_cycle`), summarized in CLAUDE.md "Per-realm schedule striping"
 
 **Periodic Task State**
 - `player-enrichment-kickstart` should fire every 15 min

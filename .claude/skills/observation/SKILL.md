@@ -146,4 +146,4 @@ clean days," not a verdict. Frame deliberate selection/config changes as
 - **Read-only.** SSHes, cats JSON, interprets. Never writes the DB, never restarts services, never re-runs the benchmark on the droplet (it serves the *snapshot*, not a fresh run).
 - Reports the most recent **nightly snapshot**, not live state. For "right now," run `benchmark_observation_floor` live instead.
 - **Observation floor only.** Not enrichment progress (separate WR-gated pipeline — see scope note up top), not live crawler health (`enrichment-status`).
-- Background: `agents/runbooks/runbook-bulk-battle-observation-capture-2026-06-06.md` ("Benchmarks" section) and `agents/runbooks/runbook-battle-observation-floor-2026-05-02.md`.
+- Background: `agents/runbooks/runbook-bulk-battle-observation-capture-2026-06-06.md` ("Benchmarks" section) — the active floor doc. (The original daily-01:15 floor design, `runbook-battle-observation-floor-2026-05-02.md`, is superseded and now in `archive/`.)
