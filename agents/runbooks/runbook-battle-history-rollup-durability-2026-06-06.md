@@ -198,7 +198,7 @@ Extend the existing suites (`RebuildDailyShipStatsTests` 1481, `RankedRollupWrit
 
 - Rollout / Phase 3 sweeper origin: `agents/runbooks/runbook-battle-history-rollout-2026-04-28.md`.
 - Phase 7 widening (historical zeros): `agents/runbooks/runbook-battle-history-phase7-data-widening-2026-04-29.md`.
-- Observation floor (Gap B density): `agents/runbooks/runbook-battle-observation-floor-2026-05-02.md`.
+- Observation floor (Gap B density): `agents/runbooks/archive/runbook-battle-observation-floor-2026-05-02.md`.
 - Idempotent rebuild primitives: `server/warships/incremental_battles.py:960` (daily), `:1265,1356` (period).
 - Backfill/repair driver: `server/warships/management/commands/rebuild_player_daily_ship_stats.py`.
 - Lock + task-option conventions: `server/warships/tasks.py:170` (`_task_lock_key`), `:19` (`TASK_OPTS`), `:1797-1826` (lock usage).

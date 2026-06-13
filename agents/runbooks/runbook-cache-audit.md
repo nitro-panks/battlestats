@@ -13,7 +13,7 @@ Operate and validate the battlestats caching layer with an emphasis on:
 3. whether their TTL and invalidation behavior still match the product surface they support
 4. known correctness caveats that operators should not ignore
 
-Use this runbook together with `agents/work-items/cache-analysis-spec.md` and `agents/archive/reviews/qa-cache-analysis-spec-review.md`.
+Use this runbook together with `agents/work-items/archive/cache-analysis-spec.md` and `agents/archive/reviews/qa-cache-analysis-spec-review.md`.
 
 ## Primary Cache Families
 
@@ -232,5 +232,5 @@ Landing player invalidation now uses a namespace bump instead of deleting every 
 
 ## Companion Artifacts
 
-1. `agents/work-items/cache-analysis-spec.md`
+1. `agents/work-items/archive/cache-analysis-spec.md`
 2. `agents/archive/reviews/qa-cache-analysis-spec-review.md`

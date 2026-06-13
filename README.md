@@ -84,7 +84,7 @@ npm test -- --runInBand
 - `agents/runbooks/README.md`: active runbooks only.
 - `agents/knowledge/README.md`: durable verified findings that should survive beyond one task.
 - `agents/contracts/README.md`: machine-readable upstream and internal data contracts.
-- `agents/reviews/README.md`: historical review material, not default task-start context.
+- `agents/archive/reviews/README.md`: historical review material, not default task-start context.
 - `agents/work-items/README.md`: planning specs and tranche scaffolds, not current source of truth after a feature ships.
 - `agents/runbooks/archive/README.md`: historical or superseded runbooks.
 - `client/README.md`: client-specific commands and frontend testing notes.

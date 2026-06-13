@@ -420,7 +420,7 @@ Recent files changed in the current tranche:
 5. `server/warships/signals.py`
 6. `server/warships/tests/test_landing.py`
 7. `server/warships/management/commands/materialize_landing_player_best_snapshots.py`
-8. `agents/work-items/landing-player-best-ranking-recalibration-spec.md`
+8. `agents/work-items/archive/landing-player-best-ranking-recalibration-spec.md`
 
 ## Commands and Operational Entry Points
 

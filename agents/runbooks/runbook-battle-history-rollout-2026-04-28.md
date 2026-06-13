@@ -387,7 +387,7 @@ Filed here so a future engineer knows what got deliberately deferred and where t
 
 ## References
 
-- PoC runbook: `agents/runbooks/runbook-incremental-battle-poc-2026-04-27.md`.
+- PoC runbook: `agents/runbooks/archive/runbook-incremental-battle-poc-2026-04-27.md`.
 - Snapshot precedent for daily aggregates: `server/warships/data.py:2518` (`update_snapshot_data`) — same delta-from-previous-row pattern, but at player level.
 - Refresh path entry points: `server/warships/data.py:4696` (`update_player_data`), `:2365` (`update_battle_data`), `:199` (`refresh_player_detail_payloads`).
 - Incremental crawl path: `server/warships/management/commands/incremental_player_refresh.py:180` (calls `fetch_players_bulk` + `save_player`, then `refresh_player_detail_payloads`).

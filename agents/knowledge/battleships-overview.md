@@ -338,5 +338,5 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 - upstream behavior: `agents/knowledge/wows-account-hydration-notes.md`, `agents/knowledge/wows-statsbydate-status.md`, `agents/knowledge/wows-encyclopedia-surface.md`, `agents/knowledge/wows-api-contract-strategy.md`
 - ranked/player hardening: `agents/runbooks/archive/runbook-player-detail-ranked-hardening.md`, `agents/runbooks/archive/runbook-ranked-top-ship.md`
 - API and smoke coverage: `agents/runbooks/runbook-api-surface.md`
-- scoring/activity semantics: `agents/runbooks/runbook-player-activity-measurement.md`, `agents/runbooks/archive/runbook-player-kill-ratio.md`
-- agentic engine choice: `agents/runbooks/runbook-agent-orchestrator-selection.md`, `agents/runbooks/runbook-crewai-integration.md`
+- scoring/activity semantics: `agents/runbooks/archive/runbook-player-activity-measurement.md`, `agents/runbooks/archive/runbook-player-kill-ratio.md`
+- agentic engine choice: `agents/runbooks/archive/runbook-agent-orchestrator-selection.md`, `agents/runbooks/archive/runbook-crewai-integration.md`

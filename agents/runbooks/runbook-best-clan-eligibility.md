@@ -135,7 +135,7 @@ The landing page Best clans surface now treats the backend payload as authoritat
 - `server/warships/data.py` — New shared helper: `score_best_clans(limit)`, update `bulk_load_player_cache()` clan selection
 - `server/warships/landing.py` — Update `_build_best_landing_clans()` to call `score_best_clans()`
 - `client/app/components/PlayerSearch.tsx` — Render backend Best payload order directly and keep only the empty-payload fallback to recent clans
-- `agents/runbooks/runbook-bulk-entity-cache-loader.md` — Cross-reference this runbook for eligibility criteria
+- `agents/runbooks/archive/runbook-bulk-entity-cache-loader.md` — Cross-reference this runbook for eligibility criteria
 
 ## Validation
 

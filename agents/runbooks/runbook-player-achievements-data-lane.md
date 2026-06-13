@@ -14,7 +14,7 @@ This runbook covers the next implementation tranche only. It does not cover play
 
 The planning source for this runbook is:
 
-- [agents/work-items/player-achievements-data-spec.md](agents/work-items/player-achievements-data-spec.md)
+- [agents/work-items/archive/player-achievements-data-spec.md](agents/work-items/archive/player-achievements-data-spec.md)
 
 The live upstream example used to ground this work is the NA `lil_boots` payload, which confirms that `account/achievements/` mixes combat codes such as `PCH016_FirstBlood` and `PCH023_Warrior` with campaign, album, and PvE codes that must be excluded from the curated lane.
 

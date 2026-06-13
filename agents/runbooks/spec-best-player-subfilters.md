@@ -3,7 +3,7 @@
 Created: 2026-04-04
 Status: Implemented in 1.6.9
 
-Supersedes the narrower Sigma-only planning in `agents/work-items/landing-player-sigma-filter-spec.md`. That earlier spec remains useful background, but this document is the intended source of truth for the broader Best-player surface.
+Supersedes the narrower Sigma-only planning in `agents/work-items/archive/landing-player-sigma-filter-spec.md`. That earlier spec remains useful background, but this document is the intended source of truth for the broader Best-player surface.
 
 ## Goal
 

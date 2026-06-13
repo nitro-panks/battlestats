@@ -224,7 +224,7 @@ After Day-7, run the population coverage query in "Day 7 — coverage assessment
 ## References
 
 - Battle-history rollout runbook (capture pipeline + flags): `agents/runbooks/runbook-battle-history-rollout-2026-04-28.md`
-- Recent-battled sub-sort runbook (sibling consumer of the same capture pipeline): `agents/runbooks/runbook-recent-battled-sub-sort-2026-04-28.md`
+- Recent-battled sub-sort runbook (sibling consumer of the same capture pipeline): `agents/runbooks/archive/runbook-recent-battled-sub-sort-2026-04-28.md`
 - WG `ships/stats/` field inventory: `agents/knowledge/wows-ships-stats-field-inventory.md`
 - Diff machinery: `server/warships/incremental_battles.py:36-322`
 - Aggregate model: `server/warships/models.py` (`PlayerDailyShipStats`)

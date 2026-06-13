@@ -171,7 +171,7 @@ Implementation: `_battle_history_period_table` is unchanged; the payload builder
 
 Mirror `establish_battle_history_baseline` to seed observations for active-ranked-N-day players who have no `BattleObservation.ranked_ships_stats_json` yet. New command: `establish_ranked_baseline --realm na --days 14 --min-ranked-battles 100`. Rate-budget caveat from the randoms baseline-fill applies (~1% 407 retries on the next regular crawl).
 
-**Scoped to its own runbook**: see `agents/runbooks/runbook-ranked-baseline-fill-2026-05-02.md`. The helper + command + tests shipped 2026-05-02; the live fill is operator-gated.
+**Scoped to its own runbook**: see `agents/runbooks/archive/runbook-ranked-baseline-fill-2026-05-02.md`. The helper + command + tests shipped 2026-05-02; the live fill is operator-gated.
 
 ## Operational watchpoints
 
@@ -195,7 +195,7 @@ Mirror `establish_battle_history_baseline` to seed observations for active-ranke
 - Rollup chokepoint: `server/warships/incremental_battles.py:_apply_event_to_daily_summary`.
 - Read API + Card: `server/warships/views.py:537-725`, `client/app/components/BattleHistoryCard.tsx`.
 - Companion runbook (random-battles rollout): `agents/runbooks/runbook-battle-history-rollout-2026-04-28.md` (Phase 7 note at line 366).
-- Companion runbook (post-rollout follow-ups): `agents/runbooks/runbook-post-rollout-followups-2026-05-01.md`.
+- Companion runbook (post-rollout follow-ups): `agents/runbooks/archive/runbook-post-rollout-followups-2026-05-01.md`.
 
 ## Doctrine pre-commit checklist
 

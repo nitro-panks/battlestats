@@ -276,7 +276,7 @@ Enrichment processing migrated from the Celery background worker to a DigitalOce
 | Cron #1    | 5       | 2,500    | 0      | 857.3s  |
 | Cron #2    | 5       | 2,500    | 0      | 845.5s  |
 
-See `agents/runbooks/spec-serverless-background-workers-2026-04-04.md` for the full architecture spec.
+See `agents/runbooks/archive/spec-serverless-background-workers-2026-04-04.md` for the full architecture spec.
 
 ### Steady-state performance (2026-04-04 18:00 - 20:00 UTC)
 
@@ -311,7 +311,7 @@ Times are UTC. Mix of cold starts (10s init, ~12 min / 4 batches) and warm start
 
 The Celery-based `enrich_player_data_task` is **no longer running**. All 23 periodic tasks remain suspended in django-celery-beat. The background worker is idle — it only serves as a fallback if the cron stops. The enrichment is now fully driven by the DO Function cron.
 
-Important scope note: this does **not** mean the full background-worker migration is complete. The repository and droplet still provision the `background` worker, Celery Beat, and background task routes for warmers, crawlers, and incrementals. Only the enrichment lane has been migrated so far. The broader migration status and target architecture live in `agents/runbooks/spec-serverless-background-workers-2026-04-04.md`.
+Important scope note: this does **not** mean the full background-worker migration is complete. The repository and droplet still provision the `background` worker, Celery Beat, and background task routes for warmers, crawlers, and incrementals. Only the enrichment lane has been migrated so far. The broader migration status and target architecture live in `agents/runbooks/archive/spec-serverless-background-workers-2026-04-04.md`.
 
 ## Next Steps
 
