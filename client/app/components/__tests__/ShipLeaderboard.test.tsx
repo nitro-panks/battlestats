@@ -19,6 +19,16 @@ jest.mock('../SubmarineEasterEgg', () => ({
     ),
 }));
 
+// CarrierEasterEgg paints a <canvas> in a useEffect (getContext is a no-op stub
+// under jsdom). Stub it to a container with the same aria-label so the
+// wiring/branch assertions can find it without exercising canvas drawing.
+jest.mock('../CarrierEasterEgg', () => ({
+    __esModule: true,
+    default: () => (
+        <div aria-label="There are no Tier 9 aircraft carriers — but here is one rendered in binary." />
+    ),
+}));
+
 jest.mock('../../context/RealmContext', () => ({
     useRealm: () => ({ realm: 'na' }),
 }));
@@ -263,6 +273,57 @@ describe('ShipLeaderboard', () => {
             expect(screen.queryByLabelText(T9_SUB_LABEL)).not.toBeInTheDocument();
             fireEvent.click(screen.getByRole('button', { name: 'SS' }));
             await screen.findByLabelText(T9_SUB_LABEL);
+            expect(eggCalls()).toHaveLength(2);
+        });
+    });
+
+    describe('T9 carrier easter egg', () => {
+        const T9_CV_LABEL =
+            'There are no Tier 9 aircraft carriers — but here is one rendered in binary.';
+
+        it('renders the easter egg for T9 + CV with NO fetch and no dead-end message', async () => {
+            render(<ShipLeaderboard />);
+            await screen.findAllByText('Gearing');
+            mockFetch.mockClear();
+
+            fireEvent.click(screen.getByRole('button', { name: '9' }));
+            fireEvent.click(screen.getByRole('button', { name: 'CV' }));
+
+            // (a) The easter-egg container renders (query by its aria-label).
+            await screen.findByLabelText(T9_CV_LABEL);
+            // (b) The dead-end "No ranked ships" message is absent.
+            expect(screen.queryByText(/no ranked ships/i)).not.toBeInTheDocument();
+            // (c) The short-circuit fired no T9+AirCarrier ships fetch.
+            await waitFor(() => {
+                expect(mockFetch).not.toHaveBeenCalledWith(
+                    expect.stringContaining('tier=9&type=AirCarrier'),
+                    expect.anything(),
+                );
+            });
+        });
+
+        it('tracks a t9-carrier umami event once each time it surfaces', async () => {
+            render(<ShipLeaderboard />);
+            await screen.findAllByText('Gearing');
+            mockTrack.mockClear();
+
+            fireEvent.click(screen.getByRole('button', { name: '9' }));
+            fireEvent.click(screen.getByRole('button', { name: 'CV' }));
+            await screen.findByLabelText(T9_CV_LABEL);
+
+            const eggCalls = () =>
+                mockTrack.mock.calls.filter((c) => c[0] === 'ship-leaderboard-easter-egg');
+            expect(eggCalls()).toHaveLength(1);
+            expect(mockTrack).toHaveBeenCalledWith('ship-leaderboard-easter-egg', {
+                realm: 'na',
+                egg: 't9-carrier',
+            });
+
+            // Leaving and re-entering the combo counts as a fresh activation.
+            fireEvent.click(screen.getByRole('button', { name: 'DD' }));
+            expect(screen.queryByLabelText(T9_CV_LABEL)).not.toBeInTheDocument();
+            fireEvent.click(screen.getByRole('button', { name: 'CV' }));
+            await screen.findByLabelText(T9_CV_LABEL);
             expect(eggCalls()).toHaveLength(2);
         });
     });

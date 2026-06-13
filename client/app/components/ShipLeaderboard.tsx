@@ -22,6 +22,7 @@ import { buildPlayerPath } from '../lib/entityRoutes';
 import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
 import SubmarineEasterEgg from './SubmarineEasterEgg';
+import CarrierEasterEgg from './CarrierEasterEgg';
 
 export type Tier = 8 | 9 | 10;
 // Raw `Ship.ship_type` strings the backend filters on (note: "AirCarrier", no
@@ -221,33 +222,38 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
         trackEvent('ship-leaderboard-sort', { realm, scope, column, dir });
 
     const bothSelected = tier != null && type != null;
-    // The T9 + Submarine combo (World of Warships has no such ship) short-circuits
-    // to the easter egg and must issue NO fetch — the endpoint would 400 in any
-    // env where SHIP_BADGE_TIERS excludes 9 (e.g. local dev) and is pointless in
-    // prod. Gate both the fetch effect and the render branch on this predicate.
+    // World of Warships has no Tier 9 submarine and no Tier 9 aircraft carrier
+    // (carriers are even-tier only), so both buckets are always empty. Each
+    // short-circuits to its own easter egg and must issue NO fetch — the endpoint
+    // would 400 in any env where SHIP_BADGE_TIERS excludes 9 (e.g. local dev) and
+    // is pointless in prod. Gate both the fetch effect and the render branch on
+    // these predicates.
     const isSubEasterEgg = tier === 9 && type === 'Submarine';
+    const isCarrierEasterEgg = tier === 9 && type === 'AirCarrier';
+    const isEasterEgg = isSubEasterEgg || isCarrierEasterEgg;
+    const eggKind = isSubEasterEgg ? 't9-submarine' : isCarrierEasterEgg ? 't9-carrier' : null;
 
-    // Count every time the T9-submarine animation surfaces. The render branch is
-    // the single source of truth for "the user is looking at it", so fire off the
-    // predicate — independent of whether they reached it tier-first or type-first.
-    // A ref edge-triggers it (once per activation, reset on exit) so a realm flip
-    // while it's on screen doesn't double-count.
+    // Count every time an easter egg surfaces. The render branch is the single
+    // source of truth for "the user is looking at it", so fire off the predicate
+    // — independent of whether they reached it tier-first or type-first. A ref
+    // edge-triggers it (once per activation, reset on exit) so a realm flip while
+    // it's on screen doesn't double-count.
     const eggTrackedRef = useRef(false);
     useEffect(() => {
-        if (isSubEasterEgg) {
+        if (eggKind) {
             if (!eggTrackedRef.current) {
                 eggTrackedRef.current = true;
-                trackEvent('ship-leaderboard-easter-egg', { realm, egg: 't9-submarine' });
+                trackEvent('ship-leaderboard-easter-egg', { realm, egg: eggKind });
             }
         } else {
             eggTrackedRef.current = false;
         }
-    }, [isSubEasterEgg, realm]);
+    }, [eggKind, realm]);
 
     // Ship list fetch (only with both filters set and no ship drilled into).
     const listReqId = useRef(0);
     useEffect(() => {
-        if (!bothSelected || selectedShip || isSubEasterEgg) return;
+        if (!bothSelected || selectedShip || isEasterEgg) return;
         const reqId = ++listReqId.current;
         setListLoading(true);
         setListError(false);
@@ -269,7 +275,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
                 setListError(true);
                 setListLoading(false);
             });
-    }, [realm, tier, type, bothSelected, selectedShip, isSubEasterEgg]);
+    }, [realm, tier, type, bothSelected, selectedShip, isEasterEgg]);
 
     // Ship board fetch (drill-down) — reuses the existing /ship leaderboard.
     const boardReqId = useRef(0);
@@ -371,6 +377,8 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
                     </p>
                 ) : isSubEasterEgg ? (
                     <SubmarineEasterEgg />
+                ) : isCarrierEasterEgg ? (
+                    <CarrierEasterEgg />
                 ) : selectedShip ? (
                     <ShipBoard
                         realm={realm}
