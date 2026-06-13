@@ -13,9 +13,10 @@ const SUB_ART = [
 ];
 
 // The pursuer: an ASCII octopus (jgs) reaching after the fleeing sub. Rendered
-// as monospace text in the same deep-water ink as the sub, riding inside the
-// same translating <g> so it bobs and crosses in lockstep, one boat-length
-// behind. Attribution ("jgs") is kept inline as the original artist's signature.
+// as monospace text in the same deep-water ink as the sub. It lives on its own
+// layer *under* the sub and drifts independently — a sinusoidal ease-in-out
+// glide across the screen along a sine bobbing path, decoupled from the sub's
+// motion. Attribution ("jgs") is kept inline as the original artist's signature.
 const OCTO_ART = [
     '                      ___',
     "                   .-'   `'.",
@@ -45,21 +46,28 @@ const LINE_H = 22;
 // type scale. Tight line height keeps the ASCII art's proportions terminal-like.
 const OCTO_FONT = 12;
 const OCTO_LINE_H = 12;
-// Octopus group origin, in the same local frame as the sub. The sub's bow sits
-// at x≈0 and its tail at x≈250; the octopus is parked just behind the tail
-// (OCTO_X) and centered vertically about the sub (OCTO_Y, negative = up).
-const OCTO_X = 230;
-const OCTO_Y = -60;
 const CROSS_MS = 12000;
 // Fixed off-screen bounds (no getBBox). The art faces left (bow on the left),
-// so the sub swims right → left with the octopus trailing to its right. Start
-// past the right edge; exit far enough left that the octopus block (the
-// rightmost content, ~OCTO_X + 400px wide) fully clears the viewBox.
+// so the sub swims right → left. Start past the right edge; exit far enough
+// left that the widest content clears the viewBox.
 const X_START = WIDTH + 60;
 const X_END = -700;
-const ASSEMBLY_W = 620; // sub + trailing octopus, used to center the static frame
 const BLOCK_H = SUB_ART.length * LINE_H;
 const Y_MID = (HEIGHT - BLOCK_H) / 2;
+
+// --- Octopus layer (independent of the sub) ---------------------------------
+// Its vertical center sits a little above the sub's mid-line (negative = up).
+const OCTO_Y = -60;
+const OCTO_BASE_Y = Y_MID + OCTO_Y;
+// Octopus block is ~400px wide, so exit well past the left edge to fully clear.
+const OCTO_X_START = WIDTH + 60;
+const OCTO_X_END = -440;
+// Slightly slower than the sub so it perpetually trails — still pursuing.
+const OCTO_CROSS_MS = 13000;
+const OCTO_BOB = 16; // amplitude of the vertical bobbing path, px
+// Horizontal offset behind the sub used only by the static (reduced-motion) frame.
+const OCTO_X = 230;
+const ASSEMBLY_W = 620; // sub + trailing octopus, used to center the static frame
 
 const SubmarineEasterEgg: React.FC = () => {
     const ref = useRef<HTMLDivElement | null>(null);
@@ -86,14 +94,12 @@ const SubmarineEasterEgg: React.FC = () => {
             .style('max-width', `${WIDTH}px`)
             .style('background', 'transparent');
 
-        const g = svg.append('g');
+        // Two independent layers. The octopus layer is appended first so it
+        // renders *under* the sub layer (the sub is escaping it).
+        const octoLayer = svg.append('g').attr('aria-hidden', 'true');
+        const subLayer = svg.append('g');
 
-        // Octopus first → it renders behind the sub (the sub is escaping it).
-        const octoG = g
-            .append('g')
-            .attr('aria-hidden', 'true')
-            .attr('transform', `translate(${OCTO_X}, ${OCTO_Y})`);
-        const octoText = octoG
+        const octoText = octoLayer
             .append('text')
             .attr('font-family', 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace')
             .attr('font-size', OCTO_FONT)
@@ -109,7 +115,7 @@ const SubmarineEasterEgg: React.FC = () => {
                 .text(line);
         });
 
-        const text = g
+        const subText = subLayer
             .append('text')
             .attr('font-family', 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace')
             .attr('font-size', FONT_SIZE)
@@ -117,7 +123,7 @@ const SubmarineEasterEgg: React.FC = () => {
             .style('white-space', 'pre');
 
         SUB_ART.forEach((line, i) => {
-            text
+            subText
                 .append('tspan')
                 .attr('x', 0)
                 .attr('y', i * LINE_H + FONT_SIZE)
@@ -131,16 +137,21 @@ const SubmarineEasterEgg: React.FC = () => {
 
         if (reduce) {
             // Static, roughly centered (no animation).
-            g.attr('transform', `translate(${(WIDTH - ASSEMBLY_W) / 2}, ${Y_MID})`);
+            const subX = (WIDTH - ASSEMBLY_W) / 2;
+            subLayer.attr('transform', `translate(${subX}, ${Y_MID})`);
+            octoLayer.attr('transform', `translate(${subX + OCTO_X}, ${OCTO_BASE_Y})`);
             return () => {
                 d3.select(host).selectAll('*').remove();
             };
         }
 
         let stopped = false;
+
+        // Sub: unchanged — linear right→left crossing with a gentle bob.
         const swim = () => {
             if (stopped) return;
-            g.attr('transform', `translate(${X_START}, ${Y_MID})`)
+            subLayer
+                .attr('transform', `translate(${X_START}, ${Y_MID})`)
                 .transition()
                 .duration(CROSS_MS)
                 .ease(d3.easeLinear)
@@ -154,7 +165,30 @@ const SubmarineEasterEgg: React.FC = () => {
                 })
                 .on('end', swim);
         };
+
+        // Octopus: independent layer. Horizontal travel eased with a sinusoidal
+        // ease-in-out (slow at the edges, quick through the middle); vertical
+        // follows a steady sine bobbing path keyed off raw progress.
+        const drift = () => {
+            if (stopped) return;
+            octoLayer
+                .attr('transform', `translate(${OCTO_X_START}, ${OCTO_BASE_Y})`)
+                .transition()
+                .duration(OCTO_CROSS_MS)
+                .ease(d3.easeLinear)
+                .attrTween('transform', () => {
+                    const ix = d3.interpolateNumber(OCTO_X_START, OCTO_X_END);
+                    return (t: number) => {
+                        const x = ix(d3.easeSinInOut(t));
+                        const bob = Math.sin(t * Math.PI * 3) * OCTO_BOB;
+                        return `translate(${x}, ${OCTO_BASE_Y + bob})`;
+                    };
+                })
+                .on('end', drift);
+        };
+
         swim();
+        drift();
 
         return () => {
             stopped = true;
