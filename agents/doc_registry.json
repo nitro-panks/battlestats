@@ -2584,6 +2584,67 @@
             "archive_on": [
                 "security-posture-doc-superseded"
             ]
+        },
+        "agents/README.md": {
+            "kind": "index",
+            "status": "active",
+            "lifecycle": "support-index",
+            "section": "index",
+            "owner": "operations",
+            "aliases": [
+                "agent doc map",
+                "first-read order",
+                "where do I start",
+                "doc routing"
+            ],
+            "tags": [
+                "index",
+                "routing",
+                "first-read",
+                "entry-point",
+                "doc-map"
+            ],
+            "archive_on": []
+        },
+        "agents/contracts/README.md": {
+            "kind": "index",
+            "status": "active",
+            "lifecycle": "support-index",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "contracts index",
+                "data product contracts",
+                "odcs"
+            ],
+            "tags": [
+                "contracts",
+                "index",
+                "odcs",
+                "data-products",
+                "payload-schema"
+            ],
+            "archive_on": []
+        },
+        "agents/contracts/upstream/README.md": {
+            "kind": "index",
+            "status": "active",
+            "lifecycle": "support-index",
+            "section": "contracts",
+            "owner": "backend",
+            "aliases": [
+                "upstream contracts index",
+                "wargaming api contracts",
+                "WG endpoint profiles"
+            ],
+            "tags": [
+                "contracts",
+                "upstream",
+                "wargaming-api",
+                "index",
+                "endpoint-profiles"
+            ],
+            "archive_on": []
         }
     }
 }

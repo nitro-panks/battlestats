@@ -8,6 +8,19 @@ Every player refresh on the droplet (~3 h cadence per realm via `incremental_pla
 
 The discarded fields cost zero additional WG API budget to capture — they are already in every response we pull. Knowing the full surface up-front avoids re-discovery the next time the team plans a coverage expansion.
 
+## Hard Constraint: `ships/stats/` Cannot Be Bulk-Fetched (verified 2026-06)
+
+`ships/stats/` is **single-account-only**. Passing ≥2 comma-joined `account_id`s
+returns `INVALID_ACCOUNT_ID` (407), not a multi-account payload — unlike
+`account/info/` and `account/list/`, which do accept batched ids. The helper
+named `_bulk_fetch_ship_stats` is **misnamed**: it always falls back to one WG
+call per player. This refutes the recurring "~100× bulk capture" premise that
+shows up in capture-throughput planning — per-ship capture is ~1 call/player,
+so the realistic batching win over the naive path is ~2×, not ~100×. Any plan
+that assumes a single call returns ship stats for N players is wrong at the WG
+contract level. The per-player floor (`account/info/` bulk) stays cheap; only
+the *ship-level* detail is per-player.
+
 ## Current Conclusion
 
 - `ships/stats/` `pvp` block exposes ~25–30 cumulative counters and ~6–8 per-record bests per ship.
