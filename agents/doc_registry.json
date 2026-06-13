@@ -796,10 +796,10 @@
                 "test-harness-replaced"
             ]
         },
-        "agents/runbooks/runbook-agent-orchestrator-selection.md": {
+        "agents/runbooks/archive/runbook-agent-orchestrator-selection.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "evergreen",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "agentic",
             "owner": "agentic",
             "aliases": [
@@ -812,16 +812,17 @@
                 "langgraph",
                 "crewai",
                 "hybrid",
-                "routing"
+                "routing",
+                "retired-runtime"
             ],
             "archive_on": [
                 "agent-router-replaced"
             ]
         },
-        "agents/runbooks/runbook-agentic-memory-review.md": {
+        "agents/runbooks/archive/runbook-agentic-memory-review.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "evergreen",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "agentic",
             "owner": "agentic",
             "aliases": [
@@ -833,16 +834,17 @@
                 "memory",
                 "review",
                 "langmem",
-                "durable context"
+                "durable context",
+                "retired-runtime"
             ],
             "archive_on": [
                 "memory-review-process-replaced"
             ]
         },
-        "agents/runbooks/runbook-memory-layering-2026-04-10.md": {
+        "agents/runbooks/archive/runbook-memory-layering-2026-04-10.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "evergreen",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "agentic",
             "owner": "platform",
             "aliases": [
@@ -857,16 +859,17 @@
                 "agentic",
                 "guidance",
                 "retrieval",
-                "memory"
+                "memory",
+                "retired-runtime"
             ],
             "archive_on": [
                 "memory-layering-replaced"
             ]
         },
-        "agents/runbooks/runbook-crewai-integration.md": {
+        "agents/runbooks/archive/runbook-crewai-integration.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "evergreen",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "agentic",
             "owner": "agentic",
             "aliases": [
@@ -878,16 +881,17 @@
                 "crewai",
                 "integration",
                 "personas",
-                "workflow"
+                "workflow",
+                "retired-runtime"
             ],
             "archive_on": [
                 "crewai-runtime-replaced"
             ]
         },
-        "agents/runbooks/runbook-langgraph-opinionated-workflow.md": {
+        "agents/runbooks/archive/runbook-langgraph-opinionated-workflow.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "evergreen",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "agentic",
             "owner": "agentic",
             "aliases": [
@@ -899,16 +903,17 @@
                 "langgraph",
                 "doctrine",
                 "review gates",
-                "workflow"
+                "workflow",
+                "retired-runtime"
             ],
             "archive_on": [
                 "graph-workflow-replaced"
             ]
         },
-        "agents/runbooks/runbook-langsmith-trace-dashboard.md": {
+        "agents/runbooks/archive/runbook-langsmith-trace-dashboard.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "evergreen",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "agentic",
             "owner": "agentic",
             "aliases": [
@@ -921,16 +926,17 @@
                 "langsmith",
                 "trace",
                 "dashboard",
-                "observability"
+                "observability",
+                "retired-runtime"
             ],
             "archive_on": [
                 "trace-dashboard-replaced"
             ]
         },
-        "agents/runbooks/runbook-agentic-next-steps-2026-04-02.md": {
+        "agents/runbooks/archive/runbook-agentic-next-steps-2026-04-02.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "feature-recovery",
             "owner": "agentic",
             "aliases": [
@@ -942,7 +948,8 @@
                 "follow-up",
                 "routing",
                 "retrieval",
-                "memory"
+                "memory",
+                "retired-runtime"
             ],
             "archive_on": [
                 "next-tranche-landed",
@@ -1396,10 +1403,10 @@
                 "spec-superseded"
             ]
         },
-        "agents/runbooks/spec-langmem-agentic-memory-pilot-2026-03-26.md": {
+        "agents/runbooks/archive/spec-langmem-agentic-memory-pilot-2026-03-26.md": {
             "kind": "spec",
-            "status": "active",
-            "lifecycle": "active-spec",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "agentic",
             "owner": "agentic",
             "aliases": [
@@ -1411,7 +1418,8 @@
                 "langmem",
                 "memory",
                 "pilot",
-                "spec"
+                "spec",
+                "retired-runtime"
             ],
             "archive_on": [
                 "pilot-complete",

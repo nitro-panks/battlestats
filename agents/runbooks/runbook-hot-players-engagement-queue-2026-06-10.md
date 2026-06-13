@@ -7,6 +7,14 @@
 
 ## Freshness for the visit path (Tier 3 of the latency runbook)
 
+> **GATED TO ONCE/24h IN PROD 2026-06-13** (config-only). Prod sets
+> `HOT_PLAYERS_FRESH_AFTER_MINUTES=1440`, so this sweep now guarantees **≥1 battle-history refresh
+> per hot player per 24h** instead of keeping them perpetually inside the 15-min visit window. The
+> tactical objective is one refresh/24h for visited players; the sub-second-on-visit guarantee
+> (Tier 3) was judged overkill for its WG cost and is retired in prod. Code/beat/skip-if-fresh are
+> unchanged — re-enabling is a one-knob revert. See `runbook-player-refresh-latency-2026-06-10.md`
+> (Tier 3) and `ops-env-reference.md`.
+
 **IMPLEMENTED 2026-06-11.** This queue gained a third, SEPARATE sweep —
 `refresh_hot_player_freshness` / `refresh_hot_player_freshness_task`, scheduled as
 `hot-players-freshness-{realm}` on a 12-min striped cycle (`HOT_PLAYERS_FRESH_CYCLE_MINUTES`,

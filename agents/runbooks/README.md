@@ -49,15 +49,18 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 - `runbook-seo.md`: metadata, sitemap, structured data, and analytics notes.
 - `runbook-recently-viewed-player-warming.md`: recent-visit warming strategy and tuning knobs.
 
-## Evergreen Agentic Guides
+## Agentic Tooling (current)
 
-- `runbook-agent-orchestrator-selection.md`: choose LangGraph, CrewAI, or hybrid.
-- `runbook-langgraph-opinionated-workflow.md`: guarded LangGraph workflow behavior.
-- `runbook-crewai-integration.md`: CrewAI platform shape and execution model.
-- `runbook-agentic-memory-review.md`: review loop for durable memory.
-- `runbook-memory-layering-2026-04-10.md`: agentic memory layering — SuperLocalMemory at the guidance seam.
-- `runbook-langsmith-trace-dashboard.md`: `/trace` dashboard, LangSmith wiring, and validation notes.
-- `spec-langmem-agentic-memory-pilot-2026-03-26.md`: memory pilot scope and current limitations.
+The experimental in-process LangGraph/CrewAI runtime and its LangSmith/LangMem
+memory layer were **retired in v1.12.1** (`f0fbbe3`); those runbooks now live in
+`archive/` (tagged `retired-runtime`) for historical reference only. There is no
+in-app agentic runtime to enable.
+
+Current agent workflows run through Claude Code itself:
+
+- `../knowledge/agentic-team-doctrine.json` — authoritative decision rules, pre-commit checklist, and quality gates.
+- `../../.claude/skills/` — the recurring operational workflows (deploy, release-gate, doctrine-precommit, enrichment-status, observation, runbook-author/archive).
+- `../../CLAUDE.md` — always-loaded repo defaults and routing.
 
 ## Evergreen Maintenance And Quality Guides
 
@@ -71,7 +74,6 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 
 Open these only when the task matches them directly:
 
-- `runbook-agentic-next-steps-2026-04-02.md`
 - `runbook-enrichment-crawler-2026-04-03.md`: progress log for the active enrichment crawl pass (batches, disruptions, check-ins)
 - `runbook-landing-best-player-subsort-materialization-2026-04-05.md`: current Best-player snapshot materialization and cache behavior
 - `runbook-streamer-twitch-icon-2026-04-07.md`: static streamer flag and Twitch badge rollout plan
@@ -96,7 +98,6 @@ These stay active only while they still shape implementation or operations:
 - `spec-clan-battles-by-tier.md`
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`
 - `spec-github-build-status-badge.md`
-- `spec-langmem-agentic-memory-pilot-2026-03-26.md`
 - `spec-mobile-player-detail-ux-2026-03-28.md`
 - `spec-multi-realm-eu-support.md`
 - `spec-player-route-follow-up-improvements-2026-03-19.md`

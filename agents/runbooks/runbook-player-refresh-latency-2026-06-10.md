@@ -132,6 +132,16 @@ ramping concurrency.
 
 ### Tier 3 — Proactive freshness (eliminate the live refresh for visits that matter)
 
+> **RETIRED IN PROD 2026-06-13** (config-only, code intact). Prod sets
+> `HOT_PLAYERS_FRESH_AFTER_MINUTES=1440`, collapsing the sweep from ~120 refreshes/day per hot
+> player to **≥1 per 24h**. Rationale: the tactical objective for a visited player is one
+> battle-history refresh per 24h; perpetual sub-second-on-visit freshness was judged overkill for
+> the WG cost. The sweep code, beat registration, and skip-if-fresh logic remain live — only the
+> threshold changed — so re-enabling Tier 3 is a one-knob revert (`_AFTER` back to ~12). With Tier 3
+> retired, a visit to a hot player whose data is >15 min stale takes the normal live-refresh-on-view
+> path (Tiers 1–2 still apply). Env detail: `ops-env-reference.md`. The implementation history below
+> is retained for context.
+>
 > **IMPLEMENTED 2026-06-11; parked 2026-06-11 (reverted in `bcfe232`, kept deliberately dark
 > while the engagement queue was observed); RE-ACTIVATED 2026-06-12** by restoring the code +
 > beat registration verbatim (orphaned `hot-players-freshness-*` rows from the parked window were
