@@ -1,8 +1,8 @@
 # Runbook: Ship award surfaces — premium UX pass (Top Player Banner + Ship Honors)
 
 _Created: 2026-06-05_
-_Context: The two ship-award surfaces on the player page read flat — the per-fortnight "top ship player" cards (`ShipTopPlayerBanner.tsx`, above Battle History) and the durable career ledger (`ShipHonors.tsx`, below it). Text was one undifferentiated color, contiguous and evenly spaced so it ran together, and neither had a real surface. The ask: have the designer persona pass against `agents/designer.md`, building real type hierarchy / color / emphasis / surface so they feel like premium awards that set the player above the crowd. Target vibe: subtle, strong, winning. (The banner was done first; Ship Honors followed once the banner landed.)_
-_QA: Reviewed against `agents/designer.md` visual-language + states checklist. Both components implemented + verified — `PlayerDetail.test.tsx` 39/39 pass, `tsc`/`eslint` clean on the changed files, and each redesign was screenshotted in both light and dark themes via a temporary Playwright preview harness (since removed). Live demo: `/player/FlakFiend` (holds 3 badges + 3 awards, so both surfaces render)._
+_Context: The two ship-award surfaces on the player page read flat — the per-fortnight "top ship player" cards (`ShipTopPlayerBanner.tsx`, above Battle History) and the durable career ledger (`ShipHonors.tsx`, below it). Text was one undifferentiated color, contiguous and evenly spaced so it ran together, and neither had a real surface. The ask: have the designer persona pass against `agents/archive/personas/designer.md`, building real type hierarchy / color / emphasis / surface so they feel like premium awards that set the player above the crowd. Target vibe: subtle, strong, winning. (The banner was done first; Ship Honors followed once the banner landed.)_
+_QA: Reviewed against `agents/archive/personas/designer.md` visual-language + states checklist. Both components implemented + verified — `PlayerDetail.test.tsx` 39/39 pass, `tsc`/`eslint` clean on the changed files, and each redesign was screenshotted in both light and dark themes via a temporary Playwright preview harness (since removed). Live demo: `/player/FlakFiend` (holds 3 badges + 3 awards, so both surfaces render)._
 
 ## Purpose
 
@@ -43,7 +43,7 @@ This pass owns the two **player-page ship-award surfaces** (banner + Ship Honors
 
 ## Design decisions (the premium pass)
 
-Grounded in `agents/designer.md` — **reuse existing tokens/components; keep hierarchy obvious and scannable; avoid gratuitous gradients, heavy shadows, oversized icons; both themes must work.** "Premium/winning" is earned through disciplined typography + a restrained gold accent + a real surface, **not** ornamentation. The user explicitly said *subtle*.
+Grounded in `agents/archive/personas/designer.md` — **reuse existing tokens/components; keep hierarchy obvious and scannable; avoid gratuitous gradients, heavy shadows, oversized icons; both themes must work.** "Premium/winning" is earned through disciplined typography + a restrained gold accent + a real surface, **not** ornamentation. The user explicitly said *subtle*.
 
 ### D1 — Use canonical tokens, not the broken ones
 
@@ -118,4 +118,4 @@ No new dependencies, no new shared primitives, no token-file changes. Both compo
 
 - `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md` — the feature this banner belongs to.
 - `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md` — `ShipHonors` (the durable sibling, same token bug).
-- `agents/designer.md` — the visual-language source consulted for this pass.
+- `agents/archive/personas/designer.md` — the visual-language source consulted for this pass.

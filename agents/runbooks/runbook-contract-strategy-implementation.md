@@ -14,7 +14,7 @@ Guide agents to implement and maintain the layered contract strategy for WoWS AP
 - Upstream YAML profiles already cover `account/info`, `account/list`, `account/statsbydate`, and `clans/accountinfo`.
 - Contract-alignment tests now cover both upstream endpoint profiles and derived data-product contracts.
 - Narrative knowledge coverage now includes `wows-statsbydate-status.md` and `wows-account-hydration-notes.md`.
-- QA review for this runbook is executed by applying the criteria in `agents/qa.md` to the changed artifacts and focused tests.
+- QA review for this runbook is executed by applying the criteria in `agents/archive/personas/qa.md` to the changed artifacts and focused tests.
 - Focused QA evidence: `manage.py test warships.tests.test_upstream_contracts warships.tests.test_data_product_contracts` passed on 2026-03-14.
 - Related follow-up work for player-detail and ranked hardening is tracked in `agents/runbooks/archive/runbook-player-detail-ranked-hardening.md`.
 

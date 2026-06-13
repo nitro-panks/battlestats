@@ -75,7 +75,7 @@ Layout today, top to bottom, inside `<section class="mx-auto max-w-3xl">`:
 
 ## Design Principles (resolving "special vs. understated")
 
-This page lives under two house doctrines: `agents/designer.md` (Tufte — high data-ink ratio, narrative through the data, not decoration) and `agents/ux.md` (clarity before novelty; ColorBrewer-derived palettes). The refresh resolves the tension by **earning "special" through data-ink, not ornament:**
+This page lives under two house doctrines: `agents/archive/personas/designer.md` (Tufte — high data-ink ratio, narrative through the data, not decoration) and `agents/archive/personas/ux.md` (clarity before novelty; ColorBrewer-derived palettes). The refresh resolves the tension by **earning "special" through data-ink, not ornament:**
 
 1. **Identity over decoration.** Make each ship page recognizable by showing its real attributes (nation, class, tier, premium), not by adding graphics. Every new mark must encode something true.
 2. **Elevation through restraint.** The champion is set apart with *less*, not more — a hairline, a size step, a touch of metal — never a boxed-out trophy graphic.
@@ -241,7 +241,7 @@ Earn "special" through data-ink: give each ship page a recognizable identity (na
 
 ## QA Review Outcome
 
-Reviewed against completeness / clarity / testability / risk by the QA agent (`agents/qa.md` persona). Initial verdict: **needs-revision-before-PM** — five author-side gaps. All closed in this revision:
+Reviewed against completeness / clarity / testability / risk by the QA agent (`agents/archive/personas/qa.md` persona). Initial verdict: **needs-revision-before-PM** — five author-side gaps. All closed in this revision:
 
 1. **Null identity fields** (`tier`/`ship_type` are nullable) — added the *Field-presence & edge cases* section; AC #1 now scopes to present fields and omits absent chips cleanly.
 2. **Null `captured_on`** — provenance line hides when null (AC #10), not "as of —".
@@ -255,7 +255,7 @@ Nits folded in: podium medal size pinned (`TopShipIcon` `podium: 'text-xl'`); th
 
 ## Operationalization (PM task breakdown)
 
-Produced by the PM agent (`agents/project-manager.md` persona) against the QA-reconciled spec above. Grounding the PM independently confirmed: `TypeSVG.tsx` has **no** single-glyph export today; `TopShipIcon.SIZE_CLASS` maxes at `text-sm`; `--metal-gold`/`--metal-gold-dark` do **not** exist yet; there are **zero** existing ship/medal component tests; `ShipRouteView.tsx` already uses `filter(Boolean)` and `timeZone: 'UTC'` (preserve, don't reinvent).
+Produced by the PM agent (`agents/archive/personas/project-manager.md` persona) against the QA-reconciled spec above. Grounding the PM independently confirmed: `TypeSVG.tsx` has **no** single-glyph export today; `TopShipIcon.SIZE_CLASS` maxes at `text-sm`; `--metal-gold`/`--metal-gold-dark` do **not** exist yet; there are **zero** existing ship/medal component tests; `ShipRouteView.tsx` already uses `filter(Boolean)` and `timeZone: 'UTC'` (preserve, don't reinvent).
 
 ### PRD-lite
 - **Objective:** turn `/ship/<id>-<slug>?realm=<realm>` from a bare table into a recognizable, prestige "winners' wall" — special through data-ink, not ornament.

@@ -42,9 +42,9 @@ This directory is the shortest useful path for agents that are told to review pr
 
 ## Do Not Read By Default
 
-- `runbooks/archive/` — historical or superseded material.
-- `reviews/` — review snapshots and QA artifacts.
-- `work-items/` — planning specs and tranche scaffolds.
+- `runbooks/archive/` — historical or superseded runbooks.
+- `work-items/` — planning specs and tranche scaffolds (shipped/superseded ones under `work-items/archive/`).
+- `archive/` — retired persona briefs (`archive/personas/`) and historical QA review snapshots (`archive/reviews/`).
 
 Only open those directories when an active runbook or current debugging task points there.
 
@@ -66,15 +66,12 @@ Before each commit:
 - keep focused coverage aligned with the change
 - archive runbooks whose status no longer matches the live repo state
 
-## Roles
+## Roles (archived)
 
-The role files in this directory are persona source material for Claude Code subagents (briefs, not a runtime):
-
-- Project Coordinator
-- Project Manager
-- Architect
-- UX
-- Designer
-- Engineer (Web Dev)
-- QA
-- Safety
+The persona role briefs (Project Coordinator, Project Manager, Architect, UX,
+Designer, Engineer/Web Dev, QA, Safety) were source material for the retired
+in-process agentic runtime. They are **not** wired to current workflows and now
+live in `archive/personas/`. Current agent behavior is driven by
+`knowledge/agentic-team-doctrine.json` (decision rules + gates) and
+`../.claude/skills/` (operational workflows); Claude Code uses its built-in
+subagent types for delegation.

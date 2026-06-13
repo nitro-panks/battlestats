@@ -1,8 +1,8 @@
 # Runbook: Optimizing for the real audience — device / OS / browser tuning
 
 _Created: 2026-06-06_
-_Context: The user asked to parse the Umami analytics for the devices, OSes, and browsers actually hitting battlestats.online, then capture a runbook to tune the site to the most common hardware and software, with the UX agent (`agents/ux.md`) participating. This runbook holds (1) the measured distribution and the query recipe to refresh it, (2) the resulting tier-1/2 support matrix, and (3) a prioritized, code-grounded optimization backlog._
-_Method: 30-day Umami pull from the managed-PG `umami` DB (`session` table for device/os/browser/screen, `website_event` for pageview weighting). UX brief produced against `agents/ux.md` with the live `client/app/` tree spot-checked._
+_Context: The user asked to parse the Umami analytics for the devices, OSes, and browsers actually hitting battlestats.online, then capture a runbook to tune the site to the most common hardware and software, with the UX agent (`agents/archive/personas/ux.md`) participating. This runbook holds (1) the measured distribution and the query recipe to refresh it, (2) the resulting tier-1/2 support matrix, and (3) a prioritized, code-grounded optimization backlog._
+_Method: 30-day Umami pull from the managed-PG `umami` DB (`session` table for device/os/browser/screen, `website_event` for pageview weighting). UX brief produced against `agents/archive/personas/ux.md` with the live `client/app/` tree spot-checked._
 
 _Status (updated 2026-06-06): **first tranche implemented** — the token-definition fix, P2 (44px touch targets on header search + insight tabs), P3 (light-mode small-text contrast + WR-glyph outline), and P1 (landing treemap ultrawide breakout) have landed. Player-page heatmap widening (`RankedWRBattlesHeatmapSVG`, `TierTypeHeatmapSVG`) and the `ClanMembers` table breakout remain **open** — they require parametrizing the heatmaps' fixed `svgWidth` before any width change takes effect, and are deferred to a later tranche. P4 was verify-only (no change needed)._
 
@@ -51,7 +51,7 @@ Each item: data justification → file(s) to touch → acceptance check. Ordered
 - **Accept:** at 2560px the treemap consumes the added width and re-tiles legibly; paragraph/card text never exceeds ~75ch; nothing horizontally scrolls at 1920/2560/3440.
 
 ### P2 — Raise touch targets to 44px on the primary nav controls — **DONE**
-- **Why:** ~21% touch; 29.9% of sessions are phones <480px. The UX patterns in `agents/ux.md` already state a 44px minimum — these surfaces missed it.
+- **Why:** ~21% touch; 29.9% of sessions are phones <480px. The UX patterns in `agents/archive/personas/ux.md` already state a 44px minimum — these surfaces missed it.
 - **Implemented:**
   - `app/components/PlayerDetailInsightsTabs.tsx` — insight tab pills now carry `inline-flex min-h-[44px] items-center justify-center` (were `px-3 py-1.5`, ~30px tall). Row keeps its `flex-wrap` — **no** horizontal-scroll tab bar.
   - `app/components/HeaderSearch.tsx` — the search input, the Go button, and the autocomplete suggestion rows all gained `min-h-[44px]` (were `py-2`, ~36px).

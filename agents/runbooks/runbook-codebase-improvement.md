@@ -20,7 +20,7 @@ Provide a repeatable workflow for coordinator-led, multi-agent code quality pass
 
 1. **Coordinator Kickoff**
    - Gather role analyses from PM, Architect, UX, Designer, Engineer, QA, Safety.
-   - Store outputs under `agents/reviews/`.
+   - Store outputs under `agents/archive/reviews/`.
 2. **Synthesis**
    - Build a single prioritized plan (`agents/plan-of-action.md`).
    - Identify low-risk/high-impact tranche for immediate execution.
