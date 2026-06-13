@@ -15,6 +15,40 @@ This is a **phased, reversible, independently-sequenced** plan. Each phase lands
 
 Read this with `runbook-bulk-battle-observation-capture-2026-06-06.md` (floor design + benchmarks) and `runbook-hot-players-engagement-queue-2026-06-10.md` (the other `background`-pool sweep family).
 
+## Two background-pool relief changes landed 2026-06-13 — attribution note
+
+**Phase 1 was not the only `background`-pool change that day.** On the same date the
+hot-players **Tier-3 freshness sweep** (`refresh_hot_player_freshness_task`, re-activated in
+`feat(hot-players): re-activate Tier 3 freshness sweep`) was **gated to once/24h** via
+`HOT_PLAYERS_FRESH_AFTER_MINUTES=1440` in prod. Until that gate it was the heaviest hot-family
+consumer — scheduled every ~12 min striped per realm, each pass calling
+`update_battle_data(force_refresh=True)` (WG fetch + write). Gating it to once/24h removed a large,
+recurring `background`-pool draw simultaneously with Phase 1's enrichment-spin fix.
+
+**Consequence for measurement:** the first clean post-Phase-1 `/observation` snapshot reflects the
+**combined** relief of both changes, not Phase 1 alone. That is fine for the question "is the floor
+freer now?" but means a coverage lift **cannot be attributed to Phase 1 in isolation** — which is
+exactly why Phase 2 must land on its own restart (below). The enrichment background worker restarted
+**2026-06-13 16:50 UTC**; the latest benchmark at evaluation time (`2026-06-13_0430Z`) predates that
+by ~12h, so its entire 24h window is **pre-both-changes**. The first daily snapshot whose window is
+fully post-restart is **`2026-06-15_0430Z`**.
+
+## The `background` pool has more tenants than enrichment + floor
+
+The hot-players runbook makes the co-tenancy concrete — the family is **three** sweeps, not one:
+
+- `maintain_hot_players_task` — DB-only daily (the "brain"), no WG, negligible.
+- `capture_hot_player_observations_task` — per-realm striped, **skip-if-fresh against the floor**, so
+  mostly non-redundant with the floor, but still occupies a `background` slot for the hot-but-inactive
+  set and writes a `Snapshot` per hot player/day.
+- `refresh_hot_player_freshness_task` (Tier 3) — now once/24h per hot player (gate above), but still
+  scheduled every ~12 min striped and **write-heavy** (`update_battle_data(force_refresh=True)`).
+
+Plus `snapshot_active_players_task` (the daily-snapshot engine), also `background` and write-heavy.
+Live evidence 2026-06-13: a continuous run of `Updated snapshot data for player …` at ~3.5s/player
+occupying a worker. **The pool's binding pressure is partly write contention against the 2-vCPU
+managed PG, not only WG/CPU** — this matters for Phase 3 (below).
+
 ## Diagnosis (what's actually binding)
 
 The floor is **not** capacity-bound by its own knobs:
@@ -65,6 +99,20 @@ The real throttle is the **shared `background` pool (`-c 3`)**, consumed by enri
 
 **Gate:** first verify managed-PG `system_load15` is comfortably < ~1.5 sustained. `doctl` on the droplet cannot enumerate the managed DB, so use the DO Prometheus scrape (creds from `/databases/{id}/metrics/credentials`, scrape `:9273/metrics`; recipe in memory `reference_do_db_cpu_metrics_endpoint.md`). Only after Phase 1 frees the pool — measure the post-Phase-1 baseline first; freeing the enrichment spin may itself lift floor throughput enough.
 
+**`-c 3 → 4` is riskier than it looks — the pool is write-heavy.** As documented above, the
+`background` pool already runs several *concurrent writers* (hot capture's `update_snapshot_data`,
+Tier-3 freshness's `update_battle_data(force_refresh=True)`, the daily-snapshot engine, plus the
+floor). A 4th slot adds another concurrent writer against the 2-vCPU managed PG, so check `load15`
+**under a striping-overlap window** (when multiple realm sweeps coincide), not at an idle moment.
+
+**Cheaper lever to try *before* Phase 3 — de-conflict striping.** The floor, hot capture, and the
+snapshot engine are each independently per-realm striped. If their `base_minute`/offsets put a
+write-heavy sweep in the **same realm-slot as the floor**, they contend for both the worker and the
+DB. Re-spacing their `base_minute` in `signals.py` frees floor wall-clock at **zero added DB load** —
+strictly preferable to buying a 4th worker. Audit `signals.py` for floor-vs-(hot/snapshot) slot
+collisions first; only reach for concurrency/self-chain if striping is already clean and `load15`
+has headroom.
+
 ## Validation (overall)
 
 - Phase 1: enrichment pass rate drops sharply; `enriched`/`empty` still progress when real backlog exists.
@@ -73,8 +121,50 @@ The real throttle is the **shared `background` pool (`-c 3`)**, consumed by enri
 
 ## Follow-ups
 
-- **Root-fix the stuck-candidate set (deeper than Phase 1).** The ~33 private-at-fetch `PENDING/battles_json IS NULL` rows should be excluded from `_candidates()` (a per-row cooldown after a skip, or marking them a terminal non-`PENDING` state) so they stop being re-selected at all. Ties into `agents/work-items/player-enrichment-map-2026-06-08.md` and memory `project_enrichment_misses_elite_empty_falseneg` (null `battles_json` on high-battle empties + scheduled reclassify). Phase 1 only bounds the spin; this removes its fuel.
-- **Phase 3 execution** once managed-PG `load15` is verified.
+- **Root-fix the stuck-candidate set (deeper than Phase 1) — IMPLEMENTED 2026-06-13, PENDING
+  COMMIT/DEPLOY.** Code is written + tested on `worktree-floor` but **not committed and not deployed**;
+  the prod behavior below is the expected post-deploy state, not yet observed. The ~33 private-at-fetch
+  `PENDING/battles_json IS NULL` rows must stop being re-selected by `_candidates()`.
+
+  **Decision: per-row cooldown, NOT a terminal state.** The "or terminal non-`PENDING` state" option
+  was evaluated and **rejected as unsafe.** `reclassify_enrichment_status` is the authoritative state
+  machine and it keys **purely on stored fields** — its `pending` bucket is exactly
+  `is_hidden=False, battles_json IS NULL, pvp_battles>=MIN, days<=MAX, pvp_ratio>=MIN`. These rows
+  have `is_hidden=False` (WG returns *null ship stats* for a private profile, but the account-level
+  `is_hidden` flag isn't set), so any terminal `skipped_*` we wrote would be **bounced straight back
+  to `pending`** by the next daily drift reclassify → re-clog. A terminal state would require teaching
+  reclassify about the cooldown — out of scope (violates smallest-safe-slice).
+
+  **The fix (implemented approach):** a dedicated `Player.enrichment_skipped_at` timestamp (migration
+  `0070_player_enrichment_skipped_at`, a nullable add — metadata-only on PG), stamped only in
+  the private-at-fetch skip branch (`_process_player_ship_data`, `ship_data_list is None`), with
+  `_candidates()` excluding rows skipped within `ENRICH_SKIP_RETRY_AFTER_DAYS` (default **3** — shorter
+  than EMPTY's 14 because private accounts un-hide relatively often, and the retry is now ~700× cheaper
+  than the old 37s spin). Rows stay `PENDING` (correct — they *are* pending, just rate-limited), so the
+  fix is orthogonal to reclassify and doesn't fight it. Mirrors the `ENRICHMENT_EMPTY_RETRY_AFTER_DAYS`
+  precedent. **Transient failures are untouched:** the `"SKIP"` sentinel and chunk-level 5xx/timeout
+  errors `continue` before reaching the stamp, so genuine transient retries stay immediate (covered by
+  a regression test). Composes with Phase 1: after one stamping pass the pool drains to 0 candidates
+  for the cooldown window, so even the 15-min Beat kickstart finds nothing — the spin is *eliminated*,
+  not just bounded.
+
+  **Operational note (so it doesn't read as a stall):** post-fix a steady **~33 `PENDING`** is
+  expected — it is **cooldown-suppressed, not stuck**. The `enrichment-status` / "how's enrichment"
+  health read should not flag a flat non-zero pending floor as a regression. Ties into
+  `agents/work-items/player-enrichment-map-2026-06-08.md` and memory
+  `project_enrichment_misses_elite_empty_falseneg` ("99% caught up" is false).
+
+  **Validate (prod, post-deploy):** after the migration applies + the `background` worker restarts,
+  the 15-min kickstart passes should show `skipped:0` (no longer `skipped:33`) — confirm with
+  `journalctl -u battlestats-celery-background --since "30 min ago" | grep "Enrichment pass complete"`
+  (the per-pass `skipped` count should fall to 0 once the 33 are stamped, with `candidates` also
+  dropping toward 0). The ~33 stay `PENDING` (a `enrichment_status` count won't move); that's the
+  cooldown holding them, not a stall. Re-eligibility after `ENRICH_SKIP_RETRY_AFTER_DAYS` (3d) is the
+  expected retry. **Rollback:** unset/raise `ENRICH_SKIP_RETRY_AFTER_DAYS` (the filter widens; the
+  column is harmless if left) — or revert the `_candidates()` filter + stamp commit; the migration is
+  additive and need not be reversed.
+- **Phase 3 execution** once managed-PG `load15` is verified — and only after the cheaper
+  striping-collision audit above.
 
 ## Related runbooks
 

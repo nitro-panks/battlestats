@@ -8,11 +8,19 @@ path must also never run the heavy `_maybe_redispatch_enrichment` candidate
 scan. See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
 """
 import os
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.core.cache import cache
 from django.test import TestCase
+from django.utils import timezone
 
+from warships.management.commands.enrich_player_data import (
+    EnrichOutcome,
+    _candidates,
+    _process_player_ship_data,
+    enrich_players,
+)
 from warships.models import Player
 from warships.tasks import (
     ENRICH_PLAYER_DATA_LOCK_TIMEOUT,
@@ -191,3 +199,82 @@ class EnrichPlayerOnViewTaskTests(TestCase):
         player = self._mk(battles_json=[{"ship_id": 1}])
         _maybe_enrich_on_view(player, "na")
         mock_apply.assert_not_called()
+
+
+class EnrichmentSkipCooldownTests(TestCase):
+    """Root-fix for the private-at-fetch self-chain spin: a PENDING /
+    battles_json-NULL row whose WG ship stats come back null is stamped with
+    ``enrichment_skipped_at`` and suppressed from ``_candidates()`` for
+    ``ENRICH_SKIP_RETRY_AFTER_DAYS`` (default 3), so it stops being re-selected
+    every pass while staying PENDING for a later retry. Transient failures must
+    NOT be stamped (they keep retrying immediately). See
+    runbook-floor-throughput-tuning-2026-06-13.md.
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    def _mk_pending(self, player_id, **kw):
+        defaults = dict(
+            realm="na", player_id=player_id, name=f"P{player_id}",
+            is_hidden=False, pvp_battles=1000, pvp_ratio=60.0,
+            days_since_last_battle=1, battles_json=None,
+            enrichment_status=Player.ENRICHMENT_PENDING,
+        )
+        defaults.update(kw)
+        return Player.objects.create(**defaults)
+
+    def test_candidates_suppresses_in_cooldown_keeps_others(self):
+        # never-skipped → eligible; stamped just now → suppressed; stamped past
+        # the cooldown → eligible again.
+        self._mk_pending(1, enrichment_skipped_at=None)
+        self._mk_pending(2, enrichment_skipped_at=timezone.now())
+        self._mk_pending(3, enrichment_skipped_at=timezone.now() - timedelta(days=5))
+
+        ids = {row[0] for row in _candidates("na", min_pvp_battles=500,
+                                             min_wr=0.0, limit=100)}
+        self.assertEqual(ids, {1, 3})
+
+    def test_private_at_fetch_skip_stamps_and_returns_skipped(self):
+        # ship_data_list is None == WG returned null ship stats (private profile):
+        # the row stays PENDING but is stamped so it leaves the candidate set.
+        player = self._mk_pending(10)
+        rows, outcome = _process_player_ship_data(player, None)
+        self.assertEqual(outcome, EnrichOutcome.SKIPPED)
+        player.refresh_from_db()
+        self.assertIsNotNone(player.enrichment_skipped_at)
+        # Still PENDING — orthogonal to the reclassify state machine.
+        self.assertEqual(player.enrichment_status, Player.ENRICHMENT_PENDING)
+
+    def test_empty_outcome_does_not_stamp_skip(self):
+        # [] is a genuine no-ships result → EMPTY (its own cooldown via
+        # battles_updated_at); it must not borrow the skip cooldown.
+        player = self._mk_pending(11)
+        rows, outcome = _process_player_ship_data(player, [])
+        self.assertEqual(outcome, EnrichOutcome.EMPTY)
+        player.refresh_from_db()
+        self.assertIsNone(player.enrichment_skipped_at)
+        self.assertEqual(player.enrichment_status, Player.ENRICHMENT_EMPTY)
+
+    @patch("warships.management.commands.enrich_player_data._prewarm_ship_cache",
+           return_value=0)
+    @patch("warships.management.commands.enrich_player_data._bulk_fetch_ranked_account_info",
+           return_value=({}, None))
+    @patch("warships.api.ships._per_player_ship_fallback")
+    @patch("warships.api.ships._bulk_fetch_ship_stats")
+    def test_transient_skip_does_not_stamp_cooldown(
+            self, mock_bulk_ship, mock_fallback, *_):
+        # A transient per-player failure surfaces as the "SKIP" sentinel and
+        # `continue`s before reaching the stamp — so a 5xx/timeout keeps retrying
+        # immediately instead of being parked for the 3-day cooldown.
+        player = self._mk_pending(20)
+        mock_bulk_ship.return_value = ({}, "INVALID_ACCOUNT_ID")  # → fallback
+        mock_fallback.return_value = {"20": "SKIP"}               # transient sentinel
+
+        summary = enrich_players(batch=10, realms=("na",))
+
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(summary["enriched"], 0)
+        player.refresh_from_db()
+        self.assertIsNone(player.enrichment_skipped_at)
+        self.assertEqual(player.enrichment_status, Player.ENRICHMENT_PENDING)

@@ -51,6 +51,12 @@ DEFAULT_MIN_WR = 0.0
 DEFAULT_DELAY = 0.0
 DEFAULT_MAX_INACTIVE_DAYS = int(os.environ.get("ENRICH_MAX_INACTIVE_DAYS", "365"))
 BULK_API_BATCH_SIZE = 100  # max account_ids per WG API call
+# Per-row cooldown for private-at-fetch skips: a PENDING/battles_json-NULL row
+# whose WG ship stats came back null is re-stamped and suppressed from
+# _candidates() for this many days, so it stops being re-selected every pass
+# (runbook-floor-throughput-tuning-2026-06-13.md). Shorter than the EMPTY retry
+# (14d) because private profiles un-hide relatively often.
+SKIP_RETRY_AFTER_DAYS = int(os.environ.get("ENRICH_SKIP_RETRY_AFTER_DAYS", "3"))
 
 # Health-check tunables (env-overridable)
 DQ_SAMPLE_EVERY_PASSES = int(os.environ.get("ENRICH_DQ_SAMPLE_EVERY_PASSES", "10"))
@@ -85,7 +91,15 @@ def _prewarm_ship_cache() -> int:
 
 def _candidates(realm: str, min_pvp_battles: int, min_wr: float, limit: int,
                 partition: int = 0, num_partitions: int = 1):
-    """Return players missing battles_json, ordered by WR desc."""
+    """Return players missing battles_json, ordered by WR desc.
+
+    Rows whose last private-at-fetch skip is inside the
+    ENRICH_SKIP_RETRY_AFTER_DAYS cooldown are suppressed, so private profiles
+    stop clogging the front of the WR-ordered queue every pass while remaining
+    PENDING for a retry once the cooldown lapses.
+    """
+    from django.db.models import Q
+    skip_cutoff = timezone.now() - timedelta(days=SKIP_RETRY_AFTER_DAYS)
     qs = (
         Player.objects.filter(
             realm=realm,
@@ -95,6 +109,10 @@ def _candidates(realm: str, min_pvp_battles: int, min_wr: float, limit: int,
             pvp_ratio__gte=min_wr,
             days_since_last_battle__lte=DEFAULT_MAX_INACTIVE_DAYS,
             battles_json__isnull=True,
+        )
+        .filter(
+            Q(enrichment_skipped_at__isnull=True)
+            | Q(enrichment_skipped_at__lt=skip_cutoff)
         )
         .exclude(name="")
         .order_by(
@@ -187,6 +205,15 @@ def _process_player_ship_data(player, ship_data_list):
     )
 
     if ship_data_list is None:
+        # Private-at-fetch (WG returned null ship stats): the row stays PENDING /
+        # battles_json NULL, so without a cooldown _candidates() re-selects it every
+        # pass (the self-chain spin, runbook-floor-throughput-tuning-2026-06-13.md).
+        # Stamp the skip so _candidates() suppresses it for ENRICH_SKIP_RETRY_AFTER_DAYS.
+        # NOTE: transient failures never reach here — the "SKIP" sentinel and
+        # chunk-level 5xx/timeout errors `continue` in the caller, so they keep
+        # retrying immediately and are deliberately NOT stamped.
+        player.enrichment_skipped_at = timezone.now()
+        player.save(update_fields=['enrichment_skipped_at'])
         return None, EnrichOutcome.SKIPPED
 
     if not ship_data_list:

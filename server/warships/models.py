@@ -99,6 +99,15 @@ class Player(models.Model):
         default=ENRICHMENT_PENDING,
         db_index=True,
     )
+    # Cooldown anchor for private-at-fetch enrichment skips. WG returns null
+    # ship stats for a private profile, so the row stays PENDING/battles_json
+    # NULL and the enrichment candidate query would otherwise re-select it
+    # forever (the ~37s self-chain spin, see
+    # runbook-floor-throughput-tuning-2026-06-13.md). Stamped on each such skip;
+    # _candidates() suppresses rows skipped within ENRICH_SKIP_RETRY_AFTER_DAYS.
+    # Orthogonal to enrichment_status (reclassify never touches this), so the
+    # row stays correctly PENDING and is retried after the cooldown.
+    enrichment_skipped_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         clan_name = self.clan.name if self.clan else "No Clan"
