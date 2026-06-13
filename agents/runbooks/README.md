@@ -97,8 +97,6 @@ These stay active only while they still shape implementation or operations:
 - `spec-best-player-subfilters.md`: Best player sub-sorts (Overall, Ranked, Efficiency, WR, CB) on the landing page
 - `spec-clan-battles-by-tier.md`
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`
-- `spec-github-build-status-badge.md`
-- `spec-mobile-player-detail-ux-2026-03-28.md`
 - `spec-multi-realm-eu-support.md`
 - `spec-player-route-follow-up-improvements-2026-03-19.md`
 - `spec-cb-seasons-chart-redesign-2026-04-05.md`: CB seasons chart layered redesign spec

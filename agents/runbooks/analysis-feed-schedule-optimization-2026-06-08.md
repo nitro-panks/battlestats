@@ -76,7 +76,7 @@ Optimization is bounded by two shared resources, not by worker slots:
 | Resource | Limit | Who draws on it |
 |---|---|---|
 | Wargaming API | ~10 req/s shared budget; `ships/stats` single-account (un-bulkable); `407 REQUEST_LIMIT_EXCEEDED` when exceeded | floor, player-refresh, ranked-refresh, clan-crawl, enrichment |
-| Postgres | 1 vCPU, managed; prior disk/CPU saturation incidents | every task (reads + writes); analytical warmers use elevated `work_mem` |
+| Postgres | 2 vCPU / 4 GB, managed (resized up from 1 vCPU 2026-05-28; `system_load15` saturates ~2); prior disk/CPU saturation incidents | every task (reads + writes); analytical warmers use elevated `work_mem` |
 
 Celery workers (default `-c3`, background `-c3`, hydration `-c5`, crawls `-c1`) mean
 ≤3 of a family run concurrently — but they all converge on the one DB and the one WG

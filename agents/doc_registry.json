@@ -1360,10 +1360,10 @@
                 "migration-complete"
             ]
         },
-        "agents/runbooks/spec-github-build-status-badge.md": {
+        "agents/runbooks/archive/spec-github-build-status-badge.md": {
             "kind": "spec",
-            "status": "active",
-            "lifecycle": "active-spec",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "spec",
             "owner": "platform",
             "aliases": [
@@ -1426,10 +1426,10 @@
                 "memory-system-replaced"
             ]
         },
-        "agents/runbooks/spec-mobile-player-detail-ux-2026-03-28.md": {
+        "agents/runbooks/archive/spec-mobile-player-detail-ux-2026-03-28.md": {
             "kind": "spec",
-            "status": "active",
-            "lifecycle": "active-spec",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "spec",
             "owner": "frontend",
             "aliases": [
@@ -2261,10 +2261,10 @@
                 "submarine-easter-egg-superseded"
             ]
         },
-        "agents/runbooks/runbook-treemap-shipleaderboard-handoff-2026-06-12.md": {
+        "agents/runbooks/archive/runbook-treemap-shipleaderboard-handoff-2026-06-12.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "frontend",
             "owner": "product",
             "aliases": [
