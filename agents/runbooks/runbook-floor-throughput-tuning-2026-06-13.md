@@ -121,10 +121,14 @@ has headroom.
 
 ## Follow-ups
 
-- **Root-fix the stuck-candidate set (deeper than Phase 1) — IMPLEMENTED 2026-06-13, PENDING
-  COMMIT/DEPLOY.** Code is written + tested on `worktree-floor` but **not committed and not deployed**;
-  the prod behavior below is the expected post-deploy state, not yet observed. The ~33 private-at-fetch
-  `PENDING/battles_json IS NULL` rows must stop being re-selected by `_candidates()`.
+- **Root-fix the stuck-candidate set (deeper than Phase 1) — SHIPPED + VALIDATED IN PROD 2026-06-13.**
+  Committed `0ad8797`, deployed (migration `0070` applied, `background` worker restarted 18:55 UTC).
+  **Validated live:** pre-deploy `_candidates` returned eu 25 / na 8 = 33; one stamping pass logged the
+  old `skipped:33` signature and set `enrichment_skipped_at` on all 33; immediately after, `_candidates`
+  returned **0/0/0** and a second pass queued **0 players, `skipped:0`, completing in 0.36s** instead of
+  the ~37s spin. The self-chain spin is **eliminated**, not merely bounded — the 15-min Beat kickstart
+  now finds 0 candidates until the 3-day cooldown lapses. The ~33 private-at-fetch
+  `PENDING/battles_json IS NULL` rows no longer re-clog `_candidates()`.
 
   **Decision: per-row cooldown, NOT a terminal state.** The "or terminal non-`PENDING` state" option
   was evaluated and **rejected as unsafe.** `reclassify_enrichment_status` is the authoritative state
