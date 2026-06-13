@@ -1903,13 +1903,29 @@ def incremental_ranked_data_task(self, realm=DEFAULT_REALM):
         cache.delete(lock_key)
 
 
-def _maybe_redispatch_enrichment():
+def _maybe_redispatch_enrichment(made_progress=True):
     """Check for remaining candidates and re-dispatch the enrichment task.
 
     Retries the broker dispatch up to 3 times with backoff to survive
     transient RabbitMQ blips after worker restarts.
+
+    ``made_progress`` guards against an unbounded self-chain spin: when the
+    just-completed batch changed zero state (every candidate skipped — nothing
+    enriched, nothing marked empty), re-selecting candidates returns the SAME
+    rows next pass (e.g. private-at-fetch ``PENDING``/``battles_json IS NULL``
+    players that ``_candidates`` keeps surfacing but enrichment can't resolve).
+    Self-chaining on those spins every ~37s burning WG calls + a background
+    worker slot. Stop instead and let the 15-min Beat kickstart
+    (``player-enrichment-kickstart``) retry. Real backlog produces
+    enriched/empty > 0 and keeps the chain alive uninterrupted. See
+    agents/runbooks/runbook-floor-throughput-tuning-2026-06-13.md.
     """
     try:
+        if not made_progress:
+            logger.info(
+                "Enrichment batch made no progress (all candidates skipped) — "
+                "not self-chaining; Beat kickstart will retry")
+            return
         from warships.management.commands.enrich_player_data import _candidates
         from warships.models import VALID_REALMS as _realms
         remaining = sum(
@@ -1946,8 +1962,9 @@ def enrich_player_data_task(self):
     """Continuous background enrichment of players missing battle/ranked/snapshot data.
 
     Processes a batch of players (default 500), then immediately re-dispatches
-    itself for the next batch.  Runs until no candidates remain, then stops.
-    The Beat schedule or a deploy restart kicks it off again.
+    itself for the next batch.  Runs until no candidates remain — or a batch
+    makes no progress (every candidate skipped; see _maybe_redispatch_enrichment)
+    — then stops.  The Beat schedule or a deploy restart kicks it off again.
 
     Defers while a clan crawl is active to avoid competing for WG API rate
     limits.  Runs on the dedicated background worker so it never competes
@@ -1986,6 +2003,7 @@ def enrich_player_data_task(self):
         )
         return {"status": "deferred", "reason": "crawl-running", "active_crawls": active_crawls}
 
+    summary = None
     try:
         from warships.management.commands.enrich_player_data import enrich_players
 
@@ -2016,8 +2034,16 @@ def enrich_player_data_task(self):
         cache.delete(lock_key)
 
         # Re-dispatch if there's more work to do.  The lock is released
-        # above so the next invocation can acquire it cleanly.
-        _maybe_redispatch_enrichment()
+        # above so the next invocation can acquire it cleanly. Skip the
+        # self-chain when the batch changed zero state (every candidate
+        # skipped) so we don't spin every ~37s on candidates that can't be
+        # enriched — Beat kickstart still retries every 15 min. On an
+        # exception (summary unbound) keep the old retry behavior.
+        made_progress = (
+            bool(summary.get("enriched") or summary.get("empty"))
+            if isinstance(summary, dict) else True
+        )
+        _maybe_redispatch_enrichment(made_progress=made_progress)
 
 
 # ---------------------------------------------------------------------------

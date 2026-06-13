@@ -70,7 +70,7 @@ class EnrichPlayerDataTaskControlFlowTests(TestCase):
         # …at the gentler during-crawl delay (default 0.5s, not the 0.2s baseline).
         self.assertAlmostEqual(mock_enrich.call_args.kwargs['delay'], 0.5)
         # …and self-chained so the drain continues through the crawl.
-        mock_redispatch.assert_called_once()
+        mock_redispatch.assert_called_once_with(made_progress=True)
         self.assertIsNone(cache.get(_enrich_player_data_lock_key()))
 
     def test_skips_when_lock_already_held(self):
@@ -101,9 +101,27 @@ class EnrichPlayerDataTaskControlFlowTests(TestCase):
 
         self.assertEqual(result, summary)
         mock_enrich.assert_called_once()
-        # A real batch DOES redispatch (the self-chain) exactly once.
-        mock_redispatch.assert_called_once()
+        # A real batch DOES redispatch (the self-chain) exactly once, and
+        # signals progress so the chain continues.
+        mock_redispatch.assert_called_once_with(made_progress=True)
         # Lock released after the batch.
+        self.assertIsNone(cache.get(_enrich_player_data_lock_key()))
+
+    def test_no_progress_batch_does_not_self_chain(self):
+        # A pure-skip batch (every candidate skipped — nothing enriched, nothing
+        # marked empty) signals made_progress=False so the self-chain stops
+        # instead of spinning ~37s on candidates that can't be resolved (e.g.
+        # private-at-fetch PENDING/battles_json IS NULL rows). The 15-min Beat
+        # kickstart remains the retry. Regression guard for the 2026-06-13
+        # enrichment self-chain spin (146 passes/90min, 142 enriched:0/skipped:33).
+        summary = {'enriched': 0, 'empty': 0, 'skipped': 33, 'errors': 0}
+
+        with patch('warships.management.commands.enrich_player_data.enrich_players', return_value=summary), \
+                patch('warships.tasks._maybe_redispatch_enrichment') as mock_redispatch:
+            result = enrich_player_data_task.apply().get()
+
+        self.assertEqual(result, summary)
+        mock_redispatch.assert_called_once_with(made_progress=False)
         self.assertIsNone(cache.get(_enrich_player_data_lock_key()))
 
 
