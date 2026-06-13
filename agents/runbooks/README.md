@@ -27,7 +27,7 @@ When an agent is told to review project docs, the default runbook read order is:
 2. The deploy runbook for the surface you are touching.
 3. The architecture or feature-specific runbook that matches the task.
 
-Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active runbook points there.
+Do not start in `archive/`, `../archive/`, or `../work-items/` unless an active runbook points there.
 
 ## Evergreen Operational Guides
 
@@ -38,6 +38,11 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 - `runbook-dependency-audit.md`: dependency hygiene policy and current audit posture.
 - `runbook-post-deploy-post-bounce-operations-2026-04-05.md`: required post-redeploy verification, post-bounce behavior, and bounded warm sequencing.
 - `runbook-daily-data-refresh-schedule-2026-04-05.md`: daily refresh cadences and periodic task windows (note: the DO Functions enrichment schedule referenced inside was reverted 2026-04-08 — see the status banner at the top of that runbook).
+- `runbook-daily-active-snapshots-2026-06-09.md`: daily `Snapshot` engine for every active player (`snapshot_active_players_task`, coexists with crawls; kill switch `SNAPSHOT_ACTIVE_PLAYERS_ENABLED`).
+- `runbook-leaderboard-updates.md`: ship-leaderboard / standings freshness and snapshot cadence ("is the leaderboard stale?").
+- `runbook-floor-throughput-tuning-2026-06-13.md`: observation-floor throughput tuning — background-pool contention, enrichment self-chain spin fix, coverage levers.
+- `runbook-incident-celery-zombie-worker-2026-04-12.md`: the celery zombie-worker failure mode (service `active` with 0 consumers) and watchdog recovery.
+- `runbook-droplet-hardening-2026-04-09.md`: droplet security posture — ssh/tls/nginx/systemd hardening.
 
 ## Evergreen Architecture And Policy Guides
 
@@ -48,6 +53,8 @@ Do not start in `archive/`, `../reviews/`, or `../work-items/` unless an active 
 - `runbook-best-clan-eligibility.md`: composite best-clan ranking rules and exclusions.
 - `runbook-seo.md`: metadata, sitemap, structured data, and analytics notes.
 - `runbook-recently-viewed-player-warming.md`: recent-visit warming strategy and tuning knobs.
+- `runbook-battle-history-rollout-2026-04-28.md`: battle-history pipeline rollout (`BattleObservation`/`BattleEvent`, per-day/period rollups).
+- `runbook-ranked-battle-history-rollout-2026-05-02.md`: ranked-mode battle-history capture (season-scoped seasons/shipstats).
 
 ## Agentic Tooling (current)
 
@@ -86,6 +93,10 @@ Open these only when the task matches them directly:
 - `runbook-multi-realm-hardening.md`
 - `runbook-asia-realm-data-load-2026-04-05.md`: Asia realm data load — clan crawl + enrichment backfill operative plan
 - `runbook-search-toggle.md`: header search toggle between player and clan search, with new clan suggestions endpoint
+- `runbook-ship-top-player-badges-2026-06-05.md`: `/ship` standings leaderboard + profile ship badges (`ShipTopPlayerSnapshot`, `SHIP_BADGE_SNAPSHOT_ENABLED`).
+- `runbook-ship-award-ledger-2026-06-05.md`: durable per-ship career Ship Honors (`ShipAward` append-only ledger).
+- `runbook-ship-banner-ux-pass-2026-06-05.md`: ship-award surfaces UX pass (`ShipTopPlayerBanner` / `ShipHonors` type hierarchy + tokens).
+- `runbook-enriched-data-features-2026-04-12.md`: enrichment-backed feature surfaces (distributions, correlations, explorer summaries).
 
 ## Active Specs And Open Design Docs
 
