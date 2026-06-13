@@ -56,8 +56,9 @@ def _season_boundary_now():
 BADGE_ENV = {
     "SHIP_BADGE_MIN_BATTLES": "10",
     "SHIP_BADGE_MIN_SHIP_POPULATION": "3",
-    # CVs get a lower class-specific floor than the universal one above.
+    # CVs and subs each get a lower class-specific floor than the universal one.
     "SHIP_BADGE_MIN_SHIP_POPULATION_CV": "2",
+    "SHIP_BADGE_MIN_SHIP_POPULATION_SUB": "2",
     "SHIP_BADGE_TOP_N": "3",
     "SHIP_BADGE_LIST_SIZE": "50",
     "SHIP_BADGE_TIER": "10",
@@ -72,6 +73,7 @@ BADGE_ENV = {
 SHIMA = 10      # T10
 ZAO = 20        # T10
 CV = 30         # T10 carrier — exercises the class-specific population floor
+SUB = 40        # T10 submarine — exercises the class-specific population floor
 T9_SHIP = 99    # tier 9 — ignored under T10-only scope; in scope for T8–10
 T8_SHIP = 88    # tier 8
 
@@ -87,6 +89,8 @@ class ShipBadgeSnapshotTests(TestCase):
                             nation="japan", ship_type="Destroyer", tier=9)
         Ship.objects.create(ship_id=CV, name="Shinano",
                             nation="japan", ship_type="AirCarrier", tier=10)
+        Ship.objects.create(ship_id=SUB, name="Gato",
+                            nation="usa", ship_type="Submarine", tier=10)
         self._next_pid = 1000
 
     def _player(self, name, realm="na", is_hidden=False):
@@ -227,6 +231,23 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertEqual(result["ships_qualified"], 1)
         self.assertEqual(
             ShipTopPlayerSnapshot.objects.filter(ship_id=CV).count(), 2)
+        self.assertFalse(
+            ShipTopPlayerSnapshot.objects.filter(ship_id=ZAO).exists())
+
+    def test_submarine_uses_lower_population_floor(self):
+        # Subs clear a lower, class-specific floor (SUB=2) than the universal
+        # floor (3): a submarine with 2 qualifiers ranks, while a cruiser (Zao)
+        # with the same 2 qualifiers stays suppressed.
+        for i in range(2):
+            self._event(self._player(f"Sub{i}"), SUB, battles=20, wins=10 + i)
+        for i in range(2):
+            self._event(self._player(f"Zp{i}"), ZAO, battles=20, wins=10 + i)
+
+        result = self._run("na")
+
+        self.assertEqual(result["ships_qualified"], 1)
+        self.assertEqual(
+            ShipTopPlayerSnapshot.objects.filter(ship_id=SUB).count(), 2)
         self.assertFalse(
             ShipTopPlayerSnapshot.objects.filter(ship_id=ZAO).exists())
 

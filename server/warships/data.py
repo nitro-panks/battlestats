@@ -5989,6 +5989,13 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     # CV coverage without loosening the guard for the populous classes. Applied
     # only to ship_type 'AirCarrier'; all other classes keep `min_population`.
     min_population_cv = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION_CV', '10'))
+    # Submarines are the same shape of problem as CVs: a small hull roster where
+    # few captains grind >= min_battles on one boat in a 2-week season, so the
+    # universal pop=20 guard drops legit boards (NA T8: pools of 18/13 cut; only
+    # 3 of 8 hulls cleared). A class-specific, lower floor restores sub coverage
+    # without loosening the guard for the populous classes. Applied only to
+    # ship_type 'Submarine'; all other (non-CV) classes keep `min_population`.
+    min_population_sub = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION_SUB', '12'))
     top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
     list_size = int(os.getenv('SHIP_BADGE_LIST_SIZE', '15'))
     # Ship tiers in scope. `SHIP_BADGE_TIERS` is a comma list (e.g. "8,9,10");
@@ -6089,10 +6096,16 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     qualified = 0
     badge_count = 0
     for ship_id, pool in by_ship.items():
-        # CVs use a lower, class-specific population floor (see min_population_cv).
-        floor = (min_population_cv
-                 if ship_rows_meta.get(ship_id, (None, None, None))[2] == 'AirCarrier'
-                 else min_population)
+        # CVs and subs each use a lower, class-specific population floor (see
+        # min_population_cv / min_population_sub); all other classes keep the
+        # universal `min_population`.
+        _stype = ship_rows_meta.get(ship_id, (None, None, None))[2]
+        if _stype == 'AirCarrier':
+            floor = min_population_cv
+        elif _stype == 'Submarine':
+            floor = min_population_sub
+        else:
+            floor = min_population
         if len(pool) < floor:
             continue
         qualified += 1
