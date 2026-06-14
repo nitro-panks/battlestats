@@ -3892,3 +3892,90 @@ class RollupReconciliationTests(TestCase):
         ):
             result = reconcile_battle_history_rollup_task.apply().get()
         self.assertEqual(result["status"], "skipped")
+
+
+class FloorBattlesJsonRefreshTests(TestCase):
+    """The observation path can reuse its `ships/stats` payload to refresh the
+    player's displayed `battles_json` (+ `battles_updated_at`) with no second WG
+    call — opt-in via `refresh_battles_json=True`, kill-switchable, never allowed
+    to break the observation write. See runbook-floor-battles-json-refresh."""
+
+    def setUp(self):
+        self.player = Player.objects.create(
+            name="floorbench", player_id=555000555, realm="na",
+            pvp_battles=100, pvp_wins=50, pvp_losses=50, pvp_frags=80,
+            pvp_survived_battles=60,
+        )
+        Ship.objects.create(
+            ship_id=42, name="Yamato", nation="japan",
+            ship_type="Battleship", tier=10,
+        )
+
+    def _full_ship_payload(self, *, battles=100):
+        # Full WG ships/stats shape: top-level `battles`/`distance` + `pvp` block.
+        return [{
+            "ship_id": 42, "battles": battles, "distance": 12345,
+            "pvp": {"battles": battles, "wins": 50, "losses": 50, "frags": 80,
+                    "damage_dealt": 1_000_000, "xp": 80_000,
+                    "planes_killed": 0, "survived_battles": 60},
+        }]
+
+    @mock.patch("warships.data.apply_battles_json")
+    def test_refresh_true_calls_apply(self, m_apply):
+        record_observation_from_payloads(
+            self.player, ship_data=self._full_ship_payload(),
+            refresh_battles_json=True)
+        m_apply.assert_called_once()
+
+    @mock.patch("warships.data.apply_battles_json")
+    def test_default_does_not_refresh(self, m_apply):
+        record_observation_from_payloads(
+            self.player, ship_data=self._full_ship_payload())
+        m_apply.assert_not_called()
+
+    @mock.patch("warships.data.apply_battles_json")
+    def test_kill_switch_disables_refresh(self, m_apply):
+        with mock.patch.dict(
+            "os.environ", {"FLOOR_REFRESH_BATTLES_JSON_ENABLED": "0"},
+        ):
+            record_observation_from_payloads(
+                self.player, ship_data=self._full_ship_payload(),
+                refresh_battles_json=True)
+        m_apply.assert_not_called()
+
+    @mock.patch("warships.data.apply_battles_json")
+    def test_empty_ship_data_skips_refresh(self, m_apply):
+        # A transient empty fetch must never blank a player's battles_json.
+        record_observation_from_payloads(
+            self.player, ship_data=[], refresh_battles_json=True)
+        m_apply.assert_not_called()
+
+    @mock.patch("warships.data.apply_battles_json")
+    def test_hidden_player_skips_refresh(self, m_apply):
+        # player_data with hidden_profile → snapshot None → skipped before apply.
+        record_observation_from_payloads(
+            self.player, player_data={"hidden_profile": True},
+            ship_data=self._full_ship_payload(), refresh_battles_json=True)
+        m_apply.assert_not_called()
+
+    def test_apply_battles_json_builds_and_advances_timestamp(self):
+        from warships.data import apply_battles_json
+        self.assertIsNone(self.player.battles_updated_at)
+        apply_battles_json(self.player, self._full_ship_payload(battles=123),
+                           realm="na")
+        self.player.refresh_from_db()
+        self.assertTrue(self.player.battles_json)
+        self.assertEqual(self.player.battles_json[0]["ship_name"], "Yamato")
+        self.assertEqual(self.player.battles_json[0]["pvp_battles"], 123)
+        self.assertIsNotNone(self.player.battles_updated_at)
+
+    def test_floor_path_end_to_end_refreshes_battles_json(self):
+        # Full path: record_observation_from_payloads(refresh_battles_json=True)
+        # with the flag on actually populates battles_json (no mock).
+        self.assertIsNone(self.player.battles_updated_at)
+        record_observation_from_payloads(
+            self.player, ship_data=self._full_ship_payload(battles=77),
+            refresh_battles_json=True)
+        self.player.refresh_from_db()
+        self.assertTrue(self.player.battles_json)
+        self.assertIsNotNone(self.player.battles_updated_at)

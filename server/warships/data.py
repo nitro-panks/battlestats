@@ -2175,6 +2175,65 @@ def _aggregate_battles_by_key(battles_json: Any, group_key: str) -> list[dict]:
     return result
 
 
+def apply_battles_json(player, ship_data, realm: str = DEFAULT_REALM) -> list:
+    """Build + persist `battles_json` from an already-fetched `ships/stats` list.
+
+    Advances `battles_updated_at`, refreshes the derived per-tier / per-type /
+    randoms tables + explorer summary, and busts the player-detail cache —
+    exactly what `update_battle_data` did inline. Factored out so the
+    battle-observation floor can refresh a player's displayed per-ship stats from
+    the SAME `ships/stats` response it already fetched for the observation (no
+    second WG call). Callers must pass a NON-empty `ship_data`; the empty/hidden
+    case is the caller's responsibility (the floor skips it to avoid blanking a
+    transiently-empty fetch; `update_battle_data` records [] deliberately).
+    """
+    prepared_data = []
+    for ship in ship_data:
+        ship_model = _fetch_ship_info(ship['ship_id'])
+        ship_metadata = _build_ship_row_metadata(ship.get('ship_id'), ship_model)
+        if ship_model is None:
+            logging.warning(
+                'Falling back to placeholder ship metadata for ship_id=%s while updating player_id=%s',
+                ship.get('ship_id'), player.player_id,
+            )
+        pvp_battles = ship['pvp']['battles']
+        wins = ship['pvp']['wins']
+        losses = ship['pvp']['losses']
+        frags = ship['pvp']['frags']
+        battles = ship['battles']
+        distance = ship['distance']
+        ship_info = {
+            'ship_id': ship_metadata['ship_id'],
+            'ship_name': ship_metadata['ship_name'],
+            'ship_chart_name': ship_metadata['ship_chart_name'],
+            'ship_tier': ship_metadata['ship_tier'],
+            'all_battles': battles,
+            'distance': distance,
+            'wins': wins,
+            'losses': losses,
+            'ship_type': ship_metadata['ship_type'],
+            'pve_battles': battles - (wins + losses),
+            'pvp_battles': pvp_battles,
+            'win_ratio': round(wins / pvp_battles, 2) if pvp_battles > 0 else 0,
+            'kdr': round(frags / pvp_battles, 2) if pvp_battles > 0 else 0,
+        }
+        prepared_data.append(ship_info)
+
+    sorted_data = sorted(prepared_data, key=lambda x: x.get('pvp_battles', 0), reverse=True)
+    player.battles_updated_at = datetime.now()
+    player.battles_json = sorted_data
+    player.save(update_fields=['battles_json', 'battles_updated_at'])
+    update_tiers_data(player.player_id, realm=realm)
+    update_type_data(player.player_id, realm=realm)
+    update_randoms_data(player.player_id, realm=realm)
+    refresh_player_explorer_summary(player, battles_rows=sorted_data)
+    # Bust the player-detail bulk cache so the next visit / live-update poll
+    # serves the freshly-refreshed stats. Cheap cache.delete; no-op for the
+    # ~uncached majority.
+    invalidate_player_detail_cache(player.player_id, realm=realm)
+    return sorted_data
+
+
 def update_battle_data(player_id: str, realm: str = DEFAULT_REALM,
                        force_refresh: bool = False) -> None:
     """
@@ -2219,62 +2278,8 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM,
         player.save(update_fields=['battles_json', 'battles_updated_at'])
         return
 
-    prepared_data = []
-
-    for ship in ship_data:
-        ship_model = _fetch_ship_info(ship['ship_id'])
-        ship_metadata = _build_ship_row_metadata(
-            ship.get('ship_id'), ship_model)
-        if ship_model is None:
-            logging.warning(
-                'Falling back to placeholder ship metadata for ship_id=%s while updating player_id=%s',
-                ship.get('ship_id'),
-                player_id,
-            )
-
-        pvp_battles = ship['pvp']['battles']
-        wins = ship['pvp']['wins']
-        losses = ship['pvp']['losses']
-        frags = ship['pvp']['frags']
-        battles = ship['battles']
-        distance = ship['distance']
-
-        ship_info = {
-            'ship_id': ship_metadata['ship_id'],
-            'ship_name': ship_metadata['ship_name'],
-            'ship_chart_name': ship_metadata['ship_chart_name'],
-            'ship_tier': ship_metadata['ship_tier'],
-            'all_battles': battles,
-            'distance': distance,
-            'wins': wins,
-            'losses': losses,
-            'ship_type': ship_metadata['ship_type'],
-            'pve_battles': battles - (wins + losses),
-            'pvp_battles': pvp_battles,
-            'win_ratio': round(wins / pvp_battles, 2) if pvp_battles > 0 else 0,
-            'kdr': round(frags / pvp_battles, 2) if pvp_battles > 0 else 0
-        }
-
-        prepared_data.append(ship_info)
-
-    # Sort the data by "pvp_battles" in descending order
-    sorted_data = sorted(prepared_data, key=lambda x: x.get(
-        'pvp_battles', 0), reverse=True)
-
-    player.battles_updated_at = datetime.now()
-    player.battles_json = sorted_data
-    player.save()
-    update_tiers_data(player.player_id, realm=realm)
-    update_type_data(player.player_id, realm=realm)
-    update_randoms_data(player.player_id, realm=realm)
-    refresh_player_explorer_summary(player, battles_rows=sorted_data)
+    apply_battles_json(player, ship_data, realm=realm)
     logging.info(f"Updated battles_json data: {player.name}")
-    # Bust the player-detail bulk cache so the next visit / live-update poll
-    # serves the freshly-refreshed stats. Without this, hot/bulk-cached players
-    # (top ~50) would keep serving the stale cached body even after
-    # battles_updated_at advanced, so the rehydrate-on-poll loop would settle
-    # on old numbers. Cheap cache.delete; no-op for the ~uncached majority.
-    invalidate_player_detail_cache(player.player_id, realm=realm)
 
     # Battle-history capture hook (Phase 2 of the playerbase rollout).
     # Runbook: agents/runbooks/runbook-battle-history-rollout-2026-04-28.md
