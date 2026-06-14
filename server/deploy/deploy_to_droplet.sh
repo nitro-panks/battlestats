@@ -281,24 +281,12 @@ done
 # always registered but no-ops without it). Pinned here because the cp of
 # .env.cloud above wipes any manual /etc edit — same trap that left the
 # ranked-capture flag dark for five deploys. Drives /ship/<id> boards +
-# profile badges for all realms. Runbook:
-# agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
+# profile badges for all realms (now a nightly rolling recompute). Runbook:
+# agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md.
 if grep -q '^SHIP_BADGE_SNAPSHOT_ENABLED=' /etc/battlestats-server.env; then
   sed -i 's|^SHIP_BADGE_SNAPSHOT_ENABLED=.*|SHIP_BADGE_SNAPSHOT_ENABLED=1|' /etc/battlestats-server.env
 else
   echo 'SHIP_BADGE_SNAPSHOT_ENABLED=1' >> /etc/battlestats-server.env
-fi
-
-# Durable Ship Honors ledger held OFF (2026-06-08) while battle-history capture
-# coverage of active-7d random players is too low (NA42/EU37/ASIA30%) — the
-# ephemeral leaderboards/badges above still run and self-correct each season,
-# but the append-only ShipAward ledger would permanently bake under-sampled
-# "champions" into Ship Honors. Flip to 1 to resume accruing honors once
-# coverage is real. See the HELD/PURGED addendum in the ship-badges runbook.
-if grep -q '^SHIP_AWARD_LEDGER_ENABLED=' /etc/battlestats-server.env; then
-  sed -i 's|^SHIP_AWARD_LEDGER_ENABLED=.*|SHIP_AWARD_LEDGER_ENABLED=0|' /etc/battlestats-server.env
-else
-  echo 'SHIP_AWARD_LEDGER_ENABLED=0' >> /etc/battlestats-server.env
 fi
 
 # Ship standings span Tiers 8–10 (per-tier density study, 2026-06-05). Pinned

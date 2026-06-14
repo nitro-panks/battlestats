@@ -896,7 +896,7 @@ describe('PlayerDetail ship-badge banner', () => {
         expect(screen.getByText('64.0%')).toBeInTheDocument();
         expect(screen.getByText('58.5%')).toBeInTheDocument();
         // Links to the ship standings page.
-        const link = screen.getByTitle(/#1 in Shimakaze this season/);
+        const link = screen.getByTitle(/#1 in Shimakaze last 14d/);
         expect(link).toHaveAttribute('href', expect.stringContaining('/ship/10-shimakaze'));
     });
 
@@ -925,7 +925,7 @@ describe('PlayerDetail ship-badge banner', () => {
 
         const banner = screen.getByLabelText('Top ship rankings');
         expect(within(banner).getByText('NA')).toBeInTheDocument();
-        expect(screen.getByTitle(/#1 in Shimakaze on NA this season/)).toBeInTheDocument();
+        expect(screen.getByTitle(/#1 in Shimakaze on NA last 14d/)).toBeInTheDocument();
     });
 
     it('stacks multiple badges (no overflow cap — backend already limits to top 3)', () => {
@@ -957,79 +957,5 @@ describe('PlayerDetail ship-badge banner', () => {
         // from the banner card's "#<n> in <ship> … over the last N days" tooltip).
         expect(screen.getByTitle('Currently #1 Shimakaze on NA')).toBeInTheDocument();
         expect(screen.getByTitle('Currently #2 Zao on NA')).toBeInTheDocument();
-    });
-});
-
-describe('PlayerDetail ship-honors panel', () => {
-    let consoleErrorSpy: jest.SpyInstance;
-
-    beforeEach(() => {
-        mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: null });
-        mockClanBattleSummary = undefined;
-        mockRankedHeatmapVisibility = undefined;
-        mockFetchSharedJson.mockReset();
-        mockFetchSharedJson.mockImplementation((url: string) => (
-            typeof url === 'string' && url.includes('/battle-history/')
-                ? Promise.resolve({ data: emptyBattleHistoryPayload, headers: {} })
-                : Promise.resolve({ data: [], headers: {} })
-        ));
-        consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-        jest.useRealTimers();
-    });
-
-    afterEach(() => {
-        mockUseClanMembers.mockClear();
-        consoleErrorSpy.mockRestore();
-    });
-
-    const renderWithAwards = (ship_awards: unknown) =>
-        render(
-            <PlayerDetail
-                player={{ ...basePlayer, ship_awards } as never}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
-            />,
-        );
-
-    it('renders the durable career record as ×count + season weeks (oldest→newest)', () => {
-        renderWithAwards([
-            {
-                ship_id: 10, ship_name: 'Shimakaze', tier: 10, times_first: 2, times_top3: 2,
-                best_rank: 1, current_rank: 1, first_on: '2026-05-11', last_on: '2026-05-25',
-                seasons: [
-                    { captured_on: '2026-05-25', rank: 1 },  // newest first (as the API returns)
-                    { captured_on: '2026-05-11', rank: 1 },
-                ],
-            },
-        ]);
-
-        expect(screen.getByText('Ship Honors')).toBeInTheDocument();
-        expect(screen.getByText('Shimakaze')).toBeInTheDocument();
-        expect(screen.getByText('T10')).toBeInTheDocument();   // tier chip
-        // ×<count>: weeks shown oldest→newest, year-disambiguated.
-        expect(screen.getByText(/×2/)).toBeInTheDocument();
-        expect(screen.getByText(/WK20-21'26, WK22-23'26/)).toBeInTheDocument();
-    });
-
-    it('persists through inactivity (year-disambiguated weeks, no current-standing text)', () => {
-        renderWithAwards([
-            {
-                ship_id: 20, ship_name: 'Zao', times_first: 1, times_top3: 1,
-                best_rank: 1, current_rank: null, first_on: '2026-06-08', last_on: '2026-06-08',
-                seasons: [{ captured_on: '2026-06-08', rank: 1 }],
-            },
-        ]);
-
-        // Count chip and season-week history now render as distinct elements.
-        expect(screen.getByText('×1')).toBeInTheDocument();
-        expect(screen.getByText(/WK24-25'26/)).toBeInTheDocument();
-        expect(screen.queryByText(/currently/)).not.toBeInTheDocument();
-        expect(screen.queryByText(/last held/)).not.toBeInTheDocument();
-    });
-
-    it('renders nothing when there are no awards', () => {
-        renderWithAwards([]);
-        expect(screen.queryByText('Ship Honors')).not.toBeInTheDocument();
     });
 });

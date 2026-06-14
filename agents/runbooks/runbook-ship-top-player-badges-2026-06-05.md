@@ -1,4 +1,15 @@
-# Runbook: Ship standings page + weekly "top ship player" profile badges
+# Runbook: Ship standings page + "top ship player" profile badges
+
+> **⚠️ CADENCE + LEDGER SUPERSEDED 2026-06-14 — now a NIGHTLY ROLLING recompute; Ship Honors REMOVED.**
+> The ranking algorithm, population guards, composite score, tier scope, and storage shape
+> below are still accurate. What changed: the snapshot is no longer a fixed bi-weekly season
+> finalized at a boundary — it recomputes **every night** over a trailing
+> `SHIP_LEADERBOARD_WINDOW_DAYS` (14) window, `captured_on` is the **run date**, badges are
+> worn **only while held**, and the durable `ShipAward` ledger / **Ship Honors panel was
+> removed entirely** (the HELD-awards banner below is historical). `SHIP_AWARD_LEDGER_ENABLED`,
+> the `backfill_ship_seasons` command, and `is_season_boundary` are gone; the fixed-season
+> helpers remain only for the realm treemap. Authoritative reference:
+> [runbook-ship-badges-rolling-2026-06-14.md](runbook-ship-badges-rolling-2026-06-14.md).
 
 _Created: 2026-06-05_
 _Context: The landing page surfaces the most-played ships per realm via the `RealmTopShipsTreemapSVG` treemap (`compute_realm_top_ships`, `data.py`), which aggregates `BattleEvent` over a rolling window. But ship-level **player** standing was invisible: no way to see who is best in a given ship, and the treemap tiles were dead ends. This feature adds (1) a **`/ship/<id>` standings page** — a fortnight leaderboard of the best players in a Tier-10 ship on the active realm — reachable by clicking a T10 treemap tile, and (2) a **durable profile badge** (gold/silver/bronze) for the top-3 players in each ranked T10 ship, which links back to that ship's page. Both are powered by a single weekly snapshot; nothing is computed per request._

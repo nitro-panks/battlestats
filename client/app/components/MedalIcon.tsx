@@ -5,8 +5,8 @@ import React from 'react';
 // A single-path font glyph (faMedal) can't two-tone the ribbon and disc, so we
 // draw the SVG inline. It scales to 1em, so a font-size class (text-*) on
 // `className` sizes it; the rank color is applied internally. Shared by
-// TopShipIcon (classification tray), the ShipTopPlayerBanner, and the ShipHonors
-// ledger so all three medal surfaces stay visually identical.
+// TopShipIcon (classification tray) and the ShipTopPlayerBanner so the medal
+// surfaces stay visually identical.
 
 export const RANK_COLOR: Record<number, string> = {
     1: 'text-amber-500',   // gold

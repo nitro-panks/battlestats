@@ -254,20 +254,20 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
-    # -- Fixed-season T10 Top-Ship-Player snapshot (per realm, striped) --
-    # Beat ticks weekly (Monday); the task self-gates on SHIP_BADGE_SNAPSHOT_ENABLED
-    # AND on a season boundary, so it finalizes each fixed 2-week season exactly
-    # once (effectively bi-weekly). See
-    # agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
+    # -- Rolling nightly T10 Top-Ship-Player snapshot (per realm, striped) --
+    # Beat ticks nightly; each run recomputes the trailing-window board so the
+    # profile badges + /ship standings evolve daily (gated by
+    # SHIP_BADGE_SNAPSHOT_ENABLED). Per-realm hour striping keeps the three ~12s
+    # aggregations off each other. See
+    # agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md.
     ship_badge_hour = int(os.getenv("SHIP_BADGE_SNAPSHOT_HOUR", "2"))
-    ship_badge_dow = os.getenv("SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK", "1")  # Monday
     for realm in sorted(VALID_REALMS):
         realm_hour = (ship_badge_hour +
                       REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
         ship_badge_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
             hour=str(realm_hour),
-            day_of_week=ship_badge_dow,
+            day_of_week="*",
             day_of_month="*",
             month_of_year="*",
             timezone="UTC",
@@ -281,7 +281,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
-                "description": f"T10 top-player season snapshot ({realm.upper()}) — beat ticks weekly (Mon); the task self-gates to season boundaries so it finalizes each fixed 2-week season once.",
+                "description": f"T10 top-player rolling snapshot ({realm.upper()}) — nightly recompute of the trailing {os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '14')}-day board.",
             },
         )
 

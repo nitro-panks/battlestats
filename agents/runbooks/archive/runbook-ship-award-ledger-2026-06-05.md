@@ -1,5 +1,9 @@
 # Runbook: Durable ship-award ledger (Phase 1)
 
+> **ARCHIVED 2026-06-14 — feature removed.** Ship Honors / the `ShipAward` ledger was
+> removed entirely when ship badges moved to a nightly rolling recompute. Superseded by
+> [runbook-ship-badges-rolling-2026-06-14.md](../runbook-ship-badges-rolling-2026-06-14.md).
+
 _Created: 2026-06-05_
 _Context: The ship-top-player feature (`runbook-ship-top-player-badges-2026-06-05.md`) computes a
 fortnight leaderboard per ship per realm ~weekly and surfaces the **current** top-3 as profile

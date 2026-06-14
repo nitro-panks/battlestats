@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
-from warships.models import Player, Clan, PlayerExplorerSummary, realm_cache_key, LandingPlayerBestSnapshot, Ship, ShipTopPlayerSnapshot, ShipAward
+from warships.models import Player, Clan, PlayerExplorerSummary, realm_cache_key, LandingPlayerBestSnapshot, Ship, ShipTopPlayerSnapshot
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
@@ -138,39 +138,7 @@ class PlayerViewSetTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["ship_badges"], [])
-        self.assertEqual(response.json()["ship_awards"], [])
-
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
-    def test_player_detail_exposes_ship_awards(
-        self,
-        mock_update_player_task,
-        mock_update_clan_task,
-        mock_update_clan_members_task,
-    ):
-        from datetime import timedelta
-        now = timezone.now()
-        player = Player.objects.create(
-            name="Champ", player_id=9079, realm="na", last_fetch=now)
-        for offset in (14, 7):
-            ShipAward.objects.create(
-                captured_on=now.date() - timedelta(days=offset), realm="na",
-                ship_id=10, ship_name="Shimakaze", rank=1, player=player)
-
-        response = self.client.get("/api/player/Champ/")
-
-        self.assertEqual(response.status_code, 200)
-        awards = response.json()["ship_awards"]
-        self.assertEqual(len(awards), 1)
-        self.assertEqual(awards[0]["ship_id"], 10)
-        self.assertEqual(awards[0]["ship_name"], "Shimakaze")
-        self.assertEqual(awards[0]["times_first"], 2)
-        self.assertEqual(awards[0]["times_top3"], 2)
-        self.assertEqual(awards[0]["best_rank"], 1)
-        self.assertIsNone(awards[0]["current_rank"])  # no live snapshot
-        self.assertEqual(
-            awards[0]["last_on"], (now.date() - timedelta(days=7)).isoformat())
+        self.assertNotIn("ship_awards", response.json())
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
