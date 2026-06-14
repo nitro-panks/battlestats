@@ -259,3 +259,54 @@ class ClanCrawlEnqueueDedupTests(TestCase):
         res = ensure_crawl_all_clans_running_task.apply(kwargs={"realm": "eu"}).get()
         self.assertEqual(res["status"], "skipped")
         self.assertIsNotNone(self._pending("eu"))
+
+
+class BenchmarkCrawlProductivityTests(TestCase):
+    """The read-only clan-crawl benchmark emits the metric structure, computes
+    catalog coverage / implied pass cadence, and reflects liveness cache keys."""
+
+    def _json(self):
+        import io
+        import json
+        from django.core.management import call_command
+        out = io.StringIO()
+        call_command("benchmark_crawl_productivity", json=True, stdout=out)
+        return json.loads(out.getvalue())
+
+    def test_coverage_and_pass_cadence(self):
+        now = timezone.now()
+        # 4 na clans, 1 fetched in-window, 1 stale, 1 never-fetched.
+        Clan.objects.create(clan_id=1, realm="na", last_fetch=now - timedelta(hours=2))
+        Clan.objects.create(clan_id=2, realm="na", last_fetch=now - timedelta(hours=30))
+        Clan.objects.create(clan_id=3, realm="na", last_fetch=now - timedelta(hours=1))
+        Clan.objects.create(clan_id=4, realm="na", last_fetch=None)
+
+        data = self._json()
+        na = data["realms"]["na"]
+        self.assertEqual(na["clans_total"], 4)
+        self.assertEqual(na["clans_fetched_24h"], 2)       # clans 1 & 3
+        self.assertEqual(na["clan_coverage_pct"], 0.5)
+        self.assertEqual(na["clans_never_fetched"], 1)
+        # 4 clans / 2-per-day → ~2-day full pass
+        self.assertEqual(na["implied_full_pass_days"], 2.0)
+        self.assertIn("totals", data)
+        self.assertEqual(data["totals"]["clans_total"], 4)
+
+    def test_liveness_reflects_cache_keys(self):
+        from warships.tasks import (
+            _clan_crawl_lock_key, _clan_crawl_pass_marker_key)
+        Clan.objects.create(clan_id=9, realm="eu", last_fetch=timezone.now())
+        cache.set(_clan_crawl_lock_key("eu"), "task-id", timeout=3600)
+        cache.set(_clan_crawl_pass_marker_key("eu"),
+                  timezone.now() - timedelta(hours=3), timeout=3600)
+        try:
+            data = self._json()
+        finally:
+            cache.delete(_clan_crawl_lock_key("eu"))
+            cache.delete(_clan_crawl_pass_marker_key("eu"))
+        lv = data["realms"]["eu"]["liveness"]
+        self.assertTrue(lv["crawl_lock_held"])
+        self.assertIsNotNone(lv["pass_marker_age_s"])
+        self.assertEqual(data["totals"]["realms_crawling"], 1)
+        # na has no lock set → not crawling
+        self.assertFalse(data["realms"]["na"]["liveness"]["crawl_lock_held"])
