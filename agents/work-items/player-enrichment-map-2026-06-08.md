@@ -2,6 +2,8 @@
 
 **Author:** systems-eng/analyst pass · **Source data:** live prod query against `warships_player` (single seqscan, all 3 realms) at 2026-06-08 ~23:20 UTC · **Code refs:** `server/warships/management/commands/enrich_player_data.py`, `server/warships/tasks.py:1789` (`enrich_player_data_task`), `server/warships/signals.py:478` (`player-enrichment-kickstart`).
 
+> **⚠️ Reconciliation (2026-06-13) — crawl-deferral premise is now historical.** This is a point-in-time analysis; the coverage data, eligibility-filter math, and backfill-vs-refresh framing still hold. **The one thing that has changed: enrichment no longer defers _entirely_ under clan crawls.** This document's own **Recommendation #3** ("decouple enrichment's WG-fetch arm from hard crawl-deferral via the planned WG token-bucket limiter") subsequently shipped — the global WG limiter landed 2026-06-10 and `enrich_player_data_task` now **coexists with crawls** at gentler pacing (`ENRICH_DEFER_DURING_CRAWL=0` default — pinned to `0` by `deploy_to_droplet.sh`; `ENRICH_DELAY_DURING_CRAWL=0.5s`; `ENRICH_DEFER_DURING_CRAWL=1` restores the old defer behaviour). So every statement below that calls crawl-deferral "the binding constraint" or says enrichment "defers entirely / is paused under multi-day crawls" describes the **2026-06-08 state only**. Current behaviour: enrichment runs continuously, throttled by the shared `background` pool + per-player `ships/stats` wall, not by hard crawl-deferral. Current reference: the enrichment section of `CLAUDE.md` and [`../diagrams/player-enrichment-data-flow.md`](../diagrams/player-enrichment-data-flow.md).
+
 ---
 
 ## TL;DR
