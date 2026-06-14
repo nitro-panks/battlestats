@@ -2538,6 +2538,29 @@
                 "daily-snapshot-engine-removed"
             ]
         },
+        "agents/runbooks/runbook-floor-battles-json-refresh-2026-06-14.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "architecture",
+            "owner": "backend",
+            "aliases": [
+                "floor battles_json refresh",
+                "observation floor freshness",
+                "battles_json from ships/stats reuse"
+            ],
+            "tags": [
+                "battle-history",
+                "battles_json",
+                "observation-floor",
+                "battles_updated_at",
+                "FLOOR_REFRESH_BATTLES_JSON_ENABLED",
+                "active-player-refresh-lag"
+            ],
+            "archive_on": [
+                "floor-battles-json-refresh-superseded"
+            ]
+        },
         "agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md": {
             "kind": "runbook",
             "status": "active",

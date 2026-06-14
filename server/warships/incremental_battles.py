@@ -673,6 +673,7 @@ def record_observation_from_payloads(
     ship_data: Iterable[Dict[str, Any]],
     ranked_ship_data: Optional[Iterable[Dict[str, Any]]] = None,
     source: str = None,
+    refresh_battles_json: bool = False,
 ) -> Dict[str, Any]:
     """Persist a `BattleObservation` for `player` and emit `BattleEvent` rows.
 
@@ -706,6 +707,23 @@ def record_observation_from_payloads(
 
     if snapshot is None:
         return {"status": "skipped", "reason": "wg-fetch-failed-or-hidden"}
+
+    # Reuse this same `ships/stats` payload to refresh the player's displayed
+    # per-ship stats (`battles_json` + `battles_updated_at`) — no second WG call.
+    # Floor/poll callers opt in via `refresh_battles_json=True`; gated by a kill
+    # switch and wrapped so it can NEVER break the observation write. Skipped on
+    # empty `ship_data` so a transient empty fetch can't blank a player's stats.
+    if (refresh_battles_json
+            and ship_data
+            and os.getenv("FLOOR_REFRESH_BATTLES_JSON_ENABLED", "1") == "1"):
+        try:
+            from warships.data import apply_battles_json
+            apply_battles_json(player, list(ship_data), realm=player.realm)
+        except Exception:
+            logger.exception(
+                "floor battles_json refresh failed for player_id=%s realm=%s",
+                player.player_id, player.realm,
+            )
 
     ships_payload = _serialize_ships_payload(snapshot)
     ranked_map = (
@@ -1160,6 +1178,7 @@ def record_observations_bulk(
                 # chunk, so we do not wrap the loop in a transaction.
                 result = record_observation_from_payloads(
                     player, player_data=acct, ship_data=ships, source=source,
+                    refresh_battles_json=True,
                 )
             except Exception:
                 logger.exception(
@@ -1832,6 +1851,7 @@ def record_observation_and_diff(player_id: int, realm: str) -> Dict[str, Any]:
         player,
         player_data=player_data,
         ship_data=ship_data,
+        refresh_battles_json=True,
     )
 
 
@@ -1905,4 +1925,5 @@ def record_ranked_observation_and_diff(player_id: int, realm: str) -> Dict[str, 
         player_data=player_data,
         ship_data=ship_data,
         ranked_ship_data=ranked_ship_data,
+        refresh_battles_json=True,
     )
