@@ -4,9 +4,9 @@ import React from 'react';
 import Link from 'next/link';
 import MedalIcon, { RANK_COLOR } from './MedalIcon';
 import { buildShipPath } from '../lib/entityRoutes';
-import { formatWeek } from '../lib/shipSeason';
 
-// Profile banner for a player's per-fortnight top-3 finishes in a Tier-10 ship.
+// Profile banner for a player's current top-3 finishes in a Tier-10 ship
+// (rolling trailing window, recomputed nightly; worn while held).
 // One award card per badge, stacked above the Battle History card, each linking
 // to that ship's standings page. Fed by the player payload's `ship_badges`
 // (data.get_player_ship_badges).
@@ -28,7 +28,7 @@ export interface ShipBadge {
     battles: number;
     avg_damage: number;
     window_days: number;
-    window_start?: string | null; // season-start date (for the WK<n> label)
+    window_start?: string | null; // run date of the snapshot (the trailing window's end)
 }
 
 interface ShipTopPlayerBannerProps {
@@ -53,7 +53,7 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
             {badges.map((b) => {
                 const rankColor = RANK_COLOR[b.rank] ?? 'text-amber-500';
                 const meta = RANK_META[b.rank] ?? { borderL: 'border-l-amber-400', ordinal: `#${b.rank}` };
-                const weekLabel = b.window_start ? formatWeek(Date.parse(b.window_start)) : 'this season';
+                const weekLabel = `last ${b.window_days}d`;
                 return (
                     <Link
                         key={`${b.ship_id}-${b.rank}`}

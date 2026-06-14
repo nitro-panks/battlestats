@@ -10,7 +10,6 @@ import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import wrColor from '../lib/wrColor';
 import { shipClass, nationLabel } from '../lib/shipIdentity';
 import TopShipIcon from './TopShipIcon';
-import { nextWindowOpenMs, formatCountdown, formatSeasonLabel } from '../lib/shipSeason';
 import { trackEvent } from '../lib/umami';
 
 const RANKING_TOOLTIP = "Ranked by a blend of win rate, average damage, and kills per battle (win rate weighted most), each tempered for games played (empirical-Bayes shrinkage) so a short hot streak doesn't outrank a high-volume player. Shows the top 15 for the window.";
@@ -36,11 +35,7 @@ interface ShipLeaderboard {
     realm: string;
     window_days: number;
     captured_on: string | null;
-    // Fixed-season boundaries (authoritative; older cached payloads may omit them,
-    // in which case the client falls back to lib/shipSeason.ts).
-    season_start?: string | null;
-    season_end?: string | null;
-    next_window_open?: string | null;
+    window_start?: string | null;
     ship: {
         ship_id: number;
         name: string;
@@ -107,16 +102,6 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
     const [data, setData] = useState<ShipLeaderboard | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
-    // Client-only clock for the "next window opens" countdown. Starts null so the
-    // server and first client render agree (no hydration mismatch); the effect
-    // fills it in and ticks once a minute.
-    const [nowMs, setNowMs] = useState<number | null>(null);
-
-    useEffect(() => {
-        setNowMs(Date.now());
-        const id = setInterval(() => setNowMs(Date.now()), 60_000);
-        return () => clearInterval(id);
-    }, []);
 
     useEffect(() => {
         if (shipId == null) {
@@ -195,17 +180,6 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
     const onPlayerClick = (rank: number) =>
         trackEvent('ship-player', { ship_id: ship.ship_id, ship_name: ship.name, rank, realm });
 
-    // Fixed-season boundaries from the payload (authoritative); ISO date-only
-    // strings parse as UTC midnight. Fall back to lib/shipSeason.ts when an older
-    // cached payload omits them.
-    const seasonStartMs = data.season_start ? Date.parse(data.season_start) : null;
-    const seasonEndMs = data.season_end ? Date.parse(data.season_end) : null;
-    const seasonLabel = seasonStartMs != null && seasonEndMs != null
-        ? formatSeasonLabel(seasonStartMs, seasonEndMs) : null;
-    const nextOpenMs = data.next_window_open
-        ? Date.parse(data.next_window_open)
-        : (nowMs !== null ? nextWindowOpenMs(nowMs) : null);
-
     // Provenance — when this board was captured. Hidden when the payload omits
     // it (no "as of —"). Date-only ISO parses as UTC midnight; render in UTC.
     const capturedMs = data.captured_on ? Date.parse(data.captured_on) : null;
@@ -255,7 +229,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                     </div>
                 )}
                 <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                    {realm.toUpperCase()} · best players · {seasonLabel ? `season ${seasonLabel}` : `last ${data.window_days} days`} ·
+                    {realm.toUpperCase()} · best players · trailing {data.window_days} days · updated daily ·
                     <button
                         type="button"
                         title={RANKING_TOOLTIP}
@@ -266,25 +240,13 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                     </button>
                 </p>
                 {capturedLabel && (
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">Standings captured {capturedLabel} UTC</p>
-                )}
-                {nowMs !== null && nextOpenMs !== null && (
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">
-                        Next standings lock in{' '}
-                        <span className="font-semibold text-[var(--accent-mid)] tabular-nums">
-                            {formatCountdown(nextOpenMs - nowMs)}
-                        </span>
-                        {' '}·{' '}
-                        {new Date(nextOpenMs).toLocaleDateString(undefined, {
-                            month: 'short', day: 'numeric', timeZone: 'UTC',
-                        })} UTC
-                    </p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">Standings captured {capturedLabel} UTC · recomputed nightly</p>
                 )}
             </header>
 
             {players.length === 0 ? (
                 <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-6 text-sm text-[var(--text-muted)]">
-                    No ranked standings for this ship yet this season — check back as battles come in.
+                    No ranked standings for this ship yet — check back as battles come in.
                 </div>
             ) : (
                 <>

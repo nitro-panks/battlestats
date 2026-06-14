@@ -1,14 +1,14 @@
-"""Tests for the fortnight ship leaderboard + top-player badge snapshot.
+"""Tests for the rolling nightly ship leaderboard + top-player badge snapshot.
 
 Covers `data.compute_ship_top_player_snapshot` (ranking, the per-player battle
 floor, the per-ship population guard, tier scope, realm isolation, hidden
-exclusion, the fixed-season window, idempotency), the fixed-season pivot (season
-math, captured_on=season-start, `times_first` counts seasons, boundary gate,
-backfill command), `get_player_ship_badges` (badges = ranks 1..N only),
-`get_ship_leaderboard` + the `ship_leaderboard` endpoint, and the task's gates.
-See agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md.
+exclusion, the trailing rolling window, idempotency, captured_on=run-date,
+displaced-holder cache invalidation), `get_player_ship_badges` (badges = ranks
+1..N only, worn while held), `get_ship_leaderboard` + the `ship_leaderboard`
+endpoint, and the task's enable gate. The fixed-season helpers still back the
+realm treemap and keep their own tests below.
+See agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md.
 """
-import contextlib
 from datetime import date, timedelta
 from unittest import mock
 
@@ -20,11 +20,9 @@ from warships.data import (
     SHIP_SEASON_EPOCH,
     compute_ship_top_player_snapshot,
     current_season_index,
-    get_player_ship_awards,
     get_player_ship_badges,
     get_players_ship_badges_bulk,
     get_ship_leaderboard,
-    is_season_boundary,
     most_recent_completed_season,
     ship_season_bounds,
 )
@@ -33,23 +31,9 @@ from warships.models import (
     BattleObservation,
     Player,
     Ship,
-    ShipAward,
     ShipTopPlayerSnapshot,
 )
 from warships.tasks import snapshot_ship_top_players_task
-
-
-@contextlib.contextmanager
-def _season_boundary_now():
-    """Make the boundary-gated task run and target a window covering "now"-stamped
-    fixtures: force `is_season_boundary` True and point the default
-    most-recently-completed season at [today-14d, today+1d)."""
-    today = timezone.now().date()
-    with mock.patch("warships.data.is_season_boundary", return_value=True), \
-            mock.patch("warships.data.most_recent_completed_season",
-                       return_value=(0, today - timedelta(days=14),
-                                     today + timedelta(days=1))):
-        yield
 
 
 # Small thresholds so a handful of fixture rows exercise the guards.
@@ -65,9 +49,6 @@ BADGE_ENV = {
     "SHIP_BADGE_RETENTION_DAYS": "21",
     "SHIP_BADGE_PRIOR_BATTLES": "30",
     "SHIP_BADGE_PRIOR_WR": "0.5",
-    # Durable award ledger defaults OFF in prod (held during the coverage ramp);
-    # the snapshot/award tests assert ledger writes, so enable it for them.
-    "SHIP_AWARD_LEDGER_ENABLED": "1",
 }
 
 SHIMA = 10      # T10
@@ -100,12 +81,15 @@ class ShipBadgeSnapshotTests(TestCase):
             is_hidden=is_hidden, pvp_battles=500,
         )
 
-    def _event(self, player, ship_id, battles, wins, detected_days_ago=0,
+    def _event(self, player, ship_id, battles, wins, detected_days_ago=1,
                damage=0, frags=0, survived=None):
         """One BattleEvent carrying the player's whole window total for a ship.
 
         Each player gets its own observation pair, so the per-pair unique
-        constraint never collides across players.
+        constraint never collides across players. Default `detected_days_ago=1`
+        (yesterday) so events land inside BOTH the explicit-window `_run` and the
+        task's default trailing window `[today-14d, today)` (whose end is exclusive
+        at today-midnight, excluding events stamped at the current time).
         """
         from_obs = BattleObservation.objects.create(player=player, pvp_battles=0)
         to_obs = BattleObservation.objects.create(
@@ -480,7 +464,7 @@ class ShipBadgeSnapshotTests(TestCase):
             self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
 
         env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "1"}
-        with mock.patch.dict("os.environ", env, clear=False), _season_boundary_now(), \
+        with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch(
                     "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
                 ):
@@ -490,20 +474,6 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertEqual(result["badges"], 3)
         self.assertEqual(ShipTopPlayerSnapshot.objects.count(), 3)
 
-    def test_task_noop_off_season_boundary(self):
-        for i in range(3):
-            self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
-
-        env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "1"}
-        with mock.patch.dict("os.environ", env, clear=False), \
-                mock.patch("warships.data.is_season_boundary", return_value=False):
-            result = snapshot_ship_top_players_task.apply(
-                kwargs={"realm": "na"}).get()
-
-        self.assertEqual(result.get("status"), "skipped")
-        self.assertEqual(result.get("reason"), "not-a-season-boundary")
-        self.assertEqual(ShipTopPlayerSnapshot.objects.count(), 0)
-
     def test_completion_dispatches_landing_best_rematerialize(self):
         # A real snapshot run re-materializes this realm's landing Best-player
         # snapshots (on the background queue) so new badges surface promptly.
@@ -511,7 +481,7 @@ class ShipBadgeSnapshotTests(TestCase):
             self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
 
         env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "1"}
-        with mock.patch.dict("os.environ", env, clear=False), _season_boundary_now(), \
+        with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch(
                     "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
                 ) as dispatch:
@@ -540,7 +510,7 @@ class ShipBadgeSnapshotTests(TestCase):
         cache.add(_task_lock_key("snapshot_ship_top_players", "na"), "held")
 
         env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "1"}
-        with mock.patch.dict("os.environ", env, clear=False), _season_boundary_now(), \
+        with mock.patch.dict("os.environ", env, clear=False), \
                 mock.patch(
                     "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
                 ) as dispatch:
@@ -550,60 +520,74 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertEqual(result.get("status"), "skipped")
         dispatch.assert_not_called()
 
-    # --- fixed-season pivot --------------------------------------------------
+    # --- rolling nightly recompute -------------------------------------------
 
-    def _run_window(self, captured_on, realm="na"):
-        """Run compute over a window covering the 'now' fixtures but stamp the
-        snapshot/awards with an explicit `captured_on` (the season identity)."""
-        today = timezone.now().date()
-        with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
-            return compute_ship_top_player_snapshot(
-                realm=realm,
-                window_start=today - timedelta(days=14),
-                window_end=today + timedelta(days=1),
-                captured_on=captured_on,
-            )
-
-    def test_captured_on_is_the_season_start(self):
+    def test_default_window_is_trailing_and_captured_on_is_run_date(self):
+        # With no explicit window, compute uses the trailing window ending today
+        # and stamps captured_on = today (the run date / snapshot identity).
         for i in range(3):
-            self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
-        s0_start, _ = ship_season_bounds(0)  # 2026-05-11
+            self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i,
+                        detected_days_ago=2)
+        today = timezone.now().date()
 
-        self._run_window(s0_start)
+        with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
+            result = compute_ship_top_player_snapshot(realm="na")
 
-        self.assertTrue(ShipTopPlayerSnapshot.objects.exists())
+        self.assertEqual(result["captured_on"], today)
+        self.assertEqual(result["ranked_rows"], 3)
         self.assertEqual(
             set(ShipTopPlayerSnapshot.objects.values_list("captured_on", flat=True)),
-            {s0_start})
-        self.assertEqual(
-            set(ShipAward.objects.values_list("captured_on", flat=True)), {s0_start})
+            {today})
 
-    def test_times_first_counts_distinct_seasons(self):
-        # Same standings finalized for two consecutive seasons → the #1 holder's
-        # ledger shows times_first == 2 (seasons held #1), not a per-run count.
-        winner = self._player("Champ")
-        self._event(winner, SHIMA, battles=40, wins=30)
+    def test_displaced_holder_cache_invalidated(self):
+        # A player who held a top-3 badge on the previous run but is absent from
+        # tonight's board must have their cached detail payload invalidated, so the
+        # stale badge drops immediately rather than lingering until TTL.
+        gone = self._player("Gone")
+        yesterday = timezone.now().date() - timedelta(days=1)
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=yesterday, realm="na", ship_id=SHIMA,
+            ship_name="Shimakaze", rank=1, player=gone, win_rate=90.0, battles=50)
+        # Tonight's pool is three different players; `gone` has no events.
         for i in range(3):
-            self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
-        s0_start, _ = ship_season_bounds(0)
-        s1_start, _ = ship_season_bounds(1)
+            self._event(self._player(f"New{i}"), SHIMA, battles=20, wins=10 + i)
 
-        self._run_window(s0_start)
-        self._run_window(s1_start)
+        with mock.patch.dict("os.environ", BADGE_ENV, clear=False), \
+                mock.patch("warships.data.invalidate_player_detail_cache") as inv:
+            self._run("na")  # captured_on=today; prev run = yesterday
 
-        awards = get_player_ship_awards(winner)
-        shima = next(a for a in awards if a["ship_id"] == SHIMA)
-        self.assertEqual(shima["times_first"], 2)
-        self.assertEqual(shima["times_top3"], 2)
-        self.assertEqual(shima["first_on"], s0_start.isoformat())
-        self.assertEqual(shima["last_on"], s1_start.isoformat())
-        # `seasons` lists each placement {captured_on, rank}, newest first — the
-        # UI spells these out as WK<n>'YY for the Ship Honors panel.
-        self.assertEqual(
-            shima["seasons"],
-            [{"captured_on": s1_start.isoformat(), "rank": 1},
-             {"captured_on": s0_start.isoformat(), "rank": 1}])
-        self.assertEqual(shima["tier"], 10)  # tier surfaced for the Ship Honors label
+        invalidated = {c.args[0] for c in inv.call_args_list}
+        self.assertIn(gone.player_id, invalidated)
+        # `gone` is no longer on the board.
+        self.assertFalse(
+            ShipTopPlayerSnapshot.objects.filter(
+                player=gone, captured_on=timezone.now().date()).exists())
+
+    def test_hidden_after_snapshot_excluded_from_reads(self):
+        # A player public at snapshot time who LATER sets their profile to hidden
+        # must drop off the board + badges + bulk reads immediately, even though
+        # the precomputed snapshot row still exists (read-time is_hidden filter).
+        champ = self._player("Champ")
+        self._event(champ, SHIMA, battles=40, wins=38)
+        for i in range(3):
+            self._event(self._player(f"Pad{i}"), SHIMA, battles=20, wins=10 + i)
+        self._run("na")
+
+        with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
+            self.assertTrue(get_player_ship_badges(champ))  # ranked while public
+            self.assertIn(
+                "Champ",
+                [p["player_name"] for p in get_ship_leaderboard("na", SHIMA)["players"]])
+
+        champ.is_hidden = True
+        champ.save(update_fields=["is_hidden"])  # snapshot row untouched
+
+        with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
+            self.assertEqual(get_player_ship_badges(champ), [])
+            board = get_ship_leaderboard("na", SHIMA)
+            self.assertNotIn(
+                "Champ", [p["player_name"] for p in board["players"]])
+            self.assertNotIn(champ.pk, get_players_ship_badges_bulk([champ.pk]))
 
     def test_multi_tier_ranks_each_scoped_tier_independently(self):
         # With SHIP_BADGE_TIERS spanning 8–10, ships in each tier are ranked in
@@ -669,27 +653,32 @@ class ShipBadgeSnapshotTests(TestCase):
             badges = get_player_ship_badges(champ)
 
         self.assertTrue(ShipTopPlayerSnapshot.objects.filter(ship_id=T5).exists())  # board
-        self.assertFalse(ShipAward.objects.filter(ship_id=T5).exists())             # no award (write-gated)
         self.assertEqual(badges, [])                                                # no badge (read-gated)
 
-    def test_leaderboard_payload_carries_season_bounds(self):
+    def test_leaderboard_payload_is_rolling_not_seasonal(self):
         for i in range(3):
             self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
         today = timezone.now().date()
-        self._run_window(today)
+        self._run("na")  # captured_on=today
 
         with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
             lb = get_ship_leaderboard("na", SHIMA)
 
-        self.assertEqual(lb["season_start"], today.isoformat())
-        self.assertEqual(lb["season_end"], (today + timedelta(days=14)).isoformat())
-        self.assertEqual(
-            lb["next_window_open"],
-            ship_season_bounds(current_season_index())[1].isoformat())
+        self.assertEqual(lb["captured_on"], today.isoformat())
+        self.assertEqual(lb["window_days"], 14)
+        self.assertEqual(lb["window_start"], (today - timedelta(days=14)).isoformat())
+        # No fixed-season framing under the rolling model.
+        self.assertNotIn("season_start", lb)
+        self.assertNotIn("season_end", lb)
+        self.assertNotIn("next_window_open", lb)
 
 
 class ShipSeasonHelpersTests(TestCase):
-    """Pure date math for the fixed 2-week seasons (epoch = Mon 11 May 2026)."""
+    """Pure date math for the fixed 2-week seasons (epoch = Mon 11 May 2026).
+
+    The ship badges/board are now a rolling trailing window; these helpers remain
+    only because the realm treemap (`compute_realm_top_ships`) still buckets by a
+    fixed, immutable calendar season for its per-season cache key."""
 
     def test_epoch_and_bounds(self):
         self.assertEqual(SHIP_SEASON_EPOCH, date(2026, 5, 11))
@@ -702,12 +691,6 @@ class ShipSeasonHelpersTests(TestCase):
         idx, start, end = most_recent_completed_season(d)
         self.assertEqual((idx, start, end),
                          (0, date(2026, 5, 11), date(2026, 5, 25)))
-
-    def test_is_season_boundary(self):
-        self.assertTrue(is_season_boundary(date(2026, 5, 11)))   # season 0 start
-        self.assertTrue(is_season_boundary(date(2026, 5, 25)))   # season 1 start
-        self.assertFalse(is_season_boundary(date(2026, 5, 12)))  # mid-season
-        self.assertFalse(is_season_boundary(date(2026, 5, 1)))   # before epoch
 
 
 class MaterializeBestSnapshotWarmChainTests(TestCase):
@@ -774,80 +757,3 @@ class MaterializeBestSnapshotWarmChainTests(TestCase):
         inner.assert_not_called()
         warm.assert_not_called()
 
-
-class BackfillShipSeasonsCommandTests(TestCase):
-    """`backfill_ship_seasons` walks completed seasons and (optionally) wipes the
-    rolling-era rows first. Orchestration is tested with compute mocked so it does
-    not depend on event timing."""
-
-    def setUp(self):
-        cache.clear()
-
-    def test_wipe_then_walk_completed_seasons(self):
-        from django.core.management import call_command
-
-        # A stale rolling-era row (keyed by an arbitrary run-day) that --wipe clears.
-        player = Player.objects.create(
-            name="Stale", player_id=7777, realm="na", pvp_battles=500)
-        ShipAward.objects.create(
-            captured_on=date(2026, 6, 3), realm="na", ship_id=SHIMA,
-            ship_name="Shimakaze", rank=1, player=player)
-
-        cmd = "warships.management.commands.backfill_ship_seasons"
-        with mock.patch(f"{cmd}.current_season_index", return_value=2), \
-                mock.patch(f"{cmd}.compute_ship_top_player_snapshot",
-                           return_value={"badges": 0, "ranked_rows": 0,
-                                         "ships_qualified": 0, "ships_total": 0}) as comp, \
-                mock.patch(
-                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
-                ):
-            call_command("backfill_ship_seasons", "--wipe", "--realms", "na")
-
-        # Stale ledger row wiped (compute is mocked, writes nothing back).
-        self.assertEqual(ShipAward.objects.count(), 0)
-        # current index 2 → last completed season = 1 → seasons 0 and 1 computed.
-        captured = sorted(c.kwargs["captured_on"] for c in comp.call_args_list)
-        self.assertEqual(captured, [date(2026, 5, 11), date(2026, 5, 25)])
-        for call in comp.call_args_list:
-            self.assertEqual(call.kwargs["realm"], "na")
-            # window matches the season the captured_on names.
-            self.assertEqual(
-                ship_season_bounds(
-                    (call.kwargs["captured_on"] - SHIP_SEASON_EPOCH).days // 14),
-                (call.kwargs["window_start"], call.kwargs["window_end"]))
-
-    def test_backfill_rematerializes_landing_per_realm(self):
-        # A direct ShipTopPlayerSnapshot rewrite must refresh the landing
-        # Best-player snapshots (which bake in ship_badges) so the landing list and
-        # the profile don't disagree on medal counts until the daily cron.
-        from django.core.management import call_command
-
-        cmd = "warships.management.commands.backfill_ship_seasons"
-        with mock.patch(f"{cmd}.current_season_index", return_value=2), \
-                mock.patch(f"{cmd}.compute_ship_top_player_snapshot",
-                           return_value={"badges": 0}), \
-                mock.patch(
-                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
-                ) as dispatch:
-            call_command("backfill_ship_seasons", "--realms", "na,eu")
-
-        self.assertEqual(
-            sorted(c.kwargs["kwargs"]["realm"] for c in dispatch.call_args_list),
-            ["eu", "na"])
-        for call in dispatch.call_args_list:
-            self.assertEqual(call.kwargs["queue"], "background")
-
-    def test_no_landing_refresh_flag_skips_dispatch(self):
-        from django.core.management import call_command
-
-        cmd = "warships.management.commands.backfill_ship_seasons"
-        with mock.patch(f"{cmd}.current_season_index", return_value=2), \
-                mock.patch(f"{cmd}.compute_ship_top_player_snapshot",
-                           return_value={"badges": 0}), \
-                mock.patch(
-                    "warships.tasks.materialize_landing_player_best_snapshots_task.apply_async"
-                ) as dispatch:
-            call_command("backfill_ship_seasons", "--realms", "na",
-                         "--no-landing-refresh")
-
-        dispatch.assert_not_called()

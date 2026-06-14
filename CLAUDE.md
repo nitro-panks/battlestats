@@ -96,8 +96,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - `app/lib/entityRoutes.ts` — URL encode/decode for player/clan routes
 - `app/components/HeaderSearch.tsx` + `SearchModeToggle.tsx` — dual-mode player/clan search, debounced autocomplete, per-mode client cache
 - Player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon, TopShipIcon) — inlined per surface in `PlayerDetail.tsx`, `ClanMembers.tsx`, `PlayerSearch.tsx` (NOT a shared component), driven by each row's `ship_badges`
-- `ShipTopPlayerBanner.tsx` — per-fortnight T10 top-3 cards above Battle History, fed by `ship_badges` (`data.get_player_ship_badges`), links to `/ship/<id>`
-- `ShipHonors.tsx` — durable per-ship career record from the append-only `ShipAward` ledger, fed by `ship_awards` (`data.get_player_ship_awards`)
+- `ShipTopPlayerBanner.tsx` — current T10 top-3 cards above Battle History (rolling nightly window, worn while held), fed by `ship_badges` (`data.get_player_ship_badges`), links to `/ship/<id>`
 - `ShipRouteView.tsx` — the `/ship/<id>` leaderboard page: masthead ship identity (class glyph + tier/class/nation chips + Premium marker via `app/lib/shipIdentity.ts`), restrained champion/podium treatment (`--metal-gold`/`--champion-tint`/`--champion-edge` tokens, `TopShipIcon size="podium"`), metric hierarchy, and a responsive desktop-table / mobile-card split. Identity is payload-only (no new fetch); presentation refresh spec: `agents/work-items/ship-leaderboard-ux-refresh-spec.md`
 
 ### Caching strategy
@@ -106,7 +105,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 - **Warmers** (Beat periodic tasks): hot-entity (30 min), bulk entity loader (12h, uses `score_best_clans()`), landing page + distributions/correlations (55 min), startup warmer via Gunicorn `when_ready`
 - **Search suggestions** — three-tier: client `Map` → Redis (10 min TTL) → Postgres `pg_trgm` GIN index; raw `ILIKE` (Django `icontains` bypasses trigram indexes). Player and clan endpoints; clan matches name OR tag
 - **Clan battle seasons** — request-driven, Redis-only TTL; configured clans pre-warmed (`CLAN_BATTLE_WARM_CLAN_IDS`). Per-player CB stats persist to Postgres on `PlayerExplorerSummary`
-- **Ship standings** — fully precomputed: `snapshot_ship_top_players_task` writes `ShipTopPlayerSnapshot` once per fixed 2-week season; `ship_leaderboard` serves via thin Redis read-cache
+- **Ship standings** — precomputed nightly: `snapshot_ship_top_players_task` rewrites `ShipTopPlayerSnapshot` each night over a trailing `SHIP_LEADERBOARD_WINDOW_DAYS` (14) window (badges worn while held; no durable ledger); `ship_leaderboard` serves via thin Redis read-cache
 - Redis in production (3 GB cap, `allkeys-lru`); LocMemCache in tests
 
 ### Celery queues
@@ -129,7 +128,7 @@ Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu
 
 ### Data models (`server/warships/models.py`)
 
-Player, Clan, Ship, Snapshot (daily summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily, PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot (landing Best fallback), MvPlayerDistributionStats, ShipTopPlayerSnapshot (ephemeral current standing per ship per season — pruned; backs `/ship/<id>` + profile badges), ShipAward (append-only career ledger — never pruned; backs Ship Honors), StreamerSubmission, HotPlayer (engagement capture queue — durable visitor-interest membership + audit, feeding the daily hot-player observation/snapshot sweep).
+Player, Clan, Ship, Snapshot (daily summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily, PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot (landing Best fallback), MvPlayerDistributionStats, ShipTopPlayerSnapshot (ephemeral current standing per ship — recomputed nightly over a trailing window, pruned; backs `/ship/<id>` + profile badges), StreamerSubmission, HotPlayer (engagement capture queue — durable visitor-interest membership + audit, feeding the daily hot-player observation/snapshot sweep).
 
 Battle-history pipeline: BattleObservation (raw `ships/stats/` JSON), BattleEvent (per-event deltas + Phase 7 widening columns), PlayerDailyShipStats (per-day per-ship aggregate), PlayerWeekly/Monthly/YearlyShipStats (period rollup tiers, populated only when the period writer is reactivated).
 

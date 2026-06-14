@@ -780,16 +780,17 @@ class PlayerActivityHourly(models.Model):
 
 
 class ShipTopPlayerSnapshot(models.Model):
-    """Per-season per-realm top-N players for each in-scope-tier ship (T8–T10) by composite score.
+    """Per-realm top-N players for each in-scope-tier ship (T8–T10) by composite score.
 
-    Written by `snapshot_ship_top_players_task` once per realm per fixed 2-week
-    season (the aggregation/write lives in `data.compute_ship_top_player_snapshot`).
-    Read on the player-detail path (`data.get_player_ship_badges`) to render
-    gold/silver/bronze profile badges. `captured_on` is the **season-start date**;
-    the window is `[captured_on, captured_on + 14d)`. A profile surfaces only its
-    rows at the latest `captured_on` (the most recently completed season).
-    `win_rate`/`battles` are denormalized so the read path needs no re-aggregation. See
-    `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
+    Written **nightly** by `snapshot_ship_top_players_task` per realm (the
+    aggregation/write lives in `data.compute_ship_top_player_snapshot`). Read on
+    the player-detail path (`data.get_player_ship_badges`) to render
+    gold/silver/bronze profile badges, worn only while held. `captured_on` is the
+    **run date**; the window is the trailing `SHIP_LEADERBOARD_WINDOW_DAYS` days
+    ending on it. A profile surfaces only its rows at the latest `captured_on`;
+    older runs are pruned (`SHIP_BADGE_RETENTION_DAYS`). `win_rate`/`battles` are
+    denormalized so the read path needs no re-aggregation. See
+    `agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md`.
     """
     captured_on = models.DateField(db_index=True)
     realm = models.CharField(
@@ -818,47 +819,6 @@ class ShipTopPlayerSnapshot(models.Model):
             models.Index(fields=['player', '-captured_on'],
                          name='ship_badge_player_captured_idx'),
         ]
-
-
-class ShipAward(models.Model):
-    """Append-only ledger of top-3 ship placements (the durable record).
-
-    Whereas `ShipTopPlayerSnapshot` is the ephemeral *current* standing
-    (overwritten + pruned each season), this records each top-`SHIP_BADGE_TOP_N`
-    placement as a permanent fact — one row per (realm, ship, rank, captured_on),
-    where `captured_on` is the season-start date. Written by
-    `compute_ship_top_player_snapshot` (idempotent per season, never pruned); read
-    by `data.get_player_ship_awards` to render the profile "Ship Honors" career
-    summary (N-time #1 = seasons held #1, seasons top-3, current/last-held). So a
-    dominant player who stops playing keeps their record instead of a vanished
-    badge. See `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md`.
-    """
-    captured_on = models.DateField(db_index=True)
-    realm = models.CharField(
-        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM)
-    ship_id = models.BigIntegerField(db_index=True)
-    ship_name = models.CharField(max_length=200, blank=True, default='')
-    rank = models.IntegerField()
-    player = models.ForeignKey(
-        Player, on_delete=models.CASCADE, related_name='ship_awards')
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=['captured_on', 'realm', 'ship_id', 'rank'],
-                name='unique_ship_award_per_rank'),
-        ]
-        indexes = [
-            models.Index(fields=['player', 'ship_id'],
-                         name='ship_award_player_ship_idx'),
-        ]
-
-    def __str__(self):
-        return (
-            f"ShipAward({self.realm} {self.captured_on} ship={self.ship_id} "
-            f"#{self.rank} player={self.player_id})"
-        )
 
     def __str__(self):
         return (

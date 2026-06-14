@@ -2311,9 +2311,9 @@
                 "crawls-depth-threshold-recalibrated"
             ]
         },
-        "agents/runbooks/runbook-ship-award-ledger-2026-06-05.md": {
+        "agents/runbooks/archive/runbook-ship-award-ledger-2026-06-05.md": {
             "kind": "runbook",
-            "status": "active",
+            "status": "archived",
             "lifecycle": "dated-active",
             "section": "features",
             "owner": "backend",
@@ -2536,6 +2536,31 @@
             ],
             "archive_on": [
                 "daily-snapshot-engine-removed"
+            ]
+        },
+        "agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "features",
+            "owner": "backend",
+            "aliases": [
+                "rolling ship badges",
+                "nightly ship badges",
+                "ship honors removal",
+                "ship badge rolling window"
+            ],
+            "tags": [
+                "ship-badges",
+                "ShipTopPlayerSnapshot",
+                "rolling-window",
+                "snapshot-task",
+                "SHIP_LEADERBOARD_WINDOW_DAYS",
+                "ship-award-ledger-removed"
+            ],
+            "archive_on": [
+                "ship-standings-feature-removed",
+                "ship-badges-rolling-superseded"
             ]
         },
         "agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md": {

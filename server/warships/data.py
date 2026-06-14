@@ -5860,24 +5860,23 @@ def bulk_load_entity_caches(
     }
 
 
-SHIP_LEADERBOARD_WINDOW_DAYS = 14  # fixed season length (also the leaderboard window)
-SHIP_LEADERBOARD_CACHE_TTL = 900   # 15 min — the snapshot changes only at season close
+# Trailing window for the ship board / profile badges, recomputed nightly. The
+# snapshot is overwritten each night, so this is just the lookback span; the
+# evolution *speed* of the badges is governed by this length (longer = more
+# stable night-to-night). Operator-tunable without a redeploy.
+SHIP_LEADERBOARD_WINDOW_DAYS = int(os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '14'))
+SHIP_LEADERBOARD_CACHE_TTL = 900   # 15 min read-cache on the /ship endpoint
 
 
-# --- Fixed 2-week "ship standings" seasons ----------------------------------
-# The board / profile badges / award ledger pivot from a rolling trailing
-# fortnight to fixed, non-overlapping 14-day calendar seasons anchored to ISO
-# week 20 of 2026 (Mon 11 May 2026, 00:00 UTC). Season N covers
-# [epoch + N*14d, epoch + (N+1)*14d). The displayed board is always the most
-# recently *completed* season (it advances only at a season boundary), which is
-# what the "next window opens" countdown promises.
-#
-# MUST stay in lockstep with the frontend mirror in
-# client/app/lib/shipSeason.ts (SHIP_SEASON_EPOCH_MS / SHIP_SEASON_LENGTH_MS).
-# The backend is authoritative — it emits the boundaries in the leaderboard
-# payload so the frontend reads them rather than recomputing.
+# --- Fixed 2-week ship "seasons" (treemap only) -----------------------------
+# The ship board + profile badges are NOW a nightly rolling trailing window (see
+# SHIP_LEADERBOARD_WINDOW_DAYS); they no longer use these season bounds. The
+# realm treemap (compute_realm_top_ships) still buckets by a fixed, immutable
+# 2-week calendar season so its per-season cache key is stable — that is the only
+# remaining consumer of this epoch/length and the frontend mirror in
+# client/app/lib/shipSeason.ts (used by RealmTopShipsTreemapSVG).
 SHIP_SEASON_EPOCH = date(2026, 5, 11)   # Mon 11 May 2026 (UTC) — season 0 start
-SHIP_SEASON_LENGTH_DAYS = SHIP_LEADERBOARD_WINDOW_DAYS  # 14
+SHIP_SEASON_LENGTH_DAYS = 14            # treemap season length (decoupled from the badge window)
 
 
 def ship_season_bounds(index: int) -> tuple:
@@ -5903,13 +5902,6 @@ def most_recent_completed_season(today: Optional[date] = None) -> tuple:
     idx = max(0, current_season_index(today) - 1)
     start, end = ship_season_bounds(idx)
     return idx, start, end
-
-
-def is_season_boundary(today: Optional[date] = None) -> bool:
-    """True when `today` is the first day of a season (a season just closed)."""
-    today = today or django_timezone.now().date()
-    delta = (today - SHIP_SEASON_EPOCH).days
-    return delta >= 0 and delta % SHIP_SEASON_LENGTH_DAYS == 0
 
 
 def _season_window_datetimes(start: date, end: date) -> tuple:
@@ -5950,11 +5942,11 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
                                      window_start: Optional[date] = None,
                                      window_end: Optional[date] = None,
                                      captured_on: Optional[date] = None) -> dict:
-    """Per-realm ranked players for each Tier-N ship over one fixed season.
+    """Per-realm ranked players for each Tier-N ship over a trailing window.
 
-    Aggregates `BattleEvent` random-battle deltas over the season window
-    `[window_start, window_end)` (default: the most recently *completed* fixed
-    14-day season — see `most_recent_completed_season`), grouped by (ship,
+    Aggregates `BattleEvent` random-battle deltas over the window
+    `[window_start, window_end)` (default: the **trailing
+    `SHIP_LEADERBOARD_WINDOW_DAYS` (14) days ending today**), grouped by (ship,
     player) — the inverse grouping of `compute_realm_top_ships`. Keeps players
     with
     >= `SHIP_BADGE_MIN_BATTLES` battles; a ship is "ranked" only if its
@@ -5963,22 +5955,25 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     `SHIP_BADGE_PRIOR_BATTLES` pseudo-battles (empirical-Bayes), tiebreak raw
     battles — so a short hot streak doesn't outrank a high-volume player; the
     stored/displayed `win_rate` is still the raw rate. For each ranked ship it
-    writes the top `SHIP_BADGE_LIST_SIZE` (50) players as `ShipTopPlayerSnapshot`
+    writes the top `SHIP_BADGE_LIST_SIZE` players as `ShipTopPlayerSnapshot`
     rows (ranks 1..N) — the ship-page leaderboard — of which ranks
-    1..`SHIP_BADGE_TOP_N` (3) are the gold/silver/bronze profile badges.
-    `captured_on` is the season-start date (the snapshot/award identity), so a
-    re-run overwrites that season's rows rather than minting a new placement —
-    making the `ShipAward` ledger's `times_first` count *seasons held #1*.
-    Idempotent per (realm, season). Invalidates the badged (top-3) players'
-    cached detail payloads so the icons surface before TTL.
+    1..`SHIP_BADGE_TOP_N` (3) are the gold/silver/bronze profile badges a player
+    wears *only while they hold them*.
 
-    Runtime calls target the just-closed season (the task is boundary-gated to
-    fire only when a season ends); the `backfill_ship_seasons` command passes
-    explicit historical windows. Thresholds are read from the environment at call
-    time (not module load) so an operator can re-tune and re-run without a
-    redeploy. See `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md`.
+    `captured_on` is the **run date** (the snapshot identity), so the task runs
+    nightly and a same-day re-run overwrites that day's rows — the badge set
+    evolves each night and there is no durable award ledger (removed 2026-06-14).
+    The heavy aggregation runs under `_elevated_work_mem()` to avoid a disk spill.
+    Invalidates both the new top-3 winners' AND the previous run's top-3 holders'
+    cached detail payloads, so a player who dropped out of the top-3 loses the
+    badge immediately rather than at TTL.
+
+    The `backfill_ship_seasons` command passes explicit historical windows.
+    Thresholds are read from the environment at call time (not module load) so an
+    operator can re-tune and re-run without a redeploy. See
+    `agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md`.
     """
-    from warships.models import BattleEvent, ShipTopPlayerSnapshot, ShipAward
+    from warships.models import BattleEvent, ShipTopPlayerSnapshot
 
     min_battles = int(os.getenv('SHIP_BADGE_MIN_BATTLES', '15'))
     min_population = int(os.getenv('SHIP_BADGE_MIN_SHIP_POPULATION', '20'))
@@ -6004,9 +5999,9 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     # cross-tier comparison. See the ship-badge runbook for the tier study.
     _tiers_env = os.getenv('SHIP_BADGE_TIERS') or os.getenv('SHIP_BADGE_TIER', '10')
     tiers = sorted({int(t) for t in _tiers_env.split(',') if t.strip()})
-    # >= ~2 seasons so the displayed (last-completed) season survives until the
-    # next finalize; the ShipAward ledger is never pruned regardless.
-    retention_days = int(os.getenv('SHIP_BADGE_RETENTION_DAYS', '30'))
+    # Only the latest captured_on is ever read, so retention just keeps a few
+    # nights of history for debugging; the snapshot is rewritten nightly.
+    retention_days = int(os.getenv('SHIP_BADGE_RETENTION_DAYS', '5'))
     # Volume-aware ranking: empirical-Bayes shrinkage of the win proportion
     # toward a baseline. `prior_battles` is the pseudo-sample weight (higher =
     # more shrinkage of small samples); `prior_wr` is the baseline (50%).
@@ -6028,15 +6023,16 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     w_kills = float(os.getenv('SHIP_BADGE_WEIGHT_KILLS', '0.15'))
 
     realm = (realm or DEFAULT_REALM).lower().strip()
-    # Default to the most recently completed fixed season; callers (the backfill
-    # command) may pass an explicit historical window instead. `captured_on` is
-    # the season-start date — the snapshot/award identity, so a re-run overwrites
-    # that season's rows rather than minting a new "run".
+    # Default to the trailing SHIP_LEADERBOARD_WINDOW_DAYS ending today; callers
+    # (the backfill command) may pass an explicit historical window instead.
+    # `captured_on` is the run date — the snapshot identity — so a same-day re-run
+    # overwrites today's rows rather than minting a duplicate.
     if window_start is None or window_end is None:
-        _idx, window_start, window_end = most_recent_completed_season()
+        today = django_timezone.now().date()
+        window_end = today
+        window_start = today - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS)
     if captured_on is None:
-        captured_on = window_start
-    season_index = (window_start - SHIP_SEASON_EPOCH).days // SHIP_SEASON_LENGTH_DAYS
+        captured_on = window_end
     since_dt, until_dt = _season_window_datetimes(window_start, window_end)
 
     # Target set = all in-scope-tier ships UNION the realm treemap's top-25
@@ -6067,7 +6063,7 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     ship_names = {sid: name for sid, (name, _t, _ty) in ship_rows_meta.items()}
     tiers_set = set(tiers)
 
-    rows = (
+    agg = (
         BattleEvent.objects
         .filter(ship_id__in=target_ids, mode='random',
                 detected_at__gte=since_dt, detected_at__lt=until_dt,
@@ -6085,13 +6081,18 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
         )
         .filter(battles__gte=min_battles)
     )
+    # Materialize the heavy group-aggregate under elevated work_mem so the
+    # per-pool sort stays in memory (default work_mem spills it to disk — see the
+    # prod sizing in runbook-ship-badges-rolling-2026-06-14.md). SET LOCAL needs a
+    # transaction, hence the atomic wrapper.
+    with transaction.atomic(), _elevated_work_mem():
+        rows = list(agg)
 
     by_ship: dict = {}
     for r in rows:
         by_ship.setdefault(r['ship_id'], []).append(r)
 
     snapshot_rows = []
-    award_rows = []
     invalidate_wg_ids = []
     qualified = 0
     badge_count = 0
@@ -6150,20 +6151,31 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
                 survived=entry['survived'] or 0,
             ))
             # Only the top-N rows of an *in-scope-tier* ship are profile badges →
-            # only they change a player's cached detail payload, and only they
-            # accrete to the durable award ledger. Off-scope treemap-union ships
-            # still get the full ranked board above, but never a badge/award.
+            # only they change a player's cached detail payload. Off-scope
+            # treemap-union ships still get the full ranked board above, but never
+            # a badge.
             if rank <= top_n and ship_rows_meta.get(ship_id, (None, None, None))[1] in tiers_set:
                 invalidate_wg_ids.append(entry['player__player_id'])
                 badge_count += 1
-                award_rows.append(ShipAward(
-                    captured_on=captured_on,
-                    realm=realm,
-                    ship_id=ship_id,
-                    ship_name=ship_names.get(ship_id) or entry['player__name'] or '',
-                    rank=rank,
-                    player_id=entry['player_id'],
-                ))
+
+    # The previous run's top-3 badge holders — invalidate them too so a player who
+    # dropped out of the top-3 since last night loses the badge immediately
+    # instead of carrying a stale one until their detail cache TTL. (Reading the
+    # last captured_on < today; over-invalidating the off-scope treemap ships'
+    # top-3 is harmless.) Read before the overwrite below.
+    prev_captured = (
+        ShipTopPlayerSnapshot.objects
+        .filter(realm=realm, captured_on__lt=captured_on)
+        .order_by('-captured_on')
+        .values_list('captured_on', flat=True)
+        .first()
+    )
+    if prev_captured is not None:
+        invalidate_wg_ids += list(
+            ShipTopPlayerSnapshot.objects
+            .filter(realm=realm, captured_on=prev_captured, rank__lte=top_n)
+            .values_list('player__player_id', flat=True)
+        )
 
     with transaction.atomic():
         ShipTopPlayerSnapshot.objects.filter(
@@ -6174,34 +6186,17 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
         ShipTopPlayerSnapshot.objects.filter(
             realm=realm, captured_on__lt=prune_before).delete()
 
-        # Durable award ledger: idempotent for today, never pruned. Gated
-        # separately from the ephemeral snapshot (SHIP_AWARD_LEDGER_ENABLED,
-        # default off) so the ephemeral leaderboards + profile badges can run
-        # during a battle-history coverage ramp WITHOUT permanently recording
-        # under-sampled "champions" into Ship Honors. The snapshot is overwritten
-        # and pruned each season (self-correcting); the award ledger is forever,
-        # so it stays paused until capture coverage is real. See the HELD/PURGED
-        # addendum in runbook-ship-top-player-badges-2026-06-05.md (2026-06-08).
-        if os.getenv("SHIP_AWARD_LEDGER_ENABLED", "0") == "1":
-            ShipAward.objects.filter(realm=realm, captured_on=captured_on).delete()
-            if award_rows:
-                ShipAward.objects.bulk_create(award_rows)
-        else:
-            logger.info(
-                "ship-award ledger write skipped (SHIP_AWARD_LEDGER_ENABLED!=1) "
-                "realm=%s captured_on=%s awards=%s", realm, captured_on, len(award_rows))
-
-    for wg_id in invalidate_wg_ids:
+    for wg_id in set(invalidate_wg_ids):
         invalidate_player_detail_cache(wg_id, realm=realm)
 
     logger.info(
-        "ship-badge snapshot realm=%s tiers=%s season=%s window=%s..%s ships_qualified=%s/%s "
-        "ranked_rows=%s badges=%s", realm, tiers, season_index, window_start, window_end,
+        "ship-badge snapshot realm=%s tiers=%s window=%s..%s ships_qualified=%s/%s "
+        "ranked_rows=%s badges=%s", realm, tiers, window_start, window_end,
         qualified, len(target_ids), len(snapshot_rows), badge_count,
     )
     return {'realm': realm, 'captured_on': captured_on, 'ships_qualified': qualified,
             'ships_total': len(target_ids), 'badges': badge_count,
-            'ranked_rows': len(snapshot_rows), 'season_index': season_index,
+            'ranked_rows': len(snapshot_rows),
             'window_start': window_start, 'window_end': window_end}
 
 
@@ -6239,6 +6234,12 @@ def get_player_ship_badges(player: Player) -> list:
     rank so the most prestigious (T10) badge leads.
     """
     from warships.models import ShipTopPlayerSnapshot
+
+    # A hidden account asked not to be shown — never surface its badges, even if a
+    # snapshot row from when it was public still exists (the board is precomputed,
+    # so a player who hid after the last run would otherwise linger until the next).
+    if getattr(player, 'is_hidden', False):
+        return []
 
     top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
     latest = (
@@ -6305,7 +6306,10 @@ def get_players_ship_badges_bulk(player_pks, realm: Optional[str] = None) -> dic
         return {}
     top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
 
-    base = ShipTopPlayerSnapshot.objects.filter(player_id__in=pks)
+    # Exclude now-hidden accounts (see get_player_ship_badges) — drives both the
+    # latest-per-player map and, via its keys, the row fetch below.
+    base = ShipTopPlayerSnapshot.objects.filter(
+        player_id__in=pks, player__is_hidden=False)
     if realm:
         base = base.filter(realm=(realm or '').lower().strip())
     latest_per_player = {
@@ -6351,71 +6355,11 @@ def get_players_ship_badges_bulk(player_pks, realm: Optional[str] = None) -> dic
     return result
 
 
-def get_player_ship_awards(player: Player, current_badges: Optional[list] = None) -> list:
-    """Durable per-ship career summary from the append-only `ShipAward` ledger.
-
-    Read path for the profile "Ship Honors" panel. With fixed seasons (captured_on
-    = season-start date), `times_first` = number of **seasons** the player held #1
-    in the ship; `times_top3` = seasons at any top-3 rank; `current_rank` is grafted from the
-    live snapshot (None when the player isn't currently top-3 — the vacation
-    case), `last_on` is their most recent placement date. `seasons` lists each
-    placement as `{captured_on, rank}` (newest first) so the UI can spell out the
-    season weeks (e.g. "WK20'26, WK22'26"). Indexed by `ship_award_player_ship_idx`.
-    See `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md`.
-    """
-    from warships.models import ShipAward
-
-    rows = list(
-        ShipAward.objects.filter(player=player)
-        .values('ship_id', 'ship_name', 'rank', 'captured_on')
-        .order_by('ship_id', '-captured_on')
-    )
-    if not rows:
-        return []
-
-    # Reuse the caller's already-computed badges when available (the serializer
-    # passes them) so the latest-snapshot lookup isn't done twice per player.
-    badges = current_badges if current_badges is not None else get_player_ship_badges(player)
-    current = {b['ship_id']: b['rank'] for b in badges}
-
-    # Aggregate per ship in Python (rows are already newest-first within a ship).
-    by_ship: dict = {}
-    for r in rows:
-        by_ship.setdefault(r['ship_id'], []).append(r)
-    tier_by_ship = _ship_tier_map(by_ship.keys())
-
-    entries = []
-    for ship_id, ship_rows in by_ship.items():
-        ranks = [x['rank'] for x in ship_rows]
-        caps = [x['captured_on'] for x in ship_rows]
-        entries.append({
-            'ship_id': ship_id,
-            'ship_name': ship_rows[0]['ship_name'],
-            'tier': tier_by_ship.get(ship_id),
-            'times_first': sum(1 for x in ship_rows if x['rank'] == 1),
-            'times_top3': len(ship_rows),
-            'best_rank': min(ranks),
-            'current_rank': current.get(ship_id),
-            'first_on': min(caps).isoformat(),
-            'last_on': max(caps).isoformat(),
-            'seasons': [
-                {'captured_on': x['captured_on'].isoformat(), 'rank': x['rank']}
-                for x in ship_rows
-            ],
-        })
-
-    # Most prestigious tier first, then the career strength (most #1s, best rank,
-    # most placements) within a tier.
-    entries.sort(key=lambda e: (-(e['tier'] or 0), -e['times_first'],
-                                e['best_rank'], -e['times_top3']))
-    return entries
-
-
 def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
-    """Latest fortnight leaderboard for one ship on one realm (snapshot read).
+    """Latest trailing-window leaderboard for one ship on one realm (snapshot read).
 
     Powers the `/ship/<id>` page. Reads the most recent `captured_on`'s rows for
-    the ship (precomputed by `compute_ship_top_player_snapshot`, ≤
+    the ship (precomputed nightly by `compute_ship_top_player_snapshot`, ≤
     `SHIP_BADGE_LIST_SIZE`), joins `Ship` for the header, and shapes a payload.
     Returns None when the ship_id is unknown; an empty `players` list when the
     ship was not "ranked" in the latest window (pool below the population guard).
@@ -6436,9 +6380,14 @@ def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
     )
     players = []
     if latest is not None:
+        # Exclude now-hidden accounts (see get_player_ship_badges): the board is a
+        # precomputed snapshot, so a player who hid after the run would otherwise
+        # keep showing by name + stats until the next recompute. Their rank slot is
+        # simply omitted (no re-ranking).
         rows = (
             ShipTopPlayerSnapshot.objects
-            .filter(realm=realm, ship_id=ship_id, captured_on=latest)
+            .filter(realm=realm, ship_id=ship_id, captured_on=latest,
+                    player__is_hidden=False)
             .order_by('rank')
             .select_related('player')
         )
@@ -6458,20 +6407,15 @@ def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
             for r in rows
         ]
 
-    # Fixed-season boundaries. The displayed board is the latest `captured_on`
-    # (a season-start date) → its window is [captured_on, captured_on+14d).
-    # `next_window_open` is when the *current in-progress* season closes and the
-    # next board drops — the authoritative value the frontend countdown reads.
-    season_start = latest
-    season_end = (latest + timedelta(days=SHIP_SEASON_LENGTH_DAYS)) if latest else None
-    next_open = ship_season_bounds(current_season_index())[1]
+    # Rolling trailing window: the board is the latest `captured_on` (a run date),
+    # covering [captured_on - window_days, captured_on). Recomputed nightly, so
+    # there is no season boundary or "next window opens" countdown.
+    window_start = (latest - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS)) if latest else None
     return {
         'realm': realm,
         'window_days': SHIP_LEADERBOARD_WINDOW_DAYS,
         'captured_on': latest.isoformat() if latest else None,
-        'season_start': season_start.isoformat() if season_start else None,
-        'season_end': season_end.isoformat() if season_end else None,
-        'next_window_open': next_open.isoformat(),
+        'window_start': window_start.isoformat() if window_start else None,
         'ship': {
             'ship_id': ship.ship_id,
             'name': ship.name,
