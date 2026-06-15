@@ -136,10 +136,53 @@ def _set_player_refresh_headers(response, pending: bool, next_refresh_epoch: int
     response['X-Player-Next-Refresh'] = str(next_refresh_epoch)
 
 
+# `last_lookup` only feeds the soft "recently-viewed" landing-clan ranking, so
+# it does not need second-level precision. Debounce it: this runs on every clan
+# read — including every clan-members hydration poll (up to 12/view) and every
+# response-cache hit (it sits before the cache check in clan_members) — so
+# writing + busting the landing cache unconditionally added a DB write and a
+# landing republish-dispatch per request. Recording at most once per interval
+# collapses a 12-poll view to a single write+invalidation (zero if looked up
+# recently) while preserving the ranking signal.
+CLAN_LOOKUP_RECORD_INTERVAL = timedelta(minutes=10)
+
+
 def _record_clan_lookup(clan: Clan, realm: str = DEFAULT_REALM) -> None:
-    clan.last_lookup = timezone.now()
+    now = timezone.now()
+    if clan.last_lookup and (now - clan.last_lookup) < CLAN_LOOKUP_RECORD_INTERVAL:
+        return
+    clan.last_lookup = now
     clan.save(update_fields=["last_lookup"])
     invalidate_landing_clan_caches(realm=realm)
+
+
+# Top-spot ship badges are recomputed only nightly (ShipTopPlayerSnapshot), so
+# they are a static invariant relative to the clan-members hydration poll loop
+# (up to 12 polls/view, each otherwise re-running the 3-query bulk fetch + CPU).
+# Cache them per clan so the loop — and concurrent viewers of the same clan —
+# share one computation. Keyed on a hash of the sorted member PKs so a roster
+# change rotates the key naturally (a new member otherwise shows no badge until
+# expiry). NOTE: this only ever fires on the hydration-pending path; a fully
+# hydrated clan short-circuits on the full-response cache before badges are
+# computed. The member query itself stays live each poll because it carries the
+# ranked/efficiency columns being hydrated — caching those would display a
+# member's pre-hydration value the moment polling stops.
+CLAN_MEMBER_BADGES_CACHE_TTL = 300  # 5 min — spans the poll loop + cross-view sharing
+
+
+def _clan_member_badges_cached(clan_id: str, realm: str, member_pks: list) -> dict:
+    from warships.data import get_players_ship_badges_bulk
+    pk_signature = sha256(
+        ','.join(str(pk) for pk in sorted(member_pks)).encode()
+    ).hexdigest()[:16]
+    cache_key = realm_cache_key(
+        realm, f'clan:member-badges:v1:{clan_id}:{pk_signature}')
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    badges = get_players_ship_badges_bulk(member_pks, realm=realm)
+    cache.set(cache_key, badges, CLAN_MEMBER_BADGES_CACHE_TTL)
+    return badges
 
 
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
@@ -1661,7 +1704,7 @@ def clan_members(request, clan_id: str) -> Response:
 
     _record_clan_lookup(clan, realm=realm)
 
-    from warships.data import queue_clan_efficiency_hydration, queue_clan_ranked_hydration, clan_battle_summary_is_stale, maybe_refresh_clan_battle_data, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT, get_players_ship_badges_bulk
+    from warships.data import queue_clan_efficiency_hydration, queue_clan_ranked_hydration, clan_battle_summary_is_stale, maybe_refresh_clan_battle_data, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT
     local_member_count = clan.player_set.exclude(name='').count()
     needs_clan_refresh = (
         not clan.members_count
@@ -1731,8 +1774,9 @@ def clan_members(request, clan_id: str) -> Response:
             return None
         return max(0, (today - member.last_battle_date).days)
 
-    # Current top-spot ship badges for every member in two queries (avoids N+1).
-    member_badges = get_players_ship_badges_bulk([m.pk for m in members], realm=realm)
+    # Current top-spot ship badges for every member — cached per clan so the
+    # hydration poll loop doesn't re-run the bulk fetch on every poll.
+    member_badges = _clan_member_badges_cached(clan_id, realm, [m.pk for m in members])
 
     member_rows = []
     for member in members:
