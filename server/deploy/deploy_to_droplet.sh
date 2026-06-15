@@ -289,6 +289,20 @@ else
   echo 'SHIP_BADGE_SNAPSHOT_ENABLED=1' >> /etc/battlestats-server.env
 fi
 
+# Hot-players engagement-queue per-realm cap (2026-06-15). Raise the ceiling
+# 500->800 so a full nightly hot-player capture/refresh pass still fits inside a
+# ~1h worst-case budget (~4-5s/player when every member needs a fresh WG call,
+# measured from the freshness-sweep refresh path) with headroom as the qualified
+# set grows. Inert at today's set size (~133/1500 across realms) — a future-proof
+# ceiling, not a throughput change; the real lever for more coverage is the
+# HOT_PROMOTE_* gates. Pinned here because the cp of .env.cloud above wipes manual
+# /etc edits. Runbook: agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md.
+if grep -q '^HOT_PLAYERS_MAX=' /etc/battlestats-server.env; then
+  sed -i 's|^HOT_PLAYERS_MAX=.*|HOT_PLAYERS_MAX=800|' /etc/battlestats-server.env
+else
+  echo 'HOT_PLAYERS_MAX=800' >> /etc/battlestats-server.env
+fi
+
 # Ship standings span Tiers 8–10 (per-tier density study, 2026-06-05). Pinned
 # here for the same .env.cloud-overwrite reason as the flag above.
 if grep -q '^SHIP_BADGE_TIERS=' /etc/battlestats-server.env; then
