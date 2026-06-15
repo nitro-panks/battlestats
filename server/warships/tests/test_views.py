@@ -4806,3 +4806,81 @@ class PlayerLiveRefreshSignalTests(TestCase):
         self.assertIsNotNone(get_cached_player_detail(77004, realm="na"))
         invalidate_player_detail_cache(77004, realm="na")
         self.assertIsNone(get_cached_player_detail(77004, realm="na"))
+
+
+class RecordClanLookupDebounceTests(TestCase):
+    """`_record_clan_lookup` runs on every clan read (incl. each hydration poll
+    and each response-cache hit), so it must not write + bust the landing cache
+    unless `last_lookup` has actually gone stale past the debounce interval."""
+
+    def setUp(self):
+        cache.clear()
+
+    @patch("warships.views.invalidate_landing_clan_caches")
+    def test_records_when_never_looked_up(self, mock_invalidate):
+        from warships.views import _record_clan_lookup
+        clan = Clan.objects.create(
+            clan_id=9701, name="NeverLookedUp", members_count=1,
+            last_fetch=timezone.now(), last_lookup=None)
+        _record_clan_lookup(clan, realm="na")
+        mock_invalidate.assert_called_once()
+        self.assertIsNotNone(clan.last_lookup)
+
+    @patch("warships.views.invalidate_landing_clan_caches")
+    def test_skips_within_interval(self, mock_invalidate):
+        from warships.views import _record_clan_lookup
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=9702, name="RecentlyLookedUp", members_count=1,
+            last_fetch=now, last_lookup=now)
+        _record_clan_lookup(clan, realm="na")
+        # Within the debounce window: no landing-cache bust, no write.
+        mock_invalidate.assert_not_called()
+        self.assertEqual(clan.last_lookup, now)
+
+    @patch("warships.views.invalidate_landing_clan_caches")
+    def test_records_again_once_stale(self, mock_invalidate):
+        from warships.views import _record_clan_lookup, CLAN_LOOKUP_RECORD_INTERVAL
+        stale = timezone.now() - CLAN_LOOKUP_RECORD_INTERVAL - timedelta(minutes=1)
+        clan = Clan.objects.create(
+            clan_id=9703, name="StaleLookup", members_count=1,
+            last_fetch=timezone.now(), last_lookup=stale)
+        _record_clan_lookup(clan, realm="na")
+        mock_invalidate.assert_called_once()
+        self.assertGreater(clan.last_lookup, stale)
+        # An immediate repeat is now debounced.
+        mock_invalidate.reset_mock()
+        _record_clan_lookup(clan, realm="na")
+        mock_invalidate.assert_not_called()
+
+
+class ClanMemberBadgesCacheTests(TestCase):
+    """Badges are recomputed only nightly, so the hydration poll loop must not
+    re-run the 3-query bulk fetch on every poll — `_clan_member_badges_cached`
+    caches per clan, keyed on the member-pk set so a roster change rotates it."""
+
+    def setUp(self):
+        cache.clear()
+
+    @patch("warships.data.get_players_ship_badges_bulk")
+    def test_cached_across_calls_same_roster(self, mock_bulk):
+        from warships.views import _clan_member_badges_cached
+        mock_bulk.return_value = {101: [{"ship_id": 1, "rank": 1}]}
+
+        first = _clan_member_badges_cached("4242", "na", [101, 102, 103])
+        second = _clan_member_badges_cached("4242", "na", [103, 101, 102])  # reordered
+
+        # Underlying bulk fetch ran once; the second (poll) call hit cache.
+        mock_bulk.assert_called_once()
+        self.assertEqual(first, second)
+
+    @patch("warships.data.get_players_ship_badges_bulk")
+    def test_roster_change_rotates_key(self, mock_bulk):
+        from warships.views import _clan_member_badges_cached
+        mock_bulk.return_value = {}
+
+        _clan_member_badges_cached("4242", "na", [101, 102])
+        _clan_member_badges_cached("4242", "na", [101, 102, 104])  # new member joined
+
+        # Different roster -> different cache key -> recompute.
+        self.assertEqual(mock_bulk.call_count, 2)
