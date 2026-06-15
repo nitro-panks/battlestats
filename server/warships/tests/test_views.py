@@ -8,7 +8,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_CLANS_BEST_PUBLISHED_CACHE_KEY, LANDING_CLANS_CACHE_KEY, LANDING_CLANS_PUBLISHED_CACHE_KEY, LANDING_PLAYER_LIMIT, landing_best_clan_cache_key, landing_best_clan_published_cache_key, landing_player_cache_key, landing_player_published_cache_key, warm_landing_page_content
-from warships.models import Player, Clan, PlayerExplorerSummary, realm_cache_key, LandingPlayerBestSnapshot, Ship, ShipTopPlayerSnapshot
+from warships.models import Player, Clan, PlayerExplorerSummary, realm_cache_key, LandingPlayerBestSnapshot, Ship, ShipTopPlayerSnapshot, EntityVisitDaily
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
@@ -4884,3 +4884,69 @@ class ClanMemberBadgesCacheTests(TestCase):
 
         # Different roster -> different cache key -> recompute.
         self.assertEqual(mock_bulk.call_count, 2)
+
+
+class SitemapEntitiesTests(TestCase):
+    """The sitemap must not emit hidden / dead-end player URLs (thin content)."""
+
+    def setUp(self):
+        cache.clear()
+
+    def _visit(self, pid, name, views):
+        EntityVisitDaily.objects.create(
+            date=timezone.now().date(),
+            entity_type='player',
+            entity_id=pid,
+            realm='na',
+            entity_name_snapshot=name,
+            views_deduped=views,
+            views_raw=views,
+            unique_visitors=1,
+        )
+
+    def test_sitemap_excludes_hidden_and_missing_players(self):
+        now = timezone.now()
+        # Visible player — should appear.
+        Player.objects.create(
+            name="VisiblePlayer", player_id=88001, realm="na",
+            last_fetch=now, pvp_battles=1000, is_hidden=False)
+        # Hidden player ranked ABOVE the visible one by views — must be dropped
+        # despite outranking, proving the filter isn't just a tail trim.
+        Player.objects.create(
+            name="HiddenPlayer", player_id=88002, realm="na",
+            last_fetch=now, pvp_battles=1000, is_hidden=True)
+        # Visited id with no Player row (deleted / never ingested) — must drop.
+
+        self._visit(88002, "HiddenPlayer", views=50)   # top by views
+        self._visit(88001, "VisiblePlayer", views=20)
+        self._visit(88003, "GhostPlayer", views=10)     # no Player row
+
+        response = self.client.get("/api/sitemap-entities/")
+        self.assertEqual(response.status_code, 200)
+        names = [p["name"] for p in response.json()["players"]]
+
+        self.assertIn("VisiblePlayer", names)
+        self.assertNotIn("HiddenPlayer", names)
+        self.assertNotIn("GhostPlayer", names)
+
+    def test_sitemap_drops_low_view_and_old_visits(self):
+        now = timezone.now()
+        Player.objects.create(
+            name="OnlyOnce", player_id=88010, realm="na",
+            last_fetch=now, pvp_battles=10, is_hidden=False)
+        Player.objects.create(
+            name="StaleVisit", player_id=88011, realm="na",
+            last_fetch=now, pvp_battles=10, is_hidden=False)
+        # Below the views_deduped>=2 floor.
+        self._visit(88010, "OnlyOnce", views=1)
+        # Visited outside the 30-day window.
+        EntityVisitDaily.objects.create(
+            date=(now - timedelta(days=45)).date(),
+            entity_type='player', entity_id=88011, realm='na',
+            entity_name_snapshot="StaleVisit", views_deduped=99, views_raw=99,
+            unique_visitors=1)
+
+        response = self.client.get("/api/sitemap-entities/")
+        names = [p["name"] for p in response.json()["players"]]
+        self.assertNotIn("OnlyOnce", names)
+        self.assertNotIn("StaleVisit", names)

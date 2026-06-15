@@ -47,6 +47,8 @@ The root `layout.tsx` exports a static `metadata` object. Player and clan pages 
 - Bulk cache players (~50) and clans (~25)
 - Recently visited players and clans (from `EntityVisitDaily`, last 30 days, with deduped views ≥ 2)
 
+> **Hidden-profile filter (2026-06-15):** `sitemap_entities` now joins `Player` and drops `is_hidden=True` accounts (and visited ids with no `Player` row — deleted/never-ingested). A hidden profile renders only a "stats hidden" placeholder, so emitting it is a thin-content / dead-end URL for crawlers — an audit found ~40% of the most-visited players were hidden. The view over-fetches `3×` the player cap before filtering so the post-filter list still reaches 200. `is_hidden` is the last-known fetch state, so a just-un-hidden player re-enters on its next visit/refresh. Covered by `test_views.py::SitemapEntitiesTests`.
+
 This gives search engines a curated, high-quality set of 100-500 URLs without trying to index stale or never-visited player profiles.
 
 ### 3. No Open Graph or Twitter Card Metadata

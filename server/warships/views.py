@@ -2057,17 +2057,41 @@ def landing_best_warmup(request) -> Response:
 
 @api_view(["GET"])
 def sitemap_entities(request) -> Response:
-    """Return recently-visited players and clans for sitemap generation."""
+    """Return recently-visited players and clans for sitemap generation.
+
+    Player rows are filtered to currently-visible (non-hidden) accounts: a
+    hidden profile renders only a "stats hidden" placeholder, so emitting it to
+    the sitemap is a thin-content / dead-end URL for crawlers (~40% of the most-
+    visited players are hidden profiles). ``is_hidden`` is the last-known fetch
+    state (data.py), so worst case we transiently drop a player who just un-hid
+    — they re-enter on the next visit/refresh. We also drop visited ids with no
+    matching ``Player`` row (deleted/never-ingested → would 404).
+    """
     cutoff = (timezone.now() - timedelta(days=30)).date()
 
-    player_visits = (
+    PLAYER_LIMIT = 200
+    # Over-fetch candidates so the post-hidden-filter list still reaches the cap
+    # despite ~40% of visited players being hidden profiles.
+    PLAYER_CANDIDATE_POOL = PLAYER_LIMIT * 3
+
+    player_candidates = list(
         EntityVisitDaily.objects
         .filter(entity_type='player', date__gte=cutoff)
         .values('entity_id', 'entity_name_snapshot')
         .annotate(total_views=Sum('views_deduped'))
         .filter(total_views__gte=2)
-        .order_by('-total_views')[:200]
+        .order_by('-total_views')[:PLAYER_CANDIDATE_POOL]
     )
+
+    candidate_ids = [c['entity_id'] for c in player_candidates]
+    visible_ids = set(
+        Player.objects
+        .filter(player_id__in=candidate_ids, is_hidden=False)
+        .values_list('player_id', flat=True)
+    )
+    player_visits = [
+        c for c in player_candidates if c['entity_id'] in visible_ids
+    ][:PLAYER_LIMIT]
 
     clan_visits = (
         EntityVisitDaily.objects
