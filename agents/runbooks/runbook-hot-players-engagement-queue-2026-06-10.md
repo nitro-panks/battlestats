@@ -193,6 +193,35 @@ for player in HotPlayer(realm):
   short-circuits `skipped/wg-fetch-failed-or-hidden`; we record the skip and move on (no
   retry storm).
 
+#### Work-budgeted rotation (2026-06-15) — required for a floor-missed seed
+
+The skip-if-fresh pseudocode above is cheap **only when most of the set is floor-fresh**
+(the original most-active seed). When the backfill seed is changed to **floor-missed**
+players (`backfill_hot_players` excludes anyone with a `BattleObservation` within
+`HOT_OBSERVE_FLOOR_HOURS`), *every* member is an expensive pull, and an unbudgeted
+`-hot_score` sweep blows the task's **540s soft limit at ~90 members** and re-pulls the
+same static head every run while the tail starves (incident 2026-06-15; see
+`project_hot_queue_stale_seed_starves` memory). `capture_hot_players` therefore:
+
+- **Orders** engagement/pinned first (by `-hot_score`, preserving their daily contract —
+  few, high-value), then backfill by **`last_observed_at` ASC NULLS FIRST** so the
+  floor-missed set drains **round-robin by coverage age**.
+- **Stops after `HOT_CAPTURE_MAX_PULLS` WG fetches** (success *or* hidden-skip — both
+  spend a call); members past the budget rotate in on the next run. The budget is a
+  **count, not wall-clock** (deterministic, unit-tested) and sized to stay under 540s even
+  at the worst ~7s/pull (`65 × 7 = 455s`).
+- **Stamps `last_observed_at`** on any spent WG call (advancing the member to the back of
+  the rotation). A cheap fresh-skip spends no call and is *not* stamped — it stays at the
+  head for a free re-check next run (self-correcting, no budget burn).
+- Result dict exposes `wg_calls` / `stopped_early` / `remaining` for the
+  `/observation`-style ops read and the self-chain trigger.
+
+**Drain rate:** one scheduled run/day × `HOT_CAPTURE_MAX_PULLS=65` ⇒ a full `HOT_PLAYERS_MAX=800`
+floor-missed set cycles in **~12 days**. A bounded **self-chain** (re-enqueue while
+`stopped_early` and pull-work remains, capped depth) is the planned follow-up to tighten
+this to ~2 days, at the cost of ~`800×~6s`≈80 min/realm/day of pulls competing with the
+floor on the shared `background` pool — **not yet shipped**; ship rotation+budget first.
+
 ### Scheduling — per-realm striped, `signals.py`
 
 Register both tasks in the `@receiver(post_migrate)` block using
@@ -240,6 +269,7 @@ the snapshot/enrichment-maintenance families (still respects `HOT_PLAYERS_ENABLE
 | `HOT_PLAYERS_MAX` | `500` (prod `800` since 2026-06-15) | Per-realm cap on hot-set size (bounds WG cost). |
 | `HOT_OBSERVE_FLOOR_HOURS` | `20` | Skip-if-fresh: skip observation if one is newer than this. |
 | `HOT_PLAYERS_CAPTURE_DELAY` | `0.5` | WG pacing between hot captures (crawl-coexist value). |
+| `HOT_CAPTURE_MAX_PULLS` | `65` | Max WG fetches per capture run — anti-starvation work budget (count, stays <540s soft limit at ~7s/pull). Members past it rotate in next run. |
 
 ## Observability
 

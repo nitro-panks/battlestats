@@ -2117,18 +2117,17 @@ def sitemap_entities(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def realm_top_ships(request, realm: str) -> Response:
-    """Most-played ships on a realm over the most recently completed ship season.
+    """Most-played ships on a realm over the rolling ship-standings window.
 
     Powers the landing treemap: each ship is a tile sized by battles, colored
     by type and shaded by tier. Sums BattleEvent.battles_delta per ship over the
-    most recently completed fixed 2-week ship season — the same window the
-    /ship/<id> leaderboard and profile medals reflect — then joins Ship for
-    type + tier. A static per-season count: recomputed once per season
-    (season-tagged Redis key) and served from cache otherwise.
+    rolling trailing window the /ship/<id> leaderboard + profile medals read
+    (anchored on the latest ShipTopPlayerSnapshot.captured_on) — then joins Ship
+    for type + tier. Recomputed nightly (window-end-tagged Redis key, refreshed by
+    the daily warmer) and served from cache otherwise.
 
     Response shape:
-        {realm, days, season_index, season_start, season_end,
-         window_start, window_end, mode,
+        {realm, window_days, captured_on, window_start, window_end, mode,
          ships: [{ship_id, ship_name, ship_type, tier, battles}]}
     """
     from warships.data import compute_realm_top_ships
@@ -2137,9 +2136,9 @@ def realm_top_ships(request, realm: str) -> Response:
     if realm not in VALID_REALMS:
         return Response({"detail": "Unknown realm."}, status=status.HTTP_404_NOT_FOUND)
 
-    # The shared helper fixes the season window, clamps limit/mode, and handles
-    # the Redis cache (season-tagged key, TTL to the next season boundary); the
-    # daily warmer calls the same helper with use_cache=False.
+    # The shared helper resolves the rolling window, clamps limit/mode, and handles
+    # the Redis cache (window-end-tagged key, 26h TTL); the daily warmer calls the
+    # same helper with use_cache=False.
     payload = compute_realm_top_ships(
         realm,
         limit=request.query_params.get("limit", 25),
@@ -2151,18 +2150,19 @@ def realm_top_ships(request, realm: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def realm_ships_by_tier_type(request, realm: str) -> Response:
-    """Ships of one tier+type on a realm, ranked by win rate over the last season.
+    """Ships of one tier+type on a realm, ranked by win rate over the rolling window.
 
     Powers the landing-page inline ship leaderboard (filterable table under the
     treemap). Realm-wide win rate / avg damage / kills per battle aggregated from
-    BattleEvent over the most recently completed fixed 2-week ship season, ordered
-    by win rate descending, restricted to ships with a populated drill-down board.
-    Requires `tier` (one of the badge tiers, prod 8/9/10) and `type` (a raw WG
-    ship-type string). 404 on unknown realm; 400 on missing/invalid tier or type.
+    BattleEvent over the rolling trailing window the treemap + /ship board read
+    (anchored on the latest ShipTopPlayerSnapshot.captured_on), ordered by win rate
+    descending, restricted to ships with a populated drill-down board. Requires
+    `tier` (one of the badge tiers, prod 8/9/10) and `type` (a raw WG ship-type
+    string). 404 on unknown realm; 400 on missing/invalid tier or type.
 
     Response shape:
-        {realm, days, tier, ship_type, mode, season_index, season_start,
-         season_end, window_start, window_end,
+        {realm, window_days, tier, ship_type, mode, captured_on,
+         window_start, window_end,
          ships: [{ship_id, ship_name, ship_type, tier, nation, is_premium,
                   battles, win_rate, avg_damage, kills_per_battle}]}
     """
@@ -2202,13 +2202,13 @@ def realm_ships_by_tier_type(request, realm: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def ship_leaderboard(request, realm: str, ship_id: int) -> Response:
-    """Fortnight leaderboard of ranked players for one ship on a realm.
+    """Rolling-window leaderboard of ranked players for one ship on a realm.
 
     Snapshot-backed (no live aggregation): serves the latest
-    `ShipTopPlayerSnapshot` rows written weekly by
-    `snapshot_ship_top_players_task`. 404 on unknown realm or unknown ship; an
-    empty `players` list means the ship was not "ranked" in the latest window
-    (qualifying pool below the population guard). Cached 15 min.
+    `ShipTopPlayerSnapshot` rows over the trailing `SHIP_LEADERBOARD_WINDOW_DAYS`
+    window, recomputed nightly by `snapshot_ship_top_players_task`. 404 on unknown
+    realm or unknown ship; an empty `players` list means the ship was not "ranked"
+    in the latest window (qualifying pool below the population guard). Cached 15 min.
 
     Response shape:
         {realm, window_days, captured_on, ship: {...},

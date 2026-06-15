@@ -5,11 +5,10 @@ floor, the per-ship population guard, tier scope, realm isolation, hidden
 exclusion, the trailing rolling window, idempotency, captured_on=run-date,
 displaced-holder cache invalidation), `get_player_ship_badges` (badges = ranks
 1..N only, worn while held), `get_ship_leaderboard` + the `ship_leaderboard`
-endpoint, and the task's enable gate. The fixed-season helpers still back the
-realm treemap and keep their own tests below.
+endpoint, and the task's enable gate.
 See agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md.
 """
-from datetime import date, timedelta
+from datetime import timedelta
 from unittest import mock
 
 from django.core.cache import cache
@@ -17,14 +16,10 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import (
-    SHIP_SEASON_EPOCH,
     compute_ship_top_player_snapshot,
-    current_season_index,
     get_player_ship_badges,
     get_players_ship_badges_bulk,
     get_ship_leaderboard,
-    most_recent_completed_season,
-    ship_season_bounds,
 )
 from warships.models import (
     BattleEvent,
@@ -261,13 +256,15 @@ class ShipBadgeSnapshotTests(TestCase):
 
     def test_non_t10_not_in_treemap_is_ignored(self):
         # A non-T10 ship that is NOT in the realm treemap top-25 isn't a target.
-        # (These events are stamped "today", which compute_realm_top_ships's
-        # previous-7-full-UTC-days window excludes, so the ship never enters the
-        # treemap set here.)
+        # The treemap now aggregates the same rolling window as the snapshot, so a
+        # recent-but-out-of-tier ship could enter it; mock the treemap empty to
+        # isolate the "not a target" path, decoupled from the treemap's window.
         for i in range(5):
             self._event(self._player(f"T9p{i}"), T9_SHIP, battles=30, wins=20)
 
-        result = self._run("na")
+        with mock.patch("warships.data.compute_realm_top_ships",
+                        return_value={"ships": []}):
+            result = self._run("na")
 
         self.assertEqual(result["ranked_rows"], 0)
         self.assertFalse(
@@ -276,10 +273,8 @@ class ShipBadgeSnapshotTests(TestCase):
     def test_non_t10_in_treemap_is_included(self):
         # A non-T10 ship that IS among the most-played (returned by the realm
         # treemap) is unioned into the snapshot target set and ranked, even though
-        # it isn't Tier 10. The treemap window is now the completed ship season
-        # (not a rolling 7d, per the treemap-season-alignment change), so mock the
-        # treemap to exercise the union mechanism directly, decoupled from its
-        # window.
+        # it isn't Tier 10. Mock the treemap to exercise the union mechanism
+        # directly, decoupled from its window.
         for i in range(3):
             self._event(self._player(f"T9p{i}"), T9_SHIP, battles=30,
                         wins=20 + i, detected_days_ago=2)
@@ -671,26 +666,6 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertNotIn("season_start", lb)
         self.assertNotIn("season_end", lb)
         self.assertNotIn("next_window_open", lb)
-
-
-class ShipSeasonHelpersTests(TestCase):
-    """Pure date math for the fixed 2-week seasons (epoch = Mon 11 May 2026).
-
-    The ship badges/board are now a rolling trailing window; these helpers remain
-    only because the realm treemap (`compute_realm_top_ships`) still buckets by a
-    fixed, immutable calendar season for its per-season cache key."""
-
-    def test_epoch_and_bounds(self):
-        self.assertEqual(SHIP_SEASON_EPOCH, date(2026, 5, 11))
-        self.assertEqual(ship_season_bounds(0), (date(2026, 5, 11), date(2026, 5, 25)))
-        self.assertEqual(ship_season_bounds(1)[0], date(2026, 5, 25))
-
-    def test_current_index_and_completed(self):
-        d = date(2026, 6, 5)  # mid W22-23 (season index 1)
-        self.assertEqual(current_season_index(d), 1)
-        idx, start, end = most_recent_completed_season(d)
-        self.assertEqual((idx, start, end),
-                         (0, date(2026, 5, 11), date(2026, 5, 25)))
 
 
 class MaterializeBestSnapshotWarmChainTests(TestCase):

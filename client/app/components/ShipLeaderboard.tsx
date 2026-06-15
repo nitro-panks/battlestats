@@ -81,8 +81,9 @@ interface ShipLeaderboardPayload {
     players: LeaderboardPlayer[];
 }
 
-// The list only changes once per 2-week season; a 1h client TTL keeps a long-open
-// tab from showing a stale window past a boundary (backend serves it warm).
+// The list changes once per night (rolling trailing window, recomputed with the
+// nightly snapshot); a 1h client TTL keeps a long-open tab from showing the
+// previous day's window for long (backend serves it warm).
 const LIST_FETCH_TTL_MS = 3_600_000;
 const BOARD_FETCH_TTL_MS = 900_000; // 15 min, matching the /ship page.
 
@@ -157,7 +158,7 @@ const ariaSort = (active: boolean, dir: SortDir): 'ascending' | 'descending' | '
     active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none';
 
 const DATA_BASIS_HINT =
-    'Stats are aggregated from battle observations recorded during the current two-week period.';
+    'Stats are aggregated from battle observations recorded during the rolling trailing 14-day window.';
 
 // Info affordance with a hover/focus tooltip — styled to match the circle-info
 // buttons in the Players/Clans landing sections below (FontAwesomeIcon + the

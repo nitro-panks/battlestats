@@ -1,43 +1,45 @@
 # Runbook: Ship Leaderboard Data Freshness & Update Cadence
 
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-15_
 
 _Status: Active operational reference_
 
-_Context: Captures how "live" the ship leaderboard data actually is — the full freshness chain from the `ShipLeaderboard` / `ShipRouteView` components down to the snapshot writer — so future operators don't misread the standings as real-time._
+_Context: Captures how "live" the ship leaderboard data actually is — the full freshness chain from the `ShipLeaderboard` / `ShipRouteView` / `RealmTopShipsTreemapSVG` components down to the snapshot writer — so future operators don't misread the standings as real-time._
+
+> **Cadence updated 2026-06-14/15 — now a NIGHTLY ROLLING recompute, not a fortnightly season.** Earlier revisions of this runbook described a fixed 2-week season boundary; that model is gone. The `/ship/<id>` board + profile badges moved to a rolling trailing 14-day recompute on 2026-06-14 ([runbook-ship-badges-rolling-2026-06-14.md](runbook-ship-badges-rolling-2026-06-14.md)), and the landing treemap + tier/type drill-down list followed on 2026-06-15 so all three share one rolling window 1:1.
 
 ## Purpose
 
-Answer the recurring question: **how live are the ship stats shown on `/ship/<id>` and the landing tier/type drill-down board?** The short answer is **not live** — they are a precomputed **fortnightly batch snapshot**, not a real-time query. This runbook documents the dominant cadence (the 2-week season boundary), the two 15-minute caches layered on top, the kill switch that gates the writer, and how to confirm the current state in prod.
+Answer the recurring question: **how live are the ship stats shown on `/ship/<id>`, the landing tier/type drill-down board, and the realm treemap?** The short answer is **not live, but daily** — they are a precomputed snapshot recomputed **every night** over a **rolling trailing 14-day window**, not a real-time query. This runbook documents the dominant cadence (the nightly snapshot), the 15-minute caches layered on top, the kill switch that gates the writer, and how to confirm the current state in prod.
 
-Read this before "fixing" a leaderboard that looks stale — within a season, static is **expected**, not a bug.
+Read this before "fixing" a leaderboard that looks stale — within a day, static is **expected**, not a bug.
 
 ## Freshness chain (dominant factor first)
 
-### 1. The real cadence — once every 2 weeks at a season boundary
+### 1. The real cadence — once a night
 
-The read path does **no live aggregation**. `get_ship_leaderboard()` (`server/warships/data.py`) does a pure snapshot read of the most recent `captured_on`'s `ShipTopPlayerSnapshot` rows for the ship+realm, joins `Ship` for the header, and shapes the payload. The endpoint is `ship_leaderboard` (`server/warships/views.py:2136`).
+The read path does **no live aggregation**. `get_ship_leaderboard()` (`server/warships/data.py`) does a pure snapshot read of the most recent `captured_on`'s `ShipTopPlayerSnapshot` rows for the ship+realm, joins `Ship` for the header, and shapes the payload. The endpoint is `ship_leaderboard` (`server/warships/views.py`).
 
-Those snapshot rows are written by `snapshot_ship_top_players_task` (`server/warships/tasks.py:898`):
+Those snapshot rows are written by `snapshot_ship_top_players_task` (`server/warships/tasks.py`):
 
-- Runs on a **weekly Monday** Beat tick, but **self-gates on `is_season_boundary()`** (`data.py`, `delta % SHIP_SEASON_LENGTH_DAYS == 0`). So it is effectively **bi-weekly** — only the Monday a 14-day season closes — and it finalizes that *just-completed* season exactly once.
-- `SHIP_SEASON_LENGTH_DAYS = SHIP_LEADERBOARD_WINDOW_DAYS = 14` (`data.py:5855`, `:5872`).
-- The displayed board is the latest `captured_on` (a **season-start** date); its window is `[captured_on, captured_on + 14d)`. `next_window_open` (the in-progress season's close) is the authoritative value the frontend countdown reads.
+- Runs **nightly** per realm (Beat `ship-top-player-snapshot-{realm}`, striped by `REALM_CRAWL_CRON_HOURS`, ~02:30 + realm offset UTC). Each run recomputes the whole trailing window and overwrites that night's rows — there is no season boundary and no "finalize once" gate.
+- `SHIP_LEADERBOARD_WINDOW_DAYS = 14` (`data.py`) is the lookback span (operator-tunable). The fixed `SHIP_SEASON_*` epoch/length and `is_season_boundary()` are gone.
+- The displayed board is the latest `captured_on` (a **run date**); its window is `[captured_on - 14d, captured_on)`. Badges are worn **only while held** — a player who drops out of the top 3 loses the badge on the next nightly run.
 
-**Implication:** within a season the numbers are **completely static**. A player grinding the ship *today* will not appear/update until the season closes and the next snapshot recomputes. The displayed stats (`win_rate`, `battles`, `avg_damage`, `kills_per_battle`) are delta-sums over the closed 14-day window — the same basis as the profile ship badges. (Survival% / KDR are intentionally omitted: per-battle survival isn't available for a multi-battle window, so it would undercount.)
+**Implication:** the numbers advance **every day**. A trailing 14-day window shares ~93% of its data night to night, so turnover is gradual (a few ships/night), not churn — but it is no longer static. The displayed stats (`win_rate`, `battles`, `avg_damage`, `kills_per_battle`) are delta-sums over the trailing 14-day window — the same basis as the profile ship badges. (Survival% / KDR are intentionally omitted: per-battle survival isn't available for a multi-battle window, so it would undercount.)
 
-### 2. Two 15-minute caches on top (negligible vs the fortnight)
+### 2. 15-minute caches on top (negligible vs the nightly recompute)
 
-These only matter for the few minutes right after a new season snapshot lands; against a 2-week refresh they are noise.
+These only matter for the few minutes right after a new nightly snapshot lands; against a daily refresh they are noise.
 
-- **Backend Redis read-cache** — `SHIP_LEADERBOARD_CACHE_TTL = 900s` (`data.py:5856`), applied in the view (`cache_key = f"{realm}:ship-lb:{ship_id}"`, `views.py:2156`).
+- **Backend Redis read-cache** — `SHIP_LEADERBOARD_CACHE_TTL = 900s` (`data.py`), applied in the view (`cache_key = f"{realm}:ship-lb:{ship_id}"`).
 - **Client fetch cache** — `BOARD_FETCH_TTL_MS = 900_000` in `client/app/components/ShipLeaderboard.tsx`; the same 15 min as `SHIP_LEADERBOARD_FETCH_TTL_MS` in `client/app/components/ShipRouteView.tsx`. Both fetch via `fetchSharedJson`. Column **sorting is client-side** over the already-fetched rows — sorting never refetches.
 
 Note: `ShipLeaderboard.tsx` (landing tier/type drill-down) and `ShipRouteView.tsx` (the `/ship/<id>` page) hit the **same** `/api/realm/<realm>/ship/<ship_id>/leaderboard` endpoint, so the freshness story is identical for both.
 
 ### 3. Kill switch gating the writer
 
-`SHIP_BADGE_SNAPSHOT_ENABLED` (default `0`) gates `snapshot_ship_top_players_task`. If `0`, **no new snapshots are written** and the board freezes at the last-written season indefinitely. Prod is `=1` (verified 2026-06-11); tiers pinned `SHIP_BADGE_TIERS=8,9,10`.
+`SHIP_BADGE_SNAPSHOT_ENABLED` (default `0`) gates `snapshot_ship_top_players_task`. If `0`, **no new snapshots are written** and the board freezes at the last-written night indefinitely. Prod is `=1`; tiers pinned `SHIP_BADGE_TIERS=8,9,10`.
 
 ## Verify current state in prod
 
@@ -45,7 +47,7 @@ Note: `ShipLeaderboard.tsx` (landing tier/type drill-down) and `ShipRouteView.ts
 # Writer enabled? Which tiers?
 ssh root@battlestats.online 'grep -E "SHIP_BADGE_SNAPSHOT_ENABLED|SHIP_BADGE_TIERS" /etc/battlestats-server.env'
 
-# What season is currently published, and how many rows?
+# What night is currently published, and how many rows?
 ssh root@battlestats.online 'cd /opt/battlestats-server/current/server;
   set -a; . /etc/battlestats-server.env; . /etc/battlestats-server.secrets.env; set +a;
   /opt/battlestats-server/venv/bin/python manage.py shell -c "
@@ -55,37 +57,39 @@ print(\"rows total:\", S.objects.count())
 "'
 ```
 
-**Reference reading (2026-06-11):** single distinct `captured_on = 2026-05-25` (season `05-25 → 06-08`, finalized at the 06-08 boundary), `6135` rows. The board has been frozen since ~06-08 and next drops **2026-06-22**. Older seasons are pruned — `ShipTopPlayerSnapshot` is ephemeral, so seeing only one (or a couple of) `captured_on` values is normal.
+**Expected:** the newest `captured_on` should be **today (or yesterday)** per realm, with a few nights of history retained (`SHIP_BADGE_RETENTION_DAYS`, default 5) before pruning. If the newest `captured_on` is several days old, the nightly writer isn't firing — investigate the `background` worker / Beat, not the read path.
 
-## The landing tier/type list is a *different*, live path (switch-lag source)
+## The landing tier/type list + treemap share the rolling window (1:1 with the board)
 
-The freshness story above is the snapshot **board** read (`/ship/<id>/leaderboard`). The landing drill-down (`ShipLeaderboard.tsx`) layers a second surface on top with a very different cost profile:
+The freshness story above is the snapshot **board** read (`/ship/<id>/leaderboard`). The landing page layers two more surfaces, both now aggregating over the **same rolling window** the board reads:
 
-- **Click a ship** → `/ship/<id>/leaderboard` → `get_ship_leaderboard` → cheap `ShipTopPlayerSnapshot` row read, Redis-cached 15 min. Fast.
-- **Change a tier/type pill** → `/api/realm/<realm>/ships?tier=&type=` → `compute_realm_ships_by_tier_type` (`data.py:6553`) → a **live `BattleEvent` GROUP-BY** (`Sum` of battles/wins/damage/frags over the 14-day window, joined to `Player` for the realm). Expensive.
+- **Treemap** (`RealmTopShipsTreemapSVG.tsx`) → `/api/realm/<realm>/top-ships` → `compute_realm_top_ships` (`data.py`) — most-played ships, a `BattleEvent` GROUP-BY over the trailing window.
+- **Tier/type pill** (`ShipLeaderboard.tsx`) → `/api/realm/<realm>/ships?tier=&type=` → `compute_realm_ships_by_tier_type` (`data.py`) — a `BattleEvent` GROUP-BY (`Sum` of battles/wins/damage/frags over the window, joined to `Player` for the realm), candidate set restricted to ships ranked in the latest snapshot.
+- **Drill in** (click a ship) → `/ship/<id>/leaderboard` → `get_ship_leaderboard` → cheap `ShipTopPlayerSnapshot` row read, Redis-cached 15 min. Fast.
 
-This asymmetry is why **switching tier/type lags but drilling in is instant.** The list result is cached per `(realm, tier, type)` bucket under a season-tagged key (immutable for the whole season) — but there are **3 tiers × 5 types = 15 buckets per realm**, so before warming, the *first* click of any new combination paid the full cold aggregation on the request path (subsequent clicks of the same combo were warm). Redis `allkeys-lru` eviction could also re-cold a bucket mid-season.
+Both GROUP-BY surfaces resolve their window via `latest_ship_snapshot_window(realm)` — anchored on the realm's latest `ShipTopPlayerSnapshot.captured_on`, so a clicked treemap tile and its drill-down board cover the **identical date span** (no off-by-a-window mismatch). Results are cached per bucket under a **window-end-tagged** key (`top-ships:<mode>:win<YYYY-MM-DD>:<limit>` and `ships-by:<mode>:win<YYYY-MM-DD>:t<tier>:<type>`), so when a new nightly snapshot lands the key changes and the next request recomputes over the matching window — **alignment self-heals regardless of beat order.**
 
-**Fix (shipped):** `warm_realm_top_ships_task` (`tasks.py`) — the existing daily per-realm landing warmer (Beat `top-ships-warmer-{realm}`, ~00:05/00:10/00:15 striped) — now also force-recomputes all populated tier/type buckets (`mode="random"` only; the frontend never passes a mode) right after it warms the treemap. One daily pass makes every filter click a guaranteed Redis hit for the season. Buckets with no candidate ships short-circuit before the aggregation and aren't cached — that cheap early-return path was never the lag source. Tests: `test_realm_ships_by_tier_type.py::RealmShipsByTierTypeWarmTests`.
+**Switch-lag warming:** there are **3 tiers × 5 types = 15 buckets per realm**; cold, the first click of a new combination would pay the full aggregation on the request path. `warm_realm_top_ships_task` (Beat `top-ships-warmer-{realm}`) force-recomputes both treemap modes + every populated tier/type bucket once a day. It is scheduled **~1h after that realm's nightly snapshot** (snapshot ~02:30, warm ~03:xx striped) so it warms the *current* window rather than the previous day's. Buckets with no candidate ships short-circuit before the aggregation and aren't cached — that cheap early-return path was never the lag source. Tests: `test_realm_ships_by_tier_type.py::RealmShipsByTierTypeWarmTests`.
 
 ## Diagnosing "the leaderboard looks stale"
 
-1. **Is it within a season?** If `today` is between the current `captured_on` and `captured_on + 14d`, static is expected. Check `next_window_open` for the next drop. **Not a bug.**
-2. **Did the boundary pass but the board didn't update?** Confirm `SHIP_BADGE_SNAPSHOT_ENABLED=1`, then check whether `snapshot_ship_top_players_task` ran on the boundary Monday (Beat health, task logs). If `captured_on` is two+ seasons behind, the writer didn't fire — investigate the `background` worker / Beat, not the read path.
-3. **Stale only for ~15 min after a known boundary?** That's the Redis + client caches draining. Harmless.
-4. **A specific strong player is missing a badge/standing** — this is usually sparse `BattleObservation` mis-bucketing by `detected_at`, a separate concern (see `runbook-ship-top-player-badges-2026-06-05.md`), not a leaderboard-freshness issue.
+1. **Is the newest `captured_on` today/yesterday?** If so, static *within the day* is expected — it advances on the next nightly run. **Not a bug.**
+2. **Is `captured_on` several days behind?** Confirm `SHIP_BADGE_SNAPSHOT_ENABLED=1`, then check whether `snapshot_ship_top_players_task` ran (Beat health, task logs). If it's stuck, investigate the `background` worker / Beat, not the read path.
+3. **Treemap/list disagree with a ship's drill-down board?** They share the rolling window via `latest_ship_snapshot_window`, but a ship not ranked on the latest night keeps an older per-ship `captured_on`, so its `/ship/<id>` window can lag the realm-wide treemap by a snapshot. Pre-existing and minor.
+4. **Stale only for ~15 min after a known nightly run?** That's the Redis + client caches draining. Harmless.
+5. **A specific strong player is missing a badge/standing** — this is usually sparse `BattleObservation` mis-bucketing by `detected_at`, a separate concern (see `runbook-ship-top-player-badges-2026-06-05.md`), not a leaderboard-freshness issue.
 
-## If real-time-ish ship stats are ever required
+## If even-fresher ship stats are ever required
 
-This is a deliberate snapshot-backed design (cheap reads, no population-wide live aggregation on request). Closing the staleness gap is a **non-trivial** change, not a config tweak:
+This is a deliberate snapshot-backed design (cheap reads, no population-wide live aggregation on request). The window now advances nightly; closing the remaining ≤1-day gap is a **non-trivial** change, not a config tweak:
 
-- **Shorten the window** (e.g. weekly season) — more frequent drops, but smaller per-window battle samples (noisier standings) and 2× the snapshot churn/pruning.
+- **Shorten the window** — smaller per-window battle samples (noisier standings); tunable via `SHIP_LEADERBOARD_WINDOW_DAYS` but it trades sample size for recency.
 - **Add a live-aggregation path** — on-request or short-TTL recompute of `BattleEvent` deltas per ship; far more expensive (the reason the snapshot model exists), would need its own caching/work-mem budget.
 
 Neither should be undertaken as a quick fix; size it as a feature.
 
 ## Related runbooks
 
-- `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md` — the snapshot/badge engine, season-boundary semantics, `detected_at` bucketing caveats.
-- `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md` — the durable `ShipAward` career ledger (distinct from the ephemeral leaderboard snapshot).
+- `agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md` — the canonical rolling-nightly snapshot/badge engine + Ship Honors removal.
+- `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md` — the original snapshot/badge engine design (ranking, population guards, `detected_at` bucketing caveats); cadence sections superseded by the rolling runbook.
 - `agents/runbooks/runbook-cache-audit.md` — cache families, TTLs, and invalidation across the app.

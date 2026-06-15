@@ -2,21 +2,23 @@
 
 Backs the landing-page filterable table under the treemap
 (``compute_realm_ships_by_tier_type`` + the ``/api/realm/<realm>/ships`` view).
-Pins the win-rate ordering, the tier+type filter, the season window boundaries,
+Pins the win-rate ordering, the tier+type filter, the rolling-window boundaries,
 realm/mode isolation, nullable-damage handling, the min-battles floor, the
 snapshot restriction (only ships with a drill-down board are listed), and the
-view's validation (404 unknown realm, 400 bad tier/type).
+view's validation (404 unknown realm, 400 bad tier/type). The window is the
+rolling trailing ``SHIP_LEADERBOARD_WINDOW_DAYS`` anchored on the realm's latest
+``ShipTopPlayerSnapshot.captured_on`` — 1:1 with the /ship leaderboards.
 """
 
 from datetime import timedelta
 
 from django.core.cache import cache
 from django.test import TestCase
+from django.utils import timezone
 
 from warships.data import (
     _season_window_datetimes,
     compute_realm_ships_by_tier_type,
-    most_recent_completed_season,
 )
 from warships.models import (
     BattleEvent, BattleObservation, Player, Ship, ShipTopPlayerSnapshot,
@@ -43,14 +45,17 @@ class RealmShipsByTierTypeTests(TestCase):
                             ship_type="Battleship", tier=10)
         Ship.objects.create(ship_id=T9_DD, name="Fletcher", nation="usa",
                             ship_type="Destroyer", tier=9)
-        self.season_idx, self.season_start, self.season_end = most_recent_completed_season()
+        # Anchor the rolling window on captured_on=today (the snapshots created by
+        # _snapshot share this date, so they are the candidate set).
+        self.captured_on = timezone.now().date()
+        self.window_start_d = self.captured_on - timedelta(days=14)
         self.window_start, self.window_end = _season_window_datetimes(
-            self.season_start, self.season_end)
+            self.window_start_d, self.captured_on)
 
     def _snapshot(self, ship_id, realm="na"):
-        """Mark a ship 'ranked' for the latest season so it's a list candidate."""
+        """Mark a ship 'ranked' for the latest window so it's a list candidate."""
         ShipTopPlayerSnapshot.objects.create(
-            captured_on=self.season_start, realm=realm, ship_id=ship_id,
+            captured_on=self.captured_on, realm=realm, ship_id=ship_id,
             ship_name="x", rank=1, player=self.player, win_rate=50.0, battles=1)
 
     def _event(self, ship_id, battles, wins, *, damage=0, frags=0,
@@ -81,7 +86,9 @@ class RealmShipsByTierTypeTests(TestCase):
 
         self.assertEqual(payload["tier"], 10)
         self.assertEqual(payload["ship_type"], "Destroyer")
-        self.assertEqual(payload["season_index"], self.season_idx)
+        self.assertEqual(payload["window_days"], 14)
+        self.assertEqual(payload["captured_on"], self.captured_on.isoformat())
+        self.assertNotIn("season_index", payload)
         ids = [s["ship_id"] for s in payload["ships"]]
         self.assertEqual(ids, [GEARING, SHIMA])  # 60% before 55%
         g = payload["ships"][0]
@@ -105,13 +112,13 @@ class RealmShipsByTierTypeTests(TestCase):
             "na", tier=10, ship_type="Destroyer", use_cache=False)
         self.assertEqual([s["ship_id"] for s in payload["ships"]], [SHIMA])
 
-    def test_window_excludes_neighbouring_seasons(self):
+    def test_window_excludes_neighbouring_periods(self):
         self._snapshot(SHIMA)
         self._event(SHIMA, battles=200, wins=100, detected_at=self.window_start)  # in
         self._event(SHIMA, battles=300, wins=300,
-                    detected_at=self.window_end + timedelta(hours=6))   # current season
+                    detected_at=self.window_end + timedelta(hours=6))   # past window
         self._event(SHIMA, battles=300, wins=300,
-                    detected_at=self.window_start - timedelta(hours=1))  # prior
+                    detected_at=self.window_start - timedelta(hours=1))  # before
 
         payload = compute_realm_ships_by_tier_type(
             "na", tier=10, ship_type="Destroyer", use_cache=False)
@@ -157,6 +164,15 @@ class RealmShipsByTierTypeTests(TestCase):
             "na", tier=10, ship_type="Destroyer", use_cache=False)
         self.assertEqual(payload["ships"], [])
 
+    def test_no_snapshot_returns_empty_with_null_captured_on(self):
+        # No snapshot anywhere for the realm → captured_on is None and the list is
+        # empty (the candidate set comes from the latest snapshot).
+        self._event(SHIMA, battles=500, wins=300)
+        payload = compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", use_cache=False)
+        self.assertIsNone(payload["captured_on"])
+        self.assertEqual(payload["ships"], [])
+
 
 class RealmShipsByTierTypeWarmTests(TestCase):
     """The daily warm_realm_top_ships_task pre-populates the tier/type buckets.
@@ -171,12 +187,11 @@ class RealmShipsByTierTypeWarmTests(TestCase):
             name="warm_bench", player_id=888004, realm="na", pvp_battles=1000)
         Ship.objects.create(ship_id=SHIMA, name="Shimakaze", nation="japan",
                             ship_type="Destroyer", tier=10)
-        self.season_idx, self.season_start, self.season_end = (
-            most_recent_completed_season())
+        self.captured_on = timezone.now().date()
         self.window_start, _ = _season_window_datetimes(
-            self.season_start, self.season_end)
+            self.captured_on - timedelta(days=14), self.captured_on)
         ShipTopPlayerSnapshot.objects.create(
-            captured_on=self.season_start, realm="na", ship_id=SHIMA,
+            captured_on=self.captured_on, realm="na", ship_id=SHIMA,
             ship_name="Shimakaze", rank=1, player=self.player,
             win_rate=50.0, battles=1)
         obs_a = BattleObservation.objects.create(player=self.player, pvp_battles=1)
@@ -192,7 +207,7 @@ class RealmShipsByTierTypeWarmTests(TestCase):
     def _bucket_key(self, tier, ship_type):
         return realm_cache_key(
             "na",
-            f"ships-by:random:season{self.season_idx}:t{tier}:{ship_type}")
+            f"ships-by:random:win{self.captured_on.isoformat()}:t{tier}:{ship_type}")
 
     def test_warm_populates_tier_type_bucket_cache(self):
         from warships.tasks import warm_realm_top_ships_task
@@ -223,10 +238,10 @@ class RealmShipsByTierTypeViewTests(TestCase):
             name="view_bench", player_id=888003, realm="na", pvp_battles=10)
         Ship.objects.create(ship_id=SHIMA, name="Shimakaze", nation="japan",
                             ship_type="Destroyer", tier=10)
-        idx, start, end = most_recent_completed_season()
         ShipTopPlayerSnapshot.objects.create(
-            captured_on=start, realm="na", ship_id=SHIMA, ship_name="Shimakaze",
-            rank=1, player=self.player, win_rate=50.0, battles=1)
+            captured_on=timezone.now().date(), realm="na", ship_id=SHIMA,
+            ship_name="Shimakaze", rank=1, player=self.player,
+            win_rate=50.0, battles=1)
 
     def test_happy_path_returns_payload(self):
         resp = self.client.get("/api/realm/na/ships/?tier=10&type=Destroyer")

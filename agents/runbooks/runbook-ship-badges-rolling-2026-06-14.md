@@ -147,11 +147,41 @@ droplet via `/opt/battlestats-server/venv/bin/python manage.py shell` with
   + season-window defaults + weekly crontab). The `ShipAward` table drop is the only
   irreversible step — it is empty in prod, so the loss is nil.
 
+## Addendum (2026-06-15): realm treemap + inline list moved to the rolling window
+
+The 2026-06-14 change rolled the **badges + `/ship` board**, but left the landing
+**realm treemap** (`compute_realm_top_ships`) and **tier/type drill-down list**
+(`compute_realm_ships_by_tier_type`) on the retired fixed `SHIP_SEASON_*` 2-week
+season. That left them misaligned with the player lists — and the inline list was in
+fact returning empty in prod (it looked up `ShipTopPlayerSnapshot` at
+`captured_on=season_start`, ~21 days old vs the table's ~5-day retention). Both were
+repointed to the same rolling window the board reads:
+
+- New `latest_ship_snapshot_window(realm)` resolves `(captured_on, window_start,
+  window_end)` from the realm's latest `ShipTopPlayerSnapshot.captured_on` —
+  `[captured_on - SHIP_LEADERBOARD_WINDOW_DAYS, captured_on)` — so treemap, inline
+  list, and `/ship` board cover the **identical** date span.
+- Caches are keyed on the window-end date (`…:win<YYYY-MM-DD>:…`); when a new
+  snapshot lands the key changes and the next request recomputes → alignment
+  **self-heals regardless of beat order.**
+- The `top-ships-warmer-{realm}` Beat task was moved to fire **~1h after** that
+  realm's nightly snapshot (was hour 0, before it) so it warms the current window.
+- The fixed-season helpers (`SHIP_SEASON_EPOCH`, `SHIP_SEASON_LENGTH_DAYS`,
+  `ship_season_bounds`, `current_season_index`, `most_recent_completed_season`) are
+  **deleted** — the treemap was their last consumer. Frontend `shipSeason.ts` trimmed
+  to the one date-range formatter still used. Payloads now expose
+  `{window_days, captured_on, window_start, window_end}` (was `{days, season_index,
+  season_start, season_end}`). Tests: `test_realm_top_ships.py`,
+  `test_realm_ships_by_tier_type.py`.
+
 ## Follow-ups
 
 - **Done at implementation (2026-06-14):** archived `runbook-ship-award-ledger-2026-06-05.md`;
   updated `runbook-ship-top-player-badges-2026-06-05.md` to the rolling model; reconciled
   `CLAUDE.md` (Ship standings paragraph, data-models list, kill-switch list).
+- **Done 2026-06-15:** treemap + inline list rolled to the same window (see Addendum above);
+  reconciled `runbook-leaderboard-updates.md` and the `runbook-ship-top-player-badges-2026-06-05.md`
+  treemap addendum.
 - **Remaining — deploy:** backend deploy runs the `0071_delete_shipaward` migration
   (table drop, empty in prod); then **rebuild + deploy the frontend** (ShipHonors removal
   + `/ship` copy are FE). After the first nightly run per realm, confirm exec time ≤~12 s,

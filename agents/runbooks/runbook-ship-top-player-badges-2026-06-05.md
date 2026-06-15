@@ -7,8 +7,10 @@
 > `SHIP_LEADERBOARD_WINDOW_DAYS` (14) window, `captured_on` is the **run date**, badges are
 > worn **only while held**, and the durable `ShipAward` ledger / **Ship Honors panel was
 > removed entirely** (the HELD-awards banner below is historical). `SHIP_AWARD_LEDGER_ENABLED`,
-> the `backfill_ship_seasons` command, and `is_season_boundary` are gone; the fixed-season
-> helpers remain only for the realm treemap. Authoritative reference:
+> the `backfill_ship_seasons` command, and `is_season_boundary` are gone. **As of 2026-06-15
+> the realm treemap + inline tier/type list also moved to the rolling window and the
+> fixed-season helpers were deleted entirely** (the treemap Addendum below is historical).
+> Authoritative reference:
 > [runbook-ship-badges-rolling-2026-06-14.md](runbook-ship-badges-rolling-2026-06-14.md).
 
 _Created: 2026-06-05_
@@ -395,6 +397,13 @@ Scope widened from **T10 only** to **T8–T10** after a per-tier density study o
   tiers via the now-multi-tier compute) → deploy frontend.
 
 ## Addendum (2026-06-05, later): landing treemap aligned to the completed season
+
+> **SUPERSEDED 2026-06-15 — treemap + inline list now use the rolling window.** The
+> fixed-season alignment described below was replaced when the badges/board went rolling
+> (2026-06-14): the treemap and inline tier/type list now anchor on the latest snapshot's
+> `captured_on` (`latest_ship_snapshot_window`), payloads expose `{window_days, captured_on,
+> window_start, window_end}`, caches are window-end-tagged, and the season helpers are
+> deleted. See the Addendum in `runbook-ship-badges-rolling-2026-06-14.md`.
 
 The `RealmTopShipsTreemapSVG` / `compute_realm_top_ships` window was switched from a
 rolling window (24h → 7d earlier in the day) to the **most recently completed fixed

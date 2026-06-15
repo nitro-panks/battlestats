@@ -5908,44 +5908,46 @@ SHIP_LEADERBOARD_WINDOW_DAYS = int(os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '14
 SHIP_LEADERBOARD_CACHE_TTL = 900   # 15 min read-cache on the /ship endpoint
 
 
-# --- Fixed 2-week ship "seasons" (treemap only) -----------------------------
-# The ship board + profile badges are NOW a nightly rolling trailing window (see
-# SHIP_LEADERBOARD_WINDOW_DAYS); they no longer use these season bounds. The
-# realm treemap (compute_realm_top_ships) still buckets by a fixed, immutable
-# 2-week calendar season so its per-season cache key is stable — that is the only
-# remaining consumer of this epoch/length and the frontend mirror in
-# client/app/lib/shipSeason.ts (used by RealmTopShipsTreemapSVG).
-SHIP_SEASON_EPOCH = date(2026, 5, 11)   # Mon 11 May 2026 (UTC) — season 0 start
-SHIP_SEASON_LENGTH_DAYS = 14            # treemap season length (decoupled from the badge window)
+# --- Rolling ship-standings window (treemap + inline list) -------------------
+# The realm treemap (compute_realm_top_ships) and the landing inline tier/type
+# list (compute_realm_ships_by_tier_type) align 1:1 with the /ship/<id> player
+# leaderboards: all three cover the SAME rolling trailing
+# SHIP_LEADERBOARD_WINDOW_DAYS window the nightly ShipTopPlayerSnapshot was built
+# over. The fixed 2-week "season" model that previously bucketed the treemap was
+# retired 2026-06-15 when the badges/leaderboards moved to a nightly rolling
+# window (see runbook-ship-badges-rolling-2026-06-14.md); the frontend mirror
+# lives in client/app/lib/shipSeason.ts.
 
 
-def ship_season_bounds(index: int) -> tuple:
-    """(`start`, `end`) dates for season `index`; start inclusive, end exclusive."""
-    start = SHIP_SEASON_EPOCH + timedelta(days=index * SHIP_SEASON_LENGTH_DAYS)
-    return start, start + timedelta(days=SHIP_SEASON_LENGTH_DAYS)
+def latest_ship_snapshot_window(realm: str) -> tuple:
+    """(`captured_on`, `window_start`, `window_end`) for a realm's ship standings.
 
-
-def current_season_index(today: Optional[date] = None) -> int:
-    """Index of the season in progress at `today` (clamped at 0 before the epoch)."""
-    today = today or django_timezone.now().date()
-    return max(0, (today - SHIP_SEASON_EPOCH).days // SHIP_SEASON_LENGTH_DAYS)
-
-
-def most_recent_completed_season(today: Optional[date] = None) -> tuple:
-    """(`index`, `start`, `end`) of the most recently *finished* season at `today`.
-
-    Before the first boundary (mid season 0) there is no completed season; we
-    clamp to season 0, but the runtime task is boundary-gated so it never asks
-    for a not-yet-complete season at runtime.
+    Anchors on the realm's most recent ``ShipTopPlayerSnapshot.captured_on`` — the
+    exact rolling window the ``/ship`` leaderboards read — so the treemap and the
+    inline tier/type list cover the identical date span as the player lists.
+    ``window_end`` is that ``captured_on`` (exclusive end, a run date);
+    ``window_start = window_end - SHIP_LEADERBOARD_WINDOW_DAYS``. Keying caches on
+    ``window_end`` makes alignment self-heal the moment a new nightly snapshot
+    lands (the key changes; the next request recomputes over the matching window).
+    Falls back to a trailing window ending today when no snapshot exists yet
+    (``captured_on`` is then ``None``).
     """
-    today = today or django_timezone.now().date()
-    idx = max(0, current_season_index(today) - 1)
-    start, end = ship_season_bounds(idx)
-    return idx, start, end
+    from warships.models import ShipTopPlayerSnapshot
+
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    captured_on = (
+        ShipTopPlayerSnapshot.objects.filter(realm=realm)
+        .order_by('-captured_on')
+        .values_list('captured_on', flat=True)
+        .first()
+    )
+    window_end = captured_on or django_timezone.now().date()
+    window_start = window_end - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS)
+    return captured_on, window_start, window_end
 
 
 def _season_window_datetimes(start: date, end: date) -> tuple:
-    """Datetimes for a season's [start, end) date bounds (UTC midnight).
+    """Datetimes for a window's [start, end) date bounds (UTC midnight).
 
     Respects `USE_TZ`: aware UTC in production (matching `BattleEvent.detected_at`),
     naive under the sqlite test config — mirroring how the previous `since =
@@ -6469,15 +6471,16 @@ def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
 
 
 def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
-    """Most-played ships on a realm over the most recently completed ship season.
+    """Most-played ships on a realm over the rolling ship-standings window.
 
     Sums ``BattleEvent.battles_delta`` per ship — filtered by realm + mode over the
-    most recently *completed* fixed 2-week ship season (the same window the
-    ``/ship/<id>`` leaderboard and profile medals reflect; see
-    ``most_recent_completed_season``) — joins ``Ship`` for type/tier, and returns
-    the top-``limit`` as a payload dict. A closed season's window is immutable (no
-    new events ever fall inside it), so this is computed once per season and cached
-    under a season-tagged key until the next boundary. Shared by the
+    **rolling trailing ``SHIP_LEADERBOARD_WINDOW_DAYS`` window the ``/ship/<id>``
+    leaderboards + profile medals read** (anchored on the latest
+    ``ShipTopPlayerSnapshot.captured_on``; see ``latest_ship_snapshot_window``) —
+    joins ``Ship`` for type/tier, and returns the top-``limit`` as a payload dict.
+    The window advances each night with the snapshot, so the cache key carries the
+    window-end date: when a new snapshot lands the key changes and the next request
+    recomputes over the matching window (1:1 with the player lists). Shared by the
     ``realm_top_ships`` API view and the daily ``warm_realm_top_ships_task``
     warmer; pass ``use_cache=False`` to force a recompute.
     """
@@ -6493,15 +6496,16 @@ def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
         limit = 25
     limit = max(5, min(limit, 50))
 
-    # Window: the most recently completed fixed 2-week ship season, aligning the
-    # treemap with the /ship leaderboard + profile medals (identical season
-    # bounds). A closed season's window is immutable, so the aggregation only
-    # changes at a season boundary — the cache key carries the season index and
-    # the TTL runs to the next boundary.
-    season_idx, season_start, season_end = most_recent_completed_season()
-    window_start, window_end = _season_window_datetimes(season_start, season_end)
+    # Window: the rolling trailing window the /ship leaderboards read (anchored on
+    # the latest snapshot's captured_on), so the treemap covers the identical date
+    # span as the player lists. The cache key carries the window-end date, so when
+    # a new nightly snapshot lands the key changes and the next request recomputes
+    # over the matching window — alignment self-heals regardless of beat order.
+    captured_on, window_start_d, window_end_d = latest_ship_snapshot_window(realm)
+    window_start, window_end = _season_window_datetimes(window_start_d, window_end_d)
 
-    cache_key = realm_cache_key(realm, f"top-ships:{mode}:season{season_idx}:{limit}")
+    cache_key = realm_cache_key(
+        realm, f"top-ships:{mode}:win{window_end_d.isoformat()}:{limit}")
     if use_cache:
         cached = cache.get(cache_key)
         if cached is not None:
@@ -6535,24 +6539,17 @@ def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
 
     payload = {
         "realm": realm,
-        "days": SHIP_SEASON_LENGTH_DAYS,
-        "season_index": season_idx,
-        "season_start": season_start.isoformat(),  # date-only ISO (UTC midnight)
-        "season_end": season_end.isoformat(),      # exclusive end (next season start)
-        "window_start": window_start.isoformat(),
-        "window_end": window_end.isoformat(),
+        "window_days": SHIP_LEADERBOARD_WINDOW_DAYS,
+        "captured_on": captured_on.isoformat() if captured_on else None,
+        "window_start": window_start_d.isoformat(),  # date-only ISO (UTC midnight), inclusive
+        "window_end": window_end_d.isoformat(),      # exclusive end (== captured_on)
         "mode": mode,
         "ships": payload_ships,
     }
-    # Cache until ~1h past the next season boundary: at that point
-    # most_recent_completed_season advances, the season-tagged key changes, and
-    # the daily warmer recomputes the new season. The closed-season aggregation is
-    # immutable until then, so the (up to ~2 week) TTL is safe.
-    now = django_timezone.now()
-    _, current_season_end = ship_season_bounds(current_season_index())
-    next_boundary_dt, _ = _season_window_datetimes(current_season_end, current_season_end)
-    ttl = max(3600, int((next_boundary_dt - now).total_seconds()) + 3600)
-    cache.set(cache_key, payload, timeout=ttl)
+    # Rolling window keyed by its end date; refreshed nightly by the warmer after
+    # the snapshot lands. A 26h TTL bridges the daily warms without ever serving a
+    # window the snapshot has already advanced past (the key changes at that point).
+    cache.set(cache_key, payload, timeout=26 * 3600)
     return payload
 
 
@@ -6568,21 +6565,24 @@ SHIP_LIST_MIN_BATTLES = int(os.getenv('SHIP_LIST_MIN_BATTLES', '50'))
 
 def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
                                      min_battles=None, use_cache=True):
-    """Ships of one tier+type on a realm, ranked by win rate over the last season.
+    """Ships of one tier+type on a realm, ranked by win rate over the rolling window.
 
     Powers the landing-page inline ship leaderboard (the filterable table under
     the treemap). Aggregates ``BattleEvent`` deltas per ship — realm + mode, over
-    the most recently *completed* fixed 2-week ship season (the same window the
-    treemap, the ``/ship/<id>`` board and profile medals reflect) — to realm-wide
-    win rate / avg damage / kills per battle, then orders by win rate descending.
+    the **rolling trailing ``SHIP_LEADERBOARD_WINDOW_DAYS`` window the treemap, the
+    ``/ship/<id>`` board and profile medals read** (anchored on the latest
+    ``ShipTopPlayerSnapshot.captured_on``; see ``latest_ship_snapshot_window``) —
+    to realm-wide win rate / avg damage / kills per battle, then orders by win rate
+    descending.
 
     The candidate set is restricted to ships that hold a ``ShipTopPlayerSnapshot``
-    row for that season (i.e. ships that cleared the population guard and have a
-    populated drill-down board), so every listed ship reliably opens a non-empty
-    leaderboard and the snapshot's population guard doubles as the sample floor.
+    row for the **latest** ``captured_on`` (i.e. ships that cleared the population
+    guard in the current window and have a populated drill-down board), so every
+    listed ship reliably opens a non-empty leaderboard and the snapshot's
+    population guard doubles as the sample floor.
 
-    A closed season's window is immutable, so this is computed once per season and
-    cached under a season-tagged key until the next boundary (mirrors
+    The window advances nightly with the snapshot, so this is cached under a
+    window-end-tagged key and refreshed by the daily warmer (mirrors
     ``compute_realm_top_ships``). Returns a payload dict; ``ships`` is ``[]`` when
     no ship in the bucket qualifies. ``tier``/``ship_type`` are assumed validated
     by the caller (the view rejects out-of-range values).
@@ -6601,11 +6601,11 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     if min_battles is None:
         min_battles = SHIP_LIST_MIN_BATTLES
 
-    season_idx, season_start, season_end = most_recent_completed_season()
-    window_start, window_end = _season_window_datetimes(season_start, season_end)
+    captured_on, window_start_d, window_end_d = latest_ship_snapshot_window(realm)
+    window_start, window_end = _season_window_datetimes(window_start_d, window_end_d)
 
     cache_key = realm_cache_key(
-        realm, f"ships-by:{mode}:season{season_idx}:t{tier}:{ship_type}")
+        realm, f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}")
     if use_cache:
         cached = cache.get(cache_key)
         if cached is not None:
@@ -6613,23 +6613,23 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
 
     payload = {
         "realm": realm,
-        "days": SHIP_SEASON_LENGTH_DAYS,
+        "window_days": SHIP_LEADERBOARD_WINDOW_DAYS,
         "tier": tier,
         "ship_type": ship_type,
         "mode": mode,
-        "season_index": season_idx,
-        "season_start": season_start.isoformat(),
-        "season_end": season_end.isoformat(),
-        "window_start": window_start.isoformat(),
-        "window_end": window_end.isoformat(),
+        "captured_on": captured_on.isoformat() if captured_on else None,
+        "window_start": window_start_d.isoformat(),
+        "window_end": window_end_d.isoformat(),
         "ships": [],
     }
+    if captured_on is None:
+        return payload  # no snapshot yet → no candidate ships
 
-    # Candidate ships: this tier+type AND ranked in the latest snapshot season
+    # Candidate ships: this tier+type AND ranked in the latest snapshot
     # (guarantees a populated drill-down board for every listed ship).
     snapshot_ids = set(
         ShipTopPlayerSnapshot.objects
-        .filter(realm=realm, captured_on=season_start)
+        .filter(realm=realm, captured_on=captured_on)
         .values_list('ship_id', flat=True)
     )
     if not snapshot_ids:
@@ -6685,9 +6685,7 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     payload_ships.sort(key=lambda s: (-s["win_rate"], -s["battles"]))
     payload["ships"] = payload_ships
 
-    now = django_timezone.now()
-    _, current_season_end = ship_season_bounds(current_season_index())
-    next_boundary_dt, _ = _season_window_datetimes(current_season_end, current_season_end)
-    ttl = max(3600, int((next_boundary_dt - now).total_seconds()) + 3600)
-    cache.set(cache_key, payload, timeout=ttl)
+    # Rolling window keyed by its end date; refreshed nightly by the warmer. The
+    # 26h TTL bridges the daily warms; the key changes once a new snapshot lands.
+    cache.set(cache_key, payload, timeout=26 * 3600)
     return payload

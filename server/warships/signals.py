@@ -206,19 +206,23 @@ def register_periodic_schedules(sender, **kwargs):
     PeriodicTask.objects.filter(name="landing-page-warmer").delete()
 
     # -- Realm top-ships treemap warmer --
-    # The treemap is a static per-season count over the most recently completed
-    # fixed 2-week ship season (cached under a season-tagged key). A daily warm
-    # is still cheap and keeps the cache fresh across a season boundary, when the
-    # completed-season key advances. Fires at hour 0, striped per realm by a few
-    # minutes (NA :05, EU :10, ASIA :15 by default) so the three realms don't
-    # recompute concurrently on the background worker.
+    # The treemap + inline tier/type list aggregate over the rolling trailing
+    # window the /ship leaderboards read (cached under a window-end-tagged key).
+    # The warm must run AFTER that realm's nightly ship snapshot lands so it warms
+    # the *current* window — otherwise the first post-snapshot visitor pays a cold
+    # 14-day GROUP-BY. Fires 1h after the snapshot hour (snapshot is :30; this is
+    # the next hour, striped per realm by a few minutes — NA :05, EU :10, ASIA :15
+    # by default) so the three realms don't recompute concurrently.
     top_ships_warm_minute = int(os.getenv("TOP_SHIPS_WARM_MINUTE", "5"))
+    ship_badge_snapshot_hour = int(os.getenv("SHIP_BADGE_SNAPSHOT_HOUR", "2"))
     for realm in sorted(VALID_REALMS):
         realm_minute = (top_ships_warm_minute +
                         REALM_INTERVAL_OFFSETS.get(realm, 0) * 5) % 60
+        realm_hour = (ship_badge_snapshot_hour + 1 +
+                      REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
         top_ships_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute=str(realm_minute),
-            hour="0",
+            hour=str(realm_hour),
             day_of_week="*",
             day_of_month="*",
             month_of_year="*",
@@ -233,7 +237,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
-                "description": f"Daily warm of top-ships treemap caches (random+ranked) + tier/type ship-list buckets, last completed ship season ({realm.upper()}).",
+                "description": f"Daily warm of top-ships treemap caches (random+ranked) + tier/type ship-list buckets over the rolling ship-standings window, ~1h after the nightly snapshot ({realm.upper()}).",
             },
         )
 

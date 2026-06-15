@@ -1051,11 +1051,11 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
 
     Recomputes both treemap modes (random + ranked) and every tier×type ship
     list bucket for the realm once per day (force-refresh) and writes them to
-    Redis under their season-tagged keys, so the first visitor hits a warm cache
-    instead of the aggregation. Both surfaces are static per-season aggregations
-    over the most recently completed fixed 2-week ship season; the daily warm
-    keeps the caches fresh across a season boundary (the keys change when the
-    completed season advances). Mirrors the other per-realm landing warmers.
+    Redis under their window-end-tagged keys, so the first visitor hits a warm
+    cache instead of the aggregation. Both surfaces aggregate over the rolling
+    trailing window the /ship leaderboards read (anchored on the latest snapshot's
+    captured_on); the daily warm runs after the nightly snapshot so it warms the
+    current window. Mirrors the other per-realm landing warmers.
 
     The tier/type list (`compute_realm_ships_by_tier_type`, backing the landing
     drill-down filter) is a live `BattleEvent` GROUP-BY — expensive to compute

@@ -27,7 +27,7 @@ import os
 import time
 from datetime import timedelta
 
-from django.db.models import Count, Max, Sum
+from django.db.models import Count, Exists, F, Max, OuterRef, Sum
 from django.utils import timezone
 
 from warships.models import (
@@ -78,6 +78,19 @@ def _observe_floor_hours() -> int:
 
 def _capture_delay() -> float:
     return float(os.getenv("HOT_PLAYERS_CAPTURE_DELAY", "0.5"))
+
+
+def _capture_max_pulls() -> int:
+    """Max WG fetches per capture run — the anti-starvation work budget.
+
+    Capping WG calls (not members) keeps one run safely under the task's 540s
+    soft limit even at the worst observed ~7s/pull (65 * 7 = 455s), regardless of
+    how many of the hot set are floor-missed. Members past the budget rotate in on
+    the next run (ordering by ``last_observed_at`` advances them). See
+    [[project_hot_queue_stale_seed_starves]] for why an unbudgeted all-pull sweep
+    starved the tail.
+    """
+    return int(os.getenv("HOT_CAPTURE_MAX_PULLS", "65"))
 
 
 def _backfill_active_days() -> int:
@@ -367,15 +380,28 @@ def maintain_hot_players(realm: str, *, dry_run: bool = False,
     return result
 
 
-def capture_hot_players(realm: str, *, logger=logger) -> dict:
+def capture_hot_players(realm: str, *, logger=logger, max_pulls=None) -> dict:
     """Sweep the HotPlayer set: guarantee an observation + a daily snapshot.
 
     For each member, skip-if-fresh against the latest ``BattleObservation`` (the
     floor already covers active hot players within HOT_OBSERVE_FLOOR_HOURS) else
     ``record_observation_and_diff``; and write a gap-free daily ``Snapshot`` via
     ``update_snapshot_data(refresh_player=False)`` when today's row is missing.
-    Bounded by HOT_PLAYERS_MAX, paced by HOT_PLAYERS_CAPTURE_DELAY. Hidden
-    accounts return nothing from WG and are recorded as skipped (no retry storm).
+    Hidden accounts return nothing from WG and are recorded as skipped.
+
+    **Work-budgeted + rotating (anti-starvation).** A floor-missed backfill seed is
+    all expensive pulls, so an unbudgeted ``-hot_score`` sweep blows the task's
+    540s soft limit at ~90 members and re-pulls the same static head every run
+    while the tail starves ([[project_hot_queue_stale_seed_starves]]). Instead:
+
+    * Order = engagement/pinned first (by ``-hot_score`` — few, high-value, keeps
+      their daily contract), then backfill by ``last_observed_at`` ASC NULLS FIRST
+      so the floor-missed set drains **round-robin** by coverage age.
+    * Stop after ``HOT_CAPTURE_MAX_PULLS`` actual WG fetches (success *or*
+      hidden-skip — both spend a call); members past the budget rotate in next run.
+    * Stamp ``last_observed_at`` whenever a WG call is spent on a member (pull or
+      hidden), advancing them to the back of the rotation. A cheap *fresh-skip*
+      (no WG call) is NOT stamped — those stay at the head for a free re-check.
     """
     from warships.data import update_snapshot_data
     from warships.incremental_battles import record_observation_and_diff
@@ -386,20 +412,39 @@ def capture_hot_players(realm: str, *, logger=logger) -> dict:
     stale_before = now - timedelta(hours=floor_hours)
     delay = _capture_delay()
     cap = _hot_players_max()
+    if max_pulls is None:
+        max_pulls = _capture_max_pulls()
 
-    members = list(
+    # Priority members (engagement/pinned) every run; backfill rotates by coverage
+    # age so the limited per-run WG budget walks the whole floor-missed set.
+    priority = list(
         HotPlayer.objects
         .filter(realm=realm)
+        .exclude(source=HotPlayer.SOURCE_BACKFILL)
         .select_related('player')
-        .order_by('-hot_score')[:cap]
+        .order_by('-hot_score')
     )
+    backfill = list(
+        HotPlayer.objects
+        .filter(realm=realm, source=HotPlayer.SOURCE_BACKFILL)
+        .select_related('player')
+        .order_by(F('last_observed_at').asc(nulls_first=True), '-hot_score')
+    )
+    members = (priority + backfill)[:cap]
 
     observed = obs_skipped_fresh = obs_skipped_hidden = 0
     snapshotted = snap_skipped_present = errors = 0
+    wg_calls = 0
+    processed = 0
+    stopped_early = False
 
     for hp in members:
+        if wg_calls >= max_pulls:
+            stopped_early = True
+            break
+        processed += 1
         player = hp.player
-        # --- Observation path (skip-if-fresh) ---
+        # --- Observation path (skip-if-fresh, else a budgeted WG fetch) ---
         latest = (
             BattleObservation.objects
             .filter(player=player)
@@ -408,21 +453,26 @@ def capture_hot_players(realm: str, *, logger=logger) -> dict:
             .first()
         )
         if latest is not None and latest >= stale_before:
-            obs_skipped_fresh += 1
+            obs_skipped_fresh += 1   # floor covers them; free, no stamp, no budget
         else:
+            wg_calls += 1
             try:
                 res = record_observation_and_diff(player.player_id, realm)
                 if res.get('status') == 'skipped':
                     obs_skipped_hidden += 1
                 else:
                     observed += 1
-                    hp.last_observed_at = timezone.now()
-                    hp.save(update_fields=['last_observed_at'])
+                # Stamp on any spent WG call (pull or hidden) so the member
+                # rotates to the back instead of re-burning budget every run.
+                hp.last_observed_at = timezone.now()
+                hp.save(update_fields=['last_observed_at'])
             except Exception:
                 errors += 1
                 logger.exception(
                     "hot_players[%s] capture observation failed for player_id=%s",
                     realm, player.player_id)
+            if delay:
+                time.sleep(delay)
 
         # --- Snapshot path (gap-free daily summary) ---
         if Snapshot.objects.filter(player=player, date=today).exists():
@@ -441,12 +491,14 @@ def capture_hot_players(realm: str, *, logger=logger) -> dict:
                     "hot_players[%s] capture snapshot failed for player_id=%s",
                     realm, player.player_id)
 
-        if delay:
-            time.sleep(delay)
-
     result = {
         'realm': realm,
         'hot_set_size': len(members),
+        'processed': processed,
+        'wg_calls': wg_calls,
+        'max_pulls': max_pulls,
+        'stopped_early': stopped_early,
+        'remaining': max(0, len(members) - processed),
         'observed': observed,
         'obs_skipped_fresh': obs_skipped_fresh,
         'obs_skipped_hidden': obs_skipped_hidden,
@@ -460,23 +512,32 @@ def capture_hot_players(realm: str, *, logger=logger) -> dict:
 
 def backfill_hot_players(realm: str, *, dry_run: bool = False,
                          logger=logger) -> dict:
-    """One-time seed: fill a realm's hot queue to the cap with most-active players.
+    """One-time seed: fill a realm's hot queue to the cap with the most-active
+    players the observation floor is NOT already keeping fresh.
 
     Selects active (``last_battle_date`` within ``HOT_BACKFILL_ACTIVE_DAYS``=7),
     non-hidden players ordered by ``pvp_battles`` desc (recent + high volume),
-    skips anyone already in the queue, and inserts ``source='backfill'`` rows up to
-    the remaining ``HOT_PLAYERS_MAX`` headroom. Each seed scores BELOW the
-    engagement floor (``_backfill_score``) so it ranks under every engaged member
-    and is the first cap-trimmed; ``maintain_hot_players`` protects it from
+    skips anyone already in the queue, **and excludes players who already have a
+    ``BattleObservation`` within ``HOT_OBSERVE_FLOOR_HOURS``** — i.e. the ones the
+    capture sweep would skip-if-fresh. Mirroring that skip predicate means each
+    seeded slot is a player the sweep will actually *pull* (coverage the floor is
+    missing), not a wasted skip. It inserts ``source='backfill'`` rows up to the
+    remaining ``HOT_PLAYERS_MAX`` headroom. Each seed scores BELOW the engagement
+    floor (``_backfill_score``) so it ranks under every engaged member and is the
+    first cap-trimmed; ``maintain_hot_players`` protects it from
     inactivity-eviction and graduates it to 'engagement' if it later earns
-    view-recurrence. Idempotent — re-running tops the queue back up to the cap
-    without duplicating. No WG calls (pure DB); the nightly capture/freshness
-    sweeps do the actual observation/snapshot/freshness work.
+    view-recurrence. Idempotent — re-running tops the queue back up to the cap.
+    No WG calls (pure DB); the nightly capture sweep does the observation work.
+
+    Because the seed is all floor-missed (expensive) players, the capture sweep is
+    work-budgeted and rotates by coverage age — see ``capture_hot_players`` and
+    [[project_hot_queue_stale_seed_starves]]; an unbudgeted all-pull sweep starves.
     """
     cap = _hot_players_max()
     active_days = _backfill_active_days()
     today = timezone.now().date()
     cutoff = today - timedelta(days=active_days)
+    stale_before = timezone.now() - timedelta(hours=_observe_floor_hours())
 
     current_ids = set(
         HotPlayer.objects.filter(realm=realm)
@@ -489,10 +550,16 @@ def backfill_hot_players(realm: str, *, dry_run: bool = False,
         logger.info("hot_players[%s] backfill (full): %s", realm, result)
         return result
 
+    # Exclude players the floor already covers (fresh obs within the capture skip
+    # window) so the seed holds only players the sweep will actually pull.
+    fresh_obs = BattleObservation.objects.filter(
+        player_id=OuterRef('id'), observed_at__gte=stale_before)
     candidates = list(
         Player.objects
         .filter(realm=realm, is_hidden=False, last_battle_date__gte=cutoff)
         .exclude(player_id__in=current_ids)
+        .annotate(_has_fresh_obs=Exists(fresh_obs))
+        .filter(_has_fresh_obs=False)
         .order_by('-pvp_battles', '-last_battle_date')
         .values_list('id', 'pvp_battles')[:slots]
     )

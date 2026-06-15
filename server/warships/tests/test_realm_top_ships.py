@@ -1,25 +1,29 @@
 """Window-boundary tests for the realm top-ships treemap.
 
-The treemap is a *static per-season count* over the most recently completed fixed
-2-week ship season — i.e. the window is ``[season_start, season_end)`` for the
-season returned by ``most_recent_completed_season`` (the same window the /ship
-leaderboard + profile medals reflect). These tests pin the off-by-one boundaries
-(in-progress current season excluded, season-start included, day-before excluded)
-and the per-ship summation, since that is the failure mode most likely to slip
-when the window definition changes.
+The treemap aggregates ``BattleEvent`` over the **rolling trailing
+``SHIP_LEADERBOARD_WINDOW_DAYS`` window the /ship leaderboards read** — i.e.
+``[captured_on - window_days, captured_on)`` for the realm's most recent
+``ShipTopPlayerSnapshot.captured_on`` (see ``latest_ship_snapshot_window``). These
+tests pin the off-by-one boundaries (window-start included, the current day past
+the window excluded, the day before excluded) and the per-ship summation, since
+that is the failure mode most likely to slip when the window definition changes.
 """
 
 from datetime import timedelta
 
 from django.core.cache import cache
 from django.test import TestCase
+from django.utils import timezone
 
 from warships.data import (
+    SHIP_LEADERBOARD_WINDOW_DAYS,
     _season_window_datetimes,
     compute_realm_top_ships,
-    most_recent_completed_season,
+    latest_ship_snapshot_window,
 )
-from warships.models import BattleEvent, BattleObservation, Player, Ship
+from warships.models import (
+    BattleEvent, BattleObservation, Player, Ship, ShipTopPlayerSnapshot,
+)
 
 
 class RealmTopShipsWindowTests(TestCase):
@@ -34,12 +38,17 @@ class RealmTopShipsWindowTests(TestCase):
             ship_id=1, name="Yamato", nation="japan",
             ship_type="Battleship", tier=10,
         )
-        # The window is the most recently completed fixed 2-week ship season. The
-        # project runs USE_TZ=False, so _season_window_datetimes returns naive
-        # datetimes — match the production code path.
-        self.season_idx, self.season_start, self.season_end = most_recent_completed_season()
+        # Anchor the realm's rolling window on a snapshot's captured_on, exactly as
+        # the /ship leaderboards do. The project runs USE_TZ=False, so
+        # _season_window_datetimes returns naive datetimes — match the prod path.
+        self.captured_on = timezone.now().date()
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=self.captured_on, realm="na", ship_id=1,
+            ship_name="Yamato", rank=1, player=self.player,
+            win_rate=50.0, battles=1)
+        _, self.window_start_d, self.window_end_d = latest_ship_snapshot_window("na")
         self.window_start, self.window_end = _season_window_datetimes(
-            self.season_start, self.season_end)
+            self.window_start_d, self.window_end_d)
 
     def _event(self, ship_id, ship_name, battles, detected_at, mode="random"):
         """Create one BattleEvent at an exact detected_at.
@@ -59,23 +68,24 @@ class RealmTopShipsWindowTests(TestCase):
         BattleEvent.objects.filter(pk=ev.pk).update(detected_at=detected_at)
         return ev
 
-    def test_window_is_completed_season_and_excludes_neighbours(self):
-        # In-window: mid-season and exactly the season-start boundary (gte).
+    def test_window_is_rolling_and_excludes_neighbours(self):
+        # In-window: mid-window and exactly the window-start boundary (gte).
         self._event(1, "Yamato", 5, self.window_start + timedelta(days=1, hours=12))
         self._event(1, "Yamato", 3, self.window_start)  # exact lower bound, included
-        # Out-of-window: the in-progress current season (>= season_end), and the
-        # instant just before season_start.
+        # Out-of-window: the current day past the window end (>= window_end), and
+        # the instant just before window_start.
         self._event(2, "Shimakaze", 99, self.window_end + timedelta(hours=6))
         self._event(3, "Montana", 77, self.window_start - timedelta(hours=1))
 
         payload = compute_realm_top_ships("na", mode="random", use_cache=False)
 
-        self.assertEqual(payload["days"], 14)
-        self.assertEqual(payload["season_index"], self.season_idx)
-        self.assertEqual(payload["season_start"], self.season_start.isoformat())
-        self.assertEqual(payload["season_end"], self.season_end.isoformat())
-        self.assertEqual(payload["window_start"], self.window_start.isoformat())
-        self.assertEqual(payload["window_end"], self.window_end.isoformat())
+        self.assertEqual(payload["window_days"], SHIP_LEADERBOARD_WINDOW_DAYS)
+        self.assertEqual(payload["captured_on"], self.captured_on.isoformat())
+        self.assertEqual(payload["window_start"], self.window_start_d.isoformat())
+        self.assertEqual(payload["window_end"], self.window_end_d.isoformat())
+        # No fixed-season framing under the rolling model.
+        self.assertNotIn("season_start", payload)
+        self.assertNotIn("season_end", payload)
 
         by_id = {s["ship_id"]: s for s in payload["ships"]}
         # Ship 1: both in-window rows summed (5 + 3); neighbours excluded.
@@ -83,8 +93,24 @@ class RealmTopShipsWindowTests(TestCase):
         self.assertEqual(by_id[1]["battles"], 8)
         self.assertEqual(by_id[1]["ship_type"], "Battleship")
         self.assertEqual(by_id[1]["tier"], 10)
-        self.assertNotIn(2, by_id)  # in-progress current season excluded
-        self.assertNotIn(3, by_id)  # before season_start excluded
+        self.assertNotIn(2, by_id)  # current day past window end excluded
+        self.assertNotIn(3, by_id)  # before window_start excluded
+
+    def test_falls_back_to_trailing_today_window_without_snapshot(self):
+        # With no snapshot for the realm, the window falls back to a trailing
+        # window ending today and captured_on is None.
+        ShipTopPlayerSnapshot.objects.all().delete()
+        cache.clear()
+        captured_on, window_start_d, window_end_d = latest_ship_snapshot_window("na")
+        self.assertIsNone(captured_on)
+        self.assertEqual(window_end_d, timezone.now().date())
+        self.assertEqual(
+            window_start_d,
+            timezone.now().date() - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS))
+
+        payload = compute_realm_top_ships("na", mode="random", use_cache=False)
+        self.assertIsNone(payload["captured_on"])
+        self.assertEqual(payload["window_end"], window_end_d.isoformat())
 
     def test_mode_and_realm_isolation(self):
         # A ranked event and a different-realm event must not bleed into the

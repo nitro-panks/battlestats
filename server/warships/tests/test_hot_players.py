@@ -253,6 +253,24 @@ class BackfillSeedTests(TestCase):
         hp2 = HotPlayer.objects.get(player__player_id=8002)
         self.assertGreater(hp1.hot_score, hp2.hot_score)
 
+    def test_excludes_players_the_floor_keeps_fresh(self):
+        # The seed must skip players the capture sweep would skip-if-fresh: those
+        # with a BattleObservation within HOT_OBSERVE_FLOOR_HOURS. Only the
+        # floor-missed (stale) player should be seeded.
+        fresh = _mk_player(8011, pvp_battles=9000)   # highest volume, but fresh
+        stale = _mk_player(8012, pvp_battles=5000)   # lower volume, floor-missed
+        BattleObservation.objects.create(player=fresh, pvp_battles=9000)  # now
+        obs = BattleObservation.objects.create(player=stale, pvp_battles=5000)
+        BattleObservation.objects.filter(pk=obs.pk).update(
+            observed_at=timezone.now() - timedelta(hours=30))   # past the window
+        with _hot_env(HOT_OBSERVE_FLOOR_HOURS="20", HOT_PLAYERS_MAX="5"):
+            res = backfill_hot_players("na")
+        self.assertEqual(res['added'], 1)            # only the stale player
+        seeds = set(HotPlayer.objects.filter(
+            realm="na", source=HotPlayer.SOURCE_BACKFILL)
+            .values_list("player__player_id", flat=True))
+        self.assertEqual(seeds, {8012})              # fresh 8011 excluded
+
     def test_seed_scores_below_engagement_floor(self):
         # Even a huge-battle seed ranks under the weakest surviving engaged member
         # (active_days=2 -> score 2_000_000).
@@ -414,6 +432,60 @@ class CaptureSweepTests(TestCase):
             res = capture_hot_players("na")
         self.assertEqual(res["obs_skipped_hidden"], 1)
         self.assertEqual(res["observed"], 0)
+
+    def _backfill_member(self, pid, *, last_observed_at=None, hot_score=1000.0,
+                         realm="na"):
+        p = _mk_player(pid, realm=realm)
+        return HotPlayer.objects.create(
+            player=p, realm=realm, source=HotPlayer.SOURCE_BACKFILL,
+            hot_score=hot_score, last_observed_at=last_observed_at)
+
+    @patch("warships.incremental_battles.record_observation_and_diff")
+    @patch("warships.data.update_snapshot_data")
+    def test_capture_budget_stops_early(self, mock_snap, mock_obs):
+        # 10 floor-missed (no observation) backfill members, budget of 4 WG calls:
+        # the sweep must pull exactly 4 and defer the rest, never the whole set.
+        # This is the ceiling the 540s incident slipped past — assert it directly.
+        mock_obs.return_value = {"status": "completed"}
+        for pid in range(8701, 8711):
+            self._backfill_member(pid)
+        with _hot_env(HOT_PLAYERS_CAPTURE_DELAY="0"):
+            res = capture_hot_players("na", max_pulls=4)
+        self.assertEqual(mock_obs.call_count, 4)
+        self.assertEqual(res["wg_calls"], 4)
+        self.assertTrue(res["stopped_early"])
+        self.assertEqual(res["remaining"], 6)
+
+    @patch("warships.incremental_battles.record_observation_and_diff")
+    @patch("warships.data.update_snapshot_data")
+    def test_capture_rotates_oldest_coverage_first(self, mock_snap, mock_obs):
+        # Backfill members all floor-missed but with distinct coverage ages. With a
+        # budget of 2, the sweep must spend it on the LEAST-recently-covered first
+        # (NULL, then oldest) so the set drains round-robin instead of starving.
+        mock_obs.return_value = {"status": "completed"}
+        now = timezone.now()
+        self._backfill_member(8801, last_observed_at=None)                       # oldest
+        self._backfill_member(8802, last_observed_at=now - timedelta(hours=50))
+        self._backfill_member(8803, last_observed_at=now - timedelta(hours=25))  # newest
+        with _hot_env(HOT_PLAYERS_CAPTURE_DELAY="0"):
+            res = capture_hot_players("na", max_pulls=2)
+        pulled_ids = [c.args[0] for c in mock_obs.call_args_list]
+        self.assertEqual(pulled_ids, [8801, 8802])   # NULL first, then 50h-old
+        self.assertEqual(res["wg_calls"], 2)
+
+    @patch("warships.incremental_battles.record_observation_and_diff")
+    @patch("warships.data.update_snapshot_data")
+    def test_capture_priority_members_before_backfill(self, mock_snap, mock_obs):
+        # An engagement member is sweep-priority over a backfill seed regardless of
+        # coverage age — budget of 1 must spend on engagement first.
+        mock_obs.return_value = {"status": "completed"}
+        self._backfill_member(8901, last_observed_at=None)   # oldest by age
+        self._hot_member(8902)                               # engagement, priority
+        with _hot_env(HOT_PLAYERS_CAPTURE_DELAY="0"):
+            res = capture_hot_players("na", max_pulls=1)
+        pulled_ids = [c.args[0] for c in mock_obs.call_args_list]
+        self.assertEqual(pulled_ids, [8902])   # engagement before the older backfill
+        self.assertTrue(res["stopped_early"])
 
 
 class CommandErgonomicsTests(TestCase):
