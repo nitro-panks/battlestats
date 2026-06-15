@@ -8,7 +8,8 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.clan_crawl import crawl_clan_members
-from warships.models import Clan
+from warships.data import reconcile_clan_departures
+from warships.models import Clan, Player
 
 
 class CrawlCoreOnlyFlagTests(TestCase):
@@ -108,6 +109,92 @@ class ClanCrawlAggregateTests(TestCase):
         self.assertEqual(clan.cached_total_wins, 150)
         self.assertEqual(clan.cached_active_member_count, 2)
         self.assertEqual(clan.cached_clan_wr, 50.0)
+
+
+class ClanDepartureReconcileTests(TestCase):
+    """The roster sync only ever ADDS members; without a departure pass a player
+    who LEFT lingers in clan.player_set forever (a "ghost" inflating the member
+    list), because the active-player observation floor never sweeps a departed-
+    then-inactive player. The crawl must clear the clan FK on stored members
+    absent from the live WG roster, using the ids it already fetched."""
+
+    def test_reconcile_clears_only_members_absent_from_roster(self):
+        clan = Clan.objects.create(clan_id=6101, realm='na', name='Y', tag='Y')
+        stay = Player.objects.create(player_id=1, realm='na', name='Stay', clan=clan)
+        go = Player.objects.create(player_id=2, realm='na', name='Go', clan=clan)
+
+        cleared = reconcile_clan_departures(clan, [1], realm='na')
+
+        stay.refresh_from_db()
+        go.refresh_from_db()
+        self.assertEqual(cleared, 1)
+        self.assertEqual(stay.clan_id, clan.pk)   # still in roster → kept
+        self.assertIsNone(go.clan_id)             # departed → cleared
+
+    def test_reconcile_invalidates_served_members_cache(self):
+        from warships.models import realm_cache_key
+        clan = Clan.objects.create(clan_id=6102, realm='na', name='Z', tag='Z')
+        Player.objects.create(player_id=3, realm='na', name='Gone', clan=clan)
+        key = realm_cache_key('na', 'clan:members:v3:6102')
+        cache.set(key, ['stale-roster'], timeout=300)
+
+        reconcile_clan_departures(clan, [99], realm='na')
+
+        # The served (v3) members cache is dropped so the clan page reflects the
+        # departure immediately instead of waiting out the 5-min TTL.
+        self.assertIsNone(cache.get(key))
+
+    def test_reconcile_empty_roster_does_not_orphan_members(self):
+        # A transient upstream failure (no member ids) must NOT orphan a clan.
+        clan = Clan.objects.create(clan_id=6100, realm='na', name='X', tag='X')
+        member = Player.objects.create(
+            player_id=42, realm='na', name='Member', clan=clan)
+
+        cleared = reconcile_clan_departures(clan, [], realm='na')
+
+        member.refresh_from_db()
+        self.assertEqual(cleared, 0)
+        self.assertEqual(member.clan_id, clan.pk)
+
+    @patch("warships.clan_crawl.fetch_players_bulk")
+    @patch("warships.clan_crawl.fetch_member_ids")
+    @patch("warships.clan_crawl.fetch_clan_info")
+    def test_crawl_clears_departed_member_keeps_current(
+        self, mock_fetch_clan_info, mock_fetch_member_ids, mock_fetch_players_bulk,
+    ):
+        recent = int(timezone.now().timestamp())
+        clan = Clan.objects.create(
+            clan_id=6001, realm='na', name='BN', tag='-BN', members_count=1)
+        # Ghost: still FK'd to the clan but no longer in the live roster.
+        ghost = Player.objects.create(
+            player_id=9999, realm='na', name='GhostGone', clan=clan)
+        # Current member that WILL be in the live roster.
+        keeper = Player.objects.create(
+            player_id=9001, realm='na', name='Keeper', clan=clan)
+
+        mock_fetch_clan_info.return_value = {
+            "clan_id": 6001, "name": "BN", "tag": "-BN", "members_count": 1,
+            "description": "", "leader_id": 9001, "leader_name": "Keeper",
+        }
+        mock_fetch_member_ids.return_value = [9001]
+        mock_fetch_players_bulk.return_value = {
+            "9001": {
+                "account_id": 9001, "nickname": "Keeper",
+                "created_at": 1700000000, "last_battle_time": recent,
+                "hidden_profile": False,
+                "statistics": {"battles": 100, "pvp": {
+                    "battles": 80, "wins": 40, "losses": 40,
+                    "frags": 30, "survived_battles": 20}},
+            },
+        }
+
+        crawl_clan_members(
+            [{"clan_id": 6001}], realm='na', core_only=True, request_delay=0)
+
+        ghost.refresh_from_db()
+        keeper.refresh_from_db()
+        self.assertIsNone(ghost.clan_id)          # departed → cleared
+        self.assertEqual(keeper.clan_id, clan.pk)  # current → retained
 
 
 class ClanCrawlResumeWindowTests(TestCase):

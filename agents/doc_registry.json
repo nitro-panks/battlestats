@@ -2693,6 +2693,29 @@
                 "endpoint-profiles"
             ],
             "archive_on": []
+        },
+        "agents/runbooks/runbook-clan-departure-reconciliation-2026-06-15.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "clan departure reconciliation",
+                "ghost clan members",
+                "player left clan still shows on clan page",
+                "clan roster overcount"
+            ],
+            "tags": [
+                "clan",
+                "clan-crawl",
+                "roster",
+                "reconciliation",
+                "cache"
+            ],
+            "archive_on": [
+                "clan-departure-reconciliation-superseded"
+            ]
         }
     }
 }

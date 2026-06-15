@@ -4592,7 +4592,8 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
 
-    for member_id in _fetch_clan_member_ids(clan_id, realm=realm):
+    member_ids = _fetch_clan_member_ids(clan_id, realm=realm)
+    for member_id in member_ids:
         try:
             player, created = get_or_create_canonical_player(
                 member_id, realm=realm)
@@ -4608,6 +4609,8 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
             if player.clan != clan:
                 player.clan = clan
                 player.save()
+
+    reconcile_clan_departures(clan, member_ids, realm=realm)
 
 
 def refresh_clan_cached_aggregates(clan_id: str, realm: str = DEFAULT_REALM) -> None:
@@ -4636,6 +4639,37 @@ def refresh_clan_cached_aggregates(clan_id: str, realm: str = DEFAULT_REALM) -> 
     invalidate_landing_clan_caches(realm=realm)
     _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
     cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
+
+
+def reconcile_clan_departures(clan, live_member_ids, realm: str = DEFAULT_REALM) -> int:
+    """Clear the clan FK on stored members no longer in the live WG roster.
+
+    The roster-sync paths (daily clan crawl, on-view clan refresh) only ever ADD
+    ``player.clan = clan``; nothing removes a member who has LEFT. Such a player
+    lingers in ``clan.player_set`` (a "ghost" that inflates the member list)
+    until their own profile is individually refreshed — and a departed-then-
+    inactive player is never swept by the active-player observation floor, so
+    ghosts accumulate indefinitely. This pass closes the gap using the member ids
+    the caller already fetched (no extra WG calls).
+
+    Guard: never reconcile against an empty/missing roster, so a transient
+    upstream failure can't orphan an entire clan. Returns the number of
+    departures cleared.
+    """
+    if not live_member_ids:
+        return 0
+    live_ids = {int(m) for m in live_member_ids}
+    cleared = clan.player_set.exclude(player_id__in=live_ids).update(clan=None)
+    if cleared:
+        # Delete the *served* members key (v3 — see clan_members view); the
+        # bare 'clan:members:{id}' key other call sites delete is a stale no-op.
+        cache.delete(realm_cache_key(realm, f'clan:members:v3:{clan.clan_id}'))
+        invalidate_clan_detail_cache(int(clan.clan_id), realm=realm)
+        logging.info(
+            "Reconciled %d departed member(s) out of clan %s [%s]",
+            cleared, clan.name, clan.tag,
+        )
+    return cleared
 
 
 def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
@@ -4670,6 +4704,7 @@ def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
 
         update_player_data(player)
 
+    reconcile_clan_departures(clan, member_ids, realm=realm)
     refresh_clan_cached_aggregates(clan_id, realm=realm)
 
 

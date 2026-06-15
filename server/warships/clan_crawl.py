@@ -289,7 +289,7 @@ def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Cal
 
 
 def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, core_only: bool = False, request_delay: float = 0.25, fresh_after: Optional[datetime] = None) -> dict[str, int]:
-    from warships.data import refresh_clan_cached_aggregates
+    from warships.data import refresh_clan_cached_aggregates, reconcile_clan_departures
 
     total = len(clan_stubs)
     clans_processed = 0
@@ -346,6 +346,7 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
                 save_player(pdata, clan, realm=realm, core_only=core_only)
                 players_saved += 1
 
+        reconcile_clan_departures(clan, member_ids, realm=realm)
         refresh_clan_cached_aggregates(str(clan.clan_id), realm=realm)
 
         clans_processed += 1
