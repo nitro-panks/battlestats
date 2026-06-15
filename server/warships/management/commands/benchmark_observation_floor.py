@@ -36,6 +36,7 @@ from warships.models import (
     BattleEvent,
     BattleObservation,
     Player,
+    Snapshot,
     VALID_REALMS,
 )
 
@@ -44,9 +45,18 @@ FLOOR_FLAGS = [
     "BATTLE_OBSERVATION_FLOOR_BULK_REALMS",
     "BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED",
     "BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED",
+    "BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED",
+    "BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED",
+    "BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED",
     "BATTLE_OBSERVATION_FLOOR_LIMIT",
     "BATTLE_OBSERVATION_FLOOR_HOURS",
     "BATTLE_OBSERVATION_FLOOR_DAYS",
+    # Engines that feed the mover-capture KPI denominator: record the config
+    # that produced each daily snapshot so the metric is interpretable later.
+    "SNAPSHOT_ACTIVE_PLAYERS_ENABLED",
+    "SNAPSHOT_ACTIVE_LIMIT",
+    "HOT_PLAYERS_ENABLED",
+    "HOT_PLAYERS_MAX",
 ]
 
 
@@ -70,10 +80,68 @@ class Command(BaseCommand):
         stale_before = now - timedelta(hours=24)
 
         realms = sorted(VALID_REALMS)
+
+        # Mover-capture KPI denominator: the cheap bulk snapshot engine writes a
+        # daily cumulative `Snapshot.battles` for the active base, so a player
+        # who battled "today" is one whose cumulative battles rose between the
+        # two most-recent snapshot dates. This is the *true mover* set, derived
+        # independently of the floor (which supplies the numerator via
+        # BattleEvent). `interval_battles` is NOT used: it's only populated on
+        # the per-player view path, not by the bulk engine.
+        snap_dates = list(
+            Snapshot.objects.order_by("-date")
+            .values_list("date", flat=True).distinct()[:2]
+        )
+        latest_date = snap_dates[0] if snap_dates else None
+        prior_date = snap_dates[1] if len(snap_dates) > 1 else None
+
+        # Precompute the mover-capture denominator ONCE, set-based. `Snapshot` is
+        # ~2.5M rows with no index on `date` (only (player_id, date)), so a
+        # correlated Subquery per today-row was O(N) and took >7min at prod scale.
+        # Instead: a single `date__in` pass over the two relevant dates, joined to
+        # Player for realm/is_hidden, tallied per realm + total in Python.
+        snap_today_count: dict[str, int] = {}   # realm/'__total__' -> active-7d w/ snapshot today
+        snap_movers: dict[str, int] = {}        # realm/'__total__' -> active-7d cumulative battles rose
+        if latest_date is not None:
+            # Scope the denominator to non-hidden active-7d players (the population
+            # the per-ship-daily goal targets; also makes snapshot_coverage_frac =
+            # "active players actually snapshotted / active-7d"). Computed as two
+            # independent reads intersected in Python, NOT a Snapshot<->Player join
+            # over the 2.5M-row table: the active-player set reuses the same filter
+            # the benchmark already runs (a Player seq scan, ~4s), and snapshots are
+            # one date__in scan (Snapshot has no `date` index → seq scan, ~3s, no
+            # join). A correlated Subquery per today-row was the wrong shape here.
+            active_realm = dict(
+                Player.objects.filter(is_hidden=False, last_battle_date__gte=cut7)
+                .values_list("id", "realm").iterator()
+            )
+            today_b: dict[int, int] = {}
+            prior_b: dict[int, int] = {}
+            for pid, sdate, battles in (
+                Snapshot.objects
+                .filter(date__in=[latest_date] + ([prior_date] if prior_date else []))
+                .values_list("player_id", "date", "battles").iterator()
+            ):
+                if sdate == latest_date:
+                    today_b[pid] = battles
+                elif sdate == prior_date:
+                    prior_b[pid] = battles
+            for pid, prealm in active_realm.items():
+                tb = today_b.get(pid)
+                if tb is None:
+                    continue  # active player not snapshotted today (a coverage gap)
+                for key in (prealm, "__total__"):
+                    snap_today_count[key] = snap_today_count.get(key, 0) + 1
+                pb = prior_b.get(pid)
+                if pb is not None and tb > pb:
+                    for key in (prealm, "__total__"):
+                        snap_movers[key] = snap_movers.get(key, 0) + 1
+
         result = {
             "captured_at": now.isoformat(),
             "window_hours": window_h,
             "config": {k: os.getenv(k, "<unset>") for k in FLOOR_FLAGS},
+            "snapshot_dates": [str(d) for d in snap_dates],
             "realms": {},
             "totals": {},
         }
@@ -109,6 +177,26 @@ class Command(BaseCommand):
             never = fq.filter(latest__isnull=True).count()
             stale = active7 - fresh - never  # has an obs but >24h old
 
+            # Mover-capture KPI: distinct players who actually battled between
+            # the two most-recent snapshot dates (cumulative battles rose) =
+            # the true denominator; `distinct_productive` (BattleEvent) is the
+            # captured numerator. snapshot_coverage_frac validates that the
+            # snapshot engine clears the active base (else the denominator is
+            # itself incomplete and the KPI under-reports the real gap).
+            snapshot_today = None
+            snapshot_movers = None
+            snapshot_coverage_frac = None
+            mover_capture_rate = None
+            if latest_date is not None:
+                snapshot_today = snap_today_count.get(realm, 0)
+                snapshot_coverage_frac = (
+                    round(snapshot_today / active7, 4) if active7 else None)
+                if prior_date is not None:
+                    snapshot_movers = snap_movers.get(realm, 0)
+                    mover_capture_rate = (
+                        round(prod_players / snapshot_movers, 4)
+                        if snapshot_movers else None)
+
             metrics = {
                 "active_1d": active1,
                 "active_7d": active7,
@@ -125,6 +213,11 @@ class Command(BaseCommand):
                 "stale_over_24h": stale,
                 "never_observed": never,
                 "fresh_frac": round(fresh / active7, 4) if active7 else None,
+                # Mover-capture KPI (the metric this goal actually needs).
+                "snapshot_today": snapshot_today,
+                "snapshot_movers": snapshot_movers,
+                "snapshot_coverage_frac": snapshot_coverage_frac,
+                "mover_capture_rate": mover_capture_rate,
             }
             if is_total:
                 result["totals"] = metrics
@@ -166,3 +259,18 @@ class Command(BaseCommand):
             f"({(t['coverage_ratio_vs_7d'] or 0):.1%}); "
             f"{(t['fresh_frac'] or 0):.1%} of active-7d have an observation "
             f"<24h old. R3 target: drive both toward 100%.")
+        # Mover-capture KPI: the metric defined over players who actually
+        # battled (snapshot battles-delta), not over the active-7d population.
+        if t.get("snapshot_movers") is not None:
+            self.stdout.write(
+                f"MOVER-CAPTURE: {t['distinct_productive']:,} of "
+                f"{t['snapshot_movers']:,} daily movers captured "
+                f"({(t['mover_capture_rate'] or 0):.1%}); snapshot covers "
+                f"{(t['snapshot_coverage_frac'] or 0):.1%} of active-7d "
+                f"(dates {result['snapshot_dates']}). This is the metric the "
+                f"per-ship-daily goal is defined over.")
+        else:
+            self.stdout.write(
+                "MOVER-CAPTURE: insufficient snapshot history "
+                f"(dates {result['snapshot_dates']}) — need two snapshot days "
+                "to compute the mover denominator.")
