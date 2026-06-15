@@ -132,15 +132,17 @@ ramping concurrency.
 
 ### Tier 3 — Proactive freshness (eliminate the live refresh for visits that matter)
 
-> **RETIRED IN PROD 2026-06-13** (config-only, code intact). Prod sets
-> `HOT_PLAYERS_FRESH_AFTER_MINUTES=1440`, collapsing the sweep from ~120 refreshes/day per hot
-> player to **≥1 per 24h**. Rationale: the tactical objective for a visited player is one
-> battle-history refresh per 24h; perpetual sub-second-on-visit freshness was judged overkill for
-> the WG cost. The sweep code, beat registration, and skip-if-fresh logic remain live — only the
-> threshold changed — so re-enabling Tier 3 is a one-knob revert (`_AFTER` back to ~12). With Tier 3
-> retired, a visit to a hot player whose data is >15 min stale takes the normal live-refresh-on-view
-> path (Tiers 1–2 still apply). Env detail: `ops-env-reference.md`. The implementation history below
-> is retained for context.
+> **DELETED 2026-06-15** (code + beat + knobs removed, not just config-gated). The
+> `refresh_hot_player_freshness` function, `refresh_hot_player_freshness_task`, the
+> `hot-players-freshness-{realm}` schedule, and the `HOT_PLAYERS_FRESH_AFTER_MINUTES` /
+> `_CYCLE_MINUTES` knobs are gone. The hot queue's sole purpose is now a ≥24h battle-history pull
+> (daily capture sweep + observation floor); a visit to a stale hot player takes the normal
+> live-refresh-on-view path (Tiers 1–2 still apply). Beat rows purged via
+> `signals._RETIRED_SCHEDULE_NAMES`. Re-introducing Tier 3 would now be a full re-implementation,
+> not a knob flip — it was judged not worth its WG cost, especially once the hot set is seeded to the
+> cap with battle-volume-selected players (a 120×/day forced-refresh sweep over a full cap starves
+> the observation floor). The 2026-06-13 prod config-gate to once/24h was the interim step. The
+> implementation history below is retained for context only — **the code it describes no longer exists.**
 >
 > **IMPLEMENTED 2026-06-11; parked 2026-06-11 (reverted in `bcfe232`, kept deliberately dark
 > while the engagement queue was observed); RE-ACTIVATED 2026-06-12** by restoring the code +

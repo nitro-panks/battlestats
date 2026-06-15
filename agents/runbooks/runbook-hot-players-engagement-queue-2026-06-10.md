@@ -5,31 +5,20 @@
 / `hot_players_status` commands, signals registration, env knobs, and tests are landed
 (`server/warships/hot_players.py`). Phase 2 (the depth/`event_type` signal) remains out of scope.
 
-## Freshness for the visit path (Tier 3 of the latency runbook)
+## Freshness sweep (Tier 3 visit-latency) — RETIRED 2026-06-15
 
-> **GATED TO ONCE/24h IN PROD 2026-06-13** (config-only). Prod sets
-> `HOT_PLAYERS_FRESH_AFTER_MINUTES=1440`, so this sweep now guarantees **≥1 battle-history refresh
-> per hot player per 24h** instead of keeping them perpetually inside the 15-min visit window. The
-> tactical objective is one refresh/24h for visited players; the sub-second-on-visit guarantee
-> (Tier 3) was judged overkill for its WG cost and is retired in prod. Code/beat/skip-if-fresh are
-> unchanged — re-enabling is a one-knob revert. See `runbook-player-refresh-latency-2026-06-10.md`
-> (Tier 3) and `ops-env-reference.md`.
-
-**IMPLEMENTED 2026-06-11.** This queue gained a third, SEPARATE sweep —
-`refresh_hot_player_freshness` / `refresh_hot_player_freshness_task`, scheduled as
-`hot-players-freshness-{realm}` on a 12-min striped cycle (`HOT_PLAYERS_FRESH_CYCLE_MINUTES`,
-under the 15-min visit-freshness window). It is the implementation of **Tier 3** of
-`runbook-player-refresh-latency-2026-06-10.md`. Whereas the *capture* sweep guarantees a
-`BattleObservation` + gap-free daily `Snapshot` (neither of which advances
-`Player.battles_updated_at`), the *freshness* sweep advances `battles_updated_at` itself — via
-`update_battle_data(force_refresh=True)` — so a visit to a durably-engaged player arrives at
-`x-player-refresh-pending: false` and resolves sub-second with no live WG refresh on the request
-thread. Same kill switch (`HOT_PLAYERS_ENABLED`), same cap (`HOT_PLAYERS_MAX`), same pacing
-(`HOT_PLAYERS_CAPTURE_DELAY`), same crawl-coexist posture. New knobs:
-`HOT_PLAYERS_FRESH_AFTER_MINUTES` (12, skip-if-fresh threshold) and
-`HOT_PLAYERS_FRESH_CYCLE_MINUTES` (12, schedule cadence). The engagement signal that earns a
-player gap-free history now *also* earns them a fast page. See that runbook's Tier 3 section for
-the full design (including the `update_battle_data` 15-min-guard bypass nuance).
+> **DELETED 2026-06-15.** The per-12-min `refresh_hot_player_freshness` /
+> `refresh_hot_player_freshness_task` sweep (Tier 3 of `runbook-player-refresh-latency-2026-06-10.md`,
+> which advanced `battles_updated_at` to keep visits sub-second) and its knobs
+> (`HOT_PLAYERS_FRESH_AFTER_MINUTES` / `_CYCLE_MINUTES`) were removed entirely. The hot queue's
+> **sole purpose is now a ≥24h battle-history pull**, guaranteed by the daily **capture** sweep
+> (`BattleObservation` skip-if-fresh against the 20h floor + gap-free `Snapshot`) plus the
+> observation floor (active players, ≤8h). A visit to a stale hot player falls back to the normal
+> live-refresh-on-view path. The `hot-players-freshness-{realm}` Beat rows are purged via
+> `signals._RETIRED_SCHEDULE_NAMES`. (Prod had already config-gated this to once/24h on 2026-06-13;
+> the 2026-06-15 change is the full code/beat/knob removal.) Rationale: at the cap-filled set size
+> (see backfill below) a 120×/day forced-refresh sweep is a permanent WG treadmill that starves the
+> observation floor, for a sub-second-on-visit guarantee that battle-volume-selected seeds don't need.
 
 ## Why
 
@@ -310,14 +299,13 @@ Semantics of the `backfill` source:
   FIRST** when engaged players need the slots.
 - **Graduates to `engagement`** if a seed later earns real view-recurrence (meets the
   promote rule during re-score).
-- **Included in the daily capture sweep** (observation skip-fresh against the 20h floor
-  + gap-free snapshot — the enrichment goal) but **EXCLUDED from the 120×/day freshness
-  sweep**: visit-freshness is for durably-visited players, and force-refreshing a full
-  cap of seeds every 12 min would never catch the window — a permanent WG treadmill that
-  would starve the observation floor. See `refresh_hot_player_freshness`.
+- **Captured by the daily capture sweep** (observation skip-fresh against the 20h floor
+  + gap-free snapshot — the enrichment goal). (There is no longer a per-visit freshness
+  sweep; it was retired 2026-06-15 — see the section above. The treadmill risk of
+  force-refreshing a cap-full seed set 120×/day was a key reason for the removal.)
 
 Tests: `test_hot_players.py::BackfillSeedTests` (fills-to-cap, ranks-below-floor,
-idempotent, survives maintain, trimmed-before-engagement, graduates, freshness-skips-seed).
+idempotent, survives maintain, trimmed-before-engagement, graduates).
 
 ## Pre-implementation checklist (doctrine)
 

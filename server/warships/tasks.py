@@ -129,10 +129,6 @@ def _hot_players_capture_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:hot_players_capture:{realm}:lock"
 
 
-def _hot_players_freshness_lock_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:hot_players_freshness:{realm}:lock"
-
-
 def _snapshot_active_players_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:snapshot_active_players:{realm}:lock"
 
@@ -2598,49 +2594,6 @@ def capture_hot_player_observations_task(self, realm=DEFAULT_REALM):
     except Exception:
         logger.exception(
             "capture_hot_player_observations_task failed for %s", realm)
-        return {"status": "error", "realm": realm}
-    finally:
-        cache.delete(lock_key)
-
-    return {"status": "ok", **result}
-
-
-@app.task(bind=True, queue='background', **TASK_OPTS)
-def refresh_hot_player_freshness_task(self, realm=DEFAULT_REALM):
-    """Keep hot players inside the 15-min visit-freshness window.
-
-    Tier 3 of ``runbook-player-refresh-latency-2026-06-10.md``, extending the
-    hot-players engagement queue. A SEPARATE, frequent (<15-min cadence) sweep
-    that advances ``Player.battles_updated_at`` for hot members whose value is
-    older than ``HOT_PLAYERS_FRESH_AFTER_MINUTES`` (default 12) via
-    ``update_battle_data(force_refresh=True)`` — so a visit to a durably-engaged
-    player arrives at ``x-player-refresh-pending: false`` and resolves
-    sub-second with no live WG refresh on the request thread. The daily capture
-    sweep writes observations/snapshots but does NOT advance
-    ``battles_updated_at``; this closes that gap.
-
-    Background queue, single-flight per realm, **coexists with clan crawls** (no
-    deferral — guaranteed freshness is the point). Bounded by ``HOT_PLAYERS_MAX``,
-    skip-if-fresh against ``battles_updated_at``, hidden accounts gated up front.
-    Kill switch ``HOT_PLAYERS_ENABLED``.
-    """
-    if os.getenv("HOT_PLAYERS_ENABLED", "1") != "1":
-        return {"status": "skipped", "reason": "disabled"}
-
-    lock_key = _hot_players_freshness_lock_key(realm)
-    if not cache.add(lock_key, self.request.id or "1",
-                     timeout=RESOURCE_TASK_LOCK_TIMEOUT):
-        logger.info(
-            "Skipping refresh_hot_player_freshness_task[%s] — another sweep is active",
-            realm)
-        return {"status": "skipped", "reason": "already-running", "realm": realm}
-
-    try:
-        from warships.hot_players import refresh_hot_player_freshness
-        result = refresh_hot_player_freshness(realm)
-    except Exception:
-        logger.exception(
-            "refresh_hot_player_freshness_task failed for %s", realm)
         return {"status": "error", "realm": realm}
     finally:
         cache.delete(lock_key)

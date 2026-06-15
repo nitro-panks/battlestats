@@ -20,7 +20,6 @@ from warships.hot_players import (
     compute_hot_score,
     evaluate_realm_engagement,
     maintain_hot_players,
-    refresh_hot_player_freshness,
 )
 from warships.models import (
     BattleObservation,
@@ -299,7 +298,7 @@ class BackfillSeedTests(TestCase):
 
     def test_seed_trimmed_before_engagement_when_over_cap(self):
         # One engaged member + one seed, cap=1 -> the seed is trimmed, engaged kept.
-        eng = _mk_player(8501)
+        _mk_player(8501)
         _spread_days(8501, 4, sessions_per_day=2)  # qualifies for promotion
         seed = _mk_player(8502, pvp_battles=9000)
         HotPlayer.objects.create(player=seed, realm="na",
@@ -308,18 +307,6 @@ class BackfillSeedTests(TestCase):
             maintain_hot_players("na")
         self.assertTrue(HotPlayer.objects.filter(player__player_id=8501).exists())
         self.assertFalse(HotPlayer.objects.filter(player__player_id=8502).exists())
-
-    @patch("warships.data.update_battle_data")
-    def test_backfill_seed_skipped_by_freshness_sweep(self, mock_upd):
-        # The 120x/day freshness sweep must NOT force-refresh backfill seeds
-        # (visit-freshness doesn't apply; at a full cap it would never catch up).
-        seed = _mk_player(8701, pvp_battles=9000, battles_updated_at=None)
-        HotPlayer.objects.create(player=seed, realm="na",
-                                 source=HotPlayer.SOURCE_BACKFILL, hot_score=9000.0)
-        with _hot_env():
-            res = refresh_hot_player_freshness("na")
-        mock_upd.assert_not_called()
-        self.assertEqual(res['hot_set_size'], 0)  # seed not even in the working set
 
     def test_seed_graduates_to_engagement_on_real_recurrence(self):
         # A seed that earns sustained view-recurrence is promoted to 'engagement'
@@ -427,146 +414,6 @@ class CaptureSweepTests(TestCase):
             res = capture_hot_players("na")
         self.assertEqual(res["obs_skipped_hidden"], 1)
         self.assertEqual(res["observed"], 0)
-
-
-class FreshnessSweepTests(TestCase):
-    """Tier 3 freshness sweep: keep hot players inside the 15-min visit window.
-
-    See agents/runbooks/runbook-player-refresh-latency-2026-06-10.md.
-    """
-
-    def _hot_member(self, pid, realm="na", **player_kw):
-        p = _mk_player(pid, realm=realm, **player_kw)
-        hp = HotPlayer.objects.create(
-            player=p, realm=realm, source=HotPlayer.SOURCE_ENGAGEMENT,
-            hot_score=5e6, last_engaged_at=timezone.now())
-        return hp
-
-    @patch("warships.data.update_battle_data")
-    def test_stale_hot_player_refreshed(self, mock_upd):
-        hp = self._hot_member(9101)
-        # battles_updated_at older than the 12-min freshness threshold.
-        Player.objects.filter(pk=hp.player.pk).update(
-            battles_updated_at=timezone.now() - timedelta(minutes=14))
-        with _hot_env(HOT_PLAYERS_FRESH_AFTER_MINUTES="12",
-                      HOT_PLAYERS_CAPTURE_DELAY="0"):
-            res = refresh_hot_player_freshness("na")
-        mock_upd.assert_called_once_with(9101, realm="na", force_refresh=True)
-        self.assertEqual(res["refreshed"], 1)
-        self.assertEqual(res["skipped_fresh"], 0)
-
-    @patch("warships.data.update_battle_data")
-    def test_fresh_hot_player_skipped(self, mock_upd):
-        hp = self._hot_member(9201)
-        # Already inside the window -> skip-if-fresh, no WG call.
-        Player.objects.filter(pk=hp.player.pk).update(
-            battles_updated_at=timezone.now() - timedelta(minutes=5))
-        with _hot_env(HOT_PLAYERS_FRESH_AFTER_MINUTES="12",
-                      HOT_PLAYERS_CAPTURE_DELAY="0"):
-            res = refresh_hot_player_freshness("na")
-        mock_upd.assert_not_called()
-        self.assertEqual(res["skipped_fresh"], 1)
-        self.assertEqual(res["refreshed"], 0)
-
-    @patch("warships.data.update_battle_data")
-    def test_never_refreshed_player_refreshed(self, mock_upd):
-        # battles_updated_at is NULL (never refreshed) -> treated as stale.
-        hp = self._hot_member(9251)
-        Player.objects.filter(pk=hp.player.pk).update(battles_updated_at=None)
-        with _hot_env(HOT_PLAYERS_CAPTURE_DELAY="0"):
-            res = refresh_hot_player_freshness("na")
-        mock_upd.assert_called_once_with(9251, realm="na", force_refresh=True)
-        self.assertEqual(res["refreshed"], 1)
-
-    @patch("warships.data.update_battle_data")
-    def test_hidden_account_gated_up_front(self, mock_upd):
-        hp = self._hot_member(9301, is_hidden=True)
-        Player.objects.filter(pk=hp.player.pk).update(
-            battles_updated_at=timezone.now() - timedelta(minutes=30))
-        with _hot_env(HOT_PLAYERS_CAPTURE_DELAY="0"):
-            res = refresh_hot_player_freshness("na")
-        mock_upd.assert_not_called()  # no wasted WG call
-        self.assertEqual(res["skipped_hidden"], 1)
-        self.assertEqual(res["refreshed"], 0)
-
-    @patch("warships.data.update_battle_data")
-    def test_failed_refresh_counted_not_raised(self, mock_upd):
-        hp = self._hot_member(9351)
-        Player.objects.filter(pk=hp.player.pk).update(
-            battles_updated_at=timezone.now() - timedelta(minutes=30))
-        mock_upd.side_effect = RuntimeError("WG hiccup")
-        with _hot_env(HOT_PLAYERS_CAPTURE_DELAY="0"):
-            res = refresh_hot_player_freshness("na")  # must not raise
-        self.assertEqual(res["errors"], 1)
-        self.assertEqual(res["refreshed"], 0)
-
-    @patch("warships.data.update_battle_data")
-    def test_respects_cap(self, mock_upd):
-        for pid, score in ((9401, 9e6), (9402, 8e6), (9403, 7e6)):
-            p = _mk_player(pid)
-            Player.objects.filter(pk=p.pk).update(
-                battles_updated_at=timezone.now() - timedelta(minutes=30))
-            HotPlayer.objects.create(
-                player=p, realm="na", source=HotPlayer.SOURCE_ENGAGEMENT,
-                hot_score=score, last_engaged_at=timezone.now())
-        with _hot_env(HOT_PLAYERS_MAX="2", HOT_PLAYERS_CAPTURE_DELAY="0"):
-            res = refresh_hot_player_freshness("na")
-        # Only the 2 hottest are swept.
-        self.assertEqual(res["hot_set_size"], 2)
-        self.assertEqual(res["refreshed"], 2)
-        called_ids = {c.args[0] for c in mock_upd.call_args_list}
-        self.assertEqual(called_ids, {9401, 9402})
-
-    @patch("warships.data.update_battle_data")
-    def test_per_realm_isolation(self, mock_upd):
-        hp = self._hot_member(9501, realm="na")
-        Player.objects.filter(pk=hp.player.pk).update(
-            battles_updated_at=timezone.now() - timedelta(minutes=30))
-        with _hot_env(HOT_PLAYERS_CAPTURE_DELAY="0"):
-            res = refresh_hot_player_freshness("eu")  # different realm
-        mock_upd.assert_not_called()
-        self.assertEqual(res["hot_set_size"], 0)
-
-    @patch("warships.data.update_battle_data")
-    def test_disabled_no_ops(self, mock_upd):
-        hp = self._hot_member(9601)
-        Player.objects.filter(pk=hp.player.pk).update(
-            battles_updated_at=timezone.now() - timedelta(minutes=30))
-        with _hot_env(HOT_PLAYERS_ENABLED="0", HOT_PLAYERS_CAPTURE_DELAY="0"):
-            res = refresh_hot_player_freshness("na")
-        mock_upd.assert_not_called()
-        self.assertEqual(res["status"], "disabled")
-
-    @patch("warships.data.update_battle_data")
-    def test_task_disabled_no_ops(self, mock_upd):
-        from warships import tasks
-        with _hot_env(HOT_PLAYERS_ENABLED="0"):
-            res = tasks.refresh_hot_player_freshness_task("na")
-        self.assertEqual(res["status"], "skipped")
-        mock_upd.assert_not_called()
-
-    @patch("warships.data._fetch_ship_stats_for_player", return_value=[])
-    def test_real_update_battle_data_advances_timestamp(self, mock_fetch):
-        """The bypass is real, not just mock-shaped.
-
-        Mocks only the WG fetch (returns [] -> the empty-stats branch that still
-        advances battles_updated_at), and runs the REAL update_battle_data
-        through the sweep. Pins that force_refresh=True actually clears the
-        internal 15-min guard for a player in the [12, 15) staleness band — the
-        guard that would otherwise neuter the whole tier.
-        """
-        hp = self._hot_member(9701)
-        before = timezone.now() - timedelta(minutes=13)  # inside the 15-min guard
-        Player.objects.filter(pk=hp.player.pk).update(
-            battles_updated_at=before, battles_json=[{"ship_id": 1}])
-        with _hot_env(HOT_PLAYERS_FRESH_AFTER_MINUTES="12",
-                      HOT_PLAYERS_CAPTURE_DELAY="0"):
-            res = refresh_hot_player_freshness("na")
-        self.assertEqual(res["refreshed"], 1)
-        hp.player.refresh_from_db()
-        # battles_updated_at advanced past the 13-min-old value despite being
-        # inside update_battle_data's own 15-min cache guard.
-        self.assertGreater(hp.player.battles_updated_at, before)
 
 
 class CommandErgonomicsTests(TestCase):

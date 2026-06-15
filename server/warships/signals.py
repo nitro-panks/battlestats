@@ -134,6 +134,14 @@ _RETIRED_SCHEDULE_NAMES = [
     "recent-clans-warmer-na",
     "recent-clans-warmer-eu",
     "recent-clans-warmer-asia",
+    # Hot-players freshness sweep (Tier 3 visit-latency optimization) retired
+    # 2026-06-15: the hot queue now guarantees a ≥24h battle-history pull via the
+    # daily capture sweep + the observation floor only. The 12-min freshness sweep
+    # and its task (refresh_hot_player_freshness_task) were deleted — purge the
+    # rows or celery-beat dispatches a non-existent task name.
+    "hot-players-freshness-na",
+    "hot-players-freshness-eu",
+    "hot-players-freshness-asia",
 ]
 
 
@@ -719,42 +727,10 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
-    # freshness (Tier 3 of runbook-player-refresh-latency-2026-06-10): a SEPARATE
-    # frequent (<15-min) sweep that advances Player.battles_updated_at for hot
-    # members so a visit lands at x-player-refresh-pending:false and resolves
-    # sub-second (no live WG refresh on the request thread). Cadence MUST be under
-    # the 15-min PLAYER_BATTLE_DATA_STALE_AFTER window — default 12 min. The 12-min
-    # cycle stripes cleanly via _realm_crontab_for_cycle (stride=4): NA :00,12,24,
-    # 36,48 / EU :04,16,28,40,52 / ASIA :08,20,32,44,56 (hour wildcard) — distinct
-    # minute lanes, no collision. It is a crawler-class WG consumer, so it gates on
-    # ENABLE_CRAWLER_SCHEDULES like the floor / capture. Sub-hourly minute-list
-    # family, so (like recently-viewed-player-warmer) it is NOT in the NA-lane
-    # de-pile list — it does not anchor a single hour-multiple minute.
-    hot_fresh_cycle_minutes = int(
-        os.getenv("HOT_PLAYERS_FRESH_CYCLE_MINUTES", "12"))
-    for realm in sorted(VALID_REALMS):
-        minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, hot_fresh_cycle_minutes)
-        hot_fresh_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute=minute_str,
-            hour=hour_str,
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"hot-players-freshness-{realm}",
-            defaults={
-                "task": "warships.tasks.refresh_hot_player_freshness_task",
-                "crontab": hot_fresh_schedule,
-                "interval": None,
-                "enabled": crawler_schedules_enabled,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Frequent (<15min) freshness sweep of the hot set ({realm.upper()}): advance battles_updated_at so visits resolve sub-second. Coexists with crawls; kill via HOT_PLAYERS_ENABLED=0.",
-            },
-        )
+    # The hot-players freshness sweep (Tier 3 visit-latency optimization) was
+    # retired 2026-06-15 — the hot queue's sole job is a ≥24h battle-history pull,
+    # which the daily capture sweep + the observation floor already guarantee. Its
+    # schedule names are in _RETIRED_SCHEDULE_NAMES and the task/function are gone.
 
     # -- Incremental Ranked Refresh (per realm) --
     # Default 120 min cycle, striped per realm. With 3 realms the stride is
