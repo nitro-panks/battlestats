@@ -292,6 +292,33 @@ reversible by re-migrating.
   the whole pipeline per-realm (no cross-realm merge) — consistent with every other
   per-realm family.
 
+## Most-active backfill seed (`source='backfill'`, added 2026-06-15)
+
+A one-time seed to fill each realm's queue to `HOT_PLAYERS_MAX` with the most-active
+players, so they get guaranteed daily battle-history capture even before they attract
+visitor interest. Management command `backfill_hot_players` (`--realm` / `--all-realms`
+/ `--dry-run`); selects active (`last_battle_date` within `HOT_BACKFILL_ACTIVE_DAYS`=7),
+non-hidden players ordered by `pvp_battles` desc, skips current members, inserts up to
+the remaining cap. Pure DB, idempotent (re-running tops up to the cap).
+
+Semantics of the `backfill` source:
+- **Ranked below all engagement members** — `hot_score = min(pvp_battles, 900_000)`,
+  always under the engagement floor (a surviving engaged member has active_days ≥ 2 →
+  score ≥ 2,000,000).
+- **Protected from inactivity-eviction** in `maintain_hot_players` (seeds have no
+  view-engagement by design) — they leave only via the **cap-trim, which removes them
+  FIRST** when engaged players need the slots.
+- **Graduates to `engagement`** if a seed later earns real view-recurrence (meets the
+  promote rule during re-score).
+- **Included in the daily capture sweep** (observation skip-fresh against the 20h floor
+  + gap-free snapshot — the enrichment goal) but **EXCLUDED from the 120×/day freshness
+  sweep**: visit-freshness is for durably-visited players, and force-refreshing a full
+  cap of seeds every 12 min would never catch the window — a permanent WG treadmill that
+  would starve the observation floor. See `refresh_hot_player_freshness`.
+
+Tests: `test_hot_players.py::BackfillSeedTests` (fills-to-cap, ranks-below-floor,
+idempotent, survives maintain, trimmed-before-engagement, graduates, freshness-skips-seed).
+
 ## Pre-implementation checklist (doctrine)
 
 - [ ] Migration for `HotPlayer`; update the Data-models section of `CLAUDE.md` and

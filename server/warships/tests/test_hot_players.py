@@ -15,6 +15,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.hot_players import (
+    backfill_hot_players,
     capture_hot_players,
     compute_hot_score,
     evaluate_realm_engagement,
@@ -227,6 +228,111 @@ class CapTrimTests(TestCase):
             HotPlayer.objects.filter(realm="na").values_list("player__player_id", flat=True))
         self.assertEqual(len(survivors), 2)
         self.assertEqual(survivors, {7803, 7804})  # the two hottest
+
+
+class BackfillSeedTests(TestCase):
+    """One-time most-active seed: fills to the cap, ranks below engagement, is
+    protected from inactivity-eviction, trimmed first, and graduates on real
+    engagement."""
+
+    def test_fills_to_cap_with_active_high_volume_excluding_hidden_inactive(self):
+        # 4 candidates with descending battle volume; one hidden, one inactive.
+        _mk_player(8001, pvp_battles=9000)
+        _mk_player(8002, pvp_battles=5000)
+        _mk_player(8003, pvp_battles=8000, is_hidden=True)           # excluded
+        _mk_player(8004, pvp_battles=7000,
+                   last_battle_date=timezone.now().date() - timedelta(days=30))  # inactive, excluded
+        with _hot_env(HOT_PLAYERS_MAX="3"):
+            res = backfill_hot_players("na")
+        self.assertEqual(res['added'], 2)  # only the two active, non-hidden
+        seeds = set(HotPlayer.objects.filter(
+            realm="na", source=HotPlayer.SOURCE_BACKFILL)
+            .values_list("player__player_id", flat=True))
+        self.assertEqual(seeds, {8001, 8002})
+        # Ordered by volume: 8001 (9000) outranks 8002 (5000).
+        hp1 = HotPlayer.objects.get(player__player_id=8001)
+        hp2 = HotPlayer.objects.get(player__player_id=8002)
+        self.assertGreater(hp1.hot_score, hp2.hot_score)
+
+    def test_seed_scores_below_engagement_floor(self):
+        # Even a huge-battle seed ranks under the weakest surviving engaged member
+        # (active_days=2 -> score 2_000_000).
+        _mk_player(8101, pvp_battles=10_000_000)
+        with _hot_env():
+            backfill_hot_players("na")
+        hp = HotPlayer.objects.get(player__player_id=8101)
+        self.assertLess(hp.hot_score, 2_000_000.0)
+
+    def test_idempotent_topup_does_not_duplicate(self):
+        for pid in range(8201, 8211):
+            _mk_player(pid, pvp_battles=1000 + pid)
+        with _hot_env(HOT_PLAYERS_MAX="5"):
+            first = backfill_hot_players("na")
+            second = backfill_hot_players("na")
+        self.assertEqual(first['added'], 5)
+        self.assertEqual(second['added'], 0)       # already full
+        self.assertEqual(HotPlayer.objects.filter(realm="na").count(), 5)
+
+    def test_does_not_displace_existing_members(self):
+        # An engaged member already in the queue is not double-counted; backfill
+        # fills only the remaining headroom.
+        p = _mk_player(8301, pvp_battles=4000)
+        HotPlayer.objects.create(player=p, realm="na",
+                                 source=HotPlayer.SOURCE_ENGAGEMENT, hot_score=3e6)
+        _mk_player(8302, pvp_battles=9000)
+        with _hot_env(HOT_PLAYERS_MAX="2"):
+            res = backfill_hot_players("na")
+        self.assertEqual(res['added'], 1)          # one open slot
+        self.assertEqual(
+            HotPlayer.objects.get(player__player_id=8301).source,
+            HotPlayer.SOURCE_ENGAGEMENT)            # untouched
+
+    def test_seed_survives_maintain_without_engagement(self):
+        # A backfill seed with zero view-engagement must NOT be inactivity-evicted.
+        p = _mk_player(8401, pvp_battles=6000)
+        HotPlayer.objects.create(player=p, realm="na",
+                                 source=HotPlayer.SOURCE_BACKFILL,
+                                 hot_score=6000.0)
+        with _hot_env():
+            maintain_hot_players("na")
+        self.assertTrue(HotPlayer.objects.filter(player__player_id=8401).exists())
+
+    def test_seed_trimmed_before_engagement_when_over_cap(self):
+        # One engaged member + one seed, cap=1 -> the seed is trimmed, engaged kept.
+        eng = _mk_player(8501)
+        _spread_days(8501, 4, sessions_per_day=2)  # qualifies for promotion
+        seed = _mk_player(8502, pvp_battles=9000)
+        HotPlayer.objects.create(player=seed, realm="na",
+                                 source=HotPlayer.SOURCE_BACKFILL, hot_score=9000.0)
+        with _hot_env(HOT_PLAYERS_MAX="1"):
+            maintain_hot_players("na")
+        self.assertTrue(HotPlayer.objects.filter(player__player_id=8501).exists())
+        self.assertFalse(HotPlayer.objects.filter(player__player_id=8502).exists())
+
+    @patch("warships.data.update_battle_data")
+    def test_backfill_seed_skipped_by_freshness_sweep(self, mock_upd):
+        # The 120x/day freshness sweep must NOT force-refresh backfill seeds
+        # (visit-freshness doesn't apply; at a full cap it would never catch up).
+        seed = _mk_player(8701, pvp_battles=9000, battles_updated_at=None)
+        HotPlayer.objects.create(player=seed, realm="na",
+                                 source=HotPlayer.SOURCE_BACKFILL, hot_score=9000.0)
+        with _hot_env():
+            res = refresh_hot_player_freshness("na")
+        mock_upd.assert_not_called()
+        self.assertEqual(res['hot_set_size'], 0)  # seed not even in the working set
+
+    def test_seed_graduates_to_engagement_on_real_recurrence(self):
+        # A seed that earns sustained view-recurrence is promoted to 'engagement'
+        # (and thereafter lives by the normal rules).
+        p = _mk_player(8601, pvp_battles=6000)
+        HotPlayer.objects.create(player=p, realm="na",
+                                 source=HotPlayer.SOURCE_BACKFILL, hot_score=6000.0)
+        _spread_days(8601, 4, sessions_per_day=2)  # now genuinely engaged
+        with _hot_env():
+            maintain_hot_players("na")
+        hp = HotPlayer.objects.get(player__player_id=8601)
+        self.assertEqual(hp.source, HotPlayer.SOURCE_ENGAGEMENT)
+        self.assertGreaterEqual(hp.hot_score, 3_000_000.0)
 
 
 class KillSwitchTests(TestCase):

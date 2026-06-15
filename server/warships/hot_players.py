@@ -87,6 +87,21 @@ def _capture_delay() -> float:
     return float(os.getenv("HOT_PLAYERS_CAPTURE_DELAY", "0.5"))
 
 
+def _backfill_active_days() -> int:
+    return int(os.getenv("HOT_BACKFILL_ACTIVE_DAYS", "7"))
+
+
+# Every backfill seed's hot_score is held below this ceiling so it always ranks
+# under the engagement floor (a surviving engagement member has active_days >=
+# HOT_EVICT_MIN_ACTIVE_DAYS=2 → score >= 2_000_000). Seeds are still ordered
+# among themselves by battle volume (most active trimmed last).
+_BACKFILL_SCORE_CEIL = 900_000
+
+
+def _backfill_score(pvp_battles) -> float:
+    return float(min(int(pvp_battles or 0), _BACKFILL_SCORE_CEIL))
+
+
 def _enabled() -> bool:
     return os.getenv("HOT_PLAYERS_ENABLED", "1") == "1"
 
@@ -241,21 +256,36 @@ def maintain_hot_players(realm: str, *, dry_run: bool = False,
                 )
         else:
             # Existing member — refresh audit fields + score (hysteresis means
-            # we do NOT re-apply the promote threshold here).
+            # we do NOT re-apply the promote threshold here). A backfill seed that
+            # now meets the promote rule GRADUATES to 'engagement' so it lives by
+            # the normal rules (and becomes inactivity-evictable) from here on.
             updated += 1
+            graduate = (
+                hp.source == HotPlayer.SOURCE_BACKFILL
+                and active_days >= promote_min
+                and recency is not None and recency <= promote_recency
+                and sessions >= promote_sessions
+            )
             if not dry_run:
+                if graduate:
+                    hp.source = HotPlayer.SOURCE_ENGAGEMENT
                 hp.last_engaged_at = eng['last_engaged_at'] or hp.last_engaged_at
                 hp.active_days_window = active_days
                 hp.unique_sessions_window = sessions
                 hp.views_deduped_window = views
                 hp.hot_score = score
-                hp.save(update_fields=[
-                    'last_engaged_at', 'active_days_window',
-                    'unique_sessions_window', 'views_deduped_window', 'hot_score'])
+                fields = ['last_engaged_at', 'active_days_window',
+                          'unique_sessions_window', 'views_deduped_window', 'hot_score']
+                if graduate:
+                    fields.append('source')
+                hp.save(update_fields=fields)
 
     # --- Evictions (hysteresis) -------------------------------------------
     for player_id, hp in existing.items():
-        if hp.source == HotPlayer.SOURCE_PINNED:
+        # Pinned overrides and backfill seeds are exempt from inactivity-eviction
+        # (backfill rows have no engagement by design — they leave only via the
+        # cap-trim below when engaged players need their slots).
+        if hp.source in (HotPlayer.SOURCE_PINNED, HotPlayer.SOURCE_BACKFILL):
             continue
         eng = engagement.get(player_id)
         active_days = eng['active_days'] if eng else 0
@@ -274,18 +304,23 @@ def maintain_hot_players(realm: str, *, dry_run: bool = False,
                 hp.delete()
 
     # --- Cap / trim by hot_score ------------------------------------------
+    # Cap applies to engagement + backfill combined (pinned exempt). Trimming the
+    # lowest-score tail over the cap removes backfill seeds FIRST (their score is
+    # always below the engagement floor), then the weakest engagement members only
+    # if engagement alone exceeds the cap.
     trimmed = 0
     if not dry_run:
-        engagement_members = HotPlayer.objects.filter(
-            realm=realm, source=HotPlayer.SOURCE_ENGAGEMENT).order_by('-hot_score')
-        member_count = engagement_members.count()
+        trimmable = HotPlayer.objects.filter(
+            realm=realm,
+            source__in=[HotPlayer.SOURCE_ENGAGEMENT, HotPlayer.SOURCE_BACKFILL],
+        ).order_by('-hot_score')
+        member_count = trimmable.count()
         if member_count > cap:
-            trim_ids = list(
-                engagement_members.values_list('id', flat=True)[cap:])
+            trim_ids = list(trimmable.values_list('id', flat=True)[cap:])
             trimmed = len(trim_ids)
             logger.info(
-                "hot_players[%s] TRIM %s engagement members over cap=%s "
-                "(qualified=%s)",
+                "hot_players[%s] TRIM %s members over cap=%s (qualified=%s, "
+                "backfill-first)",
                 realm, trimmed, cap, member_count)
             HotPlayer.objects.filter(id__in=trim_ids).delete()
     else:
@@ -307,19 +342,23 @@ def maintain_hot_players(realm: str, *, dry_run: bool = False,
             return (recency is None or recency > evict_inactivity
                     or active_days < evict_min_active)
 
+        # Pinned and backfill are exempt from inactivity-eviction.
+        protected = (HotPlayer.SOURCE_PINNED, HotPlayer.SOURCE_BACKFILL)
         new_promotions = {
             pid for pid, e in engagement.items()
             if pid not in existing and _would_promote(pid, e)
         }
         survivors = {
             pid for pid, hp in existing.items()
-            if hp.source == HotPlayer.SOURCE_PINNED or not _would_evict(pid)
+            if hp.source in protected or not _would_evict(pid)
         }
-        engagement_survivors = {
+        # Cap counts engagement + backfill survivors (pinned exempt); the trim
+        # falls on backfill first.
+        capped_survivors = {
             pid for pid in survivors
-            if existing[pid].source == HotPlayer.SOURCE_ENGAGEMENT
+            if existing[pid].source != HotPlayer.SOURCE_PINNED
         }
-        projected = len(new_promotions | engagement_survivors)
+        projected = len(new_promotions | capped_survivors)
         trimmed = max(0, projected - cap)
 
     result = {
@@ -451,7 +490,9 @@ def refresh_hot_player_freshness(realm: str, *, logger=logger) -> dict:
     advance it). Hidden accounts are gated up front (``update_battle_data``
     returns no status dict, so we cannot read "hidden" off its result the way
     ``capture_hot_players`` does) — counted and skipped, no wasted WG call, no
-    retry storm. No-op when ``HOT_PLAYERS_ENABLED`` is off.
+    retry storm. No-op when ``HOT_PLAYERS_ENABLED`` is off. ``backfill`` seeds are
+    excluded — the visit-freshness guarantee doesn't apply to volume-selected
+    seeds, and refreshing a full cap of them 120x/day would never catch the window.
     """
     if not _enabled():
         return {'realm': realm, 'status': 'disabled', 'refreshed': 0,
@@ -465,9 +506,17 @@ def refresh_hot_player_freshness(realm: str, *, logger=logger) -> dict:
     delay = _capture_delay()
     cap = _hot_players_max()
 
+    # Backfill seeds are EXCLUDED here: this Tier-3 sweep exists to keep
+    # durably-VISITED players inside the 15-min visit-freshness window for
+    # sub-second profile loads. Seeds are selected by battle volume, not visitor
+    # interest, so they don't need it — and at a full cap a 120x/day forced WG
+    # refresh of them would never catch the 12-min window (a permanent treadmill
+    # that would starve the observation floor). They still get the once/day
+    # capture (observation + snapshot), which is the actual enrichment goal.
     members = list(
         HotPlayer.objects
         .filter(realm=realm)
+        .exclude(source=HotPlayer.SOURCE_BACKFILL)
         .select_related('player')
         .order_by('-hot_score')[:cap]
     )
@@ -509,4 +558,60 @@ def refresh_hot_player_freshness(realm: str, *, logger=logger) -> dict:
         'errors': errors,
     }
     logger.info("hot_players[%s] freshness: %s", realm, result)
+    return result
+
+
+def backfill_hot_players(realm: str, *, dry_run: bool = False,
+                         logger=logger) -> dict:
+    """One-time seed: fill a realm's hot queue to the cap with most-active players.
+
+    Selects active (``last_battle_date`` within ``HOT_BACKFILL_ACTIVE_DAYS``=7),
+    non-hidden players ordered by ``pvp_battles`` desc (recent + high volume),
+    skips anyone already in the queue, and inserts ``source='backfill'`` rows up to
+    the remaining ``HOT_PLAYERS_MAX`` headroom. Each seed scores BELOW the
+    engagement floor (``_backfill_score``) so it ranks under every engaged member
+    and is the first cap-trimmed; ``maintain_hot_players`` protects it from
+    inactivity-eviction and graduates it to 'engagement' if it later earns
+    view-recurrence. Idempotent — re-running tops the queue back up to the cap
+    without duplicating. No WG calls (pure DB); the nightly capture/freshness
+    sweeps do the actual observation/snapshot/freshness work.
+    """
+    cap = _hot_players_max()
+    active_days = _backfill_active_days()
+    today = timezone.now().date()
+    cutoff = today - timedelta(days=active_days)
+
+    current_ids = set(
+        HotPlayer.objects.filter(realm=realm)
+        .values_list('player__player_id', flat=True)
+    )
+    slots = cap - len(current_ids)
+    if slots <= 0:
+        result = {'realm': realm, 'cap': cap, 'current': len(current_ids),
+                  'slots': 0, 'added': 0, 'dry_run': dry_run}
+        logger.info("hot_players[%s] backfill (full): %s", realm, result)
+        return result
+
+    candidates = list(
+        Player.objects
+        .filter(realm=realm, is_hidden=False, last_battle_date__gte=cutoff)
+        .exclude(player_id__in=current_ids)
+        .order_by('-pvp_battles', '-last_battle_date')
+        .values_list('id', 'pvp_battles')[:slots]
+    )
+    added = len(candidates)
+    if not dry_run and candidates:
+        rows = [
+            HotPlayer(player_id=pk, realm=realm,
+                      source=HotPlayer.SOURCE_BACKFILL,
+                      hot_score=_backfill_score(pvp))
+            for pk, pvp in candidates
+        ]
+        # ignore_conflicts guards the unique(player, realm) constraint against a
+        # concurrent promotion racing the seed.
+        HotPlayer.objects.bulk_create(rows, ignore_conflicts=True, batch_size=500)
+
+    result = {'realm': realm, 'cap': cap, 'current': len(current_ids),
+              'slots': slots, 'added': added, 'dry_run': dry_run}
+    logger.info("hot_players[%s] backfill: %s", realm, result)
     return result

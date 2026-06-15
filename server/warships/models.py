@@ -384,9 +384,16 @@ class HotPlayer(models.Model):
     """
     SOURCE_ENGAGEMENT = 'engagement'
     SOURCE_PINNED = 'pinned'
+    # One-time seed of most-active players (backfill_hot_players). Captured like
+    # any member and protected from inactivity-eviction, but ranked BELOW every
+    # engagement member (hot_score < the engagement floor) so it is the first
+    # trimmed when engaged players need the slots. Graduates to 'engagement' if it
+    # later earns real view-recurrence.
+    SOURCE_BACKFILL = 'backfill'
     SOURCE_CHOICES = [
         (SOURCE_ENGAGEMENT, 'Engagement'),
         (SOURCE_PINNED, 'Pinned'),
+        (SOURCE_BACKFILL, 'Backfill'),
     ]
 
     player = models.ForeignKey(
