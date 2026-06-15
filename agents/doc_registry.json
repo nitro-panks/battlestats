@@ -2136,6 +2136,34 @@
                 "cpu-saturation-root-caused-and-resolved"
             ]
         },
+        "agents/runbooks/runbook-db-growth-analysis-2026-06-15.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db growth analysis",
+                "disk runway",
+                "60gb wall",
+                "snapshot engine growth",
+                "storage autoscale disabled",
+                "battleobservation regrowth",
+                "no-retention tables"
+            ],
+            "tags": [
+                "postgres",
+                "disk",
+                "storage",
+                "runway",
+                "digitalocean",
+                "retention",
+                "snapshot"
+            ],
+            "archive_on": [
+                "db-retention-policy-shipped-and-runway-extended"
+            ]
+        },
         "agents/runbooks/runbook-db-size-optimization-2026-05-26.md": {
             "kind": "runbook",
             "status": "active",
