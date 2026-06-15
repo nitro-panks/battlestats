@@ -102,8 +102,8 @@ flowchart LR
   from the other three concurrent queues — drawn separately.
 - Most of the **scheduled ingest path is gated by `ENABLE_CRAWLER_SCHEDULES`**
   (default off): the daily clan crawl, crawl watchdog, observation floor, hot-player
-  capture/freshness, and incremental player/ranked refresh. Enrichment, snapshots,
-  hot-player maintenance, and the cache warmers run regardless.
+  capture, and incremental player/ranked refresh. Enrichment, snapshots, hot-player
+  maintenance, and the cache warmers run regardless.
 - Dotted edges are control/coordination (dispatch, self-chaining, locks); solid edges
   are data movement.
 
@@ -111,9 +111,11 @@ flowchart LR
 
 A loop that lets **durable visitor interest** — not the player's own activity or skill —
 qualify a player for guaranteed daily capture: **engagement → hot queue → daily capture →
-eviction when interest fades**. Three separate tasks share one `HotPlayer` table — a
-DB-only *brain* that decides membership, and two WG-consuming *hands* that act on it.
-(Runbook: `agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md`.)
+eviction when interest fades**. Two tasks share one `HotPlayer` table — a DB-only *brain*
+that decides membership and one WG-consuming *hand* (capture) that acts on it; a one-time
+`backfill_hot_players` seed can fill the queue to the cap with the most-active players.
+(Runbook: `agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md`. The per-12-min
+"Tier 3" freshness sweep was **retired 2026-06-15**.)
 
 ```mermaid
 flowchart LR
@@ -121,7 +123,7 @@ flowchart LR
     WG["Wargaming API (upstream)"]
 
     VED[("EntityVisitDaily / EntityVisitEvent (bot-filtered, 30-min dedupe)")]
-    HP[("HotPlayer table (durable membership + audit, capped HOT_PLAYERS_MAX=500)")]
+    HP[("HotPlayer table (durable membership + audit, capped HOT_PLAYERS_MAX=800)")]
     PG[("PostgreSQL: BattleObservation, Snapshot, Player")]
 
     subgraph BRAIN["maintain_hot_players_task (daily, DB-only, the brain)"]
@@ -130,19 +132,15 @@ flowchart LR
     subgraph HANDS["capture_hot_player_observations_task (daily, background queue)"]
         H["skip-if-fresh vs floor (HOT_OBSERVE_FLOOR_HOURS)<br/>record_observation_and_diff + update_snapshot_data"]
     end
-    subgraph FRESH["refresh_hot_player_freshness_task (12-min striped, background queue)"]
-        F["skip-if-fresh vs battles_updated_at<br/>update_battle_data(force_refresh=True)"]
-    end
+    SEED["backfill_hot_players (one-time / idempotent):<br/>seed most-active as source='backfill', below engagement"]
 
     FE -->|"trackEntityDetailView -> /api/analytics/entity-view"| VED
     VED -->|"engagement signal (recurrence, not summed views)"| B
     B -->|"promote / evict / re-score"| HP
+    SEED -->|"fill to cap"| HP
     HP -->|"hot set"| H
-    HP -->|"hot set"| F
     H <-->|"fetch (only hot players not active-7d / stale)"| WG
-    F <-->|"force refresh"| WG
     H -->|"BattleObservation + gap-free daily Snapshot"| PG
-    F -->|"advance Player.battles_updated_at (sub-second page)"| PG
 
     classDef ext fill:#e8f0fe,stroke:#4285f4,color:#202124;
     classDef store fill:#fff3e0,stroke:#f9a825,color:#202124;
@@ -159,22 +157,24 @@ flowchart LR
   **recurrence** (`active_days` over a 14-day window), *not* summed views, so one viral spike
   ≠ a returning fan. Promote ≥3 active-days / evict <2 gives hysteresis so members don't flap.
   A single devoted visitor qualifies (no visitor-breadth gate).
-- **Hands — capture** (`capture_hot_player_observations_task`, daily, `background`) — sweeps
+- **Hand — capture** (`capture_hot_player_observations_task`, daily, `background`) — sweeps
   the hot set and **skip-if-fresh** against the observation floor, so hot players who are
   *also* active-7d cost nothing; marginal work is only the hot players who dropped out of the
   active set. Writes a `BattleObservation` (re-engagement caught the moment they return) and a
-  gap-free daily `Snapshot` (day-over-day series stays continuous on no-play days).
-- **Hands — freshness** (`refresh_hot_player_freshness_task`, 12-min striped, `background`,
-  Tier 3 of the latency runbook) — bumps `Player.battles_updated_at` so a visit to a hot player
-  arrives `x-player-refresh-pending: false` and resolves sub-second with no live WG call.
+  gap-free daily `Snapshot` (day-over-day series stays continuous on no-play days). This is the
+  queue's sole guarantee: **≥1 battle-history pull per hot player per 24h** (floor-or-capture).
+- **Seed — backfill** (`backfill_hot_players`, one-time / idempotent, DB-only) — fills each
+  realm to `HOT_PLAYERS_MAX` with the most-active players (`source='backfill'`, ranked below
+  engagement, captured but trimmed first), so they get the 24h guarantee before attracting
+  visitor interest.
 
 ### Gating
 
-- Kill switch **`HOT_PLAYERS_ENABLED`** (default on) no-ops all three tasks.
-- **Brain is always-enabled** (DB-only, like enrichment-pool maintenance); the two **hands are
-  WG consumers gated by `ENABLE_CRAWLER_SCHEDULES`** (default off), same as the observation
-  floor. All three **coexist with the clan crawl** (no deferral) — guaranteed coverage is the
-  whole point.
+- Kill switch **`HOT_PLAYERS_ENABLED`** (default on) no-ops both tasks.
+- **Brain is always-enabled** (DB-only, like enrichment-pool maintenance); the **capture hand
+  is a WG consumer gated by `ENABLE_CRAWLER_SCHEDULES`** (default off), same as the observation
+  floor. Both **coexist with the clan crawl** (no deferral) — guaranteed coverage is the whole
+  point.
 
 ## Drill-down: visitor loads a stale player page (lazy-refresh round trip)
 

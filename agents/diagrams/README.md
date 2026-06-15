@@ -9,7 +9,7 @@ material, not runbooks — operational procedures live in `agents/runbooks/`.
 |---|---|---|
 | [queue-data-flow.md](queue-data-flow.md) | Celery/queue topology | The whole request/refresh/warm pipeline: triggers → RabbitMQ → the four queue workers → WG API → Postgres → warmers → Redis → DRF read path |
 | [player-enrichment-data-flow.md](player-enrichment-data-flow.md) | Player enrichment | One-time-per-player backfill: eligibility filter, write-once status state machine, self-chaining batch task, and the daily DB-only pool-maintenance / reclassify-drift loop |
-| [hot-player-queue-data-flow.md](hot-player-queue-data-flow.md) | Hot-player engagement queue | How durable visitor interest (not the player's own activity) promotes a player into the `HotPlayer` set, and the three sweeps (brain / capture / freshness) that guarantee daily capture + sub-second visit resolution |
+| [hot-player-queue-data-flow.md](hot-player-queue-data-flow.md) | Hot-player engagement queue | How durable visitor interest (not the player's own activity) promotes a player into the `HotPlayer` set, the two sweeps (brain / capture) plus the one-time backfill seed that guarantee a ≥24h battle-history pull per hot player (the Tier-3 freshness sweep was retired 2026-06-15) |
 | [observation-floor-data-flow.md](observation-floor-data-flow.md) | Battle-observation floor + daily-active sweep | The rolling freshness guarantee, bulk-batched capture path, the change-gates, and the gap-free daily `Snapshot` engine — plus per-realm striping and shared-pool contention |
 
 All diagrams are validated with the mermaid CLI (`mmdc`) before commit. If you edit one,

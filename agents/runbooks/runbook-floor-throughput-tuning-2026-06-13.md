@@ -35,14 +35,20 @@ fully post-restart is **`2026-06-15_0430Z`**.
 
 ## The `background` pool has more tenants than enrichment + floor
 
-The hot-players runbook makes the co-tenancy concrete — the family is **three** sweeps, not one:
+> **UPDATE 2026-06-15:** the Tier-3 `refresh_hot_player_freshness_task` was **deleted** (not just
+> gated) — the hot family is now **two** sweeps (brain + capture). The write-heavy 12-min freshness
+> tenant described below is gone, which permanently removes that `background`-pool draw.
+
+The hot-players runbook makes the co-tenancy concrete — the family was **three** sweeps at the time
+of writing (now two):
 
 - `maintain_hot_players_task` — DB-only daily (the "brain"), no WG, negligible.
 - `capture_hot_player_observations_task` — per-realm striped, **skip-if-fresh against the floor**, so
   mostly non-redundant with the floor, but still occupies a `background` slot for the hot-but-inactive
   set and writes a `Snapshot` per hot player/day.
-- `refresh_hot_player_freshness_task` (Tier 3) — now once/24h per hot player (gate above), but still
-  scheduled every ~12 min striped and **write-heavy** (`update_battle_data(force_refresh=True)`).
+- ~~`refresh_hot_player_freshness_task` (Tier 3)~~ — **RETIRED 2026-06-15.** Was once/24h per hot
+  player (gate above) but scheduled every ~12 min striped and write-heavy
+  (`update_battle_data(force_refresh=True)`); deleted entirely.
 
 Plus `snapshot_active_players_task` (the daily-snapshot engine), also `background` and write-heavy.
 Live evidence 2026-06-13: a continuous run of `Updated snapshot data for player …` at ~3.5s/player

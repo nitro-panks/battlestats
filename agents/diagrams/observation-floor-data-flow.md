@@ -82,10 +82,12 @@ flowchart LR
     class PG,OBS,EVT,SNAPROW store;
 ```
 
-**The freshness clock the floor resets** is the latest `BattleObservation.observed_at`
+**The freshness clock the floor selects on** is the latest `BattleObservation.observed_at`
 (the `_candidates` `stale_hours` test) — *not* `battles_updated_at`. `battles_updated_at`
-tracks the displayed `battles_json` chart refresh, which is owned by incremental refresh
-and the hot-player Tier-3 freshness sweep, never the floor.
+tracks the displayed `battles_json` chart refresh; since 2026-06-14 the floor **also**
+advances it for active players from the same `ships/stats` response
+(`FLOOR_REFRESH_BATTLES_JSON_ENABLED`), alongside incremental refresh and lazy-refresh-on-view.
+(The hot-player Tier-3 freshness sweep that previously advanced it was retired 2026-06-15.)
 
 ### The reuse seam
 
@@ -232,8 +234,6 @@ sequenceDiagram
         BEAT->>POOL: enrich_player_data_task (self-chaining backlog drain)
     and
         BEAT->>POOL: capture_hot_player_observations_task (skip-if-fresh vs floor)
-    and
-        BEAT->>POOL: refresh_hot_player_freshness_task (write-heavy, gated 1/24h)
     end
 
     Note over POOL,PG: BINDING CONSTRAINT = the shared background pool + 2-vCPU DB<br/>write contention, NOT WG rate (limiter idles at ~2-3 of 10 req/s)<br/>and NOT FLOOR_LIMIT (7500->12000 bump did not move obs_poll).
@@ -249,9 +249,9 @@ The floor is **not** capacity-bound by its own knobs (per the 06-13 throughput r
   did not move `obs_poll`.
 
 The real throttle is the **shared `background` pool (`-c 3`)**, contended by enrichment
-self-chaining, the daily-snapshot engine, and the three hot-player sweeps — plus **write
-contention on the 2-vCPU managed Postgres**, since several of those tenants
-(`update_snapshot_data`, `update_battle_data(force_refresh=True)`, the floor) are
+self-chaining, the daily-snapshot engine, and the two hot-player sweeps (brain + capture)
+— plus **write contention on the 2-vCPU managed Postgres**, since several of those tenants
+(`update_snapshot_data`, the floor's own `battles_json` refresh, hot-player capture) are
 concurrent writers. Phase 1 of the tuning runbook bounded a wasteful enrichment
 self-chain spin (146 passes / 90 min doing zero useful work, stealing a worker slot);
 freeing the pool is the live coverage lever, not raising the floor limit.

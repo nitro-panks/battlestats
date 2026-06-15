@@ -65,5 +65,7 @@ added calls).
 
 - `runbook-player-refresh-latency-2026-06-10.md` — the staleness problem this targets.
 - `runbook-battle-history-rollout-2026-04-28.md` — the observation/floor pipeline.
-- `runbook-hot-players-engagement-queue-2026-06-10.md` — the ≤500/realm freshness sweep
-  this complements (the floor now covers the whole active-7d set for free).
+- `runbook-hot-players-engagement-queue-2026-06-10.md` — the hot-player freshness sweep this
+  complemented for the active-7d set. (That sweep was retired 2026-06-15 — this floor
+  `battles_json` refresh now covers the whole active-7d set for free, which was part of the
+  rationale for removing it.)

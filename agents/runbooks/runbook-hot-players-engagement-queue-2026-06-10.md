@@ -237,7 +237,7 @@ the snapshot/enrichment-maintenance families (still respects `HOT_PLAYERS_ENABLE
 | `HOT_PROMOTE_MIN_SESSIONS` | `2` | Min `unique_sessions` over `W` (anti single-reload). |
 | `HOT_EVICT_INACTIVITY_DAYS` | `14` | No views for N days → evict. |
 | `HOT_EVICT_MIN_ACTIVE_DAYS` | `2` | Active-days below this (in `W`) → evict (hysteresis). |
-| `HOT_PLAYERS_MAX` | `500` | Per-realm cap on hot-set size (bounds WG cost). |
+| `HOT_PLAYERS_MAX` | `500` (prod `800` since 2026-06-15) | Per-realm cap on hot-set size (bounds WG cost). |
 | `HOT_OBSERVE_FLOOR_HOURS` | `20` | Skip-if-fresh: skip observation if one is newer than this. |
 | `HOT_PLAYERS_CAPTURE_DELAY` | `0.5` | WG pacing between hot captures (crawl-coexist value). |
 

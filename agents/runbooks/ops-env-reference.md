@@ -53,7 +53,6 @@ Hot-players engagement capture queue (`warships/hot_players.py`; kill switch `HO
 - `HOT_PLAYERS_WINDOW_DAYS` (14) — trailing engagement window `W` for the active-days `GROUP BY`.
 - `HOT_PROMOTE_MIN_ACTIVE_DAYS` (3) / `HOT_PROMOTE_MAX_RECENCY_DAYS` (3) / `HOT_PROMOTE_MIN_SESSIONS` (2) — promotion rule: distinct deduped-view days in `W`, recency, and an anti-single-reload session floor. **No visitor-breadth gate** — a single devoted fan (`unique_visitors=1`, many active-days) must qualify.
 - `HOT_EVICT_INACTIVITY_DAYS` (14) / `HOT_EVICT_MIN_ACTIVE_DAYS` (2) — eviction with hysteresis (promote ≥3, evict <2 → no flapping).
-- `HOT_PLAYERS_MAX` (500) — per-realm cap, trimmed by `hot_score` (bounds marginal WG cost — only hot players *not* covered by the active-7d floor cost anything).
 - `HOT_OBSERVE_FLOOR_HOURS` (20) — skip-if-fresh: skip the observation when a `BattleObservation` is newer (the floor already got them).
 - `HOT_PLAYERS_CAPTURE_DELAY` (0.5) — WG pacing between hot captures (crawl-coexist value).
 - `HOT_PLAYERS_MAX` (code default 500, **prod=800 since 2026-06-15**) — per-realm cap on the hot set (capture sweep + cap-trim ranking). Sized so a full nightly capture pass fits a ~1h worst-case budget.
