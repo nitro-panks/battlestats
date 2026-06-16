@@ -5,6 +5,8 @@ _Context: Battle-history data is continuously ingested into `BattleEvent`, and a
 _Status: Code landed on branch `feat/battle-history-rollup-durability` (sweeper trailing window, reconciliation, BRIN migration 0063, ops check script, tests — full backend release gate + new suites green on SQLite and Postgres). Production rollout (Step-0 gate verification + deploy + flag flips) is the remaining operator step — gates default off so the deploy is inert until flipped. This runbook is the durable spec._
 _Supersedes/extends: `runbook-battle-history-rollout-2026-04-28.md` (Phase 3 nightly sweeper), cross-links `runbook-battle-history-phase7-data-widening-2026-04-29.md` and `runbook-battle-observation-floor-2026-05-02.md`._
 
+> **UPDATE 2026-06-15 — period tier REMOVED.** The weekly/monthly/yearly rollup tables and all period-writer/reader code were dropped (DB-growth followup, step 2 KILL; reclaims ~1.18 GB). The nightly sweeper now rebuilds the **daily layer only** and its result carries no `period` key; the `BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED` gate is gone. **The yearly-YTD 540s-timeout follow-up below is moot/closed by removal** — there is no period rebuild to time out. The daily self-heal, reconciliation, and BRIN index all remain live. Sections referencing the period tier are retained below for history only.
+
 ## Purpose
 
 The nightly sweeper `roll_up_player_daily_ship_stats_task` (`server/warships/tasks.py:1738`) rebuilds `PlayerDailyShipStats` for **yesterday only**. That is correct *when the sweeper runs* — but it has no self-healing window, no reconciliation, and no observability. If the sweeper is disabled, the `background` worker is down, or Beat misfires for a stretch, the skipped days become **permanent holes**: the sweeper never revisits them and nothing reveals the gap. Recovery today is entirely manual.
@@ -177,7 +179,7 @@ Extend the existing suites (`RebuildDailyShipStatsTests` 1481, `RankedRollupWrit
 | Knob | Default | Effect |
 |---|---|---|
 | `BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS` | `3` | Trailing-window size the nightly sweeper rebuilds (self-heal). `1` = legacy yesterday-only. |
-| `BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED` | `0` | Gates the nightly weekly/monthly/yearly rebuild (the 540s long pole). OFF by default; flip only when period tiers are reactivated (with the DB-side rewrite). |
+| `BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED` | _removed_ | ~~Gates the nightly weekly/monthly/yearly rebuild.~~ **Removed 2026-06-15** — the period tier was dropped (KILL); the gate no longer exists. |
 | `BATTLE_HISTORY_RECONCILE_ENABLED` | `0` | Gates the alert-only reconciliation task; independent of `BATTLE_HISTORY_ROLLUP_ENABLED`. |
 | `BATTLE_HISTORY_RECONCILE_AUDIT_DAYS` | `30` | Audit window the reconciliation task scans. |
 

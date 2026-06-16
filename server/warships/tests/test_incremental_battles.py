@@ -33,8 +33,6 @@ from warships.incremental_battles import (
     compute_battle_events,
     compute_ranked_battle_events,
     rebuild_daily_ship_stats_for_date,
-    rebuild_period_rollups_for_date,
-    rebuild_period_rollups_for_window,
     reconcile_daily_rollup_coverage,
     record_observation_and_diff,
     record_observation_from_payloads,
@@ -45,9 +43,6 @@ from warships.models import (
     BattleObservation,
     Player,
     PlayerDailyShipStats,
-    PlayerMonthlyShipStats,
-    PlayerWeeklyShipStats,
-    PlayerYearlyShipStats,
     Ship,
 )
 
@@ -1704,38 +1699,6 @@ class RankedRollupWriteTests(TestCase):
         self.assertEqual(ranked_row.battles, 3)
         self.assertEqual(ranked_row.damage, 99_000)
 
-    def test_period_rollup_query_ignores_ranked_rows(self):
-        # Pre-seed daily rows: one random + one ranked on the same date,
-        # then rebuild the period tier and confirm only the random row
-        # contributed to the weekly aggregate.
-        PlayerDailyShipStats.objects.create(
-            player=self.player, date=self.target_date,
-            ship_id=42, ship_name="Yamato",
-            mode=PlayerDailyShipStats.MODE_RANDOM,
-            battles=5, wins=3, losses=2, frags=7,
-            damage=200_000, xp=4_000, survived_battles=3,
-        )
-        PlayerDailyShipStats.objects.create(
-            player=self.player, date=self.target_date,
-            ship_id=42, ship_name="Yamato",
-            mode=PlayerDailyShipStats.MODE_RANKED, season_id=21,
-            battles=10, wins=8, losses=2, frags=14,
-            damage=400_000, xp=9_000, survived_battles=8,
-        )
-
-        rebuild_period_rollups_for_date(self.target_date)
-
-        weekly = PlayerWeeklyShipStats.objects.filter(
-            player=self.player, ship_id=42,
-        )
-        self.assertEqual(weekly.count(), 1)
-        wk = weekly.get()
-        self.assertEqual(wk.battles, 5)
-        self.assertEqual(wk.wins, 3)
-        self.assertEqual(wk.frags, 7)
-        self.assertEqual(wk.damage, 200_000)
-        self.assertEqual(wk.survived_battles, 3)
-
 
 class RebuildManagementCommandTests(TestCase):
     """`python manage.py rebuild_player_daily_ship_stats --since ...`."""
@@ -3006,90 +2969,10 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertNotIn("X-Ranked-Observation-Pending", r)
 
 
-class PeriodRollupsTests(TestCase):
-    """Phase 6: weekly / monthly / yearly rollups derived from
-    PlayerDailyShipStats."""
-
-    def setUp(self):
-        self.player = Player.objects.create(
-            name="period_test", player_id=55555, realm="na",
-            pvp_battles=200,
-        )
-        Ship.objects.create(
-            ship_id=42, name="Yamato", nation="japan", ship_type="Battleship",
-            tier=10,
-        )
-        # Two daily rows on the same week / month / year so we can verify
-        # the rollup sums them.
-        self.day_a = date(2026, 4, 27)  # Monday
-        self.day_b = date(2026, 4, 30)  # Thursday — same ISO week, same month/year
-        PlayerDailyShipStats.objects.create(
-            player=self.player, date=self.day_a, ship_id=42,
-            ship_name="Yamato",
-            battles=3, wins=2, losses=1, frags=5,
-            damage=180_000, xp=4_500, planes_killed=0,
-            survived_battles=1,
-            first_event_at=datetime(2026, 4, 27, 12, 0),
-            last_event_at=datetime(2026, 4, 27, 18, 0),
-        )
-        PlayerDailyShipStats.objects.create(
-            player=self.player, date=self.day_b, ship_id=42,
-            ship_name="Yamato",
-            battles=4, wins=3, losses=1, frags=7,
-            damage=240_000, xp=6_200, planes_killed=0,
-            survived_battles=2,
-            first_event_at=datetime(2026, 4, 30, 9, 0),
-            last_event_at=datetime(2026, 4, 30, 21, 0),
-        )
-
-    def test_rebuild_period_rollups_writes_weekly_monthly_yearly(self):
-        result = rebuild_period_rollups_for_date(self.day_b)
-        self.assertEqual(result["status"], "completed")
-
-        # Week: Monday 2026-04-27 sums both days.
-        weekly = PlayerWeeklyShipStats.objects.get(
-            player=self.player, period_start=date(2026, 4, 27), ship_id=42,
-        )
-        self.assertEqual(weekly.battles, 7)
-        self.assertEqual(weekly.wins, 5)
-        self.assertEqual(weekly.frags, 12)
-        self.assertEqual(weekly.damage, 420_000)
-
-        # Month: 2026-04-01 sums both days.
-        monthly = PlayerMonthlyShipStats.objects.get(
-            player=self.player, period_start=date(2026, 4, 1), ship_id=42,
-        )
-        self.assertEqual(monthly.battles, 7)
-        self.assertEqual(monthly.damage, 420_000)
-
-        # Year: 2026-01-01 sums both days.
-        yearly = PlayerYearlyShipStats.objects.get(
-            player=self.player, period_start=date(2026, 1, 1), ship_id=42,
-        )
-        self.assertEqual(yearly.battles, 7)
-        self.assertEqual(yearly.damage, 420_000)
-
-    def test_rebuild_is_idempotent_at_period_grain(self):
-        rebuild_period_rollups_for_date(self.day_b)
-        rebuild_period_rollups_for_date(self.day_b)
-        # Still exactly one row per (player, period_start, ship_id).
-        self.assertEqual(PlayerWeeklyShipStats.objects.count(), 1)
-        self.assertEqual(PlayerMonthlyShipStats.objects.count(), 1)
-        self.assertEqual(PlayerYearlyShipStats.objects.count(), 1)
-
-    def test_rebuild_does_not_touch_other_periods(self):
-        # Insert a canary in a different week.
-        canary = PlayerWeeklyShipStats.objects.create(
-            player=self.player, period_start=date(2026, 1, 5), ship_id=99,
-            ship_name="Other ship", battles=42,
-        )
-        rebuild_period_rollups_for_date(self.day_b)
-        canary.refresh_from_db()
-        self.assertEqual(canary.battles, 42)
-
-
 class BattleHistoryPeriodApiTests(TestCase):
-    """Phase 6: API exposes period=daily|weekly|monthly|yearly."""
+    """Daily-only battle-history API. The weekly/monthly/yearly rollup
+    tables were dropped 2026-06-15; `?period=weekly|monthly|yearly` now
+    falls back to daily instead of reading a period tier."""
 
     def setUp(self):
         from django.core.cache import cache
@@ -3103,20 +2986,9 @@ class BattleHistoryPeriodApiTests(TestCase):
             tier=10,
         )
 
-    def test_weekly_period_reads_weekly_table(self):
-        # Two weeks ago + this week, both with data.
-        today = django_timezone.now().date()
-        from warships.incremental_battles import _week_start
-        this_week = _week_start(today)
-        two_weeks_ago = this_week - timedelta(days=14)
-        PlayerWeeklyShipStats.objects.create(
-            player=self.player, period_start=this_week, ship_id=42,
-            ship_name="Yamato", battles=10, wins=6,
-        )
-        PlayerWeeklyShipStats.objects.create(
-            player=self.player, period_start=two_weeks_ago, ship_id=42,
-            ship_name="Yamato", battles=4, wins=2,
-        )
+    def test_legacy_period_param_falls_back_to_daily(self):
+        # An unsupported `?period=weekly` no longer reads a period tier; it
+        # falls through BATTLE_HISTORY_PERIODS to daily without erroring.
         with mock.patch.dict(
             "os.environ",
             {"BATTLE_HISTORY_API_ENABLED": "1"},
@@ -3126,32 +2998,7 @@ class BattleHistoryPeriodApiTests(TestCase):
                 "/api/player/period_api/battle-history/?period=weekly&windows=4",
             )
         self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual(body["period"], "weekly")
-        self.assertEqual(body["windows"], 4)
-        # Both weekly rows fall inside a 4-week window.
-        self.assertEqual(body["totals"]["battles"], 14)
-        # by_day still carries one entry per period bucket.
-        self.assertEqual(len(body["by_day"]), 2)
-
-    def test_monthly_period_reads_monthly_table(self):
-        today = django_timezone.now().date()
-        this_month = today.replace(day=1)
-        PlayerMonthlyShipStats.objects.create(
-            player=self.player, period_start=this_month, ship_id=42,
-            ship_name="Yamato", battles=20, wins=11,
-        )
-        with mock.patch.dict(
-            "os.environ",
-            {"BATTLE_HISTORY_API_ENABLED": "1"},
-            clear=False,
-        ):
-            response = self.client.get(
-                "/api/player/period_api/battle-history/?period=monthly&windows=3",
-            )
-        body = response.json()
-        self.assertEqual(body["period"], "monthly")
-        self.assertEqual(body["totals"]["battles"], 20)
+        self.assertEqual(response.json()["period"], "daily")
 
     def test_invalid_period_falls_back_to_daily(self):
         with mock.patch.dict(
@@ -3734,53 +3581,16 @@ class RollupDurabilityTests(TestCase):
         self.assertEqual(result["status"], "skipped")
         self.assertEqual(result["reason"], "rollup-disabled")
 
-    def test_period_window_dedups_distinct_anchors(self):
-        from warships.incremental_battles import _week_start
-        # A Monday and the prior Sunday fall in two distinct ISO weeks.
-        monday = self.today - timedelta(days=self.today.weekday())
-        sunday = monday - timedelta(days=1)
-        for d in (sunday, monday):
-            PlayerDailyShipStats.objects.create(
-                player=self.player, date=d, ship_id=42, ship_name="Yamato",
-                battles=1, wins=1, frags=1, mode="random",
-            )
-        # Duplicate `monday` in the input asserts the dedup collapses it.
-        result = rebuild_period_rollups_for_window([sunday, monday, monday])
-        self.assertEqual(result["weeks_rebuilt"], 2)
-        self.assertTrue(PlayerWeeklyShipStats.objects.filter(
-            period_start=_week_start(sunday)).exists())
-        self.assertTrue(PlayerWeeklyShipStats.objects.filter(
-            period_start=monday).exists())
-
-    def test_period_rebuild_skipped_by_default(self):
-        # Period tiers are dormant + UI-hidden and are the long pole that blew
-        # the 540s soft limit, so the nightly sweeper skips them unless
-        # BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED=1. The daily layer still builds.
+    def test_sweeper_builds_daily_only(self):
+        # The weekly/monthly/yearly rollup tier was removed 2026-06-15; the
+        # nightly sweeper now rebuilds the daily layer only and the result
+        # carries no "period" key.
         self._event_on(self.yesterday, battles=2)
         result = self._run_sweeper(lookback=3)
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["period"]["status"], "skipped")
-        self.assertEqual(result["period"]["reason"], "period-rollup-disabled")
+        self.assertNotIn("period", result)
         self.assertTrue(
             PlayerDailyShipStats.objects.filter(date=self.yesterday).exists())
-        self.assertEqual(PlayerWeeklyShipStats.objects.count(), 0)
-        self.assertEqual(PlayerMonthlyShipStats.objects.count(), 0)
-        self.assertEqual(PlayerYearlyShipStats.objects.count(), 0)
-
-    def test_period_rebuild_runs_when_flag_enabled(self):
-        from warships.incremental_battles import _week_start
-        from warships.tasks import roll_up_player_daily_ship_stats_task
-        self._event_on(self.yesterday, battles=2)
-        with mock.patch.dict("os.environ", {
-            "BATTLE_HISTORY_ROLLUP_ENABLED": "1",
-            "BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS": "3",
-            "BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED": "1",
-        }):
-            result = roll_up_player_daily_ship_stats_task.apply().get()
-        self.assertEqual(result["status"], "completed")
-        self.assertGreaterEqual(result["period"]["weeks_rebuilt"], 1)
-        self.assertTrue(PlayerWeeklyShipStats.objects.filter(
-            period_start=_week_start(self.yesterday)).exists())
 
 
 class RollupReconciliationTests(TestCase):

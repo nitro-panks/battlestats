@@ -591,13 +591,12 @@ BATTLE_HISTORY_DEFAULT_DAYS = 7
 BATTLE_HISTORY_MAX_DAYS = 365
 BATTLE_HISTORY_CACHE_TTL = 5 * 60  # 5 minutes
 
-# Phase 6: period switcher. Each period maps to a backing model + a default
-# window count + a cap.
+# Period switcher. Only the daily tier exists — the weekly/monthly/yearly
+# rollup tables were dropped 2026-06-15 (DB-growth followup, step 2 KILL).
+# A legacy `?period=weekly|monthly|yearly` request falls back to daily
+# (not in this map → defaulted to "daily" in `battle_history`).
 BATTLE_HISTORY_PERIODS = {
     "daily": {"default_windows": 7, "max_windows": 365},
-    "weekly": {"default_windows": 12, "max_windows": 52},
-    "monthly": {"default_windows": 12, "max_windows": 36},
-    "yearly": {"default_windows": 5, "max_windows": 20},
 }
 
 # Rolling-window picker (`?window=...`) — the user-facing API the frontend
@@ -661,21 +660,6 @@ def _period_window_start(today, period: str, windows: int):
 
     if period == "daily":
         return today - _td(days=windows - 1)
-    if period == "weekly":
-        # Window starts at the Monday of `windows-1` weeks ago.
-        from warships.incremental_battles import _week_start
-        current_week_start = _week_start(today)
-        return current_week_start - _td(days=7 * (windows - 1))
-    if period == "monthly":
-        # Walk back N-1 months, snap to first-of-month.
-        m = today.month - (windows - 1)
-        y = today.year
-        while m <= 0:
-            m += 12
-            y -= 1
-        return today.replace(year=y, month=m, day=1)
-    if period == "yearly":
-        return today.replace(year=today.year - (windows - 1), month=1, day=1)
     raise ValueError(f"Unknown period: {period}")
 
 
@@ -697,21 +681,6 @@ def _has_recent_24h_activity(player) -> bool:
 # noise rather than signal. Rows below the threshold get treated like
 # zero-prior rows and surface a NEW badge instead.
 _MIN_PRIOR_BATTLES_FOR_DELTA = 3
-
-
-def _battle_history_period_table(period: str):
-    from warships.models import (
-        PlayerDailyShipStats,
-        PlayerMonthlyShipStats,
-        PlayerWeeklyShipStats,
-        PlayerYearlyShipStats,
-    )
-    return {
-        "daily": PlayerDailyShipStats,
-        "weekly": PlayerWeeklyShipStats,
-        "monthly": PlayerMonthlyShipStats,
-        "yearly": PlayerYearlyShipStats,
-    }[period]
 
 
 def _current_ranked_season_context(player) -> dict:
@@ -1078,36 +1047,32 @@ def _build_battle_history_payload_24h(player, mode: str) -> dict:
 
 def _build_battle_history_payload(player, period: str, windows: int,
                                   mode: str = BATTLE_HISTORY_DEFAULT_MODE) -> dict:
-    """Read the period rollup table for `player` over the last `windows`
-    periods and return the totals / by_ship / by_day shape.
+    """Read the daily ship-stats layer for `player` over the last `windows`
+    days and return the totals / by_ship / by_day shape. `period` is always
+    "daily" since the weekly/monthly/yearly rollup tables were dropped
+    2026-06-15.
 
     Each by_ship entry is enriched with `lifetime_*` (the player's career
     aggregate from Player.battles_json for that ship) and `delta_*` (how
-    much the period dragged the lifetime number — positive means the
-    period outperformed prior history, negative means it dragged it
+    much the window dragged the lifetime number — positive means the
+    window outperformed prior history, negative means it dragged it
     down). Returns null on those fields when the lifetime aggregate is
     not available.
-
-    The `by_day` field name is preserved for back-compat with the
-    frontend even when period != daily; entries' `date` carries the
-    period_start (Monday for weekly, first-of-month for monthly, Jan 1
-    for yearly).
     """
     today = timezone.now().date()
     since = _period_window_start(today, period, windows)
-    table = _battle_history_period_table(period)
 
-    if period == "daily":
-        # Daily layer keeps `date`; period rollups use `period_start`.
-        date_field = "date"
-    else:
-        date_field = "period_start"
+    # The weekly/monthly/yearly rollup tables were dropped 2026-06-15; the
+    # daily layer is the only backing table now. `period` is always "daily"
+    # here (`_period_window_start` raises otherwise).
+    from warships.models import PlayerDailyShipStats as _PDSS
+    table = _PDSS
+    date_field = "date"
 
     # Availability probe: which modes have ANY rollup rows for this player
     # (across all dates, not just the current window). Drives the
     # frontend's mode-pill visibility — we hide pills for modes the
     # player has never had data in.
-    from warships.models import PlayerDailyShipStats as _PDSS
     available_modes = list(
         _PDSS.objects.filter(player=player)
         .values_list("mode", flat=True).distinct().order_by("mode")
@@ -1125,14 +1090,10 @@ def _build_battle_history_payload(player, period: str, windows: int,
     qs = table.objects.filter(
         player=player, **{f"{date_field}__gte": since}
     )
-    # Phase 4 ranked rollout: only the daily layer carries the `mode`
-    # column. Period tables (weekly/monthly/yearly) are randoms-only by
-    # the Phase 3 period-rollup guard, so a `ranked` request against a
-    # period tier returns empty by construction.
-    if period == "daily" and mode in ("random", "ranked"):
+    # Phase 4 ranked rollout: the daily layer carries the `mode` column, so
+    # filter random/ranked requests to that mode (combined keeps both).
+    if mode in ("random", "ranked"):
         qs = qs.filter(mode=mode)
-    elif period != "daily" and mode == "ranked":
-        qs = qs.none()
     if ranked_ctx is not None and ranked_ctx["season_id"] is not None:
         qs = qs.filter(season_id=ranked_ctx["season_id"])
     rows = list(qs.order_by(date_field, "ship_id"))
@@ -1182,9 +1143,8 @@ def _build_battle_history_payload(player, period: str, windows: int,
         totals["xp"] += row.xp
         totals["planes_killed"] += row.planes_killed
         totals["survived_battles"] += row.survived_battles
-        # Period rollup tables (weekly/monthly/yearly) are randoms-only and
-        # have no `mode` column — fall back to MODE_RANDOM for those rows.
-        if getattr(row, 'mode', _PDSS.MODE_RANDOM) == _PDSS.MODE_RANDOM:
+        # Track the randoms-only subset for the lifetime-delta baseline.
+        if row.mode == _PDSS.MODE_RANDOM:
             totals_random_battles += row.battles
             totals_random_wins += row.wins
 
@@ -1210,14 +1170,12 @@ def _build_battle_history_payload(player, period: str, windows: int,
         ship_entry["xp"] += row.xp
         ship_entry["planes_killed"] += row.planes_killed
         ship_entry["survived_battles"] += row.survived_battles
-        # Period rollup tables (weekly/monthly/yearly) are randoms-only and
-        # have no `mode` column — fall back to MODE_RANDOM for those rows.
-        if getattr(row, 'mode', _PDSS.MODE_RANDOM) == _PDSS.MODE_RANDOM:
+        # Track the randoms-only subset for the lifetime-delta baseline.
+        if row.mode == _PDSS.MODE_RANDOM:
             ship_entry["_random_battles"] += row.battles
             ship_entry["_random_wins"] += row.wins
 
-        bucket_date = row.date if period == "daily" else row.period_start
-        day_iso = bucket_date.isoformat()
+        day_iso = row.date.isoformat()
         day_entry = by_day_acc.setdefault(day_iso, {
             "date": day_iso,
             "battles": 0, "wins": 0, "damage": 0, "frags": 0,

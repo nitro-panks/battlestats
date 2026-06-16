@@ -130,7 +130,7 @@ Per-realm periodic tasks are striped via `REALM_INTERVAL_OFFSETS = {'na': 0, 'eu
 
 Player, Clan, Ship, Snapshot (daily summaries), PlayerExplorerSummary, EntityVisitEvent/EntityVisitDaily, PlayerAchievementStat, DeletedAccount (GDPR blocklist), LandingPlayerBestSnapshot (landing Best fallback), MvPlayerDistributionStats, ShipTopPlayerSnapshot (ephemeral current standing per ship — recomputed nightly over a trailing window, pruned; backs `/ship/<id>` + profile badges), StreamerSubmission, HotPlayer (engagement capture queue — durable visitor-interest membership + audit, feeding the daily hot-player observation/snapshot sweep).
 
-Battle-history pipeline: BattleObservation (raw `ships/stats/` JSON), BattleEvent (per-event deltas + Phase 7 widening columns), PlayerDailyShipStats (per-day per-ship aggregate), PlayerWeekly/Monthly/YearlyShipStats (period rollup tiers, populated only when the period writer is reactivated).
+Battle-history pipeline: BattleObservation (raw `ships/stats/` JSON), BattleEvent (per-event deltas + Phase 7 widening columns), PlayerDailyShipStats (per-day per-ship aggregate). The weekly/monthly/yearly period rollup tiers were dropped 2026-06-15 (DB-growth followup, step 2 KILL); all UI windows (day/week/month/year) resolve to the daily layer.
 
 ## Team Doctrine (Pre-commit Requirements)
 

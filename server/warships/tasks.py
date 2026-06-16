@@ -2124,10 +2124,9 @@ def roll_up_player_daily_ship_stats_task(self, target_date_iso=None):
     A single explicit `target_date_iso` collapses the window to that one day
     (manual single-date repair), matching the legacy behaviour.
 
-    The weekly/monthly/yearly period rebuild is gated OFF by default
-    (BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED) — those tiers are dormant + UI-hidden
-    and the yearly-YTD aggregate is the long pole that blew the 540s soft time
-    limit, while the daily layer (consumed + reconciled) completes in seconds.
+    The weekly/monthly/yearly period rollup tier was removed 2026-06-15
+    (DB-growth followup, step 2 KILL): the tables were dropped and the
+    period writer deleted, so this task rebuilds the daily layer only.
 
     See agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md.
     """
@@ -2136,10 +2135,7 @@ def roll_up_player_daily_ship_stats_task(self, target_date_iso=None):
 
     from datetime import datetime, timedelta, timezone as dt_timezone
 
-    from warships.incremental_battles import (
-        rebuild_daily_ship_stats_for_date,
-        rebuild_period_rollups_for_window,
-    )
+    from warships.incremental_battles import rebuild_daily_ship_stats_for_date
 
     if target_date_iso:
         last_date = datetime.strptime(target_date_iso, "%Y-%m-%d").date()
@@ -2151,7 +2147,7 @@ def roll_up_player_daily_ship_stats_task(self, target_date_iso=None):
         lookback = max(
             1, int(os.getenv("BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS", "3")))
 
-    # Oldest -> yesterday, so logs and period dedup read in calendar order.
+    # Oldest -> yesterday, so logs read in calendar order.
     dates = [
         last_date - timedelta(days=offset)
         for offset in range(lookback - 1, -1, -1)
@@ -2171,34 +2167,13 @@ def roll_up_player_daily_ship_stats_task(self, target_date_iso=None):
             "Starting roll_up_player_daily_ship_stats_task window=%s..%s (%d days)",
             dates[0], dates[-1], len(dates))
         daily_results = [rebuild_daily_ship_stats_for_date(d) for d in dates]
-        # Cascade into the weekly / monthly / yearly tiers covering the window,
-        # each distinct period rebuilt once. Gated OFF by default: those tiers
-        # are dormant + UI-hidden and the yearly-YTD aggregate is the long pole
-        # that exceeded the 540s soft time limit, whereas the daily layer above
-        # finishes in seconds. Flip BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED=1 to
-        # refresh the coarser tiers (pair with the deferred DB-side rewrite when
-        # they are reactivated for the UI).
-        if os.getenv("BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED", "0") == "1":
-            period_result = rebuild_period_rollups_for_window(dates)
-            logger.info(
-                "Finished roll_up_player_daily_ship_stats_task: days_rebuilt=%d "
-                "periods_rebuilt=w%d/m%d/y%d",
-                len(daily_results),
-                period_result["weeks_rebuilt"],
-                period_result["months_rebuilt"],
-                period_result["years_rebuilt"])
-        else:
-            period_result = {"status": "skipped",
-                             "reason": "period-rollup-disabled"}
-            logger.info(
-                "Finished roll_up_player_daily_ship_stats_task: days_rebuilt=%d "
-                "period_rebuild=skipped (BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED!=1)",
-                len(daily_results))
+        logger.info(
+            "Finished roll_up_player_daily_ship_stats_task: days_rebuilt=%d",
+            len(daily_results))
         return {
             "status": "completed",
             "days_rebuilt": len(daily_results),
             "daily": daily_results,
-            "period": period_result,
         }
     finally:
         cache.delete(lock_key)
