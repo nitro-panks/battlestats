@@ -3824,12 +3824,39 @@ def _get_clan_battle_seasons_metadata() -> dict:
     return result
 
 
-def _get_player_clan_battle_season_stats(account_id: int, realm: str = DEFAULT_REALM) -> list:
-    """Return cached clan battle season stats for a player."""
-    cache_key = realm_cache_key(realm, f'clan_battles:player:{account_id}')
+def _player_clan_battle_season_cache_key(account_id: int, realm: str = DEFAULT_REALM) -> str:
+    return realm_cache_key(realm, f'clan_battles:player:{account_id}')
+
+
+def has_player_clan_battle_season_cache(account_id: int, realm: str = DEFAULT_REALM) -> bool:
+    """True when a per-player CB-seasons cache entry exists (warm, incl. empty).
+
+    Lets the view distinguish a genuinely-empty (already-fetched) player from
+    a cold-miss player, so it only signals pending / re-queues for the latter.
+    """
+    return cache.get(_player_clan_battle_season_cache_key(int(account_id), realm=realm)) is not None
+
+
+def _get_player_clan_battle_season_stats(
+    account_id: int,
+    realm: str = DEFAULT_REALM,
+    allow_remote_fetch: bool = True,
+) -> list | None:
+    """Return cached clan battle season stats for a player.
+
+    Returns None (not []) when the cache is cold and `allow_remote_fetch` is
+    False — the signal that no WG fetch was performed, so callers must skip
+    persistence (which would clobber the stored summary with zeros and fire a
+    landing-cache invalidation). The request path passes False (cache-or-empty
+    + queue async); the background task passes True (does the WG fetch).
+    """
+    cache_key = _player_clan_battle_season_cache_key(int(account_id), realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
+
+    if not allow_remote_fetch:
+        return None
 
     raw = _fetch_clan_battle_season_stats(account_id, realm=realm)
     if raw is None:
@@ -3884,19 +3911,34 @@ def _persist_player_clan_battle_summary(
         invalidate_landing_player_caches()
 
 
-def fetch_player_clan_battle_seasons(account_id: int, realm: str = DEFAULT_REALM) -> list:
-    """Return a single player's clan battle seasons enriched with season metadata."""
+def fetch_player_clan_battle_seasons(
+    account_id: int,
+    realm: str = DEFAULT_REALM,
+    allow_remote_fetch: bool = True,
+) -> list:
+    """Return a single player's clan battle seasons enriched with season metadata.
+
+    `allow_remote_fetch=False` (request path) serves cache-or-empty without a
+    synchronous WG call: on a cold cache it returns [] and skips persistence,
+    leaving the caller to queue an async refresh + set the pending header.
+    """
     if not account_id:
         return []
 
-    season_meta = _get_clan_battle_seasons_metadata()
     seasons = _get_player_clan_battle_season_stats(
-        int(account_id), realm=realm)
+        int(account_id), realm=realm, allow_remote_fetch=allow_remote_fetch)
+    if seasons is None:
+        # Cold cache on the request path: no WG fetch performed. Return empty
+        # without persisting (zero-clobber + landing-cache invalidation storm)
+        # and without fetching season metadata (another cold WG call).
+        return []
+
     _persist_player_clan_battle_summary(
         int(account_id),
         summarize_clan_battle_seasons(seasons),
         realm=realm,
     )
+    season_meta = _get_clan_battle_seasons_metadata()
     result = []
 
     for season in seasons:

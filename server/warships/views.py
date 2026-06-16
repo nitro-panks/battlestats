@@ -1904,8 +1904,19 @@ def player_clan_battle_seasons(request, player_id: str) -> Response:
     player = Player.objects.select_related(
         'clan').filter(player_id=player_id, realm=realm).first()
 
+    from warships.data import has_player_clan_battle_season_cache
+    from warships.tasks import (
+        queue_clan_battle_data_refresh,
+        is_clan_battle_data_refresh_pending,
+    )
+
     try:
-        data = fetch_player_clan_battle_seasons(player_id)
+        # Request path: never block on the WG API. Serve cache-or-empty and
+        # queue an async refresh on a cold miss; the background task does the
+        # real fetch (allow_remote_fetch defaults True there).
+        had_cached = has_player_clan_battle_season_cache(player_id, realm=realm)
+        data = fetch_player_clan_battle_seasons(
+            player_id, realm=realm, allow_remote_fetch=False)
     except Exception:
         logger.exception(
             'Player clan battle seasons endpoint failed for player_id=%s player_name=%s clan_id=%s clan_name=%s',
@@ -1916,7 +1927,16 @@ def player_clan_battle_seasons(request, player_id: str) -> Response:
         )
         raise
 
-    return _validated_list_response(data, PlayerClanBattleSeasonSerializer)
+    response = _validated_list_response(data, PlayerClanBattleSeasonSerializer)
+    # Only signal pending / re-queue for a cold-miss player — not one that has
+    # already been fetched and is genuinely empty (avoids a perpetual poll +
+    # re-fetch loop for zero-CB players). Mirrors the clan-level endpoint.
+    if not data and (
+        not had_cached or is_clan_battle_data_refresh_pending(player_id, realm=realm)
+    ):
+        queue_clan_battle_data_refresh(player_id, realm=realm)
+        response["X-Clan-Battle-Seasons-Pending"] = "true"
+    return response
 
 
 @api_view(["GET"])

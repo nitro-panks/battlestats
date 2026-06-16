@@ -46,33 +46,63 @@ const formatTierRange = (minTier: number | null, maxTier: number | null): string
 };
 
 
+// Cold-cache poll: the endpoint now serves [] + X-Clan-Battle-Seasons-Pending
+// while a background WG fetch is in flight (instead of blocking the request).
+// Re-poll until the fetch lands. Sized to outlast a worst-case cold fetch
+// (Celery pickup + ~5s WG + background rate-limiter budget) while staying
+// bounded — mirrors RankedSeasons.tsx.
+const CB_SEASONS_PENDING_RETRY_DELAY_MS = 1500;
+const CB_SEASONS_PENDING_RETRY_LIMIT = 12;
+
 const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playerId, onSummaryChange }) => {
     const { realm } = useRealm();
     const [seasons, setSeasons] = useState<PlayerClanBattleSeason[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [isPendingRefresh, setIsPendingRefresh] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let pendingAttempts = 0;
 
         const fetchSeasons = async () => {
-            setLoading(true);
-            setError('');
+            timeoutId = null;
+            if (pendingAttempts === 0) {
+                setLoading(true);
+                setError('');
+                setIsPendingRefresh(false);
+            }
             try {
-                const { data } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
+                const { data, headers } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
                     label: `Player clan battle seasons ${playerId}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    cacheKey: `clan-cb-seasons:${playerId}:${pendingAttempts}`,
+                    responseHeaders: ['X-Clan-Battle-Seasons-Pending'],
                 });
-                if (!cancelled) {
-                    setSeasons(Array.isArray(data) ? data : []);
+                if (cancelled) {
+                    return;
+                }
+
+                setSeasons(Array.isArray(data) ? data : []);
+
+                const pending = headers['X-Clan-Battle-Seasons-Pending'] === 'true';
+                setIsPendingRefresh(pending);
+                if (pending && pendingAttempts < CB_SEASONS_PENDING_RETRY_LIMIT) {
+                    pendingAttempts += 1;
+                    timeoutId = setTimeout(() => {
+                        void fetchSeasons();
+                    }, CB_SEASONS_PENDING_RETRY_DELAY_MS);
+                    return;
                 }
             } catch (fetchError) {
                 console.error('Error fetching player clan battle seasons:', fetchError);
                 if (!cancelled) {
                     setError('Unable to load clan battle seasons right now.');
+                    setIsPendingRefresh(false);
                 }
             } finally {
-                if (!cancelled) {
+                if (!cancelled && !timeoutId) {
                     setLoading(false);
                 }
             }
@@ -81,6 +111,9 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
         void fetchSeasons();
         return () => {
             cancelled = true;
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
         };
     }, [playerId, realm]);
 
@@ -99,12 +132,14 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
             return;
         }
 
-        if (loading || error) {
+        if (loading || error || isPendingRefresh) {
+            // Don't emit a zero summary while a cold fetch is still pending —
+            // it would briefly clear the clan-battle header badge.
             return;
         }
 
         onSummaryChange(summary);
-    }, [error, loading, onSummaryChange, summary]);
+    }, [error, isPendingRefresh, loading, onSummaryChange, summary]);
 
     return (
         <div>

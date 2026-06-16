@@ -98,7 +98,10 @@ const formatSeasonStartDate = (startDate: string | null): string => {
 
 const RANKED_FETCH_RETRY_DELAY_MS = 350;
 const RANKED_PENDING_RETRY_DELAY_MS = 1500;
-const RANKED_PENDING_RETRY_LIMIT = 5;
+// Outlast a worst-case cold async refresh (Celery pickup + ~5s WG + background
+// rate-limiter budget). The previous ceiling (5 x 1500ms = 7.5s) abandoned
+// before a cold fetch could land, leaving a stuck-empty chart.
+const RANKED_PENDING_RETRY_LIMIT = 12;
 
 const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
     window.setTimeout(resolve, timeoutMs);

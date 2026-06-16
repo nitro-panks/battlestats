@@ -4491,7 +4491,8 @@ class ApiThrottleTests(TestCase):
         payload = response.json()
         self.assertEqual(len(payload), 1)
         self.assertEqual(payload[0]["season_label"], "S33")
-        mock_fetch.assert_called_once_with("777")
+        mock_fetch.assert_called_once_with(
+            "777", realm='na', allow_remote_fetch=False)
 
     @patch("warships.views.logger.exception")
     @patch("warships.views.fetch_player_clan_battle_seasons", side_effect=RuntimeError("boom"))
@@ -4510,6 +4511,45 @@ class ApiThrottleTests(TestCase):
             clan.clan_id,
             'LogClan',
         )
+
+    @patch("warships.tasks.queue_clan_battle_data_refresh")
+    @patch("warships.data._fetch_clan_battle_season_stats")
+    def test_player_clan_battle_seasons_cold_cache_queues_async_and_flags_pending(
+        self, mock_remote_fetch, mock_queue_refresh,
+    ):
+        # Cold cache must serve [] without a synchronous WG call, queue an
+        # async refresh, and flag X-Clan-Battle-Seasons-Pending so the FE polls.
+        Player.objects.create(name="ColdCBPlayer", player_id=9001, realm='na')
+
+        response = self.client.get(
+            "/api/fetch/player_clan_battle_seasons/9001/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+        self.assertEqual(response["X-Clan-Battle-Seasons-Pending"], "true")
+        # No synchronous WG fetch on the request path.
+        mock_remote_fetch.assert_not_called()
+        mock_queue_refresh.assert_called_once_with("9001", realm='na')
+
+    @patch("warships.tasks.queue_clan_battle_data_refresh")
+    @patch("warships.data._fetch_clan_battle_season_stats")
+    def test_player_clan_battle_seasons_genuinely_empty_does_not_flag_pending(
+        self, mock_remote_fetch, mock_queue_refresh,
+    ):
+        # A player already fetched and genuinely empty (warm cache holding [])
+        # must not poll/re-queue forever.
+        from warships.data import _player_clan_battle_season_cache_key
+        cache.set(_player_clan_battle_season_cache_key(9002, realm='na'), [])
+        Player.objects.create(name="EmptyCBPlayer", player_id=9002, realm='na')
+
+        response = self.client.get(
+            "/api/fetch/player_clan_battle_seasons/9002/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+        self.assertNotIn("X-Clan-Battle-Seasons-Pending", response)
+        mock_remote_fetch.assert_not_called()
+        mock_queue_refresh.assert_not_called()
 
     @patch("warships.views.fetch_ranked_data")
     def test_ranked_data_returns_serialized_rows_and_refresh_header(self, mock_fetch_ranked_data):

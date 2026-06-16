@@ -484,6 +484,10 @@ def queue_ranked_data_refresh(player_id: object, realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "enqueue-failed"}
 
 
+def is_clan_battle_data_refresh_pending(player_id: object, realm: str = DEFAULT_REALM) -> bool:
+    return bool(cache.get(_clan_battle_refresh_dispatch_key(player_id, realm=realm)))
+
+
 def queue_clan_battle_data_refresh(player_id: object, realm: str = DEFAULT_REALM):
     if cache.get(_clan_battle_refresh_failure_key(realm=realm)):
         return {"status": "skipped", "reason": "broker-unavailable"}
