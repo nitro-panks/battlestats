@@ -136,6 +136,8 @@ psql "$DB_URL" -c 'VACUUM (ANALYZE) warships_player;'
 
 Metrics note: NULLing `battles_json` on currently-`enriched` inactive rows makes the next `reclassify_enrichment_status` re-bucket them as `skipped_inactive` — a correct-but-cosmetic shift in the enrichment health read, reversible on refetch. **Cadence is an open question** (manual one-shot vs a low-frequency Beat task) — left to the operator; no Beat schedule was added.
 
+> **Execution log — 2026-06-15 (first run on the durable command):** dry-run reported **45,763** candidates (`inactive_days=180`, cutoff `2025-12-18`), **PENDING-in-band intersection = 0** (enrichment-overlap risk empirically nil), ~333 MB approx reclaim. Live paced run NULLed **45,763** payloads in **10 batches** (`--batch-size 5000 --sleep 0.5 --statement-timeout 180`) — exact match to the dry-run. Followed by `VACUUM (ANALYZE) warships_player` (**279 s**, online/autocommit) → freed TOAST returned to **reusable** space (not OS; `VACUUM FULL` remains the separate windowed Tier-2 op). Ran on the droplet via `manage.py` so the guard read prod's real `ENRICH_MAX_INACTIVE_DAYS=7`. Command landed on `main` (merge `cb632e2`, release `20260615221647`).
+
 ## Related
 
 - `runbook-db-size-optimization-2026-05-26.md` — parent; tiered reclaim plan + execution log (24 → 19 GB). This runbook is the 2026-06-15 re-measurement after regrowth to 23 GB.
