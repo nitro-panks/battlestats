@@ -332,6 +332,36 @@
                 "bulk-capture-shipped-and-coverage-stable"
             ]
         },
+        "agents/runbooks/runbook-battle-history-data-operationalization-2026-06-16.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "spec",
+            "owner": "platform",
+            "aliases": [
+                "battle history operationalization",
+                "untapped combat fields",
+                "career combat profile",
+                "ships_stats_json fields",
+                "what we capture vs surface"
+            ],
+            "tags": [
+                "battle history",
+                "battleobservation",
+                "battleevent",
+                "playerdailyshipstats",
+                "ships_stats_json",
+                "combat fields",
+                "accuracy",
+                "playstyle",
+                "db composition",
+                "runway",
+                "spec"
+            ],
+            "archive_on": [
+                "combat-profile-features-shipped-or-direction-abandoned"
+            ]
+        },
         "agents/runbooks/runbook-api-surface.md": {
             "kind": "runbook",
             "status": "active",
