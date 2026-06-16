@@ -799,11 +799,14 @@ class LandingWarmupViewTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.data.update_ranked_data")
-    def test_ranked_endpoint_sync_hydration_uses_request_realm(
+    @patch("warships.tasks.queue_ranked_data_refresh")
+    def test_ranked_endpoint_cold_cache_queues_async_refresh_with_request_realm(
         self,
-        mock_update_ranked_data,
+        mock_queue_ranked_data_refresh,
     ):
+        # Cold cache must NOT block on the WG API: serve [] now and queue an
+        # async refresh keyed to the request realm (so the per-realm pending
+        # dispatch key + X-Ranked-Pending header are correct for EU/ASIA).
         player = Player.objects.create(
             name="ColdRankedEU",
             player_id=7002,
@@ -817,7 +820,7 @@ class LandingWarmupViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
-        mock_update_ranked_data.assert_called_once_with(
+        mock_queue_ranked_data_refresh.assert_called_once_with(
             str(player.player_id),
             realm='eu',
         )

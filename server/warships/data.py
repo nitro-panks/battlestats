@@ -4183,10 +4183,14 @@ def fetch_ranked_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
             logging.info(f'Ranked data cache fresh for {player.name}')
         return player.ranked_json
 
-    logging.info(f'Fetching ranked data for {player.name}')
-    update_ranked_data(player_id, realm=realm)
-    player.refresh_from_db()
-    return player.ranked_json or []
+    # Cold cache: never block the request thread on the WG API. Queue an
+    # async refresh (dedup-guarded) and return empty now; the view sets
+    # X-Ranked-Pending and RankedSeasons.tsx polls until the fetch lands.
+    from warships.tasks import queue_ranked_data_refresh
+
+    logging.info(f'Queueing cold ranked data refresh for {player.name}')
+    queue_ranked_data_refresh(player_id, realm=realm)
+    return []
 
 
 def ranked_last_season_from_json(ranked_json) -> Optional[int]:
