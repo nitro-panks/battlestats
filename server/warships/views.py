@@ -1700,6 +1700,18 @@ def clan_members(request, clan_id: str) -> Response:
         response['X-Clan-Members-Cache'] = 'hit'
         return response
 
+    # Roster idle freshness: on a cold cache, queue a bulk account/info refresh
+    # of the whole roster so each member's last_battle_date (and the derived
+    # "X days idle") is corrected without a per-member profile view. Gated to
+    # ~once/hour/clan; serves stored values now and signals pending so the FE
+    # poll re-fetches and shows the corrected idle.
+    from warships.tasks import (
+        queue_clan_member_idle_refresh,
+        is_clan_member_idle_refresh_pending,
+    )
+    queue_clan_member_idle_refresh(clan_id, realm=realm)
+    idle_pending = is_clan_member_idle_refresh_pending(clan_id, realm=realm)
+
     # Simplified ordering: hidden players cluster at the bottom; otherwise
     # most-recently-played first with name as the deterministic tiebreak.
     # Drives the "recent activity" feel of the clan-members list and lets
@@ -1773,12 +1785,14 @@ def clan_members(request, clan_id: str) -> Response:
 
     # B1: Only cache when hydration is complete — pending responses must not
     # be cached or the client poll loop will see stale "pending" flags forever.
-    has_pending = pending_player_ids or pending_efficiency_player_ids
+    has_pending = pending_player_ids or pending_efficiency_player_ids or idle_pending
     if not has_pending:
         cache.set(cache_key, serialized_data, CLAN_MEMBERS_CACHE_TTL)
 
     response = Response(serialized_data)
     response['X-Clan-Members-Cache'] = 'miss' if not has_pending else 'skip-pending'
+    if idle_pending:
+        response['X-Clan-Idle-Pending'] = 'true'
     response['X-Ranked-Hydration-Queued'] = str(
         len(hydration_state['queued_player_ids']))
     response['X-Ranked-Hydration-Deferred'] = str(

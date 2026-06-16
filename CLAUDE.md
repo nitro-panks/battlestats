@@ -101,10 +101,11 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 
 ### Caching strategy
 
-- **Cache-first / lazy-refresh** — serve cached payload, queue background refresh; **durable fallback** keeps last-published copy past TTL; `X-Clan-Plot-Pending: true` signals pending warm-up
+- **Cache-first / lazy-refresh** — serve cached payload, queue background refresh; **durable fallback** keeps last-published copy past TTL; `X-Clan-Plot-Pending: true` signals pending warm-up. **No `/api/fetch/*` endpoint blocks the request thread on the WG API**: cold `ranked_data` and `player_clan_battle_seasons` serve `[]` + queue async + set `X-Ranked-Pending` / `X-Clan-Battle-Seasons-Pending` (the per-player CB request path passes `allow_remote_fetch=False`, skipping the WG fetch + persist so it never zero-clobbers the stored summary)
 - **Warmers** (Beat periodic tasks): hot-entity (30 min), bulk entity loader (12h, uses `score_best_clans()`), landing page + distributions/correlations (55 min), startup warmer via Gunicorn `when_ready`
 - **Search suggestions** — three-tier: client `Map` → Redis (10 min TTL) → Postgres `pg_trgm` GIN index; raw `ILIKE` (Django `icontains` bypasses trigram indexes). Player and clan endpoints; clan matches name OR tag
 - **Clan battle seasons** — request-driven, Redis-only TTL; configured clans pre-warmed (`CLAN_BATTLE_WARM_CLAN_IDS`). Per-player CB stats persist to Postgres on `PlayerExplorerSummary`
+- **Clan roster idle freshness** — `clan_members` derives "X days idle" live from `last_battle_date`, which only the per-player refresh wrote (so cold long-tail members stayed frozen until viewed). On a cache miss the endpoint queues `refresh_clan_member_idle_task` (one bulk `account/info` for the whole roster, ~once/hour/clan), serves stored values now, and signals `X-Clan-Idle-Pending` so the `useClanMembers` poll picks up the corrected idle. The task writes **only** `last_battle_date` + `days_since_last_battle` (never `last_fetch`, which would suppress the real per-player full refresh)
 - **Ship standings** — precomputed nightly: `snapshot_ship_top_players_task` rewrites `ShipTopPlayerSnapshot` each night over a trailing `SHIP_LEADERBOARD_WINDOW_DAYS` (14) window (badges worn while held; no durable ledger); `ship_leaderboard` serves via thin Redis read-cache
 - Redis in production (3 GB cap, `allkeys-lru`); LocMemCache in tests
 

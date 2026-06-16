@@ -118,7 +118,11 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
                     (member) => member.ranked_hydration_pending
                         || member.efficiency_hydration_pending,
                 );
+                // Roster idle bulk-refresh in flight: re-poll so corrected
+                // "X days idle" (fresh last_battle_date) replaces stale values.
+                const idlePending = response.headers.get('X-Clan-Idle-Pending') === 'true';
                 const shouldPollAgain = hasPendingHydration
+                    || idlePending
                     || hydrationState.rankedPending > 0
                     || hydrationState.efficiencyPending > 0;
                 if (shouldPollAgain && attempt < HYDRATION_POLL_LIMIT) {

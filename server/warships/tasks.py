@@ -77,6 +77,13 @@ HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_DISPATCH_TIMEOUT = 5 * 60
 CLAN_BATTLE_SUMMARY_REFRESH_DISPATCH_TIMEOUT = 10 * 60
+# Clan roster idle refresh: bulk account/info pass that corrects every member's
+# last_battle_date so "X days idle" is right without a per-member profile view.
+# In-flight key dedups concurrent dispatch + signals FE pending; the cooldown
+# gates the whole roster to ~once/hour.
+CLAN_MEMBER_IDLE_REFRESH_DISPATCH_TIMEOUT = 5 * 60
+CLAN_MEMBER_IDLE_REFRESH_COOLDOWN = 60 * 60
+CLAN_MEMBER_IDLE_BULK_BATCH_SIZE = 100
 BULK_CACHE_LOAD_LOCK_TIMEOUT = 30 * 60
 RECENTLY_VIEWED_WARM_LOCK_TIMEOUT = 15 * 60
 CLAN_TIER_DIST_WARM_LOCK_TIMEOUT = 3 * 60 * 60  # 3h — iterates all clans
@@ -251,6 +258,14 @@ def _clan_battle_summary_refresh_dispatch_key(clan_id: object, realm: str = DEFA
     return f"warships:tasks:update_clan_battle_summary_dispatch:{realm}:{clan_id}"
 
 
+def _clan_member_idle_refresh_dispatch_key(clan_id: object, realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:refresh_clan_member_idle_dispatch:{realm}:{clan_id}"
+
+
+def _clan_member_idle_refresh_cooldown_key(clan_id: object, realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:refresh_clan_member_idle_dispatch:{realm}:{clan_id}:cooldown"
+
+
 # ---------------------------------------------------------------------------
 # Queue / dispatch helpers
 # ---------------------------------------------------------------------------
@@ -279,6 +294,41 @@ def queue_clan_battle_summary_refresh(clan_id: object, realm: str = DEFAULT_REAL
 
 def is_clan_battle_summary_refresh_pending(clan_id: object, realm: str = DEFAULT_REALM) -> bool:
     return bool(cache.get(_clan_battle_summary_refresh_dispatch_key(clan_id, realm=realm)))
+
+
+def is_clan_member_idle_refresh_pending(clan_id: object, realm: str = DEFAULT_REALM) -> bool:
+    return bool(cache.get(_clan_member_idle_refresh_dispatch_key(clan_id, realm=realm)))
+
+
+def queue_clan_member_idle_refresh(clan_id: object, realm: str = DEFAULT_REALM):
+    """Queue a bulk roster idle refresh, gated to ~once/hour/clan.
+
+    The cooldown key prevents re-refreshing a complete roster on every cache
+    miss; the in-flight dispatch key dedups concurrent misses and is what the
+    view reads for the X-Clan-Idle-Pending header (cleared in the task's
+    finally). Returns a status dict mirroring the other queue helpers.
+    """
+    cooldown_key = _clan_member_idle_refresh_cooldown_key(clan_id, realm=realm)
+    if cache.get(cooldown_key):
+        return {"status": "skipped", "reason": "cooldown"}
+
+    dispatch_key = _clan_member_idle_refresh_dispatch_key(clan_id, realm=realm)
+    if not cache.add(dispatch_key, "queued", timeout=CLAN_MEMBER_IDLE_REFRESH_DISPATCH_TIMEOUT):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        refresh_clan_member_idle_task.delay(clan_id=clan_id, realm=realm)
+        cache.set(cooldown_key, "1", timeout=CLAN_MEMBER_IDLE_REFRESH_COOLDOWN)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        cache.delete(cooldown_key)
+        logger.warning(
+            "Skipping clan member idle refresh enqueue for clan_id=%s because broker dispatch failed: %s",
+            clan_id,
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
 
 
 def queue_landing_page_warm(realm: str = DEFAULT_REALM, scope: str = 'all'):
@@ -849,6 +899,90 @@ def update_player_clan_battle_data_task(self, player_id, realm=DEFAULT_REALM):
         )
     finally:
         cache.delete(_clan_battle_refresh_dispatch_key(player_id, realm=realm))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def refresh_clan_member_idle_task(self, clan_id, realm=DEFAULT_REALM):
+    """Bulk-refresh roster idle fields so a clan's "X days idle" is correct
+    without a per-member profile view.
+
+    One account/info request per <=100 members. Writes ONLY last_battle_date +
+    days_since_last_battle via bulk_update — never last_fetch (bumping it would
+    suppress the real per-player full refresh for ~23h, data.py:4717). On a
+    transient WG error the affected batch's stored values are left untouched
+    (no clobber); a poison batch falls back to per-player isolation.
+    """
+    from datetime import datetime, timezone as dt_timezone
+
+    from warships.api.players import (
+        _bulk_fetch_account_info,
+        _per_player_account_fallback,
+    )
+    from warships.models import Clan, Player, realm_cache_key
+
+    def _refresh():
+        try:
+            clan = Clan.objects.get(clan_id=clan_id, realm=realm)
+        except Clan.DoesNotExist:
+            return {"status": "skipped", "reason": "clan-missing"}
+
+        members = list(
+            clan.player_set.exclude(name='').exclude(player_id__isnull=True)
+        )
+        if not members:
+            return {"status": "skipped", "reason": "empty-roster"}
+
+        by_id = {m.player_id: m for m in members}
+        ids = list(by_id.keys())
+        today = django_timezone.now().date()
+        updated = []
+
+        for start in range(0, len(ids), CLAN_MEMBER_IDLE_BULK_BATCH_SIZE):
+            chunk = ids[start:start + CLAN_MEMBER_IDLE_BULK_BATCH_SIZE]
+            data, err = _bulk_fetch_account_info(chunk, realm)
+            if err == "INVALID_ACCOUNT_ID":
+                data = _per_player_account_fallback(chunk, realm)
+            elif err:
+                logger.warning(
+                    "clan member idle refresh batch failed clan_id=%s realm=%s err=%s",
+                    clan_id, realm, err,
+                )
+                continue
+
+            for pid in chunk:
+                info = data.get(str(pid)) if data else None
+                if not info:
+                    continue
+                member = by_id.get(pid)
+                if member is None:
+                    continue
+                last_battle_time = info.get("last_battle_time")
+                new_date = (
+                    datetime.fromtimestamp(last_battle_time, tz=dt_timezone.utc).date()
+                    if last_battle_time else None
+                )
+                member.last_battle_date = new_date
+                if new_date:
+                    member.days_since_last_battle = (today - new_date).days
+                updated.append(member)
+
+        if updated:
+            Player.objects.bulk_update(
+                updated, ["last_battle_date", "days_since_last_battle"])
+            # Drop the cached clan_members payload so the next poll re-derives
+            # idle from the fresh last_battle_date.
+            cache.delete(realm_cache_key(realm, f'clan:members:v3:{clan_id}'))
+        return {"status": "completed", "updated": len(updated)}
+
+    try:
+        return _run_locked_task(
+            "refresh_clan_member_idle",
+            clan_id,
+            self.request.id,
+            _refresh,
+        )
+    finally:
+        cache.delete(_clan_member_idle_refresh_dispatch_key(clan_id, realm=realm))
 
 
 @app.task(bind=True, **TASK_OPTS)

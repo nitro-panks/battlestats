@@ -1176,6 +1176,58 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(rows[0]["name"], "StaleSnapshot")
         self.assertEqual(rows[0]["days_since_last_battle"], 5)
 
+    @patch("warships.tasks.refresh_clan_member_idle_task.delay")
+    @patch("warships.data.update_clan_members")
+    @patch("warships.data.update_clan_data")
+    def test_clan_members_cold_cache_queues_idle_refresh_and_flags_pending(
+        self,
+        mock_update_clan_data,
+        mock_update_clan_members,
+        mock_idle_delay,
+    ):
+        # Cold cache: queue a bulk roster idle refresh + signal pending so the
+        # FE re-polls for corrected "X days idle"; serve stored values now.
+        today = timezone.now().date()
+        clan = Clan.objects.create(
+            clan_id=4244, name="Idle Clan", members_count=1)
+        Player.objects.create(
+            name="StaleIdle",
+            player_id=144,
+            clan=clan,
+            is_hidden=False,
+            last_battle_date=today - timedelta(days=73),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/4244/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Clan-Idle-Pending"], "true")
+        mock_idle_delay.assert_called_once_with(clan_id="4244", realm="na")
+
+    @patch("warships.tasks.refresh_clan_member_idle_task.delay")
+    @patch("warships.data.update_clan_members")
+    @patch("warships.data.update_clan_data")
+    def test_clan_members_idle_refresh_respects_cooldown(
+        self,
+        mock_update_clan_data,
+        mock_update_clan_members,
+        mock_idle_delay,
+    ):
+        from warships.tasks import _clan_member_idle_refresh_cooldown_key
+        cache.set(_clan_member_idle_refresh_cooldown_key("4245", realm="na"), "1")
+
+        clan = Clan.objects.create(
+            clan_id=4245, name="Cooldown Clan", members_count=1)
+        Player.objects.create(
+            name="CooldownMember", player_id=145, clan=clan, is_hidden=False,
+            last_battle_date=timezone.now().date() - timedelta(days=10))
+
+        response = self.client.get("/api/fetch/clan_members/4245/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("X-Clan-Idle-Pending", response)
+        mock_idle_delay.assert_not_called()
+
     @patch("warships.data.update_clan_members")
     @patch("warships.data.update_clan_data")
     def test_clan_members_returns_data_when_members_exist(
