@@ -5,6 +5,19 @@
 / `hot_players_status` commands, signals registration, env knobs, and tests are landed
 (`server/warships/hot_players.py`). Phase 2 (the depth/`event_type` signal) remains out of scope.
 
+**DISABLED IN PROD 2026-06-16 (`HOT_PLAYERS_ENABLED=0`).** A live redundancy check found the
+hot set was **2363/2400 (98.5%) active-7d** — already guaranteed daily capture by the observation
+floor — with only **~7** engagement+inactive players a genuine queue-only win, and **92%** of the
+set backfill-seeded (most-active). The daily maintain/capture sweeps were near-pure floor overlap
+on the shared `-c3` background pool, so the queue was turned off (default is ON). Set durably via a
+grep-or-append block in `deploy_to_droplet.sh` (survives the `.env.cloud` overwrite) + live in
+`/etc/battlestats-server.env` + restart of `celery-background`/`beat`; both tasks now return
+`{'status':'skipped','reason':'disabled'}`. **Reversible** (`=1`); tables/code/`HotPlayer` rows
+retained. Only worth re-enabling if the seed flips from most-active (`backfill_hot_players`) to
+**floor-MISSED** — the design intent the backfill seed + cap currently crowd out. The bounded
+self-chain (the one unbuilt piece, "Work-budgeted rotation" §) was **NOT built**: its ROI depends
+on exactly that floor-missed seed, which does not exist in prod.
+
 ## Freshness sweep (Tier 3 visit-latency) — RETIRED 2026-06-15
 
 > **DELETED 2026-06-15.** The per-12-min `refresh_hot_player_freshness` /

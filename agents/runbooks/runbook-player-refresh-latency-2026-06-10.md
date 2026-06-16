@@ -10,10 +10,12 @@ fails fast instead of hanging into a 502; `update_ranked_data_task` routed off `
 request timeouts (gunicorn `timeout=25`, dev+prod nginx `proxy_connect_timeout 5s` /
 `proxy_read_timeout 20s`) were silently reverted as collateral in an unrelated bundled commit
 (`bcfe232`) — live `nginx -T` on prod showed the `/api/` block with **no** proxy timeouts and
-gunicorn running on the implicit **30s** default. They have been **re-applied to the templates**
-(see "PROD NGINX (Tier 2a)" below) and a file-content regression guard added
-(`server/warships/tests/test_proxy_timeout_config.py`); the gunicorn timeout reaches prod on the
-next backend deploy, the prod nginx half still needs a manual live reload. **Tier 3** — proactive
+gunicorn running on the implicit **30s** default. They were **re-applied to the templates**
+(see "PROD NGINX (Tier 2a)" below) with a file-content regression guard added
+(`server/warships/tests/test_proxy_timeout_config.py`), then **applied live in prod 2026-06-16**:
+backend deployed (gunicorn `timeout=25` confirmed live in `current/server/gunicorn.conf.py`) and the
+prod nginx `/api/` block manually edited + `nginx -t && systemctl reload nginx` (both proxy timeouts
+verified in the running config; API healthchecks 200). Tier 2a is now fully live. **Tier 3** — proactive
 freshness (see below). Tier 3 extends the
 hot-players engagement queue (`runbook-hot-players-engagement-queue-2026-06-10.md`).
 
@@ -232,7 +234,7 @@ the time the `[data-testid="live-refresh-status"]` chip flips "Updating…" → 
 time and 502 rate**, before vs after each tier. Capture the script under the runbook (appendix /
 `server/scripts/` or a one-off) so it is rerunnable as a regression gate.
 
-### PROD NGINX (Tier 2a) — RE-APPLIED to templates (2026-06-15); gunicorn ships on next deploy, prod nginx still needs a live reload
+### PROD NGINX (Tier 2a) — APPLIED LIVE IN PROD 2026-06-16 (backend deploy + nginx reload done; templates re-applied 2026-06-15)
 
 **History:** these three settings shipped in the 2026-06-11 Tier-2 tranche, then were
 silently reverted as collateral in `bcfe232` (an unrelated ship-leaderboard perf commit
