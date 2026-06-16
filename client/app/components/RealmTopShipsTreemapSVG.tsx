@@ -12,6 +12,8 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import * as d3 from 'd3';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useTheme } from '../context/ThemeContext';
@@ -276,7 +278,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({ onSel
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex items-center gap-3">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                        {displayRealm.toUpperCase()} most-played ships · Last 14 days{windowLabel ? ` · ${windowLabel}` : ''}
+                        {displayRealm.toUpperCase()} most-played ships · Previous Fortnight{windowLabel ? ` · ${windowLabel}` : ''}
                     </h2>
                     <div className="flex items-center gap-1 text-xs" role="group" aria-label="Battle mode">
                         {SHIP_MODES.map((m) => (
@@ -294,6 +296,20 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({ onSel
                                 {SHIP_MODE_LABEL[m]}
                             </button>
                         ))}
+                    </div>
+                    <div className="group relative inline-flex items-center">
+                        <button
+                            type="button"
+                            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-[var(--accent-light)] transition-colors hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
+                            aria-label="About the most-played ships treemap and its eligibility window"
+                        >
+                            <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
+                        </button>
+                        <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
+                            <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Most-played ships</p>
+                            <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">The 25 most-played ships on this realm — each tile is one ship, sized by battles, colored by ship type and shaded by tier (lighter = lower tier). Tap a tile to open that ship&rsquo;s leaderboard; toggle Random / Ranked to switch battle mode.</p>
+                            <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]"><span className="font-semibold text-[var(--accent-mid)]">Eligibility window:</span> a rolling, trailing 14-day ship-standings window recomputed nightly — the same window the ship leaderboards and profile medals read. The dates shown are its current bounds.</p>
+                        </div>
                     </div>
                 </div>
             </div>
