@@ -266,19 +266,22 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
-    # -- Rolling nightly T10 Top-Ship-Player snapshot (per realm, striped) --
-    # Beat ticks nightly; each run recomputes the trailing-window board so the
-    # profile badges + /ship standings evolve daily (gated by
-    # SHIP_BADGE_SNAPSHOT_ENABLED). Per-realm hour striping keeps the three ~12s
-    # aggregations off each other. See
-    # agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md.
+    # -- Rolling T10 Top-Ship-Player snapshot (per realm, striped, every 12h) --
+    # Beat fires twice daily (12h apart); each run recomputes the trailing-window
+    # board so the profile badges + /ship standings evolve through the day (gated
+    # by SHIP_BADGE_SNAPSHOT_ENABLED). Per-realm hour striping keeps the three
+    # ~12s aggregations off each other; each realm runs at realm_hour and
+    # realm_hour+12. NOTE: offsets must be distinct *mod 12* under a 12h period —
+    # REALM_CRAWL_CRON_HOURS (0/6/12, built for 24h schedules) would collide
+    # (eu 0 == asia 12 mod 12), so we stripe via REALM_INTERVAL_OFFSETS*4
+    # (na 0 / eu 4 / asia 8). See agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md.
     ship_badge_hour = int(os.getenv("SHIP_BADGE_SNAPSHOT_HOUR", "2"))
     for realm in sorted(VALID_REALMS):
         realm_hour = (ship_badge_hour +
-                      REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
+                      REALM_INTERVAL_OFFSETS.get(realm, 0) * 4) % 24
         ship_badge_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
-            hour=str(realm_hour),
+            hour=f"{realm_hour},{(realm_hour + 12) % 24}",
             day_of_week="*",
             day_of_month="*",
             month_of_year="*",
@@ -293,7 +296,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
-                "description": f"T10 top-player rolling snapshot ({realm.upper()}) — nightly recompute of the trailing {os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '14')}-day board.",
+                "description": f"T10 top-player rolling snapshot ({realm.upper()}) — every-12h recompute of the trailing {os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '14')}-day board.",
             },
         )
 

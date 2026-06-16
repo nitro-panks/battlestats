@@ -5,6 +5,24 @@ _Context: Replace the fixed 2-week ship-badge season with a nightly rolling reco
 _Status: IMPLEMENTED 2026-06-14 (migration `0071_delete_shipaward`). Code landed; pending deploy. Backend suite 669 passed on sqlite; frontend lint + unit tests + production build clean._
 _QA: aggregation sized against prod 2026-06-14 (see Prod sizing); all commands/settings/paths validated against live code._
 
+> **Update 2026-06-16 — cadence: nightly → every 12h.** The recompute now fires
+> **twice daily** (every 12 hours) per realm instead of once nightly, so the
+> standings/badges track the trailing-14d window mid-day as well as overnight.
+> Each realm runs at `SHIP_BADGE_SNAPSHOT_HOUR + offset` **and** that +12h
+> (NA 02:30/14:30, EU 06:30/18:30, ASIA 10:30/22:30 UTC). **Striping changed:**
+> the old `REALM_CRAWL_CRON_HOURS` offsets (0/6/12, built for 24h schedules)
+> collide *mod 12* under a 12h period (eu 0 ≡ asia 12), which would stack two
+> realms' aggregations on the same wall-clock hour. The 12h schedule therefore
+> stripes via `REALM_INTERVAL_OFFSETS * 4` (na 0 / eu 4 / asia 8) so all six
+> firings are pairwise-distinct hours. Still three ~12 s bursts per firing, now
+> 2×/day; cost is negligible (a 14-day window shares ~93% run-to-run, and
+> twice-daily is well within the background pool). The sizing/safety verdict below
+> ("nightly is safe") holds at 2× the run count. `signals.py` builds the crontab
+> `hour` as a two-value list (`{realm_hour},{(realm_hour+12)%24}`); pinned by
+> `ShipSnapshotFiresTwiceADayTests` in `test_periodic_schedule_topology.py`
+> (which checks both the 2×/day cadence and the no-cross-realm-collision property).
+> Below this note, read "nightly/each night" as "each 12h run."
+
 ## Purpose
 
 The canonical reference for moving ship badges from a fixed bi-weekly season to a
@@ -165,7 +183,11 @@ repointed to the same rolling window the board reads:
   snapshot lands the key changes and the next request recomputes → alignment
   **self-heals regardless of beat order.**
 - The `top-ships-warmer-{realm}` Beat task was moved to fire **~1h after** that
-  realm's nightly snapshot (was hour 0, before it) so it warms the current window.
+  realm's snapshot (was hour 0, before it) so it warms the current window. (Per the
+  2026-06-16 every-12h note above, the snapshot now fires at NA 02:30/14:30, EU
+  06:30/18:30, ASIA 10:30/22:30 UTC; warmer alignment to the *first* daily firing is
+  unchanged and non-load-bearing — the snapshot self-chains the landing re-materialize,
+  so cache reads self-heal regardless of warmer order.)
 - The fixed-season helpers (`SHIP_SEASON_EPOCH`, `SHIP_SEASON_LENGTH_DAYS`,
   `ship_season_bounds`, `current_season_index`, `most_recent_completed_season`) are
   **deleted** — the treemap was their last consumer. Frontend `shipSeason.ts` trimmed
