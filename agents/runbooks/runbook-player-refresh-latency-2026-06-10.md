@@ -6,10 +6,15 @@ unavailable" state. **Tier 2** — backend resilience: gunicorn `timeout=25`
 (`GUNICORN_TIMEOUT_SECONDS`) + a tight request-thread WG HTTP timeout
 (`WG_REQUEST_THREAD_TIMEOUT_SECONDS=4`, 20s preserved for background) so a cold-path WG call
 fails fast instead of hanging into a 502; `update_ranked_data_task` routed off `hydration` →
-`background`; hydration concurrency 3→5. One follow-up: the prod-droplet nginx
-`proxy_read_timeout`/`proxy_connect_timeout` is a documented TODO (see "PROD NGINX TODO" below) —
-gunicorn `timeout` is the primary 502 fix and ships now; the nginx timeouts are secondary
-connect-stall hardening. **Tier 3** — proactive freshness (see below). Tier 3 extends the
+`background`; hydration concurrency 3→5. **Tier 2a regression (2026-06-15):** the three proxy/
+request timeouts (gunicorn `timeout=25`, dev+prod nginx `proxy_connect_timeout 5s` /
+`proxy_read_timeout 20s`) were silently reverted as collateral in an unrelated bundled commit
+(`bcfe232`) — live `nginx -T` on prod showed the `/api/` block with **no** proxy timeouts and
+gunicorn running on the implicit **30s** default. They have been **re-applied to the templates**
+(see "PROD NGINX (Tier 2a)" below) and a file-content regression guard added
+(`server/warships/tests/test_proxy_timeout_config.py`); the gunicorn timeout reaches prod on the
+next backend deploy, the prod nginx half still needs a manual live reload. **Tier 3** — proactive
+freshness (see below). Tier 3 extends the
 hot-players engagement queue (`runbook-hot-players-engagement-queue-2026-06-10.md`).
 
 ## Why
@@ -227,26 +232,41 @@ the time the `[data-testid="live-refresh-status"]` chip flips "Updating…" → 
 time and 502 rate**, before vs after each tier. Capture the script under the runbook (appendix /
 `server/scripts/` or a one-off) so it is rerunnable as a regression gate.
 
-### PROD NGINX (Tier 2a) — APPLIED in `bootstrap_droplet.sh`; needs a live nginx reload to take effect
+### PROD NGINX (Tier 2a) — RE-APPLIED to templates (2026-06-15); gunicorn ships on next deploy, prod nginx still needs a live reload
 
-Tier 2a's dev `server/nginx.conf` proxy timeouts and the gunicorn `timeout=25`
-shipped in this Tier-2 tranche. The **production** nginx `location /api/` block is
-templated at `client/deploy/bootstrap_droplet.sh` and now carries the same two
-timeouts (`proxy_connect_timeout 5s` / `proxy_read_timeout 20s`):
+**History:** these three settings shipped in the 2026-06-11 Tier-2 tranche, then were
+silently reverted as collateral in `bcfe232` (an unrelated ship-leaderboard perf commit
+whose message never mentions them). The 2026-06-15 verify caught it: live `nginx -T` on
+the droplet showed the `/api/` block with **no** `proxy_*_timeout`, and the gunicorn
+systemd `ExecStart` passes no `--timeout`, so with the conf-file line gone prod gunicorn
+was back on the implicit **30s** default — Tier 2a was wholly un-live. All three have now
+been **re-applied to the templates**:
+
+- gunicorn `timeout = int(os.getenv("GUNICORN_TIMEOUT_SECONDS", "25"))` — `server/gunicorn.conf.py`.
+- dev `server/nginx.conf` `/api/` block — `proxy_read_timeout 20s` / `proxy_connect_timeout 5s`.
+- prod template `client/deploy/bootstrap_droplet.sh` `/api/` block:
 
 ```nginx
     proxy_connect_timeout 5s;
     proxy_read_timeout 20s;
 ```
 
-**Live-apply caveat:** `bootstrap_droplet.sh` is the one-time droplet provisioning
-script — a normal `client/deploy/deploy_to_droplet.sh` (rsync + `npm build`) does
-**not** re-run it, so the running droplet nginx keeps the old (timeout-less) config
-until either bootstrap is re-run or an operator edits the live nginx server block
-and `sudo nginx -t && sudo systemctl reload nginx`. This is secondary hardening —
-gunicorn `timeout=25` (shipped via the backend deploy) is the primary 502 fix and
-carries Tier 2a on its own until the nginx reload happens. No `server { … }` edit
-beyond this block is needed.
+A file-content regression guard (`server/warships/tests/test_proxy_timeout_config.py`)
+now fails red if any of the three is removed again — this was the **third** silent revert,
+so the guard is deliberate insurance.
+
+**Delivery / live-apply caveat:** the gunicorn `timeout` ships cleanly through the next
+`server/deploy/deploy_to_droplet.sh` (rsync + restart re-reads the conf) and is the
+**primary** 502 fix. The **prod nginx** half does not: `bootstrap_droplet.sh` is one-time
+provisioning that a normal `client/deploy/deploy_to_droplet.sh` (rsync + `npm build`) never
+re-runs, so editing the template alone leaves the running droplet nginx timeout-less. An
+operator must edit the live `location /api/` server block on the droplet and
+`sudo nginx -t && sudo systemctl reload nginx` (zero-downtime; `nginx -t` first — shared
+box also hosts oturu). The nginx leg is secondary connect-stall hardening; gunicorn
+`timeout=25` carries Tier 2a on its own until that reload happens. No `server { … }` edit
+beyond this `/api/` block is needed. The proxy `proxy_read_timeout 20s` is intentionally
+below the gunicorn `timeout 25s` so nginx sheds a stalled upstream before gunicorn recycles
+the worker — preserve that ordering on any retune.
 
 Per-tier checks:
 - **Tier 1** — Jest suites green (`usePlayerLiveRefresh`, `PlayerRouteView`, `sharedJsonFetch`); a

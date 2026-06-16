@@ -92,6 +92,12 @@ server {
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto \$scheme;
+    # Latency runbook Tier 2a: shed a stalled upstream fast instead of hanging
+    # on nginx's implicit 60s. proxy_read_timeout (20s) sits just below gunicorn
+    # timeout=25 (the primary 502 fix), so nginx returns a clean 504 before
+    # gunicorn kills the worker. Mirror of server/nginx.conf.
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 20s;
   }
 
   location /umami {
