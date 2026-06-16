@@ -303,6 +303,19 @@ else
   echo 'HOT_PLAYERS_MAX=800' >> /etc/battlestats-server.env
 fi
 
+# Hot-players engagement queue DISABLED 2026-06-16: live prod set was ~98.5%
+# active-7d (2363/2400), i.e. already guaranteed daily capture by the observation
+# floor — only ~7 engagement+inactive players were a genuine queue-only win. The
+# daily maintain/capture sweeps were near-pure overlap with the floor on the
+# shared -c3 background pool, so the queue is off (default is ON). Reversible:
+# set HOT_PLAYERS_ENABLED=1 (and revisit only if the seed flips to floor-missed).
+# Pinned here for the same .env.cloud-overwrite reason as the flags above.
+if grep -q '^HOT_PLAYERS_ENABLED=' /etc/battlestats-server.env; then
+  sed -i 's|^HOT_PLAYERS_ENABLED=.*|HOT_PLAYERS_ENABLED=0|' /etc/battlestats-server.env
+else
+  echo 'HOT_PLAYERS_ENABLED=0' >> /etc/battlestats-server.env
+fi
+
 # Ship standings span Tiers 8–10 (per-tier density study, 2026-06-05). Pinned
 # here for the same .env.cloud-overwrite reason as the flag above.
 if grep -q '^SHIP_BADGE_TIERS=' /etc/battlestats-server.env; then
