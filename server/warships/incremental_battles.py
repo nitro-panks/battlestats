@@ -24,7 +24,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from django.db import connection, transaction
@@ -1536,6 +1536,220 @@ def compact_battle_observation_payloads(
         "dry_run": False,
         "keep_per_player": keep,
         "min_age_hours": int(min_age_hours),
+        "cleared": cleared,
+        "batches": batches,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Inactive-player battles_json prune (DB-growth Tier-1)
+#
+# The battle-history pipeline (2026-05) repopulates Player.battles_json on every
+# visit / floor refresh, so the displayed Random-Battles blob erodes back onto
+# long-inactive players who get a one-off page view. For a >cutoff-day-inactive
+# account that blob is dead weight: battle history is empty anyway, the wire
+# serializer already omits the field (PlayerSerializer.Meta.exclude), and the
+# /randoms endpoint falls back to randoms_json when battles_json is NULL. This
+# prune NULLs *only* battles_json on those rows, reclaiming TOAST while leaving
+# the derived chart columns (tiers/type/randoms/activity_json) intact.
+#
+# Disjoint from the floor by construction: FLOOR_REFRESH_BATTLES_JSON_ENABLED
+# only repopulates the active-7d set, and the prune cutoff is far older
+# (default 180d), so the two sets never overlap — the prune does not fight the
+# floor. Pruned rows refetch battles_json on the player's next profile view.
+#
+# Enrichment safety: battles_json IS NULL is one of the enrichment candidate
+# match conditions (enrich_player_data._candidates), so NULLing it on a row the
+# enrichment pool would otherwise pick up could feed the private-at-fetch spin
+# loop. Two belt-and-suspenders guards make that impossible:
+#   1. PENDING rows are excluded from the prune predicate outright.
+#   2. The core refuses to run unless inactive_days > ENRICH_MAX_INACTIVE_DAYS
+#      (the enrichment activity ceiling), so a pruned row can never satisfy the
+#      candidate query's days_since_last_battle <= max_inactive_days condition.
+# ---------------------------------------------------------------------------
+
+PRUNE_BATTLES_JSON_BATCH_SIZE_DEFAULT = 5000
+PRUNE_BATTLES_JSON_INACTIVE_DAYS_DEFAULT = 180
+PRUNE_BATTLES_JSON_STATEMENT_TIMEOUT_DEFAULT = 180
+
+
+def _prune_battles_json_candidate_sql() -> str:
+    """Rows whose battles_json is safe to NULL — a single plain WHERE filter.
+
+    Touches only heap columns: ``battles_json IS NOT NULL`` reads the tuple
+    null-bitmap, never the TOASTed value, so the blob is never detoasted (the
+    timeout trap the observation-compaction docstring warns about). No window
+    functions are needed — this is a flat per-row predicate, unlike the
+    observation keep-set. Excludes hidden accounts, PENDING enrichment rows
+    (guard 1), and NULL ``last_battle_date`` (``NULL < cutoff`` is unknown →
+    excluded, the safe default). The ``< %(cutoff)s`` is strict, so a row whose
+    ``last_battle_date`` equals the cutoff date is kept.
+    """
+    return """
+        SELECT id
+        FROM warships_player
+        WHERE is_hidden = FALSE
+          AND battles_json IS NOT NULL
+          AND last_battle_date IS NOT NULL
+          AND last_battle_date < %(cutoff)s
+          AND enrichment_status <> %(pending)s
+    """
+
+
+def _prune_battles_json_pending_intersection_sql() -> str:
+    """The same inactive/visible band BUT including PENDING rows, filtered to
+    PENDING — the gating dry-run count. Expect 0 after guard 1; a non-zero
+    pre-guard value proves the enrichment-overlap risk was real for this band.
+    """
+    return """
+        SELECT COUNT(*)
+        FROM warships_player
+        WHERE is_hidden = FALSE
+          AND battles_json IS NOT NULL
+          AND last_battle_date IS NOT NULL
+          AND last_battle_date < %(cutoff)s
+          AND enrichment_status = %(pending)s
+    """
+
+
+def _estimate_avg_player_battles_json_bytes() -> Optional[float]:
+    """Mean TOASTed-JSON bytes per player row, from catalog stats (instant).
+
+    Approximate: ``warships_player`` TOASTs five JSON columns
+    (tiers/type/randoms/activity/achievements_json) besides ``battles_json``,
+    so total-TOAST / row-count is an upper-bound proxy for per-row
+    ``battles_json`` size, not an exact measure. We deliberately do NOT use
+    ``pg_column_size(battles_json)`` for precision — that detoasts every row and
+    is exactly the 40-min timeout pathology from 2026-05-24. Postgres-only.
+    """
+    if connection.vendor != "postgresql":
+        return None
+    with connection.cursor() as cur:
+        cur.execute(
+            "SELECT pg_total_relation_size(reltoastrelid), reltuples "
+            "FROM pg_class WHERE relname = 'warships_player' "
+            "AND reltoastrelid <> 0"
+        )
+        row = cur.fetchone()
+    if not row or not row[1] or row[1] <= 0:
+        return None
+    return float(row[0]) / float(row[1])
+
+
+def prune_inactive_player_battles_json(
+    *,
+    inactive_days: int = PRUNE_BATTLES_JSON_INACTIVE_DAYS_DEFAULT,
+    max_inactive_days: int,
+    batch_size: int = PRUNE_BATTLES_JSON_BATCH_SIZE_DEFAULT,
+    max_rows: int = 0,
+    dry_run: bool = False,
+    sleep_between_batches: float = 0.0,
+    statement_timeout_s: int = PRUNE_BATTLES_JSON_STATEMENT_TIMEOUT_DEFAULT,
+) -> Dict[str, Any]:
+    """Reclaim disk by NULLing ``battles_json`` on long-inactive players.
+
+    NULLs **only** ``battles_json`` (keeps tiers/type/randoms/activity_json)
+    where ``is_hidden = false AND battles_json IS NOT NULL AND
+    last_battle_date < today - inactive_days AND enrichment_status <> PENDING``.
+
+    ``max_inactive_days`` is the enrichment activity ceiling
+    (``ENRICH_MAX_INACTIVE_DAYS``, read by the caller, not at import time so the
+    guard stays testable). This function **refuses to run** (raises
+    ``ValueError``) unless ``inactive_days > max_inactive_days`` — that enforced
+    precondition guarantees a pruned row can never satisfy the enrichment
+    candidate query's ``days_since_last_battle <= max_inactive_days``, so the
+    prune cannot create a fresh enrichment candidate regardless of env config.
+
+    ``dry_run=True`` reports the candidate count, the PENDING-intersection count
+    (over the predicate *without* the PENDING exclusion — expect 0), and an
+    approximate reclaimable-bytes estimate from catalog stats; it writes
+    nothing. Live runs collect candidate ids in one scan (capped by
+    ``max_rows``), then NULL by primary key in ``batch_size`` chunks — the table
+    is scanned once, not once per batch. ``statement_timeout_s`` bounds every
+    query (Postgres) so a pathological plan fails fast.
+    """
+    from warships.models import Player
+
+    inactive_days = int(inactive_days)
+    max_inactive_days = int(max_inactive_days)
+    if inactive_days <= max_inactive_days:
+        raise ValueError(
+            f"--inactive-days ({inactive_days}) must be strictly greater than "
+            f"ENRICH_MAX_INACTIVE_DAYS ({max_inactive_days}); refusing to run "
+            "so the prune can never create a fresh enrichment candidate."
+        )
+
+    cutoff = date.today() - timedelta(days=inactive_days)
+    params = {
+        "cutoff": cutoff,
+        "pending": Player.ENRICHMENT_PENDING,
+    }
+    is_pg = connection.vendor == "postgresql"
+
+    if dry_run:
+        candidate_sql = _prune_battles_json_candidate_sql()
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                _apply_statement_timeout(cur, statement_timeout_s, is_pg)
+                cur.execute(
+                    f"SELECT COUNT(*) FROM ({candidate_sql}) c", params)
+                count = int(cur.fetchone()[0] or 0)
+                cur.execute(
+                    _prune_battles_json_pending_intersection_sql(), params)
+                pending_intersection = int(cur.fetchone()[0] or 0)
+        avg_bytes = _estimate_avg_player_battles_json_bytes()
+        reclaimable_bytes = (
+            int(avg_bytes * count) if avg_bytes is not None else None)
+        return {
+            "status": "completed",
+            "dry_run": True,
+            "inactive_days": inactive_days,
+            "max_inactive_days": max_inactive_days,
+            "cutoff": cutoff.isoformat(),
+            "candidates": count,
+            "pending_intersection": pending_intersection,
+            "reclaimable_bytes": reclaimable_bytes,
+            "cleared": 0,
+            "batches": 0,
+        }
+
+    # One scan to collect candidate ids (capped by max_rows), then NULL by
+    # primary key in chunks. Avoids re-scanning the whole table per batch.
+    candidate_sql = _prune_battles_json_candidate_sql()
+    if max_rows and max_rows > 0:
+        candidate_sql += " LIMIT %(maxrows)s"
+        params["maxrows"] = int(max_rows)
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            _apply_statement_timeout(cur, statement_timeout_s, is_pg)
+            cur.execute(f"SELECT id FROM ({candidate_sql}) c", params)
+            ids = [r[0] for r in cur.fetchall()]
+
+    cleared = 0
+    batches = 0
+    for start in range(0, len(ids), batch_size):
+        chunk = ids[start:start + batch_size]
+        placeholders = ",".join(["%s"] * len(chunk))
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                _apply_statement_timeout(cur, statement_timeout_s, is_pg)
+                cur.execute(
+                    f"UPDATE warships_player SET battles_json = NULL "
+                    f"WHERE id IN ({placeholders})",
+                    chunk,
+                )
+                affected = cur.rowcount
+        cleared += max(affected, 0)
+        batches += 1
+        if sleep_between_batches:
+            time.sleep(sleep_between_batches)
+
+    return {
+        "status": "completed",
+        "dry_run": False,
+        "inactive_days": inactive_days,
+        "max_inactive_days": max_inactive_days,
+        "cutoff": cutoff.isoformat(),
         "cleared": cleared,
         "batches": batches,
     }

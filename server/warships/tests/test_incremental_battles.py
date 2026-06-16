@@ -3979,3 +3979,160 @@ class FloorBattlesJsonRefreshTests(TestCase):
         self.player.refresh_from_db()
         self.assertTrue(self.player.battles_json)
         self.assertIsNotNone(self.player.battles_updated_at)
+
+
+class PruneInactivePlayerBattlesJsonTests(TestCase):
+    """Disk-reclaim prune of battles_json on long-inactive players.
+
+    Verifies only inactive (> cutoff) + visible + non-PENDING rows are NULLed,
+    derived chart columns survive, the boundary is exclusive, --dry-run writes
+    nothing, --max-rows caps, and the ENRICH_MAX_INACTIVE_DAYS guard refuses an
+    unsafe --inactive-days. Scope:
+    agents/work-items/scope-battles-json-prune-rerun-2026-06-15.md
+    """
+
+    SAMPLE = [{"ship_id": 1, "pvp": {"battles": 1}}]
+
+    def _player(self, *, pid, days_inactive=None, hidden=False,
+                status=Player.ENRICHMENT_ENRICHED, with_blob=True,
+                derived=True):
+        kwargs = dict(
+            name=f"prune_{pid}", player_id=pid, realm="na", pvp_battles=600,
+            is_hidden=hidden, enrichment_status=status,
+            battles_json=(self.SAMPLE if with_blob else None),
+        )
+        if derived:
+            kwargs.update(
+                tiers_json=[{"tier": 10}],
+                type_json=[{"type": "bb"}],
+                randoms_json=[{"r": 1}],
+                activity_json=[{"a": 1}],
+            )
+        if days_inactive is not None:
+            kwargs["last_battle_date"] = (
+                date.today() - timedelta(days=days_inactive))
+        return Player.objects.create(**kwargs)
+
+    def _run(self, **kw):
+        from warships.incremental_battles import (
+            prune_inactive_player_battles_json,
+        )
+        kw.setdefault("inactive_days", 180)
+        kw.setdefault("max_inactive_days", 7)
+        return prune_inactive_player_battles_json(**kw)
+
+    def test_nulls_only_inactive_visible_nonpending(self):
+        inactive = self._player(pid=1, days_inactive=200)
+        active = self._player(pid=2, days_inactive=3)
+        hidden = self._player(pid=3, days_inactive=200, hidden=True)
+        pending = self._player(
+            pid=4, days_inactive=200, status=Player.ENRICHMENT_PENDING)
+        never = self._player(pid=5, days_inactive=None)  # last_battle_date NULL
+
+        result = self._run()
+        self.assertEqual(result["cleared"], 1)
+
+        inactive.refresh_from_db()
+        self.assertIsNone(inactive.battles_json)
+        # Derived chart columns survive on the pruned row.
+        self.assertIsNotNone(inactive.tiers_json)
+        self.assertIsNotNone(inactive.type_json)
+        self.assertIsNotNone(inactive.randoms_json)
+        self.assertIsNotNone(inactive.activity_json)
+
+        for p in (active, hidden, pending, never):
+            p.refresh_from_db()
+            self.assertIsNotNone(p.battles_json, f"pid={p.player_id} pruned")
+
+    def test_dry_run_writes_nothing_and_reports_pending_intersection(self):
+        self._player(pid=1, days_inactive=200)
+        self._player(pid=2, days_inactive=200)
+        # A PENDING row in the same inactive band — excluded from candidates,
+        # but reported as the gating intersection count.
+        self._player(
+            pid=3, days_inactive=200, status=Player.ENRICHMENT_PENDING)
+
+        result = self._run(dry_run=True)
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["candidates"], 2)
+        self.assertEqual(result["pending_intersection"], 1)
+        # No writes.
+        self.assertEqual(
+            Player.objects.filter(battles_json__isnull=False).count(), 3)
+
+    def test_max_rows_caps(self):
+        for pid in range(1, 6):
+            self._player(pid=pid, days_inactive=200)
+        result = self._run(max_rows=2)
+        self.assertEqual(result["cleared"], 2)
+        self.assertEqual(
+            Player.objects.filter(battles_json__isnull=False).count(), 3)
+
+    def test_inactive_days_boundary_is_exclusive(self):
+        # last_battle_date == cutoff (exactly inactive_days ago) is KEPT;
+        # one day older is pruned.
+        on_boundary = self._player(pid=1, days_inactive=180)
+        past_boundary = self._player(pid=2, days_inactive=181)
+        result = self._run()
+        self.assertEqual(result["cleared"], 1)
+        on_boundary.refresh_from_db()
+        past_boundary.refresh_from_db()
+        self.assertIsNotNone(on_boundary.battles_json)
+        self.assertIsNone(past_boundary.battles_json)
+
+    def test_guard_refuses_when_inactive_days_not_above_ceiling(self):
+        self._player(pid=1, days_inactive=400)
+        with self.assertRaises(ValueError):
+            self._run(inactive_days=365, max_inactive_days=365)
+        with self.assertRaises(ValueError):
+            self._run(inactive_days=100, max_inactive_days=365)
+        # Nothing written despite a clear candidate.
+        self.assertEqual(
+            Player.objects.filter(battles_json__isnull=False).count(), 1)
+
+    def test_batched_loop_clears_across_multiple_batches(self):
+        for pid in range(1, 6):
+            self._player(pid=pid, days_inactive=200)
+        result = self._run(batch_size=1)
+        self.assertEqual(result["cleared"], 5)
+        self.assertGreaterEqual(result["batches"], 5)
+
+    def test_management_command_dry_run_reports_and_writes_nothing(self):
+        self._player(pid=1, days_inactive=200)
+        self._player(pid=2, days_inactive=200)
+        # A PENDING in-band row exercises the excluded-by-guard count + label.
+        self._player(
+            pid=3, days_inactive=200, status=Player.ENRICHMENT_PENDING)
+        out = StringIO()
+        with mock.patch.dict(
+                "os.environ", {"ENRICH_MAX_INACTIVE_DAYS": "7"}):
+            call_command(
+                "prune_inactive_player_battles_json",
+                "--inactive-days", "180", "--dry-run", stdout=out,
+            )
+        output = out.getvalue()
+        self.assertIn("DRY-RUN", output)
+        self.assertIn("2 player battles_json", output)
+        self.assertIn("no rows written", output)
+        # The PENDING-in-band count is framed as excluded-by-guard, NOT as a
+        # failure signal (operator go/no-go honesty).
+        self.assertIn("EXCLUDED by guard", output)
+        self.assertNotIn("(expect 0)", output)
+        # 3 visible rows with battles_json (2 candidates + 1 excluded PENDING).
+        self.assertEqual(
+            Player.objects.filter(battles_json__isnull=False).count(), 3)
+
+    def test_management_command_guard_refuses_at_default_env(self):
+        # With the env at its 365 default, the 180d default refuses to run.
+        from django.core.management.base import CommandError
+        self._player(pid=1, days_inactive=400)
+        out = StringIO()
+        with mock.patch.dict(
+                "os.environ", {"ENRICH_MAX_INACTIVE_DAYS": "365"}):
+            with self.assertRaises(CommandError):
+                call_command(
+                    "prune_inactive_player_battles_json",
+                    "--dry-run", stdout=out,
+                )
+        self.assertEqual(
+            Player.objects.filter(battles_json__isnull=False).count(), 1)

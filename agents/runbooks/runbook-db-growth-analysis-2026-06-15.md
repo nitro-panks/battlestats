@@ -102,7 +102,7 @@ Mostly yes, with two policy gaps:
 
 1. **[Safety net — do first, low effort] Enable storage autoscale OR a disk alert.** Autoscale (`doctl databases storage-autoscale update`) converts the hard-wall outage risk into a (paid) auto-resize; or at minimum set a DO disk-utilization alert at 70%/80%. Given autoscale is *off* and the May outage history, this is the cheapest insurance and removes the acute risk while the retention work is decided.
 2. **[Biggest durable lever — needs product decision] Define a `Snapshot` retention/downsampling policy.** This is the only new unbounded vector and the one that changed on the date the user noticed. Decide the full-daily-granularity window, then downsample older rows (the weekly/monthly rollups already model the target). Caps the ~34 MB/day + the `warships_player` write churn.
-3. **[Ship the deferred May Tier-1 items]** — `PlayerSerializer` wire-trim (omit `battles_json`/`tiers_json`/`type_json`/`activity_json`/`achievements_json`; needs contract-test update) trims wire + Redis; per-table autovacuum tuning on `playerdailyshipstats`/`player`/`snapshot`; re-run the inactive `battles_json` prune (it has eroded).
+3. **[Ship the deferred May Tier-1 items]** — **`PlayerSerializer` wire-trim is ALREADY SHIPPED** (May, `e8b3172` / release `20260526125032`; `serializers.py:113-116` `Meta.exclude` drops `battles_json`/`tiers_json`/`type_json`/`activity_json`/`achievements_json`, trimming wire **and** the Redis bulk-player copy on every write path). The "needs contract-test update" caveat was **stale** — the player-detail serializer is not ODCS-contract-governed (contracts cover `PlayerSummarySerializer`/`PlayerExplorerRowSerializer`); no contract work needed. Remaining: per-table autovacuum tuning on `playerdailyshipstats`/`player`/`snapshot`; **re-run the inactive `battles_json` prune (it has eroded) — now via the durable `prune_inactive_player_battles_json` management command** (built `db-battles-json-prune-rerun`; see the execute recipe below), not another ad-hoc `psql` UPDATE.
 4. **[Headroom hygiene, windowed] `VACUUM FULL` `battleobservation`** (small heap, short lock, returns ~reusable TOAST to OS) and consider `player` in a maintenance window. Note: reclaims *within* the 23 GB, not the WAL gap.
 5. **[Decide] weekly/monthly/yearly rollups** — keep writing UI-hidden derived data (1.18 GB)? Resolve alongside the nightly-rollup OOM follow-up.
 6. **[Future / structural] Compact `battles_json` baseline** into a per-ship table so the 7.7 GB raw-blob TOAST can be dropped entirely (separate runbook; the floor-refresh now actively repopulates it, so this is increasingly worth it).
@@ -111,9 +111,30 @@ Mostly yes, with two policy gaps:
 
 - Before/after: the per-table sizing query + `disk_used_percent` from the metrics endpoint (logical size lags disk; trust the disk metric for runway).
 - Snapshot retention: confirm chart day-over-day still renders for the kept window; cross-check rollups vs daily.
-- Wire-trim: backend `test_data_product_contracts.py` + `npm test` green; load a player page, all charts render.
+- Wire-trim: already shipped (May) — no action; serializer is not contract-governed.
 - Inactive-prune reversibility: visit a pruned player → `battles_json` refetches within 15 min.
 - Post-`VACUUM`/prune runaway check: `SELECT pid, now()-query_start AS age, state, left(query,80) FROM pg_stat_activity WHERE state='active' ORDER BY age DESC;` (killing `psql` does not cancel the server backend — `pg_cancel_backend(pid)`).
+
+## Execute recipe — inactive `battles_json` prune (durable command)
+
+Built on branch `db-battles-json-prune-rerun`: core `prune_inactive_player_battles_json` in `incremental_battles.py` + the `prune_inactive_player_battles_json` management command (mirrors `prune_battle_observations`'s flags + scan-once/UPDATE-by-PK shape). NULLs **only** `Player.battles_json` (keeps `tiers/type/randoms/activity_json`) where `is_hidden = false AND battles_json IS NOT NULL AND last_battle_date < today - inactive_days AND enrichment_status <> pending`. Reversible (refetched on next visit); disjoint from the floor refresh by cutoff (floor = active-7d, prune = >180d).
+
+**Enrichment-safety preconditions (do not bypass):** `battles_json IS NULL` is an enrichment candidate-match condition, so the command (1) excludes `pending` rows and (2) **refuses to run unless `--inactive-days > ENRICH_MAX_INACTIVE_DAYS`** (prod pins that env to 7; the default 365 means the command refuses at the 180d default in any un-pinned env — that refusal is intended). Confirm prod's env still pins 7 before the live run.
+
+```bash
+cd server
+# 1. Dry-run first — candidates, PENDING-in-band-excluded count (~0 in healthy
+#    data; non-zero = odd populated-PENDING rows guard-1 already excluded, still
+#    safe to proceed — NOT a guard failure), approx reclaim. No writes.
+python manage.py prune_inactive_player_battles_json --dry-run
+# 2. Paced live run (low-traffic window; idempotent + resumable, re-run tops up).
+python manage.py prune_inactive_player_battles_json \
+    --batch-size 5000 --sleep 0.5 --statement-timeout 180
+# 3. Return freed TOAST to reusable space (VACUUM FULL is the separate windowed Tier-2 op).
+psql "$DB_URL" -c 'VACUUM (ANALYZE) warships_player;'
+```
+
+Metrics note: NULLing `battles_json` on currently-`enriched` inactive rows makes the next `reclassify_enrichment_status` re-bucket them as `skipped_inactive` — a correct-but-cosmetic shift in the enrichment health read, reversible on refetch. **Cadence is an open question** (manual one-shot vs a low-frequency Beat task) — left to the operator; no Beat schedule was added.
 
 ## Related
 
