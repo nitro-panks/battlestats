@@ -116,22 +116,49 @@ const MetricRow: React.FC<{ metric: ShipStatMetric; bracket: SkillBracket }> = (
         <div className="grid grid-cols-[60%_1fr] items-center gap-x-4 py-1.5">
             <div className="min-w-0">
                 <div className="text-xs text-[var(--text-muted)]">{label}</div>
-                {/* Comparison track: filled bar = the player; tick = the ship's
-                    30-day population average. */}
+                {/* Comparison track. The player's fill is one color up to the
+                    ship average, then switches (green when exceeding the average
+                    is good, red when it isn't) for the surplus beyond it — so the
+                    color change itself marks the average. A high-contrast tick
+                    with a panel-colored halo, extending past the bar, reinforces
+                    the average position in both light and dark mode. */}
                 <div
-                    className="relative mt-1 h-2 w-full overflow-hidden rounded-full"
-                    style={{ backgroundColor: 'var(--accent-faint)' }}
+                    className="relative mt-2 mb-1 h-2.5 w-full"
                     role="img"
                     aria-label={`${label}: you ${formatMetricValue(user, unit)}, average ${formatMetricValue(average, unit)}`}
                 >
                     <div
-                        className="absolute inset-y-0 left-0 rounded-full"
-                        style={{ width: `${userPct}%`, backgroundColor: 'var(--accent-secondary-mid)' }}
-                    />
+                        className="absolute inset-0 overflow-hidden rounded-full"
+                        style={{ backgroundColor: 'var(--accent-faint)' }}
+                    >
+                        {/* Fill up to the average (or to the player value if below). */}
+                        <div
+                            className="absolute inset-y-0 left-0"
+                            style={{
+                                width: `${avgPct == null ? userPct : Math.min(userPct, avgPct)}%`,
+                                backgroundColor: 'var(--accent-secondary-mid)',
+                            }}
+                        />
+                        {/* Surplus beyond the average, tone-coded by performance. */}
+                        {avgPct != null && userPct > avgPct ? (
+                            <div
+                                className="absolute inset-y-0"
+                                style={{
+                                    left: `${avgPct}%`,
+                                    width: `${userPct - avgPct}%`,
+                                    backgroundColor: better === 'high' ? TONE_GOOD : TONE_BAD,
+                                }}
+                            />
+                        ) : null}
+                    </div>
                     {avgPct != null ? (
                         <div
-                            className="absolute inset-y-[-2px] w-[2px]"
-                            style={{ left: `calc(${avgPct}% - 1px)`, backgroundColor: 'var(--text-strong)', opacity: 0.7 }}
+                            className="absolute top-[-3px] bottom-[-3px] w-[2px] rounded-full"
+                            style={{
+                                left: `calc(${avgPct}% - 1px)`,
+                                backgroundColor: 'var(--text-strong)',
+                                boxShadow: '0 0 0 1.5px var(--bg-surface)',
+                            }}
                             title={`Ship average: ${formatMetricValue(average, unit)}`}
                         />
                     ) : null}
