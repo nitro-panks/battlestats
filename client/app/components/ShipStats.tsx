@@ -227,7 +227,7 @@ const ShipStats: React.FC<ShipStatsProps> = ({
                     </div>
                     {state === 'ready' && payload ? (
                         <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                            Your career profile vs the {payload.window_days}-day server average
+                            {payload.window_days}d performance in Random battles
                             {payload.brackets[bracket].players > 0
                                 ? ` (${payload.brackets[bracket].players.toLocaleString()} captains, ${payload.brackets[bracket].battles.toLocaleString()} battles)`
                                 : ''}
