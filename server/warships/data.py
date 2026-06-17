@@ -6776,55 +6776,42 @@ def _ship_combat_safe_div(numerator, denominator):
 
 # Metric catalogue. `value(totals)` derives a per-battle rate or accuracy ratio
 # from a totals dict. `gate(pop)` (optional) returns False when the ship's
-# population does not meaningfully use that system → the metric is dropped.
-# `better` drives the frontend's above/below-average coloring.
+# population sample can't support the metric → it is dropped. `better` drives
+# the frontend's above/below-average coloring.
+#
+# RELIABILITY SCOPING (important): only metrics that PlayerDailyShipStats can
+# aggregate trustworthily across the population are surfaced. The original core
+# counters (battles / wins / frags / damage / xp / planes_killed) are complete
+# on every daily row, and accuracy RATIOS (hits / shots) self-normalize over the
+# rows that carry gunnery. The Phase-7 WIDENED per-battle counters — survival,
+# spotting, scouting, capture play — are captured on only a small fraction of
+# daily rows (~6% in spot checks), so their per-battle population averages are
+# badly biased and are intentionally NOT surfaced. A faithful comparison for
+# those needs a precomputed career-population aggregate from ships_stats_json
+# (the runbook's recommended full-coverage source) — tracked as a follow-up.
+_SHIP_COMBAT_MIN_SHOTS = 100  # accuracy ratios need a stable population sample
+
 _SHIP_COMBAT_METRICS = (
     dict(key='win_rate', label='Win rate', cluster='Outcomes', unit='%', better='high',
          value=lambda t: _ship_combat_safe_div(t['wins'] * 100.0, t['battles'])),
-    dict(key='survival_rate', label='Survival rate', cluster='Outcomes', unit='%', better='high',
-         value=lambda t: _ship_combat_safe_div(t['survived_battles'] * 100.0, t['battles'])),
-    dict(key='damage_pb', label='Damage', cluster='Damage & XP', unit='/battle', better='high',
+    dict(key='damage_pb', label='Damage', cluster='Combat output', unit='/battle', better='high',
          value=lambda t: _ship_combat_safe_div(t['damage'], t['battles'])),
-    dict(key='frags_pb', label='Frags', cluster='Damage & XP', unit='/battle', better='high',
+    dict(key='frags_pb', label='Frags', cluster='Combat output', unit='/battle', better='high',
          value=lambda t: _ship_combat_safe_div(t['frags'], t['battles'])),
-    dict(key='xp_pb', label='XP', cluster='Damage & XP', unit='/battle', better='high',
+    dict(key='xp_pb', label='XP', cluster='Combat output', unit='/battle', better='high',
          value=lambda t: _ship_combat_safe_div(t['xp'], t['battles'])),
-    dict(key='main_hit_rate', label='Main hit %', cluster='Main battery', unit='%', better='high',
-         gate=lambda p: p['main_shots'] > 0,
-         value=lambda t: _ship_combat_safe_div(t['main_hits'] * 100.0, t['main_shots'])),
-    dict(key='main_frags_pb', label='Main frags', cluster='Main battery', unit='/battle', better='high',
-         gate=lambda p: p['main_shots'] > 0,
-         value=lambda t: _ship_combat_safe_div(t['main_frags'], t['battles'])),
-    dict(key='secondary_hit_rate', label='Secondary hit %', cluster='Secondaries', unit='%', better='high',
-         gate=lambda p: p['secondary_shots'] > 0,
-         value=lambda t: _ship_combat_safe_div(t['secondary_hits'] * 100.0, t['secondary_shots'])),
-    dict(key='secondary_frags_pb', label='Secondary frags', cluster='Secondaries', unit='/battle', better='high',
-         gate=lambda p: p['secondary_shots'] > 0,
-         value=lambda t: _ship_combat_safe_div(t['secondary_frags'], t['battles'])),
-    dict(key='torpedo_hit_rate', label='Torpedo hit %', cluster='Torpedoes', unit='%', better='high',
-         gate=lambda p: p['torpedo_shots'] > 0,
-         value=lambda t: _ship_combat_safe_div(t['torpedo_hits'] * 100.0, t['torpedo_shots'])),
-    dict(key='torpedo_frags_pb', label='Torpedo frags', cluster='Torpedoes', unit='/battle', better='high',
-         gate=lambda p: p['torpedo_shots'] > 0,
-         value=lambda t: _ship_combat_safe_div(t['torpedo_frags'], t['battles'])),
-    dict(key='scouting_pb', label='Scouting damage', cluster='Spotting & support', unit='/battle', better='high',
-         gate=lambda p: p['damage_scouting'] > 0,
-         value=lambda t: _ship_combat_safe_div(t['damage_scouting'], t['battles'])),
-    dict(key='spotted_pb', label='Ships spotted', cluster='Spotting & support', unit='/battle', better='high',
-         gate=lambda p: p['ships_spotted'] > 0,
-         value=lambda t: _ship_combat_safe_div(t['ships_spotted'], t['battles'])),
-    dict(key='caps_pb', label='Capture points', cluster='Objective', unit='/battle', better='high',
-         gate=lambda p: (p['capture_points'] + p['team_capture_points']) > 0,
-         value=lambda t: _ship_combat_safe_div(t['capture_points'], t['battles'])),
-    dict(key='team_caps_pb', label='Team capture points', cluster='Objective', unit='/battle', better='high',
-         gate=lambda p: p['team_capture_points'] > 0,
-         value=lambda t: _ship_combat_safe_div(t['team_capture_points'], t['battles'])),
-    dict(key='dropped_caps_pb', label='Dropped capture points', cluster='Objective', unit='/battle', better='low',
-         gate=lambda p: (p['capture_points'] + p['team_capture_points']) > 0,
-         value=lambda t: _ship_combat_safe_div(t['dropped_capture_points'], t['battles'])),
-    dict(key='planes_pb', label='Planes killed', cluster='Anti-air', unit='/battle', better='high',
+    dict(key='planes_pb', label='Planes killed', cluster='Combat output', unit='/battle', better='high',
          gate=lambda p: p['planes_killed'] > 0,
          value=lambda t: _ship_combat_safe_div(t['planes_killed'], t['battles'])),
+    dict(key='main_hit_rate', label='Main battery hit %', cluster='Accuracy', unit='%', better='high',
+         gate=lambda p: p['main_shots'] >= _SHIP_COMBAT_MIN_SHOTS,
+         value=lambda t: _ship_combat_safe_div(t['main_hits'] * 100.0, t['main_shots'])),
+    dict(key='secondary_hit_rate', label='Secondary hit %', cluster='Accuracy', unit='%', better='high',
+         gate=lambda p: p['secondary_shots'] >= _SHIP_COMBAT_MIN_SHOTS,
+         value=lambda t: _ship_combat_safe_div(t['secondary_hits'] * 100.0, t['secondary_shots'])),
+    dict(key='torpedo_hit_rate', label='Torpedo hit %', cluster='Accuracy', unit='%', better='high',
+         gate=lambda p: p['torpedo_shots'] >= _SHIP_COMBAT_MIN_SHOTS,
+         value=lambda t: _ship_combat_safe_div(t['torpedo_hits'] * 100.0, t['torpedo_shots'])),
 )
 
 

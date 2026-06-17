@@ -6,6 +6,7 @@ import wrColor from '../lib/wrColor';
 import { chartColors } from '../lib/chartTheme';
 import { useTheme } from '../context/ThemeContext';
 import { trackEvent } from '../lib/umami';
+import ShipStats from './ShipStats';
 
 interface BattleHistoryByShip {
     ship_id: number;
@@ -645,6 +646,11 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const [userPickedWindow, setUserPickedWindow] = useState(false);
     const [mode, setMode] = useState<Mode>('random');
     const [userPickedMode, setUserPickedMode] = useState(false);
+    // Ship selected in the table → its combat profile (ShipStats) shows below
+    // the rollup separator. Clicking the same row again clears it (toggle).
+    const [selectedShip, setSelectedShip] = useState<{
+        ship_id: number; ship_name: string; ship_tier: number | null; ship_type: string | null;
+    } | null>(null);
     const { theme } = useTheme();
     const palette = chartColors[theme];
 
@@ -788,6 +794,25 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             : DEFAULT_DIRECTION[key];
         setSort({ key, direction });
         trackEvent('battle-history-sort', { key, direction, mode, window });
+    };
+
+    // Toggle the ShipStats combat panel for a table row. Clicking the already-
+    // selected ship hides it; clicking a different ship switches to it.
+    const toggleShip = (row: {
+        ship_id: number; ship_name: string; ship_tier?: number | null; ship_type?: string | null;
+    }) => {
+        const isOpening = !selectedShip || selectedShip.ship_id !== row.ship_id;
+        setSelectedShip(isOpening
+            ? {
+                ship_id: row.ship_id,
+                ship_name: row.ship_name,
+                ship_tier: row.ship_tier ?? null,
+                ship_type: row.ship_type ?? null,
+            }
+            : null);
+        if (isOpening) {
+            trackEvent('ship-stats-open', { ship_id: row.ship_id, mode, window, realm });
+        }
     };
 
     const visibleByShip = useMemo(() => {
@@ -1020,6 +1045,20 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     </div>
                 );
             })()}
+            {/* Combat profile for the ship selected in the table below. Sits
+                between the stats rollup and the ships table; toggled by row
+                clicks (a second click on the same ship hides it). */}
+            {hasBattles && selectedShip ? (
+                <ShipStats
+                    playerName={playerName}
+                    realm={realm}
+                    shipId={selectedShip.ship_id}
+                    shipName={selectedShip.ship_name}
+                    shipTier={selectedShip.ship_tier}
+                    shipType={selectedShip.ship_type}
+                    onClose={() => setSelectedShip(null)}
+                />
+            ) : null}
             {/* Embedded in the Activity tab the card has the whole panel to grow
                 into, so give the table a tall cap (800px) instead of the short
                 60vh box — more ship rows show before the inner scroll kicks in.
@@ -1043,10 +1082,21 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         {visibleByShip.map((row) => (
                             <tr
                                 key={row.ship_id}
-                                className="border-b border-[var(--accent-faint)] last:border-b-0"
+                                onClick={() => toggleShip(row)}
+                                className={`cursor-pointer border-b border-[var(--accent-faint)] transition-colors last:border-b-0 hover:bg-[var(--accent-faint)] ${selectedShip?.ship_id === row.ship_id ? 'bg-[var(--accent-faint)]' : ''}`}
                             >
                                 <td className="py-1.5 pr-2 text-[var(--text-strong)]">
-                                    {row.ship_name || `Ship ${row.ship_id}`}
+                                    {/* Real button on the name keeps the row keyboard-
+                                        accessible without overriding the <tr> row role. */}
+                                    <button
+                                        type="button"
+                                        onClick={(event) => { event.stopPropagation(); toggleShip(row); }}
+                                        aria-expanded={selectedShip?.ship_id === row.ship_id}
+                                        aria-label={`Toggle combat profile for ${row.ship_name || `Ship ${row.ship_id}`}`}
+                                        className="text-left font-medium text-[var(--text-strong)] underline-offset-2 hover:underline"
+                                    >
+                                        {row.ship_name || `Ship ${row.ship_id}`}
+                                    </button>
                                 </td>
                                 <td className="py-1.5 px-2 text-center tabular-nums text-[var(--text-muted)]">
                                     {row.ship_tier ?? '—'}
