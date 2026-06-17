@@ -654,6 +654,31 @@
                 "queue-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-interactive-refresh-lane-2026-06-17.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "interactive refresh lane",
+                "player refresh queue lane",
+                "on-visit refresh contention",
+                "move core refresh to hydration"
+            ],
+            "tags": [
+                "celery",
+                "queues",
+                "hydration",
+                "observation-floor",
+                "player-refresh",
+                "latency",
+                "contention"
+            ],
+            "archive_on": [
+                "routing-slice-landed"
+            ]
+        },
         "agents/runbooks/ops-env-reference.md": {
             "kind": "runbook",
             "status": "active",
