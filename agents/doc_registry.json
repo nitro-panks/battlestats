@@ -386,6 +386,32 @@
                 "combat-profile-features-shipped-or-direction-abandoned"
             ]
         },
+        "agents/runbooks/runbook-top-random-battle-players-2026-06-16.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "reference",
+            "owner": "platform",
+            "aliases": [
+                "top players by random battles",
+                "highest battle count players",
+                "most battles per realm",
+                "featured player pool",
+                "high-volume accounts snapshot"
+            ],
+            "tags": [
+                "leaderboard",
+                "player data",
+                "pvp_battles",
+                "snapshot",
+                "featured players",
+                "realm",
+                "reference"
+            ],
+            "archive_on": [
+                "snapshot-superseded-by-a-fresher-run"
+            ]
+        },
         "agents/runbooks/runbook-api-surface.md": {
             "kind": "runbook",
             "status": "active",
