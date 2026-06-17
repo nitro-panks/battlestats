@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
-import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
@@ -533,6 +532,23 @@ const isRandomsTimestampStale = (timestamp: string | null): boolean => {
     return Date.now() - updatedAt > RANDOMS_STALE_THRESHOLD_MS;
 };
 
+// Last successfully-applied randoms payload per player+realm, kept at module
+// scope so switching tabs (which UNMOUNTS this component) and returning paints
+// the prior result instantly instead of flashing empty. The fetch below uses
+// ttlMs:0 so it never re-serves a STALE client-cached payload on remount — it
+// always re-reads the freshest stored data from the server (cache-first, fast)
+// and the rehydrate ladder still picks up a pending Celery refresh. This map is
+// purely for instant paint; the network read is the source of truth.
+const lastRandomsByKey = new Map<string, { rows: RandomsRow[]; updatedAt: string | null }>();
+
+const deriveRandomsSelections = (rows: RandomsRow[]): { types: string[]; tiers: number[] } => {
+    const types = Array.from(new Set(rows.map((r) => r.ship_type)));
+    const tiers = Array.from(new Set(rows.map((r) => r.ship_tier)))
+        .filter((tier) => tier >= 5)
+        .sort((a, b) => b - a);
+    return { types, tiers };
+};
+
 const RandomsSVG: React.FC<RandomsSVGProps> = ({
     playerId,
     isLoading = false,
@@ -540,11 +556,16 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     theme = 'light',
 }) => {
     const { realm } = useRealm();
-    const [allShips, setAllShips] = useState<RandomsRow[]>([]);
-    const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
-    const [selectedTiers, setSelectedTiers] = useState<number[]>([]);
-    const [isChartLoading, setIsChartLoading] = useState(true);
-    const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(null);
+    // Seed from the module-scope cache so a tab-switch return repaints the prior
+    // (already-fresh) result instantly instead of flashing a loader or showing
+    // the stale-then-corrected ladder again.
+    const seeded = lastRandomsByKey.get(`${playerId}:${realm}`) ?? null;
+    const seededSelections = seeded ? deriveRandomsSelections(seeded.rows) : null;
+    const [allShips, setAllShips] = useState<RandomsRow[]>(() => seeded?.rows ?? []);
+    const [selectedTypes, setSelectedTypes] = useState<string[]>(() => seededSelections?.types ?? []);
+    const [selectedTiers, setSelectedTiers] = useState<number[]>(() => seededSelections?.tiers ?? []);
+    const [isChartLoading, setIsChartLoading] = useState(() => seeded === null);
+    const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(() => seeded?.updatedAt ?? null);
     const [hoveredShip, setHoveredShip] = useState<RandomsRow | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -552,6 +573,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     useEffect(() => {
         let cancelled = false;
         let rehydrateTimeout: ReturnType<typeof setTimeout> | null = null;
+        // If we seeded from the last result, keep showing it during the
+        // background re-read instead of flipping back to the loader.
+        const hasSeed = lastRandomsByKey.has(`${playerId}:${realm}`);
 
         const applyResult = (data: unknown, updatedAt: string | null) => {
             const result = normalizeRandomsRows(data)
@@ -560,16 +584,16 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             setAllShips(result);
             setRandomsUpdatedAt(updatedAt);
 
-            const types = Array.from(new Set(result.map((r) => r.ship_type)));
-            const tiers = Array.from(new Set(result.map((r) => r.ship_tier)))
-                .filter((tier) => tier >= 5)
-                .sort((a, b) => b - a);
+            const { types, tiers } = deriveRandomsSelections(result);
             setSelectedTypes(types);
             setSelectedTiers(tiers);
+
+            // Persist for instant repaint on the next mount (tab-switch return).
+            lastRandomsByKey.set(`${playerId}:${realm}`, { rows: result, updatedAt });
         };
 
         const fetchRandoms = async (attempt: number) => {
-            if (attempt === 0) {
+            if (attempt === 0 && !hasSeed) {
                 setIsChartLoading(true);
             }
 
@@ -577,7 +601,12 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 const { data, headers } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/randoms_data/${playerId}/?all=true`, realm), {
                     label: `Randoms data ${playerId}`,
                     responseHeaders: ['X-Randoms-Updated-At'],
-                    ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                    // ttlMs:0 — no settled client cache. A stale payload cached on
+                    // first view must never be re-served on a tab-switch remount;
+                    // we always re-read the freshest stored data from the (fast,
+                    // cache-first) server. Instant paint is handled by the module
+                    // cache seed above; in-flight dedup still prevents dup fetches.
+                    ttlMs: 0,
                     cacheKey: `randoms:${playerId}:${attempt}`,
                 });
 

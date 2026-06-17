@@ -115,4 +115,37 @@ describe('RandomsSVG tier filters', () => {
         expect(screen.getByRole('button', { name: 'T5' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.queryByRole('button', { name: 'T4' })).not.toBeInTheDocument();
     });
+
+    it('repaints the prior result instantly on remount (tab-switch return), without waiting on a fetch', async () => {
+        const okResponse = {
+            ok: true,
+            headers: {
+                get: (name: string) => {
+                    if (name.toLowerCase() === 'content-type') return 'application/json';
+                    if (name === 'X-Randoms-Updated-At') return '2026-03-19T00:00:00Z';
+                    return null;
+                },
+            },
+            json: async () => ([
+                { ship_id: 2, ship_name: 'Tier Six Ship', ship_chart_name: 'Tier Six Ship', ship_tier: 6, ship_type: 'Cruiser', pvp_battles: 40, wins: 23, win_ratio: 0.575 },
+            ]),
+        };
+
+        // First mount resolves and populates the module-scope last-result cache.
+        mockFetch.mockResolvedValue(okResponse);
+        const { unmount } = render(<RandomsSVG playerId={909} />);
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'T6' })).toBeInTheDocument();
+        });
+
+        // Tab away → component unmounts.
+        unmount();
+
+        // Tab back: even if the network is now slow (pending), the prior result
+        // must paint immediately from the seed — no loading flash, no stale ladder.
+        mockFetch.mockImplementation(() => new Promise(() => { }));
+        render(<RandomsSVG playerId={909} />);
+        expect(screen.getByRole('button', { name: 'T6' })).toBeInTheDocument();
+        expect(screen.queryByText('Loading random battles...')).not.toBeInTheDocument();
+    });
 });
