@@ -993,6 +993,9 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 key={m}
                                 type="button"
                                 onClick={() => {
+                                    if (m !== mode) {
+                                        trackEvent('battle-history-mode', { mode: m, window, realm });
+                                    }
                                     setMode(m);
                                     setUserPickedMode(true);
                                 }}

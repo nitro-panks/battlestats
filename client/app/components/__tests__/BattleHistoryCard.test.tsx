@@ -475,6 +475,9 @@ describe('BattleHistoryCard', () => {
         await waitFor(() => {
             expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
         });
+        // Picking a different mode emits a battle-history-mode umami event.
+        expect(mockTrackEvent).toHaveBeenCalledWith(
+            'battle-history-mode', expect.objectContaining({ mode: 'ranked', realm: 'na' }));
     });
 
     test('clicking each visible window pill refetches with the matching ?window= param', async () => {

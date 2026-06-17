@@ -314,6 +314,28 @@ describe('PlayerSearch landing (Best-only)', () => {
         expect(within(nonExpertRow).queryByText('Σ')).not.toBeInTheDocument();
     });
 
+    it('fires landing-player-click when a landing player row is clicked', async () => {
+        render(<PlayerSearch />);
+        const row = await screen.findByRole('button', { name: /Show player BestPlayer/i });
+        trackEventMock.mockReset();
+
+        fireEvent.click(row);
+
+        expect(trackEventMock).toHaveBeenCalledWith(
+            'landing-player-click', expect.objectContaining({ realm: expect.any(String) }));
+    });
+
+    it('fires landing-clan-click when a landing clan row is clicked', async () => {
+        render(<PlayerSearch />);
+        const row = await screen.findByRole('button', { name: /Show clan ClanAlpha/i });
+        trackEventMock.mockReset();
+
+        fireEvent.click(row);
+
+        expect(trackEventMock).toHaveBeenCalledWith(
+            'landing-clan-click', expect.objectContaining({ realm: expect.any(String) }));
+    });
+
     it('shows Best as the only player filter with no Recent toggle and fetches best players on mount', async () => {
         render(<PlayerSearch />);
 

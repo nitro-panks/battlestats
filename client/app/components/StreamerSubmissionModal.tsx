@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from 'react';
+import { trackEvent } from '../lib/umami';
 
 interface StreamerSubmissionModalProps {
     open: boolean;
@@ -79,6 +80,7 @@ const StreamerSubmissionModal: React.FC<StreamerSubmissionModalProps> = ({ open,
                 }),
             });
             if (res.status === 201) {
+                trackEvent('streamer-submit', { status: 'success' });
                 setState('success');
                 return;
             }
@@ -95,13 +97,16 @@ const StreamerSubmissionModal: React.FC<StreamerSubmissionModalProps> = ({ open,
                 }
                 setFieldErrors(errs);
                 setGenericError(errs.non_field_errors || 'Please correct the errors below.');
+                trackEvent('streamer-submit', { status: 'invalid' });
                 setState('error');
                 return;
             }
             setGenericError('Something went wrong. Please try again later.');
+            trackEvent('streamer-submit', { status: 'error' });
             setState('error');
         } catch {
             setGenericError('Network error. Please try again.');
+            trackEvent('streamer-submit', { status: 'error' });
             setState('error');
         }
     };

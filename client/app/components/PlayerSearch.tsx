@@ -367,6 +367,7 @@ const PlayerSearch: React.FC = () => {
     }, [fetchPlayerByName]);
 
     const handleSelectClan = useCallback((clan: LandingClan) => {
+        trackEvent('landing-clan-click', { realm });
         router.push(buildClanPath(clan.clan_id, clan.name || clan.tag, realm));
     }, [router, realm]);
 
@@ -385,6 +386,14 @@ const PlayerSearch: React.FC = () => {
     const handleSelectMember = useCallback(async (memberName: string) => {
         router.push(buildPlayerPath(memberName, realm));
     }, [router, realm]);
+
+    // Landing player-board picks (grid + chart) are a distinct funnel step from
+    // clan-roster member clicks (tracked in ClanMembers), so they get their own
+    // event rather than living inside the shared handleSelectMember.
+    const handleSelectLandingPlayer = useCallback((memberName: string) => {
+        trackEvent('landing-player-click', { realm });
+        void handleSelectMember(memberName);
+    }, [handleSelectMember, realm]);
 
     useEffect(() => {
         const query = typeof window !== 'undefined'
@@ -536,14 +545,14 @@ const PlayerSearch: React.FC = () => {
                             <div className="mt-1 max-w-[964px]">
                                 <LandingPlayerSVG
                                     players={visibleLandingPlayers}
-                                    onSelectPlayer={(player) => handleSelectMember(player.name)}
+                                    onSelectPlayer={(player) => handleSelectLandingPlayer(player.name)}
                                     theme={theme}
                                     sort={playerBestSort}
                                 />
                             </div>
                             <PlayerNameGrid
                                 players={visibleLandingPlayers}
-                                onSelectMember={handleSelectMember}
+                                onSelectMember={handleSelectLandingPlayer}
                                 ariaLabelPrefix="Show"
                                 realm={realm}
                             />

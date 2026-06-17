@@ -11,6 +11,8 @@ import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import TopShipBadges from './TopShipBadges';
 import wrColor from '../lib/wrColor';
 import { useFlipAnimation } from './useFlipAnimation';
+import { trackEvent } from '../lib/umami';
+import { useRealm } from '../context/RealmContext';
 
 interface ClanMembersProps {
     members: ClanMemberData[];
@@ -87,6 +89,14 @@ const MemberContent: React.FC<MemberContentProps> = ({ member, layout, onSelectM
 };
 
 const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layout = 'inline', loading = false, error = '' }) => {
+    const { realm } = useRealm();
+    // One attach point for clan-roster member clicks: this leaf renders the
+    // roster on both the clan page and the player page's clan section, so
+    // tracking here covers both without double-counting the landing player grid.
+    const handleSelectMember = useCallback((memberName: string) => {
+        trackEvent('clan-member-click', { realm });
+        onSelectMember(memberName);
+    }, [onSelectMember, realm]);
     const pendingEfficiencyCount = members.filter((member) => member.efficiency_hydration_pending).length;
     const isWarmingEfficiencyRanks = pendingEfficiencyCount > 0;
 
@@ -115,11 +125,11 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                     {members.map((member) => (
                         layout === 'stacked' ? (
                             <div key={member.name} ref={makeRowRef(member.name)} className="will-change-transform">
-                                <MemberContent member={member} layout={layout} onSelectMember={onSelectMember} />
+                                <MemberContent member={member} layout={layout} onSelectMember={handleSelectMember} />
                             </div>
                         ) : (
                             <React.Fragment key={member.name}>
-                                <MemberContent member={member} layout={layout} onSelectMember={onSelectMember} />
+                                <MemberContent member={member} layout={layout} onSelectMember={handleSelectMember} />
                             </React.Fragment>
                         )
                     ))}

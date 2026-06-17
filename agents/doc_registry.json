@@ -225,6 +225,30 @@
                 "umami-v3-migration"
             ]
         },
+        "agents/runbooks/runbook-umami-analytics-coverage-2026-06-17.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "product",
+            "aliases": [
+                "umami event coverage",
+                "umami custom events",
+                "analytics coverage audit",
+                "what users use vs ignore",
+                "umami event inventory"
+            ],
+            "tags": [
+                "umami",
+                "analytics",
+                "events",
+                "frontend",
+                "instrumentation"
+            ],
+            "archive_on": [
+                "umami-event-coverage-tranche-closed"
+            ]
+        },
         "agents/runbooks/runbook-wg-rate-limiter-token-bucket-2026-06-05.md": {
             "kind": "runbook",
             "status": "active",
