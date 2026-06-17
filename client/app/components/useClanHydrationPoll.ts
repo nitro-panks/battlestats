@@ -9,7 +9,7 @@ interface UseClanHydrationPollArgs {
     intervalMs: number;
 }
 
-export const useClanHydrationPoll = ({
+const useClanHydrationPoll = ({
     playerData,
     fetchPlayerByName,
     setPlayerData,

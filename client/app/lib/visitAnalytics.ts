@@ -1,4 +1,4 @@
-export type EntityType = 'player' | 'clan';
+type EntityType = 'player' | 'clan';
 
 interface TrackEntityDetailViewInput {
     entityType: EntityType;

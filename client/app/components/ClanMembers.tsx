@@ -8,7 +8,7 @@ import PveEnjoyerIcon from './PveEnjoyerIcon';
 import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
-import TopShipIcon from './TopShipIcon';
+import TopShipBadges from './TopShipBadges';
 import wrColor from '../lib/wrColor';
 import { useFlipAnimation } from './useFlipAnimation';
 
@@ -56,9 +56,7 @@ const MemberContent: React.FC<MemberContentProps> = ({ member, layout, onSelectM
                 {member.is_ranked_player && <RankedPlayerIcon league={member.highest_ranked_league} size="inline" />}
                 {member.is_clan_battle_player && <ClanBattleShieldIcon winRate={member.clan_battle_win_rate} size="inline" />}
                 {efficiencyRankTier === 'E' ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={member.efficiency_rank_percentile} populationSize={member.efficiency_rank_population_size} size="inline" /> : null}
-                {(member.ship_badges ?? []).slice(0, 3).map((b) => (
-                    <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} tier={b.tier} realm={member.realm} size="inline" />
-                ))}
+                <TopShipBadges badges={member.ship_badges} realm={member.realm} size="inline" />
                 <span className="text-xs font-normal text-[var(--text-secondary)]">{formatRecency(member.days_since_last_battle)}</span>
             </span>
         );
@@ -82,9 +80,7 @@ const MemberContent: React.FC<MemberContentProps> = ({ member, layout, onSelectM
             {member.is_ranked_player && <RankedPlayerIcon league={member.highest_ranked_league} size="inline" />}
             {member.is_clan_battle_player && <ClanBattleShieldIcon winRate={member.clan_battle_win_rate} size="inline" />}
             {efficiencyRankTier === 'E' ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={member.efficiency_rank_percentile} populationSize={member.efficiency_rank_population_size} size="inline" /> : null}
-            {(member.ship_badges ?? []).slice(0, 3).map((b) => (
-                <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} tier={b.tier} realm={member.realm} size="inline" />
-            ))}
+            <TopShipBadges badges={member.ship_badges} realm={member.realm} size="inline" />
             <span className="text-xs font-normal text-[var(--text-secondary)]">{formatRecency(member.days_since_last_battle)}</span>
         </button>
     );

@@ -8,7 +8,6 @@ import { withRealm } from '../lib/realmParams';
 interface RandomsSVGProps {
     playerId: number;
     isLoading?: boolean;
-    design?: RandomsChartDesign;
     theme?: ChartTheme;
 }
 
@@ -31,10 +30,7 @@ const normalizeRandomsRows = (data: unknown): RandomsRow[] => {
     return [];
 };
 
-type RandomsChartDesign = 'design1' | 'design2';
-
-const DEFAULT_RANDOMS_DESIGN: RandomsChartDesign = 'design1';
-// Per-row slot height for the scrollable design1 bar list. ~22px keeps each bar
+// Per-row slot height for the scrollable bar list. ~22px keeps each bar
 // at roughly the same density the old fixed-height (top-20) chart rendered at.
 const RANDOMS_ROW_HEIGHT_PX = 22;
 // Visible height of the scroll viewport; taller ship lists scroll within this.
@@ -45,11 +41,8 @@ const RANDOMS_CHART_MAX_VIEWPORT_PX = 800;
 // collapsing to a 1px sliver on the linear scale. The wins overlay stays a true
 // fraction of this (possibly floored) width, so win rate reads correctly.
 const RANDOMS_MIN_BAR_PX = 6;
-const WR_BREAKPOINTS = [45, 50, 52, 54, 56, 60, 65];
 const RANDOMS_CHART_SHIFT_RIGHT_PX = 15;
 const RANDOMS_CHART_RIGHT_EXTENSION_PX = 10;
-const RANDOMS_BAR_HEIGHT_INCREASE_PX = 2;
-const RANDOMS_CHART_HEIGHT_INCREASE_PX = 100;
 
 const selectRandomsColorByWr = (winRatio: number, theme: ChartTheme): string => {
     const colors = chartColors[theme];
@@ -62,25 +55,6 @@ const selectRandomsColorByWr = (winRatio: number, theme: ChartTheme): string => 
     if (winRatio >= 0.45) return colors.wrAverage;
     if (winRatio >= 0.40) return colors.wrBelowAvg;
     return colors.wrBad;
-};
-
-const selectShipTypeColor = (shipType: string, theme: ChartTheme): string => {
-    const colors = chartColors[theme];
-    switch (shipType) {
-        case 'Destroyer':
-            return colors.shipDD;
-        case 'Cruiser':
-            return colors.shipCA;
-        case 'Battleship':
-            return colors.shipBB;
-        case 'AirCarrier':
-        case 'Carrier':
-            return colors.shipCV;
-        case 'Submarine':
-            return colors.shipSS;
-        default:
-            return colors.shipDefault;
-    }
 };
 
 const drawBattlePlotDesign1 = (
@@ -262,259 +236,6 @@ const drawBattlePlotDesign1 = (
         });
 };
 
-const drawBattlePlotDesign2 = (containerElement: HTMLDivElement, data: RandomsRow[], theme: ChartTheme) => {
-    const colors = chartColors[theme];
-    const margin = { top: 30, right: 22, bottom: 36, left: 57 };
-    const width = 620 - margin.left - margin.right;
-    const height = (360 + RANDOMS_CHART_HEIGHT_INCREASE_PX) - margin.top - margin.bottom;
-
-    const svg = d3.select(containerElement)
-        .append('svg')
-        .attr('width', width + margin.left + margin.right)
-        .attr('height', height + margin.top + margin.bottom)
-        .append('g')
-        .attr('transform', `translate(${margin.left}, ${margin.top})`);
-
-    const winRates = data.map((datum) => datum.win_ratio * 100);
-    const battleCounts = data.map((datum) => datum.pvp_battles);
-    const wins = data.map((datum) => datum.wins);
-    const xMin = Math.max(35, Math.floor((d3.min(winRates) ?? 40) - 2));
-    const xMax = Math.min(80, Math.ceil((d3.max(winRates) ?? 65) + 2));
-    const yMax = Math.max(d3.max(battleCounts) ?? 20, 20);
-
-    const x = d3.scaleLinear()
-        .domain([xMin, xMax])
-        .range([0, width]);
-
-    const y = d3.scaleLog()
-        .domain([1, yMax * 1.15])
-        .range([height, 0]);
-
-    const radius = d3.scaleSqrt()
-        .domain([0, Math.max(d3.max(wins) ?? 1, 1)])
-        .range([4, 17]);
-
-    svg.append('g')
-        .attr('class', 'randoms-x-grid')
-        .attr('transform', `translate(0, ${height})`)
-        .call(d3.axisBottom(x).ticks(8).tickSize(-height).tickFormat(() => ''));
-
-    svg.select('.randoms-x-grid')?.select('.domain')?.remove();
-    svg.selectAll('.randoms-x-grid line')
-        .style('stroke', colors.gridLine)
-        .style('stroke-width', 1);
-
-    svg.append('g')
-        .attr('class', 'randoms-y-grid')
-        .call(d3.axisLeft(y).tickValues([1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter((value) => value <= yMax * 1.15)).tickSize(-width).tickFormat(() => ''));
-
-    svg.select('.randoms-y-grid')?.select('.domain')?.remove();
-    svg.selectAll('.randoms-y-grid line')
-        .style('stroke', colors.gridLine)
-        .style('stroke-width', 1);
-
-    WR_BREAKPOINTS
-        .filter((breakpoint) => breakpoint >= xMin && breakpoint <= xMax)
-        .forEach((breakpoint) => {
-            svg.append('line')
-                .attr('x1', x(breakpoint))
-                .attr('x2', x(breakpoint))
-                .attr('y1', 0)
-                .attr('y2', height)
-                .attr('stroke', selectRandomsColorByWr(breakpoint / 100, theme))
-                .attr('stroke-width', 1)
-                .attr('opacity', 0.18);
-        });
-
-    svg.append('g')
-        .attr('transform', `translate(0, ${height})`)
-        .style('color', colors.labelMuted)
-        .call(d3.axisBottom(x).ticks(8).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
-        .selectAll('text')
-        .style('font-size', '10px');
-
-    svg.append('g')
-        .style('color', colors.labelMuted)
-        .call(d3.axisLeft(y).tickValues([1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000].filter((value) => value <= yMax * 1.15)).tickFormat((value: number) => d3.format(',')(value)).tickSizeOuter(0))
-        .selectAll('text')
-        .style('font-size', '10px');
-
-    svg.append('text')
-        .attr('x', width / 2)
-        .attr('y', height + 32)
-        .attr('text-anchor', 'middle')
-        .style('fill', colors.labelMuted)
-        .style('font-size', '10px')
-        .text('Ship win rate');
-
-    svg.append('text')
-        .attr('transform', 'rotate(-90)')
-        .attr('x', -height / 2)
-        .attr('y', -38)
-        .attr('text-anchor', 'middle')
-        .style('fill', colors.labelMuted)
-        .style('font-size', '10px')
-        .text('Random battles played');
-
-    const summaryGroup = svg.append('g').attr('transform', `translate(${Math.max(0, width - 168)}, 0)`);
-    summaryGroup.append('text')
-        .attr('x', 0)
-        .attr('y', 0)
-        .style('font-size', '11px')
-        .style('font-weight', '700')
-        .style('fill', colors.labelMid)
-        .text('Design 2');
-    summaryGroup.append('text')
-        .attr('x', 0)
-        .attr('y', 14)
-        .style('font-size', '10px')
-        .style('fill', colors.labelMuted)
-        .text('x = win rate');
-    summaryGroup.append('text')
-        .attr('x', 0)
-        .attr('y', 28)
-        .style('font-size', '10px')
-        .style('fill', colors.labelMuted)
-        .text('y = battle volume');
-    summaryGroup.append('text')
-        .attr('x', 0)
-        .attr('y', 42)
-        .style('font-size', '10px')
-        .style('fill', colors.labelMuted)
-        .text('area = wins');
-    summaryGroup.append('text')
-        .attr('x', 0)
-        .attr('y', 56)
-        .style('font-size', '10px')
-        .style('fill', colors.labelMuted)
-        .text('fill = ship class');
-
-    const detailGroup = svg.append('g').attr('class', 'randoms-detail').attr('transform', 'translate(0, 0)');
-
-    const renderDetails = (datum: RandomsRow | null) => {
-        detailGroup.selectAll('*').remove();
-        if (!datum) {
-            return;
-        }
-
-        const lines = [
-            datum.ship_name,
-            `T${datum.ship_tier} ${datum.ship_type}`,
-            `${datum.pvp_battles.toLocaleString()} battles`,
-            `${datum.wins.toLocaleString()} wins`,
-            `${(datum.win_ratio * 100).toFixed(1)}% win rate`,
-        ];
-
-        lines.forEach((line, index) => {
-            detailGroup.append('text')
-                .attr('x', 0)
-                .attr('y', index * 14)
-                .style('font-size', index === 0 ? '11px' : '10px')
-                .style('font-weight', index === 0 ? '700' : '400')
-                .style('fill', index === 0 ? colors.labelStrong : colors.labelMid)
-                .text(line);
-        });
-
-        const textNode = detailGroup.node();
-        if (textNode) {
-            const bbox = textNode.getBBox();
-            detailGroup.insert('rect', 'text')
-                .attr('x', bbox.x - 8)
-                .attr('y', bbox.y - 6)
-                .attr('width', bbox.width + 16)
-                .attr('height', bbox.height + 12)
-                .attr('rx', 6)
-                .attr('fill', theme === 'dark' ? `${colors.surface}ee` : `${colors.surface}f0`)
-                .attr('stroke', colors.axisLine);
-        }
-    };
-
-    const points = svg.append('g')
-        .selectAll('circle')
-        .data(data)
-        .enter()
-        .append('circle')
-        .attr('cx', (datum: RandomsRow) => x(datum.win_ratio * 100))
-        .attr('cy', (datum: RandomsRow) => y(Math.max(1, datum.pvp_battles)))
-        .attr('r', (datum: RandomsRow) => radius(datum.wins))
-        .attr('fill', (datum: RandomsRow) => selectShipTypeColor(datum.ship_type, theme))
-        .attr('fill-opacity', 0.82)
-        .attr('stroke', (datum: RandomsRow) => selectRandomsColorByWr(datum.win_ratio, theme))
-        .attr('stroke-width', 1.5)
-        .style('cursor', 'default')
-        .on('mouseover', function (this: SVGCircleElement, _event: MouseEvent, datum: RandomsRow) {
-            d3.select(this)
-                .raise()
-                .transition()
-                .duration(80)
-                .attr('stroke-width', 2.5)
-                .attr('fill-opacity', 0.96);
-            renderDetails(datum);
-        })
-        .on('mouseout', function (this: SVGCircleElement, _event: MouseEvent, datum: RandomsRow) {
-            d3.select(this)
-                .transition()
-                .duration(80)
-                .attr('stroke-width', 1.5)
-                .attr('fill-opacity', 0.82);
-            renderDetails(null);
-        });
-
-    const labelledShips = [...data]
-        .sort((left, right) => right.pvp_battles - left.pvp_battles)
-        .slice(0, Math.min(8, data.length));
-
-    labelledShips.forEach((datum, index) => {
-        const pointX = x(datum.win_ratio * 100);
-        const pointY = y(Math.max(1, datum.pvp_battles));
-        const dx = pointX > width * 0.7 ? -10 : 10;
-        const dy = (index % 2 === 0 ? -12 : 14) + (index % 3 === 0 ? -4 : 0);
-        const anchor = dx < 0 ? 'end' : 'start';
-
-        svg.append('line')
-            .attr('x1', pointX)
-            .attr('x2', pointX + dx)
-            .attr('y1', pointY)
-            .attr('y2', pointY + dy)
-            .attr('stroke', colors.separator)
-            .attr('stroke-width', 1);
-
-        svg.append('text')
-            .attr('x', pointX + dx + (dx < 0 ? -2 : 2))
-            .attr('y', pointY + dy)
-            .attr('text-anchor', anchor)
-            .attr('dominant-baseline', 'middle')
-            .style('font-size', '10px')
-            .style('font-weight', '500')
-            .style('fill', colors.labelMid)
-            .text(datum.ship_chart_name);
-    });
-
-    const legendData = Array.from(new Set(data.map((datum) => datum.ship_type)));
-    const legend = svg.append('g').attr('transform', `translate(0, ${height + 8})`);
-    legendData.forEach((shipType, index) => {
-        const row = legend.append('g').attr('transform', `translate(${index * 94}, 0)`);
-        row.append('circle')
-            .attr('cx', 0)
-            .attr('cy', 0)
-            .attr('r', 4)
-            .attr('fill', selectShipTypeColor(shipType, theme));
-        row.append('text')
-            .attr('x', 8)
-            .attr('y', 3)
-            .style('font-size', '10px')
-            .style('fill', colors.labelMuted)
-            .text(shipType);
-    });
-
-    if (data.length > 0) {
-        renderDetails(data[0]);
-        points.filter((_datum: RandomsRow, index: number) => index === 0)
-            .attr('stroke-width', 2.5)
-            .attr('fill-opacity', 0.96);
-    }
-};
-
 const RANDOMS_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 const RANDOMS_REHYDRATE_DELAY_MS = 6_000;
 const RANDOMS_REHYDRATE_MAX_ATTEMPTS = 4;
@@ -552,7 +273,6 @@ const deriveRandomsSelections = (rows: RandomsRow[]): { types: string[]; tiers: 
 const RandomsSVG: React.FC<RandomsSVGProps> = ({
     playerId,
     isLoading = false,
-    design = DEFAULT_RANDOMS_DESIGN,
     theme = 'light',
 }) => {
     const { realm } = useRealm();
@@ -662,13 +382,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         d3.select(containerRef.current).selectAll("*").remove();
         setHoveredShip(null);
         if (chartData.length > 0) {
-            if (design === 'design1') {
-                drawBattlePlotDesign1(containerRef.current, chartData, theme, setHoveredShip);
-            } else {
-                drawBattlePlotDesign2(containerRef.current, chartData, theme);
-            }
+            drawBattlePlotDesign1(containerRef.current, chartData, theme, setHoveredShip);
         }
-    }, [chartData, design, theme]);
+    }, [chartData, theme]);
 
     const availableTypes = Array.from(new Set(allShips.map((row) => row.ship_type)));
     const availableTiers = Array.from(new Set(allShips.map((row) => row.ship_tier)))

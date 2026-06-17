@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, expandDomain, formatCompactCount, wrColorByPercent, type ChartTheme } from '../lib/chartTheme';
 import type { LandingPlayer } from './entityTypes';
 
 type PlayerBestSort = 'overall' | 'ranked' | 'efficiency' | 'wr' | 'cb';
@@ -21,33 +21,6 @@ interface PlotDatum extends LandingPlayer {
     plot_wr: number;
     plot_wins: number;
 }
-
-const expandDomain = (minValue: number, maxValue: number, paddingRatio: number, floor?: number, ceiling?: number): [number, number] => {
-    const span = Math.max(maxValue - minValue, 1);
-    const padding = span * paddingRatio;
-    const paddedMin = floor == null ? minValue - padding : Math.max(floor, minValue - padding);
-    const paddedMax = ceiling == null ? maxValue + padding : Math.min(ceiling, maxValue + padding);
-
-    if (paddedMin === paddedMax) {
-        return [paddedMin - 1, paddedMax + 1];
-    }
-
-    return [paddedMin, paddedMax];
-};
-
-const selectLandingPlayerColorByWR = (winRatio: number): string => {
-    if (winRatio > 65) return '#810c9e';
-    if (winRatio >= 60) return '#D042F3';
-    if (winRatio >= 56) return '#3182bd';
-    if (winRatio >= 54) return '#74c476';
-    if (winRatio >= 52) return '#a1d99b';
-    if (winRatio >= 50) return '#fed976';
-    if (winRatio >= 45) return '#fd8d3c';
-    if (winRatio >= 40) return '#e6550d';
-    return '#a50f15';
-};
-
-const formatCompactCount = (value: number): string => d3.format('~s')(value).replace('G', 'B');
 
 type Colors = typeof chartColors['light'];
 
@@ -245,7 +218,7 @@ const drawLandingPlayerChart = (
         .attr('cy', (datum: PlotDatum) => y(datum.plot_wr))
         .attr('r', 5.5)
         .style('cursor', onSelectPlayer ? 'pointer' : 'default')
-        .attr('fill', (datum: PlotDatum) => selectLandingPlayerColorByWR(datum.plot_wr))
+        .attr('fill', (datum: PlotDatum) => wrColorByPercent(datum.plot_wr))
         .attr('stroke', colors.axisLine)
         .attr('stroke-width', 1.25);
 
@@ -267,7 +240,7 @@ const drawLandingPlayerChart = (
             hideDetails();
             d3.select(this)
                 .classed('clan-dot-pulse', false)
-                .attr('fill', selectLandingPlayerColorByWR(datum.plot_wr));
+                .attr('fill', wrColorByPercent(datum.plot_wr));
         });
 };
 

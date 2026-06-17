@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { ClanMemberData } from './clanMembersShared';
 import { buildClanChartMemberActivitySignature } from './clanChartActivity';
-import { incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
@@ -317,62 +317,82 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
 
     const memberActivitySig = buildClanChartMemberActivitySignature(membersData ?? []);
 
-    // Fetch scatter data
+    // Fetch scatter data. Shares ClanSVG's `/api/fetch/clan_data` endpoint, so it
+    // routes through fetchSharedJson for the shared in-flight dedup + cache + chart-
+    // fetch counter (rather than a bare fetch that would double-pull the payload).
     useEffect(() => {
         let cancelled = false;
-        let chartSignalled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let pendingAttempts = 0;
 
-        const fetchPlotData = async () => {
-            chartSignalled = true;
-            incrementChartFetches();
-
-            for (let attempt = 0; attempt < FETCH_ATTEMPTS; attempt++) {
+        const requestPlotData = async (): Promise<{ data: PlotData[]; pending: boolean } | null> => {
+            for (let attempt = 0; attempt < FETCH_ATTEMPTS; attempt += 1) {
                 try {
-                    const response = await fetch(
-                        withRealm(`/api/fetch/clan_data/${clanId}:active`, realm),
-                    );
-                    if (!response.ok) throw new Error(`${response.status}`);
-                    const data = await response.json() as PlotData[];
-                    const pending = response.headers.get('X-Clan-Plot-Pending') === 'true';
-
-                    if (cancelled) return;
-                    setPlotData(data);
-                    setPlotError(false);
-
-                    if (pending) {
-                        for (let i = 0; i < PENDING_RETRY_LIMIT && !cancelled; i++) {
-                            await delayMs(PENDING_RETRY_DELAY);
-                            if (cancelled) return;
-                            const retry = await fetch(withRealm(`/api/fetch/clan_data/${clanId}:active`, realm));
-                            if (retry.ok) {
-                                const retryData = await retry.json() as PlotData[];
-                                if (!cancelled) setPlotData(retryData);
-                                if (retry.headers.get('X-Clan-Plot-Pending') !== 'true') break;
-                            }
-                        }
-                    }
-                    return;
+                    const payload = await fetchSharedJson<PlotData[]>(withRealm(`/api/fetch/clan_data/${clanId}:active`, realm), {
+                        label: 'Clan 3D plot data',
+                        ttlMs: 0,
+                        cacheKey: `clan-plot:${clanId}:${pendingAttempts}:${attempt}`,
+                        responseHeaders: ['X-Clan-Plot-Pending'],
+                    });
+                    return {
+                        data: payload.data,
+                        pending: payload.headers['X-Clan-Plot-Pending'] === 'true',
+                    };
                 } catch {
-                    if (cancelled) return;
-                    if (attempt < FETCH_ATTEMPTS - 1) await delayMs(FETCH_RETRY_DELAY);
+                    if (attempt + 1 < FETCH_ATTEMPTS) {
+                        await delayMs(FETCH_RETRY_DELAY);
+                        if (cancelled) return null;
+                        continue;
+                    }
                 }
             }
-            if (!cancelled) setPlotError(true);
+            return null;
         };
 
-        void fetchPlotData().finally(() => {
-            if (chartSignalled) {
-                chartSignalled = false;
+        let chartFetchSignalled = true;
+        incrementChartFetches();
+        const releaseChartSignal = () => {
+            if (chartFetchSignalled) {
+                chartFetchSignalled = false;
                 decrementChartFetches();
             }
-        });
+        };
+
+        let hasLoaded = false;
+
+        const loadPlotData = async () => {
+            timeoutId = null;
+            const result = await requestPlotData();
+            if (cancelled) return;
+
+            if (result === null) {
+                // Only surface an error on the initial load; a failed pending-retry
+                // keeps the already-rendered plot (matches the prior behavior).
+                if (!hasLoaded) {
+                    setPlotError(true);
+                }
+                releaseChartSignal();
+                return;
+            }
+
+            hasLoaded = true;
+            setPlotData(result.data);
+            setPlotError(false);
+
+            if (result.pending && pendingAttempts < PENDING_RETRY_LIMIT) {
+                pendingAttempts += 1;
+                timeoutId = setTimeout(() => { void loadPlotData(); }, PENDING_RETRY_DELAY);
+            } else {
+                releaseChartSignal();
+            }
+        };
+
+        void loadPlotData();
 
         return () => {
             cancelled = true;
-            if (chartSignalled) {
-                chartSignalled = false;
-                decrementChartFetches();
-            }
+            if (timeoutId) clearTimeout(timeoutId);
+            releaseChartSignal();
         };
     }, [clanId, realm]);
 

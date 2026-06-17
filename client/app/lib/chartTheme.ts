@@ -1,3 +1,5 @@
+import * as d3 from 'd3';
+
 export type ChartTheme = 'light' | 'dark';
 
 export const chartColors: Record<ChartTheme, {
@@ -166,3 +168,58 @@ export const chartColors: Record<ChartTheme, {
         accentMid: '#58a6ff',
     },
 };
+
+// Win-rate → color on the 0–1 ratio scale, using the light-theme win-rate
+// palette regardless of theme (these bands read identically in light/dark; see
+// the wr* tokens above). This is distinct from lib/wrColor.ts, which maps a
+// 0–100 percentage through an 8-band scale; keep the two separate.
+export const wrColorByRatio = (winRatio: number): string => {
+    if (winRatio > 0.65) return '#810c9e';
+    if (winRatio >= 0.60) return '#D042F3';
+    if (winRatio >= 0.56) return '#3182bd';
+    if (winRatio >= 0.54) return '#74c476';
+    if (winRatio >= 0.52) return '#a1d99b';
+    if (winRatio >= 0.50) return '#fed976';
+    if (winRatio >= 0.45) return '#fd8d3c';
+    if (winRatio >= 0.40) return '#e6550d';
+    return '#a50f15';
+};
+
+// Win-rate → color on the 0–100 percentage scale. Identical palette to
+// wrColorByRatio, just a different input scale (used by the landing scatters).
+export const wrColorByPercent = (winRatio: number): string => wrColorByRatio(winRatio / 100);
+
+// SI-compact integer formatting for axis ticks / counts, relabeling the SI
+// "giga" suffix (G) to "B" for billions (e.g. 1.2G → 1.2B).
+export const formatCompactCount = (value: number): string =>
+    d3.format('~s')(value).replace('G', 'B');
+
+// Pad a [min, max] data extent by paddingRatio of its span, optionally clamping
+// to a floor/ceiling, and guarantee a non-zero span. Shared by the landing
+// scatter charts for their axis domains.
+export const expandDomain = (
+    minValue: number,
+    maxValue: number,
+    paddingRatio: number,
+    floor?: number,
+    ceiling?: number,
+): [number, number] => {
+    const span = Math.max(maxValue - minValue, 1);
+    const padding = span * paddingRatio;
+    const paddedMin = floor == null ? minValue - padding : Math.max(floor, minValue - padding);
+    const paddedMax = ceiling == null ? maxValue + padding : Math.min(ceiling, maxValue + padding);
+
+    if (paddedMin === paddedMax) {
+        return [paddedMin - 1, paddedMax + 1];
+    }
+
+    return [paddedMin, paddedMax];
+};
+
+// Responsive chart width: clamp the container's measured width to [minWidth,
+// svgWidth], falling back to svgWidth when the container has not laid out yet.
+export const resolveChartWidth = (
+    clientWidth: number | null | undefined,
+    svgWidth: number,
+    minWidth = 280,
+): number => Math.min(svgWidth, Math.max(clientWidth || svgWidth, minWidth));

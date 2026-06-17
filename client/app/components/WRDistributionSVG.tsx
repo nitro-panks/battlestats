@@ -4,7 +4,7 @@ import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { getCorrelationTileBounds, getCorrelationTrendX } from './wrDistributionPayload';
-import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, resolveChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -391,7 +391,7 @@ const WRDistributionSVG: React.FC<WRDistributionProps> = ({
 
         const draw = () => {
             if (!cachedPayload) return;
-            const resolvedWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 280));
+            const resolvedWidth = resolveChartWidth(containerElement.clientWidth, svgWidth);
             drawChart(containerElement, cachedPayload, playerWR, playerSurvivalRate, resolvedWidth, svgHeight, colors);
         };
 

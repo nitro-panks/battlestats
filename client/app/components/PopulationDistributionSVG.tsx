@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { ChartTheme, chartColors } from '../lib/chartTheme';
+import { ChartTheme, chartColors, formatCompactCount, resolveChartWidth } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -102,8 +102,7 @@ const formatAxisTick = (payload: DistributionPayload, value: number): string => 
         return value % 1 === 0 ? `${value}` : value.toFixed(1);
     }
 
-    const compact = d3.format('~s')(value);
-    return compact.replace('G', 'B');
+    return formatCompactCount(value);
 };
 
 const uniqueSortedEdges = (bins: DistributionBin[]): number[] => Array.from(
@@ -681,7 +680,7 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
 
         const draw = () => {
             if (!cachedPrimary) return;
-            const resolvedWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 280));
+            const resolvedWidth = resolveChartWidth(containerElement.clientWidth, svgWidth);
             drawDistribution(
                 containerElement,
                 cachedPrimary,

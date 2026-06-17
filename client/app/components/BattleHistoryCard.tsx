@@ -7,7 +7,7 @@ import { chartColors } from '../lib/chartTheme';
 import { useTheme } from '../context/ThemeContext';
 import { trackEvent } from '../lib/umami';
 
-export interface BattleHistoryByShip {
+interface BattleHistoryByShip {
     ship_id: number;
     ship_name: string;
     ship_tier: number | null;
@@ -37,7 +37,7 @@ export interface BattleHistoryByDay {
     frags: number;
 }
 
-export interface BattleHistoryTotals {
+interface BattleHistoryTotals {
     battles: number;
     wins: number;
     losses: number;

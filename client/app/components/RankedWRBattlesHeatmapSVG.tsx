@@ -3,7 +3,7 @@ import wrColor from '../lib/wrColor';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, formatCompactCount, resolveChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { getRankedHeatmapTileBounds, getRankedHeatmapTrendX, getRankedHeatmapXDomain, type RankedHeatmapPayloadShape, type RankedHeatmapTile, type RankedHeatmapTrendPoint } from './rankedHeatmapPayload';
@@ -179,7 +179,7 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
         .tickValues(payload.x_ticks && payload.x_ticks.length
             ? (compact ? payload.x_ticks.filter((_: number, i: number) => i % 2 === 0) : payload.x_ticks)
             : undefined)
-        .tickFormat((value: unknown) => d3.format('~s')(Number(value)).replace('G', 'B'));
+        .tickFormat((value: unknown) => formatCompactCount(Number(value)));
 
     const yAxis = d3.axisLeft(y)
         .ticks(compact ? 4 : 6)
@@ -262,7 +262,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
         let cachedPayload: RankedWRBattlesPayload | null = null;
         let resizeFrame: number | null = null;
 
-        const resolveWidth = () => Math.min(svgWidth, Math.max(containerRef.current?.clientWidth || svgWidth, 280));
+        const resolveWidth = () => resolveChartWidth(containerRef.current?.clientWidth, svgWidth);
 
         const redraw = () => {
             if (cachedPayload && isMounted && containerRef.current) {

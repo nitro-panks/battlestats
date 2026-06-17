@@ -24,22 +24,22 @@ import LoadingPanel from './LoadingPanel';
 
 const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 'ClanDetail-ClanSVG'), {
     ssr: false,
-    loading: () => <LoadingPanel label="Loading clan chart..." minHeight={440} />,
+    loading: () => <LoadingPanel tone="muted" label="Loading clan chart..." minHeight={440} />,
 });
 
 const Clan3DSVG = dynamic(() => resilientDynamicImport(() => import('./Clan3DSVG'), 'ClanDetail-Clan3DSVG'), {
     ssr: false,
-    loading: () => <LoadingPanel label="Loading 3D clan chart..." minHeight={480} />,
+    loading: () => <LoadingPanel tone="muted" label="Loading 3D clan chart..." minHeight={480} />,
 });
 
 const ClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./ClanBattleSeasons'), 'ClanDetail-ClanBattleSeasons'), {
     ssr: false,
-    loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={240} />,
+    loading: () => <LoadingPanel tone="muted" label="Loading clan battle seasons..." minHeight={240} />,
 });
 
 const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMembers'), 'ClanDetail-ClanMembers'), {
     ssr: false,
-    loading: () => <LoadingPanel label="Loading clan members..." minHeight={96} />,
+    loading: () => <LoadingPanel tone="muted" label="Loading clan members..." minHeight={96} />,
 });
 
 const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember }) => {
@@ -189,7 +189,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
             <DeferredSection
                 className="mt-6 border-t border-[var(--border)] pt-4"
                 minHeight={96}
-                placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
+                placeholder={<LoadingPanel tone="muted" label="Preparing clan members..." minHeight={96} />}
             >
                 <div>
                     <ClanMembers members={members} loading={membersLoading} error={membersError} onSelectMember={onSelectMember} />
@@ -199,7 +199,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
             <DeferredSection
                 className="mt-8"
                 minHeight={240}
-                placeholder={<LoadingPanel label="Preparing clan battle seasons..." minHeight={240} />}
+                placeholder={<LoadingPanel tone="muted" label="Preparing clan battle seasons..." minHeight={240} />}
             >
                 <div>
                     <ClanBattleSeasons clanId={clan.clan_id} memberCount={clan.members_count} />

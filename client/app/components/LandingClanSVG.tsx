@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, expandDomain, formatCompactCount, wrColorByPercent, type ChartTheme } from '../lib/chartTheme';
 
 interface ClanDatum {
     clan_id: number;
@@ -13,7 +13,6 @@ interface ClanDatum {
 
 interface LandingClanSVGProps {
     clans: ClanDatum[];
-    heatmapClans?: ClanDatum[];
     onSelectClan?: (clan: ClanDatum) => void;
     svgHeight?: number;
     theme?: ChartTheme;
@@ -29,33 +28,6 @@ interface PlotDatum {
     total_battles: number;
     total_wins: number;
 }
-
-const expandDomain = (minValue: number, maxValue: number, paddingRatio: number, floor?: number, ceiling?: number): [number, number] => {
-    const span = Math.max(maxValue - minValue, 1);
-    const padding = span * paddingRatio;
-    const paddedMin = floor == null ? minValue - padding : Math.max(floor, minValue - padding);
-    const paddedMax = ceiling == null ? maxValue + padding : Math.min(ceiling, maxValue + padding);
-
-    if (paddedMin === paddedMax) {
-        return [paddedMin - 1, paddedMax + 1];
-    }
-
-    return [paddedMin, paddedMax];
-};
-
-const selectLandingClanColorByWR = (winRatio: number, colors: typeof chartColors.light): string => {
-    if (winRatio > 65) return colors.wrElite;
-    if (winRatio >= 60) return colors.wrSuperUnicum;
-    if (winRatio >= 56) return colors.wrUnicum;
-    if (winRatio >= 54) return colors.wrVeryGood;
-    if (winRatio >= 52) return colors.wrGood;
-    if (winRatio >= 50) return colors.wrAboveAvg;
-    if (winRatio >= 45) return colors.wrAverage;
-    if (winRatio >= 40) return colors.wrBelowAvg;
-    return colors.wrBad;
-};
-
-const formatCompactCount = (value: number): string => d3.format('~s')(value).replace('G', 'B');
 
 const drawLandingClanChart = (
     containerElement: HTMLDivElement,
@@ -231,7 +203,7 @@ const drawLandingClanChart = (
         .attr('cy', (datum: PlotDatum) => y(datum.clan_wr))
         .attr('r', 5.5)
         .style('cursor', onSelectClan ? 'pointer' : 'default')
-        .attr('fill', (datum: PlotDatum) => selectLandingClanColorByWR(datum.clan_wr, colors))
+        .attr('fill', (datum: PlotDatum) => wrColorByPercent(datum.clan_wr))
         .attr('stroke', colors.axisLine)
         .attr('stroke-width', 1.25);
 
@@ -253,13 +225,12 @@ const drawLandingClanChart = (
             hideDetails();
             d3.select(this)
                 .classed('clan-dot-pulse', false)
-                .attr('fill', selectLandingClanColorByWR(datum.clan_wr, colors));
+                .attr('fill', wrColorByPercent(datum.clan_wr));
         });
 };
 
 const LandingClanSVG: React.FC<LandingClanSVGProps> = ({
     clans,
-    heatmapClans,
     onSelectClan,
     svgHeight = 300,
     theme = 'light',

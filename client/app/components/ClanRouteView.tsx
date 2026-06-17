@@ -3,21 +3,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ClanDetail from './ClanDetail';
+import LoadingPanel from './LoadingPanel';
 import type { LandingClan } from './entityTypes';
 import { buildPlayerPath, parseClanIdFromRouteSegment } from '../lib/entityRoutes';
 import { trackEntityDetailView } from '../lib/visitAnalytics';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
-
-
-const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
-    <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
-        style={{ minHeight }}
-    >
-        {label}
-    </div>
-);
 
 
 const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {

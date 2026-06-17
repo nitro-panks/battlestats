@@ -90,14 +90,6 @@ const getTierBand = (tier: number | null): string | null => {
     return 'IX-X';
 };
 
-const getDefaultSortDirection = (sortKey: SortKey): 'asc' | 'desc' => {
-    if (sortKey === 'badge' || sortKey === 'tier') {
-        return 'asc';
-    }
-
-    return 'asc';
-};
-
 const isRomanBadgeLabel = (badgeLabel: string): boolean => {
     return badgeLabel === 'I' || badgeLabel === 'II' || badgeLabel === 'III';
 };
@@ -224,7 +216,8 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
         }
 
         setSortKey(nextSortKey);
-        setSortDirection(getDefaultSortDirection(nextSortKey));
+        // Every sort key defaults to ascending on first click.
+        setSortDirection('asc');
     };
 
     return (

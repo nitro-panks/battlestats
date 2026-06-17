@@ -7,6 +7,7 @@ import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getHighestRankedLeagueName, type RankedLeagueName } from './rankedLeague';
 import PlayerDetailInsightsTabs from './PlayerDetailInsightsTabs';
+import LoadingPanel from './LoadingPanel';
 import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
@@ -17,7 +18,7 @@ import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import ShipTopPlayerBanner, { ShipBadge } from './ShipTopPlayerBanner';
-import TopShipIcon from './TopShipIcon';
+import TopShipBadges from './TopShipBadges';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
 import { useTheme } from '../context/ThemeContext';
@@ -103,7 +104,6 @@ interface PlayerDetailProps {
     };
     onBack: () => void;
     onSelectMember: (memberName: string) => void;
-    onSelectClan: (clanId: number, clanName: string) => void;
     isLoading?: boolean;
     // Visit-based live-update status (see usePlayerLiveRefresh). When omitted the
     // page renders exactly as before — the badge and chart re-fetch are inert.
@@ -111,23 +111,9 @@ interface PlayerDetailProps {
     refreshNonce?: number;
 }
 
-const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
-    <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
-        style={{ minHeight }}
-    >
-        {label}
-    </div>
-);
-
 const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMembers'), 'PlayerDetail-ClanMembers'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan members..." minHeight={96} />,
-});
-
-const PlayerClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./PlayerClanBattleSeasons'), 'PlayerDetail-PlayerClanBattleSeasons'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={180} />,
 });
 
 
@@ -138,27 +124,6 @@ const formatKillRatio = (killRatio: number | null): string => {
 
     return killRatio.toFixed(2);
 };
-
-const PLAYSTYLE_HELPER_TEXT: Record<string, string> = {
-    Sealord: 'Owns the map, dictates the pace, dominates, turns tables and wins.',
-    Assassin: 'Wins relentlessly, wastes little, and closes games with intent.',
-    Kraken: 'Wins violently,and stacks kills before disappearing into the depths.',
-    Stalwart: 'Steady under pressure, useful in every phase, and good for more than raw damage.',
-    Daredevil: 'Pushes recklessly, burns brightly, and still finds ways to win.',
-    Warrior: 'Performs well, stays alive, and keeps steady pressure on the fight.',
-    Raider: 'Strikes where the line is thin, trades fast, and lives off opportunism more than control.',
-    Flotsam: 'Stays afloat, contributes enough, and remains useful in most fights.',
-    Jetsam: 'Gets chewed up early, loses impact fast, and rarely shapes the outcome.',
-    Survivor: 'Stays alive, avoids disaster, sometimes the deciding factor.',
-    Drifter: 'Floats through the match, avoids some danger, but rarely shapes the outcome.',
-    Pirate: 'Hangs around longer than expected, steals value, and survives on nuisance more than strength.',
-    Potato: 'Sinks early, lands little, and leaves the team short-handed.',
-    'Hot Potato': 'Stays alive longer than they should, given the circumstances.',
-    'Leroy Jenkins': 'Charges in blind, detonates early, and flames the whole team in chat for the rest of the game.',
-    Recruit: 'Has too few battles to read; the story is just beginning.',
-};
-
-const SHOW_PLAYSTYLE_PANEL = false;
 
 
 const buildClanBattleHeaderState = (
@@ -223,7 +188,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     player,
     onBack,
     onSelectMember,
-    onSelectClan,
     isLoading = false,
     refreshStatus,
     refreshNonce = 0,
@@ -433,9 +397,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}
                                 {isClanBattleEnjoyer && clanBattleSummary ? <ClanBattleShieldIcon winRate={clanBattleSummary.overallWinRate} size="header" /> : null}
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
-                                {!player.is_hidden && (player.ship_badges ?? []).slice(0, 3).map((b) => (
-                                    <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} tier={b.tier} realm={player.realm} size="header" />
-                                ))}
+                                {!player.is_hidden && <TopShipBadges badges={player.ship_badges} realm={player.realm} size="header" />}
                             </div>
                             <div className="flex items-center gap-2 self-start">
                                 <button
@@ -549,14 +511,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <p>PvE Battles: <span className="font-medium text-[var(--accent-mid)]">{pveBattles.toLocaleString()}</span></p>
                             </div>
 
-                            {SHOW_PLAYSTYLE_PANEL && player.verdict && (
-                                <div className="mt-4 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3">
-                                    <p className="text-sm font-medium text-[var(--text-primary)]">Playstyle: <span className="font-semibold text-[var(--accent-dark)]">{player.verdict}</span></p>
-                                    {PLAYSTYLE_HELPER_TEXT[player.verdict] ? (
-                                        <p className="mt-1 text-xs text-[var(--accent-light)]">{PLAYSTYLE_HELPER_TEXT[player.verdict]}</p>
-                                    ) : null}
-                                </div>
-                            )}
                             {!player.is_hidden ? (
                                 <ShipTopPlayerBanner badges={player.ship_badges ?? []} realm={player.realm} />
                             ) : null}

@@ -3,7 +3,7 @@ import wrColor from '../lib/wrColor';
 import * as d3 from 'd3';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 
-export interface ClanBattleSeasonPoint {
+interface ClanBattleSeasonPoint {
     season_id: number;
     season_name: string;
     season_label: string;

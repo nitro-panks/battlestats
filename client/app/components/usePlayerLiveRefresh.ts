@@ -30,9 +30,9 @@ const POLL_LIMIT = 62; // ~3 min ceiling (6×2s + 56×3s = 180s) — long enough
 const pollDelayMs = (attempt: number): number =>
     attempt < POLL_FAST_ATTEMPTS ? POLL_FAST_INTERVAL_MS : POLL_SLOW_INTERVAL_MS;
 
-export type LiveRefreshPhase = 'loading' | 'cooldown';
+type LiveRefreshPhase = 'loading' | 'cooldown';
 
-export interface LiveRefreshState {
+interface LiveRefreshState {
     phase: LiveRefreshPhase;
     secondsRemaining: number;
     refreshNonce: number;
@@ -203,5 +203,3 @@ export const usePlayerLiveRefresh = ({
         refreshNonce,
     };
 };
-
-export default usePlayerLiveRefresh;

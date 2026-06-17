@@ -3,7 +3,7 @@ import * as d3 from 'd3';
 import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
 import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
 import { fetchSharedJson, incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
-import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, resolveChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
@@ -480,12 +480,6 @@ const drawClanPlot = (
 
     const applyBucketFilter = () => {
         dotSelection
-            .attr('display', (datum: ClanPlotPoint) => {
-                if (!hoveredBucket) {
-                    return null;
-                }
-                return datum.activity_bucket === hoveredBucket ? null : null;
-            })
             .attr('fill', (datum: ClanPlotPoint) => {
                 if (!hoveredBucket) {
                     return selectClanColorByWR(datum.pvp_ratio, theme);
@@ -741,7 +735,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
             return;
         }
 
-        const resolvedWidth = Math.min(svgWidth, Math.max(containerRef.current.clientWidth || svgWidth, 280));
+        const resolvedWidth = resolveChartWidth(containerRef.current.clientWidth, svgWidth);
 
         if (plotData === null && !plotError) {
             drawClanChartStatus(containerRef.current, 'Loading clan chart data...', resolvedWidth, svgHeight, theme);
@@ -764,7 +758,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
 
             const drawAtCurrentWidth = () => {
                 cleanupPlot?.();
-                const w = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 280));
+                const w = resolveChartWidth(containerElement.clientWidth, svgWidth);
                 cleanupPlot = drawClanPlot(
                     containerElement,
                     (memberName) => onSelectMemberRef.current?.(memberName),

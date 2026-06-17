@@ -110,16 +110,13 @@ describe('PlayerRouteView', () => {
         const props = capturedProps.current as {
             onBack: () => void;
             onSelectMember: (name: string) => void;
-            onSelectClan: (id: number, name: string) => void;
         };
 
         props.onBack();
         props.onSelectMember('Other Player');
-        props.onSelectClan(1000067803, 'The Best Clan');
 
         expect(pushMock).toHaveBeenNthCalledWith(1, '/');
         expect(pushMock).toHaveBeenNthCalledWith(2, '/player/Other%20Player?realm=na');
-        expect(pushMock).toHaveBeenNthCalledWith(3, '/clan/1000067803-the-best-clan?realm=na');
     });
 
     it('shows a not found state on a 404, with NO retry', async () => {

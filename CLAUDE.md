@@ -90,12 +90,12 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 ### Key frontend patterns
 
 - D3-based SVG chart components (TierSVG, TypeSVG, ActivitySVG, RankedWRBattlesHeatmapSVG, …)
-- `app/context/ThemeContext.tsx` + `app/components/ThemeToggle.tsx` — dark/light/system theme, localStorage-persisted; `app/lib/chartTheme.ts` D3 colors; `app/globals.css` CSS custom properties (`--bg-*`/`--text-*`/`--accent-*`, `[data-theme="dark"]`)
+- `app/context/ThemeContext.tsx` + `app/components/ThemeToggle.tsx` — dark/light/system theme, localStorage-persisted; `app/lib/chartTheme.ts` D3 colors + shared chart helpers (`wrColorByRatio`/`wrColorByPercent`, `formatCompactCount`, `resolveChartWidth`, `expandDomain`); `app/globals.css` CSS custom properties (`--bg-*`/`--text-*`/`--accent-*`, `[data-theme="dark"]`)
 - `app/lib/wrColor.ts` — shared win-rate → color mapping
 - `app/lib/sharedJsonFetch.ts` — fetch with retry/cache + `chartFetchesInFlight` priority counter
 - `app/lib/entityRoutes.ts` — URL encode/decode for player/clan routes
 - `app/components/HeaderSearch.tsx` + `SearchModeToggle.tsx` — dual-mode player/clan search, debounced autocomplete, per-mode client cache
-- Player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon, TopShipIcon) — inlined per surface in `PlayerDetail.tsx`, `ClanMembers.tsx`, `PlayerSearch.tsx` (NOT a shared component), driven by each row's `ship_badges`
+- Player classification icons (HiddenAccountIcon, EfficiencyRankIcon, LeaderCrownIcon, PveEnjoyerIcon, InactiveIcon, RankedPlayerIcon, ClanBattleShieldIcon, TopShipIcon) — each a shared single-purpose component file imported across surfaces. The shared top-ship medal tail (`ship_badges` → up-to-3 `TopShipIcon`s) is factored into `TopShipBadges.tsx`. What stays per-surface (intentionally — the order/membership genuinely differ) is the **badge-dispatch logic**: which other classification icons a row renders and in what order, inlined in `PlayerDetail.tsx`, `ClanMembers.tsx`, `PlayerSearch.tsx`, driven by each row's `ship_badges` / classification flags
 - `ShipTopPlayerBanner.tsx` — current T10 top-3 cards above Battle History (rolling nightly window, worn while held), fed by `ship_badges` (`data.get_player_ship_badges`), links to `/ship/<id>`
 - `ShipRouteView.tsx` — the `/ship/<id>` leaderboard page: masthead ship identity (class glyph + tier/class/nation chips + Premium marker via `app/lib/shipIdentity.ts`), restrained champion/podium treatment (`--metal-gold`/`--champion-tint`/`--champion-edge` tokens, `TopShipIcon size="podium"`), metric hierarchy, and a responsive desktop-table / mobile-card split. Identity is payload-only (no new fetch); presentation refresh spec: `agents/work-items/ship-leaderboard-ux-refresh-spec.md`
 

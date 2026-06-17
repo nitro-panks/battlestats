@@ -195,7 +195,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -208,7 +207,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={basePlayer}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
                 refreshStatus={{ phase: 'loading', secondsRemaining: 0 }}
             />,
         );
@@ -226,7 +224,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={basePlayer}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
                 refreshStatus={{ phase: 'cooldown', secondsRemaining: 720 }}
             />,
         );
@@ -243,7 +240,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={basePlayer}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
                 refreshStatus={{ phase: 'cooldown', secondsRemaining: 0 }}
             />,
         );
@@ -257,7 +253,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={{ ...basePlayer, is_hidden: true }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
                 refreshStatus={{ phase: 'loading', secondsRemaining: 0 }}
             />,
         );
@@ -275,7 +270,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -295,7 +289,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={basePlayer}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -317,7 +310,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -336,7 +328,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -356,7 +347,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -375,7 +365,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -395,7 +384,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -426,7 +414,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -453,7 +440,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -472,7 +458,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -490,7 +475,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -508,7 +492,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -529,7 +512,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -556,7 +538,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -585,7 +566,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -608,7 +588,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -628,7 +607,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={onBack}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -644,7 +622,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={basePlayer}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -664,7 +641,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -683,7 +659,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -729,7 +704,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -749,7 +723,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={basePlayer}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -777,7 +750,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={basePlayer}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -795,7 +767,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={basePlayer}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -813,7 +784,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 }}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -838,7 +808,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                 player={basePlayer}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
                 isLoading
             />,
         );
@@ -874,7 +843,6 @@ describe('PlayerDetail ship-badge banner', () => {
                 player={{ ...basePlayer, ship_badges } as never}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -919,7 +887,6 @@ describe('PlayerDetail ship-badge banner', () => {
                 player={{ ...basePlayer, realm: 'na', ship_badges: [badge()] } as never}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 
@@ -949,7 +916,6 @@ describe('PlayerDetail ship-badge banner', () => {
                 ] } as never}
                 onBack={() => undefined}
                 onSelectMember={() => undefined}
-                onSelectClan={() => undefined}
             />,
         );
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-export const useIntervalRefresh = (
+const useIntervalRefresh = (
     callback: () => void,
     intervalMs: number,
     enabled: boolean = true,

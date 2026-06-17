@@ -3,9 +3,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import PlayerDetail from './PlayerDetail';
+import LoadingPanel from './LoadingPanel';
 import { prefetchBattleHistory } from './BattleHistoryCard';
 import type { PlayerData } from './entityTypes';
-import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
+import { buildPlayerPath } from '../lib/entityRoutes';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, SharedJsonFetchError } from '../lib/sharedJsonFetch';
 import {
@@ -18,16 +19,6 @@ import {
 import { trackEntityDetailView } from '../lib/visitAnalytics';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
-
-
-const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
-    <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
-        style={{ minHeight }}
-    >
-        {label}
-    </div>
-);
 
 
 interface PlayerRouteViewProps {
@@ -145,7 +136,6 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
             player={playerData}
             onBack={() => router.push('/')}
             onSelectMember={(memberName) => router.push(buildPlayerPath(memberName, realm))}
-            onSelectClan={(clanId, clanName) => router.push(buildClanPath(clanId, clanName, realm))}
             isLoading={false}
             refreshStatus={{ phase: liveRefresh.phase, secondsRemaining: liveRefresh.secondsRemaining }}
             refreshNonce={liveRefresh.refreshNonce}

@@ -128,7 +128,8 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
         }
 
         setSortKey(nextSortKey);
-        setSortDirection(nextSortKey === 'start_date' || nextSortKey === 'season' ? 'desc' : 'desc');
+        // Every sort key defaults to descending on first click.
+        setSortDirection('desc');
     };
 
     const sortedSeasons = [...seasons].sort((left, right) => {

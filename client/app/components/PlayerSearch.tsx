@@ -5,9 +5,9 @@ import dynamic from 'next/dynamic';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import { useRouter } from 'next/navigation';
-import ClanDetail from './ClanDetail';
-import EfficiencyRankIcon, { resolveEfficiencyRankTier, type EfficiencyRankTier } from './EfficiencyRankIcon';
+import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import PlayerDetail from './PlayerDetail';
+import LoadingPanel from './LoadingPanel';
 import RealmTopShipsTreemapSVG from './RealmTopShipsTreemapSVG';
 import ShipLeaderboard, { type ShipLeaderboardHandle } from './ShipLeaderboard';
 import { resilientDynamicImport } from './resilientDynamicImport';
@@ -20,7 +20,7 @@ import PveEnjoyerIcon from './PveEnjoyerIcon';
 import InactiveIcon from './InactiveIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
-import TopShipIcon from './TopShipIcon';
+import TopShipBadges from './TopShipBadges';
 import useIntervalRefresh from './useIntervalRefresh';
 import useClanHydrationPoll from './useClanHydrationPoll';
 import { useTheme } from '../context/ThemeContext';
@@ -28,15 +28,6 @@ import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
-
-const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
-    <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
-        style={{ minHeight }}
-    >
-        {label}
-    </div>
-);
 
 
 const ClanTagGrid: React.FC<{
@@ -111,9 +102,7 @@ const PlayerNameGrid: React.FC<{
                             size="inline"
                         />
                     ) : null}
-                    {(player.ship_badges ?? []).slice(0, 3).map((b) => (
-                        <TopShipIcon key={`${b.ship_id}-${b.rank}`} rank={b.rank} shipName={b.ship_name} tier={b.tier} realm={realm} size="search" />
-                    ))}
+                    <TopShipBadges badges={player.ship_badges} realm={realm} size="search" />
                 </>
             );
 
@@ -179,18 +168,10 @@ const LandingPlayerSVG = dynamic(
     },
 );
 
-const PlayerExplorer = dynamic(() => resilientDynamicImport(() => import('./PlayerExplorer'), 'PlayerExplorer'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading player explorer..." minHeight={360} />,
-});
-
 const LANDING_CLAN_LIMIT = 30;
 const LANDING_PLAYER_LIMIT = 25;
-const RANDOM_PLAYER_MIN_PVP_BATTLES = 500;
-const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
-const SHOW_PLAYER_EXPLORER = false;
 // Backend caches best/random for 6 h, so a 60-second client-side TTL lets SPA
 // back-navigations to the landing page hit the in-memory cache (no network,
 // no empty-state flash) while still catching meaningful churn within a
@@ -389,10 +370,6 @@ const PlayerSearch: React.FC = () => {
         router.push(buildClanPath(clan.clan_id, clan.name || clan.tag, realm));
     }, [router, realm]);
 
-    const handleSelectClanById = async (clanId: number, clanName: string) => {
-        router.push(buildClanPath(clanId, clanName, realm));
-    };
-
     const visibleLandingClans = useMemo(
         () => clans.slice(0, LANDING_CLAN_LIMIT),
         [clans],
@@ -464,7 +441,6 @@ const PlayerSearch: React.FC = () => {
                     player={playerData}
                     onBack={handleBack}
                     onSelectMember={handleSelectMember}
-                    onSelectClan={handleSelectClanById}
                     isLoading={isLoadingPlayer}
                 />
             ) : (
@@ -636,7 +612,6 @@ const PlayerSearch: React.FC = () => {
                                 ) : null}
                                 <LandingClanSVG
                                     clans={visibleLandingClans}
-                                    heatmapClans={clans}
                                     onSelectClan={handleSelectClan}
                                     theme={theme}
                                     sort={clanBestSort}
@@ -649,8 +624,6 @@ const PlayerSearch: React.FC = () => {
                             />
                         </div>
                     )}
-
-                    {SHOW_PLAYER_EXPLORER ? <PlayerExplorer onSelectMember={handleSelectMember} /> : null}
                 </div>
             )}
         </div>

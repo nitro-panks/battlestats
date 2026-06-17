@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, resolveChartWidth, wrColorByRatio, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import type { TierTypePayload, TierTypePlayerCell } from './playerProfileChartData';
@@ -28,18 +28,6 @@ const SHIP_TYPE_ABBREV: Record<string, string> = {
     'AirCarrier': 'CV',
     'Carrier': 'CV',
     'Submarine': 'Sub',
-};
-
-const selectColorByWR = (winRatio: number): string => {
-    if (winRatio > 0.65) return '#810c9e';
-    if (winRatio >= 0.60) return '#D042F3';
-    if (winRatio >= 0.56) return '#3182bd';
-    if (winRatio >= 0.54) return '#74c476';
-    if (winRatio >= 0.52) return '#a1d99b';
-    if (winRatio >= 0.50) return '#fed976';
-    if (winRatio >= 0.45) return '#fd8d3c';
-    if (winRatio >= 0.40) return '#e6550d';
-    return '#a50f15';
 };
 
 type Colors = typeof chartColors['light'];
@@ -86,7 +74,7 @@ const renderSummaryCard = (
             text: playerCell
                 ? `${playerCell.pvp_battles.toLocaleString()} @ ${(playerCell.win_ratio * 100).toFixed(1)}%`
                 : 'No battles in cell',
-            fill: playerCell ? selectColorByWR(playerCell.win_ratio) : colors.heatmapUnavailable,
+            fill: playerCell ? wrColorByRatio(playerCell.win_ratio) : colors.heatmapUnavailable,
             weight: playerCell ? '700' : '400',
         },
     ];
@@ -264,7 +252,7 @@ const drawChart = (
         .attr('cx', (row: TierTypePlayerCell) => (x(row.ship_type) ?? 0) + (x.bandwidth() / 2))
         .attr('cy', (row: TierTypePlayerCell) => (y(String(row.ship_tier)) ?? 0) + (y.bandwidth() / 2))
         .attr('r', (row: TierTypePlayerCell) => Math.max(4, playerRadius(row.pvp_battles)))
-        .attr('fill', (row: TierTypePlayerCell) => selectColorByWR(row.win_ratio))
+        .attr('fill', (row: TierTypePlayerCell) => wrColorByRatio(row.win_ratio))
         .attr('fill-opacity', 0.92)
         .attr('stroke', colors.barStroke)
         .attr('stroke-width', 1.6);
@@ -302,7 +290,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
         let cachedPayload: TierTypePayload | null = null;
         let resizeFrame: number | null = null;
 
-        const resolveWidth = () => Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
+        const resolveWidth = () => resolveChartWidth(containerElement.clientWidth, svgWidth, 320);
 
         const redraw = () => {
             if (cachedPayload && containerElement) {

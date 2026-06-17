@@ -31,7 +31,6 @@ const StreamerSubmissionModal: React.FC<StreamerSubmissionModalProps> = ({ open,
     const [genericError, setGenericError] = useState('');
     const loadedAtRef = useRef<number>(0);
     const ignInputRef = useRef<HTMLInputElement>(null);
-    const panelRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (!open) return;
@@ -118,7 +117,6 @@ const StreamerSubmissionModal: React.FC<StreamerSubmissionModalProps> = ({ open,
             aria-labelledby="streamer-submission-title"
         >
             <div
-                ref={panelRef}
                 className="w-full max-w-[480px] rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-5 shadow-xl"
             >
                 <div className="mb-3 flex items-start justify-between">

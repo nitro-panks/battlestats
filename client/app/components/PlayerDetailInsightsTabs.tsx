@@ -8,6 +8,7 @@ import BattleHistoryCard, {
     type BattleHistoryPayload,
 } from './BattleHistoryCard';
 import PlayerEfficiencyBadges from './PlayerEfficiencyBadges';
+import LoadingPanel from './LoadingPanel';
 import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
@@ -52,15 +53,6 @@ interface PlayerDetailInsightsTabsProps {
     // settled (pre-refresh) cache. 0 = inert (no live refresh).
     refreshNonce?: number;
 }
-
-const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
-    <div
-        className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
-        style={{ minHeight }}
-    >
-        {label}
-    </div>
-);
 
 const RandomsSVG = dynamic(() => resilientDynamicImport(() => import('./RandomsSVG'), 'PlayerDetailInsightsTabs-RandomsSVG'), {
     ssr: false,

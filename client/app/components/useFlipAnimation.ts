@@ -79,5 +79,3 @@ export const useFlipAnimation = (
 
     return { register };
 };
-
-export default useFlipAnimation;
