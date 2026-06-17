@@ -1,9 +1,9 @@
-# Runbook: Monthly cold-archive + prune of battle-history (>32d retention)
+# Runbook: Twice-monthly cold-archive + prune of battle-history (>32d retention)
 
 _Created: 2026-06-17_
 _Author role: DBA / platform_
 _Context: The managed Postgres sits on a 60 GiB disk with autoscale OFF (~50% used as of 2026-06-15). `BattleEvent` + `PlayerDailyShipStats` are the monotonic, never-pruned growth slope identified in `runbook-db-growth-analysis-2026-06-15.md`. This runbook specifies a monthly job that introduces a 32-day rolling window in live Postgres: export everything older to a compressed, restorable file on the app droplet, verify, then delete._
-_Status: **IMPLEMENTED (shipped disabled), 2026-06-17.** The `archive_battle_history` management command + core (`incremental_battles.py`), the `battlestats-archive-battle-history.timer` systemd unit, the deploy env knobs, and tests (`test_archive_battle_history.py`, green on sqlite + Postgres) are on branch `feat/battle-history-archive-prune`. `BATTLE_HISTORY_ARCHIVE_ENABLED=0` — nothing has run against prod; enabling is the supervised dry-run-first Rollout below._
+_Status: **IMPLEMENTED + ENABLED in prod, 2026-06-17.** The `archive_battle_history` command + core (`incremental_battles.py`), the `battlestats-archive-battle-history.timer` systemd unit (1st + 15th, 03:00 UTC), deploy env knobs, and tests (`test_archive_battle_history.py`, green on sqlite + Postgres) shipped via PR #50. `BATTLE_HISTORY_ARCHIVE_ENABLED=1`. The 2026-06-17 rollout performs the first-run backlog prune (~1.4 M rows) + a one-time `VACUUM FULL` — see the First-run section + Rollout log._
 
 ## Purpose
 
@@ -12,7 +12,7 @@ Cap the unbounded growth of the two append-only, no-retention battle-history tab
 ## TL;DR
 
 - **Why:** 60 GiB disk, autoscale OFF = hard wall; a full disk is a read-only outage (the 2026-05-24 failure mode). `BattleEvent` (~+730 MB / 20d) and `PlayerDailyShipStats` (~+915 MB / 20d) grow forever with no retention today.
-- **What:** a monthly `manage.py archive_battle_history` run — export rows older than `cutoff = midnight_utc(now) - 32d` to `gzip` CSV on the **app droplet** (separate host, ~58 GB free), **verify (count + sha256) before any delete**, then batch-delete by PK, then `VACUUM (ANALYZE)`.
+- **What:** a twice-monthly (1st + 15th, 03:00 UTC) `manage.py archive_battle_history` run — export rows older than `cutoff = midnight_utc(now) - 32d` to `gzip` CSV on the **app droplet** (separate host, ~58 GB free), **verify (full decompress + sha256) before any delete**, then batch-delete only the archived ids by PK, then `VACUUM (ANALYZE)`.
 - **Accepted behavior change:** the week/month/**year** battle-history UI windows resolve to the daily layer and will **cap at 32 days**. The 24h "day" window is unaffected.
 - **Safety spine:** both tables are FK **leaves** (nothing references them → no cascade), and the prune deletes only the **exact PK set that was just exported and verified** — correct regardless of any concurrent write.
 - **Not solved by this:** `PlayerDailyShipStats` keeps growing inside the 32-day window as coverage grows; the disk wall is *deferred, not removed*. See Follow-ups.
@@ -121,16 +121,16 @@ ExecStart=/bin/bash -lc 'exec "/opt/battlestats-server/venv/bin/python" manage.p
 `/etc/systemd/system/battlestats-archive-battle-history.timer`:
 ```ini
 [Timer]
-OnCalendar=*-*-01 03:00:00 UTC
+OnCalendar=*-*-01,15 03:00:00 UTC
 Persistent=true
 
 [Install]
 WantedBy=timers.target
 ```
 
-The deploy script `install -d`s `${APP_ROOT}/shared/archives/battle_history`, drops both unit files, `daemon-reload`s, and `systemctl enable --now`s the timer (idempotent). The timer fires unconditionally on the 1st; the command no-ops while `BATTLE_HISTORY_ARCHIVE_ENABLED=0`.
+The deploy script `install -d`s `${APP_ROOT}/shared/archives/battle_history`, drops both unit files, `daemon-reload`s, and `systemctl enable --now`s the timer (idempotent). The timer fires on the **1st and 15th** of every month at 03:00 UTC; with `BATTLE_HISTORY_ARCHIVE_ENABLED=1` (prod default since 2026-06-17) it maintains the rolling window, and the command no-ops if the switch is ever set to `0`.
 
-**Why systemd, not Celery Beat:** a steady-state run deletes millions of rows over ~1–2h — too long for a Celery soft-time-limit / worker slot, and it matches the literal "once a month." *Alternative noted for the implementer:* a Celery Beat `crontab(day_of_month="1", hour=3)` entry in `signals.py` (the in-repo scheduling convention) with `CRAWL_TASK_OPTS`-style limits + the run-lock, **if** the operator accepts the long-task caveat. The systemd path is recommended.
+**Why systemd, not Celery Beat:** the first-run backlog (~1.4 M rows) deletes over many minutes — too long for a Celery soft-time-limit / worker slot — and a host-level timer is the natural home for a maintenance job. *Alternative noted for the implementer:* a Celery Beat `crontab(day_of_month="1,15", hour=3)` entry in `signals.py` with `CRAWL_TASK_OPTS`-style limits + the run-lock, **if** the operator accepts the long-task caveat. The systemd path is recommended and is what ships.
 
 ## Env knobs
 
@@ -138,7 +138,7 @@ Set via `set_env_value` in `server/deploy/deploy_to_droplet.sh` (line 345) — t
 
 | Var | Default | Notes |
 |---|---|---|
-| `BATTLE_HISTORY_ARCHIVE_ENABLED` | `0` | Master kill switch; the command no-ops (logs + exits 0) when `0`. |
+| `BATTLE_HISTORY_ARCHIVE_ENABLED` | `1` (prod) | Master kill switch; the command no-ops (logs + exits 0) when `0`. Set to `1` in `deploy_to_droplet.sh` since the 2026-06-17 rollout. |
 | `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` | `32` | Backs `--retention-days`. |
 | `BATTLE_HISTORY_ARCHIVE_DIR` | `${APP_ROOT}/shared/archives/battle_history` | Backs `--archive-dir`. |
 | `BATTLE_HISTORY_ARCHIVE_BATCH_SIZE` | `2000` | |
@@ -147,8 +147,9 @@ Set via `set_env_value` in `server/deploy/deploy_to_droplet.sh` (line 345) — t
 
 ## First-run vs steady-state, and the VACUUM policy
 
-- **First run** archives the entire `>32d` backlog (~2 weeks today; small). Steady-state runs archive ~1 month of `>32d` rows each.
-- **`VACUUM (ANALYZE)` only — no `VACUUM FULL`.** `VACUUM FULL` takes an `ACCESS EXCLUSIVE` lock (table unavailable) and is only worth it for a large one-time backlog. Here, steady-state delete ≈ steady-state insert, so the freed space is **reused in-table** for new rows rather than returned to the OS — exactly the behavior `runbook-db-growth-analysis-2026-06-15.md` documents for steady-delete tables. `VACUUM (ANALYZE)` updates the visibility map + planner stats without the exclusive lock. (Note: per that runbook, even `VACUUM FULL` would only reclaim space *within* `pg_database_size`, not the ~7 GB WAL/temp gap — irrelevant here.)
+- **First-run backlog (measured on prod 2026-06-17, cutoff `2026-05-16`):** **703,891** `BattleEvent` rows (of 3,492,084 — ~20%) and **694,083** `PlayerDailyShipStats` rows (of 3,437,135 — ~20%), both dating back to **2026-04-28** (capture began earlier than the "~May 2" first assumed). Table-data weight ≈ **~250 MB** + **~300 MB** = **~550 MB**. So the first run is **not** the "small ~2-week" backlog originally assumed — it removes ~1.4 M rows / ~20% of each table.
+- **Steady state (1st + 15th cadence):** each run culls ~14–17 days of newly-aged `>32d` rows (~⅓–½ of the first-run backlog), so per-run deletes are smaller and dead-tuple buildup is gentler than a once-a-month run.
+- **VACUUM policy — `VACUUM (ANALYZE)` per run, plus a ONE-TIME `VACUUM FULL` after the first run.** The per-run command does `VACUUM (ANALYZE)` (no exclusive lock); in steady state delete ≈ insert so freed space is **reused in-table** and that is sufficient. **But the first run deletes ~20% of each table**, and `VACUUM (ANALYZE)` only marks that ~550 MB *reusable in-table* — it is **not** returned to the OS / `pg_database_size`. To actually reclaim the ~550 MB against the autoscale-OFF 60 GiB wall, run a **one-time** `VACUUM (FULL, ANALYZE) warships_battleevent;` + `… warships_playerdailyshipstats;` after the first prune. `VACUUM FULL` takes an `ACCESS EXCLUSIVE` lock (rewrites the table → battle-history reads/writes on that table block for the rewrite), but on ~300 MB tables that is seconds, and it needs transient free disk ≈ the table size (ample: ~30 GiB free). Do it once; never needed again at steady state.
 
 ## Restore procedure (cold queryable archive)
 

@@ -609,14 +609,14 @@ set_env_value WG_RATE_LIMIT_BURST 18
 set_env_value WG_RATE_LIMIT_MAX_WAIT 8
 set_env_value WG_RATE_LIMIT_REQUEST_MAX_WAIT 0.5
 
-# Monthly battle-history cold-archive + prune (archive_battle_history command,
+# Battle-history cold-archive + prune (archive_battle_history command,
 # battlestats-archive-battle-history.timer below). Exports BattleEvent /
 # PlayerDailyShipStats rows older than the retention window to gzip CSV +
 # manifest under shared/archives, verifies, then deletes the archived rows.
-# DISABLED by default — enable only after the supervised dry-run-first rollout
-# in runbook-battle-history-archive-prune-2026-06-17.md. The timer fires the
-# command monthly; with ENABLED=0 the command is a no-op.
-set_env_value BATTLE_HISTORY_ARCHIVE_ENABLED 0
+# ENABLED in prod (first run + VACUUM FULL done 2026-06-17, see runbook); the
+# timer maintains the rolling window twice a month (1st + 15th). Set to 0 to
+# pause — the timer still fires but the command no-ops.
+set_env_value BATTLE_HISTORY_ARCHIVE_ENABLED 1
 set_env_value BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS 32
 set_env_value BATTLE_HISTORY_ARCHIVE_DIR "${APP_ROOT}/shared/archives/battle_history"
 set_env_value BATTLE_HISTORY_ARCHIVE_BATCH_SIZE 2000
@@ -786,11 +786,11 @@ AccuracySec=30s
 WantedBy=timers.target
 EOF
 
-# Monthly battle-history cold-archive + prune. A oneshot that runs the
-# archive_battle_history management command on the 1st of each month. NOT a
-# Celery task: a steady-state run deletes millions of rows over ~1-2h, too long
-# for a Celery soft-time-limit / worker slot. Gated by
-# BATTLE_HISTORY_ARCHIVE_ENABLED (set to 0 by default above) — the timer fires
+# Battle-history cold-archive + prune. A oneshot that runs the
+# archive_battle_history management command on the 1st + 15th of each month.
+# NOT a Celery task: a backlog/steady-state run deletes hundreds of thousands
+# of rows over many minutes, too long for a Celery soft-time-limit / worker
+# slot. Gated by BATTLE_HISTORY_ARCHIVE_ENABLED — the timer fires
 # unconditionally but the command no-ops while disabled.
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/archives/battle_history"
 cat > /etc/systemd/system/battlestats-archive-battle-history.service <<EOF
@@ -811,10 +811,10 @@ EOF
 
 cat > /etc/systemd/system/battlestats-archive-battle-history.timer <<'EOF'
 [Unit]
-Description=Run Battlestats battle-history archive on the 1st of each month
+Description=Run Battlestats battle-history archive on the 1st + 15th of each month
 
 [Timer]
-OnCalendar=*-*-01 03:00:00 UTC
+OnCalendar=*-*-01,15 03:00:00 UTC
 Persistent=true
 
 [Install]
