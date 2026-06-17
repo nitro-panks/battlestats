@@ -289,7 +289,7 @@ const ShipStats: React.FC<ShipStatsProps> = ({
                     <div className="mt-3 space-y-4">
                         {payload.clusters.map((cluster) => (
                             <section key={cluster.name}>
-                                <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--accent-secondary-mid)]">
+                                <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--accent-mid)]">
                                     {cluster.name}
                                 </h4>
                                 <div className="divide-y divide-[var(--accent-faint)]">
