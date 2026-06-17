@@ -21,18 +21,32 @@ const TONE_GOOD = '#74c476';
 const TONE_BAD = '#a50f15';
 const TONE_NEUTRAL = 'var(--text-muted)';
 
+// Skill brackets, by overall account random win rate (see backend). The user
+// can compare against all players, the top 50%, or the top 25%.
+type SkillBracket = 'all' | 'top50' | 'top25';
+const BRACKET_OPTIONS: { id: SkillBracket; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'top50', label: 'Top 50%' },
+    { id: 'top25', label: 'Top 25%' },
+];
+
 interface ShipStatMetric {
     key: string;
     label: string;
     unit: string;
     better: 'high' | 'low';
     user: number | null;
-    average: number;
+    averages: Record<SkillBracket, number | null>;
 }
 
 interface ShipStatCluster {
     name: string;
     metrics: ShipStatMetric[];
+}
+
+interface BracketMeta {
+    players: number;
+    battles: number;
 }
 
 interface ShipCombatPayload {
@@ -41,8 +55,8 @@ interface ShipCombatPayload {
     ship_tier: number | null;
     ship_type: string | null;
     window_days: number;
-    sample_players: number;
-    sample_battles: number;
+    min_account_battles: number;
+    brackets: Record<SkillBracket, BracketMeta>;
     user_battles: number;
     has_user_data: boolean;
     clusters: ShipStatCluster[];
@@ -75,15 +89,16 @@ const formatMetricValue = (value: number | null, unit: string): string => {
     return unit ? `${formatted}${unit}` : formatted;
 };
 
-const MetricRow: React.FC<{ metric: ShipStatMetric }> = ({ metric }) => {
-    const { user, average, better, unit, label } = metric;
-    const scaleMax = Math.max(user ?? 0, average, 1) * 1.15;
+const MetricRow: React.FC<{ metric: ShipStatMetric; bracket: SkillBracket }> = ({ metric, bracket }) => {
+    const { user, better, unit, label } = metric;
+    const average = metric.averages[bracket];
+    const scaleMax = Math.max(user ?? 0, average ?? 0, 1) * 1.15;
     const userPct = user == null ? 0 : Math.min(100, (user / scaleMax) * 100);
-    const avgPct = Math.min(100, (average / scaleMax) * 100);
+    const avgPct = average == null ? null : Math.min(100, (average / scaleMax) * 100);
 
     let deltaText = '';
     let deltaTone = TONE_NEUTRAL;
-    if (user != null && average > 0) {
+    if (user != null && average != null && average > 0) {
         const deltaPct = ((user - average) / average) * 100;
         const isBetter = better === 'high' ? deltaPct > 0 : deltaPct < 0;
         const magnitude = Math.abs(deltaPct);
@@ -113,11 +128,13 @@ const MetricRow: React.FC<{ metric: ShipStatMetric }> = ({ metric }) => {
                         className="absolute inset-y-0 left-0 rounded-full"
                         style={{ width: `${userPct}%`, backgroundColor: 'var(--accent-secondary-mid)' }}
                     />
-                    <div
-                        className="absolute inset-y-[-2px] w-[2px]"
-                        style={{ left: `calc(${avgPct}% - 1px)`, backgroundColor: 'var(--text-strong)', opacity: 0.7 }}
-                        title={`Ship average: ${formatMetricValue(average, unit)}`}
-                    />
+                    {avgPct != null ? (
+                        <div
+                            className="absolute inset-y-[-2px] w-[2px]"
+                            style={{ left: `calc(${avgPct}% - 1px)`, backgroundColor: 'var(--text-strong)', opacity: 0.7 }}
+                            title={`Ship average: ${formatMetricValue(average, unit)}`}
+                        />
+                    ) : null}
                 </div>
             </div>
             <div className="whitespace-nowrap text-right text-xs tabular-nums">
@@ -136,6 +153,7 @@ const ShipStats: React.FC<ShipStatsProps> = ({
 }) => {
     const [payload, setPayload] = useState<ShipCombatPayload | null>(null);
     const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
+    const [bracket, setBracket] = useState<SkillBracket>('all');
 
     useEffect(() => {
         let cancelled = false;
@@ -183,8 +201,8 @@ const ShipStats: React.FC<ShipStatsProps> = ({
                     {state === 'ready' && payload ? (
                         <p className="mt-0.5 text-xs text-[var(--text-muted)]">
                             Your career profile vs the {payload.window_days}-day server average
-                            {payload.sample_players > 0
-                                ? ` (${payload.sample_players.toLocaleString()} captains, ${payload.sample_battles.toLocaleString()} battles)`
+                            {payload.brackets[bracket].players > 0
+                                ? ` (${payload.brackets[bracket].players.toLocaleString()} captains, ${payload.brackets[bracket].battles.toLocaleString()} battles)`
                                 : ''}
                         </p>
                     ) : null}
@@ -214,20 +232,48 @@ const ShipStats: React.FC<ShipStatsProps> = ({
             ) : null}
 
             {state === 'ready' && payload ? (
-                <div className="mt-3 space-y-4">
-                    {payload.clusters.map((cluster) => (
-                        <section key={cluster.name}>
-                            <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--accent-secondary-mid)]">
-                                {cluster.name}
-                            </h4>
-                            <div className="divide-y divide-[var(--accent-faint)]">
-                                {cluster.metrics.map((metric) => (
-                                    <MetricRow key={metric.key} metric={metric} />
-                                ))}
-                            </div>
-                        </section>
-                    ))}
-                </div>
+                <>
+                    {/* Compare against all players, or only the higher-skill
+                        brackets (by overall account win rate). */}
+                    <div className="mt-3 flex items-center gap-2">
+                        <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">Compare vs</span>
+                        <div className="inline-flex overflow-hidden rounded-md border border-[var(--accent-faint)] text-xs" role="group" aria-label="Skill bracket">
+                            {BRACKET_OPTIONS.map((opt) => {
+                                const isActive = bracket === opt.id;
+                                return (
+                                    <button
+                                        key={opt.id}
+                                        type="button"
+                                        onClick={() => setBracket(opt.id)}
+                                        aria-pressed={isActive}
+                                        className={`px-2.5 py-1 transition-colors ${
+                                            isActive
+                                                ? 'bg-[var(--accent-secondary-mid)] font-semibold text-[var(--bg-card)]'
+                                                : 'text-[var(--accent-secondary-mid)] hover:bg-[var(--accent-faint)]'
+                                        }`}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="mt-3 space-y-4">
+                        {payload.clusters.map((cluster) => (
+                            <section key={cluster.name}>
+                                <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--accent-secondary-mid)]">
+                                    {cluster.name}
+                                </h4>
+                                <div className="divide-y divide-[var(--accent-faint)]">
+                                    {cluster.metrics.map((metric) => (
+                                        <MetricRow key={metric.key} metric={metric} bracket={bracket} />
+                                    ))}
+                                </div>
+                            </section>
+                        ))}
+                    </div>
+                </>
             ) : null}
 
             {state === 'ready' && payload && !payload.has_user_data ? (

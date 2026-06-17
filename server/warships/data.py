@@ -6815,13 +6815,27 @@ _SHIP_COMBAT_METRICS = (
 )
 
 
-def _ship_population_totals_30d(ship_id, realm, window_days=SHIP_COMBAT_WINDOW_DAYS):
-    """Summed PlayerDailyShipStats (random mode) for one ship over the trailing
-    window, scoped to a realm and cached per (realm, ship, day)."""
+# Skill brackets, ranked by overall account random win rate (Player.pvp_ratio).
+# `all` is the whole window population; `top50`/`top25` are the better-skilled
+# halves/quarters of it (relative percentiles of THIS ship's players, not fixed
+# global cutoffs). Mirrors shiptool's account-WR bracketing in spirit.
+_SHIP_COMBAT_BRACKETS = ('all', 'top50', 'top25')
+_SHIP_COMBAT_BRACKET_FRACTION = {'all': 1.0, 'top50': 0.50, 'top25': 0.25}
+# Exclude low-sample accounts from the skill ranking (shiptool uses 200).
+_SHIP_COMBAT_MIN_ACCOUNT_BATTLES = 200
+
+
+def _ship_population_brackets_30d(ship_id, realm, window_days=SHIP_COMBAT_WINDOW_DAYS):
+    """Per-skill-bracket summed PlayerDailyShipStats (random) for one ship over
+    the trailing window. Players are aggregated individually, ranked by overall
+    account random win rate (Player.pvp_ratio, accounts with >=200 pvp battles),
+    then summed into the All / top-50% / top-25% brackets. Cached per
+    (realm, ship, day)."""
+    import math
     from warships.models import PlayerDailyShipStats
 
     cache_key = (
-        f"ship_combat_pop:v1:{realm}:{ship_id}:{window_days}:"
+        f"ship_combat_pop:v2:{realm}:{ship_id}:{window_days}:"
         f"{django_timezone.now().date().isoformat()}"
     )
     cached = cache.get(cache_key)
@@ -6829,19 +6843,37 @@ def _ship_population_totals_30d(ship_id, realm, window_days=SHIP_COMBAT_WINDOW_D
         return cached
 
     cutoff = django_timezone.now().date() - timedelta(days=window_days)
-    agg_kwargs = {f'sum_{f}': Sum(f) for f in _SHIP_COMBAT_SUM_FIELDS}
+    sum_kwargs = {f: Sum(f) for f in _SHIP_COMBAT_SUM_FIELDS}
     with transaction.atomic(), _elevated_work_mem():
-        row = (
+        per_player = list(
             PlayerDailyShipStats.objects
             .filter(ship_id=ship_id, mode='random', date__gte=cutoff,
-                    player__realm=realm)
-            .aggregate(players=Count('player', distinct=True), **agg_kwargs)
+                    player__realm=realm,
+                    player__pvp_battles__gte=_SHIP_COMBAT_MIN_ACCOUNT_BATTLES,
+                    player__pvp_ratio__isnull=False)
+            .values('player_id', 'player__pvp_ratio')
+            .annotate(**sum_kwargs)
         )
 
-    totals = {f: int(row.get(f'sum_{f}') or 0) for f in _SHIP_COMBAT_SUM_FIELDS}
-    totals['players'] = int(row.get('players') or 0)
-    cache.set(cache_key, totals, _SHIP_COMBAT_POP_CACHE_TTL)
-    return totals
+    # Rank by account win rate (desc) and take the leading N% for each bracket.
+    per_player.sort(key=lambda r: r['player__pvp_ratio'], reverse=True)
+    total = len(per_player)
+
+    def _sum_rows(rows):
+        totals = {f: 0 for f in _SHIP_COMBAT_SUM_FIELDS}
+        for r in rows:
+            for f in _SHIP_COMBAT_SUM_FIELDS:
+                totals[f] += int(r.get(f) or 0)
+        totals['players'] = len(rows)
+        return totals
+
+    result = {}
+    for bracket, fraction in _SHIP_COMBAT_BRACKET_FRACTION.items():
+        count = total if fraction >= 1.0 else (max(1, math.ceil(total * fraction)) if total else 0)
+        result[bracket] = _sum_rows(per_player[:count])
+
+    cache.set(cache_key, result, _SHIP_COMBAT_POP_CACHE_TTL)
+    return result
 
 
 def _ship_combat_user_totals(player, ship_id):
@@ -6872,32 +6904,37 @@ def _ship_combat_user_totals(player, ship_id):
 
 def compute_ship_combat_comparison(player, ship_id, realm,
                                    window_days=SHIP_COMBAT_WINDOW_DAYS):
-    """Build the ShipStats payload: per-metric {user, average} clustered by
-    combat role, with role-irrelevant metrics omitted (population denominator
-    ~0). `user` is the player's career rate; `average` is the ship's 30-day
-    population rate. Either side may be None (no observation / no population)."""
+    """Build the ShipStats payload: per-metric {user, averages:{all,top50,top25}}
+    clustered by combat role, with role-irrelevant metrics omitted (population
+    denominator ~0). `user` is the player's career rate; each `averages` entry is
+    the ship's 30-day population rate within that account-WR skill bracket. Any
+    side may be None (no observation / empty bracket)."""
     ship_id = int(ship_id)
-    pop = _ship_population_totals_30d(ship_id, realm, window_days)
+    brackets = _ship_population_brackets_30d(ship_id, realm, window_days)
+    pop_all = brackets['all']
     user = _ship_combat_user_totals(player, ship_id)
 
     ship = Ship.objects.filter(ship_id=ship_id).first()
 
     clusters: dict[str, list] = {}
     cluster_order: list[str] = []
-    pop_has_battles = pop['battles'] > 0
+    pop_has_battles = pop_all['battles'] > 0
 
     for spec in _SHIP_COMBAT_METRICS:
         gate = spec.get('gate')
-        # Drop the metric when the ship's population doesn't use this system, or
-        # there's simply no population data to average over.
+        # Whether to surface the metric is decided on the full population; the
+        # per-bracket averages may still be None for a thin top-25% slice.
         if not pop_has_battles:
             continue
-        if gate is not None and not gate(pop):
+        if gate is not None and not gate(pop_all):
+            continue
+        if spec['value'](pop_all) is None:
             continue
 
-        average = spec['value'](pop)
-        if average is None:
-            continue
+        averages = {}
+        for bracket in _SHIP_COMBAT_BRACKETS:
+            value = spec['value'](brackets[bracket])
+            averages[bracket] = round(value, 2) if value is not None else None
         user_value = spec['value'](user) if user is not None else None
 
         cluster = spec['cluster']
@@ -6910,7 +6947,7 @@ def compute_ship_combat_comparison(player, ship_id, realm,
             'unit': spec['unit'],
             'better': spec['better'],
             'user': round(user_value, 2) if user_value is not None else None,
-            'average': round(average, 2),
+            'averages': averages,
         })
 
     return {
@@ -6919,8 +6956,12 @@ def compute_ship_combat_comparison(player, ship_id, realm,
         'ship_tier': ship.tier if ship else None,
         'ship_type': ship.ship_type if ship else None,
         'window_days': window_days,
-        'sample_players': pop['players'],
-        'sample_battles': pop['battles'],
+        'min_account_battles': _SHIP_COMBAT_MIN_ACCOUNT_BATTLES,
+        'brackets': {
+            bracket: {'players': brackets[bracket]['players'],
+                      'battles': brackets[bracket]['battles']}
+            for bracket in _SHIP_COMBAT_BRACKETS
+        },
         'user_battles': (user or {}).get('battles', 0),
         'has_user_data': user is not None,
         'clusters': [{'name': name, 'metrics': clusters[name]}
