@@ -96,34 +96,36 @@ const MetricRow: React.FC<{ metric: ShipStatMetric }> = ({ metric }) => {
     }
 
     return (
-        <div className="py-1.5">
-            <div className="flex items-baseline justify-between gap-2 text-xs">
-                <span className="text-[var(--text-muted)]">{label}</span>
-                <span className="tabular-nums">
-                    <span className="font-semibold text-[var(--text-strong)]">{formatMetricValue(user, unit)}</span>
-                    <span className="text-[var(--text-muted)]">{' · avg '}{formatMetricValue(average, unit)}</span>
-                    {deltaText ? (
-                        <span className="ml-1.5 font-semibold" style={{ color: deltaTone }}>{deltaText}</span>
-                    ) : null}
-                </span>
+        // Left column: left-justified title + comparison bar. Right column: the
+        // you · avg · Δ details, right-aligned.
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 py-1.5">
+            <div className="min-w-0">
+                <div className="text-xs text-[var(--text-muted)]">{label}</div>
+                {/* Comparison track: filled bar = the player; tick = the ship's
+                    30-day population average. */}
+                <div
+                    className="relative mt-1 h-2 w-full overflow-hidden rounded-full"
+                    style={{ backgroundColor: 'var(--accent-faint)' }}
+                    role="img"
+                    aria-label={`${label}: you ${formatMetricValue(user, unit)}, average ${formatMetricValue(average, unit)}`}
+                >
+                    <div
+                        className="absolute inset-y-0 left-0 rounded-full"
+                        style={{ width: `${userPct}%`, backgroundColor: 'var(--accent-secondary-mid)' }}
+                    />
+                    <div
+                        className="absolute inset-y-[-2px] w-[2px]"
+                        style={{ left: `calc(${avgPct}% - 1px)`, backgroundColor: 'var(--text-strong)', opacity: 0.7 }}
+                        title={`Ship average: ${formatMetricValue(average, unit)}`}
+                    />
+                </div>
             </div>
-            {/* Comparison track: filled bar = the player; tick = the ship's
-                30-day population average. */}
-            <div
-                className="relative mt-1 h-2 w-full overflow-hidden rounded-full"
-                style={{ backgroundColor: 'var(--accent-faint)' }}
-                role="img"
-                aria-label={`${label}: you ${formatMetricValue(user, unit)}, average ${formatMetricValue(average, unit)}`}
-            >
-                <div
-                    className="absolute inset-y-0 left-0 rounded-full"
-                    style={{ width: `${userPct}%`, backgroundColor: 'var(--accent-secondary-mid)' }}
-                />
-                <div
-                    className="absolute inset-y-[-2px] w-[2px]"
-                    style={{ left: `calc(${avgPct}% - 1px)`, backgroundColor: 'var(--text-strong)', opacity: 0.7 }}
-                    title={`Ship average: ${formatMetricValue(average, unit)}`}
-                />
+            <div className="whitespace-nowrap text-right text-xs tabular-nums">
+                <span className="font-semibold text-[var(--text-strong)]">{formatMetricValue(user, unit)}</span>
+                <span className="text-[var(--text-muted)]">{' · avg '}{formatMetricValue(average, unit)}</span>
+                {deltaText ? (
+                    <span className="ml-1.5 font-semibold" style={{ color: deltaTone }}>{deltaText}</span>
+                ) : null}
             </div>
         </div>
     );
@@ -212,7 +214,7 @@ const ShipStats: React.FC<ShipStatsProps> = ({
             ) : null}
 
             {state === 'ready' && payload ? (
-                <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+                <div className="mt-3 space-y-4">
                     {payload.clusters.map((cluster) => (
                         <section key={cluster.name}>
                             <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--accent-secondary-mid)]">
