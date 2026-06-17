@@ -6735,3 +6735,207 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     # 26h TTL bridges the daily warms; the key changes once a new snapshot lands.
     cache.set(cache_key, payload, timeout=26 * 3600)
     return payload
+
+
+# ---------------------------------------------------------------------------
+# Ship combat comparison (ShipStats component)
+# ---------------------------------------------------------------------------
+# Operationalizes the untapped per-ship combat fields documented in
+# runbook-battle-history-data-operationalization-2026-06-16.md. For one ship,
+# compares a player's CAREER per-ship profile (full coverage, read from the
+# latest BattleObservation.ships_stats_json) against the ship's 30-day
+# POPULATION average (summed across all players' PlayerDailyShipStats for that
+# ship_id + realm). Per-battle rates and accuracy ratios are window-robust, so
+# career-vs-30d is a coherent "you vs how this ship is being played" comparison
+# with full user coverage. Metrics whose population denominator is ~0 (e.g.
+# secondaries on a DD, torpedoes on most BBs) are OMITTED — the frontend renders
+# only what is meaningful for the ship.
+
+SHIP_COMBAT_WINDOW_DAYS = 30
+_SHIP_COMBAT_POP_CACHE_TTL = 3600  # 1h — population aggregate is player-independent
+
+# The widened per-day columns summed for the population aggregate. ships_stats_json
+# calls damage `damage_dealt`; PlayerDailyShipStats calls it `damage` — normalized
+# to `damage` for both sides below.
+_SHIP_COMBAT_SUM_FIELDS = (
+    'battles', 'wins', 'losses', 'frags', 'damage', 'xp', 'planes_killed',
+    'survived_battles',
+    'main_shots', 'main_hits', 'main_frags',
+    'secondary_shots', 'secondary_hits', 'secondary_frags',
+    'torpedo_shots', 'torpedo_hits', 'torpedo_frags',
+    'damage_scouting', 'ships_spotted',
+    'capture_points', 'dropped_capture_points', 'team_capture_points',
+)
+
+
+def _ship_combat_safe_div(numerator, denominator):
+    if not denominator:
+        return None
+    return numerator / denominator
+
+
+# Metric catalogue. `value(totals)` derives a per-battle rate or accuracy ratio
+# from a totals dict. `gate(pop)` (optional) returns False when the ship's
+# population does not meaningfully use that system → the metric is dropped.
+# `better` drives the frontend's above/below-average coloring.
+_SHIP_COMBAT_METRICS = (
+    dict(key='win_rate', label='Win rate', cluster='Outcomes', unit='%', better='high',
+         value=lambda t: _ship_combat_safe_div(t['wins'] * 100.0, t['battles'])),
+    dict(key='survival_rate', label='Survival rate', cluster='Outcomes', unit='%', better='high',
+         value=lambda t: _ship_combat_safe_div(t['survived_battles'] * 100.0, t['battles'])),
+    dict(key='damage_pb', label='Damage', cluster='Damage & XP', unit='/battle', better='high',
+         value=lambda t: _ship_combat_safe_div(t['damage'], t['battles'])),
+    dict(key='frags_pb', label='Frags', cluster='Damage & XP', unit='/battle', better='high',
+         value=lambda t: _ship_combat_safe_div(t['frags'], t['battles'])),
+    dict(key='xp_pb', label='XP', cluster='Damage & XP', unit='/battle', better='high',
+         value=lambda t: _ship_combat_safe_div(t['xp'], t['battles'])),
+    dict(key='main_hit_rate', label='Main hit %', cluster='Main battery', unit='%', better='high',
+         gate=lambda p: p['main_shots'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['main_hits'] * 100.0, t['main_shots'])),
+    dict(key='main_frags_pb', label='Main frags', cluster='Main battery', unit='/battle', better='high',
+         gate=lambda p: p['main_shots'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['main_frags'], t['battles'])),
+    dict(key='secondary_hit_rate', label='Secondary hit %', cluster='Secondaries', unit='%', better='high',
+         gate=lambda p: p['secondary_shots'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['secondary_hits'] * 100.0, t['secondary_shots'])),
+    dict(key='secondary_frags_pb', label='Secondary frags', cluster='Secondaries', unit='/battle', better='high',
+         gate=lambda p: p['secondary_shots'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['secondary_frags'], t['battles'])),
+    dict(key='torpedo_hit_rate', label='Torpedo hit %', cluster='Torpedoes', unit='%', better='high',
+         gate=lambda p: p['torpedo_shots'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['torpedo_hits'] * 100.0, t['torpedo_shots'])),
+    dict(key='torpedo_frags_pb', label='Torpedo frags', cluster='Torpedoes', unit='/battle', better='high',
+         gate=lambda p: p['torpedo_shots'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['torpedo_frags'], t['battles'])),
+    dict(key='scouting_pb', label='Scouting damage', cluster='Spotting & support', unit='/battle', better='high',
+         gate=lambda p: p['damage_scouting'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['damage_scouting'], t['battles'])),
+    dict(key='spotted_pb', label='Ships spotted', cluster='Spotting & support', unit='/battle', better='high',
+         gate=lambda p: p['ships_spotted'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['ships_spotted'], t['battles'])),
+    dict(key='caps_pb', label='Capture points', cluster='Objective', unit='/battle', better='high',
+         gate=lambda p: (p['capture_points'] + p['team_capture_points']) > 0,
+         value=lambda t: _ship_combat_safe_div(t['capture_points'], t['battles'])),
+    dict(key='team_caps_pb', label='Team capture points', cluster='Objective', unit='/battle', better='high',
+         gate=lambda p: p['team_capture_points'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['team_capture_points'], t['battles'])),
+    dict(key='dropped_caps_pb', label='Dropped capture points', cluster='Objective', unit='/battle', better='low',
+         gate=lambda p: (p['capture_points'] + p['team_capture_points']) > 0,
+         value=lambda t: _ship_combat_safe_div(t['dropped_capture_points'], t['battles'])),
+    dict(key='planes_pb', label='Planes killed', cluster='Anti-air', unit='/battle', better='high',
+         gate=lambda p: p['planes_killed'] > 0,
+         value=lambda t: _ship_combat_safe_div(t['planes_killed'], t['battles'])),
+)
+
+
+def _ship_population_totals_30d(ship_id, realm, window_days=SHIP_COMBAT_WINDOW_DAYS):
+    """Summed PlayerDailyShipStats (random mode) for one ship over the trailing
+    window, scoped to a realm and cached per (realm, ship, day)."""
+    from warships.models import PlayerDailyShipStats
+
+    cache_key = (
+        f"ship_combat_pop:v1:{realm}:{ship_id}:{window_days}:"
+        f"{django_timezone.now().date().isoformat()}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    cutoff = django_timezone.now().date() - timedelta(days=window_days)
+    agg_kwargs = {f'sum_{f}': Sum(f) for f in _SHIP_COMBAT_SUM_FIELDS}
+    with transaction.atomic(), _elevated_work_mem():
+        row = (
+            PlayerDailyShipStats.objects
+            .filter(ship_id=ship_id, mode='random', date__gte=cutoff,
+                    player__realm=realm)
+            .aggregate(players=Count('player', distinct=True), **agg_kwargs)
+        )
+
+    totals = {f: int(row.get(f'sum_{f}') or 0) for f in _SHIP_COMBAT_SUM_FIELDS}
+    totals['players'] = int(row.get('players') or 0)
+    cache.set(cache_key, totals, _SHIP_COMBAT_POP_CACHE_TTL)
+    return totals
+
+
+def _ship_combat_user_totals(player, ship_id):
+    """The player's CAREER totals for one ship, read from the latest
+    BattleObservation.ships_stats_json (full coverage; normalized to the same
+    keys as the population totals). Returns None if no observation/row."""
+    from warships.models import BattleObservation
+
+    obs = (
+        BattleObservation.objects
+        .filter(player=player, ships_stats_json__isnull=False)
+        .order_by('-observed_at')
+        .first()
+    )
+    if not obs or not obs.ships_stats_json:
+        return None
+
+    row = next((r for r in obs.ships_stats_json
+                if r.get('ship_id') == ship_id), None)
+    if row is None:
+        return None
+
+    totals = {f: int(row.get(f, 0) or 0) for f in _SHIP_COMBAT_SUM_FIELDS}
+    # ships_stats_json names damage `damage_dealt`; align to `damage`.
+    totals['damage'] = int(row.get('damage_dealt', row.get('damage', 0)) or 0)
+    return totals
+
+
+def compute_ship_combat_comparison(player, ship_id, realm,
+                                   window_days=SHIP_COMBAT_WINDOW_DAYS):
+    """Build the ShipStats payload: per-metric {user, average} clustered by
+    combat role, with role-irrelevant metrics omitted (population denominator
+    ~0). `user` is the player's career rate; `average` is the ship's 30-day
+    population rate. Either side may be None (no observation / no population)."""
+    ship_id = int(ship_id)
+    pop = _ship_population_totals_30d(ship_id, realm, window_days)
+    user = _ship_combat_user_totals(player, ship_id)
+
+    ship = Ship.objects.filter(ship_id=ship_id).first()
+
+    clusters: dict[str, list] = {}
+    cluster_order: list[str] = []
+    pop_has_battles = pop['battles'] > 0
+
+    for spec in _SHIP_COMBAT_METRICS:
+        gate = spec.get('gate')
+        # Drop the metric when the ship's population doesn't use this system, or
+        # there's simply no population data to average over.
+        if not pop_has_battles:
+            continue
+        if gate is not None and not gate(pop):
+            continue
+
+        average = spec['value'](pop)
+        if average is None:
+            continue
+        user_value = spec['value'](user) if user is not None else None
+
+        cluster = spec['cluster']
+        if cluster not in clusters:
+            clusters[cluster] = []
+            cluster_order.append(cluster)
+        clusters[cluster].append({
+            'key': spec['key'],
+            'label': spec['label'],
+            'unit': spec['unit'],
+            'better': spec['better'],
+            'user': round(user_value, 2) if user_value is not None else None,
+            'average': round(average, 2),
+        })
+
+    return {
+        'ship_id': ship_id,
+        'ship_name': (ship.name if ship else '') or (player and ''),
+        'ship_tier': ship.tier if ship else None,
+        'ship_type': ship.ship_type if ship else None,
+        'window_days': window_days,
+        'sample_players': pop['players'],
+        'sample_battles': pop['battles'],
+        'user_battles': (user or {}).get('battles', 0),
+        'has_user_data': user is not None,
+        'clusters': [{'name': name, 'metrics': clusters[name]}
+                     for name in cluster_order],
+    }
