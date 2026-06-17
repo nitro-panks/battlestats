@@ -300,12 +300,6 @@ const ShipStats: React.FC<ShipStatsProps> = ({
                             </section>
                         ))}
                     </div>
-                    {payload.clusters.some((c) => c.name === 'Accuracy') ? (
-                        <p className="mt-3 text-[11px] italic text-[var(--text-muted)]">
-                            Your hit % is lifetime accuracy (a stable skill, and the recent sample is thin);
-                            every other bar and all server averages are {payload.window_days}-day.
-                        </p>
-                    ) : null}
                 </>
             ) : null}
 
