@@ -177,7 +177,10 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
             )}
 
             {!loading && !error && seasons.length > 0 && (
-                <div className="mb-4">
+                /* Pull left so the y-axis tick labels' left edge is flush with the
+                   body's left edge (not the axis line — the labels sit ~31px in from
+                   the SVG edge, so shift by that, leaving the axis naturally inset). */
+                <div className="mb-4 md:-ml-[31px]">
                     <ClanBattleSeasonsSVG
                         seasons={seasons}
                         memberCount={memberCount}

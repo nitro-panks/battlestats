@@ -139,44 +139,49 @@ describe('ClanMembers efficiency-rank icon', () => {
     });
 });
 
-describe('ClanMembers idle recency formatting', () => {
-    it('renders idle recency in the compact "Nd idle" form', () => {
-        render(
-            <ClanMembers
-                members={[{ ...baseMember, days_since_last_battle: 2 }]}
-                onSelectMember={() => undefined}
-            />,
-        );
-
-        expect(screen.getByText('2d idle')).toBeInTheDocument();
-        expect(screen.queryByText('2 days idle')).not.toBeInTheDocument();
-    });
-
-    it('uses the compact form for a single idle day too', () => {
-        render(
-            <ClanMembers
-                members={[{ ...baseMember, days_since_last_battle: 1 }]}
-                onSelectMember={() => undefined}
-            />,
-        );
-
-        expect(screen.getByText('1d idle')).toBeInTheDocument();
-        expect(screen.queryByText('1 day idle')).not.toBeInTheDocument();
-    });
-
-    it('still labels zero-day and unknown activity in words', () => {
+describe('ClanMembers activity icon', () => {
+    it('renders a graded activity icon per bucket instead of raw idle text', () => {
         render(
             <ClanMembers
                 members={[
-                    { ...baseMember, name: 'Fresh', days_since_last_battle: 0 },
-                    { ...baseMember, name: 'Unknown', days_since_last_battle: null },
+                    { ...baseMember, name: 'Sunny', activity_bucket: 'active_7d' },
+                    { ...baseMember, name: 'Dusk', activity_bucket: 'active_30d' },
+                    { ...baseMember, name: 'Cool', activity_bucket: 'cooling_90d' },
+                    { ...baseMember, name: 'Dorm', activity_bucket: 'dormant_180d' },
+                    { ...baseMember, name: 'Dark', activity_bucket: 'inactive_180d_plus' },
                 ]}
                 onSelectMember={() => undefined}
             />,
         );
 
-        expect(screen.getByText('played today')).toBeInTheDocument();
-        expect(screen.getByText('activity unknown')).toBeInTheDocument();
+        expect(screen.getByLabelText(/Active now/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Still warm/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Cooling/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Dormant/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Gone dark/i)).toBeInTheDocument();
+    });
+
+    it('drops the old "Nd idle" / "played today" recency text', () => {
+        render(
+            <ClanMembers
+                members={[{ ...baseMember, days_since_last_battle: 2, activity_bucket: 'active_7d' }]}
+                onSelectMember={() => undefined}
+            />,
+        );
+
+        expect(screen.queryByText(/idle/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/played today/i)).not.toBeInTheDocument();
+    });
+
+    it('renders no activity icon when the bucket is unknown', () => {
+        render(
+            <ClanMembers
+                members={[{ ...baseMember, activity_bucket: 'unknown' }]}
+                onSelectMember={() => undefined}
+            />,
+        );
+
+        expect(screen.queryByLabelText(/Active now|Still warm|Cooling|Dormant|Gone dark/i)).not.toBeInTheDocument();
     });
 });
 
@@ -197,9 +202,8 @@ describe('ClanMembers current-player marker', () => {
         // Other members stay clickable links.
         expect(screen.getByRole('button', { name: /Show player Member Two/i })).toBeInTheDocument();
 
-        // The current player's name and the explicit "you" marker are present.
-        expect(screen.getByText('you')).toBeInTheDocument();
-        const marker = screen.getByText('you').closest('[aria-current="page"]');
+        // The current player's row is marked aria-current and carries the name.
+        const marker = screen.getByText('Member One').closest('[aria-current="page"]');
         expect(marker).not.toBeNull();
         expect(marker).toHaveTextContent('Member One');
     });
@@ -214,7 +218,7 @@ describe('ClanMembers current-player marker', () => {
         );
 
         expect(screen.queryByRole('button', { name: /Show player Member One/i })).not.toBeInTheDocument();
-        expect(screen.getByText('you')).toBeInTheDocument();
+        expect(screen.getByText('Member One').closest('[aria-current="page"]')).not.toBeNull();
     });
 
     it('keeps every member clickable when no current player is highlighted', () => {
@@ -226,7 +230,7 @@ describe('ClanMembers current-player marker', () => {
         );
 
         expect(screen.getByRole('button', { name: /Show player Member One/i })).toBeInTheDocument();
-        expect(screen.queryByText('you')).not.toBeInTheDocument();
+        expect(screen.getByText('Member One').closest('[aria-current="page"]')).toBeNull();
     });
 });
 

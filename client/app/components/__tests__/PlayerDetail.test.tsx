@@ -708,7 +708,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         );
 
         expect(screen.getByLabelText('Clan leader')).toBeInTheDocument();
-        expect(screen.getByLabelText('inactive for over a year')).toBeInTheDocument();
+        expect(screen.getByLabelText(/Gone dark/i)).toBeInTheDocument();
         expect(screen.getByLabelText(/ranked enjoyer/i)).toBeInTheDocument();
         expect(screen.queryByText('Playstyle:')).not.toBeInTheDocument();
         expect(screen.queryByText('Warrior')).not.toBeInTheDocument();
