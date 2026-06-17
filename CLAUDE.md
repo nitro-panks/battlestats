@@ -153,6 +153,8 @@ Project skills live in `.claude/skills/<name>/SKILL.md`, auto-loaded on trigger 
 - **`runbook-archive`** ("archive this runbook") — `git mv`s to `archive/`, updates `doc_registry.json`. Stages.
 - **`deploy-droplet`** ("deploy frontend/backend", "ship to prod") — deploys then verifies. Mutates production.
 - **`enrichment-status`** ("how's enrichment") — runs the crawler health check and interprets it. Read-only.
+- **`observation`** ("/observation", "observation readout") — day-over-day observation-floor coverage/freshness from the nightly snapshots. Read-only.
+- **`crawl-yield`** ("/crawl-yield", "is the crawler still earning its cost") — per-pass clan-crawl yield (discovery + dormant→active re-detection) vs. floor overlap, from the per-pass snapshots. Read-only.
 
 ## Versioning
 
