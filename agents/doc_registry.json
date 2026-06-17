@@ -2669,6 +2669,30 @@
                 "ship-badges-rolling-superseded"
             ]
         },
+        "agents/runbooks/runbook-landing-medals-filter-2026-06-17.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "features",
+            "owner": "backend",
+            "aliases": [
+                "landing medals filter",
+                "medals sub-sort",
+                "top players by medals",
+                "landing best medals"
+            ],
+            "tags": [
+                "landing-medals",
+                "ship_badges",
+                "LANDING_PLAYER_BEST_SORTS",
+                "ShipTopPlayerSnapshot",
+                "landing-best-player"
+            ],
+            "archive_on": [
+                "landing-medals-superseded",
+                "ship-standings-feature-removed"
+            ]
+        },
         "agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md": {
             "kind": "runbook",
             "status": "active",
