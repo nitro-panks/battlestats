@@ -104,10 +104,18 @@ Current explicit task routing:
 4. `default`
    - lightweight request-adjacent entity refreshes that are still intentionally left on the general lane
 
-After the implementation slice, request-adjacent tasks still landing on `default` are primarily:
+After the 2026-04-03 slice, the two core on-visit refreshes still landed on `default`:
 
 1. `update_player_data_task`
 2. `update_clan_data_task`
+
+**Update (2026-06-17):** both were moved to `hydration` — the "Option A" residual
+below is now closed. They are dispatched only from the request path (no bulk/batch
+loop fans them out), so every on-visit refresh now shares the single interactive
+lane, decoupled from the inline observation-floor sweep + crawl dispatchers +
+warmers that share `default`. `default` now carries only those maintenance/crawl-
+dispatch tasks, not user-facing entity refreshes. See
+`runbook-interactive-refresh-lane-2026-06-17.md`.
 
 ## How Request-Driven Work Enters The System
 

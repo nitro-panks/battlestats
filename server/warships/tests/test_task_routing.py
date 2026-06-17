@@ -13,6 +13,13 @@ def test_heavy_request_driven_refreshes_route_to_hydration():
         "warships.tasks.update_player_clan_battle_data_task",
         "warships.tasks.update_player_efficiency_data_task",
         "warships.tasks.update_clan_battle_summary_task",
+        # Core on-visit refreshes: dispatched only from the request path, so
+        # they belong in the dedicated interactive lane rather than competing
+        # on `default` with the inline observation-floor sweep + crawl
+        # dispatchers + warmers. See
+        # runbook-interactive-refresh-lane-2026-06-17.md.
+        "warships.tasks.update_player_data_task",
+        "warships.tasks.update_clan_data_task",
     }
 
     for task_name in expected_tasks:
