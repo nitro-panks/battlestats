@@ -1464,6 +1464,29 @@ def battle_history(request, player_name: str) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def ship_combat_stats(request, player_name: str, ship_id: int) -> Response:
+    """Per-ship combat comparison — a player's career profile vs the ship's
+    30-day population average. Backs the ShipStats panel in the Activity tab
+    (runbook-battle-history-data-operationalization-2026-06-16.md). Role-
+    irrelevant metrics (e.g. secondaries on a DD) are omitted server-side."""
+    realm = _get_realm(request)
+    player = (
+        Player.objects
+        .alias(name_lower=Lower("name"))
+        .filter(name_lower=(player_name or "").strip().lower(), realm=realm)
+        .first()
+    )
+    if player is None:
+        return Response({"detail": "Player not found."},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    from warships.data import compute_ship_combat_comparison
+    payload = compute_ship_combat_comparison(player, ship_id, realm)
+    return Response(payload)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def wr_distribution(request) -> Response:
     realm = _get_realm(request)
     data = fetch_wr_distribution(realm=realm)

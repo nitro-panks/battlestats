@@ -162,6 +162,13 @@ print(sorted(obs.ships_stats_json[0].keys()))   # 22 per-ship fields
 - `server/warships/data.py` — `compute_realm_top_ships`, `compute_realm_ships_by_tier_type`, `snapshot_ship_top_players_task`
 - `client/app/components/BattleHistoryCard.tsx`, `RealmTopShipsTreemapSVG.tsx`, `ShipLeaderboard.tsx`, `ShipRouteView.tsx`, `ShipTopPlayerBanner.tsx`
 
+## Implementation status
+
+- **2026-06-17 — ShipStats panel shipped (PR on `feat/ship-stats-component`).** First operationalization of these fields. Clicking a ship in the Battle History table (Activity tab) opens a per-ship panel comparing the player to the ship's 30-day population, bracketed by account-WR skill (All / Top 50% / Top 25%, ranked by `Player.pvp_ratio`, ≥200 pvp battles).
+  - **Backend:** `GET /api/player/<name>/ship/<id>/combat-stats` → `compute_ship_combat_comparison` (`data.py`); population aggregated from `PlayerDailyShipStats` (random, 30d), cached per realm+ship.
+  - **Reliability scoping confirmed the runbook's warning the hard way:** the Phase-7 widened per-day columns are populated on only **~6% of daily rows**, so their per-battle population averages are unusable. Surfaced metrics are limited to the complete core counters (win/damage/frags/xp) + accuracy **ratios** (hit% self-normalizes over rows-with-shots). User accuracy reads CAREER `ships_stats_json` (complete; 30d gunnery too sparse); core metrics read 30d PDSS (match the table).
+  - **Deferred (needs the runbook's recommended source):** survival, spotting, scouting, capture play — require a **precomputed career-population aggregate** from `ships_stats_json` (per-ship cross-player, e.g. a nightly job), since no queryable per-ship career-population store exists. Until then those clusters are omitted.
+
 ## Related
 
 - `agents/runbooks/runbook-bulk-battle-observation-capture-2026-06-06.md` — the capture/floor design (write side)

@@ -6735,3 +6735,264 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     # 26h TTL bridges the daily warms; the key changes once a new snapshot lands.
     cache.set(cache_key, payload, timeout=26 * 3600)
     return payload
+
+
+# ---------------------------------------------------------------------------
+# Ship combat comparison (ShipStats component)
+# ---------------------------------------------------------------------------
+# Operationalizes the untapped per-ship combat fields documented in
+# runbook-battle-history-data-operationalization-2026-06-16.md. For one ship,
+# compares a player's CAREER per-ship profile (full coverage, read from the
+# latest BattleObservation.ships_stats_json) against the ship's 30-day
+# POPULATION average (summed across all players' PlayerDailyShipStats for that
+# ship_id + realm). Per-battle rates and accuracy ratios are window-robust, so
+# career-vs-30d is a coherent "you vs how this ship is being played" comparison
+# with full user coverage. Metrics whose population denominator is ~0 (e.g.
+# secondaries on a DD, torpedoes on most BBs) are OMITTED — the frontend renders
+# only what is meaningful for the ship.
+
+SHIP_COMBAT_WINDOW_DAYS = 30
+_SHIP_COMBAT_POP_CACHE_TTL = 3600  # 1h — population aggregate is player-independent
+
+# The widened per-day columns summed for the population aggregate. ships_stats_json
+# calls damage `damage_dealt`; PlayerDailyShipStats calls it `damage` — normalized
+# to `damage` for both sides below.
+_SHIP_COMBAT_SUM_FIELDS = (
+    'battles', 'wins', 'losses', 'frags', 'damage', 'xp', 'planes_killed',
+    'survived_battles',
+    'main_shots', 'main_hits', 'main_frags',
+    'secondary_shots', 'secondary_hits', 'secondary_frags',
+    'torpedo_shots', 'torpedo_hits', 'torpedo_frags',
+    'damage_scouting', 'ships_spotted',
+    'capture_points', 'dropped_capture_points', 'team_capture_points',
+)
+
+
+def _ship_combat_safe_div(numerator, denominator):
+    if not denominator:
+        return None
+    return numerator / denominator
+
+
+# Metric catalogue. `value(totals)` derives a per-battle rate or accuracy ratio
+# from a totals dict. `gate(pop)` (optional) returns False when the ship's
+# population sample can't support the metric → it is dropped. `better` drives
+# the frontend's above/below-average coloring.
+#
+# RELIABILITY SCOPING (important): only metrics that PlayerDailyShipStats can
+# aggregate trustworthily across the population are surfaced. The original core
+# counters (battles / wins / frags / damage / xp / planes_killed) are complete
+# on every daily row, and accuracy RATIOS (hits / shots) self-normalize over the
+# rows that carry gunnery. The Phase-7 WIDENED per-battle counters — survival,
+# spotting, scouting, capture play — are captured on only a small fraction of
+# daily rows (~6% in spot checks), so their per-battle population averages are
+# badly biased and are intentionally NOT surfaced. A faithful comparison for
+# those needs a precomputed career-population aggregate from ships_stats_json
+# (the runbook's recommended full-coverage source) — tracked as a follow-up.
+_SHIP_COMBAT_MIN_SHOTS = 100  # accuracy ratios need a stable population sample
+
+_SHIP_COMBAT_METRICS = (
+    dict(key='win_rate', label='Win rate', cluster='Outcomes', unit='%', better='high',
+         value=lambda t: _ship_combat_safe_div(t['wins'] * 100.0, t['battles'])),
+    dict(key='damage_pb', label='Damage', cluster='Combat output', unit='/battle', better='high',
+         value=lambda t: _ship_combat_safe_div(t['damage'], t['battles'])),
+    dict(key='frags_pb', label='Frags', cluster='Combat output', unit='/battle', better='high',
+         value=lambda t: _ship_combat_safe_div(t['frags'], t['battles'])),
+    dict(key='xp_pb', label='XP', cluster='Combat output', unit='/battle', better='high',
+         value=lambda t: _ship_combat_safe_div(t['xp'], t['battles'])),
+    # Accuracy ratios use the player's CAREER totals (user_basis='career'): the
+    # 30-day daily rows seldom capture gunnery, and hit% is a stable skill better
+    # judged over a career than a few recent battles. The population average
+    # stays 30-day (over the rows that did capture shots).
+    dict(key='main_hit_rate', label='Main battery hit %', cluster='Accuracy', unit='%', better='high',
+         user_basis='career',
+         gate=lambda p: p['main_shots'] >= _SHIP_COMBAT_MIN_SHOTS,
+         value=lambda t: _ship_combat_safe_div(t['main_hits'] * 100.0, t['main_shots'])),
+    dict(key='secondary_hit_rate', label='Secondary hit %', cluster='Accuracy', unit='%', better='high',
+         user_basis='career',
+         gate=lambda p: p['secondary_shots'] >= _SHIP_COMBAT_MIN_SHOTS,
+         value=lambda t: _ship_combat_safe_div(t['secondary_hits'] * 100.0, t['secondary_shots'])),
+    dict(key='torpedo_hit_rate', label='Torpedo hit %', cluster='Accuracy', unit='%', better='high',
+         user_basis='career',
+         gate=lambda p: p['torpedo_shots'] >= _SHIP_COMBAT_MIN_SHOTS,
+         value=lambda t: _ship_combat_safe_div(t['torpedo_hits'] * 100.0, t['torpedo_shots'])),
+)
+
+
+# Skill brackets, ranked by overall account random win rate (Player.pvp_ratio).
+# `all` is the whole window population; `top50`/`top25` are the better-skilled
+# halves/quarters of it (relative percentiles of THIS ship's players, not fixed
+# global cutoffs). Mirrors shiptool's account-WR bracketing in spirit.
+_SHIP_COMBAT_BRACKETS = ('all', 'top50', 'top25')
+_SHIP_COMBAT_BRACKET_FRACTION = {'all': 1.0, 'top50': 0.50, 'top25': 0.25}
+# Exclude low-sample accounts from the skill ranking (shiptool uses 200).
+_SHIP_COMBAT_MIN_ACCOUNT_BATTLES = 200
+
+
+def _ship_population_brackets_30d(ship_id, realm, window_days=SHIP_COMBAT_WINDOW_DAYS):
+    """Per-skill-bracket summed PlayerDailyShipStats (random) for one ship over
+    the trailing window. Players are aggregated individually, ranked by overall
+    account random win rate (Player.pvp_ratio, accounts with >=200 pvp battles),
+    then summed into the All / top-50% / top-25% brackets. Cached per
+    (realm, ship, day)."""
+    import math
+    from warships.models import PlayerDailyShipStats
+
+    cache_key = (
+        f"ship_combat_pop:v2:{realm}:{ship_id}:{window_days}:"
+        f"{django_timezone.now().date().isoformat()}"
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    cutoff = django_timezone.now().date() - timedelta(days=window_days)
+    sum_kwargs = {f: Sum(f) for f in _SHIP_COMBAT_SUM_FIELDS}
+    with transaction.atomic(), _elevated_work_mem():
+        per_player = list(
+            PlayerDailyShipStats.objects
+            .filter(ship_id=ship_id, mode='random', date__gte=cutoff,
+                    player__realm=realm,
+                    player__pvp_battles__gte=_SHIP_COMBAT_MIN_ACCOUNT_BATTLES,
+                    player__pvp_ratio__isnull=False)
+            .values('player_id', 'player__pvp_ratio')
+            .annotate(**sum_kwargs)
+        )
+
+    # Rank by account win rate (desc) and take the leading N% for each bracket.
+    per_player.sort(key=lambda r: r['player__pvp_ratio'], reverse=True)
+    total = len(per_player)
+
+    def _sum_rows(rows):
+        totals = {f: 0 for f in _SHIP_COMBAT_SUM_FIELDS}
+        for r in rows:
+            for f in _SHIP_COMBAT_SUM_FIELDS:
+                totals[f] += int(r.get(f) or 0)
+        totals['players'] = len(rows)
+        return totals
+
+    result = {}
+    for bracket, fraction in _SHIP_COMBAT_BRACKET_FRACTION.items():
+        count = total if fraction >= 1.0 else (max(1, math.ceil(total * fraction)) if total else 0)
+        result[bracket] = _sum_rows(per_player[:count])
+
+    cache.set(cache_key, result, _SHIP_COMBAT_POP_CACHE_TTL)
+    return result
+
+
+def _ship_combat_user_totals(player, ship_id, window_days=SHIP_COMBAT_WINDOW_DAYS):
+    """The player's own totals for one ship over the SAME trailing window and
+    source (PlayerDailyShipStats, random) as the population — so the panel is
+    consistent with the Battle History table the user clicked from and with the
+    "30d" framing. Returns None when the player has no battles on the ship in the
+    window."""
+    from warships.models import PlayerDailyShipStats
+
+    cutoff = django_timezone.now().date() - timedelta(days=window_days)
+    row = (
+        PlayerDailyShipStats.objects
+        .filter(player=player, ship_id=ship_id, mode='random', date__gte=cutoff)
+        .aggregate(**{f: Sum(f) for f in _SHIP_COMBAT_SUM_FIELDS})
+    )
+    totals = {f: int(row.get(f) or 0) for f in _SHIP_COMBAT_SUM_FIELDS}
+    if totals['battles'] <= 0:
+        return None
+    return totals
+
+
+def _ship_combat_user_career_totals(player, ship_id):
+    """The player's CAREER totals for one ship from the latest
+    BattleObservation.ships_stats_json — complete for every field. Used for the
+    accuracy ratios, whose 30-day daily rows are too sparse (gunnery is captured
+    on few rows) and which are stable career traits anyway. Returns None if no
+    observation row for the ship."""
+    from warships.models import BattleObservation
+
+    obs = (
+        BattleObservation.objects
+        .filter(player=player, ships_stats_json__isnull=False)
+        .order_by('-observed_at')
+        .first()
+    )
+    if not obs or not obs.ships_stats_json:
+        return None
+    row = next((r for r in obs.ships_stats_json
+                if r.get('ship_id') == ship_id), None)
+    if row is None:
+        return None
+    totals = {f: int(row.get(f, 0) or 0) for f in _SHIP_COMBAT_SUM_FIELDS}
+    totals['damage'] = int(row.get('damage_dealt', row.get('damage', 0)) or 0)
+    return totals
+
+
+def compute_ship_combat_comparison(player, ship_id, realm,
+                                   window_days=SHIP_COMBAT_WINDOW_DAYS):
+    """Build the ShipStats payload: per-metric {user, averages:{all,top50,top25}}
+    clustered by combat role, with role-irrelevant metrics omitted (population
+    denominator ~0). Both `user` and each `averages` entry are 30-day random-
+    battle rates (same window/source), so the panel stays consistent with the
+    Battle History table; `averages` is bracketed by account-WR skill. Any side
+    may be None (no battles in the window / empty bracket)."""
+    ship_id = int(ship_id)
+    brackets = _ship_population_brackets_30d(ship_id, realm, window_days)
+    pop_all = brackets['all']
+    # 30d window totals for the core per-battle metrics (match the table); career
+    # totals for the accuracy ratios (30d gunnery is too sparse — see specs).
+    user_window = _ship_combat_user_totals(player, ship_id, window_days)
+    user_career = _ship_combat_user_career_totals(player, ship_id)
+    user_totals_for = {'window': user_window, 'career': user_career}
+
+    ship = Ship.objects.filter(ship_id=ship_id).first()
+
+    clusters: dict[str, list] = {}
+    cluster_order: list[str] = []
+    pop_has_battles = pop_all['battles'] > 0
+
+    for spec in _SHIP_COMBAT_METRICS:
+        gate = spec.get('gate')
+        # Whether to surface the metric is decided on the full population; the
+        # per-bracket averages may still be None for a thin top-25% slice.
+        if not pop_has_battles:
+            continue
+        if gate is not None and not gate(pop_all):
+            continue
+        if spec['value'](pop_all) is None:
+            continue
+
+        averages = {}
+        for bracket in _SHIP_COMBAT_BRACKETS:
+            value = spec['value'](brackets[bracket])
+            averages[bracket] = round(value, 2) if value is not None else None
+        user_totals = user_totals_for[spec.get('user_basis', 'window')]
+        user_value = spec['value'](user_totals) if user_totals is not None else None
+
+        cluster = spec['cluster']
+        if cluster not in clusters:
+            clusters[cluster] = []
+            cluster_order.append(cluster)
+        clusters[cluster].append({
+            'key': spec['key'],
+            'label': spec['label'],
+            'unit': spec['unit'],
+            'better': spec['better'],
+            'user': round(user_value, 2) if user_value is not None else None,
+            'averages': averages,
+        })
+
+    return {
+        'ship_id': ship_id,
+        'ship_name': (ship.name if ship else '') or (player and ''),
+        'ship_tier': ship.tier if ship else None,
+        'ship_type': ship.ship_type if ship else None,
+        'window_days': window_days,
+        'min_account_battles': _SHIP_COMBAT_MIN_ACCOUNT_BATTLES,
+        'brackets': {
+            bracket: {'players': brackets[bracket]['players'],
+                      'battles': brackets[bracket]['battles']}
+            for bracket in _SHIP_COMBAT_BRACKETS
+        },
+        'user_battles': (user_window or {}).get('battles', 0),
+        'has_user_data': user_window is not None or user_career is not None,
+        'clusters': [{'name': name, 'metrics': clusters[name]}
+                     for name in cluster_order],
+    }
