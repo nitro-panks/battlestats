@@ -139,6 +139,97 @@ describe('ClanMembers efficiency-rank icon', () => {
     });
 });
 
+describe('ClanMembers idle recency formatting', () => {
+    it('renders idle recency in the compact "Nd idle" form', () => {
+        render(
+            <ClanMembers
+                members={[{ ...baseMember, days_since_last_battle: 2 }]}
+                onSelectMember={() => undefined}
+            />,
+        );
+
+        expect(screen.getByText('2d idle')).toBeInTheDocument();
+        expect(screen.queryByText('2 days idle')).not.toBeInTheDocument();
+    });
+
+    it('uses the compact form for a single idle day too', () => {
+        render(
+            <ClanMembers
+                members={[{ ...baseMember, days_since_last_battle: 1 }]}
+                onSelectMember={() => undefined}
+            />,
+        );
+
+        expect(screen.getByText('1d idle')).toBeInTheDocument();
+        expect(screen.queryByText('1 day idle')).not.toBeInTheDocument();
+    });
+
+    it('still labels zero-day and unknown activity in words', () => {
+        render(
+            <ClanMembers
+                members={[
+                    { ...baseMember, name: 'Fresh', days_since_last_battle: 0 },
+                    { ...baseMember, name: 'Unknown', days_since_last_battle: null },
+                ]}
+                onSelectMember={() => undefined}
+            />,
+        );
+
+        expect(screen.getByText('played today')).toBeInTheDocument();
+        expect(screen.getByText('activity unknown')).toBeInTheDocument();
+    });
+});
+
+describe('ClanMembers current-player marker', () => {
+    it('renders the current player as a non-interactive "you are here" marker, not a self-link', () => {
+        const onSelectMember = jest.fn();
+        render(
+            <ClanMembers
+                members={[baseMember, { ...baseMember, name: 'Member Two' }]}
+                onSelectMember={onSelectMember}
+                highlightedPlayerName="Member One"
+            />,
+        );
+
+        // The current player is no longer a clickable link to their own page.
+        expect(screen.queryByRole('button', { name: /Show player Member One/i })).not.toBeInTheDocument();
+
+        // Other members stay clickable links.
+        expect(screen.getByRole('button', { name: /Show player Member Two/i })).toBeInTheDocument();
+
+        // The current player's name and the explicit "you" marker are present.
+        expect(screen.getByText('you')).toBeInTheDocument();
+        const marker = screen.getByText('you').closest('[aria-current="page"]');
+        expect(marker).not.toBeNull();
+        expect(marker).toHaveTextContent('Member One');
+    });
+
+    it('matches the current player case-insensitively', () => {
+        render(
+            <ClanMembers
+                members={[baseMember]}
+                onSelectMember={() => undefined}
+                highlightedPlayerName="member one"
+            />,
+        );
+
+        expect(screen.queryByRole('button', { name: /Show player Member One/i })).not.toBeInTheDocument();
+        expect(screen.getByText('you')).toBeInTheDocument();
+    });
+
+    it('keeps every member clickable when no current player is highlighted', () => {
+        render(
+            <ClanMembers
+                members={[baseMember]}
+                onSelectMember={() => undefined}
+            />,
+        );
+
+        expect(screen.getByRole('button', { name: /Show player Member One/i })).toBeInTheDocument();
+        expect(screen.queryByText('you')).not.toBeInTheDocument();
+    });
+});
+
 describe('ClanMembers click tracking', () => {
     beforeEach(() => trackEventMock.mockReset());
 
