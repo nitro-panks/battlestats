@@ -2219,6 +2219,34 @@
                 "db-retention-policy-shipped-and-runway-extended"
             ]
         },
+        "agents/runbooks/runbook-battle-history-archive-prune-2026-06-17.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "battle history archive",
+                "32-day retention",
+                "prune battle events",
+                "prune playerdailyshipstats",
+                "cold archive postgres disk",
+                "monthly archive prune",
+                "battle history retention window"
+            ],
+            "tags": [
+                "postgres",
+                "disk",
+                "retention",
+                "battle-history",
+                "archive",
+                "prune",
+                "digitalocean"
+            ],
+            "archive_on": [
+                "battle-history-archive-implemented-and-scheduled"
+            ]
+        },
         "agents/runbooks/runbook-db-size-optimization-2026-05-26.md": {
             "kind": "runbook",
             "status": "active",

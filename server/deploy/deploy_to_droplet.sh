@@ -609,6 +609,20 @@ set_env_value WG_RATE_LIMIT_BURST 18
 set_env_value WG_RATE_LIMIT_MAX_WAIT 8
 set_env_value WG_RATE_LIMIT_REQUEST_MAX_WAIT 0.5
 
+# Battle-history cold-archive + prune (archive_battle_history command,
+# battlestats-archive-battle-history.timer below). Exports BattleEvent /
+# PlayerDailyShipStats rows older than the retention window to gzip CSV +
+# manifest under shared/archives, verifies, then deletes the archived rows.
+# ENABLED in prod (first run + VACUUM FULL done 2026-06-17, see runbook); the
+# timer maintains the rolling window twice a month (1st + 15th). Set to 0 to
+# pause — the timer still fires but the command no-ops.
+set_env_value BATTLE_HISTORY_ARCHIVE_ENABLED 1
+set_env_value BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS 32
+set_env_value BATTLE_HISTORY_ARCHIVE_DIR "${APP_ROOT}/shared/archives/battle_history"
+set_env_value BATTLE_HISTORY_ARCHIVE_BATCH_SIZE 2000
+set_env_value BATTLE_HISTORY_ARCHIVE_SLEEP 0.5
+set_env_value BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT 180
+
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"
 
@@ -772,11 +786,47 @@ AccuracySec=30s
 WantedBy=timers.target
 EOF
 
+# Battle-history cold-archive + prune. A oneshot that runs the
+# archive_battle_history management command on the 1st + 15th of each month.
+# NOT a Celery task: a backlog/steady-state run deletes hundreds of thousands
+# of rows over many minutes, too long for a Celery soft-time-limit / worker
+# slot. Gated by BATTLE_HISTORY_ARCHIVE_ENABLED — the timer fires
+# unconditionally but the command no-ops while disabled.
+install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/archives/battle_history"
+cat > /etc/systemd/system/battlestats-archive-battle-history.service <<EOF
+[Unit]
+Description=Battlestats monthly battle-history cold-archive + prune
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py archive_battle_history'
+EOF
+
+cat > /etc/systemd/system/battlestats-archive-battle-history.timer <<'EOF'
+[Unit]
+Description=Run Battlestats battle-history archive on the 1st + 15th of each month
+
+[Timer]
+OnCalendar=*-*-01,15 03:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 # Enable the new crawls unit on first install so it auto-starts on reboot.
 # Idempotent — `systemctl enable` is a no-op when the unit is already enabled.
 systemctl enable battlestats-celery-crawls 2>/dev/null || true
 systemctl enable --now battlestats-celery-watchdog.timer 2>/dev/null || true
+systemctl enable --now battlestats-archive-battle-history.timer 2>/dev/null || true
 # configure_local_rabbitmq already ran before `manage.py migrate` above — the
 # env file and broker credentials are finalized at this point.
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true

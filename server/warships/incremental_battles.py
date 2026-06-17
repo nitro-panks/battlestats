@@ -20,8 +20,14 @@ The module exposes two entry points to the same diff machinery:
 """
 from __future__ import annotations
 
+import csv
+import gzip
+import hashlib
+import io
+import json
 import logging
 import os
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -1932,3 +1938,374 @@ def record_ranked_observation_and_diff(player_id: int, realm: str) -> Dict[str, 
         ranked_ship_data=ranked_ship_data,
         refresh_battles_json=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Battle-history cold-archive + prune (monthly retention)
+#
+# Runbook: agents/runbooks/runbook-battle-history-archive-prune-2026-06-17.md
+#
+# Enforces a rolling retention window on the two append-only, no-retention
+# battle-history tables (BattleEvent, PlayerDailyShipStats) by exporting rows
+# older than the cutoff to a compressed CSV + manifest on local disk, verifying
+# the archive, then deleting ONLY the rows that physically landed in the
+# verified archive. BattleObservation is intentionally OUT of scope (its heavy
+# JSON is handled by compact_battle_observation_payloads, and its CASCADE FKs
+# from BattleEvent make row deletion unsafe).
+#
+# Safety spine:
+#   * Both tables are FK leaves -> deletes cascade nothing.
+#   * The delete set is read back out of the archived CSV (column 0 == id), so
+#     we can only ever delete rows that were successfully written AND re-read.
+#     A truncated / disk-full archive fails to fully decompress -> we abort and
+#     delete nothing. The full decompress IS the completeness check.
+#   * The archive + manifest (count + sha256) are written BEFORE any delete.
+#   * Per-table independent: a failure on one table never deletes another's.
+#   * COPY is one long streaming op (NOT bounded by statement_timeout); only the
+#     bounded count query and the per-batch deletes carry SET LOCAL timeouts.
+# ---------------------------------------------------------------------------
+
+ARCHIVE_RETENTION_DAYS_DEFAULT = 32
+ARCHIVE_BATCH_SIZE_DEFAULT = 2000
+ARCHIVE_STATEMENT_TIMEOUT_DEFAULT = 180
+
+# table-key -> (real table, age column). Hardcoded allowlist: these strings are
+# interpolated into SQL (COPY / VACUUM / DELETE cannot bind identifiers), so
+# they must never originate from caller input. `date` columns compare against a
+# date cutoff; datetime columns against a naive-UTC datetime (USE_TZ=False, so
+# the columns are `timestamp without time zone` / `date`).
+ARCHIVE_TABLES: Dict[str, Dict[str, str]] = {
+    "battleevent": {"table": "warships_battleevent", "date_col": "detected_at"},
+    "playerdailyshipstats": {
+        "table": "warships_playerdailyshipstats", "date_col": "date"},
+}
+
+
+def _archive_cutoff(retention_days: int, *, as_date: bool):
+    """midnight-UTC(now) - retention_days, naive (USE_TZ=False columns)."""
+    now = datetime.utcnow()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    cutoff = midnight - timedelta(days=max(0, int(retention_days)))
+    return cutoff.date() if as_date else cutoff
+
+
+def _read_app_version() -> str:
+    try:
+        from django.conf import settings
+        path = os.path.join(str(settings.BASE_DIR), "..", "VERSION")
+        with open(path) as fh:
+            return fh.read().strip()
+    except Exception:
+        return os.getenv("NEXT_PUBLIC_APP_VERSION", "unknown")
+
+
+class _ArchiveLock:
+    """Non-blocking flock so an overrunning prior run can't overlap the next.
+
+    File-based (not the Django cache) so it works in a standalone management
+    command / systemd invocation regardless of the cache backend.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        self._fd = None
+
+    def acquire(self) -> bool:
+        import fcntl
+        self._fd = open(self.path, "w")
+        try:
+            fcntl.flock(self._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            self._fd.close()
+            self._fd = None
+            return False
+
+    def release(self) -> None:
+        if self._fd is not None:
+            import fcntl
+            try:
+                fcntl.flock(self._fd, fcntl.LOCK_UN)
+            finally:
+                self._fd.close()
+                self._fd = None
+
+
+def _export_table_csv_gz(table, date_col, cutoff, max_rows, archive_path,
+                         is_pg) -> None:
+    """Stream rows older than cutoff to a gzip CSV (header + data).
+
+    Postgres: server-side COPY straight into the gzip stream (never
+    materialised in memory). sqlite (tests): a plain csv.writer over the
+    same query, so the count/verify/delete logic is exercised on either
+    backend.
+    """
+    limit_clause = ""
+    params: List[Any] = [cutoff]
+    if max_rows and max_rows > 0:
+        limit_clause = " LIMIT %s"
+        params.append(int(max_rows))
+    select_sql = (
+        f"SELECT * FROM {table} WHERE {date_col} < %s ORDER BY id{limit_clause}")
+    with open(archive_path, "wb") as raw:
+        with gzip.GzipFile(fileobj=raw, mode="wb") as gz:
+            if is_pg:
+                with connection.cursor() as cur:
+                    copy_sql = (
+                        "COPY (" + cur.mogrify(select_sql, params).decode()
+                        + ") TO STDOUT WITH CSV HEADER")
+                    cur.copy_expert(copy_sql, gz)
+            else:
+                text = io.TextIOWrapper(gz, encoding="utf-8", newline="")
+                writer = csv.writer(text)
+                with connection.cursor() as cur:
+                    cur.execute(select_sql, params)
+                    writer.writerow([c[0] for c in cur.description])
+                    for row in cur.fetchall():
+                        writer.writerow(
+                            ["" if v is None else v for v in row])
+                text.flush()
+                text.detach()  # leave the gzip stream open for its context
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _read_ids_and_count(archive_path: str):
+    """Fully decompress the archive, spill column-0 (id) to a temp file.
+
+    Returns (ids_path, data_row_count, columns). Fully reading the gzip is the
+    completeness check — a truncated/disk-full file raises here, before any
+    delete. ids spill to disk (not memory): steady-state runs are millions of
+    rows on an 8 GB box.
+    """
+    fd, ids_path = tempfile.mkstemp(prefix="bh_archive_ids_", suffix=".txt")
+    count = 0
+    columns: List[str] = []
+    with os.fdopen(fd, "w") as out:
+        with gzip.open(archive_path, "rt", encoding="utf-8", newline="") as gz:
+            reader = csv.reader(gz)
+            header = next(reader, None)
+            if header is None:
+                return ids_path, 0, []
+            columns = list(header)
+            for row in reader:
+                if not row:
+                    continue
+                out.write(row[0])
+                out.write("\n")
+                count += 1
+    return ids_path, count, columns
+
+
+def _delete_id_chunk(table, ids, statement_timeout_s, is_pg) -> int:
+    placeholders = ",".join(["%s"] * len(ids))
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            _apply_statement_timeout(cur, statement_timeout_s, is_pg)
+            cur.execute(
+                f"DELETE FROM {table} WHERE id IN ({placeholders})", ids)
+            return max(cur.rowcount, 0)
+
+
+def _delete_ids_from_file(table, ids_path, batch_size, sleep_s,
+                          statement_timeout_s, is_pg) -> int:
+    deleted = 0
+    chunk: List[int] = []
+    with open(ids_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            chunk.append(int(line))
+            if len(chunk) >= batch_size:
+                deleted += _delete_id_chunk(
+                    table, chunk, statement_timeout_s, is_pg)
+                chunk = []
+                if sleep_s:
+                    time.sleep(sleep_s)
+        if chunk:
+            deleted += _delete_id_chunk(
+                table, chunk, statement_timeout_s, is_pg)
+    return deleted
+
+
+def _vacuum_analyze(table: str) -> bool:
+    """VACUUM (ANALYZE) — must run in autocommit (cannot be inside a txn).
+
+    Skipped when a transaction is open (e.g. under TestCase's per-test atomic
+    wrapper); the management command runs it in Django's default autocommit.
+    Best effort: the deletes already committed, so a vacuum failure is logged,
+    not fatal."""
+    if connection.in_atomic_block:
+        logger.info(
+            "archive_battle_history: skipping VACUUM (ANALYZE) %s "
+            "(inside a transaction block)", table)
+        return False
+    try:
+        with connection.cursor() as cur:
+            cur.execute(f"VACUUM (ANALYZE) {table}")
+        return True
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "archive_battle_history: VACUUM (ANALYZE) %s failed: %s",
+            table, exc)
+        return False
+
+
+def _archive_one_table(*, key, spec, retention_days, run_dir, is_pg,
+                       batch_size, max_rows, dry_run, sleep_between_batches,
+                       statement_timeout_s, skip_vacuum, app_version):
+    table = spec["table"]
+    date_col = spec["date_col"]
+    cutoff = _archive_cutoff(retention_days, as_date=(date_col == "date"))
+
+    with transaction.atomic():
+        with connection.cursor() as cur:
+            _apply_statement_timeout(cur, statement_timeout_s, is_pg)
+            cur.execute(
+                f"SELECT COUNT(*), MIN({date_col}), MAX({date_col}) "
+                f"FROM {table} WHERE {date_col} < %s", [cutoff])
+            row = cur.fetchone()
+    total_count = int(row[0] or 0)
+    min_d, max_d = row[1], row[2]
+
+    def _iso(v):
+        # Postgres returns date/datetime objects; sqlite returns ISO strings.
+        if v is None:
+            return None
+        return v.isoformat() if hasattr(v, "isoformat") else str(v)
+
+    base: Dict[str, Any] = {
+        "key": key, "table": table, "date_col": date_col,
+        "cutoff": cutoff.isoformat(), "retention_days": int(retention_days),
+        "candidates": total_count,
+        "min_date": _iso(min_d), "max_date": _iso(max_d),
+    }
+
+    if dry_run:
+        base.update({
+            "status": "dry_run", "exported": 0, "deleted": 0,
+            "archive_file": os.path.join(run_dir, f"{table}.csv.gz")})
+        return base
+
+    if total_count == 0:
+        base.update({"status": "skipped", "reason": "no rows older than cutoff",
+                     "exported": 0, "deleted": 0})
+        return base
+
+    os.makedirs(run_dir, exist_ok=True)
+    archive_path = os.path.join(run_dir, f"{table}.csv.gz")
+    manifest_path = os.path.join(run_dir, f"{table}.manifest.json")
+
+    _export_table_csv_gz(
+        table, date_col, cutoff, max_rows, archive_path, is_pg)
+
+    sha = _sha256_file(archive_path)
+    ids_path, exported, columns = _read_ids_and_count(archive_path)
+    try:
+        if exported == 0:
+            base.update({
+                "status": "failed",
+                "reason": "archive contained no data rows after export",
+                "archive_file": archive_path, "exported": 0, "deleted": 0})
+            return base
+
+        if max_rows == 0 and exported != total_count:
+            # Benign (e.g. a concurrent rollup delete between count + export):
+            # we delete only what we archived, so this is a warning, not an
+            # abort. A truncated archive would have raised in _read_ids_*.
+            logger.warning(
+                "archive_battle_history: %s exported %d != candidate count %d "
+                "— deleting only the %d archived+verified rows",
+                table, exported, total_count, exported)
+
+        manifest = {
+            **base, "exported": exported, "sha256": sha, "columns": columns,
+            "archive_file": os.path.basename(archive_path),
+            "app_version": app_version, "max_rows": int(max_rows)}
+        with open(manifest_path, "w") as fh:
+            json.dump(manifest, fh, indent=2, sort_keys=True)
+
+        deleted = _delete_ids_from_file(
+            table, ids_path, batch_size, sleep_between_batches,
+            statement_timeout_s, is_pg)
+    finally:
+        try:
+            os.unlink(ids_path)
+        except OSError:
+            pass
+
+    vacuumed = False
+    if deleted and not skip_vacuum and is_pg:
+        vacuumed = _vacuum_analyze(table)
+
+    base.update({
+        "status": "completed", "exported": exported, "deleted": deleted,
+        "sha256": sha, "archive_file": archive_path,
+        "manifest_file": manifest_path, "vacuumed": vacuumed})
+    return base
+
+
+def archive_and_prune_battle_history(
+    *,
+    retention_days: int = ARCHIVE_RETENTION_DAYS_DEFAULT,
+    tables: Optional[Iterable[str]] = None,
+    archive_dir: str,
+    batch_size: int = ARCHIVE_BATCH_SIZE_DEFAULT,
+    max_rows: int = 0,
+    dry_run: bool = False,
+    sleep_between_batches: float = 0.0,
+    statement_timeout_s: int = ARCHIVE_STATEMENT_TIMEOUT_DEFAULT,
+    skip_vacuum: bool = False,
+) -> Dict[str, Any]:
+    """Archive (gzip CSV + manifest) then prune battle-history rows older than
+    ``retention_days``. See the module header for the safety spine. Returns a
+    summary dict; per-table failures are isolated (status == 'failed') and do
+    not delete from other tables."""
+    keys = list(tables) if tables else list(ARCHIVE_TABLES.keys())
+    for k in keys:
+        if k not in ARCHIVE_TABLES:
+            raise ValueError(
+                f"unknown table key {k!r}; valid: {sorted(ARCHIVE_TABLES)}")
+    is_pg = connection.vendor == "postgresql"
+    run_date = datetime.utcnow().strftime("%Y-%m-%d")
+    run_dir = os.path.join(archive_dir, run_date)
+    app_version = _read_app_version()
+
+    os.makedirs(archive_dir, exist_ok=True)
+    lock = _ArchiveLock(os.path.join(archive_dir, ".archive_battle_history.lock"))
+    if not lock.acquire():
+        return {"status": "skipped", "reason": "already-running",
+                "dry_run": dry_run}
+    try:
+        results = []
+        overall = "completed"
+        for key in keys:
+            try:
+                res = _archive_one_table(
+                    key=key, spec=ARCHIVE_TABLES[key],
+                    retention_days=retention_days, run_dir=run_dir, is_pg=is_pg,
+                    batch_size=batch_size, max_rows=max_rows, dry_run=dry_run,
+                    sleep_between_batches=sleep_between_batches,
+                    statement_timeout_s=statement_timeout_s,
+                    skip_vacuum=skip_vacuum, app_version=app_version)
+            except Exception as exc:
+                logger.exception(
+                    "archive_battle_history: table %s failed", key)
+                res = {"key": key, "table": ARCHIVE_TABLES[key]["table"],
+                       "status": "failed", "reason": str(exc),
+                       "exported": 0, "deleted": 0}
+            results.append(res)
+            if res.get("status") == "failed":
+                overall = "failed"
+        return {"status": overall, "dry_run": dry_run, "run_dir": run_dir,
+                "run_date": run_date, "app_version": app_version,
+                "tables": results}
+    finally:
+        lock.release()
