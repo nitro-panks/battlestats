@@ -6800,13 +6800,20 @@ _SHIP_COMBAT_METRICS = (
          value=lambda t: _ship_combat_safe_div(t['frags'], t['battles'])),
     dict(key='xp_pb', label='XP', cluster='Combat output', unit='/battle', better='high',
          value=lambda t: _ship_combat_safe_div(t['xp'], t['battles'])),
+    # Accuracy ratios use the player's CAREER totals (user_basis='career'): the
+    # 30-day daily rows seldom capture gunnery, and hit% is a stable skill better
+    # judged over a career than a few recent battles. The population average
+    # stays 30-day (over the rows that did capture shots).
     dict(key='main_hit_rate', label='Main battery hit %', cluster='Accuracy', unit='%', better='high',
+         user_basis='career',
          gate=lambda p: p['main_shots'] >= _SHIP_COMBAT_MIN_SHOTS,
          value=lambda t: _ship_combat_safe_div(t['main_hits'] * 100.0, t['main_shots'])),
     dict(key='secondary_hit_rate', label='Secondary hit %', cluster='Accuracy', unit='%', better='high',
+         user_basis='career',
          gate=lambda p: p['secondary_shots'] >= _SHIP_COMBAT_MIN_SHOTS,
          value=lambda t: _ship_combat_safe_div(t['secondary_hits'] * 100.0, t['secondary_shots'])),
     dict(key='torpedo_hit_rate', label='Torpedo hit %', cluster='Accuracy', unit='%', better='high',
+         user_basis='career',
          gate=lambda p: p['torpedo_shots'] >= _SHIP_COMBAT_MIN_SHOTS,
          value=lambda t: _ship_combat_safe_div(t['torpedo_hits'] * 100.0, t['torpedo_shots'])),
 )
@@ -6893,6 +6900,31 @@ def _ship_combat_user_totals(player, ship_id, window_days=SHIP_COMBAT_WINDOW_DAY
     return totals
 
 
+def _ship_combat_user_career_totals(player, ship_id):
+    """The player's CAREER totals for one ship from the latest
+    BattleObservation.ships_stats_json — complete for every field. Used for the
+    accuracy ratios, whose 30-day daily rows are too sparse (gunnery is captured
+    on few rows) and which are stable career traits anyway. Returns None if no
+    observation row for the ship."""
+    from warships.models import BattleObservation
+
+    obs = (
+        BattleObservation.objects
+        .filter(player=player, ships_stats_json__isnull=False)
+        .order_by('-observed_at')
+        .first()
+    )
+    if not obs or not obs.ships_stats_json:
+        return None
+    row = next((r for r in obs.ships_stats_json
+                if r.get('ship_id') == ship_id), None)
+    if row is None:
+        return None
+    totals = {f: int(row.get(f, 0) or 0) for f in _SHIP_COMBAT_SUM_FIELDS}
+    totals['damage'] = int(row.get('damage_dealt', row.get('damage', 0)) or 0)
+    return totals
+
+
 def compute_ship_combat_comparison(player, ship_id, realm,
                                    window_days=SHIP_COMBAT_WINDOW_DAYS):
     """Build the ShipStats payload: per-metric {user, averages:{all,top50,top25}}
@@ -6904,7 +6936,11 @@ def compute_ship_combat_comparison(player, ship_id, realm,
     ship_id = int(ship_id)
     brackets = _ship_population_brackets_30d(ship_id, realm, window_days)
     pop_all = brackets['all']
-    user = _ship_combat_user_totals(player, ship_id, window_days)
+    # 30d window totals for the core per-battle metrics (match the table); career
+    # totals for the accuracy ratios (30d gunnery is too sparse — see specs).
+    user_window = _ship_combat_user_totals(player, ship_id, window_days)
+    user_career = _ship_combat_user_career_totals(player, ship_id)
+    user_totals_for = {'window': user_window, 'career': user_career}
 
     ship = Ship.objects.filter(ship_id=ship_id).first()
 
@@ -6927,7 +6963,8 @@ def compute_ship_combat_comparison(player, ship_id, realm,
         for bracket in _SHIP_COMBAT_BRACKETS:
             value = spec['value'](brackets[bracket])
             averages[bracket] = round(value, 2) if value is not None else None
-        user_value = spec['value'](user) if user is not None else None
+        user_totals = user_totals_for[spec.get('user_basis', 'window')]
+        user_value = spec['value'](user_totals) if user_totals is not None else None
 
         cluster = spec['cluster']
         if cluster not in clusters:
@@ -6954,8 +6991,8 @@ def compute_ship_combat_comparison(player, ship_id, realm,
                       'battles': brackets[bracket]['battles']}
             for bracket in _SHIP_COMBAT_BRACKETS
         },
-        'user_battles': (user or {}).get('battles', 0),
-        'has_user_data': user is not None,
+        'user_battles': (user_window or {}).get('battles', 0),
+        'has_user_data': user_window is not None or user_career is not None,
         'clusters': [{'name': name, 'metrics': clusters[name]}
                      for name in cluster_order],
     }
