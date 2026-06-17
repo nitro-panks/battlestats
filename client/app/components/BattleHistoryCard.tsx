@@ -810,9 +810,19 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 ship_type: row.ship_type ?? null,
             }
             : null);
-        if (isOpening) {
-            trackEvent('ship-stats-open', { ship_id: row.ship_id, mode, window, realm });
+        trackEvent(isOpening ? 'ship-stats-open' : 'ship-stats-close', {
+            ship_id: row.ship_id, source: 'row', mode, window, realm,
+        });
+    };
+
+    // Close from the panel's ✕ button (distinct source for analytics).
+    const closeShipStats = () => {
+        if (selectedShip) {
+            trackEvent('ship-stats-close', {
+                ship_id: selectedShip.ship_id, source: 'button', mode, window, realm,
+            });
         }
+        setSelectedShip(null);
     };
 
     const visibleByShip = useMemo(() => {
@@ -1056,7 +1066,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     shipName={selectedShip.ship_name}
                     shipTier={selectedShip.ship_tier}
                     shipType={selectedShip.ship_type}
-                    onClose={() => setSelectedShip(null)}
+                    onClose={closeShipStats}
                 />
             ) : null}
             {/* Embedded in the Activity tab the card has the whole panel to grow
