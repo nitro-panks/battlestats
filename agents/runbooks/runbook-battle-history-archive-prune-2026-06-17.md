@@ -3,7 +3,7 @@
 _Created: 2026-06-17_
 _Author role: DBA / platform_
 _Context: The managed Postgres sits on a 60 GiB disk with autoscale OFF (~50% used as of 2026-06-15). `BattleEvent` + `PlayerDailyShipStats` are the monotonic, never-pruned growth slope identified in `runbook-db-growth-analysis-2026-06-15.md`. This runbook specifies a monthly job that introduces a 32-day rolling window in live Postgres: export everything older to a compressed, restorable file on the app droplet, verify, then delete._
-_Status: **SPECIFICATION ONLY — NOT IMPLEMENTED.** This runbook fully specifies the command/schedule/restore for a later implementation PR. No code, units, deploy wiring, or tests exist yet; nothing has been run against prod._
+_Status: **IMPLEMENTED (shipped disabled), 2026-06-17.** The `archive_battle_history` management command + core (`incremental_battles.py`), the `battlestats-archive-battle-history.timer` systemd unit, the deploy env knobs, and tests (`test_archive_battle_history.py`, green on sqlite + Postgres) are on branch `feat/battle-history-archive-prune`. `BATTLE_HISTORY_ARCHIVE_ENABLED=0` — nothing has run against prod; enabling is the supervised dry-run-first Rollout below._
 
 ## Purpose
 
@@ -43,12 +43,12 @@ Cap the unbounded growth of the two append-only, no-retention battle-history tab
 
 **Why the prune is correct regardless of concurrent writes.** The job does **not** assume "no new `<cutoff` rows can appear mid-run." Correctness comes from the **verify-before-delete gate** and the **delete-only-what-you-exported** discipline:
 
-1. Count `SELECT COUNT(*) WHERE <datecol> < cutoff`.
-2. Export those rows (`ORDER BY id`), capturing the exact PK set.
-3. Re-count / verify the gz data-row count == the exported count, compute sha256, write the manifest.
-4. **Delete only the PKs that were exported and verified** — never a fresh `WHERE <datecol> < cutoff` delete. Any row that appears after the export simply isn't in the delete set and waits for next month.
+1. Count `SELECT COUNT(*) WHERE <datecol> < cutoff` (reported in the manifest as `candidates`).
+2. Export those rows to the gz (`ORDER BY id`) via server-side `COPY`.
+3. **Fully decompress the gz** — this is the completeness check (a truncated / disk-full archive raises here) — and in the same pass **read column 0 (`id`) back out of the verified archive** into a temp file; compute the `.csv.gz` sha256; write the manifest **before any delete**.
+4. **Delete only the ids that were read back out of the archive** — never a fresh `WHERE <datecol> < cutoff` delete. We can therefore only ever delete rows that physically landed in, and re-read cleanly from, the archive. A row that appears after the export simply isn't in the delete set and waits for next month; a concurrently-deleted row simply isn't there to delete.
 
-On any verification mismatch: **keep the archive, delete nothing, exit non-zero.**
+On a failed decompress (truncation / disk-full) or an empty archive: **keep the archive, delete nothing, exit non-zero.** (`exported != candidates` with `--max-rows 0` is logged as a warning, not an abort — we still delete only what was archived.)
 
 > Note on the prior draft: there is no literal "~3-day rollup lookback" constant to lean on — `reconcile_battle_history_rollup` takes `--since/--until`/`audit_days`, not a fixed window. The safety argument above deliberately does not depend on the rollup's write window.
 
@@ -60,12 +60,13 @@ manage.py archive_battle_history  (systemd timer: OnCalendar=*-*-01 03:00 UTC)
         ▼
   for each table in {BattleEvent(detected_at), PlayerDailyShipStats(date)}:
         ① EXPORT  COPY (SELECT * FROM <t> WHERE <col> < cutoff ORDER BY id) TO STDOUT WITH CSV HEADER
-                  └─ cursor.copy_expert(...) → gzip → <archive-dir>/<run-date>/<table>.csv.gz
-        ② VERIFY  gz data-row count == COUNT(*) WHERE <col> < cutoff ; sha256 ; write manifest.json
-                  └─ MISMATCH → keep archive, DELETE NOTHING, exit non-zero
-        ③ DELETE  delete the exported+verified PK set, batched by PK
-                  └─ SET LOCAL statement_timeout per txn + inter-batch sleep
-        ④ VACUUM (ANALYZE) <t>      ── NO VACUUM FULL
+                  └─ cursor.mogrify(cutoff) + copy_expert(...) → gzip → <archive-dir>/<run-date>/<table>.csv.gz
+        ② VERIFY  fully decompress the gz (completeness check) → spill column-0 (id) to a temp file ;
+                  sha256 the .csv.gz ; write <table>.manifest.json (count, sha256, columns, cutoff, version)
+                  └─ a truncated / disk-full gz fails to decompress here → keep archive, DELETE NOTHING, fail
+        ③ DELETE  delete ONLY the ids read back out of the verified archive, batched by PK
+                  └─ SET LOCAL statement_timeout per delete txn + inter-batch sleep
+        ④ VACUUM (ANALYZE) <t>      ── NO VACUUM FULL (skipped if inside a txn, e.g. tests)
   single-run lock (cache.add / file) prevents overlap with a still-running prior run
 ```
 
@@ -92,7 +93,8 @@ Flags (mirror `prune_battle_observations.py`'s shape — dry-run-first, validate
 | `--sleep` | 0.0 | Seconds between delete batches. |
 | `--statement-timeout` | 180 | Per-query PG timeout (matches `COMPACT_STATEMENT_TIMEOUT_DEFAULT`, `incremental_battles.py:1347`). |
 | `--skip-vacuum` | off | Skip the post-delete `VACUUM (ANALYZE)`. |
-| `--dry-run` | off | Report counts + reclaim estimate + destination paths; write **nothing**, delete **nothing**. |
+| `--dry-run` | off | Report counts + destination paths; write **nothing**, delete **nothing**. Always allowed (ungated). |
+| `--force` | off | Run live even when `BATTLE_HISTORY_ARCHIVE_ENABLED != 1` (manual rollout). The scheduled timer relies on the env switch, not this. |
 
 **Reuse, do not reinvent:**
 - `_apply_statement_timeout(cur, seconds, is_pg)` (`incremental_battles.py:1414`) — call inside each delete txn (`SET LOCAL` scopes to the transaction).
@@ -102,28 +104,22 @@ Flags (mirror `prune_battle_observations.py`'s shape — dry-run-first, validate
 
 ## Scheduling
 
-**Primary: systemd timer** (the repo has **no** systemd-timer precedent yet, so the units ship in this command's PR):
+**Primary: systemd timer.** Shipped in `server/deploy/deploy_to_droplet.sh` (heredoc'd next to the existing `battlestats-celery-watchdog.timer` — that watchdog timer is the in-repo systemd-timer precedent this mirrors). Paths are the **QA-corrected** ones (the venv is `${APP_ROOT}/venv/bin/python`, *not* `current/server/venv`, and the env lives in `/etc/battlestats-server.env` + `.secrets.env`, loaded both by Django's dotenv from `WorkingDirectory` and by the unit's `EnvironmentFile`s):
 
-`/etc/systemd/system/battlestats-archive-battle-history.service`:
+`/etc/systemd/system/battlestats-archive-battle-history.service` (`Type=oneshot`):
 ```ini
-[Unit]
-Description=Battlestats monthly battle-history cold-archive + prune
-After=network-online.target
-
 [Service]
 Type=oneshot
 User=battlestats
+Group=battlestats
 WorkingDirectory=/opt/battlestats-server/current/server
-EnvironmentFile=/opt/battlestats-server/current/server/.env.secrets
-EnvironmentFile=/opt/battlestats-server/current/server/.env.secrets.cloud
-ExecStart=/opt/battlestats-server/current/server/venv/bin/python manage.py archive_battle_history
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=/bin/bash -lc 'exec "/opt/battlestats-server/venv/bin/python" manage.py archive_battle_history'
 ```
 
 `/etc/systemd/system/battlestats-archive-battle-history.timer`:
 ```ini
-[Unit]
-Description=Run battle-history archive on the 1st of each month
-
 [Timer]
 OnCalendar=*-*-01 03:00:00 UTC
 Persistent=true
@@ -132,7 +128,7 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-Add an install step to `server/deploy/deploy_to_droplet.sh` that `install -d`s the archive dir, drops both unit files, and runs `systemctl daemon-reload && systemctl enable --now battlestats-archive-battle-history.timer`. Confirm venv path + `EnvironmentFile` paths against the live release layout before wiring (the snippet above assumes the `current` symlink + `venv`; verify against the deploy script's actual `REMOTE_RELEASE`).
+The deploy script `install -d`s `${APP_ROOT}/shared/archives/battle_history`, drops both unit files, `daemon-reload`s, and `systemctl enable --now`s the timer (idempotent). The timer fires unconditionally on the 1st; the command no-ops while `BATTLE_HISTORY_ARCHIVE_ENABLED=0`.
 
 **Why systemd, not Celery Beat:** a steady-state run deletes millions of rows over ~1–2h — too long for a Celery soft-time-limit / worker slot, and it matches the literal "once a month." *Alternative noted for the implementer:* a Celery Beat `crontab(day_of_month="1", hour=3)` entry in `signals.py` (the in-repo scheduling convention) with `CRAWL_TASK_OPTS`-style limits + the run-lock, **if** the operator accepts the long-task caveat. The systemd path is recommended.
 
@@ -183,7 +179,7 @@ The **restore round-trip is the validation gate** and must pass at rollout befor
 4. **sha256** of the `.csv.gz` == manifest `sha256`.
 5. Confirm the command's computed delete set == the exported PK set (the delete-only-what-you-exported invariant).
 
-Automated coverage to add in the implementation PR (run against the SQLite test DB, `--nomigrations`): a test that seeds `>cutoff` and `<cutoff` rows for both tables, runs the command in dry-run (asserts counts, no deletes) and live (asserts only `<cutoff` rows deleted, `>cutoff` rows untouched, archive file written, manifest count/sha match). `copy_expert`/`VACUUM` are PG-only — guard those branches on `connection.vendor == "postgresql"` so the SQLite gate exercises the count/delete/manifest logic.
+Automated coverage (shipped): `warships/tests/test_archive_battle_history.py` seeds `>cutoff` + `<cutoff` rows for both tables and asserts dry-run writes/deletes nothing; live deletes **only** `<cutoff` rows (and leaves `BattleObservation` untouched); the archive's column-0 ids == the deleted set; manifest count + sha256 match the file; `--max-rows` and `--tables` subsetting; and the command's kill-switch (no-op without `--force`/`ENABLED=1`). It is backend-agnostic: the SQLite test DB exercises the csv-writer fallback + count/verify/delete/manifest logic, and the **Postgres release gate exercises the real `copy_expert` export** (`VACUUM` is autocommit-only, so it is skipped — and asserted skipped — under `TestCase`'s per-test transaction). Verified green on both sqlite and a local Postgres 15.
 
 ## Rollback
 
@@ -196,7 +192,7 @@ Automated coverage to add in the implementation PR (run against the SQLite test 
 - **`PlayerDailyShipStats` growth is deferred, not solved.** Within the 32-day window it still grows as player coverage grows; this runbook only bounds the *tail*. Revisit if in-window size becomes the binding constraint.
 - **Offsite copy.** Archives live only on the app droplet today. Add a DO Spaces (object storage) upload + droplet-side retention/pruning of `<run-date>` dirs so the droplet disk doesn't itself fill.
 - **UI relabel.** The week/month/year pills now cap at 32 days; consider a UI affordance noting the window cap (candidate, not required).
-- **Systemd-timer precedent.** This is the repo's first systemd timer; if more monthly/periodic host-level jobs follow, factor the install into a reusable deploy helper.
+- **Systemd-timer install.** This is the second timer in the deploy script (after `battlestats-celery-watchdog.timer`); if more host-level periodic jobs follow, factor the heredoc + enable into a reusable deploy helper.
 
 ## Related runbooks
 
