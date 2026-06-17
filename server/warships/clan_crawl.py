@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional
 
 import requests
 from django.conf import settings as django_settings
+from django.core.cache import cache
 
 from warships.api.client import DEFAULT_REALM, get_base_url
 from warships.models import Clan, Player
@@ -60,6 +62,128 @@ def _from_ts(ts):
     if getattr(django_settings, "USE_TZ", False):
         return datetime.fromtimestamp(ts, tz=timezone.utc)
     return datetime.fromtimestamp(ts)
+
+
+# --- Crawl yield-by-source instrumentation -------------------------------
+# Measures the crawl's *marginal* value per pass: net-new active players and
+# dormant->active re-detections (yield the observation floor structurally
+# cannot produce, since it is gated on already-active players) vs. players the
+# floor already covers (overlap). Lets us decide whether the daily full
+# re-walk is still earning its cost. See the bulk-battle-observation runbook
+# Benchmarks section. Best-effort throughout: instrumentation never breaks the
+# crawl.
+
+CRAWL_YIELD_TTL = 60 * 60 * 24 * 21  # mirror CLAN_CRAWL_PASS_MARKER_TTL (21d)
+CRAWL_YIELD_BENCHMARK_DIR = os.getenv(
+    "CRAWL_YIELD_BENCHMARK_DIR",
+    "/opt/battlestats-server/shared/benchmarks/crawl-yield",
+)
+CRAWL_YIELD_BUCKETS = (
+    "discovered_active",   # net-new account, currently active  -> floor-impossible yield
+    "discovered_dormant",  # net-new account, dormant           -> universe completion only
+    "reactivated",         # known, dormant->active this write  -> floor-impossible yield
+    "refreshed_active",    # known, already active              -> overlap (floor covers it)
+    "still_dormant",       # known, stayed dormant              -> no active value this pass
+)
+
+
+def _crawl_yield_enabled() -> bool:
+    return os.getenv("CRAWL_YIELD_INSTRUMENT_ENABLED", "1") == "1"
+
+
+def _crawl_active_cutoff():
+    """Active-window cutoff date, mirroring the observation floor's
+    BATTLE_OBSERVATION_FLOOR_DAYS so "active" means the identical thing in both
+    instruments. A player is active iff last_battle_date >= cutoff."""
+    days = int(os.getenv("BATTLE_OBSERVATION_FLOOR_DAYS", "7"))
+    return _now().date() - timedelta(days=days)
+
+
+def _classify_player_yield(created: bool, old_lbd, new_lbd, cutoff) -> str:
+    """Bucket a crawled player by what *this* crawl write surfaced. Credit is
+    given to the crawl only when its own write crossed the active threshold: if
+    the floor (or an on-view refresh) already moved the player active between
+    passes, old_lbd is already active and this counts as overlap, not yield."""
+    new_active = bool(new_lbd and new_lbd >= cutoff)
+    was_active = bool(old_lbd and old_lbd >= cutoff)
+    if created:
+        return "discovered_active" if new_active else "discovered_dormant"
+    if new_active and not was_active:
+        return "reactivated"
+    if new_active:
+        return "refreshed_active"
+    return "still_dormant"
+
+
+def _crawl_yield_pass_id(fresh_after: Optional[datetime]) -> str:
+    return fresh_after.isoformat() if fresh_after is not None else "adhoc"
+
+
+def _crawl_yield_key(realm: str, pass_id: str) -> str:
+    return f"crawl:yield:{realm}:{pass_id}"
+
+
+def _flush_crawl_yield(realm: str, pass_id: str, pending: Dict[str, int]) -> None:
+    """Additively merge a batch of bucket counts into the pass's Redis
+    aggregate so counts survive task redelivery across a multi-day pass. The
+    crawls queue is -c 1 with one realm crawling at a time, so this get-modify-
+    set has a single writer and is race-free."""
+    if not pending:
+        return
+    try:
+        key = _crawl_yield_key(realm, pass_id)
+        agg = cache.get(key) or {}
+        for bucket, count in pending.items():
+            agg[bucket] = agg.get(bucket, 0) + count
+        cache.set(key, agg, timeout=CRAWL_YIELD_TTL)
+    except Exception:
+        log.warning("crawl-yield flush failed (realm=%s)", realm, exc_info=True)
+
+
+def emit_crawl_yield_snapshot(realm: str, fresh_after: Optional[datetime]) -> Optional[dict]:
+    """At pass completion, flush the pass's accumulated yield counts to a
+    durable per-pass JSON snapshot (sibling of the observation-floor
+    benchmarks) plus a structured log line, then clear the Redis aggregate.
+    Returns the snapshot dict, or None if disabled / no real pass."""
+    if not _crawl_yield_enabled() or fresh_after is None:
+        return None
+    pass_id = _crawl_yield_pass_id(fresh_after)
+    key = _crawl_yield_key(realm, pass_id)
+    try:
+        agg = cache.get(key) or {}
+    except Exception:
+        log.warning("crawl-yield read failed (realm=%s)", realm, exc_info=True)
+        return None
+    counts = {bucket: int(agg.get(bucket, 0)) for bucket in CRAWL_YIELD_BUCKETS}
+    classified = sum(counts.values())
+    yield_total = counts["discovered_active"] + counts["reactivated"]
+    overlap = counts["refreshed_active"]
+    snapshot = {
+        "captured_at": _now().isoformat(),
+        "realm": realm,
+        "pass_started_at": pass_id,
+        "active_window_days": int(os.getenv("BATTLE_OBSERVATION_FLOOR_DAYS", "7")),
+        "players_classified": classified,
+        "buckets": counts,
+        "yield_total": yield_total,
+        "overlap_total": overlap,
+        "yield_frac": round(yield_total / classified, 4) if classified else 0.0,
+        "overlap_frac": round(overlap / classified, 4) if classified else 0.0,
+    }
+    log.info("crawl-yield realm=%s pass=%s %s", realm, pass_id, snapshot)
+    try:
+        os.makedirs(CRAWL_YIELD_BENCHMARK_DIR, exist_ok=True)
+        fname = f"{_now().strftime('%Y-%m-%d_%H%MZ')}_{realm}.json"
+        with open(os.path.join(CRAWL_YIELD_BENCHMARK_DIR, fname), "w") as handle:
+            json.dump(snapshot, handle, indent=2)
+    except Exception:
+        log.warning("crawl-yield snapshot write failed (dir=%s)",
+                    CRAWL_YIELD_BENCHMARK_DIR, exc_info=True)
+    try:
+        cache.delete(key)
+    except Exception:
+        pass
+    return snapshot
 
 
 def _api_get(endpoint: str, params: Dict, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> Optional[Dict]:
@@ -167,21 +291,25 @@ def save_clan(info: Dict, realm: str = DEFAULT_REALM) -> Clan:
     return clan
 
 
-def save_player(player_data: Dict, clan: Clan, realm: str = DEFAULT_REALM, core_only: bool = False) -> None:
+def save_player(player_data: Dict, clan: Clan, realm: str = DEFAULT_REALM, core_only: bool = False, cutoff=None) -> Optional[str]:
     from warships.data import compute_player_verdict, refresh_player_explorer_summary, update_achievements_data, update_player_efficiency_data
 
     if player_data is None:
-        return
+        return None
 
     pid = player_data.get("account_id")
     if not pid:
-        return
+        return None
 
     try:
-        player, _created = get_or_create_canonical_player(pid, realm=realm)
+        player, created = get_or_create_canonical_player(pid, realm=realm)
     except BlockedAccountError:
         log.info("Skipping blocked account %s during clan crawl", pid)
-        return
+        return None
+    # Capture the prior activity date *before* the WG write overwrites it — this
+    # is what lets the yield classifier tell a dormant->active re-detection
+    # (floor-impossible yield) from a refresh of an already-active player.
+    old_lbd = player.last_battle_date
     player.name = player_data.get("nickname", player.name or "")
     player.clan = clan
 
@@ -245,6 +373,11 @@ def save_player(player_data: Dict, clan: Clan, realm: str = DEFAULT_REALM, core_
     if not core_only:
         refresh_player_explorer_summary(player)
 
+    if cutoff is None:
+        return None
+    return _classify_player_yield(
+        created, old_lbd, player.last_battle_date, cutoff)
+
 
 def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> List[Dict]:
     all_clans: List[Dict] = []
@@ -288,13 +421,23 @@ def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Cal
     return all_clans
 
 
-def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, core_only: bool = False, request_delay: float = 0.25, fresh_after: Optional[datetime] = None) -> dict[str, int]:
+def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, core_only: bool = False, request_delay: float = 0.25, fresh_after: Optional[datetime] = None) -> dict:
     from warships.data import refresh_clan_cached_aggregates, reconcile_clan_departures
 
     total = len(clan_stubs)
     clans_processed = 0
     players_saved = 0
     skipped = 0
+
+    # Yield-by-source instrumentation. `cutoff` (computed once) classifies each
+    # saved player; `yield_counts` is this execution's running total returned in
+    # the summary; `yield_pending` buffers counts flushed to the pass's Redis
+    # aggregate so they survive task redelivery across a multi-day pass.
+    yield_enabled = _crawl_yield_enabled()
+    cutoff = _crawl_active_cutoff() if yield_enabled else None
+    pass_id = _crawl_yield_pass_id(fresh_after)
+    yield_counts = {bucket: 0 for bucket in CRAWL_YIELD_BUCKETS}
+    yield_pending: Dict[str, int] = {}
 
     for i, stub in enumerate(clan_stubs, 1):
         _touch_crawl_heartbeat(heartbeat_callback)
@@ -343,8 +486,12 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
                 batch_ids, realm=realm, request_delay=request_delay)
 
             for _pid_str, pdata in player_map.items():
-                save_player(pdata, clan, realm=realm, core_only=core_only)
+                bucket = save_player(
+                    pdata, clan, realm=realm, core_only=core_only, cutoff=cutoff)
                 players_saved += 1
+                if bucket:
+                    yield_counts[bucket] += 1
+                    yield_pending[bucket] = yield_pending.get(bucket, 0) + 1
 
         reconcile_clan_departures(clan, member_ids, realm=realm)
         refresh_clan_cached_aggregates(str(clan.clan_id), realm=realm)
@@ -359,6 +506,13 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
                 players_saved,
                 skipped,
             )
+            if yield_enabled:
+                _flush_crawl_yield(realm, pass_id, yield_pending)
+                yield_pending = {}
+
+    if yield_enabled:
+        _flush_crawl_yield(realm, pass_id, yield_pending)
+        yield_pending = {}
 
     log.info("Done. Clans processed: %d, skipped: %d, players saved: %d",
              clans_processed, skipped, players_saved)
@@ -366,6 +520,7 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
         "clans_processed": clans_processed,
         "players_saved": players_saved,
         "skipped": skipped,
+        "yield": yield_counts,
     }
 
 

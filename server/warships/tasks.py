@@ -1554,11 +1554,19 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
             core_only=core_only,
             fresh_after=fresh_after,
         )
-        # A normal return means the pass walked the entire clan list, so clear
-        # the marker; the next scheduled run starts a fresh full pass. An
-        # interrupting exception (SoftTimeLimit / SIGTERM) skips this, leaving
-        # the marker so the redelivered task resumes where this one stopped.
+        # A normal return means the pass walked the entire clan list, so emit
+        # the per-pass yield snapshot (then clear) and clear the marker; the
+        # next scheduled run starts a fresh full pass. An interrupting exception
+        # (SoftTimeLimit / SIGTERM) skips this, leaving the marker so the
+        # redelivered task resumes where this one stopped (and keeps the partial
+        # yield aggregate accumulating into the same pass).
         if not dry_run:
+            try:
+                from warships.clan_crawl import emit_crawl_yield_snapshot
+                emit_crawl_yield_snapshot(realm, fresh_after)
+            except Exception:
+                logger.warning(
+                    "crawl-yield emit failed (realm=%s)", realm, exc_info=True)
             cache.delete(pass_marker_key)
         logger.info("Finished crawl_all_clans_task: %s", summary)
         return {"status": "completed", **summary}
