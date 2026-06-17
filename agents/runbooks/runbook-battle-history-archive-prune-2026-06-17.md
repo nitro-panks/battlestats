@@ -3,7 +3,7 @@
 _Created: 2026-06-17_
 _Author role: DBA / platform_
 _Context: The managed Postgres sits on a 60 GiB disk with autoscale OFF (~50% used as of 2026-06-15). `BattleEvent` + `PlayerDailyShipStats` are the monotonic, never-pruned growth slope identified in `runbook-db-growth-analysis-2026-06-15.md`. This runbook specifies a monthly job that introduces a 32-day rolling window in live Postgres: export everything older to a compressed, restorable file on the app droplet, verify, then delete._
-_Status: **IMPLEMENTED + ENABLED in prod, 2026-06-17.** The `archive_battle_history` command + core (`incremental_battles.py`), the `battlestats-archive-battle-history.timer` systemd unit (1st + 15th, 03:00 UTC), deploy env knobs, and tests (`test_archive_battle_history.py`, green on sqlite + Postgres) shipped via PR #50. `BATTLE_HISTORY_ARCHIVE_ENABLED=1`. The 2026-06-17 rollout performs the first-run backlog prune (~1.4 M rows) + a one-time `VACUUM FULL` — see the First-run section + Rollout log._
+_Status: **IMPLEMENTED + ENABLED in prod, 2026-06-17.** The `archive_battle_history` command + core (`incremental_battles.py`), the `battlestats-archive-battle-history.timer` systemd unit (1st + 15th, 03:00 UTC), deploy env knobs, and tests (`test_archive_battle_history.py`, green on sqlite + Postgres) shipped via PR #50. `BATTLE_HISTORY_ARCHIVE_ENABLED=1`. The 2026-06-17 rollout completed: first-run backlog pruned (703,891 + 694,083 rows) + one-time `VACUUM FULL` (~1 GB reclaimed, DB 23→22 GB); timer next fires 2026-07-01. See the Rollout log._
 
 ## Purpose
 
@@ -180,7 +180,7 @@ The **restore round-trip is the validation gate** and must pass at rollout befor
 4. **sha256** of the `.csv.gz` == manifest `sha256`.
 5. Confirm the command's computed delete set == the exported PK set (the delete-only-what-you-exported invariant).
 
-Automated coverage (shipped): `warships/tests/test_archive_battle_history.py` seeds `>cutoff` + `<cutoff` rows for both tables and asserts dry-run writes/deletes nothing; live deletes **only** `<cutoff` rows (and leaves `BattleObservation` untouched); the archive's column-0 ids == the deleted set; manifest count + sha256 match the file; `--max-rows` and `--tables` subsetting; and the command's kill-switch (no-op without `--force`/`ENABLED=1`). It is backend-agnostic: the SQLite test DB exercises the csv-writer fallback + count/verify/delete/manifest logic, and the **Postgres release gate exercises the real `copy_expert` export** (`VACUUM` is autocommit-only, so it is skipped — and asserted skipped — under `TestCase`'s per-test transaction). Verified green on both sqlite and a local Postgres 15.
+Automated coverage (shipped): `warships/tests/test_archive_battle_history.py` seeds `>cutoff` + `<cutoff` rows for both tables and asserts dry-run writes/deletes nothing; live deletes **only** `<cutoff` rows (and leaves `BattleObservation` untouched); the archive's column-0 ids == the deleted set; manifest count + sha256 match the file; `--max-rows` and `--tables` subsetting; and the command's kill-switch (no-op without `--force`/`ENABLED=1`). It is backend-agnostic: the SQLite test DB exercises the csv-writer fallback, and a Postgres run exercises the real server-side `COPY` export. The export is **driver-agnostic** — psycopg2 (`mogrify` + `copy_expert`) *and* psycopg3 (`cursor.copy(sql, params)`), because **prod's Django runs psycopg3** while `requirements.txt` pins psycopg2 (CI/local). `VACUUM` is autocommit-only, so it is skipped (and asserted skipped) under `TestCase`'s per-test transaction. Verified green on local Postgres 15 against **both** drivers (psycopg2 2.9.11 and psycopg3 3.3.4).
 
 ## Rollback
 
@@ -194,6 +194,15 @@ Automated coverage (shipped): `warships/tests/test_archive_battle_history.py` se
 - **Offsite copy.** Archives live only on the app droplet today. Add a DO Spaces (object storage) upload + droplet-side retention/pruning of `<run-date>` dirs so the droplet disk doesn't itself fill.
 - **UI relabel.** The week/month/year pills now cap at 32 days; consider a UI affordance noting the window cap (candidate, not required).
 - **Systemd-timer install.** This is the second timer in the deploy script (after `battlestats-celery-watchdog.timer`); if more host-level periodic jobs follow, factor the heredoc + enable into a reusable deploy helper.
+- **DB driver divergence (latent, beyond this job).** `requirements.txt` pins `psycopg2-binary`, so CI + local tests run on psycopg2, but the **prod venv runs psycopg3** — prod uses a driver CI never exercises (it's what made the first run fail; see Rollout log). Recommend pinning `psycopg[binary]` and aligning CI to prod's driver so this class of bug is caught pre-deploy. This job's export is now driver-agnostic regardless.
+
+## Rollout log
+
+- **2026-06-17 — first run + enable (this rollout).**
+  - **Attempt 1 (15:36 UTC): failed safely.** Prod psycopg3 vs the psycopg2-only export (`mogrify().decode()` / `copy_expert`). The verify-before-delete gate + per-table isolation held: *archive kept, nothing deleted*, **zero rows removed**. Fixed driver-agnostic (PR #51), re-deployed.
+  - **Attempt 2 (15:46–15:54 UTC, ~8.5 min): success.** Archived + deleted **703,891** `BattleEvent` rows (`warships_battleevent.csv.gz`, 31.3 MB, sha `48553fd8…`) and **694,083** `PlayerDailyShipStats` rows (`warships_playerdailyshipstats.csv.gz`, 26.7 MB, sha `97700528…`), cutoff `2026-05-16`. Per-table `VACUUM (ANALYZE)` ran. Post-run dry-run = **0 candidates**; both archives `gzip -t` clean and sha256 == manifest; archives `scp`'d off-box (one-time) and re-verified.
+  - **One-time `VACUUM (FULL, ANALYZE)`** (`lock_timeout=5s`): `warships_battleevent` 1300→924 MB, `warships_playerdailyshipstats` 1529→993 MB; **`pg_database_size` 23 GB → 22 GB** (~1 GB reclaimed to the OS).
+  - **Steady state:** `BATTLE_HISTORY_ARCHIVE_ENABLED=1`, timer next fires **2026-07-01 03:00 UTC** (then the 15th).
 
 ## Related runbooks
 
