@@ -3,6 +3,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import ClanMembers from '../ClanMembers';
 import type { ClanMemberData } from '../clanMembersShared';
 
+const trackEventMock = jest.fn();
+jest.mock('../../lib/umami', () => ({
+    trackEvent: (...args: unknown[]) => trackEventMock(...args),
+}));
+
 const baseMember: ClanMemberData = {
     name: 'Member One',
     is_hidden: false,
@@ -130,6 +135,20 @@ describe('ClanMembers efficiency-rank icon', () => {
 
         expect(screen.getByLabelText(/Battlestats efficiency rank Expert: 97th percentile among eligible tracked players\. Based on stored WG badge profile for 367 tracked players\./i)).toBeInTheDocument();
         expect(screen.getByText('Σ')).toBeInTheDocument();
+        expect(onSelectMember).toHaveBeenCalledWith('Member One');
+    });
+});
+
+describe('ClanMembers click tracking', () => {
+    beforeEach(() => trackEventMock.mockReset());
+
+    it('fires a clan-member-click umami event and still navigates on a roster click', () => {
+        const onSelectMember = jest.fn();
+        render(<ClanMembers members={[baseMember]} onSelectMember={onSelectMember} />);
+
+        fireEvent.click(screen.getByRole('button', { name: /Show player Member One/i }));
+
+        expect(trackEventMock).toHaveBeenCalledWith('clan-member-click', { realm: 'na' });
         expect(onSelectMember).toHaveBeenCalledWith('Member One');
     });
 });

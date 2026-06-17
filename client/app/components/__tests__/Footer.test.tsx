@@ -21,4 +21,21 @@ describe('Footer creator-link tracking', () => {
         fireEvent.click(creatorLink);
         expect(trackEventMock).toHaveBeenCalledWith('footer-lil-boots', { realm: 'na' });
     });
+
+    it('fires outbound-link events with a stable target for each external link', () => {
+        render(<Footer />);
+
+        fireEvent.click(screen.getByRole('link', { name: 'Fork me on GitHub' }));
+        expect(trackEventMock).toHaveBeenCalledWith('outbound-link', { target: 'github' });
+
+        fireEvent.click(screen.getByRole('link', { name: 'Official World of Warships website' }));
+        expect(trackEventMock).toHaveBeenCalledWith('outbound-link', { target: 'wows' });
+    });
+
+    it('fires streamer-open when the Add a streamer button is clicked', () => {
+        render(<Footer />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Add a streamer!' }));
+        expect(trackEventMock).toHaveBeenCalledWith('streamer-open');
+    });
 });

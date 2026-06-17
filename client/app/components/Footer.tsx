@@ -25,6 +25,7 @@ const Footer: React.FC = () => {
                     {' '}
                     <a
                         href="https://www.reddit.com/user/_lil_boots/"
+                        onClick={() => trackEvent('outbound-link', { target: 'reddit' })}
                         className="text-[var(--accent-mid)] hover:text-[var(--accent-dark)]"
                         target="_blank"
                         rel="noreferrer"
@@ -36,6 +37,7 @@ const Footer: React.FC = () => {
                     {' · '}
                     <a
                         href="https://creativecommons.org/licenses/by-nc-sa/4.0/"
+                        onClick={() => trackEvent('outbound-link', { target: 'cc-license' })}
                         className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                         target="_blank"
                         rel="noreferrer"
@@ -45,6 +47,7 @@ const Footer: React.FC = () => {
                     {' · '}
                     <a
                         href="https://github.com/nitro-panks/battlestats"
+                        onClick={() => trackEvent('outbound-link', { target: 'github' })}
                         className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                         target="_blank"
                         rel="noreferrer"
@@ -54,7 +57,7 @@ const Footer: React.FC = () => {
                     {' · '}
                     <button
                         type="button"
-                        onClick={() => setStreamerModalOpen(true)}
+                        onClick={() => { trackEvent('streamer-open'); setStreamerModalOpen(true); }}
                         className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                     >
                         Add a streamer!
@@ -67,6 +70,7 @@ const Footer: React.FC = () => {
                 <p>
                     <a
                         href="https://worldofwarships.com/"
+                        onClick={() => trackEvent('outbound-link', { target: 'wows' })}
                         className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                         target="_blank"
                         rel="noreferrer"
@@ -76,6 +80,7 @@ const Footer: React.FC = () => {
                     {' · '}
                     <a
                         href="https://www.support.wargaming.net/"
+                        onClick={() => trackEvent('outbound-link', { target: 'wg-support' })}
                         className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                         target="_blank"
                         rel="noreferrer"
