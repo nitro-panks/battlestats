@@ -96,9 +96,9 @@ const MetricRow: React.FC<{ metric: ShipStatMetric }> = ({ metric }) => {
     }
 
     return (
-        // Left column: left-justified title + comparison bar. Right column: the
-        // you · avg · Δ details, right-aligned.
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 py-1.5">
+        // Left column (capped at 60% of the panel width): left-justified title +
+        // comparison bar. Right column: the you · avg · Δ details, right-aligned.
+        <div className="grid grid-cols-[60%_1fr] items-center gap-x-4 py-1.5">
             <div className="min-w-0">
                 <div className="text-xs text-[var(--text-muted)]">{label}</div>
                 {/* Comparison track: filled bar = the player; tick = the ship's
