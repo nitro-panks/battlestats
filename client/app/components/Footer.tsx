@@ -11,7 +11,7 @@ import StreamerSubmissionModal from './StreamerSubmissionModal';
 const Footer: React.FC = () => {
     const [streamerModalOpen, setStreamerModalOpen] = useState(false);
     return (
-        <footer className="border-t border-[var(--border)] py-4 text-center text-xs text-[var(--text-secondary)]">
+        <footer className="mt-6 py-4 text-center text-xs text-[var(--text-secondary)]">
             <div className="space-y-2 px-4 leading-5">
                 <p>
                     Battlestats v{process.env.NEXT_PUBLIC_APP_VERSION} by{' '}

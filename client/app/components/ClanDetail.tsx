@@ -138,6 +138,8 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 </p>
             </div>
 
+            {/* Body content is constrained to the 900px chart width */}
+            <div className="max-w-[900px]">
             {/* 2D/3D toggle — desktop only */}
             <div className="hidden md:flex items-center gap-1 mb-3">
                 <div className="inline-flex rounded-md border border-[var(--border)] text-xs font-medium">
@@ -178,21 +180,23 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 )}
             </div>
 
-            <div className="mt-4">
+            {/* Pull the chart left by the y-axis margin so the axis sits flush
+                with the body's left edge (full-bleed) instead of looking indented. */}
+            <div className="mt-4 md:-ml-[38px]">
                 {chartMode === '2d' ? (
-                    <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={440} membersData={members} theme={theme} />
+                    <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={938} svgHeight={440} membersData={members} theme={theme} />
                 ) : (
-                    <Clan3DSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={480} membersData={members} memberTiers={memberTiers} theme={theme} />
+                    <Clan3DSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={938} svgHeight={480} membersData={members} memberTiers={memberTiers} theme={theme} />
                 )}
             </div>
 
             <DeferredSection
-                className="mt-6 border-t border-[var(--border)] pt-4"
+                className="mt-6"
                 minHeight={96}
                 placeholder={<LoadingPanel tone="muted" label="Preparing clan members..." minHeight={96} />}
             >
                 <div>
-                    <ClanMembers members={members} loading={membersLoading} error={membersError} onSelectMember={onSelectMember} />
+                    <ClanMembers members={members} loading={membersLoading} error={membersError} onSelectMember={onSelectMember} layout="columns" />
                 </div>
             </DeferredSection>
 
@@ -212,6 +216,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
             >
                 Back
             </button>
+            </div>
         </div>
     );
 };

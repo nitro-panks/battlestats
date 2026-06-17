@@ -560,7 +560,10 @@ const PlayerSearch: React.FC = () => {
                     )}
 
                     {true && (
-                        <div className="mt-6 border-t border-[var(--border)] pt-6">
+                        <div className="mt-6">
+                            {/* HR constrained to 900px; the section/chart below keep their own (wider) width */}
+                            <div className="max-w-[900px] border-t border-[var(--border)]" aria-hidden="true" />
+                            <div className="pt-6">
                             <div className="flex flex-wrap items-center gap-2">
                                 <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Active Clans</h3>
                                 <span
@@ -631,6 +634,7 @@ const PlayerSearch: React.FC = () => {
                                 onSelectClan={handleSelectClan}
                                 ariaLabelPrefix="Show"
                             />
+                            </div>
                         </div>
                     )}
                 </div>

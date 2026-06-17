@@ -14,7 +14,7 @@ import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankI
 import LeaderCrownIcon from './LeaderCrownIcon';
 import TwitchStreamerIcon from './TwitchStreamerIcon';
 import PveEnjoyerIcon from './PveEnjoyerIcon';
-import InactiveIcon from './InactiveIcon';
+import ActivityIcon from './ActivityIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import ShipTopPlayerBanner, { ShipBadge } from './ShipTopPlayerBanner';
@@ -197,7 +197,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
     const isPveEnjoyer = Boolean(player.is_pve_player);
-    const isSleepyPlayer = player.days_since_last_battle > 365;
     const rankedBattleCount = Array.isArray(player.ranked_json)
         ? player.ranked_json.reduce((total, row) => total + Math.max(row?.total_battles || 0, 0), 0)
         : 0;
@@ -370,7 +369,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 rootMargin="80px 0px"
                                 sectionId="clan-members"
                             >
-                                <div id="clan_members_container">
+                                <div id="clan_members_container" className="pl-8">
                                     <ClanMembers members={clanMembers} loading={clanMembersLoading} error={clanMembersError} onSelectMember={onSelectMember} layout="stacked" highlightedPlayerName={player.name} />
                                 </div>
                             </DeferredSection>
@@ -390,10 +389,10 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <h1 className="text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
                                     {player.name}
                                 </h1>
+                                <ActivityIcon daysSinceLastBattle={player.days_since_last_battle} size="header" />
                                 {player.is_hidden ? <HiddenAccountIcon className="text-sm text-[var(--accent-light)]" /> : null}
                                 {player.is_clan_leader ? <LeaderCrownIcon size="header" /> : null}
                                 {isPveEnjoyer ? <PveEnjoyerIcon size="header" /> : null}
-                                {isSleepyPlayer ? <InactiveIcon size="header" /> : null}
                                 {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}
                                 {isClanBattleEnjoyer && clanBattleSummary ? <ClanBattleShieldIcon winRate={clanBattleSummary.overallWinRate} size="header" /> : null}
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
