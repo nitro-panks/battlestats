@@ -328,6 +328,15 @@ CELERY_TASK_ROUTES = {
     'warships.tasks.update_player_clan_battle_data_task': {'queue': 'hydration'},
     'warships.tasks.update_player_efficiency_data_task': {'queue': 'hydration'},
     'warships.tasks.update_clan_battle_summary_task': {'queue': 'hydration'},
+    # Core on-visit refreshes. Dispatched ONLY from the request path (views.py
+    # player/clan detail + the data.py hydration dispatch); no bulk/batch loop
+    # fans them out (see tasks.py update_player_data_task docstring). Routing
+    # them to `hydration` finishes the interactive-lane consolidation started
+    # 2026-04-03 and removes the last contention point with the inline
+    # observation-floor sweep + crawl dispatchers + warmers on `default`.
+    # See runbook-interactive-refresh-lane-2026-06-17.md.
+    'warships.tasks.update_player_data_task': {'queue': 'hydration'},
+    'warships.tasks.update_clan_data_task': {'queue': 'hydration'},
 }
 
 REST_FRAMEWORK = {
