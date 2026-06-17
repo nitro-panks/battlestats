@@ -2051,10 +2051,22 @@ def _export_table_csv_gz(table, date_col, cutoff, max_rows, archive_path,
         with gzip.GzipFile(fileobj=raw, mode="wb") as gz:
             if is_pg:
                 with connection.cursor() as cur:
-                    copy_sql = (
-                        "COPY (" + cur.mogrify(select_sql, params).decode()
-                        + ") TO STDOUT WITH CSV HEADER")
-                    cur.copy_expert(copy_sql, gz)
+                    if hasattr(cur, "copy_expert"):
+                        # psycopg2: mogrify (bytes on older builds, str on
+                        # newer) + copy_expert streams to the file object.
+                        mog = cur.mogrify(select_sql, params)
+                        if isinstance(mog, (bytes, bytearray)):
+                            mog = mog.decode()
+                        cur.copy_expert(
+                            "COPY (" + mog + ") TO STDOUT WITH CSV HEADER", gz)
+                    else:
+                        # psycopg3 (prod): no copy_expert. cursor.copy() binds
+                        # params itself and yields bytes chunks to stream out.
+                        copy_sql = ("COPY (" + select_sql
+                                    + ") TO STDOUT (FORMAT csv, HEADER)")
+                        with cur.copy(copy_sql, params) as copy:
+                            for chunk in copy:
+                                gz.write(chunk)
             else:
                 text = io.TextIOWrapper(gz, encoding="utf-8", newline="")
                 writer = csv.writer(text)
