@@ -6873,29 +6873,23 @@ def _ship_population_brackets_30d(ship_id, realm, window_days=SHIP_COMBAT_WINDOW
     return result
 
 
-def _ship_combat_user_totals(player, ship_id):
-    """The player's CAREER totals for one ship, read from the latest
-    BattleObservation.ships_stats_json (full coverage; normalized to the same
-    keys as the population totals). Returns None if no observation/row."""
-    from warships.models import BattleObservation
+def _ship_combat_user_totals(player, ship_id, window_days=SHIP_COMBAT_WINDOW_DAYS):
+    """The player's own totals for one ship over the SAME trailing window and
+    source (PlayerDailyShipStats, random) as the population — so the panel is
+    consistent with the Battle History table the user clicked from and with the
+    "30d" framing. Returns None when the player has no battles on the ship in the
+    window."""
+    from warships.models import PlayerDailyShipStats
 
-    obs = (
-        BattleObservation.objects
-        .filter(player=player, ships_stats_json__isnull=False)
-        .order_by('-observed_at')
-        .first()
+    cutoff = django_timezone.now().date() - timedelta(days=window_days)
+    row = (
+        PlayerDailyShipStats.objects
+        .filter(player=player, ship_id=ship_id, mode='random', date__gte=cutoff)
+        .aggregate(**{f: Sum(f) for f in _SHIP_COMBAT_SUM_FIELDS})
     )
-    if not obs or not obs.ships_stats_json:
+    totals = {f: int(row.get(f) or 0) for f in _SHIP_COMBAT_SUM_FIELDS}
+    if totals['battles'] <= 0:
         return None
-
-    row = next((r for r in obs.ships_stats_json
-                if r.get('ship_id') == ship_id), None)
-    if row is None:
-        return None
-
-    totals = {f: int(row.get(f, 0) or 0) for f in _SHIP_COMBAT_SUM_FIELDS}
-    # ships_stats_json names damage `damage_dealt`; align to `damage`.
-    totals['damage'] = int(row.get('damage_dealt', row.get('damage', 0)) or 0)
     return totals
 
 
@@ -6903,13 +6897,14 @@ def compute_ship_combat_comparison(player, ship_id, realm,
                                    window_days=SHIP_COMBAT_WINDOW_DAYS):
     """Build the ShipStats payload: per-metric {user, averages:{all,top50,top25}}
     clustered by combat role, with role-irrelevant metrics omitted (population
-    denominator ~0). `user` is the player's career rate; each `averages` entry is
-    the ship's 30-day population rate within that account-WR skill bracket. Any
-    side may be None (no observation / empty bracket)."""
+    denominator ~0). Both `user` and each `averages` entry are 30-day random-
+    battle rates (same window/source), so the panel stays consistent with the
+    Battle History table; `averages` is bracketed by account-WR skill. Any side
+    may be None (no battles in the window / empty bracket)."""
     ship_id = int(ship_id)
     brackets = _ship_population_brackets_30d(ship_id, realm, window_days)
     pop_all = brackets['all']
-    user = _ship_combat_user_totals(player, ship_id)
+    user = _ship_combat_user_totals(player, ship_id, window_days)
 
     ship = Ship.objects.filter(ship_id=ship_id).first()
 

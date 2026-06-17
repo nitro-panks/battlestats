@@ -305,7 +305,7 @@ const ShipStats: React.FC<ShipStatsProps> = ({
 
             {state === 'ready' && payload && !payload.has_user_data ? (
                 <p className="mt-3 text-xs text-[var(--text-muted)]">
-                    No career stats found for you on this ship — showing the server average only.
+                    No battles in the last 30 days on this ship for you — showing the server average only.
                 </p>
             ) : null}
         </div>
