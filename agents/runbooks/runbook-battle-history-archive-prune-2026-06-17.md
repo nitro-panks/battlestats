@@ -1,0 +1,205 @@
+# Runbook: Monthly cold-archive + prune of battle-history (>32d retention)
+
+_Created: 2026-06-17_
+_Author role: DBA / platform_
+_Context: The managed Postgres sits on a 60 GiB disk with autoscale OFF (~50% used as of 2026-06-15). `BattleEvent` + `PlayerDailyShipStats` are the monotonic, never-pruned growth slope identified in `runbook-db-growth-analysis-2026-06-15.md`. This runbook specifies a monthly job that introduces a 32-day rolling window in live Postgres: export everything older to a compressed, restorable file on the app droplet, verify, then delete._
+_Status: **SPECIFICATION ONLY — NOT IMPLEMENTED.** This runbook fully specifies the command/schedule/restore for a later implementation PR. No code, units, deploy wiring, or tests exist yet; nothing has been run against prod._
+
+## Purpose
+
+Cap the unbounded growth of the two append-only, no-retention battle-history tables (`BattleEvent`, `PlayerDailyShipStats`) by enforcing a **32-day rolling window** in live Postgres, while preserving the older data as a **cold queryable archive** (compressed CSV + manifest) on a separate host. Read by the operator who implements the archive command, schedules it, or restores a slice for analysis. It is the durable follow-up to the "biggest single lever is a retention policy" conclusion of `runbook-db-growth-analysis-2026-06-15.md`.
+
+## TL;DR
+
+- **Why:** 60 GiB disk, autoscale OFF = hard wall; a full disk is a read-only outage (the 2026-05-24 failure mode). `BattleEvent` (~+730 MB / 20d) and `PlayerDailyShipStats` (~+915 MB / 20d) grow forever with no retention today.
+- **What:** a monthly `manage.py archive_battle_history` run — export rows older than `cutoff = midnight_utc(now) - 32d` to `gzip` CSV on the **app droplet** (separate host, ~58 GB free), **verify (count + sha256) before any delete**, then batch-delete by PK, then `VACUUM (ANALYZE)`.
+- **Accepted behavior change:** the week/month/**year** battle-history UI windows resolve to the daily layer and will **cap at 32 days**. The 24h "day" window is unaffected.
+- **Safety spine:** both tables are FK **leaves** (nothing references them → no cascade), and the prune deletes only the **exact PK set that was just exported and verified** — correct regardless of any concurrent write.
+- **Not solved by this:** `PlayerDailyShipStats` keeps growing inside the 32-day window as coverage grows; the disk wall is *deferred, not removed*. See Follow-ups.
+
+## Scope & locked decisions
+
+| Decision | Value | Rationale |
+|---|---|---|
+| In scope | `BattleEvent` (filter `detected_at`), `PlayerDailyShipStats` (filter `date`) | The two monotonic no-retention growth tables (`runbook-db-growth-analysis-2026-06-15.md`). |
+| Excluded | `BattleObservation` | Already handled by prod compaction (`prune_battle_observations` NULLs heavy JSON, keeps rows). `BattleEvent.from_observation`/`to_observation` are **CASCADE FKs into `BattleObservation`** (`models.py:617–626`), so deleting BO rows would destroy the durable event record — and keeping BO rows keeps archived events re-insertable in practice (parents persist). |
+| Retention | 32 days, both tables | One window for everything in scope. |
+| UI impact (accepted) | week/month/year cap at 32 days | Permanent; impact today is ~2 weeks (pipeline ~6 weeks old). |
+| Restore | cold queryable archive | Load compressed CSV into a scratch DB for analysis. No one-command live re-insertion guarantee. |
+| Archive host | app droplet | Separate host from the DB; ~58 GB free; no offsite (DO Spaces) yet. |
+
+## Data-safety rationale
+
+**Leaf-table proof (no cascade on delete).** Verified against `server/warships/models.py`:
+
+- `BattleEvent` (`models.py:575`): its FKs point **outward** — `player → Player` (`:580`), `from_observation`/`to_observation → BattleObservation` (`:617–626`). **No model declares an FK into `BattleEvent`.** Deleting a `BattleEvent` row cascades to nothing. Filter column `detected_at` is `auto_now_add=True` (`:582`) — set once at insert, monotonic, never backdated.
+- `PlayerDailyShipStats` (`models.py:668`): FK only to `Player` (`:673`); filter column `date` is a `DateField` with `db_index=True` (`:675`). **No model declares an FK into it.** Leaf.
+
+**Read paths that bound the behavior change.** The battle-history API (`server/warships/views.py`):
+
+- `BATTLE_HISTORY_WINDOWS` (`views.py:608–613`): `day → 24h`, `week → 7 daily`, `month → 30 daily`, `year → 365 daily`. The week/month/year windows resolve to the `PlayerDailyShipStats` daily layer, so once rows older than 32d are pruned those windows cap at 32 days. The `year` window's 365-day span is the one that visibly shrinks.
+- The 24h "day" window routes through `_build_battle_history_payload_24h()` (`views.py:769`, referenced at `views.py:605`), which reads `BattleEvent` directly (`detected_at >= now-24h`). 24h ≪ 32d, so it is **never** affected by the prune.
+- `data.py` reads only the **latest** `BattleObservation` as a diff baseline; `BattleObservation` is out of scope and untouched.
+
+**Why the prune is correct regardless of concurrent writes.** The job does **not** assume "no new `<cutoff` rows can appear mid-run." Correctness comes from the **verify-before-delete gate** and the **delete-only-what-you-exported** discipline:
+
+1. Count `SELECT COUNT(*) WHERE <datecol> < cutoff`.
+2. Export those rows (`ORDER BY id`), capturing the exact PK set.
+3. Re-count / verify the gz data-row count == the exported count, compute sha256, write the manifest.
+4. **Delete only the PKs that were exported and verified** — never a fresh `WHERE <datecol> < cutoff` delete. Any row that appears after the export simply isn't in the delete set and waits for next month.
+
+On any verification mismatch: **keep the archive, delete nothing, exit non-zero.**
+
+> Note on the prior draft: there is no literal "~3-day rollup lookback" constant to lean on — `reconcile_battle_history_rollup` takes `--since/--until`/`audit_days`, not a fixed window. The safety argument above deliberately does not depend on the rollup's write window.
+
+## Flow
+
+```
+manage.py archive_battle_history  (systemd timer: OnCalendar=*-*-01 03:00 UTC)
+        │  cutoff = midnight_utc(now) - retention_days (32)
+        ▼
+  for each table in {BattleEvent(detected_at), PlayerDailyShipStats(date)}:
+        ① EXPORT  COPY (SELECT * FROM <t> WHERE <col> < cutoff ORDER BY id) TO STDOUT WITH CSV HEADER
+                  └─ cursor.copy_expert(...) → gzip → <archive-dir>/<run-date>/<table>.csv.gz
+        ② VERIFY  gz data-row count == COUNT(*) WHERE <col> < cutoff ; sha256 ; write manifest.json
+                  └─ MISMATCH → keep archive, DELETE NOTHING, exit non-zero
+        ③ DELETE  delete the exported+verified PK set, batched by PK
+                  └─ SET LOCAL statement_timeout per txn + inter-batch sleep
+        ④ VACUUM (ANALYZE) <t>      ── NO VACUUM FULL
+  single-run lock (cache.add / file) prevents overlap with a still-running prior run
+```
+
+## Archive format & location
+
+- **Path:** `${BATTLE_HISTORY_ARCHIVE_DIR}/<run-date>/<table>.csv.gz`, default dir `${APP_ROOT}/shared/archives/battle_history/` where `APP_ROOT=/opt/battlestats-server` (`deploy_to_droplet.sh:19`). The `${APP_ROOT}/shared/` tree already survives deploys and is where the deploy installs durable state (e.g. `shared/logs`, `deploy_to_droplet.sh:63–67`). The install step (below) must `install -d` the `archives/battle_history` subtree the same way.
+- **Format:** `COPY ... WITH CSV HEADER` streamed through `gzip`. CSV (not `pg_dump`) so the archive is trivially loadable into Postgres *or* sqlite for analysis.
+- **`manifest.json`** (one per run-date, per table or combined): `table`, `cutoff` (ISO), `min_date`/`max_date` of exported rows, `rowcount`, `sha256` of the `.csv.gz`, `columns` (ordered column list — pins the CSV header against future schema drift), `app_version` (from root `VERSION`).
+- **Why the droplet:** it is a **separate host** from the managed DB (so the archive doesn't consume the disk we're trying to relieve) with ~58 GB free. No offsite/object-storage copy yet — see Follow-ups.
+
+## The command + flags
+
+New management command `server/warships/management/commands/archive_battle_history.py`, with the core logic in a testable function in `warships/incremental_battles.py` (mirroring how `prune_battle_observations.py` delegates to `compact_battle_observation_payloads`).
+
+Flags (mirror `prune_battle_observations.py`'s shape — dry-run-first, validated):
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--retention-days` | 32 | Window kept live; `cutoff = midnight_utc(now) - this`. |
+| `--tables` | both | Subset to `battleevent` / `playerdailyshipstats`. |
+| `--archive-dir` | `$BATTLE_HISTORY_ARCHIVE_DIR` | Output root. |
+| `--batch-size` | 2000 | PKs deleted per transaction (matches `COMPACT_BATCH_SIZE_DEFAULT`, `incremental_battles.py:1346`). |
+| `--max-rows` | 0 (unlimited) | Cap rows archived+deleted this run (rollout throttle). |
+| `--sleep` | 0.0 | Seconds between delete batches. |
+| `--statement-timeout` | 180 | Per-query PG timeout (matches `COMPACT_STATEMENT_TIMEOUT_DEFAULT`, `incremental_battles.py:1347`). |
+| `--skip-vacuum` | off | Skip the post-delete `VACUUM (ANALYZE)`. |
+| `--dry-run` | off | Report counts + reclaim estimate + destination paths; write **nothing**, delete **nothing**. |
+
+**Reuse, do not reinvent:**
+- `_apply_statement_timeout(cur, seconds, is_pg)` (`incremental_battles.py:1414`) — call inside each delete txn (`SET LOCAL` scopes to the transaction).
+- The candidate-PKs-once-then-batch-by-PK idiom from `compact_battle_observation_payloads` (`incremental_battles.py:1423`) and `prune_inactive_player_battles_json` (`incremental_battles.py:1637`): collect ids in one scan (capped by `--max-rows`), then mutate by PK in `--batch-size` chunks — so each table is scanned once, not once per batch.
+- **Export** uses `cursor.copy_expert("COPY (...) TO STDOUT WITH CSV HEADER", gzip_fileobj)` via psycopg2 (`psycopg2-binary` 2.9.9 is the prod driver). Stream straight into a `gzip.GzipFile` — never materialize the full CSV in memory.
+- A **single-run lock** (`cache.add(key, ..., timeout)` or a pidfile under `${APP_ROOT}/shared/`) so an overrunning prior run can't overlap the next month's.
+
+## Scheduling
+
+**Primary: systemd timer** (the repo has **no** systemd-timer precedent yet, so the units ship in this command's PR):
+
+`/etc/systemd/system/battlestats-archive-battle-history.service`:
+```ini
+[Unit]
+Description=Battlestats monthly battle-history cold-archive + prune
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=battlestats
+WorkingDirectory=/opt/battlestats-server/current/server
+EnvironmentFile=/opt/battlestats-server/current/server/.env.secrets
+EnvironmentFile=/opt/battlestats-server/current/server/.env.secrets.cloud
+ExecStart=/opt/battlestats-server/current/server/venv/bin/python manage.py archive_battle_history
+```
+
+`/etc/systemd/system/battlestats-archive-battle-history.timer`:
+```ini
+[Unit]
+Description=Run battle-history archive on the 1st of each month
+
+[Timer]
+OnCalendar=*-*-01 03:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Add an install step to `server/deploy/deploy_to_droplet.sh` that `install -d`s the archive dir, drops both unit files, and runs `systemctl daemon-reload && systemctl enable --now battlestats-archive-battle-history.timer`. Confirm venv path + `EnvironmentFile` paths against the live release layout before wiring (the snippet above assumes the `current` symlink + `venv`; verify against the deploy script's actual `REMOTE_RELEASE`).
+
+**Why systemd, not Celery Beat:** a steady-state run deletes millions of rows over ~1–2h — too long for a Celery soft-time-limit / worker slot, and it matches the literal "once a month." *Alternative noted for the implementer:* a Celery Beat `crontab(day_of_month="1", hour=3)` entry in `signals.py` (the in-repo scheduling convention) with `CRAWL_TASK_OPTS`-style limits + the run-lock, **if** the operator accepts the long-task caveat. The systemd path is recommended.
+
+## Env knobs
+
+Set via `set_env_value` in `server/deploy/deploy_to_droplet.sh` (line 345) — these survive deploys, whereas `.env.cloud` does not:
+
+| Var | Default | Notes |
+|---|---|---|
+| `BATTLE_HISTORY_ARCHIVE_ENABLED` | `0` | Master kill switch; the command no-ops (logs + exits 0) when `0`. |
+| `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` | `32` | Backs `--retention-days`. |
+| `BATTLE_HISTORY_ARCHIVE_DIR` | `${APP_ROOT}/shared/archives/battle_history` | Backs `--archive-dir`. |
+| `BATTLE_HISTORY_ARCHIVE_BATCH_SIZE` | `2000` | |
+| `BATTLE_HISTORY_ARCHIVE_SLEEP` | `0.5` | Gentle inter-batch pause in prod. |
+| `BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT` | `180` | |
+
+## First-run vs steady-state, and the VACUUM policy
+
+- **First run** archives the entire `>32d` backlog (~2 weeks today; small). Steady-state runs archive ~1 month of `>32d` rows each.
+- **`VACUUM (ANALYZE)` only — no `VACUUM FULL`.** `VACUUM FULL` takes an `ACCESS EXCLUSIVE` lock (table unavailable) and is only worth it for a large one-time backlog. Here, steady-state delete ≈ steady-state insert, so the freed space is **reused in-table** for new rows rather than returned to the OS — exactly the behavior `runbook-db-growth-analysis-2026-06-15.md` documents for steady-delete tables. `VACUUM (ANALYZE)` updates the visibility map + planner stats without the exclusive lock. (Note: per that runbook, even `VACUUM FULL` would only reclaim space *within* `pg_database_size`, not the ~7 GB WAL/temp gap — irrelevant here.)
+
+## Restore procedure (cold queryable archive)
+
+To analyze archived rows (e.g. a historical window pruned from live):
+
+1. Copy `<run-date>/<table>.csv.gz` + `manifest.json` off the droplet.
+2. **Verify integrity:** `sha256sum <table>.csv.gz` must equal the manifest `sha256`; `zcat <table>.csv.gz | tail -n +2 | wc -l` must equal the manifest `rowcount`.
+3. **Load into a scratch DB** (do **not** load into prod):
+   - Postgres scratch: `CREATE TABLE archive_<table> (LIKE warships_<table> INCLUDING ALL);` then `\copy archive_<table> FROM PROGRAM 'zcat <table>.csv.gz' WITH CSV HEADER;` — the manifest `columns` list pins the header order against schema drift.
+   - sqlite: `zcat <table>.csv.gz | sqlite3 scratch.db '.mode csv' '.import /dev/stdin archive_<table>'`.
+4. Query for analysis. Re-inserting into live Postgres is possible (the parent `BattleObservation`/`Player` rows still exist) but is **not** a supported one-command path and is out of scope.
+
+## Rollout
+
+1. **Dry-run on prod** with `--dry-run` (and `BATTLE_HISTORY_ARCHIVE_ENABLED=1`): confirm candidate counts, reclaim estimate, and destination paths look right. No writes.
+2. **Round-trip test** (the QA gate — see Validation) on a **small slice** via `--max-rows`: export → load into scratch → counts + sha256 match → confirm the would-be delete set equals the exported PK set.
+3. **Throttled live run** with a small `--max-rows`; verify the archive on disk + the post-delete live counts.
+4. **Full run** (drop `--max-rows`).
+5. **Schedule**: enable the systemd timer (or Beat entry).
+
+## Validation / QA gate
+
+The **restore round-trip is the validation gate** and must pass at rollout before any unthrottled delete:
+
+1. Export a small slice (`--max-rows N`) to the archive dir.
+2. Load `<table>.csv.gz` into a scratch Postgres/sqlite (Restore steps 1–3).
+3. **Row count** in scratch == manifest `rowcount` == `COUNT(*) WHERE <col> < cutoff` for that slice.
+4. **sha256** of the `.csv.gz` == manifest `sha256`.
+5. Confirm the command's computed delete set == the exported PK set (the delete-only-what-you-exported invariant).
+
+Automated coverage to add in the implementation PR (run against the SQLite test DB, `--nomigrations`): a test that seeds `>cutoff` and `<cutoff` rows for both tables, runs the command in dry-run (asserts counts, no deletes) and live (asserts only `<cutoff` rows deleted, `>cutoff` rows untouched, archive file written, manifest count/sha match). `copy_expert`/`VACUUM` are PG-only — guard those branches on `connection.vendor == "postgresql"` so the SQLite gate exercises the count/delete/manifest logic.
+
+## Rollback
+
+- **Disable** by setting `BATTLE_HISTORY_ARCHIVE_ENABLED=0` (command no-ops) and/or `systemctl disable --now battlestats-archive-battle-history.timer`.
+- Archives are **additive and non-destructive until verified** — a failed/aborted run leaves the archive on disk and deletes nothing, so there is nothing to roll back beyond disabling the schedule.
+- If a delete already ran, the archived `.csv.gz` is the recovery source (see Restore); the data is not lost, only moved off live.
+
+## Follow-ups
+
+- **`PlayerDailyShipStats` growth is deferred, not solved.** Within the 32-day window it still grows as player coverage grows; this runbook only bounds the *tail*. Revisit if in-window size becomes the binding constraint.
+- **Offsite copy.** Archives live only on the app droplet today. Add a DO Spaces (object storage) upload + droplet-side retention/pruning of `<run-date>` dirs so the droplet disk doesn't itself fill.
+- **UI relabel.** The week/month/year pills now cap at 32 days; consider a UI affordance noting the window cap (candidate, not required).
+- **Systemd-timer precedent.** This is the repo's first systemd timer; if more monthly/periodic host-level jobs follow, factor the install into a reusable deploy helper.
+
+## Related runbooks
+
+- `runbook-db-growth-analysis-2026-06-15.md` — the growth attribution + runway analysis this implements the lead remediation for.
+- `runbook-db-cpu-saturation-2026-05-24.md` — the read-only outage this prevents recurrence of.
+- `runbook-battle-history-rollup-durability-2026-06-06.md` — the rollup/`BattleEvent` pipeline whose read paths bound the safety argument.
