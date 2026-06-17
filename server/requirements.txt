@@ -26,6 +26,11 @@ packaging==24.1; python_version >= '3.8'
 pdbpp==0.10.3
 pluggy==1.5.0; python_version >= '3.8'
 prompt-toolkit==3.0.47; python_full_version >= '3.7.0'
+# Prod's Django uses psycopg (v3) — Django 5's postgresql backend prefers v3
+# when installed. Pin it so CI + local match prod's driver (was psycopg2-only,
+# which let a psycopg2-specific bug pass CI then fail in prod, 2026-06-17).
+# psycopg2-binary kept as the fallback driver (prod has both installed).
+psycopg[binary]==3.3.3
 psycopg2-binary==2.9.9; python_version >= '3.7'
 pygments==2.20.0; python_version >= '3.8'
 pyrepl==0.9.0

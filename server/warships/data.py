@@ -2886,14 +2886,20 @@ def fetch_player_population_distribution(metric: str, realm: str = DEFAULT_REALM
             **{f'{field_name}__isnull': False},
         )
     else:
+        # MvPlayerDistributionStats is an unmanaged materialized view; where it
+        # doesn't exist (test DB, fresh env) the probe raises a DB error. Wrap
+        # it in its own savepoint so that error rolls back cleanly instead of
+        # poisoning the surrounding transaction — psycopg3 (prod's driver) does
+        # not tolerate continuing on an aborted transaction the way psycopg2 did.
         try:
-            qs = MvPlayerDistributionStats.objects.filter(
-                realm=realm,
-                pvp_battles__gte=config['min_population_battles'],
-                **{f'{field_name}__isnull': False},
-            )
-            if not qs.exists():
-                raise MvPlayerDistributionStats.DoesNotExist
+            with transaction.atomic():
+                qs = MvPlayerDistributionStats.objects.filter(
+                    realm=realm,
+                    pvp_battles__gte=config['min_population_battles'],
+                    **{f'{field_name}__isnull': False},
+                )
+                if not qs.exists():
+                    raise MvPlayerDistributionStats.DoesNotExist
         except Exception:
             qs = Player.objects.filter(
                 realm=realm,
@@ -3421,17 +3427,22 @@ def fetch_player_wr_survival_correlation(realm: str = DEFAULT_REALM, *, force_re
     sum_y2 = 0.0
 
     with transaction.atomic(), _elevated_work_mem():
+        # Savepoint-isolate the unmanaged-Mv probe (see fetch_player_population_
+        # distribution): a missing-relation error must roll back to the
+        # savepoint, not abort this outer atomic — psycopg3 won't run the
+        # fallback iterator on an aborted transaction.
         try:
-            mv_qs = MvPlayerDistributionStats.objects.filter(
-                realm=realm,
-                pvp_battles__gte=config['min_population_battles'],
-                pvp_ratio__isnull=False,
-                pvp_survival_rate__isnull=False,
-                pvp_survival_rate__gte=config['min_survival_rate'],
-            )
-            if not mv_qs.exists():
-                raise MvPlayerDistributionStats.DoesNotExist
-            rows = mv_qs.values_list('pvp_ratio', 'pvp_survival_rate')
+            with transaction.atomic():
+                mv_qs = MvPlayerDistributionStats.objects.filter(
+                    realm=realm,
+                    pvp_battles__gte=config['min_population_battles'],
+                    pvp_ratio__isnull=False,
+                    pvp_survival_rate__isnull=False,
+                    pvp_survival_rate__gte=config['min_survival_rate'],
+                )
+                if not mv_qs.exists():
+                    raise MvPlayerDistributionStats.DoesNotExist
+                rows = mv_qs.values_list('pvp_ratio', 'pvp_survival_rate')
         except Exception:
             rows = Player.objects.filter(
                 realm=realm,
