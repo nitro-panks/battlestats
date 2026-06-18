@@ -2978,6 +2978,33 @@
             "archive_on": [
                 "clan-departure-reconciliation-superseded"
             ]
+        },
+        "agents/runbooks/runbook-clan-chart-activity-filter-2026-06-18.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "architecture",
+            "owner": "frontend",
+            "aliases": [
+                "clan chart activity filter",
+                "clan chart pin bucket",
+                "activity bar pin",
+                "clan chart radio filter",
+                "pin activity cohort"
+            ],
+            "tags": [
+                "clan-chart",
+                "ClanSVG",
+                "activity_bucket",
+                "frontend",
+                "d3",
+                "clan-chart-activity-filter",
+                "umami",
+                "interaction"
+            ],
+            "archive_on": [
+                "clan-chart-activity-filter-superseded"
+            ]
         }
     }
 }

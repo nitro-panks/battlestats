@@ -50,6 +50,14 @@ const getActivityBuckets = (theme: ChartTheme): Array<{ key: ActivityBucketKey; 
     ];
 };
 
+// Radio-button toggle for the activity bar pin: re-clicking the pinned bucket
+// releases it; clicking any other bucket swaps the pin. Pure so it can be unit
+// tested without the D3 layer.
+export const nextPinnedBucket = (
+    current: ActivityBucketKey | null,
+    clicked: ActivityBucketKey,
+): ActivityBucketKey | null => (current === clicked ? null : clicked);
+
 const CLAN_PLOT_FETCH_RETRY_DELAY_MS = 350;
 const CLAN_PLOT_FETCH_ATTEMPTS = 2;
 const CLAN_PLOT_PENDING_RETRY_DELAY_MS = 3000;
@@ -178,6 +186,8 @@ const drawClanPlot = (
     theme: ChartTheme,
     xScaleType: 'linear' | 'log' = 'log',
     showGridlines: boolean = false,
+    pinnedBucketRef?: React.MutableRefObject<ActivityBucketKey | null>,
+    onBucketPin?: (bucket: ActivityBucketKey | null) => void,
 ) => {
     const colors = chartColors[theme];
     const compact = svgWidth < 480;
@@ -277,7 +287,11 @@ const drawClanPlot = (
     const ymax = (d3.max(data, (datum: ClanData) => datum.pvp_ratio) || 0) + 2;
     const ymin = (d3.min(data, (datum: ClanData) => datum.pvp_ratio) || 0) - 2;
     const normalizedHighlightedPlayerName = highlightedPlayerName?.trim().toLowerCase() || null;
+    // Transient hover highlight; `pinnedBucket` is the persisted (clicked) filter,
+    // restored from the ref so it survives a redraw (resize / theme / highlight).
+    // The effective filter is `hoveredBucket ?? pinnedBucket`.
     let hoveredBucket: ActivityBucketKey | null = null;
+    let pinnedBucket: ActivityBucketKey | null = pinnedBucketRef?.current ?? null;
 
     svg.selectAll('*').remove();
     activityGroup.selectAll('*').remove();
@@ -310,7 +324,7 @@ const drawClanPlot = (
         .attr('stroke', colors.gridLine)
         .attr('stroke-width', 1);
 
-    activityGroup.append('g')
+    const segmentRects = activityGroup.append('g')
         .selectAll('rect')
         .data(segments)
         .enter()
@@ -320,19 +334,56 @@ const drawClanPlot = (
         .attr('width', (segment: ActivitySegment & { shareStart: number; shareEnd: number }) => Math.max(0, activityScale(segment.shareEnd) - activityScale(segment.shareStart)))
         .attr('height', activityBarHeight)
         .attr('fill', (segment: ActivitySegment) => segment.color)
-        .attr('stroke', colors.barStroke)
-        .attr('stroke-width', 1)
-        .style('cursor', 'default')
+        .attr('data-bucket', (segment: ActivitySegment) => segment.key)
+        // Empty buckets render a zero-width slice and aren't a meaningful filter.
+        .style('cursor', (segment: ActivitySegment) => (segment.count > 0 ? 'pointer' : 'default'))
         .on('mouseover', function (_event: MouseEvent, segment: ActivitySegment) {
             hoveredBucket = segment.key;
-            showActivityDetails(segment);
+            refreshActivityDetails();
             applyBucketFilter();
         })
         .on('mouseout', function () {
             hoveredBucket = null;
-            activityGroup.select('.activity-details').remove();
+            // Fall back to the pinned segment's label (or clear if nothing pinned).
+            refreshActivityDetails();
+            applyBucketFilter();
+        })
+        .on('click', function (_event: MouseEvent, segment: ActivitySegment) {
+            if (segment.count <= 0) {
+                return;
+            }
+            pinnedBucket = nextPinnedBucket(pinnedBucket, segment.key);
+            if (pinnedBucketRef) {
+                pinnedBucketRef.current = pinnedBucket;
+            }
+            // Fire only when a bucket becomes pinned (mirrors log/linear: change-only).
+            if (pinnedBucket) {
+                onBucketPin?.(pinnedBucket);
+            }
+            updateSegmentStrokes();
+            refreshActivityDetails();
             applyBucketFilter();
         });
+
+    // Mark the pinned segment with a heavier, high-contrast outline so the
+    // persisted selection reads as "stuck on" rather than a passing hover.
+    const updateSegmentStrokes = () => {
+        segmentRects
+            .attr('stroke', (segment: ActivitySegment) => (segment.key === pinnedBucket ? colors.labelStrong : colors.barStroke))
+            .attr('stroke-width', (segment: ActivitySegment) => (segment.key === pinnedBucket ? 2.5 : 1));
+    };
+
+    // Show the label for whichever bucket is currently effective (hover wins over
+    // pin), or remove it when neither is active.
+    const refreshActivityDetails = () => {
+        const activeKey = hoveredBucket ?? pinnedBucket;
+        const segment = activeKey ? segments.find((candidate) => candidate.key === activeKey) : null;
+        if (segment) {
+            showActivityDetails(segment);
+        } else {
+            activityGroup.select('.activity-details').remove();
+        }
+    };
 
     // x = battles. A few very-high-battle members blow out the linear domain and
     // compress everyone else near the origin; a log scale spreads the pack out.
@@ -389,6 +440,9 @@ const drawClanPlot = (
 
     const showPointDetails = (datum: ClanPlotPoint) => {
         activityGroup.select('.player-details').remove();
+        // The per-player label and the activity-bucket label share the same slot;
+        // hide the bucket label while a point is hovered, restored on mouseout.
+        activityGroup.select('.activity-details').remove();
 
         const detailGroup = activityGroup.append('g')
             .attr('class', 'player-details')
@@ -456,6 +510,7 @@ const drawClanPlot = (
         .attr('cx', 0)
         .attr('cy', 0)
         .attr('class', (datum: ClanPlotPoint) => normalizedHighlightedPlayerName === datum.player_name.trim().toLowerCase() ? 'clan-player-dot' : null)
+        .attr('data-bucket', (datum: ClanPlotPoint) => datum.activity_bucket)
         .attr('r', 4.65)
         .style('stroke', colors.axisLine)
         .style('stroke-width', 1.25)
@@ -474,33 +529,35 @@ const drawClanPlot = (
         })
         .on('mouseout', function (this: SVGCircleElement, _event: MouseEvent, _datum: ClanPlotPoint) {
             hideDetails();
+            refreshActivityDetails();
             d3.select(this).classed('clan-dot-pulse', false);
             applyBucketFilter();
         });
 
     const applyBucketFilter = () => {
+        const activeBucket = hoveredBucket ?? pinnedBucket;
         dotSelection
             .attr('fill', (datum: ClanPlotPoint) => {
-                if (!hoveredBucket) {
+                if (!activeBucket) {
                     return selectClanColorByWR(datum.pvp_ratio, theme);
                 }
-                return datum.activity_bucket === hoveredBucket ? selectClanColorByWR(datum.pvp_ratio, theme) : '#d1d5db';
+                return datum.activity_bucket === activeBucket ? selectClanColorByWR(datum.pvp_ratio, theme) : '#d1d5db';
             })
             .attr('opacity', (datum: ClanPlotPoint) => {
-                if (!hoveredBucket) {
+                if (!activeBucket) {
                     return 1;
                 }
-                return datum.activity_bucket === hoveredBucket ? 1 : 0.18;
+                return datum.activity_bucket === activeBucket ? 1 : 0.18;
             })
             .attr('r', (datum: ClanPlotPoint) => {
-                if (!hoveredBucket) {
+                if (!activeBucket) {
                     return 4.65;
                 }
-                return datum.activity_bucket === hoveredBucket ? 5.25 : 3.525;
+                return datum.activity_bucket === activeBucket ? 5.25 : 3.525;
             });
 
         points
-            .filter((datum: ClanPlotPoint) => hoveredBucket !== null && datum.activity_bucket === hoveredBucket)
+            .filter((datum: ClanPlotPoint) => activeBucket !== null && datum.activity_bucket === activeBucket)
             .raise();
 
         points
@@ -513,6 +570,10 @@ const drawClanPlot = (
         .raise();
 
     applyBucketFilter();
+    // Restore the pinned segment's outline + label after a redraw (the closure
+    // re-read pinnedBucket from the ref above).
+    updateSegmentStrokes();
+    refreshActivityDetails();
 
     // Lissajous orbit around highlighted player
     let animationFrameId: number | null = null;
@@ -594,6 +655,10 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
     // null = follow the per-clan auto default; otherwise the user's stored pick.
     const [userScalePref, setUserScalePref] = useState<'linear' | 'log' | null>(null);
     const onSelectMemberRef = useRef(onSelectMember);
+    // Persisted activity-bar pin. A ref (not state) so the SVG keeps the selection
+    // across redraws without re-running the draw effect (which would restart the
+    // orbit animation). Reset when the clan/realm changes.
+    const pinnedBucketRef = useRef<ActivityBucketKey | null>(null);
     const chartMemberActivitySignature = useMemo(() => buildClanChartMemberActivitySignature(membersData), [membersData]);
     const chartMemberActivity = useMemo(() => buildClanChartMemberActivity(membersData), [membersData]);
     const [plotData, setPlotData] = useState<ClanData[] | null>(null);
@@ -647,6 +712,8 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
         setPlotData(null);
         setPlotError(false);
         setIsPlotPendingRefresh(false);
+        // A new clan/realm starts with no activity pin.
+        pinnedBucketRef.current = null;
 
         const requestPlotData = async (): Promise<{ data: ClanData[]; pending: boolean } | null> => {
             for (let attempt = 0; attempt < CLAN_PLOT_FETCH_ATTEMPTS; attempt += 1) {
@@ -770,6 +837,12 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                     theme,
                     effectiveScaleType,
                     true,
+                    pinnedBucketRef,
+                    (bucket) => {
+                        if (bucket) {
+                            trackEvent('clan-chart-activity-filter', { realm, bucket });
+                        }
+                    },
                 );
             };
 
@@ -783,7 +856,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                 window.removeEventListener('resize', onResize);
             };
         }
-    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme, effectiveScaleType]);
+    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme, effectiveScaleType, realm]);
 
     return (
         <div>

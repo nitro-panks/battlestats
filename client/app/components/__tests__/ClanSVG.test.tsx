@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react';
-import ClanSVG from '../ClanSVG';
+import ClanSVG, { nextPinnedBucket } from '../ClanSVG';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
@@ -73,6 +73,20 @@ jest.mock('d3', () => {
 });
 
 const mockFetchSharedJson = fetchSharedJson as jest.MockedFunction<typeof fetchSharedJson>;
+
+describe('nextPinnedBucket (activity-bar radio toggle)', () => {
+    it('pins a bucket when none is pinned', () => {
+        expect(nextPinnedBucket(null, 'active_7d')).toBe('active_7d');
+    });
+
+    it('releases the pin when the already-pinned bucket is clicked again', () => {
+        expect(nextPinnedBucket('active_7d', 'active_7d')).toBeNull();
+    });
+
+    it('swaps the pin (radio behavior) when a different bucket is clicked', () => {
+        expect(nextPinnedBucket('active_7d', 'cooling_90d')).toBe('cooling_90d');
+    });
+});
 
 describe('ClanSVG', () => {
     beforeEach(() => {
