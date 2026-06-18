@@ -1,0 +1,149 @@
+# Runbook: Umami — complete event reference & capture-verification
+
+_Created: 2026-06-18_
+_Context: The user asked for one durable place that captures **everything Umami** — the full pipeline plus a detailed breakdown of every custom event we track — and to confirm each event is actually working. Rather than drive a browser to synthesize clicks (the operator IP is dropped by Umami's `IGNORE_IP`, so self-generated events never land), each event's "working" status is read **from the captured-event logs** in the managed-PG `umami` DB. This is the cheap, authoritative confirmation: real visitor traffic proves the wire end-to-end._
+_Status: reference (living). Capture snapshot below is a 30-day pull to 2026-06-18; re-run the standing query before trusting a count._
+_Method: full sweep of `client/app/` for `trackEvent(...)` call sites (all route through `client/app/lib/umami.ts`), each cross-referenced against (a) a 30-day pull from `website_event` (`event_type = 2`) and (b) a grep of the deployed bundle (`/opt/battlestats-client/current/client/.next`) to separate "not deployed" from "deployed-but-unclicked"._
+
+## How this runbook relates to the other two
+
+- **This file** — the definitive per-event catalog + how to confirm any event is live from the capture logs. Read this to answer "what does event X mean / is it firing / how do I reproduce it."
+- `runbook-umami-analytics-coverage-2026-06-17.md` — the coverage *audit*: funnel gaps, what users use vs. ignore, the events added to close blind spots, and the taxonomy rename history. Read that for "what should we measure / what's underused."
+- `runbook-umami-hardening-2026-06-02.md` — infra/security: scoped DB role, nginx allowlist, version cadence. Read that for "is the dashboard locked down / what creds does Umami use."
+
+## The pipeline (everything Umami, end to end)
+
+1. **Tracker injection** — `client/app/layout.tsx` renders `<script defer src="/umami/script.js" data-website-id="27c0ee6a-f534-42d4-b49f-27bbadad9848">` **only when `enableUmami`** (`NODE_ENV === "production"`). `npm run dev` injects nothing — there is no local analytics.
+2. **Same-origin proxy** — `/umami/script.js` and the beacon `/umami/api/send` are nginx-proxied to the self-hosted Umami app (`127.0.0.1:3002`, systemd `umami.service` at `/opt/umami`). The frontend never talks to a third-party analytics origin.
+3. **Wrapper** — every event goes through `trackEvent(name, data?)` in `client/app/lib/umami.ts`. It is SSR-safe (no-ops when `window.umami` is absent: SSR, flag off, ad-blocked) and swallows tracker errors — analytics can never throw into the UI. Convention: **kebab-case names, small low-cardinality payloads** (Umami event-data drives dashboard breakdowns, not high-cardinality lookups). Unit tests: `client/app/lib/__tests__/umami.test.ts`.
+4. **Storage** — the managed-PG cluster's separate `umami` database. Custom events are `website_event` rows with `event_type = 2` (pageviews are `event_type = 1`); `trackEvent` props land in `event_data`. Umami connects as the least-privilege `umami_app` role (see hardening runbook).
+5. **Dashboard** — `/umami/` UI, IP-allowlisted to the operator home IP at nginx; only `script.js` + `api/send` are public.
+
+## Verification model — read before "0 events = broken"
+
+**Why we confirm from logs, not from a browser.** The operator home IP (`130.44.131.215`, see `reference_august_home_ip` memory) is in Umami's `IGNORE_IP`. Clicks from the dev machine — manual or Playwright-driven — are **silently dropped**, so a synthetic click test from here proves nothing. The honest, cheap confirmation is the capture log: if real visitors fire an event, it appears in `website_event` with a recent `last_seen`. That is the "working" signal used in the catalog below.
+
+To distinguish a *genuinely-broken* event from a *deployed-but-not-yet-clicked* one, pair the log read with a **bundle grep**:
+
+```bash
+# Capture log — what's firing (read-only; re-run before trusting any count)
+ssh root@battlestats.online 'set -a; . /opt/umami/.env; set +a; psql "$DATABASE_URL" -P pager=off -c \
+ "SELECT event_name, count(*) events, count(DISTINCT session_id) sessions, max(created_at) last_seen \
+  FROM website_event WHERE event_type = 2 AND created_at > now() - interval '"'"'30 days'"'"' \
+  GROUP BY 1 ORDER BY 2 DESC;"'
+
+# Bundle grep — did the name even ship? (PRESENT ⇒ deployed; rules out "never built")
+ssh root@battlestats.online 'grep -rho "<event-name>" /opt/battlestats-client/current/client/.next | head -1'
+```
+
+DB creds live in `/opt/umami/.env` — **source it, never echo/grep it** (see `reference_umami_event_query_recipe` memory). A `grep` PRESENT only proves the *string* shipped (could be a className or dead leftover), not that a live `trackEvent` path reaches it — use it to rule out "never deployed," not to prove "wired."
+
+**Status legend (used in the catalog):**
+- ✅ **WORKING** — captured in the last 30 days with a recent `last_seen`. Wire confirmed by real traffic.
+- 🟡 **PENDING** — PRESENT in the deployed bundle but **no captures yet** in 30 days. Recently added; cannot be self-triggered (operator IP ignored). Re-check organic traffic over the next few days.
+- 💤 **DEAD (discoverability)** — deployed + wired, but ~zero captures over a long window while sibling events in the same component fire. The fix is a UI affordance, not a tracking fix.
+- 🗑 **LEGACY** — captured under an old name that is **absent from the current bundle** (renamed/removed). Not a tracking outage; bridge old→new when reading historical dashboards.
+
+## Event catalog (30-day capture snapshot to 2026-06-18)
+
+Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts are `events (sessions)`.
+
+### Global header / chrome
+
+| Event | Payload | Trigger & reproduction | Source | Status (30d) |
+|---|---|---|---|---|
+| `search` | `{mode:'player'\|'clan', realm, via:'suggestion'\|'text'}` | Header search: click a suggestion (`via:suggestion`) or submit typed text in player mode (`via:text`) | `HeaderSearch.tsx:55,59,86` | ✅ 792 (407) |
+| `search-mode-toggle` | `{mode:'player'\|'clan'}` | Click the player/clan toggle in the header search | `HeaderSearch.tsx:105` | ✅ 157 (62) |
+| `realm-change` | `{realm}` | Pick a different realm in the header realm selector | `RealmSelector.tsx:66` | ✅ 162 (142) |
+| `theme-change` | `{theme}` | Pick a theme in the theme toggle | `ThemeToggle.tsx:112` | ✅ 71 (48) |
+
+### Landing page
+
+| Event | Payload | Trigger & reproduction | Source | Status (30d) |
+|---|---|---|---|---|
+| `landing-player-click` | `{realm}` | Click a player in the landing "Best" board → player detail | `PlayerSearch.tsx:394` | 🟡 deployed, 0 captures |
+| `landing-clan-click` | `{realm}` | Click a clan in the landing "Active Clans" board → clan detail | `PlayerSearch.tsx:370` | 🟡 deployed, 0 captures |
+| `landing-best-sort` | `{entity:'player'\|'clan', sort, realm}` | Click a sort pill above the best players/clans boards (Overall/Ranked/Efficiency/WR/CB) | `PlayerSearch.tsx:500,585` | ✅ 12 (8) — low-use, real |
+| `treemap-ship` | `{ship_id, ship_name, mode:'random'\|'ranked', realm, target:'leaderboard'\|'route'}` | Click a ship tile in the landing realm treemap | `RealmTopShipsTreemapSVG.tsx:208,211` | ✅ 124 (37) |
+| `treemap-random` | `{realm}` | Click the treemap "Random" mode button | `RealmTopShipsTreemapSVG.tsx:288` | ✅ 38 (23) |
+| `treemap-ranked` | `{realm}` | Click the treemap "Ranked" mode button | `RealmTopShipsTreemapSVG.tsx:288` | ✅ 52 (34) |
+
+### Player detail
+
+| Event | Payload | Trigger & reproduction | Source | Status (30d) |
+|---|---|---|---|---|
+| `player-insights-activity` | `{realm}` | Click the "Activity" insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 185 (95) |
+| `player-insights-ships` | `{realm}` | Click the "Ships" insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 442 (207) |
+| `player-insights-profile` | `{realm}` | Click the "Profile" insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 433 (218) |
+| `player-insights-ranked` | `{realm}` | Click the "Ranked" insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 290 (185) |
+| `player-insights-clan-battles` | `{realm}` | Click the "Career" (clan battles) insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 223 (143) |
+| `player-insights-efficiency` | `{realm}` | Click the "Badges" (efficiency) insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 310 (186) |
+| `player-insights-population` | `{realm}` | Click the "Population" insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 349 (180) |
+| `player-history-{window}` | `{realm}` | Click a battle-history window pill — emits `player-history-day` / `-week` / `-month` | `BattleHistoryCard.tsx:947` | ✅ day 590 / week 588 / month 292 |
+| `battle-history-mode` | `{mode:'random'\|'ranked'\|'all', window, realm}` | Click a Random/Ranked/All mode pill in battle history | `BattleHistoryCard.tsx:997` | ✅ 2 (1) — newly live |
+| `battle-history-sort` | `{key, direction, mode, window}` | Click a battle-history table column header | `BattleHistoryCard.tsx:796` | ✅ 214 (58) |
+| `ship-stats-open` | `{ship_id, source:'row', mode, window, realm}` | Click a ship row in battle history to open its combat-stats panel | `BattleHistoryCard.tsx:813` | 💤 deployed, 0 captures |
+| `ship-stats-close` | `{ship_id, source:'button'\|'row', mode, window, realm}` | Close the ship-stats panel (X button, or click another row) | `BattleHistoryCard.tsx:821,813` | 💤 deployed, 0 captures |
+| `player-share` | `{realm}` | Click "Share" on a player detail page | `PlayerDetail.tsx:300` | ✅ 10 (10) |
+
+### Clan detail
+
+| Event | Payload | Trigger & reproduction | Source | Status (30d) |
+|---|---|---|---|---|
+| `clan-member-click` | `{realm}` | Click a roster member name (clan page **and** player-page clan section — one leaf attach point, no double-count) | `ClanMembers.tsx:135` | ✅ 1 (1) — newly live |
+| `clan-share` | `{realm}` | Click "Share" on a clan detail page | `ClanDetail.tsx:98` | 💤 wired+live since PR #29, 0 captures |
+| `clan-chart-2d` | `{realm}` | Click the "2D" chart toggle (desktop) | `ClanDetail.tsx:148` | ✅ 23 (16) |
+| `clan-chart-3d` | `{realm}` | Click the "3D" chart toggle (desktop, when 3D data present) | `ClanDetail.tsx:158` | ✅ 38 (23) |
+| `clan-chart-linear` | `{realm}` | Switch the clan efficiency chart to linear scale | `ClanSVG.tsx:629` | ✅ 136 (78) |
+| `clan-chart-log` | `{realm}` | Switch the clan efficiency chart to log scale | `ClanSVG.tsx:629` | ✅ 134 (82) |
+
+### Ship leaderboard (landing section) & `/ship/<id>` page
+
+| Event | Payload | Trigger & reproduction | Source | Status (30d) |
+|---|---|---|---|---|
+| `ship-leaderboard-filter` | `{realm, control:'tier'\|'type', tier, type}` | Click a tier (I–X) or ship-type pill on the ship leaderboard | `ShipLeaderboard.tsx:211,217` | ✅ 129 (25) |
+| `ship-leaderboard-sort` | `{realm, scope:'ships'\|'players', column, dir}` | Click a column header in the ship or player table | `ShipLeaderboard.tsx:223` | ✅ 35 (9) |
+| `ship-leaderboard-drilldown` | `{realm, ship_id, source:'row'\|'treemap'}` | Click a ship name (`row`) or treemap tile (`treemap`) to open ship detail | `ShipLeaderboard.tsx:311,327` | ✅ 41 (14) |
+| `ship-leaderboard-clear` | `{realm}` | Close the drilled-down ship view (X/clear) | `ShipLeaderboard.tsx:315` | ✅ 9 (5) |
+| `ship-leaderboard-player-click` | `{realm, ship_id, rank}` | Click a player in the ship's player leaderboard | `ShipLeaderboard.tsx:533` | ✅ 5 (4) |
+| `ship-leaderboard-easter-egg` | `{realm, egg:'t9-submarine'\|'t9-carrier'}` | Select a non-existent combo (T9 Submarine / T9 Carrier) | `ShipLeaderboard.tsx:247` | ✅ 3 (2) |
+| `ship-page-view` | `{ship_id, ship_name, realm}` | Land on `/ship/<id>` (fires when ship data loads) | `ShipRouteView.tsx:130` | ✅ 215 (51) |
+| `ship-player` | `{ship_id, ship_name, rank, realm}` | Click a player in the `/ship/<id>` leaderboard | `ShipRouteView.tsx:181` | ✅ 66 (13) |
+
+### Footer & streamer funnel
+
+| Event | Payload | Trigger & reproduction | Source | Status (30d) |
+|---|---|---|---|---|
+| `footer-lil-boots` | `{realm:'na'}` | Click the "lil_boots" creator link in the footer | `Footer.tsx:20` | ✅ 2 (2) |
+| `outbound-link` | `{target:'reddit'\|'cc-license'\|'github'\|'wows'\|'wg-support'}` | Click an external footer link | `Footer.tsx:28,40,50,73,83` | 🟡 deployed, 0 captures |
+| `streamer-open` | _(none)_ | Click "Add a streamer!" in the footer (submit-funnel denominator) | `Footer.tsx:60` | 🟡 deployed, 0 captures |
+| `streamer-submit` | `{status:'success'\|'invalid'\|'error'}` | Submit the streamer form (status = validation/server outcome) | `StreamerSubmissionModal.tsx:83,100,105,109` | 🟡 deployed, 0 captures |
+
+## Not exposed (by design)
+
+- **`player-history-year`** — `ABSENT` from the bundle on purpose. `year` is excluded from `VISIBLE_WINDOWS` (`BattleHistoryCard.tsx:604–610`) because battle-history capture only started 2026-04-28, so a 365-day view carries no extra signal yet. The backend still accepts `?window=year`; re-add the pill (and the event will then fire) once >180 days of capture accumulate. Its absence is **not** a tracking gap.
+
+## Legacy / orphaned events (historical discontinuity, ~June 6–11)
+
+These appear in old `website_event` rows but are **absent from the current bundle** (renamed/removed, commits `d005eb0`→`dd5a441`). Not an outage — bridge old→new when reading historical dashboards.
+
+| Legacy name (last seen) | Current replacement |
+|---|---|
+| `insights-tab` (06-06) | `player-insights-*` (per tab) |
+| `landing-filter` (06-11) | removed (Recent surface gone; sub-sorts → `landing-best-sort`) |
+| `chart-scale` (06-06) | `clan-chart-linear` / `clan-chart-log` |
+| `clan-chart-mode` (06-06) | `clan-chart-2d` / `clan-chart-3d` |
+| `treemap-mode` (06-06) | `treemap-random` / `treemap-ranked` |
+
+## Watch items
+
+- **🟡 PENDING newly-deployed events** (`landing-player-click`, `landing-clan-click`, `outbound-link`, `streamer-open`, `streamer-submit`). All shipped in the recent funnel-gaps deploy (`238c168`) and PRESENT in the bundle; capture is just awaiting organic traffic (we can't self-trigger — operator IP ignored). The two landing-click call sites were source-verified to sit on the real click path (`PlayerSearch.tsx` `handleSelectLandingPlayer`/`handleSelectClan`, attached at `:548/:555/:627/:634`), so these are confirmed *deployed-but-unclicked*, not broken. `clan-member-click` and `battle-history-mode` shipped in the same batch and are now ✅ — re-run the standing query over the next few days and expect the rest to fill in.
+- **💤 `ship-stats-open` / `ship-stats-close` / `clan-share` zero-data (long-lived, wired, discoverability/low-use).** Each is wired and has been deployed a while (`clan-share` since PR #29 — *older* than `player-share`, which has 10 captures), yet ~zero captures: `ship-stats-*` while sibling `battle-history-sort` fired 214× in the same card. These are **not** deploy-recency cases. For `ship-stats-*`, if still zero after a few more days the ship-row expand affordance isn't discoverable → fix the UI affordance (separate change), not the tracking. `clan-share` may simply be a rare action (its sibling `player-share` is also low at 10).
+- **To run a *real* live click-test** (e.g. to clear a PENDING fast), you must egress from a non-ignored IP (phone hotspot / VPN) or temporarily edit Umami `IGNORE_IP` and restore it. Confirm afterward with the standing query.
+
+## Related
+
+- `runbook-umami-analytics-coverage-2026-06-17.md` — coverage audit (gaps, taxonomy, what's used vs. ignored)
+- `runbook-umami-hardening-2026-06-02.md` — infra/security (scoped DB role, nginx allowlist, version cadence)
+- `reference_umami_event_query_recipe` — DB query recipe (memory)
+- `reference_august_home_ip`, `feedback_prioritize_random_over_ranked` (memories)

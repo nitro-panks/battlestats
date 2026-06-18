@@ -249,6 +249,32 @@
                 "umami-event-coverage-tranche-closed"
             ]
         },
+        "agents/runbooks/runbook-umami-event-reference-2026-06-18.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "product",
+            "aliases": [
+                "umami event reference",
+                "umami event catalog",
+                "everything umami",
+                "umami event breakdown",
+                "is event X firing",
+                "how to reproduce umami event"
+            ],
+            "tags": [
+                "umami",
+                "analytics",
+                "events",
+                "frontend",
+                "instrumentation",
+                "reference"
+            ],
+            "archive_on": [
+                "umami-event-taxonomy-overhaul"
+            ]
+        },
         "agents/runbooks/runbook-wg-rate-limiter-token-bucket-2026-06-05.md": {
             "kind": "runbook",
             "status": "active",
