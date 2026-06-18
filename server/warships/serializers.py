@@ -71,7 +71,8 @@ class StreamerSubmissionSerializer(serializers.ModelSerializer):
         validated.pop('form_loaded_at', None)
         request = self.context.get('request')
         if request is not None:
-            validated['submitter_ip'] = request.META.get('REMOTE_ADDR')
+            from warships.client_ip import get_client_ip
+            validated['submitter_ip'] = get_client_ip(request)
             validated['submitter_ua'] = (
                 request.META.get('HTTP_USER_AGENT') or '')[:300]
         return super().create(validated)

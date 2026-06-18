@@ -70,7 +70,17 @@ def _sync_recent_player_surface(entity_type: str, entity_id: int, occurred_at, r
     push_recently_viewed_player(entity_id, realm=realm)
 
 
-def record_entity_visit(payload: dict, user_agent: str = '') -> dict:
+def record_entity_visit(payload: dict, user_agent: str = '', client_ip: str | None = None) -> dict:
+    if client_ip and client_ip in settings.ANALYTICS_IGNORE_IPS:
+        # Operator / internal traffic is excluded from first-party analytics the
+        # same way Umami's IGNORE_IP drops it, so dev browsing never taints the
+        # Popular surface or the hot-player view-recurrence signal.
+        return {
+            'accepted': False,
+            'counted_in_deduped_views': False,
+            'reason': 'ignored_ip',
+        }
+
     if is_bot_user_agent(user_agent):
         return {
             'accepted': False,

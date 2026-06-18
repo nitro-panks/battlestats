@@ -61,8 +61,8 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 
 | Event | Payload | Trigger & reproduction | Source | Status (30d) |
 |---|---|---|---|---|
-| `landing-player-click` | `{realm}` | Click a player in the landing "Best" board → player detail | `PlayerSearch.tsx:394` | 🟡 deployed, 0 captures |
-| `landing-clan-click` | `{realm}` | Click a clan in the landing "Active Clans" board → clan detail | `PlayerSearch.tsx:370` | 🟡 deployed, 0 captures |
+| `landing-player-click` | `{realm}` | Click a player in the landing "Best" board → player detail | `PlayerSearch.tsx:394` | 🟡 deployed, 0 captures (not exercised in the 2026-06-18 live test) |
+| `landing-clan-click` | `{realm}` | Click a clan in the landing "Active Clans" board → clan detail | `PlayerSearch.tsx:370` | ✅ live-verified 2026-06-18 |
 | `landing-best-sort` | `{entity:'player'\|'clan', sort, realm}` | Click a sort pill above the best players/clans boards (Overall/Ranked/Efficiency/WR/CB) | `PlayerSearch.tsx:500,585` | ✅ 12 (8) — low-use, real |
 | `treemap-ship` | `{ship_id, ship_name, mode:'random'\|'ranked', realm, target:'leaderboard'\|'route'}` | Click a ship tile in the landing realm treemap | `RealmTopShipsTreemapSVG.tsx:208,211` | ✅ 124 (37) |
 | `treemap-random` | `{realm}` | Click the treemap "Random" mode button | `RealmTopShipsTreemapSVG.tsx:288` | ✅ 38 (23) |
@@ -82,21 +82,22 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | `player-history-{window}` | `{realm}` | Click a battle-history window pill — emits `player-history-day` / `-week` / `-month` | `BattleHistoryCard.tsx:947` | ✅ day 590 / week 588 / month 292 |
 | `battle-history-mode` | `{mode:'random'\|'ranked'\|'all', window, realm}` | Click a Random/Ranked/All mode pill in battle history | `BattleHistoryCard.tsx:997` | ✅ 2 (1) — newly live |
 | `battle-history-sort` | `{key, direction, mode, window}` | Click a battle-history table column header | `BattleHistoryCard.tsx:796` | ✅ 214 (58) |
-| `ship-stats-open` | `{ship_id, source:'row', mode, window, realm}` | Click a ship row in battle history to open its combat-stats panel | `BattleHistoryCard.tsx:813` | 💤 deployed, 0 captures |
-| `ship-stats-close` | `{ship_id, source:'button'\|'row', mode, window, realm}` | Close the ship-stats panel (X button, or click another row) | `BattleHistoryCard.tsx:821,813` | 💤 deployed, 0 captures |
+| `ship-stats-open` | `{ship_id, source:'row', mode, window, realm}` | Click a ship row in battle history to open its combat-stats panel | `BattleHistoryCard.tsx:813` | ✅ live-verified 2026-06-18 (the long zero was discoverability, not a bug) |
+| `ship-stats-close` | `{ship_id, source:'button'\|'row', mode, window, realm}` | Close the ship-stats panel (X button, or click another row) | `BattleHistoryCard.tsx:821,813` | ✅ live-verified 2026-06-18 |
+| `randoms-filter` | `{realm, control:'type'\|'tier', value}` | Toggle a ship-type / tier filter pill (or "All") in the "Ships" insights tab. `value` is the type name, tier number, or `'all'` | `RandomsSVG.tsx` (toggleType/toggleTier/selectAll*) | 🟡 deployed v2.5.0, 0 captures |
 | `player-share` | `{realm}` | Click "Share" on a player detail page | `PlayerDetail.tsx:300` | ✅ 10 (10) |
 
 ### Clan detail
 
 | Event | Payload | Trigger & reproduction | Source | Status (30d) |
 |---|---|---|---|---|
-| `clan-member-click` | `{realm}` | Click a roster member name (clan page **and** player-page clan section — one leaf attach point, no double-count) | `ClanMembers.tsx:135` | ✅ 1 (1) — newly live |
-| `clan-share` | `{realm}` | Click "Share" on a clan detail page | `ClanDetail.tsx:98` | 💤 wired+live since PR #29, 0 captures |
+| `clan-member-click` | `{realm, source:'clan'\|'player'}` | Click a roster member name. One leaf attach point (`ClanMembers.tsx`); `source` distinguishes the clan page (`'clan'`) from the player-page clan section (`'player'`) — no double-count with the landing player grid | `ClanMembers.tsx:138` | ✅ working; `source` added v2.5.0 |
+| `clan-share` | `{realm}` | Click "Share" on a clan detail page | `ClanDetail.tsx:98` | ✅ live-verified 2026-06-18 (rare action, not broken) |
 | `clan-chart-2d` | `{realm}` | Click the "2D" chart toggle (desktop) | `ClanDetail.tsx:148` | ✅ 23 (16) |
 | `clan-chart-3d` | `{realm}` | Click the "3D" chart toggle (desktop, when 3D data present) | `ClanDetail.tsx:158` | ✅ 38 (23) |
 | `clan-chart-linear` | `{realm}` | Switch the clan efficiency chart to linear scale | `ClanSVG.tsx:629` | ✅ 136 (78) |
 | `clan-chart-log` | `{realm}` | Switch the clan efficiency chart to log scale | `ClanSVG.tsx:629` | ✅ 134 (82) |
-| `clan-chart-activity-filter` | `{realm, bucket}` | Click an activity-bar segment to **pin** that recency cohort (radio; re-click releases). Fires only when a bucket becomes pinned. `bucket` ∈ `active_7d\|active_30d\|cooling_90d\|dormant_180d\|inactive_180d_plus\|unknown` | `ClanSVG.tsx` (segment click) | 🟡 deployed v2.4.0, 0 captures |
+| `clan-chart-activity-filter` | `{realm, bucket}` | Click an activity-bar segment to **pin** that recency cohort (radio; re-click releases). Fires only when a bucket becomes pinned. `bucket` ∈ `active_7d\|active_30d\|cooling_90d\|dormant_180d\|inactive_180d_plus\|unknown` | `ClanSVG.tsx` (segment click) | ✅ live-verified 2026-06-18 |
 
 ### Ship leaderboard (landing section) & `/ship/<id>` page
 
@@ -116,9 +117,9 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | Event | Payload | Trigger & reproduction | Source | Status (30d) |
 |---|---|---|---|---|
 | `footer-lil-boots` | `{realm:'na'}` | Click the "lil_boots" creator link in the footer | `Footer.tsx:20` | ✅ 2 (2) |
-| `outbound-link` | `{target:'reddit'\|'cc-license'\|'github'\|'wows'\|'wg-support'}` | Click an external footer link | `Footer.tsx:28,40,50,73,83` | 🟡 deployed, 0 captures |
-| `streamer-open` | _(none)_ | Click "Add a streamer!" in the footer (submit-funnel denominator) | `Footer.tsx:60` | 🟡 deployed, 0 captures |
-| `streamer-submit` | `{status:'success'\|'invalid'\|'error'}` | Submit the streamer form (status = validation/server outcome) | `StreamerSubmissionModal.tsx:83,100,105,109` | 🟡 deployed, 0 captures |
+| `outbound-link` | `{target:'reddit'\|'cc-license'\|'github'\|'wows'\|'wg-support'}` | Click an external footer link | `Footer.tsx:28,40,50,73,83` | ✅ live-verified 2026-06-18 (cc-license/github/wows/wg-support). NOTE: the `wg-support` target's URL was dead (`www.support.wargaming.net`) and was repointed to `https://wargaming.net/support/` in v2.5.0 |
+| `streamer-open` | _(none)_ | Click "Add a streamer!" in the footer (submit-funnel denominator) | `Footer.tsx:60` | ✅ live-verified 2026-06-18 |
+| `streamer-submit` | `{status:'success'\|'invalid'\|'error'}` | Submit the streamer form (status = validation/server outcome) | `StreamerSubmissionModal.tsx:83,100,105,109` | ✅ live-verified 2026-06-18 (invalid + success paths) |
 
 ## Not exposed (by design)
 
@@ -136,11 +137,16 @@ These appear in old `website_event` rows but are **absent from the current bundl
 | `clan-chart-mode` (06-06) | `clan-chart-2d` / `clan-chart-3d` |
 | `treemap-mode` (06-06) | `treemap-random` / `treemap-ranked` |
 
+## Live verification — 2026-06-18
+
+An authorized live click-test (operator IP temporarily lifted from Umami `IGNORE_IP`, then re-blocked and all test data deleted across Umami + first-party `EntityVisitEvent`/`Daily` + `StreamerSubmission`) **confirmed every previously-unverifiable event fires end-to-end** with correct payloads: `landing-clan-click`, `clan-share`, `clan-chart-activity-filter`, `ship-stats-open`/`ship-stats-close`, `outbound-link`, `streamer-open`, `streamer-submit`. The 💤 zero-capture statuses were **discoverability / low-use, not bugs**. Full writeup + cleanup recipe: `agents/work-items/umami-live-session-findings-2026-06-18.md`.
+
 ## Watch items
 
-- **🟡 PENDING newly-deployed events** (`landing-player-click`, `landing-clan-click`, `outbound-link`, `streamer-open`, `streamer-submit`, `clan-chart-activity-filter`). `clan-chart-activity-filter` shipped in v2.4.0 (clan-chart activity-bucket pin, see `runbook-clan-chart-activity-filter-2026-06-18.md`); PRESENT in the bundle, capture awaits organic traffic. All shipped in the recent funnel-gaps deploy (`238c168`) and PRESENT in the bundle; capture is just awaiting organic traffic (we can't self-trigger — operator IP ignored). The two landing-click call sites were source-verified to sit on the real click path (`PlayerSearch.tsx` `handleSelectLandingPlayer`/`handleSelectClan`, attached at `:548/:555/:627/:634`), so these are confirmed *deployed-but-unclicked*, not broken. `clan-member-click` and `battle-history-mode` shipped in the same batch and are now ✅ — re-run the standing query over the next few days and expect the rest to fill in.
-- **💤 `ship-stats-open` / `ship-stats-close` / `clan-share` zero-data (long-lived, wired, discoverability/low-use).** Each is wired and has been deployed a while (`clan-share` since PR #29 — *older* than `player-share`, which has 10 captures), yet ~zero captures: `ship-stats-*` while sibling `battle-history-sort` fired 214× in the same card. These are **not** deploy-recency cases. For `ship-stats-*`, if still zero after a few more days the ship-row expand affordance isn't discoverable → fix the UI affordance (separate change), not the tracking. `clan-share` may simply be a rare action (its sibling `player-share` is also low at 10).
-- **To run a *real* live click-test** (e.g. to clear a PENDING fast), you must egress from a non-ignored IP (phone hotspot / VPN) or temporarily edit Umami `IGNORE_IP` and restore it. Confirm afterward with the standing query.
+- **🟡 `landing-player-click`** — the only catalogued event *not* exercised on 2026-06-18 (the landing best-player tile wasn't clicked). Source-verified on the real click path (`PlayerSearch.tsx` `handleSelectLandingPlayer`); awaits an organic capture or a follow-up click-test.
+- **🟡 `randoms-filter`** — shipped v2.5.0 (Ships-tab tier/type filter tracking, previously a blind spot). PRESENT in the bundle; capture awaits organic traffic.
+- **First-party analytics now honors an operator IP exclusion** (`ANALYTICS_IGNORE_IPS`, v2.5.0) mirroring Umami's `IGNORE_IP`, so operator browsing no longer taints `EntityVisitEvent`/`Daily`. A live click-test still needs the operator IP lifted from **both** (Umami `IGNORE_IP` and `ANALYTICS_IGNORE_IPS`) to capture, then re-blocked.
+- **To run a *real* live click-test** (e.g. to clear a 🟡 fast), egress from a non-ignored IP (phone hotspot / VPN) or temporarily lift the operator IP from Umami `IGNORE_IP` (+ `ANALYTICS_IGNORE_IPS` if first-party capture is also wanted) and restore it. Confirm afterward with the standing query; clean up per the work-item recipe.
 
 ## Related
 

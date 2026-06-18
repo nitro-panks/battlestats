@@ -43,6 +43,9 @@ interface ClanMembersProps {
     layout?: 'inline' | 'stacked' | 'columns';
     loading?: boolean;
     error?: string;
+    // Which surface this roster is rendered on — distinguishes a click on the
+    // clan page from one in the player-page clan section (both share this leaf).
+    source?: 'clan' | 'player';
     // When set, the row whose name matches is rendered as the current player:
     // a non-interactive "you are here" marker instead of a self-link.
     highlightedPlayerName?: string;
@@ -125,16 +128,17 @@ const MemberContent: React.FC<MemberContentProps> = ({ member, layout, isCurrent
     );
 };
 
-const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layout = 'inline', loading = false, error = '', highlightedPlayerName }) => {
+const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layout = 'inline', loading = false, error = '', highlightedPlayerName, source = 'clan' }) => {
     const { realm } = useRealm();
     const normalizedCurrentPlayer = highlightedPlayerName?.trim().toLowerCase() || null;
     // One attach point for clan-roster member clicks: this leaf renders the
     // roster on both the clan page and the player page's clan section, so
     // tracking here covers both without double-counting the landing player grid.
+    // `source` tells which surface drove the click ('clan' vs 'player').
     const handleSelectMember = useCallback((memberName: string) => {
-        trackEvent('clan-member-click', { realm });
+        trackEvent('clan-member-click', { realm, source });
         onSelectMember(memberName);
-    }, [onSelectMember, realm]);
+    }, [onSelectMember, realm, source]);
     const pendingEfficiencyCount = members.filter((member) => member.efficiency_hydration_pending).length;
     const isWarmingEfficiencyRanks = pendingEfficiencyCount > 0;
 

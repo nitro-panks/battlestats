@@ -57,6 +57,7 @@ from warships.data import (
 )
 from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, invalidate_landing_clan_caches, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
+from warships.client_ip import get_client_ip
 from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, queue_landing_best_entity_warm, update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
@@ -2397,6 +2398,7 @@ def analytics_entity_view(request) -> Response:
     result = record_entity_visit(
         serializer.validated_data,
         user_agent=request.META.get('HTTP_USER_AGENT', ''),
+        client_ip=get_client_ip(request),
     )
 
     response_serializer = EntityVisitIngestResponseSerializer(data=result)

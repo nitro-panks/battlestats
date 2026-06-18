@@ -196,7 +196,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 placeholder={<LoadingPanel tone="muted" label="Preparing clan members..." minHeight={96} />}
             >
                 <div>
-                    <ClanMembers members={members} loading={membersLoading} error={membersError} onSelectMember={onSelectMember} layout="columns" />
+                    <ClanMembers members={members} loading={membersLoading} error={membersError} onSelectMember={onSelectMember} layout="columns" source="clan" />
                 </div>
             </DeferredSection>
 

@@ -38,6 +38,20 @@ grep -rho "<event-name>" /opt/battlestats-client/current/client/.next | head -1 
 
 Caveat: a `grep` PRESENT only proves the *string* shipped (it can match a className, a dead import, or a renamed leftover) — not that a live `trackEvent` path reaches it. Use it to rule out "never deployed," not to prove "wired and reachable."
 
+### Reading multi-prop events (the dashboard collapses them by name)
+
+The standing query (and Umami's default **Events** report) groups by event **name** only, so a multi-prop event like `landing-best-sort` shows as a single "landing-best-sort on /" line regardless of which sort/entity was clicked — even though the props **are** captured. The distinguishing values (`entity`, `sort`, `realm`, etc.) live in `event_data`; to see their distribution either open the event in the dashboard → **Properties** breakdown, or query `event_data` directly:
+
+```bash
+ssh root@battlestats.online 'set -a; . /opt/umami/.env; set +a; psql "$DATABASE_URL" -P pager=off -c \
+ "SELECT ed.data_key, COALESCE(ed.string_value, ed.number_value::text) AS value, count(*) \
+  FROM website_event we JOIN event_data ed ON ed.website_event_id = we.event_id \
+  WHERE we.event_name = '"'"'landing-best-sort'"'"' AND we.created_at > now() - interval '"'"'30 days'"'"' \
+  GROUP BY 1, 2 ORDER BY 1, 3 DESC;"'
+```
+
+So "I can't tell which sort people pick from the events list" is a **reading** limitation, not a tracking gap — drill into Properties. This applies to every multi-prop event (`search`, `battle-history-mode`, `ship-leaderboard-filter`, `randoms-filter`, …).
+
 ## Current event inventory (21 days to 2026-06-17)
 
 Healthy / live (top by volume): `search` (786), `player-history-week` (584), `player-history-day` (582), `player-insights-ships` (435), `player-insights-profile` (430), `player-insights-population` (345), `player-insights-efficiency` (306), `player-history-month` (287), `player-insights-ranked` (287), `player-insights-clan-battles` (220), `ship-page-view` (215), `battle-history-sort` (214), `player-insights-activity` (184), `realm-change` (161), `search-mode-toggle` (157), `clan-chart-linear/log` (135/133), `ship-leaderboard-filter` (124), `treemap-ship` (124), `theme-change` (70), `ship-player` (66), `treemap-ranked/random` (52/38), `ship-leaderboard-drilldown` (41), `clan-chart-3d/2d` (38/23), `ship-leaderboard-sort` (34), `landing-best-sort` (12), `player-share` (10), `ship-leaderboard-clear` (9), `ship-leaderboard-player-click` (5), `ship-leaderboard-easter-egg` (3), `footer-lil-boots` (2).

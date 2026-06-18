@@ -243,7 +243,16 @@ describe('ClanMembers click tracking', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /Show player Member One/i }));
 
-        expect(trackEventMock).toHaveBeenCalledWith('clan-member-click', { realm: 'na' });
+        expect(trackEventMock).toHaveBeenCalledWith('clan-member-click', { realm: 'na', source: 'clan' });
         expect(onSelectMember).toHaveBeenCalledWith('Member One');
+    });
+
+    it('tags the clan-member-click with the rendering surface via source', () => {
+        const onSelectMember = jest.fn();
+        render(<ClanMembers members={[baseMember]} onSelectMember={onSelectMember} source="player" />);
+
+        fireEvent.click(screen.getByRole('button', { name: /Show player Member One/i }));
+
+        expect(trackEventMock).toHaveBeenCalledWith('clan-member-click', { realm: 'na', source: 'player' });
     });
 });

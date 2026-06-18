@@ -173,6 +173,15 @@ else
   echo 'BATTLE_HISTORY_RANKED_CAPTURE_REALMS=na,eu,asia' >> /etc/battlestats-server.env
 fi
 
+# Drop operator/internal first-party entity visits so dev browsing never taints
+# the Popular surface or the hot-player view-recurrence signal. Mirrors Umami's
+# IGNORE_IP (the operator home IP). See settings.ANALYTICS_IGNORE_IPS.
+if grep -q '^ANALYTICS_IGNORE_IPS=' /etc/battlestats-server.env; then
+  sed -i 's|^ANALYTICS_IGNORE_IPS=.*|ANALYTICS_IGNORE_IPS=130.44.131.215|' /etc/battlestats-server.env
+else
+  echo 'ANALYTICS_IGNORE_IPS=130.44.131.215' >> /etc/battlestats-server.env
+fi
+
 # Pin the rolling-6h BattleObservation floor staleness threshold to 8h
 # (tightened from 22h on 2026-05-09 alongside the cadence promotion).
 # Code defaults to 8h too; setting it explicitly here makes the live

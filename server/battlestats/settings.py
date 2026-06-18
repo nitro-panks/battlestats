@@ -20,6 +20,13 @@ ALLOWED_HOSTS = [
     ).split(',') if host.strip()
 ]
 
+# Client IPs whose first-party entity visits are dropped (operator / internal
+# traffic), mirroring Umami's IGNORE_IP so dev browsing never taints the Popular
+# surface or the hot-player view-recurrence signal. Comma-separated env var.
+ANALYTICS_IGNORE_IPS = {
+    ip.strip() for ip in os.getenv('ANALYTICS_IGNORE_IPS', '').split(',') if ip.strip()
+}
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',

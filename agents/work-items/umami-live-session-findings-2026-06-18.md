@@ -8,6 +8,8 @@ _Context: ran a live, authorized click-test by temporarily clearing Umami's `IGN
 
 ## Next steps (ranked)
 
+**Status (v2.5.0):** all seven items below are **implemented** on branch `fix/wg-support-link` (code + tests + doc reconcile). Backend + frontend deploy is the only remaining action — see the deploy note at the end.
+
 ### 1. WG support footer link was dead — FIXED (this branch)
 - `client/app/components/Footer.tsx:82` pointed at `https://www.support.wargaming.net/` (entire domain unreachable, conn-fail). Replaced with `https://wargaming.net/support/` (verified 200).
 - **Remaining:** needs a patch release + **frontend rebuild/deploy** (`NEXT_PUBLIC_APP_VERSION` is build-time; footer also surfaces version). `./client/deploy/deploy_to_droplet.sh battlestats.online`.

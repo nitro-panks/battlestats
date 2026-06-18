@@ -370,7 +370,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 sectionId="clan-members"
                             >
                                 <div id="clan_members_container" className="pl-8">
-                                    <ClanMembers members={clanMembers} loading={clanMembersLoading} error={clanMembersError} onSelectMember={onSelectMember} layout="stacked" highlightedPlayerName={player.name} />
+                                    <ClanMembers members={clanMembers} loading={clanMembersLoading} error={clanMembersError} onSelectMember={onSelectMember} layout="stacked" highlightedPlayerName={player.name} source="player" />
                                 </div>
                             </DeferredSection>
                         </>

@@ -4,6 +4,7 @@ import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
+import { trackEvent } from '../lib/umami';
 
 interface RandomsSVGProps {
     playerId: number;
@@ -416,18 +417,22 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const allTiersSelected = areAllSelected(selectedTiers, availableTiers);
 
     const toggleType = (shipType: string) => {
+        trackEvent('randoms-filter', { realm, control: 'type', value: shipType });
         setSelectedTypes((current) => toggleSelection(current, shipType, availableTypes));
     };
 
     const toggleTier = (tier: number) => {
+        trackEvent('randoms-filter', { realm, control: 'tier', value: tier });
         setSelectedTiers((current) => toggleSelection(current, tier, availableTiers));
     };
 
     const selectAllTypes = () => {
+        trackEvent('randoms-filter', { realm, control: 'type', value: 'all' });
         setSelectedTypes([...availableTypes]);
     };
 
     const selectAllTiers = () => {
+        trackEvent('randoms-filter', { realm, control: 'tier', value: 'all' });
         setSelectedTiers([...availableTiers]);
     };
 
