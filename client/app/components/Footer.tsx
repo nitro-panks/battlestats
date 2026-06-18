@@ -79,7 +79,7 @@ const Footer: React.FC = () => {
                     </a>
                     {' · '}
                     <a
-                        href="https://www.support.wargaming.net/"
+                        href="https://wargaming.net/support/"
                         onClick={() => trackEvent('outbound-link', { target: 'wg-support' })}
                         className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                         target="_blank"
