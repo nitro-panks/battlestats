@@ -2398,6 +2398,57 @@
                 "crawl-control-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-shipleaderboard-warm-before-evict-2026-06-18.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "ship leaderboard warm before evict",
+                "treemap blank on refresh fix",
+                "serve old until new ready",
+                "ship cache published fallback",
+                "top-ships durable fallback"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "treemap",
+                "caching",
+                "published-cache",
+                "durable-fallback",
+                "warmer",
+                "celery beat",
+                "landing-page"
+            ],
+            "archive_on": [
+                "ship-warm-before-evict-superseded"
+            ]
+        },
+        "agents/runbooks/runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "treemap blank on refresh",
+                "ship leaderboard offline diagnosis",
+                "landing treemap blank diagnosis",
+                "blank on refresh"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "treemap",
+                "diagnosis",
+                "caching",
+                "frontend",
+                "landing-page"
+            ],
+            "archive_on": [
+                "ship-warm-before-evict-superseded"
+            ]
+        },
         "agents/runbooks/runbook-ship-leaderboard-submarine-easter-egg-2026-06-11.md": {
             "kind": "runbook",
             "status": "active",

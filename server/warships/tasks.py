@@ -73,6 +73,10 @@ LANDING_PLAYER_BEST_SNAPSHOT_REFRESH_LOCK_TIMEOUT = 2 * 60 * 60
 DISTRIBUTION_WARM_LOCK_TIMEOUT = 15 * 60
 CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60
 CORRELATION_WARM_DISPATCH_TIMEOUT = 30  # Matches landing — coalesces cold-cache fanout
+# Coalesces the cold-cache fanout when a window-rotation gap or Redis eviction
+# leaves the treemap / tier-type fresh keys cold and the published fallback is
+# served (data.compute_realm_top_ships / _ships_by_tier_type queue a warm).
+REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT = 60
 HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_LOCK_TIMEOUT = 30 * 60
 LANDING_BEST_ENTITY_WARM_DISPATCH_TIMEOUT = 5 * 60
@@ -150,6 +154,14 @@ def _landing_page_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
 
 def _distribution_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_player_distributions:{realm}:lock"
+
+
+def _realm_top_ships_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_realm_top_ships:{realm}:lock"
+
+
+def _realm_top_ships_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_realm_top_ships:{realm}:dispatch"
 
 
 def _landing_player_best_snapshot_refresh_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -355,6 +367,40 @@ def queue_landing_page_warm(realm: str = DEFAULT_REALM, scope: str = 'all'):
         cache.delete(dispatch_key)
         logger.warning(
             "Skipping landing page warm enqueue because broker dispatch failed: %s",
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def queue_realm_top_ships_warm(realm: str = DEFAULT_REALM):
+    """Lock- + dispatch-aware enqueue of the realm top-ships/tier-type warmer.
+
+    Called from the cold-cache read path (data.compute_realm_top_ships /
+    compute_realm_ships_by_tier_type) when a window-rotation gap or Redis
+    eviction leaves the window-keyed fresh key cold and the durable
+    `:published` fallback is served instead. Keeps the published numbers
+    served-old while a single warm recomputes the new window — without every
+    cold request spawning its own full warm (the dedup + the task's own 300s
+    lock coalesce the fanout). Mirrors queue_warm_player_correlations.
+    """
+    if cache.get(_realm_top_ships_warm_lock_key(realm)):
+        return {"status": "skipped", "reason": "already-running"}
+
+    dispatch_key = _realm_top_ships_warm_dispatch_key(realm)
+    if not cache.add(
+        dispatch_key,
+        "queued",
+        timeout=REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT,
+    ):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        warm_realm_top_ships_task.delay(realm=realm)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        logger.warning(
+            "Skipping realm top-ships warm enqueue because broker dispatch failed: %s",
             error,
         )
         return {"status": "skipped", "reason": "enqueue-failed"}
@@ -1086,6 +1132,14 @@ def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
             kwargs={"realm": realm},
             queue="background",
         )
+        # The snapshot just advanced the window-end date, so the treemap +
+        # tier-type list cache keys (keyed by that date) have rotated cold.
+        # Warm them now — overwriting the durable `:published` fallback with
+        # the new numbers — instead of waiting ~1h for the scheduled warmer.
+        # The published fallback keeps the previous numbers served until this
+        # warm lands (warm-before-evict). The dispatch dedup + the warmer's
+        # own lock coalesce against the scheduled run / any cold-read enqueue.
+        queue_realm_top_ships_warm(realm)
 
     return result
 
@@ -1207,7 +1261,7 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
         _badge_tiers, SHIP_LEADERBOARD_TYPES,
     )
 
-    lock_key = f"warships:tasks:warm_realm_top_ships:{realm}:lock"
+    lock_key = _realm_top_ships_warm_lock_key(realm)
     if not cache.add(lock_key, self.request.id, timeout=300):
         logger.info(
             "Skipping warm_realm_top_ships_task realm=%s — already running", realm)
@@ -1235,6 +1289,8 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
         return {"status": "completed", "realm": realm, "results": results}
     finally:
         cache.delete(lock_key)
+        # Let the next cold-read enqueue fire (mirrors the other warmers).
+        cache.delete(_realm_top_ships_warm_dispatch_key(realm))
 
 
 @app.task(bind=True, **TASK_OPTS)

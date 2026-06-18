@@ -226,9 +226,15 @@ class RealmShipsByTierTypeWarmTests(TestCase):
         self.assertEqual([s["ship_id"] for s in cached["ships"]], [SHIMA])
         self.assertEqual(cached["ships"][0]["win_rate"], 60.0)
         # A bucket with no candidate ships (Battleship) short-circuits before the
-        # BattleEvent aggregation, so it isn't cached — and doesn't need to be:
-        # that cheap early-return path was never the source of the switch lag.
-        self.assertIsNone(cache.get(self._bucket_key(10, "Battleship")))
+        # BattleEvent aggregation, but the **warm** path still writes the empty
+        # payload — to both the fresh key and the durable `:published` key — so a
+        # bucket that went empty this window clears any stale last-good rather
+        # than serving yesterday's ships forever (warm-before-evict). The read
+        # path (use_cache=True) still does NOT cache the early-return empties.
+        # See test_ship_warm_before_evict.test_ships_by_warm_publishes_empty_*.
+        empty = cache.get(self._bucket_key(10, "Battleship"))
+        self.assertIsNotNone(empty)
+        self.assertEqual(empty["ships"], [])
 
 
 class RealmShipsByTierTypeViewTests(TestCase):
