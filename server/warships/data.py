@@ -6527,6 +6527,23 @@ def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
     }
 
 
+def _store_realm_ship_cache(fresh_key: str, published_key: str, payload: dict) -> dict:
+    """Write a realm-ship payload to its window-keyed fresh key (26h TTL) and a
+    window-**independent** durable ``:published`` key (no expiry).
+
+    Write-new-then-overwrite — never delete-first — so a cold fresh key (a
+    window-rotation gap after the nightly snapshot, or an ``allkeys-lru``
+    eviction) can serve these numbers as last-good until the next warm replaces
+    them. Mirrors ``landing._publish_landing_payload`` (the published-cache /
+    durable-fallback idiom). The published key carries the request-shape
+    discriminators (mode/limit or mode/tier/type) but **not** the window-end
+    date, so it survives the rotation that the fresh key is designed to chase.
+    """
+    cache.set(fresh_key, payload, timeout=26 * 3600)
+    cache.set(published_key, payload, timeout=None)
+    return payload
+
+
 def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
     """Most-played ships on a realm over the rolling ship-standings window.
 
@@ -6563,10 +6580,22 @@ def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
 
     cache_key = realm_cache_key(
         realm, f"top-ships:{mode}:win{window_end_d.isoformat()}:{limit}")
+    published_key = realm_cache_key(realm, f"top-ships:published:{mode}:{limit}")
     if use_cache:
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
+        # Fresh key cold (window rotated past the last warm, or evicted): serve
+        # the durable last-good payload now and queue a warm to recompute the
+        # new window — warm-before-evict. Never block the request on the heavy
+        # BattleEvent aggregation. The brief misalignment vs the snapshot-backed
+        # /ship boards (treemap shows the prior window for seconds–minutes) is
+        # intentional and self-heals when the queued warm overwrites both keys.
+        published = cache.get(published_key)
+        if published is not None:
+            from warships.tasks import queue_realm_top_ships_warm
+            queue_realm_top_ships_warm(realm)
+            return published
 
     rows = list(
         BattleEvent.objects
@@ -6606,8 +6635,9 @@ def compute_realm_top_ships(realm, limit=25, mode="random", use_cache=True):
     # Rolling window keyed by its end date; refreshed nightly by the warmer after
     # the snapshot lands. A 26h TTL bridges the daily warms without ever serving a
     # window the snapshot has already advanced past (the key changes at that point).
-    cache.set(cache_key, payload, timeout=26 * 3600)
-    return payload
+    # Also overwrite the durable published key so the next rotation gap serves
+    # these numbers as last-good instead of blanking on a cold aggregation.
+    return _store_realm_ship_cache(cache_key, published_key, payload)
 
 
 # Raw WG ship-type strings as stored on `Ship.ship_type` (note: "AirCarrier",
@@ -6663,10 +6693,20 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
 
     cache_key = realm_cache_key(
         realm, f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}")
+    published_key = realm_cache_key(
+        realm, f"ships-by:published:{mode}:t{tier}:{ship_type}")
     if use_cache:
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
+        # Fresh key cold (window rotation gap / eviction): serve last-good and
+        # queue a warm — warm-before-evict, never block on the aggregation. See
+        # compute_realm_top_ships for the full rationale + the alignment note.
+        published = cache.get(published_key)
+        if published is not None:
+            from warships.tasks import queue_realm_top_ships_warm
+            queue_realm_top_ships_warm(realm)
+            return published
 
     payload = {
         "realm": realm,
@@ -6679,8 +6719,13 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
         "window_end": window_end_d.isoformat(),
         "ships": [],
     }
+    # Empty buckets (no snapshot, or no ships of this tier+type ranked) are not
+    # cached on the read path — they re-run only the cheap candidate query, and
+    # caching empty would let it clobber a good published payload during a cold
+    # serve. On the **warm** path (use_cache=False) we DO publish the empty so a
+    # bucket that went empty this window clears its stale last-good.
     if captured_on is None:
-        return payload  # no snapshot yet → no candidate ships
+        return _store_realm_ship_cache(cache_key, published_key, payload) if not use_cache else payload
 
     # Candidate ships: this tier+type AND ranked in the latest snapshot
     # (guarantees a populated drill-down board for every listed ship).
@@ -6690,14 +6735,14 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
         .values_list('ship_id', flat=True)
     )
     if not snapshot_ids:
-        return payload
+        return _store_realm_ship_cache(cache_key, published_key, payload) if not use_cache else payload
     ships = {
         s.ship_id: s
         for s in Ship.objects.filter(
             ship_id__in=snapshot_ids, tier=tier, ship_type=ship_type)
     }
     if not ships:
-        return payload
+        return _store_realm_ship_cache(cache_key, published_key, payload) if not use_cache else payload
 
     # ship_id is a plain BigIntegerField (no FK), so there is no ORM join to
     # Ship — aggregate the candidate ids directly, then attach metadata in Python.
@@ -6744,8 +6789,9 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
 
     # Rolling window keyed by its end date; refreshed nightly by the warmer. The
     # 26h TTL bridges the daily warms; the key changes once a new snapshot lands.
-    cache.set(cache_key, payload, timeout=26 * 3600)
-    return payload
+    # Also overwrite the durable published key (last-good fallback for the next
+    # rotation gap). See compute_realm_top_ships / _store_realm_ship_cache.
+    return _store_realm_ship_cache(cache_key, published_key, payload)
 
 
 # ---------------------------------------------------------------------------
