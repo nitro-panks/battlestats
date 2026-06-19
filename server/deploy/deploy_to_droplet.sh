@@ -238,6 +238,25 @@ else
   echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na,eu,asia' >> /etc/battlestats-server.env
 fi
 
+# Gate-skip cooldown + event-driven self-chain (na pilot 2026-06-19). The
+# change-gate stamps non-movers (Player.floor_gate_skipped_at, migration 0075)
+# so _candidates() drains the permanent non-mover wall and the self-chain
+# TERMINATES instead of spinning on it. na-only until validated; expand _REALMS
+# to na,eu,asia once na confirms (Floor self-chain stop log, load15<2). Rollback:
+# set _SELF_CHAIN_ENABLED=0 / _COOLDOWN_HOURS=0. Runbook:
+# runbook-floor-throughput-tuning-2026-06-13.md (gate-skip cooldown section).
+for kv in \
+  'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=2' \
+  'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1' \
+  'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_REALMS=na'; do
+  k="${kv%%=*}"
+  if grep -q "^${k}=" /etc/battlestats-server.env; then
+    sed -i "s|^${k}=.*|${kv}|" /etc/battlestats-server.env
+  else
+    echo "${kv}" >> /etc/battlestats-server.env
+  fi
+done
+
 # R2: clan crawl core-only (enabled 2026-06-07). Skips the redundant per-player
 # efficiency+achievements enrichment (~85% of the crawl's WG cost) that made it
 # hold the realm lock for hours and pre-empt the battle-history floor. Discovery

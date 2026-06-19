@@ -22,9 +22,9 @@ flowchart LR
 
     %% ===== Queue workers =====
     subgraph QUEUES["Celery queue workers"]
-        DEF["default (c=3): dispatchers, lazy-refresh, watchdogs"]
+        DEF["default (c=3): dispatchers, lazy-refresh, watchdogs, OBSERVATION FLOOR, incremental ranked/player refresh"]
         HYD["hydration (c=3): per-player / per-clan WG refresh"]
-        BG["background (c=3): enrichment, observation floor, hot-players, incremental refresh"]
+        BG["background (c=3): enrichment, snapshot engine, hot-players capture, warmers"]
         WARM["background warmers: landing, distributions, correlations, top-ships, hot-entity"]
     end
     CRAWL["crawls (c=1, exclusive): crawl_all_clans_task (multi-day)"]
@@ -87,9 +87,10 @@ flowchart LR
 2. **Lazy-refresh path** — a stale profile/clan view enqueues `update_battle_data_task`
    / `update_ranked_data_task` (hydration) or `update_player_data_task` (default) via
    `_delay_task_safely` (60s dedup). Workers fetch WG and write Postgres.
-3. **Scheduled ingest path** — Beat enqueues background/crawls work (enrichment,
-   observation floor, hot-players capture, incremental refresh, the full clan crawl).
-   Workers fetch WG and write Postgres.
+3. **Scheduled ingest path** — Beat enqueues default/background/crawls work
+   (the observation floor + incremental refresh on **default**; enrichment, the
+   snapshot engine, hot-players capture on **background**; the full clan crawl on
+   **crawls**). Workers fetch WG and write Postgres.
 4. **Warming path** — Beat-scheduled warmers (on the background queue) read Postgres
    aggregates and publish payloads to Redis, which the serve path then reads back.
 

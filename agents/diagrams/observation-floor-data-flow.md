@@ -1,19 +1,24 @@
 # Observation-Floor & Daily-Active Capture Data Flow
 
 How the **battle-observation floor** and the **daily-active `Snapshot` engine** keep
-battle history flowing for active players. These are two *parallel coverage guarantees*
-on the `background` Celery queue, each with a **distinct write target**:
+battle history flowing for active players. They are two *parallel coverage guarantees*
+with **distinct write targets** that run on **different workers** (corrected 2026-06-19):
 
-- **Observation floor** — no active player goes longer than `BATTLE_OBSERVATION_FLOOR_HOURS`
-  (live: 8) without a fresh `BattleObservation`. Writes `BattleObservation` (+ a
-  change-gated `BattleEvent`) and advances `Player.last_battle_date`. It does **not**
-  write `Snapshot` and does **not** touch `battles_json` / `battles_updated_at`.
-- **Daily-active snapshot engine** — every active, visible player gets one gap-free daily
-  `Snapshot` row. Writes `Snapshot` (the day-over-day series). This engine exists
-  *because* the floor never writes `Snapshot`.
+- **Observation floor** — runs on the **`default`** queue / `battlestats-celery` worker
+  (per `settings.CELERY_TASK_ROUTES`; **not** `background`). No active player goes longer
+  than `BATTLE_OBSERVATION_FLOOR_HOURS` (live: 8) without a fresh `BattleObservation`.
+  Writes `BattleObservation` (+ a change-gated `BattleEvent`), advances
+  `Player.last_battle_date`, and — since 2026-06-14 — also rebuilds `battles_json` /
+  `battles_updated_at` for the captured player from the same `ships/stats` response
+  (`FLOOR_REFRESH_BATTLES_JSON_ENABLED`, default on). It does **not** write `Snapshot`.
+- **Daily-active snapshot engine** — runs on the **`background`** (`-c 3`) worker. Every
+  active, visible player gets one gap-free daily `Snapshot` row. Writes `Snapshot` (the
+  day-over-day series). This engine exists *because* the floor never writes `Snapshot`.
 
 This doc is narrower and deeper than `queue-data-flow.md` — see that for the full
-four-queue layout; both subsystems run on the **`background` (`-c 3`)** worker.
+four-queue layout. **The two engines run on separate workers** (floor on `default`,
+snapshot on `background`), so they do **not** contend for the same pool — an earlier
+version of this doc wrongly placed the floor on `background`; Level 3 below is corrected.
 
 Sources: `runbook-bulk-battle-observation-capture-2026-06-06.md`,
 `runbook-daily-active-snapshots-2026-06-09.md`,
@@ -35,8 +40,10 @@ flowchart LR
     WG["Wargaming API (upstream)"]
     BEAT["Celery Beat (per-realm striped)"]
 
-    subgraph BG["background worker (-c 3, shared pool)"]
+    subgraph DW["default worker (-c 3): floor + dispatchers/lazy-refresh/watchdogs"]
         FLOOR["ensure_daily_battle_observations_task<br/>(per-realm, 'observation-floor-&lt;realm&gt;')"]
+    end
+    subgraph BG["background worker (-c 3): snapshot + enrichment/hot/warmers"]
         SNAP["snapshot_active_players_task<br/>(per-realm, 'snapshot-active-players-&lt;realm&gt;')"]
     end
 
@@ -206,10 +213,15 @@ floor runs on a rolling `BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES` cycle (live: **
 (live: 8). The snapshot engine runs every `SNAPSHOT_ACTIVE_INTERVAL_MINUTES` (default 30,
 48 idempotent runs/day → convergence).
 
+**Corrected 2026-06-19.** The floor runs on the **`default`** worker; the snapshot engine,
+enrichment, hot-player capture, and warmers run on the **separate `background`** worker — so the
+floor is **not** contended by those background tenants (an earlier version claimed it was, from a
+wrong-worker reading). They still share the 2-vCPU PG and the global WG budget, just not a pool.
+
 ```mermaid
 sequenceDiagram
     participant BEAT as Celery Beat
-    participant POOL as background pool (-c 3, SHARED)
+    participant POOL as default worker (-c 3) — the floor runs here
     participant LOCK as Redis (per-realm single-flight lock)
     participant WG as Wargaming API (global token-bucket ~2-3 of 10 req/s)
     participant PG as PostgreSQL (2-vCPU managed)
@@ -218,43 +230,42 @@ sequenceDiagram
 
     BEAT->>POOL: observation-floor-na (every CYCLE_MINUTES)
     POOL->>LOCK: acquire daily_observation_floor:na:lock (3h TTL)
-    Note over POOL: select _candidates up to BATTLE_OBSERVATION_FLOOR_LIMIT<br/>(live 12000) — bounds work per cycle
+    Note over POOL: select _candidates up to BATTLE_OBSERVATION_FLOOR_LIMIT<br/>(live 12000) — bounds work per cycle (asia is pinned here)
     POOL->>WG: bulk account/info (gate) + per-player ships/stats (movers)
     alt 407 REQUEST_LIMIT_EXCEEDED
         WG-->>POOL: rate-limited
-        Note over POOL: ABORT sweep, persist partial (floor coexists w/ crawl,<br/>must not keep hammering the shared budget)
+        Note over POOL: ABORT sweep, persist partial
     else ok
-        POOL->>PG: BattleObservation (+ gated BattleEvent) + last_battle_date
+        POOL->>PG: BattleObservation (+ gated BattleEvent) + last_battle_date + battles_json
     end
     POOL->>LOCK: release lock
+    Note over POOL: if SELF_CHAIN_ENABLED: re-dispatch while _candidates() >= THRESHOLD.<br/>The gate-skip cooldown drains the non-mover wall so this TERMINATES.
 
-    par competing background tenants (same pool / DB / WG budget)
-        BEAT->>POOL: snapshot-active-players-na (write-heavy: Snapshot rows)
-    and
-        BEAT->>POOL: enrich_player_data_task (self-chaining backlog drain)
-    and
-        BEAT->>POOL: capture_hot_player_observations_task (skip-if-fresh vs floor)
-    end
-
-    Note over POOL,PG: BINDING CONSTRAINT = the shared background pool + 2-vCPU DB<br/>write contention, NOT WG rate (limiter idles at ~2-3 of 10 req/s)<br/>and NOT FLOOR_LIMIT (7500->12000 bump did not move obs_poll).
+    Note over POOL,PG: separate `background` worker runs snapshot/enrichment/hot/warmers —<br/>shares the 2-vCPU PG + WG budget, NOT the floor's worker pool.
 ```
 
-### What actually bounds throughput
+### What actually bounds throughput (corrected 2026-06-19)
 
-The floor is **not** capacity-bound by its own knobs (per the 06-13 throughput runbook):
+Phase-0a instrumentation read on the **default** worker (the floor's real home) showed it healthy
+(11 clean cycles/12h, `aborted=False`) but:
 
-- **Not WG rate** — the global token-bucket limiter idles at ~2-3 of 10 req/s.
-- **Not app CPU** — app droplet load ~1.1-1.3 on 2 vCPU.
-- **Not `BATTLE_OBSERVATION_FLOOR_LIMIT`** — already live at 12000; the 7500→12000 bump
-  did not move `obs_poll`.
+- **asia is permanently `FLOOR_LIMIT`-bound** (~12,000 candidates/cycle), ~90–95% `gated_skipped`
+  non-movers. The change-gate skips a non-mover **without writing an observation**, so it stays
+  observation-stale and `_candidates()` re-selects it every cycle — a permanent "non-mover wall"
+  (≈ the 181k `stale_over_24h`). When the stale pool exceeds the cap, recent movers in the overflow
+  wait a full cycle. **This corrects the earlier "NOT FLOOR_LIMIT" claim** — the cap *is* binding on
+  asia (the prior reading conflated workers).
+- **battles_json rebuild** is ~16–48% of cycle wall-time — secondary; the per-mover `ships/stats`
+  serial fetch dominates.
+- **Not WG** (limiter idles ~2–3 of 10 req/s), and **not background-pool contention** (the floor
+  isn't on that pool).
 
-The real throttle is the **shared `background` pool (`-c 3`)**, contended by enrichment
-self-chaining, the daily-snapshot engine, and the two hot-player sweeps (brain + capture)
-— plus **write contention on the 2-vCPU managed Postgres**, since several of those tenants
-(`update_snapshot_data`, the floor's own `battles_json` refresh, hot-player capture) are
-concurrent writers. Phase 1 of the tuning runbook bounded a wasteful enrichment
-self-chain spin (146 passes / 90 min doing zero useful work, stealing a worker slot);
-freeing the pool is the live coverage lever, not raising the floor limit.
+**The fix (gate-skip cooldown + self-chain, 2026-06-19).** `Player.floor_gate_skipped_at` lets
+`_candidates()` suppress the recently-checked non-mover wall, so the candidate pool drains to genuine
+work and the **self-chain terminates** — draining the limit-bound backlog in the idle time between
+Beat cycles instead of spinning on the wall (which, on the `default` worker, would starve
+dispatchers / lazy-refresh / watchdogs). See `runbook-floor-throughput-tuning-2026-06-13.md`
+(gate-skip cooldown section).
 
 ### Crawl-coexist (no deferral)
 
