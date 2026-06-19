@@ -105,6 +105,31 @@ const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T
     return response.json() as Promise<T>;
 };
 
+// Evict every settled (and in-flight) cache entry whose key begins with
+// `prefix`, returning the number of settled entries dropped. Used to turn a
+// `refreshNonce` bump into a true invalidation: bumping the nonce rotates the
+// cacheKey so the *mounted* component re-fetches, but the prior-nonce entries
+// linger in the module-level cache for up to their TTL. A client-side remount
+// (navigate away → back) resets the nonce to 0 and would otherwise re-read that
+// stale entry until the TTL lapses or the page is hard-reloaded. Purging the
+// per-entity keys when fresh data lands keeps a remount from serving the
+// pre-refresh payload.
+export const invalidateSharedJsonByPrefix = (prefix: string): number => {
+    let removed = 0;
+    for (const key of Array.from(settledRequests.keys())) {
+        if (key.startsWith(prefix)) {
+            settledRequests.delete(key);
+            removed += 1;
+        }
+    }
+    for (const key of Array.from(inFlightRequests.keys())) {
+        if (key.startsWith(prefix)) {
+            inFlightRequests.delete(key);
+        }
+    }
+    return removed;
+};
+
 const getSettledValue = (cacheKey: string): SharedJsonFetchResult<unknown> | null => {
     const cached = settledRequests.get(cacheKey);
     if (!cached) {

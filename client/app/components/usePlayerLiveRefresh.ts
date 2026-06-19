@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, invalidateSharedJsonByPrefix } from '../lib/sharedJsonFetch';
 import { withRealm } from '../lib/realmParams';
 import type { PlayerData } from './entityTypes';
 
@@ -127,6 +127,17 @@ export const usePlayerLiveRefresh = ({
                     // bump the nonce so charts re-fetch a single time) and settle
                     // into the cooldown countdown. Re-hydrating on every interim
                     // poll is what caused the "loads repeatedly" loop.
+                    //
+                    // Purge this player's battle-history cache entries too. The
+                    // nonce bump rotates the active card's cacheKey so it re-fetches
+                    // fresh, but the prior-nonce entries (incl. the nonce=0 mount
+                    // key) keep the pre-refresh payload for up to their 60s TTL. A
+                    // client-side remount (navigate to another profile and back)
+                    // resets the nonce to 0 and would re-read that stale entry,
+                    // showing the OLD chart until a hard reload. Eviction keys on
+                    // the canonical `data.name` — the value the card builds its
+                    // cacheKey from (battleHistoryCacheKey).
+                    invalidateSharedJsonByPrefix(`battle-history:${data.name}:${realm}:`);
                     onRehydrateRef.current(data);
                     setRefreshNonce((nonce) => nonce + 1);
                     if (next !== null) setNextRefresh(next);

@@ -5,10 +5,14 @@ import {
     parsePendingHeader,
     usePlayerLiveRefresh,
 } from '../usePlayerLiveRefresh';
-import { fetchSharedJson } from '../../lib/sharedJsonFetch';
+import { fetchSharedJson, invalidateSharedJsonByPrefix } from '../../lib/sharedJsonFetch';
 
-jest.mock('../../lib/sharedJsonFetch', () => ({ fetchSharedJson: jest.fn() }));
+jest.mock('../../lib/sharedJsonFetch', () => ({
+    fetchSharedJson: jest.fn(),
+    invalidateSharedJsonByPrefix: jest.fn(),
+}));
 const mockFetch = fetchSharedJson as jest.MockedFunction<typeof fetchSharedJson>;
+const mockInvalidate = invalidateSharedJsonByPrefix as jest.MockedFunction<typeof invalidateSharedJsonByPrefix>;
 
 describe('usePlayerLiveRefresh helpers', () => {
     it('parses the refresh-pending header', () => {
@@ -41,6 +45,7 @@ describe('usePlayerLiveRefresh auto-refresh on cooldown expiry', () => {
     beforeEach(() => {
         jest.useFakeTimers();
         mockFetch.mockReset();
+        mockInvalidate.mockReset();
         // Poll target for the auto-fired refresh (never reached in the
         // anchor-less test, harmless there).
         mockFetch.mockResolvedValue({ data: { player_id: 1 } as never, headers: {} });
@@ -105,6 +110,31 @@ describe('usePlayerLiveRefresh auto-refresh on cooldown expiry', () => {
         await act(async () => { jest.advanceTimersByTime(1_000); });
         await flush();
         expect(mockFetch).toHaveBeenCalledTimes(7);
+    });
+
+    it('purges the player battle-history cache when a refresh lands (so a remount re-fetches)', async () => {
+        // First poll returns pending=false → the refresh has landed. The hook
+        // must evict this player's battle-history entries (keyed on the canonical
+        // payload `name`, not the URL slug) so navigating away and back re-fetches
+        // the fresh chart instead of the stale nonce=0 cache entry.
+        mockFetch.mockResolvedValue({
+            data: { player_id: 1, name: 'Lil_Boots' } as never,
+            headers: { 'X-Player-Refresh-Pending': 'false' },
+        });
+
+        renderHook(() => usePlayerLiveRefresh({
+            playerName: 'lil_boots',
+            realm: 'na',
+            initialPending: true,
+            initialNextRefresh: null,
+            onRehydrate: jest.fn(),
+        }));
+
+        // Fire the first poll (pollDelayMs(0) = 2s) and flush its promise.
+        await act(async () => { jest.advanceTimersByTime(2_000); });
+        await act(async () => { await Promise.resolve(); });
+
+        expect(mockInvalidate).toHaveBeenCalledWith('battle-history:Lil_Boots:na:');
     });
 
     it('does NOT auto-fire when there is no cooldown anchor (avoids spurious refresh)', () => {
