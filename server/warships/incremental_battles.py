@@ -39,6 +39,15 @@ from django.db.models import F, Q
 
 logger = logging.getLogger(__name__)
 
+# Phase 0a instrumentation — aggregate wall-time of the per-mover battles_json
+# rebuild (`apply_battles_json`), sampled by the bulk floor sweep so we can tell
+# whether that rebuild is the floor's throughput throttle. Process-local: the
+# bulk sweep resets it at entry and logs the total at exit. Safe because the
+# `background` Celery pool is prefork (one process per slot) and a single
+# `record_observations_bulk` call runs synchronously start-to-finish, so no other
+# observation write interleaves in-process between reset and read.
+_BATTLES_JSON_REBUILD_TIMING = {"count": 0, "total_ms": 0.0}
+
 
 @dataclass(frozen=True)
 class ShipSnapshot:
@@ -722,6 +731,7 @@ def record_observation_from_payloads(
     if (refresh_battles_json
             and ship_data
             and os.getenv("FLOOR_REFRESH_BATTLES_JSON_ENABLED", "1") == "1"):
+        _rebuild_t0 = time.perf_counter()
         try:
             from warships.data import apply_battles_json
             apply_battles_json(player, list(ship_data), realm=player.realm)
@@ -730,6 +740,12 @@ def record_observation_from_payloads(
                 "floor battles_json refresh failed for player_id=%s realm=%s",
                 player.player_id, player.realm,
             )
+        finally:
+            # Phase 0a — accumulate into the process-local timer the bulk sweep
+            # brackets; counts even when the rebuild raised (cost was still paid).
+            _BATTLES_JSON_REBUILD_TIMING["count"] += 1
+            _BATTLES_JSON_REBUILD_TIMING["total_ms"] += (
+                time.perf_counter() - _rebuild_t0) * 1000.0
 
     ships_payload = _serialize_ships_payload(snapshot)
     ranked_map = (
@@ -1048,6 +1064,12 @@ def record_observations_bulk(
         "aborted": False,
     }
 
+    # Phase 0a — bracket the per-mover battles_json rebuild timer around this
+    # sweep so we can attribute floor wall-time to the rebuild vs. the rest.
+    _cycle_start = time.perf_counter()
+    _BATTLES_JSON_REBUILD_TIMING["count"] = 0
+    _BATTLES_JSON_REBUILD_TIMING["total_ms"] = 0.0
+
     for chunk_start in range(0, len(ids), _BULK_OBSERVATION_CHUNK):
         chunk_ids = ids[chunk_start:chunk_start + _BULK_OBSERVATION_CHUNK]
 
@@ -1216,6 +1238,16 @@ def record_observations_bulk(
         if chunk_delay:
             time.sleep(chunk_delay)
 
+    # Phase 0a — single per-cycle line into journalctl (logger.info, not stdout,
+    # which Celery only forwards unreliably at WARNING): how much of the sweep's
+    # wall-time the per-mover battles_json rebuild consumed.
+    logger.info(
+        "bulk floor done realm=%s movers=%d battles_json_rebuilds=%d "
+        "battles_json_total_ms=%.0f cycle_ms=%.0f aborted=%s",
+        realm, tally["completed"], _BATTLES_JSON_REBUILD_TIMING["count"],
+        _BATTLES_JSON_REBUILD_TIMING["total_ms"],
+        (time.perf_counter() - _cycle_start) * 1000.0, tally["aborted"],
+    )
     return tally
 
 

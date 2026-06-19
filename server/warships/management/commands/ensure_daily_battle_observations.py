@@ -560,6 +560,18 @@ class Command(BaseCommand):
                 f"other={tally.get('other', 0)} "
                 f"aborted={tally.get('aborted', False)}"
             )
+            # Mirror to the module logger so the tally lands in journalctl —
+            # Celery does not reliably forward management-command stdout.
+            log.info(
+                "floor bulk random realm=%s completed=%s baseline=%s events=%s "
+                "wg_failed=%s not_found=%s skipped_missing=%s gated_skipped=%s "
+                "other=%s aborted=%s",
+                realm, tally.get('completed', 0), tally.get('baseline', 0),
+                tally.get('events', 0), tally.get('wg_failed', 0),
+                tally.get('not_found', 0), tally.get('skipped_missing', 0),
+                tally.get('gated_skipped', 0), tally.get('other', 0),
+                tally.get('aborted', False),
+            )
 
         # ── Per-player ranked sweep (ranked-known subset) ─────────────────
         r_completed = r_events = r_wg_failed = r_not_found = r_other = 0
@@ -600,6 +612,11 @@ class Command(BaseCommand):
                 f"events={r_events} wg_failed={r_wg_failed} "
                 f"not_found={r_not_found} other={r_other}"
             )
+            log.info(
+                "floor ranked per-player realm=%s completed=%s events=%s "
+                "wg_failed=%s not_found=%s other=%s",
+                realm, r_completed, r_events, r_wg_failed, r_not_found, r_other,
+            )
 
         elapsed = time.time() - started
         self.stdout.write(self.style.SUCCESS(
@@ -608,3 +625,9 @@ class Command(BaseCommand):
             f"ranked_completed={r_completed} "
             f"aborted={tally.get('aborted', False)}"
         ))
+        log.info(
+            "floor bulk done realm=%s in %.0fs random_completed=%s "
+            "ranked_completed=%s aborted=%s",
+            realm, elapsed, tally.get('completed', 0), r_completed,
+            tally.get('aborted', False),
+        )

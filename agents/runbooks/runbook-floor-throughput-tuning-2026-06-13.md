@@ -86,6 +86,28 @@ The real throttle is the **shared `background` pool (`-c 3`)**, consumed by enri
 
 **Rollback:** revert the guard (one commit); behavior returns to unconditional self-chain.
 
+### Phase 0a — Floor instrumentation (SHIPPED — observability prerequisite)
+
+Code-only, no behavior change. The floor's per-cycle tallies were written via management-command
+`self.stdout.write`, which Celery only forwards to `journalctl` unreliably (at WARNING, via
+`worker_redirect_stdouts`), so the deferred phases below had no trustworthy wall-time evidence to
+attribute against. Now mirrored to the module loggers, which land cleanly in
+`journalctl -u battlestats-celery-background`:
+
+- `ensure_daily_battle_observations.py` mirrors the bulk-random, ranked-per-player, and final
+  summary tallies (completed/baseline/events/`gated_skipped`/wall-time) to `log.info` (logger
+  `battle_observation_floor`) alongside the existing stdout lines.
+- `record_observations_bulk` (`incremental_battles.py`) emits one per-cycle line
+  (`bulk floor done realm=… movers=… battles_json_rebuilds=… battles_json_total_ms=… cycle_ms=…`)
+  via the module `logger` — isolating how much of the sweep's wall-time the per-mover
+  `apply_battles_json` rebuild (the 06-14 `battles_json` refresh) consumes. Backed by a
+  process-local timer reset/read inside the sweep (prefork-safe).
+
+**Read it:** `journalctl -u battlestats-celery-background --since "30 min ago" -g 'bulk floor done'`.
+This is the attribution source for the Phase 0b A/B (`FLOOR_REFRESH_BATTLES_JSON_ENABLED` 1→0) and
+for deciding whether the rebuild is the throttle before touching Phase 2/3 levers. Covered by
+`test_observations_bulk.py::BulkObservationInstrumentationTests` on the sqlite gate.
+
 ### Phase 2 — Floor RANKED_DAILY (DEFERRED — evidence + attribution)
 
 **Not landed in this tranche.** Plausible and doctrine-aligned (Random > Ranked), but the ranked fetches observed in logs were **enrichment's** (`enrich_player_data.py:142`), *not* the floor's ranked sweep, so there is no direct evidence the floor's per-slot ranked baseline is a meaningful cost right now. Decide only after one clean post-Phase-1 `/observation` snapshot, and land it on **its own** worker restart (never bundled with Phase 1) so its effect is attributable.
