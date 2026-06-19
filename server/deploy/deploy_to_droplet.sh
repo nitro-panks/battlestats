@@ -107,7 +107,7 @@ set -euo pipefail
 # that was missing CELERY_BROKER_URL and entered an infinite reconnect loop. Stopping
 # services up front eliminates the race — they are started cleanly at the end of the
 # remote block (line ~460) after all env writes are finalized.
-systemctl stop battlestats-beat battlestats-celery-crawls battlestats-celery-background battlestats-celery-hydration battlestats-celery battlestats-gunicorn 2>/dev/null || true
+systemctl stop battlestats-beat battlestats-celery-crawls battlestats-celery-floor battlestats-celery-background battlestats-celery-hydration battlestats-celery battlestats-gunicorn 2>/dev/null || true
 
 cp "${REMOTE_TMP_ENV}" /etc/battlestats-server.env
 cp "${REMOTE_TMP_SECRETS}" /etc/battlestats-server.secrets.env
@@ -238,17 +238,22 @@ else
   echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na,eu,asia' >> /etc/battlestats-server.env
 fi
 
-# Gate-skip cooldown + event-driven self-chain (na pilot 2026-06-19). The
-# change-gate stamps non-movers (Player.floor_gate_skipped_at, migration 0075)
-# so _candidates() drains the permanent non-mover wall and the self-chain
-# TERMINATES instead of spinning on it. na-only until validated; expand _REALMS
-# to na,eu,asia once na confirms (Floor self-chain stop log, load15<2). Rollback:
-# set _SELF_CHAIN_ENABLED=0 / _COOLDOWN_HOURS=0. Runbook:
-# runbook-floor-throughput-tuning-2026-06-13.md (gate-skip cooldown section).
+# Floor tuning env (iterate loop, 2026-06-19). Outcome of the day's diagnosis:
+# the self-chain + gate-skip cooldown (#62) are the WRONG tool under-capacity
+# (na ~52k active-7d vs ~12k captured/cycle — the stale pool never drains, the
+# self-chain grinds an un-drainable backlog), so they are kept OFF. The real win
+# is recency-first candidate ordering (#66, in code: spends scarce capture
+# capacity on the likeliest movers) plus the dedicated `floor` worker below
+# (isolation from the user-facing `default` lane + cross-realm concurrency).
+# FLOOR_REFRESH_BATTLES_JSON_ENABLED=0 defers the per-mover battles_json rebuild
+# (~16-48% of per-mover wall-time) to maximize capture rate during the catch-up
+# phase — flip to 1 for steady-state once headroom is confirmed (displayed ship
+# stats then age until a page-view). Runbook:
+# runbook-floor-throughput-tuning-2026-06-13.md.
 for kv in \
-  'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=2' \
-  'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1' \
-  'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_REALMS=na'; do
+  'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=0' \
+  'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=0' \
+  'FLOOR_REFRESH_BATTLES_JSON_ENABLED=0'; do
   k="${kv%%=*}"
   if grep -q "^${k}=" /etc/battlestats-server.env; then
     sed -i "s|^${k}=.*|${kv}|" /etc/battlestats-server.env
@@ -498,7 +503,7 @@ PY
   # and the worker will silently fall back to the settings.py default. Fail
   # the deploy hard — see the 2026-04-08 incident in
   # agents/runbooks/runbook-enrichment-crawler-2026-04-03.md.
-  for svc in battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls; do
+  for svc in battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls battlestats-celery-floor; do
     local pid
     pid="$(systemctl show -p MainPID --value "${svc}")"
     if [[ -z "${pid}" || "${pid}" == "0" ]]; then
@@ -598,6 +603,12 @@ set_env_value CELERY_BACKGROUND_MAX_TASKS_PER_CHILD 50
 set_env_value CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB 786432
+# Dedicated observation-floor worker: -c 3 lets the per-realm cycles run
+# concurrently (the floor is heavy + serial per-mover, so cross-realm concurrency
+# is the cheap throughput win); recycle aggressively like background.
+set_env_value CELERY_FLOOR_CONCURRENCY 3
+set_env_value CELERY_FLOOR_MAX_TASKS_PER_CHILD 50
+set_env_value CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB 786432
 set_env_value BEST_CLAN_EXCLUDED_IDS 1000068602
 set_env_value PLAYER_REFRESH_STATE_FILE "${APP_ROOT}/shared/logs/incremental_player_refresh_state.json"
 set_env_value RANKED_INCREMENTAL_STATE_FILE "${APP_ROOT}/shared/logs/incremental_ranked_data_state.json"
@@ -738,6 +749,35 @@ TimeoutStartSec=120
 WantedBy=multi-user.target
 EOF
 
+# Dedicated worker for the observation floor. Lives on its own queue so its
+# heavy, hours-long per-mover capture never starves the user-facing `default`
+# lane (lazy-refresh / dispatchers / watchdogs), and so the per-realm floor
+# cycles run CONCURRENTLY on this pool (-c 3) instead of serially contending on
+# `default`. --time-limit=21600 (6h) mirrors background — a full realm sweep over
+# a large stale pool is a multi-hour op. See
+# agents/runbooks/runbook-floor-throughput-tuning-2026-06-13.md.
+cat > /etc/systemd/system/battlestats-celery-floor.service <<EOF
+[Unit]
+Description=Battlestats Celery worker (floor queue — observation-floor capture)
+After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
+Wants=redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q floor -c "${CELERY_FLOOR_CONCURRENCY:-3}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_FLOOR_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n floor@%%h'
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # Dedicated worker for the multi-day clan crawl. Lives on its own queue so it
 # never camps a `background` slot that incrementals / warmers / enrichment need.
 # -c 1: only one crawl runs at a time (one realm per cron tick anyway).
@@ -788,6 +828,7 @@ check_worker default   battlestats-celery
 check_worker hydration battlestats-celery-hydration
 check_worker background battlestats-celery-background
 check_worker crawls    battlestats-celery-crawls
+check_worker floor     battlestats-celery-floor
 WATCHDOG
 chmod +x /usr/local/bin/battlestats-celery-watchdog.sh
 
@@ -853,13 +894,14 @@ systemctl daemon-reload
 # Enable the new crawls unit on first install so it auto-starts on reboot.
 # Idempotent — `systemctl enable` is a no-op when the unit is already enabled.
 systemctl enable battlestats-celery-crawls 2>/dev/null || true
+systemctl enable battlestats-celery-floor 2>/dev/null || true
 systemctl enable --now battlestats-celery-watchdog.timer 2>/dev/null || true
 systemctl enable --now battlestats-archive-battle-history.timer 2>/dev/null || true
 # configure_local_rabbitmq already ran before `manage.py migrate` above — the
 # env file and broker credentials are finalized at this point.
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
 redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
-systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls battlestats-beat
+systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls battlestats-celery-floor battlestats-beat
 verify_broker_connection
 materialize_best_player_snapshots
 active_release_after_restart="$(readlink -f "${APP_ROOT}/current")"
