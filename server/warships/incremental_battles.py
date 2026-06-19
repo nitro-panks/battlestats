@@ -1050,6 +1050,17 @@ def record_observations_bulk(
     if source is None:
         source = BattleObservation.SOURCE_BULK_FLOOR
 
+    # Gate-skip cooldown (default-off). When > 0, stamp change-gated non-movers
+    # so _candidates() suppresses them for the window — draining the candidate
+    # pool to genuine work so the self-chain can terminate. See
+    # Player.floor_gate_skipped_at + runbook-floor-throughput-tuning-2026-06-13.md.
+    try:
+        _gate_skip_cooldown_on = int(
+            os.getenv("BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS", "0")
+            or 0) > 0
+    except ValueError:
+        _gate_skip_cooldown_on = False
+
     ids = [int(pid) for pid in player_ids]
     tally = {
         "status": "completed",
@@ -1119,6 +1130,7 @@ def record_observations_bulk(
         # who didn't play are skipped here, never paying a ships call.
         if change_gate:
             ships_ids = []
+            gated_skip_pids = []
             for pid in chunk_ids:
                 player = players.get(pid)
                 if player is None:
@@ -1132,8 +1144,21 @@ def record_observations_bulk(
                     ships_ids.append(pid)
                 elif decision is False:
                     tally["gated_skipped"] += 1
+                    gated_skip_pids.append(pid)
                 else:  # None — account absent / hidden / no pvp stats
                     tally["skipped_missing"] += 1
+            # Cooldown stamp (default-off): these non-movers wrote no
+            # observation, so they stay observation-stale and would re-fill
+            # _candidates() every cycle (the non-mover wall that makes
+            # self-chain spin). Stamping suppresses them for the cooldown
+            # window. A captured mover is excluded by the staleness filter
+            # regardless, so this never delays a player who actually played
+            # beyond the window. One bulk UPDATE per chunk (≤100 rows).
+            if gated_skip_pids and _gate_skip_cooldown_on:
+                from django.utils import timezone as _dj_tz
+                Player.objects.filter(
+                    player_id__in=gated_skip_pids, realm=realm,
+                ).update(floor_gate_skipped_at=_dj_tz.now())
         else:
             ships_ids = chunk_ids
 

@@ -198,6 +198,58 @@ has headroom.
 - **Phase 3 execution** once managed-PG `load15` is verified — and only after the cheaper
   striping-collision audit above.
 
+## Gate-skip cooldown + event-driven self-chain (implemented 2026-06-19)
+
+**Corrected queue fact (supersedes the "starved on the background pool" framing above, for the
+floor specifically).** The observation floor runs on the **`default`** queue / `battlestats-celery`
+worker (per `settings.CELERY_TASK_ROUTES`; confirmed live 2026-06-19 — Beat dispatched
+`observation-floor-{realm}` 12×/12h, the `background` worker received **0**, the floor ran on
+`battlestats-celery`). The `background`-pool contention the earlier phases describe is real for the
+**snapshot engine / enrichment / warmers**, but the floor does **not** share that pool — so an
+earlier "floor slot-starved on background" read this session was a measurement error (grepping the
+wrong worker). NOTE: `agents/diagrams/queue-data-flow.md` and `observation-floor-data-flow.md` still
+mis-place the floor on `background`; flagged for a separate doc fix.
+
+**The real finding (Phase 0a instrumentation, live 2026-06-19).** The floor is healthy on the
+default worker (11 clean cycles/12h, `aborted=False`), but **asia is permanently `FLOOR_LIMIT`-bound**
+(~12,000 candidates/cycle) with **~90–95% `gated_skipped` non-movers**. The change-gate skips a
+non-mover *without writing an observation*, so it stays observation-stale and `_candidates()`
+re-selects it every cycle — a permanent "non-mover wall" (≈ the 181k `stale_over_24h`). The per-mover
+`battles_json` rebuild is ~16–48% of cycle wall-time (secondary; the per-mover `ships/stats` fetch
+dominates).
+
+**Why naive self-chain would spin.** `_maybe_redispatch_floor` re-dispatches while
+`len(_candidates(...)) >= THRESHOLD`. The non-mover wall keeps `_candidates()` permanently far above
+the threshold, so self-chain would re-dispatch forever (same shape as the enrichment self-chain spin
+bounded above) — and because the floor is on the **default** worker, that spin would starve the
+*other* default-queue tenants (dispatchers, lazy-refresh-on-view, watchdogs).
+
+**The fix (flag-gated, default-off) — mirrors `enrichment_skipped_at`:**
+- `Player.floor_gate_skipped_at` (migration `0075`, nullable → metadata-only on PG).
+- `record_observations_bulk` stamps change-gated non-movers (one bulk `UPDATE` per ≤100-id chunk),
+  **only when** `BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS > 0`.
+- `_candidates()` excludes rows stamped within that window. A captured mover is excluded by the
+  observation-staleness filter regardless, so the cooldown never delays a player who actually played
+  beyond the window. The stamp cost self-limits: once the wall is cooled, later cycles see far fewer
+  candidates → far fewer stamps.
+- With the wall suppressed, `_candidates()` drains to genuine work, so the **existing**
+  `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED` self-chain terminates instead of spinning — no
+  self-chain code change, just enable the flag once the cooldown is on.
+
+**Rollout (staged).** Deploy with `…_COOLDOWN_HOURS` unset (default-off ⇒ behaviour-neutral). Then
+enable on **na** first: set `BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=2` (or 3), restart
+`battlestats-celery` (the **default** worker, NOT `-background`), watch `gated_skipped` fall
+cycle-over-cycle as the wall cools and `_candidates()` drains; then set
+`BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1` and confirm the `Floor self-chain stop` log appears
+(terminates, not spins) with managed-PG `load15` < 2. Expand to eu/asia. **Rollback:**
+`…_COOLDOWN_HOURS=0` (filter widens, stamping stops; column harmless) + `…_SELF_CHAIN_ENABLED=0`; the
+migration is additive.
+
+**Cooldown sizing.** Shorter = the wall re-enters `_candidates()` sooner (tighter self-chain
+duty-cycle, lower mover re-check latency); longer = more idle, longer worst-case re-check latency for
+a player who returns mid-cooldown. Start 2–3h (≈ today's effective re-check latency on the
+limit-bound realms). Tests: `GateSkipCooldownTests` in `test_observations_bulk.py`.
+
 ## Related runbooks
 
 - `runbook-bulk-battle-observation-capture-2026-06-06.md` — floor design, knobs, benchmarks.
