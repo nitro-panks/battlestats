@@ -7,7 +7,10 @@ on the `background` Celery queue, each with a **distinct write target**:
 - **Observation floor** — no active player goes longer than `BATTLE_OBSERVATION_FLOOR_HOURS`
   (live: 8) without a fresh `BattleObservation`. Writes `BattleObservation` (+ a
   change-gated `BattleEvent`) and advances `Player.last_battle_date`. It does **not**
-  write `Snapshot` and does **not** touch `battles_json` / `battles_updated_at`.
+  write `Snapshot`. Since 2026-06-14 it **also** rebuilds `battles_json` /
+  `battles_updated_at` for the captured player from the same `ships/stats` response
+  (`FLOOR_REFRESH_BATTLES_JSON_ENABLED`, default on) — see the freshness-clock note in
+  Level 1 below; this per-mover rebuild is the Phase-0b throughput suspect.
 - **Daily-active snapshot engine** — every active, visible player gets one gap-free daily
   `Snapshot` row. Writes `Snapshot` (the day-over-day series). This engine exists
   *because* the floor never writes `Snapshot`.
