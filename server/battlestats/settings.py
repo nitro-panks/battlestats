@@ -312,6 +312,13 @@ CELERY_TASK_ROUTES = {
     # Must run on `default` (not the single-slot `crawls` queue) so it dispatches
     # promptly instead of queueing behind the running pass.
     'warships.tasks.dispatch_clan_crawl_task': {'queue': 'default'},
+    # The observation floor runs on its OWN queue/worker (battlestats-celery-floor)
+    # so its heavy, hours-long per-mover capture can't starve the user-facing
+    # `default` lane (lazy-refresh / dispatchers / watchdogs), and so the per-realm
+    # cycles run concurrently on a dedicated `-c N` pool instead of contending on
+    # `default`. The self-chain re-dispatch (_maybe_redispatch_floor) routes here
+    # automatically by task name. See runbook-floor-throughput-tuning-2026-06-13.md.
+    'warships.tasks.ensure_daily_battle_observations_task': {'queue': 'floor'},
     'warships.tasks.incremental_player_refresh_task': {'queue': 'background'},
     'warships.tasks.enrich_player_on_view_task': {'queue': 'background'},
     'warships.tasks.snapshot_active_players_task': {'queue': 'background'},
