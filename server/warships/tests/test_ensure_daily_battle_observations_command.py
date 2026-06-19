@@ -120,10 +120,17 @@ class EnsureDailyBattleObservationsCommandTests(TestCase):
         )
         self.assertIn("0 candidates", out.getvalue())
 
-    def test_orders_never_observed_first_then_oldest_first(self):
-        self._make_player("NeverObs", days_idle=1)
-        self._make_player("Stale30h", days_idle=1, latest_obs_hours_ago=30)
-        self._make_player("Stale50h", days_idle=1, latest_obs_hours_ago=50)
+    def test_orders_recency_first_then_oldest_observation(self):
+        # Recency-first: most-recently-active player wins regardless of
+        # observation staleness — RecentStale (battled today, stale obs) sorts
+        # ahead of OldNeverObs (battled 5d ago, never observed), because scarce
+        # capture capacity must go to the likeliest movers. Within the same
+        # last_battle_date, never-observed/stalest-obs wins. (All candidates must
+        # be stale — a fresh obs <8h excludes a player regardless of recency.)
+        self._make_player("RecentStale", days_idle=0, latest_obs_hours_ago=30)
+        self._make_player("MidNeverObs", days_idle=1)
+        self._make_player("MidStale50h", days_idle=1, latest_obs_hours_ago=50)
+        self._make_player("OldNeverObs", days_idle=5)
         seen: list[int] = []
 
         def record_order(player_id, realm):
@@ -135,18 +142,19 @@ class EnsureDailyBattleObservationsCommandTests(TestCase):
             "warships.incremental_battles.record_observation_and_diff",
             side_effect=record_order,
         ):
-            out = StringIO()
             call_command(
                 "ensure_daily_battle_observations",
                 "--realm", "na", "--days", "7", "--delay", "0",
-                stdout=out,
+                stdout=StringIO(),
             )
-        never_id = Player.objects.get(name="NeverObs").player_id
-        s50_id = Player.objects.get(name="Stale50h").player_id
-        s30_id = Player.objects.get(name="Stale30h").player_id
-        # NeverObs (NULL latest_obs_at) → ASC NULLS FIRST → first.
-        # Then oldest observation (50h) → then 30h.
-        self.assertEqual(seen, [never_id, s50_id, s30_id])
+        recent_id = Player.objects.get(name="RecentStale").player_id
+        mid_never = Player.objects.get(name="MidNeverObs").player_id
+        mid_s50 = Player.objects.get(name="MidStale50h").player_id
+        old_never = Player.objects.get(name="OldNeverObs").player_id
+        # days_idle 0 (today) first, then the two days_idle=1 (never-obs before
+        # stale-50h via NULLS-FIRST tiebreak), then days_idle=5 last — even
+        # though OldNeverObs has never been observed.
+        self.assertEqual(seen, [recent_id, mid_never, mid_s50, old_never])
 
     def test_invokes_random_worker_when_ranked_capture_off(self):
         self._make_player("Active1", days_idle=1, latest_obs_hours_ago=30)

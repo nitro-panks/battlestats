@@ -92,12 +92,17 @@ def _candidates(realm: str, days: int, stale_hours: int, limit: int):
             | Q(floor_gate_skipped_at__lt=skip_cutoff)
         )
     qs = qs.order_by(
-        # Never-observed players (NULL latest_obs_at) must sweep FIRST. Postgres
-        # sorts NULLs LAST on plain ASC (sqlite sorts them first), so be explicit
-        # — relying on the default silently deprioritized never-observed players
-        # in production while passing on the sqlite-backed local gate.
-        F("latest_obs_at").asc(nulls_first=True),
+        # Recency-first (2026-06-19): most-recently-active players first. The
+        # active population (na ~52k active-7d / ~35k active-1d) exceeds the
+        # floor's serial per-cycle capture capacity, so capacity is scarce and
+        # must go to the highest-value players — those who battled most recently
+        # are the likeliest movers (the mover_capture_rate goal). The prior
+        # stalest-first ordering spent scarce capacity on the least-recently-
+        # active (often crawl-inflated) tail. Tiebreak within the same
+        # last_battle_date: never-observed (NULL) then stalest observation first
+        # (NULLS FIRST is explicit — Postgres sorts NULLs LAST on plain ASC).
         "-last_battle_date",
+        F("latest_obs_at").asc(nulls_first=True),
         "name",
     ).values_list("player_id", "name", "latest_obs_at")
 
