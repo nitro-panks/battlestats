@@ -64,27 +64,48 @@ Parse `captured_at` from each snapshot and pick:
 
 Never use "the second file in the list" as the baseline — that is the bug this step exists to prevent.
 
-### 3. The config block lags the running worker — check before attributing
+### 3. The config block lags the running worker — check the RIGHT worker
 
 Each snapshot's `config` block is read from the **env file** at cron time, **not**
 from what the running Celery worker has loaded. A floor knob (e.g.
-`BATTLE_OBSERVATION_FLOOR_LIMIT`) only takes effect in capture when the
-**background worker restarts** — task code reads `os.getenv` but the process env
-is frozen at process start. So a snapshot can show `LIMIT=12000` in its config
-while its entire 24h data window was captured by a worker still running the old
-value.
+`BATTLE_OBSERVATION_FLOOR_LIMIT`) only takes effect in capture when the worker that
+runs the floor restarts — task code reads `os.getenv` but the process env is frozen
+at process start. So a snapshot can show `LIMIT=12000` in its config while its
+entire 24h data window was captured by a worker still running the old value.
 
-Before crediting/blaming a config change for a metric move, confirm the worker
-actually restarted *after* the env changed:
+**The floor runs on the `default` queue / `battlestats-celery` worker** (per
+`settings.CELERY_TASK_ROUTES`; confirmed live 2026-06-19 — **NOT** `background`,
+which runs enrichment / the snapshot engine / warmers). So a floor-config change
+takes effect when **`battlestats-celery`** restarts. Check *that* worker — a
+stale-doc trap this step exists to prevent: an earlier version checked
+`battlestats-celery-background`, the wrong worker, which is what sent the 2026-06-19
+investigation down a "slot-starvation" dead end.
 
 ```bash
-ssh root@battlestats.online 'stat -c "env mtime: %y" /etc/battlestats-server.env; systemctl show battlestats-celery-background -p ActiveEnterTimestamp'
+ssh root@battlestats.online 'stat -c "env mtime: %y" /etc/battlestats-server.env; systemctl show battlestats-celery -p ActiveEnterTimestamp'
 ```
 
 If `ActiveEnterTimestamp` is **before** the env mtime, the config-block value is
 **not live** — say so, and treat the labeled snapshot as still running the old
 config. The first clean reading under a new value is the first daily snapshot
 captured fully *after* the worker restart.
+
+**Floor knobs worth reading from the `config` block** (besides `LIMIT` / `HOURS` /
+`CYCLE_MINUTES` and the bulk / change-gate / random-first / ranked-daily flags):
+`BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS`,
+`BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED`, and `…_SELF_CHAIN_REALMS` — the
+gate-skip cooldown + event-driven self-chain (na pilot 2026-06-19). With self-chain
+on for a realm, expect `gated_skipped` to fall cycle-over-cycle as the cooldown
+drains the non-mover wall, and the floor to self-chain within a Beat cycle instead
+of idling.
+
+**Optional live cross-check — the floor's own instrumentation, on `battlestats-celery`:**
+```bash
+ssh root@battlestats.online 'journalctl -u battlestats-celery --since "6 hours ago" --no-pager | grep -E "bulk floor done|Floor self-chain" | tail'
+```
+`bulk floor done realm=… movers=… battles_json_total_ms=… cycle_ms=…` gives per-cycle
+wall-time and the per-mover `battles_json`-rebuild share; `Floor self-chain stop` vs a
+long run of `Floor self-chain re-dispatched` with no stop (= a spin → investigate).
 
 ### 4. Compute and interpret
 
@@ -97,7 +118,7 @@ For **totals** and **each realm** (na / eu / asia), compute L and the Δ vs D-1 
 | `coverage_ratio_vs_7d` | **headline** = `distinct_productive / active_7d` |
 | `productive_rate` | `distinct_productive / distinct_observed` — of who we polled, how many had battled |
 | `fresh_frac` | `fresh_within_24h / active_7d` — share of active players with an obs <24h old |
-| `stale_over_24h` | active-7d players whose latest obs is >24h old |
+| `stale_over_24h` | active-7d players whose latest obs is >24h old. **Mostly the change-gate "non-mover wall" — by design, not a backlog:** a non-mover is gate-skipped *without* a fresh observation, so it stays stale until it plays again. A large/steady value is expected (live: ~181k); only read a *rising* one as cadence-falling-behind if `distinct_productive` is also dropping. |
 | `obs_bulk_floor` / `obs_poll` | capture-cost split (cheap bulk floor vs per-player poll) |
 | `never_observed` | should be ~0; a rise is a signal |
 
@@ -108,14 +129,14 @@ For **totals** and **each realm** (na / eu / asia), compute L and the Δ vs D-1 
 **Other interpretation cues:**
 - NA `productive_rate` runs well below EU/ASIA — known, not a regression on its own.
 - A jump/drop right after a `config` change (compare the `config` block across snapshots — `LIMIT`, `HOURS`, gate flags) *may* explain a step change — but only if step 3 confirms the worker restarted to apply it. Call the config delta out explicitly.
-- Rising `stale_over_24h` or `never_observed` while cov is flat → floor cadence falling behind the active set.
+- Rising `never_observed` while cov is flat → floor cadence falling behind the active set. (Rising `stale_over_24h` alone is **not** that signal — it's mostly the change-gate non-mover wall, see the metric note above; only treat it as falling-behind if `distinct_productive` drops too.)
 
 ### 5. Report
 
 ```
 Observation-floor benchmark — battlestats.online
 Latest: <L captured_at>   vs   <D-1 captured_at> (Δ24h)   [trend vs <D-7> over 7d]
-Config: LIMIT=<…> HOURS=<…>  <flag if not-yet-live per step 3>
+Config: LIMIT=<…> HOURS=<…> cooldown=<…h> self_chain=<on:realms|off>  <flag if not-yet-live per step 3 — check battlestats-celery (default), not background>
 
                 active7d   productive    cov/7d   (% of ceil)   prodRate   fresh<24h   stale>24h
   na            …          …  (Δ…)        …%       …%            …%         …           …
