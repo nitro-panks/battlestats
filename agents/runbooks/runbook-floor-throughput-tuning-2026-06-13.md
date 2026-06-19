@@ -311,6 +311,50 @@ appears once `remaining < THRESHOLD`. Spin = many `re-dispatched` with the pool 
 **Termination on na was still in progress at the time of writing (slow under the asia overlap);
 update this note with the confirmed `stop` once observed.**
 
+## Iteration 2 — the actual fix: recency-first + dedicated worker (self-chain RETIRED, 2026-06-19)
+
+The na pilot proved the floor is **under-capacity**, not mis-tuned: na has **~52k active-7d /
+~35k active-1d** players but the floor captures ~12k/cycle serially (~140 movers/min). The stale
+pool never drains, so the **self-chain + gate-skip cooldown (#62) are the WRONG tool** — they grind
+an un-drainable backlog. **Retired** (`SELF_CHAIN_ENABLED=0` / `GATE_SKIP_COOLDOWN_HOURS=0` in the
+deploy block; code kept, flag-gated off). The fix is **prioritization + isolation + concurrency**:
+
+1. **Recency-first candidate ordering** (PR #66) — `_candidates` orders `-last_battle_date` first, so
+   scarce capture capacity goes to the likeliest movers (not the stalest/crawl-inflated tail).
+   Measured: ~108 movers/cycle → ~140/min.
+2. **Defer the per-mover `battles_json` rebuild** — `FLOOR_REFRESH_BATTLES_JSON_ENABLED=0` (~16-48%
+   per-mover saving) during the capture-max / backlog-catch-up phase.
+3. **Dedicated floor worker** (PR #67) — own `floor` queue + `battlestats-celery-floor` `-c 3`. Off
+   the user-facing `default` lane (isolation) + per-realm cycles run **concurrently** (~3×). Verified
+   live: 2 realms concurrent, `default` 0-ready, no WG 407s.
+
+**Per-mover threading (option C) was SKIPPED** — redundant once the dedicated worker's cross-realm
+concurrency approaches the global WG token-bucket ceiling (~10 req/s; floor at 3 concurrent realms
+≈ 6-9 req/s). WG is the true ceiling. **Worker isolation ≠ WG isolation:** the bucket is shared with
+user-facing `hydration`, so if hydration backs up *sustainedly* under heavy organic traffic, cap floor
+`-c`→2 (a one-off transient deploy-herd is not that signal).
+
+### Leaderboard impact of deferring `battles_json` (verified 2026-06-19) — and the steady-state re-enable
+
+Deferring the per-mover `battles_json` rebuild does **not** affect the ship leaderboards. The
+`/ship/<id>` standings, the landing **treemap** (`compute_realm_top_ships`), the **tier-type list**,
+and the profile **ship badges** are all built by **aggregating `BattleEvent`**
+(`compute_ship_top_player_snapshot`) — and the floor **still writes `BattleObservation` + `BattleEvent`
+regardless** of `FLOOR_REFRESH_BATTLES_JSON_ENABLED` (the rebuild is a separate post-capture step).
+Recency-first actually *improves* these (more movers → more `BattleEvent`).
+
+The only board that touches the deferred data is the **landing best-players ranking** (`landing.py`):
+its score blends `high_tier_pvp_ratio` (derived from `battles_json`) + `efficiency_rank_percentile`
+(from `PlayerExplorerSummary`). The lag there is **minor and bounded**: `PlayerExplorerSummary` is
+refreshed by many *other* paths (enrichment, incremental refresh, clan crawl, on-view, backfill);
+`battles_json` still refreshes on page-views / incremental / hot-player capture; the board's top
+entries are popular/frequently-viewed players (refreshed via the view path); and the Best board is a
+periodically-materialized cached snapshot. Deferring just reverts to the **pre-2026-06-14 status quo**.
+
+**ACTION (don't forget): re-enable `FLOOR_REFRESH_BATTLES_JSON_ENABLED=1`** (in the deploy block +
+live env) once past the capture-max / backlog phase, to restore active-but-unviewed players'
+displayed-stats + landing-ranking freshness for free off the floor's existing `ships/stats` fetch.
+
 ## Related runbooks
 
 - `runbook-bulk-battle-observation-capture-2026-06-06.md` — floor design, knobs, benchmarks.
