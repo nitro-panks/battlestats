@@ -250,6 +250,67 @@ duty-cycle, lower mover re-check latency); longer = more idle, longer worst-case
 a player who returns mid-cooldown. Start 2–3h (≈ today's effective re-check latency on the
 limit-bound realms). Tests: `GateSkipCooldownTests` in `test_observations_bulk.py`.
 
+### Live validation — na pilot (2026-06-19, manual trigger ~18:02 UTC)
+
+Enabled on **na only** (`…_GATE_SKIP_COOLDOWN_HOURS=2`, `…_SELF_CHAIN_ENABLED=1`,
+`…_SELF_CHAIN_REALMS=na`; `battlestats-celery` restarted 17:11; persisted in `deploy_to_droplet.sh`
+via #63). Manually dispatched one na floor cycle to drive it now instead of waiting for the 19:15
+Beat slot.
+
+**Cooldown works — draining, NOT spinning (the decisive check).** Direct prod read after the first
+run:
+```
+na floor_gate_skipped_at within 2h : 12,279   (stamping fires)
+na _candidates remaining (cooled out): 38,210  (the stamped 12,279 are EXCLUDED)
+```
+A spin would re-select the same stamped wall; instead `_candidates()` returns a *different* 38,210,
+so the pool is genuinely draining. First run tally: `completed=108 baseline=10 events=178
+gated_skipped=11871 cycle_ms=344s battles_json_total_ms=60s (~17%)` — limit-bound at 12000, then
+`Floor self-chain re-dispatched (remaining>=500)` with `self_chained: True`.
+
+**Big finding: na's true stale pool is ~50k** (12,279 stamped + 38,210 remaining). The single
+12k-cap cycle was only ever reaching **~24% of na's stale set per cycle** — ~38k players untouched
+every cycle. This is the coverage hole the self-chain closes; it drains the full pool over ~4–5
+self-chained runs.
+
+**Contention observation (matters for expansion).** The self-chained na runs share the `default`
+`-c 3` pool with **other floor realms' scheduled cycles** — the asia 18:15 Beat cycle ran
+concurrently, and each per-mover `ships/stats` fetch is serial, so the na burst slowed markedly
+(first run 5.7 min; the self-chained run ran >20 min under the asia overlap). Default queue stayed
+healthy (`0 ready` — no user-facing lazy-refresh starvation) during the burst, but the floor's own
+realms contend with each other on `default` once more than one is active. (managed-PG `load15` not
+captured — the DO metrics token lacks scope; use default-queue depth as the proxy until that's
+fixed.)
+
+**⚠️ Cooldown must outlast the per-realm drain burst — size before expanding.** Termination requires
+the whole stale pool to drain to `< THRESHOLD` *before the earliest stamps expire* (the cooldown
+window). na (~50k, ~6–17 min/run) drains inside 2h. **asia is always limit-bound, runs slower
+(~25–30 min/run for ~12k), and likely has a larger pool — at a 2h cooldown asia's burst can exceed
+2h, the earliest stamps expire mid-burst, those players re-enter `_candidates()`, and it never
+converges (effective spin).** So do **NOT** blind-expand `…_SELF_CHAIN_REALMS` to eu/asia at 2h.
+Before each realm: measure its pool (`len(_candidates("<realm>",7,8,100000))` via `manage.py
+shell`) and either raise `…_GATE_SKIP_COOLDOWN_HOURS` to comfortably exceed `(pool/FLOOR_LIMIT) ×
+run_minutes`, or raise `FLOOR_LIMIT` to drain in fewer runs (cheap — the extra budget is mostly
+bulk gate-skips). Reconsider whether the floor's realms should self-chain concurrently on `default`
+at all (a dedicated floor worker would remove the cross-realm contention — see Phase 4 isolation).
+
+**Verify commands (operator):**
+```bash
+# draining vs spinning (the decisive read):
+ssh root@battlestats.online 'cd /opt/battlestats-server/current/server && /opt/battlestats-server/venv/bin/python manage.py shell -c "
+from warships.models import Player; from django.utils import timezone; from datetime import timedelta
+from warships.management.commands.ensure_daily_battle_observations import _candidates
+cut=timezone.now()-timedelta(hours=2)
+print(\"stamped<2h:\", Player.objects.filter(realm=\"na\", floor_gate_skipped_at__gte=cut).count())
+print(\"candidates remaining:\", len(_candidates(\"na\",7,8,100000)))"'
+# terminate vs spin in the logs (floor is on the DEFAULT worker, battlestats-celery):
+ssh root@battlestats.online 'journalctl -u battlestats-celery --since "2 hours ago" --no-pager | grep -E "floor bulk random realm=na|Floor self-chain"'
+```
+Healthy = successive runs' `gated_skipped` draws from a shrinking pool and a `Floor self-chain stop`
+appears once `remaining < THRESHOLD`. Spin = many `re-dispatched` with the pool not shrinking.
+**Termination on na was still in progress at the time of writing (slow under the asia overlap);
+update this note with the confirmed `stop` once observed.**
+
 ## Related runbooks
 
 - `runbook-bulk-battle-observation-capture-2026-06-06.md` — floor design, knobs, benchmarks.
