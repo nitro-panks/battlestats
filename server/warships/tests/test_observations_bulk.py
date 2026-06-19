@@ -1193,3 +1193,89 @@ class ShadowParityCommandTests(TestCase):
         fb.assert_called_once()
         self.assertIn("match=1", out.getvalue())
         self.assertIn("poison_fallback_chunks=1", out.getvalue())
+
+
+class BulkObservationInstrumentationTests(TestCase):
+    """Phase 0a — the bulk sweep must surface per-mover battles_json rebuild
+    cost (count + wall-time) for the throughput diagnosis, without changing the
+    parity-tested tally/return contract.
+    """
+
+    def setUp(self):
+        Ship.objects.create(
+            ship_id=42, name="Yamato", nation="japan", ship_type="Battleship",
+            tier=10,
+        )
+
+    def _make_player(self, player_id):
+        return Player.objects.create(
+            name=f"p{player_id}", player_id=player_id, realm="na",
+            pvp_battles=100, pvp_wins=50, pvp_losses=50, pvp_frags=80,
+            pvp_survived_battles=60,
+        )
+
+    def _baseline(self, player):
+        # refresh_battles_json defaults False here, so the baseline write does
+        # not itself touch the timer (only the floor sweep opts in).
+        record_observation_from_payloads(
+            player,
+            player_data=_account_payload(battles=100, wins=50, losses=50,
+                                         frags=80, survived=60),
+            ship_data=_ship_payload(battles=100, wins=50, frags=80,
+                                    damage=1_000_000, xp=80_000, survived=60),
+        )
+
+    def _run_bulk(self, player, after_acct, after_ships):
+        with mock.patch(
+            ACCT_PATH, return_value=({str(player.player_id): after_acct}, None)
+        ), mock.patch(
+            SHIP_PATH, return_value=({str(player.player_id): after_ships}, None)
+        ):
+            return record_observations_bulk([player.player_id], realm="na")
+
+    def test_rebuild_timer_counts_movers_and_logs_cycle(self):
+        player = self._make_player(9001)
+        self._baseline(player)
+        after_acct = _account_payload(battles=101, wins=51, losses=50, frags=82,
+                                      survived=61)
+        after_ships = _ship_payload(battles=101, wins=51, frags=82,
+                                    damage=1_048_000, xp=81_500, survived=61)
+
+        with mock.patch.dict(
+            os.environ, {"FLOOR_REFRESH_BATTLES_JSON_ENABLED": "1"}
+        ), self.assertLogs(
+            "warships.incremental_battles", level="INFO"
+        ) as logs:
+            tally = self._run_bulk(player, after_acct, after_ships)
+
+        from warships.incremental_battles import _BATTLES_JSON_REBUILD_TIMING
+        # One captured mover → exactly one rebuild, with a measured (>=0) cost.
+        self.assertEqual(_BATTLES_JSON_REBUILD_TIMING["count"], 1)
+        self.assertGreaterEqual(_BATTLES_JSON_REBUILD_TIMING["total_ms"], 0.0)
+        # The per-cycle summary line lands on the module logger (journalctl).
+        joined = "\n".join(logs.output)
+        self.assertIn("bulk floor done", joined)
+        self.assertIn("battles_json_rebuilds=1", joined)
+        # Instrumentation must not perturb the parity-tested tally.
+        self.assertEqual(tally["completed"], 1)
+        self.assertEqual(tally["events"], 1)
+
+    def test_rebuild_timer_skips_when_flag_disabled(self):
+        player = self._make_player(9002)
+        self._baseline(player)
+        after_acct = _account_payload(battles=101, wins=51, losses=50, frags=82,
+                                      survived=61)
+        after_ships = _ship_payload(battles=101, wins=51, frags=82,
+                                    damage=1_048_000, xp=81_500, survived=61)
+
+        with mock.patch.dict(
+            os.environ, {"FLOOR_REFRESH_BATTLES_JSON_ENABLED": "0"}
+        ):
+            tally = self._run_bulk(player, after_acct, after_ships)
+
+        from warships.incremental_battles import _BATTLES_JSON_REBUILD_TIMING
+        # Flag off → no rebuild ran, so the timer stays at zero, but the
+        # observation + event are still captured (capture is independent).
+        self.assertEqual(_BATTLES_JSON_REBUILD_TIMING["count"], 0)
+        self.assertEqual(tally["completed"], 1)
+        self.assertEqual(tally["events"], 1)
