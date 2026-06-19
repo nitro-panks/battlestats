@@ -76,7 +76,22 @@ def _candidates(realm: str, days: int, stale_hours: int, limit: int):
     from django.db.models import F, Q
     qs = qs.filter(
         Q(latest_obs_at__isnull=True) | Q(latest_obs_at__lt=stale_before)
-    ).order_by(
+    )
+    # Gate-skip cooldown (default-off): suppress non-movers the change-gate
+    # recently skipped so the candidate pool drains to genuine work and the
+    # self-chain can terminate instead of spinning on the permanent non-mover
+    # wall. Mirrors the enrichment_skipped_at cooldown. A captured mover is
+    # already excluded by the staleness filter above (fresh observation), so
+    # this only suppresses players who genuinely had no new battles.
+    cooldown_hours = int(
+        os.getenv("BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS", "0"))
+    if cooldown_hours > 0:
+        skip_cutoff = timezone.now() - timedelta(hours=cooldown_hours)
+        qs = qs.filter(
+            Q(floor_gate_skipped_at__isnull=True)
+            | Q(floor_gate_skipped_at__lt=skip_cutoff)
+        )
+    qs = qs.order_by(
         # Never-observed players (NULL latest_obs_at) must sweep FIRST. Postgres
         # sorts NULLs LAST on plain ASC (sqlite sorts them first), so be explicit
         # — relying on the default silently deprioritized never-observed players

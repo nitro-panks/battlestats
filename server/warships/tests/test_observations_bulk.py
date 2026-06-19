@@ -1279,3 +1279,108 @@ class BulkObservationInstrumentationTests(TestCase):
         self.assertEqual(_BATTLES_JSON_REBUILD_TIMING["count"], 0)
         self.assertEqual(tally["completed"], 1)
         self.assertEqual(tally["events"], 1)
+
+
+class GateSkipCooldownTests(TestCase):
+    """Gate-skip cooldown (default-off): the change-gate stamps non-movers and
+    `_candidates()` suppresses them for the cooldown window, so the candidate
+    pool drains to genuine work and the floor self-chain can terminate instead
+    of re-scanning the permanent non-mover wall. A captured mover is excluded by
+    the observation-staleness filter regardless of the stamp.
+    """
+
+    ENV = "BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS"
+
+    def _player_with_prior(self, pid, prior_battles):
+        p = Player.objects.create(
+            name=f"p{pid}", player_id=pid, realm="na",
+            pvp_battles=prior_battles, pvp_wins=50, pvp_losses=50,
+            pvp_frags=80, pvp_survived_battles=60,
+        )
+        record_observation_from_payloads(
+            p,
+            player_data=_account_payload(battles=prior_battles, wins=50,
+                                         losses=50, frags=80, survived=60),
+            ship_data=_ship_payload(battles=prior_battles, wins=50, frags=80,
+                                    damage=1_000_000, xp=80_000, survived=60),
+        )
+        return p
+
+    # ── stamp behaviour in record_observations_bulk ────────────────────────
+
+    def test_gate_skip_stamps_non_mover_when_cooldown_on(self):
+        p = self._player_with_prior(7001, 100)
+        acct = {"7001": _account_payload(battles=100)}  # no change → gated skip
+        with mock.patch.dict(os.environ, {self.ENV: "3"}), \
+                mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, return_value=({}, None)):
+            tally = record_observations_bulk([7001], realm="na",
+                                             change_gate=True)
+        self.assertEqual(tally["gated_skipped"], 1)
+        p.refresh_from_db()
+        self.assertIsNotNone(p.floor_gate_skipped_at)
+
+    def test_gate_skip_does_not_stamp_when_cooldown_off(self):
+        p = self._player_with_prior(7002, 100)
+        acct = {"7002": _account_payload(battles=100)}
+        with mock.patch.dict(os.environ, {self.ENV: "0"}), \
+                mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, return_value=({}, None)):
+            tally = record_observations_bulk([7002], realm="na",
+                                             change_gate=True)
+        self.assertEqual(tally["gated_skipped"], 1)
+        p.refresh_from_db()
+        self.assertIsNone(p.floor_gate_skipped_at)
+
+    def test_mover_is_not_stamped(self):
+        p = self._player_with_prior(7003, 100)
+        acct = {"7003": _account_payload(battles=105)}  # +5 → fetch ships
+        ships = {"7003": _ship_payload(battles=105, wins=53, frags=84,
+                                       damage=1_050_000, xp=84_000, survived=63)}
+        with mock.patch.dict(os.environ, {self.ENV: "3"}), \
+                mock.patch(ACCT_PATH, return_value=(acct, None)), \
+                mock.patch(SHIP_PATH, return_value=(ships, None)):
+            tally = record_observations_bulk([7003], realm="na",
+                                             change_gate=True)
+        self.assertEqual(tally["completed"], 1)
+        p.refresh_from_db()
+        self.assertIsNone(p.floor_gate_skipped_at)
+
+    # ── _candidates() suppression ──────────────────────────────────────────
+
+    def _stale_candidate_player(self, pid, *, skipped_at=None):
+        # Active (recent last_battle_date) + never observed (NULL latest_obs_at
+        # ⇒ stale) ⇒ a candidate unless the cooldown suppresses it.
+        return Player.objects.create(
+            name=f"c{pid}", player_id=pid, realm="na",
+            last_battle_date=timezone.now().date(),
+            pvp_battles=100, is_hidden=False,
+            floor_gate_skipped_at=skipped_at,
+        )
+
+    def _candidate_ids(self):
+        from warships.management.commands.ensure_daily_battle_observations \
+            import _candidates
+        return {row[0]
+                for row in _candidates("na", days=7, stale_hours=8, limit=1000)}
+
+    def test_candidates_suppresses_recently_stamped_when_cooldown_on(self):
+        self._stale_candidate_player(7101, skipped_at=timezone.now())
+        with mock.patch.dict(os.environ, {self.ENV: "3"}):
+            self.assertNotIn(7101, self._candidate_ids())
+
+    def test_candidates_includes_elapsed_stamp(self):
+        self._stale_candidate_player(
+            7102, skipped_at=timezone.now() - timedelta(hours=4))
+        with mock.patch.dict(os.environ, {self.ENV: "3"}):
+            self.assertIn(7102, self._candidate_ids())
+
+    def test_candidates_includes_null_stamp(self):
+        self._stale_candidate_player(7103, skipped_at=None)
+        with mock.patch.dict(os.environ, {self.ENV: "3"}):
+            self.assertIn(7103, self._candidate_ids())
+
+    def test_candidates_ignores_stamp_when_cooldown_off(self):
+        self._stale_candidate_player(7104, skipped_at=timezone.now())
+        with mock.patch.dict(os.environ, {self.ENV: "0"}):
+            self.assertIn(7104, self._candidate_ids())

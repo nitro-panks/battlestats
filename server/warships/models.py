@@ -108,6 +108,18 @@ class Player(models.Model):
     # Orthogonal to enrichment_status (reclassify never touches this), so the
     # row stays correctly PENDING and is retried after the cooldown.
     enrichment_skipped_at = models.DateTimeField(null=True, blank=True)
+    # Set when the observation-floor change-gate skips this player as a
+    # non-mover (no new battles since the last observation). The gate writes no
+    # observation, so the player stays observation-stale and the floor's
+    # _candidates() would otherwise re-select them every cycle forever — the
+    # permanent "non-mover wall" that makes self-chain spin (same shape as the
+    # enrichment self-chain spin above). _candidates() suppresses rows stamped
+    # within BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS so the candidate
+    # pool drains to genuine work and self-chain can terminate. Default-off
+    # (cooldown hours = 0 → no stamping, no suppression). Orthogonal to
+    # last_battle_date / observation staleness, which still excludes a captured
+    # mover regardless of this stamp.
+    floor_gate_skipped_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         clan_name = self.clan.name if self.clan else "No Clan"
