@@ -5,7 +5,7 @@ battle history flowing for active players. They are two *parallel coverage guara
 with **distinct write targets** that run on **different workers** (current 2026-06-20):
 
 - **Observation floor** — runs on the dedicated **`floor`** queue / `battlestats-celery-floor`
-  worker (`-c 1`; per `settings.CELERY_TASK_ROUTES`; **not** `default` or `background`). No active
+  worker (`-c 2`, self-chaining; per `settings.CELERY_TASK_ROUTES`; **not** `default` or `background`). No active
   player goes longer than `BATTLE_OBSERVATION_FLOOR_HOURS` (live: 8) without a fresh
   `BattleObservation`. Writes `BattleObservation` (+ a change-gated `BattleEvent`), advances
   `Player.last_battle_date`, and — since 2026-06-14 — can also rebuild `battles_json` /
@@ -42,7 +42,7 @@ flowchart LR
     WG["Wargaming API (upstream)"]
     BEAT["Celery Beat (per-realm striped)"]
 
-    subgraph FW["floor worker (-c 1): battlestats-celery-floor — recency-first, random-only, Beat-only"]
+    subgraph FW["floor worker (-c 2): battlestats-celery-floor — recency-first, random-only, self-chaining"]
         FLOOR["ensure_daily_battle_observations_task<br/>(per-realm, 'observation-floor-&lt;realm&gt;')"]
     end
     subgraph BG["background worker (-c 3): snapshot + enrichment/hot/warmers"]
@@ -217,20 +217,21 @@ floor runs on a rolling `BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES` cycle (live: **
 48 idempotent runs/day → convergence).
 
 **Current 2026-06-20.** The floor runs on its **own dedicated `floor` worker**
-(`battlestats-celery-floor`, `-c 1`); the snapshot engine, enrichment, hot-player capture, and
-warmers run on the **separate `background`** worker, and dispatchers / lazy-refresh / watchdogs on
-`default` — so the floor is **not** contended by any of those tenants (earlier versions wrongly placed
-it on `background`, then `default`). They still share the 2-vCPU PG and the global WG budget, just not
-a worker pool. The **binding constraint is that shared 2-vCPU managed PG** — and within it the
-analytical **warmers** (best-clans / distributions / correlations) + large-row `warships_player`
+(`battlestats-celery-floor`, `-c 2`, **self-chaining**); the snapshot engine, enrichment, hot-player
+capture, and warmers run on the **separate `background`** worker, and dispatchers / lazy-refresh /
+watchdogs on `default` — so the floor is **not** contended by any of those tenants (earlier versions
+wrongly placed it on `background`, then `default`). They still share the 2-vCPU PG and the global WG
+budget, just not a worker pool. The **binding constraint is that shared 2-vCPU managed PG** — and within
+it the analytical **warmers** (best-clans / distributions / correlations) + large-row `warships_player`
 updates, **not** the floor's own observation/event INSERTs (a minor cost) and **not** WG (the floor
 draws only ~1.5–2.4 of the 9 req/s bucket). A standing managed-PG load monitor watches for sustained
-saturation (`load15 > 2.3`).
+saturation (`load15 > 2.3`); the `-c 2` + self-chain re-enable (after the NameError warm-storm fix freed
+DB headroom) is held to that monitor — back off to `-c 1` / self-chain OFF if it trips.
 
 ```mermaid
 sequenceDiagram
     participant BEAT as Celery Beat
-    participant POOL as floor worker (-c 1) — battlestats-celery-floor
+    participant POOL as floor worker (-c 2) — battlestats-celery-floor
     participant LOCK as Redis (per-realm single-flight lock)
     participant WG as Wargaming API (global token-bucket ~2-3 of 10 req/s)
     participant PG as PostgreSQL (2-vCPU managed)
@@ -248,7 +249,7 @@ sequenceDiagram
         POOL->>PG: BattleObservation (+ gated BattleEvent) + last_battle_date + battles_json
     end
     POOL->>LOCK: release lock
-    Note over POOL: SELF_CHAIN_ENABLED=0 — self-chain is OFF (gated on DB headroom; the 2-vCPU PG is<br/>warmer-saturated). The floor is Beat-only: each realm fires once per CYCLE_MINUTES, no re-dispatch.
+    Note over POOL: SELF_CHAIN_ENABLED=1 — self-chain is ON (all realms): re-dispatch (~120s) while stale<br/>backlog >= threshold(500), so two realms chew concurrently. Re-enabled after the warm-storm fix; yields during crawls.
 
     Note over POOL,PG: separate `background` worker runs snapshot/enrichment/hot/warmers; `default` runs<br/>dispatchers/lazy-refresh/watchdogs — all share the 2-vCPU PG (warmers are the main hog) + WG budget,<br/>NOT the floor's worker pool.
 ```
@@ -271,17 +272,19 @@ The binding constraint is the shared **2-vCPU managed PG**, and within it the an
 - **Not WG** (the floor draws only ~1.5–2.4 of the 9 req/s bucket), and **not worker-pool contention**
   (the floor has its own dedicated `floor` worker).
 
-**The current mode (recency-first + dedicated worker, `-c 1`, Beat-only, 2026-06-20).**
+**The current mode (recency-first + dedicated worker, `-c 2`, self-chaining, 2026-06-20).**
 The floor is **under-capacity**, not mis-tuned: the per-realm active pools are large (na 50k / eu 88k /
-asia 61k active-7d; only ~10–23% fresh<8h). It runs on its **own `floor` worker (`-c 1`)** with
-**recency-first** ordering (capacity to the likeliest movers) and is **Beat-only**
-(`SELF_CHAIN_ENABLED=0`): each realm fires once per `CYCLE_MINUTES`, no continuous re-dispatch. A
-`-c 2` + self-chain experiment was tried (2026-06-20) and **reverted** — it sustained-saturated the
-shared 2-vCPU PG when an analytical-warmer cycle overlapped (`load15 > 2.3`, peaked `load1` 6.86).
-The binding constraint is the shared 2-vCPU PG, **saturated by the analytical warmers** (the floor's
-own writes are a minor cost); higher floor concurrency / self-chain are **gated on DB headroom**
-(warmer optimization or a 2→4 vCPU resize). See `runbook-floor-throughput-tuning-2026-06-13.md`
-(CURRENT STATE section).
+asia 61k active-7d; only ~10–23% fresh<8h). It runs on its **own `floor` worker (`-c 2`)** with
+**recency-first** ordering (capacity to the likeliest movers) and is **self-chaining**
+(`SELF_CHAIN_ENABLED=1`, all realms): each realm re-dispatches itself (~120s) while its stale backlog ≥
+threshold (500), so two realms continuously chew their backlogs while a third queues; yields during
+crawls. `-c 2` + self-chain was briefly reverted (2026-06-20) on DB saturation, but the root cause was a
+**NameError `warm_landing` storm** (a dangling Popular-surface constant ref, fixed in 5f7edd6), not the
+floor — with that fixed the DB recovered to ~1.0 baseline and `-c 2` + self-chain was **re-enabled**.
+The binding constraint remains the shared 2-vCPU PG, **periodically saturated by the analytical
+warmers** (the floor's own writes are a minor cost); `-c 2` is watched by a standing load monitor
+(sustained `load15 > 2.3`) — if it trips, back off (self-chain off / `-c 1`) and optimize the warmers or
+resize 2→4 vCPU. See `runbook-floor-throughput-tuning-2026-06-13.md` (CURRENT STATE section).
 
 ### Crawl-coexist (no deferral)
 
@@ -321,9 +324,9 @@ the live prod values differ where noted.
 | `BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED` | `0` | `1` | Pre-fetch ranked change-gate (`last_battle_time`) |
 | `BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED` | `0` | `1` | Route current-season ranked only; Random > Ranked |
 | `BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED` | `0` | `1` | Heavy ranked sweep once/day (primary slot) vs every slot — random-only otherwise |
-| `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED` | `0` | `0` | OFF (Beat-only). Continuous re-dispatch + `-c 2` was tried and reverted (sustained-saturated the 2-vCPU PG); gated on DB headroom |
+| `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED` | `0` | `1` | ON (all realms): re-dispatch (~120s) while stale backlog ≥ 500, so two realms chew concurrently. Re-enabled after the NameError warm-storm fix freed DB headroom |
 | `FLOOR_REFRESH_BATTLES_JSON_ENABLED` | `1` | `0` (deferred) | Per-mover `battles_json` rebuild from the same `ships/stats` — deferred during backlog catch-up |
-| `CELERY_FLOOR_CONCURRENCY` | — | `1` | Dedicated `floor` worker (`battlestats-celery-floor`) concurrency — `-c 2` reverted (warmer-saturated PG); gated on DB headroom |
+| `CELERY_FLOOR_CONCURRENCY` | — | `2` | Dedicated `floor` worker (`battlestats-celery-floor`) concurrency — `-c 2` re-enabled 2026-06-20 after the warm-storm fix; watched by the managed-PG load monitor |
 
 ### Notes
 

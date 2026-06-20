@@ -26,7 +26,7 @@ flowchart LR
         HYD["hydration (c=3): per-player / per-clan WG refresh"]
         BG["background (c=3): enrichment, snapshot engine, hot-players capture, warmers"]
         WARM["background warmers: landing, distributions, correlations, top-ships, hot-entity"]
-        FLOOR["floor (c=1): observation-floor-&lt;realm&gt; — recency-first capture, Beat-only (self-chain OFF)"]
+        FLOOR["floor (c=2): observation-floor-&lt;realm&gt; — recency-first capture, self-chaining (two realms chew concurrently)"]
     end
     CRAWL["crawls (c=1, exclusive): crawl_all_clans_task (multi-day)"]
 
@@ -65,8 +65,7 @@ flowchart LR
     %% ---- Dispatch / chaining ----
     DEF -.->|"dispatch / re-enqueue"| MQ
     BG -.->|"self-chain next batch"| MQ
-    %% floor self-chain is OFF (Beat-only); the per-realm floor cycle is enqueued
-    %% by Beat's "periodic enqueue" edge above (self-chain gated on DB headroom).
+    FLOOR -.->|"self-chain next realm cycle (~120s while backlog ≥ threshold)"| MQ
 
     %% ---- Warming path ----
     WARM -->|"read aggregates"| PG

@@ -17,22 +17,32 @@ Read this with `runbook-bulk-battle-observation-capture-2026-06-06.md` (floor de
 
 ## CURRENT STATE (2026-06-20) — supersedes all sections below
 
-The floor has settled back to its **minimal-safe original config**: a dedicated worker at **`-c 1`,
-self-chain OFF, Beat-only**. The sections below are the chronological investigation that led here;
-where they conflict with this section, **this section wins**. The `-c 2` + continuous-self-chain
-experiment (the prior version of this section) was **tried and reverted** — see "The experiment"
-below — because it sustained-saturated the shared 2-vCPU managed-PG. The "WG-bound" / "starved on the
-background pool" framings scattered through the older sections remain **outdated** (the floor is on its
-own queue, never on `background`), but the deeper lesson — that the binding constraint is the **DB,
-saturated by analytical warmers** — was only confirmed by the experiment and is recorded here.
+The floor runs a dedicated worker at **`-c 2` + self-chain ON (all realms)** — the re-attempt of the
+original 2× coverage goal, now on a recovered DB. The sections below are the chronological investigation
+that led here; where they conflict with this section, **this section wins**. The "WG-bound" / "starved
+on the background pool" framings scattered through the older sections remain **outdated** (the floor is
+on its own queue, never on `background`); the deeper lesson — the binding constraint is the **DB,
+periodically saturated by analytical warmers** — holds.
+
+**The arc (one day, 2026-06-20).** `-c 2` + self-chain was first enabled (2× mover-capture), then
+**reverted to `-c 1` / self-chain OFF** (commit 6367e3c) when the shared 2-vCPU managed-PG
+sustained-saturated (`system_load15 > 2.3`, `load1` peaked 6.86). But that was a misattribution: the
+real cause was a **NameError-driven `warm_landing` STORM**, not floor concurrency. The d5c00db "remove
+Random surface" refactor left a dangling `LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES` reference in the
+**Popular** landing surface, so **every landing warm NameError'd** → Popular never cached → a perpetual
+`warm_landing` re-warm loop hammered the DB. That bug is **fixed (commit 5f7edd6, deployed)**: the storm
+stopped and the DB recovered to **~1.0 baseline `load15`**. With the DB unblocked, **`-c 2` + self-chain
+was RE-ENABLED** (live on the droplet) — the re-attempt of the 2× goal on the healthy DB.
 
 **Settled config (prod, 2026-06-20):**
 
-- **Dedicated `floor` worker** — own `floor` queue + `battlestats-celery-floor` at **`-c 1`** (history:
-  `-c 3` → `-c 1` → briefly `-c 2` (reverted) → **`-c 1`**, settled 2026-06-20). Off the user-facing
-  `default` lane, so the floor never starves dispatchers / lazy-refresh-on-view / watchdogs.
-- **Self-chain OFF, Beat-only** — `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=0`. Each realm fires
-  once per `CYCLE_MINUTES` via Beat, with **no continuous re-dispatch**.
+- **Dedicated `floor` worker** — own `floor` queue + `battlestats-celery-floor` at **`-c 2`** (history:
+  `-c 3` → `-c 1` → `-c 2` (reverted on the warm storm) → **`-c 2`** re-enabled 2026-06-20). Off the
+  user-facing `default` lane, so the floor never starves dispatchers / lazy-refresh-on-view / watchdogs.
+- **Self-chain ON, all realms** — `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1`. Each realm
+  re-dispatches itself (~120s countdown) while its stale backlog ≥ threshold (500), so **two realms
+  continuously chew their per-realm backlogs** (filling the `-c 2` concurrency) while a third queues;
+  yields during crawls.
 - **`CYCLE_MINUTES=180`** — each realm fires every 3h, striped 60 min apart.
 - **Recency-first** candidate ordering (`-last_battle_date`) — scarce capture capacity goes to the
   likeliest movers, not the stalest/crawl-inflated tail.
@@ -42,36 +52,25 @@ saturated by analytical warmers** — was only confirmed by the experiment and i
   backlog catch-up phase; re-enable once past it — see the "steady-state re-enable" note in Iteration 2).
 - **`FLOOR_LIMIT=12000`** per-cycle count cap. (A per-cycle time-box was explored but **NOT built**.)
 
-**The experiment (`-c 2` + self-chain) — tried and REVERTED 2026-06-20.**
-We set `CELERY_FLOOR_CONCURRENCY=2` and `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1` (all realms) to
-double floor throughput: two realms chew concurrently while a self-chain re-dispatches each realm
-(~120s countdown) as long as its stale backlog ≥ threshold. Mechanically it **did** double mover-capture.
-But when an analytical-warmer cycle overlapped, `-c 2` + self-chain **sustained-saturated the shared
-2-vCPU managed-PG** (`system_load15 > 2.3`, **`load1` peaked 6.86**). It was reverted to `-c 1` /
-self-chain OFF.
+**THE CONSTRAINT — still the shared 2-vCPU managed-PG, periodically saturated by analytical WARMERS
+(not WG, not the floor's own writes).** Confirmed via the DO Prometheus managed-PG metrics endpoint
+(`:9273`) + `pg_stat_statements`; the app-droplet load proxy is **blind** to this. The DB hog is the
+`warm_landing_best_entity_caches` fan-out (per realm × sort) plus distributions/correlations; the
+floor's own observation/event INSERTs are a **minor** DB cost (it draws only ~1.5–2.4 req/s of WG, ~25%
+of the 9 req/s bucket). The acute saturation (the NameError warm storm) is fixed, so the DB has headroom
+again — but even post-fix a normal analytical-warmer cycle can spike it, so `-c 2` is **watched by a
+standing managed-PG load monitor** (alarm on sustained `load15 > 2.3`).
 
-**THE CONSTRAINT — the shared 2-vCPU managed-PG, saturated by analytical WARMERS (not WG, not the
-floor's own writes).** Confirmed via the DO Prometheus managed-PG metrics endpoint (`:9273`) +
-`pg_stat_statements` during the experiment; the app-droplet load proxy was **blind** to this. The DB
-hog is a sustained `warm_landing_best_entity_caches` fan-out (per realm × sort — observed **~9 tasks /
-3 min** sustained) plus distributions/correlations; those alone drive managed-PG `system_load` past
-saturation **independent of the floor**. The floor's own observation/event INSERTs are a **minor** DB
-cost (it draws only ~1.5–2.4 req/s of WG, ~25% of the 9 req/s bucket). So floor coverage is capped by
-**DB capacity**, and `-c 2` / self-chain are viable **only after DB headroom exists**.
+**CONTINGENCY (if the monitor trips again).** `-c 2` + self-chain is live, not pending. If a normal
+warmer cycle sustain-saturates the DB:
+1. **Back off** — self-chain OFF / `-c 1` (the minimal-safe config).
+2. **Optimize/throttle the analytical warmers** — `warm_landing_best_entity_caches` (per realm×sort
+   fan-out) and distributions/correlations are the prime suspects for the next quick win.
+3. **OR resize the DB 2 → 4 vCPU** (managed-PG `db-s-2vcpu-4gb` → next tier).
 
-**NEXT WORK (prerequisite for ANY floor coverage gain).** Before re-introducing floor concurrency or
-self-chain, create DB headroom:
-1. **Optimize/throttle the analytical warmers** — investigate the `warm_landing_best_entity_caches`
-   over-firing first (~9/3min sustained looks like a loop or over-trigger, not a steady cadence); a
-   warmer that fans out per realm×sort on a tight loop is the most likely quick win.
-2. **OR resize the DB 2 → 4 vCPU** (managed-PG `db-s-2vcpu-4gb` → next tier).
-
-Only once one of those lands should `-c 2` / self-chain be re-introduced (incrementally, watching the
-managed-PG `load15` monitor).
-
-**Diagnostic value of the experiment.** Coverage was **not** improved, but the real constraint is now
-known with **real DB metrics** (not the app-droplet proxy): the floor was never the DB hog — the
-analytical warmers are. That attribution is the durable takeaway.
+**Diagnostic value of the arc.** The real constraint is now known with **real DB metrics** (not the
+app-droplet proxy): the floor was never the DB hog — the analytical warmers are, and one of them
+(Popular) was in a NameError storm. That attribution is the durable takeaway.
 
 **Pool sizes (active-7d / stale>8h):** na 50,373 / 38,994 · eu 87,592 / 76,830 · asia 60,957 / 55,068.
 Only ~10–23% are fresh<8h, so the floor is **under-capacity** and the backlogs are large — but draining
