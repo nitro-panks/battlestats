@@ -247,9 +247,14 @@ fi
 # Popular landing surface NameError'd every warm so Popular never cached — fixed
 # in 5f7edd6; the DB recovered to ~1.0 baseline load15 and -c2 + self-chain was
 # re-enabled.) Self-chain re-dispatches each realm (~120s countdown) while its
-# stale backlog >= threshold (500). GATE_SKIP_COOLDOWN_HOURS stays 0 (code kept,
-# flag-gated). The other wins persist: recency-first candidate ordering (#66) plus
-# the dedicated `floor` worker below.
+# stale backlog >= threshold (500). GATE_SKIP_COOLDOWN_HOURS=8 is the COMPLEMENT
+# that makes self-chain WALK DEEP instead of spin: it stamps gated-skip (non-mover)
+# players (floor_gate_skipped_at) so the candidate query EXCLUDES them for 8h →
+# self-chain advances through the recency tiers (today -> n-1 -> n-2 -> ...) to
+# unprocessed players, then idles when the pool drains — rather than re-grinding the
+# same top-12k every cycle (the spin that got self-chain retired the first time;
+# self-chain WITHOUT this cooldown is the broken half). The other wins persist:
+# recency-first candidate ordering (#66) plus the dedicated `floor` worker below.
 # FLOOR_REFRESH_BATTLES_JSON_ENABLED=0 defers the per-mover battles_json rebuild
 # (~16-48% of per-mover wall-time) to maximize capture rate during the catch-up
 # phase — flip to 1 for steady-state once headroom is confirmed (displayed ship
@@ -260,7 +265,7 @@ fi
 # niche (Random > Ranked) and was dominating cycle time + holding locks. Validated
 # live 2026-06-19.
 for kv in \
-  'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=0' \
+  'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=8' \
   'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1' \
   'FLOOR_REFRESH_BATTLES_JSON_ENABLED=0' \
   'BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED=1'; do
