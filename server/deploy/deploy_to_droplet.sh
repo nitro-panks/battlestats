@@ -627,18 +627,17 @@ set_env_value CELERY_BACKGROUND_MAX_TASKS_PER_CHILD 50
 set_env_value CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB 786432
-# Dedicated observation-floor worker: -c1 (DB-write-capacity bound). With the
-# gate-skip cooldown on, self-chain walks DEEP and cycles become mover-DENSE
-# (the floor focuses on actual movers, ~60% of gated candidates need ships/stats
-# vs ~0.2% during the unproductive spin). That productive work is DB-write-heavy:
-# at -c2 it saturated the shared 2-vCPU managed-PG (load15 2.17, load1 2.65); at
-# -c1 it runs DB-safe (load15 ~1.0-1.1) while still capturing movers at ~0.5-2/sec.
-# So -c2 only ever "fit" the cheap spin, not productive capture — the DB write
-# capacity is the throughput wall. The real 2x needs the DB (resize 2->4 vCPU or
-# cut the analytical-warmer load), NOT floor concurrency. -c3 never. (Earlier the
-# -c2 saturation was misattributed; the acute cause was the NameError warm storm,
-# fixed in 5f7edd6 — but even storm-free, -c2 can't carry mover-dense cycles.)
-set_env_value CELERY_FLOOR_CONCURRENCY 1
+# Dedicated observation-floor worker: -c2 (2026-06-20). The floor is FETCH-bound in
+# steady state — at -c1 a realm does only ~50 ships/stats/min while WG (9/s) and the
+# DB sit idle — so a 2nd concurrent lane ~3x's mover capture (~150 ships/stats/min
+# measured). The earlier -c1 choice was forced because mover-dense -c2 cycles + the
+# heavy analytical WARMERS together saturated the 2-vCPU PG. THIS release cuts the
+# warmer DB load (efficiency-rank event-triggers off + daily distributions/correlations
+# — the prescribed "cut the analytical-warmer load" unlock), so -c2 now runs DB-safe
+# (steady load15 settles ~1.5; the efficiency-rank neuter is immediate relief). Watched
+# by the standing managed-PG load monitor; if it sustains load15>2.3, back off to -c1.
+# -c3 never (saturates). Pairs with self-chain (-c2 fills both lanes) + gate-skip cooldown.
+set_env_value CELERY_FLOOR_CONCURRENCY 2
 set_env_value CELERY_FLOOR_MAX_TASKS_PER_CHILD 50
 set_env_value CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB 786432
 set_env_value BEST_CLAN_EXCLUDED_IDS 1000068602
@@ -805,7 +804,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q floor -c "${CELERY_FLOOR_CONCURRENCY:-1}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_FLOOR_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n floor@%%h'
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q floor -c "${CELERY_FLOOR_CONCURRENCY:-2}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_FLOOR_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n floor@%%h'
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
