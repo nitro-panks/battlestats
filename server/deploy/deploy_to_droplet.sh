@@ -288,13 +288,16 @@ fi
 for kv in \
   'BATTLE_OBSERVATION_FLOOR_LIMIT=12000' \
   'BATTLE_OBSERVATION_FLOOR_CRAWL_LIMIT=3000' \
-  'BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES=120'; do
-  # Iteration 3 (2026-06-20): 180->120 to use the floor worker's ~40min/hour idle.
-  # 120 => 12 cycles/realm/day, stride 40min, up to 2 realms concurrent on the
-  # dedicated floor worker (-c 3). Measured step: watch distinct_productive /
-  # mover_capture_rate rise vs the 180 baseline, WG limiter waits, load15<2, and
-  # hydration not sustained-backed. Next step (90) only if still rising + guardrails
-  # clear; never 60 (3 concurrent realms saturate the 9 req/s WG bucket).
+  'BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES=180'; do
+  # Iteration 4 (2026-06-20): reverted 120->180. Iteration 3's frequency step ran
+  # healthy but the per-cycle data showed eu/na are DEPTH-bound (hit FLOOR_LIMIT
+  # 12000 with candidates left unreached, then idle), not frequency-bound; asia is
+  # candidate-exhausted (~3000). So depth (FLOOR_LIMIT / a per-cycle time-box) is the
+  # lever, not cadence. 180 (stride 60min) restores the ~40min/cycle idle that the
+  # depth probe consumes, and gives a future time-box a larger budget with a big
+  # buffer before the next realm. Frequency parked; revisit only if depth plateaus.
+  # Plan: ~/.claude/plans/great-analysis-make-a-tingly-babbage.md (iteration 4).
+  # CYCLE_MINUTES takes effect via post_migrate Beat re-registration on deploy.
   k="${kv%%=*}"
   if grep -q "^${k}=" /etc/battlestats-server.env; then
     sed -i "s|^${k}=.*|${kv}|" /etc/battlestats-server.env
