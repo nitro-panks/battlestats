@@ -238,15 +238,16 @@ else
   echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na,eu,asia' >> /etc/battlestats-server.env
 fi
 
-# Floor tuning env (iteration 4, 2026-06-20). SELF_CHAIN_ENABLED=1 (all realms):
-# self-chain re-dispatches each realm while its stale backlog >= threshold so the
-# dedicated floor worker's -c2 concurrency continuously chews the large per-realm
-# backlogs (na 39k/eu 77k/asia 55k stale). This REVERSES the 2026-06-19 "self-chain
-# is the WRONG tool" call — that assumed the floor was WG/slot-bound on a shared
-# pool; profiling showed the real constraint is the shared 2-vCPU PG (warmers are
-# the hog, not the floor), which has baseline headroom. Self-chain yields during
-# crawls. GATE_SKIP_COOLDOWN_HOURS stays 0 (code kept, flag-gated). The other wins:
-# recency-first candidate ordering (#66) plus the dedicated `floor` worker below.
+# Floor tuning env (iteration 4 revert, 2026-06-20). SELF_CHAIN_ENABLED=0 (all
+# realms): self-chain was reverted back to OFF because -c2 + self-chain
+# SUSTAINED-saturated the shared 2-vCPU managed-PG whenever an analytical-warmer
+# cycle overlapped (the warmers — a sustained warm_landing_best_entity_caches
+# fan-out — are the DB hog, NOT the floor; the floor's own writes are a minor DB
+# cost). The floor is now Beat-only (each realm fires every CYCLE_MINUTES, no
+# continuous re-dispatch). Re-enable self-chain only after DB headroom exists
+# (warmer optimization/throttle or a 2->4 vCPU resize). GATE_SKIP_COOLDOWN_HOURS
+# stays 0 (code kept, flag-gated). The other wins persist: recency-first candidate
+# ordering (#66) plus the dedicated `floor` worker below.
 # FLOOR_REFRESH_BATTLES_JSON_ENABLED=0 defers the per-mover battles_json rebuild
 # (~16-48% of per-mover wall-time) to maximize capture rate during the catch-up
 # phase — flip to 1 for steady-state once headroom is confirmed (displayed ship
@@ -258,7 +259,7 @@ fi
 # live 2026-06-19.
 for kv in \
   'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=0' \
-  'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1' \
+  'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=0' \
   'FLOOR_REFRESH_BATTLES_JSON_ENABLED=0' \
   'BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED=1'; do
   k="${kv%%=*}"
@@ -619,16 +620,15 @@ set_env_value CELERY_BACKGROUND_MAX_TASKS_PER_CHILD 50
 set_env_value CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB 786432
-# Dedicated observation-floor worker: -c 2 (iteration 4, 2026-06-20, profiled). Per-realm
-# floor draws only ~1.5-2.4 req/s (~25% of the 9 req/s WG bucket) and the real bottleneck
-# is the shared 2-vCPU managed-PG. Profiling showed: (1) the floor's own writes are a MINOR
-# DB cost (the hogs are analytical warmers + large-row warships_player updates); (2) the DB
-# has baseline headroom (load1 ~0.6-0.9 at -c1, quiet) and is spiked mainly by warmers
-# (~hourly), not the floor. So -c2 ~doubles floor mover-capture/coverage and is DB-safe in
-# steady state (only transient warmer overlaps push the DB over saturation, briefly). A
-# standing managed-PG load monitor watches for SUSTAINED saturation. (-c1 was a short-lived
-# measurement choice; -c3 over-saturates the DB when a warmer coincides — do not.)
-set_env_value CELERY_FLOOR_CONCURRENCY 2
+# Dedicated observation-floor worker: -c 1 (iteration 4 revert, 2026-06-20). -c2
+# (2 floor realms) overlapping an analytical-warmer cycle SUSTAIN-saturated the
+# shared 2-vCPU managed-PG (system_load > 2.3, peaked load1 6.86), so it was
+# reverted to the minimal-safe -c1. The floor's own DB cost is minor — the
+# analytical warmers (a sustained warm_landing_best_entity_caches fan-out, plus
+# distributions/correlations) are the real DB hog and alone drive managed-PG load
+# past saturation independent of the floor. -c2 needs DB headroom first (warmer
+# optimization/throttle or a 2->4 vCPU resize); -c3 is never safe here.
+set_env_value CELERY_FLOOR_CONCURRENCY 1
 set_env_value CELERY_FLOOR_MAX_TASKS_PER_CHILD 50
 set_env_value CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB 786432
 set_env_value BEST_CLAN_EXCLUDED_IDS 1000068602
@@ -773,9 +773,11 @@ EOF
 
 # Dedicated worker for the observation floor. Lives on its own queue so its
 # heavy, hours-long per-mover capture never starves the user-facing `default`
-# lane (lazy-refresh / dispatchers / watchdogs), and so the per-realm floor
-# cycles run CONCURRENTLY on this pool (-c 3) instead of serially contending on
-# `default`. --time-limit=21600 (6h) mirrors background — a full realm sweep over
+# lane (lazy-refresh / dispatchers / watchdogs) instead of serially contending on
+# `default`. Runs at -c 1 (Beat-only, self-chain OFF) — -c2/self-chain were tried
+# and reverted because they sustain-saturate the shared 2-vCPU PG (the analytical
+# warmers, not the floor, are the DB hog); higher concurrency is gated on DB
+# headroom. --time-limit=21600 (6h) mirrors background — a full realm sweep over
 # a large stale pool is a multi-hour op. See
 # agents/runbooks/runbook-floor-throughput-tuning-2026-06-13.md.
 cat > /etc/systemd/system/battlestats-celery-floor.service <<EOF
@@ -791,7 +793,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q floor -c "${CELERY_FLOOR_CONCURRENCY:-2}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_FLOOR_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n floor@%%h'
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q floor -c "${CELERY_FLOOR_CONCURRENCY:-1}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_FLOOR_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n floor@%%h'
 Restart=always
 RestartSec=5
 TimeoutStartSec=120

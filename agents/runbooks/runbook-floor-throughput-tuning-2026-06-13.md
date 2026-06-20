@@ -17,18 +17,22 @@ Read this with `runbook-bulk-battle-observation-capture-2026-06-06.md` (floor de
 
 ## CURRENT STATE (2026-06-20) — supersedes all sections below
 
-The floor has settled into a **dedicated-worker + continuous-self-chain** mode. The sections
-below are the chronological investigation that led here; where they conflict with this section,
-**this section wins**. Specifically, the **"Iteration 2 — self-chain RETIRED"** conclusion below is
-**REVERSED**: self-chain is back on for all realms (see "Self-chain re-enabled" below), and the
-"starved on the background pool (-c3)" / "WG-bound" / "self-chain is the WRONG tool" framings
-scattered through the older sections are **outdated** — read them through this section.
+The floor has settled back to its **minimal-safe original config**: a dedicated worker at **`-c 1`,
+self-chain OFF, Beat-only**. The sections below are the chronological investigation that led here;
+where they conflict with this section, **this section wins**. The `-c 2` + continuous-self-chain
+experiment (the prior version of this section) was **tried and reverted** — see "The experiment"
+below — because it sustained-saturated the shared 2-vCPU managed-PG. The "WG-bound" / "starved on the
+background pool" framings scattered through the older sections remain **outdated** (the floor is on its
+own queue, never on `background`), but the deeper lesson — that the binding constraint is the **DB,
+saturated by analytical warmers** — was only confirmed by the experiment and is recorded here.
 
 **Settled config (prod, 2026-06-20):**
 
-- **Dedicated `floor` worker** — own `floor` queue + `battlestats-celery-floor` at **`-c 2`** (history:
-  `-c 3` → briefly `-c 1` → now `-c 2`, settled 2026-06-20). Off the user-facing `default` lane, so the
-  floor never starves dispatchers / lazy-refresh-on-view / watchdogs.
+- **Dedicated `floor` worker** — own `floor` queue + `battlestats-celery-floor` at **`-c 1`** (history:
+  `-c 3` → `-c 1` → briefly `-c 2` (reverted) → **`-c 1`**, settled 2026-06-20). Off the user-facing
+  `default` lane, so the floor never starves dispatchers / lazy-refresh-on-view / watchdogs.
+- **Self-chain OFF, Beat-only** — `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=0`. Each realm fires
+  once per `CYCLE_MINUTES` via Beat, with **no continuous re-dispatch**.
 - **`CYCLE_MINUTES=180`** — each realm fires every 3h, striped 60 min apart.
 - **Recency-first** candidate ordering (`-last_battle_date`) — scarce capture capacity goes to the
   likeliest movers, not the stalest/crawl-inflated tail.
@@ -38,29 +42,40 @@ scattered through the older sections are **outdated** — read them through this
   backlog catch-up phase; re-enable once past it — see the "steady-state re-enable" note in Iteration 2).
 - **`FLOOR_LIMIT=12000`** per-cycle count cap. (A per-cycle time-box was explored but **NOT built**.)
 
-**Self-chain RE-ENABLED (all realms) — this REVERSES "Iteration 2 self-chain RETIRED" below.**
-`BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1`, `_SELF_CHAIN_REALMS` empty (= all realms). Each realm
-re-dispatches itself (~120s countdown, `_SELF_CHAIN_INTERVAL`) while its stale backlog ≥
-`_SELF_CHAIN_THRESHOLD` (500); self-chain only fires when **not** in a crawl (it yields to crawls).
-With `-c 2`, two realms chew concurrently and a third queues. The earlier "self-chain is the WRONG
-tool / spins an un-drainable pool" conclusion assumed the floor was on the shared `default`/`background`
-pool and WG/slot-bound; that premise was wrong. On its **own** `-c 2` worker, continuous self-chain is
-exactly the right mode: it fills the concurrency to continuously chew the large per-realm backlogs.
-It does **not** need to "terminate" — a freshness floor wants the backlog perpetually drained, and
-the pools are persistently larger than the threshold, so continuous chewing is by design.
+**The experiment (`-c 2` + self-chain) — tried and REVERTED 2026-06-20.**
+We set `CELERY_FLOOR_CONCURRENCY=2` and `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1` (all realms) to
+double floor throughput: two realms chew concurrently while a self-chain re-dispatches each realm
+(~120s countdown) as long as its stale backlog ≥ threshold. Mechanically it **did** double mover-capture.
+But when an analytical-warmer cycle overlapped, `-c 2` + self-chain **sustained-saturated the shared
+2-vCPU managed-PG** (`system_load15 > 2.3`, **`load1` peaked 6.86**). It was reverted to `-c 1` /
+self-chain OFF.
 
-**The binding constraint is the shared 2-vCPU managed PG — NOT WG, NOT the floor's own writes.**
-Profiling (2026-06-20): the floor draws only **~1.5–2.4 req/s** (~25% of the 9 req/s WG bucket); its
-observation/event INSERTs are a **minor** DB cost. The dominant DB costs are the analytical **warmers**
-(best-clans / distributions / correlations) plus large-row `warships_player` updates. The DB has
-baseline headroom (load1 ~0.6–0.9 quiet) and is spiked mainly by the warmers (~hourly), not the floor.
-A standing **managed-PG load monitor** watches for **sustained** saturation (`load15 > 2.3`). The older
-"WG-bound" and "floor slot-starved on the background pool" framings are therefore **wrong/outdated**
-(the floor is on its own queue and was never on `background`).
+**THE CONSTRAINT — the shared 2-vCPU managed-PG, saturated by analytical WARMERS (not WG, not the
+floor's own writes).** Confirmed via the DO Prometheus managed-PG metrics endpoint (`:9273`) +
+`pg_stat_statements` during the experiment; the app-droplet load proxy was **blind** to this. The DB
+hog is a sustained `warm_landing_best_entity_caches` fan-out (per realm × sort — observed **~9 tasks /
+3 min** sustained) plus distributions/correlations; those alone drive managed-PG `system_load` past
+saturation **independent of the floor**. The floor's own observation/event INSERTs are a **minor** DB
+cost (it draws only ~1.5–2.4 req/s of WG, ~25% of the 9 req/s bucket). So floor coverage is capped by
+**DB capacity**, and `-c 2` / self-chain are viable **only after DB headroom exists**.
+
+**NEXT WORK (prerequisite for ANY floor coverage gain).** Before re-introducing floor concurrency or
+self-chain, create DB headroom:
+1. **Optimize/throttle the analytical warmers** — investigate the `warm_landing_best_entity_caches`
+   over-firing first (~9/3min sustained looks like a loop or over-trigger, not a steady cadence); a
+   warmer that fans out per realm×sort on a tight loop is the most likely quick win.
+2. **OR resize the DB 2 → 4 vCPU** (managed-PG `db-s-2vcpu-4gb` → next tier).
+
+Only once one of those lands should `-c 2` / self-chain be re-introduced (incrementally, watching the
+managed-PG `load15` monitor).
+
+**Diagnostic value of the experiment.** Coverage was **not** improved, but the real constraint is now
+known with **real DB metrics** (not the app-droplet proxy): the floor was never the DB hog — the
+analytical warmers are. That attribution is the durable takeaway.
 
 **Pool sizes (active-7d / stale>8h):** na 50,373 / 38,994 · eu 87,592 / 76,830 · asia 60,957 / 55,068.
-Only ~10–23% are fresh<8h, so the floor is **under-capacity** and the backlogs are large — which is
-precisely why continuous self-chain at `-c 2` is the right mode.
+Only ~10–23% are fresh<8h, so the floor is **under-capacity** and the backlogs are large — but draining
+them faster is **gated on DB headroom**, not on floor concurrency alone.
 
 ## Two background-pool relief changes landed 2026-06-13 — attribution note
 
