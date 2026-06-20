@@ -2,23 +2,25 @@
 
 How the **battle-observation floor** and the **daily-active `Snapshot` engine** keep
 battle history flowing for active players. They are two *parallel coverage guarantees*
-with **distinct write targets** that run on **different workers** (corrected 2026-06-19):
+with **distinct write targets** that run on **different workers** (current 2026-06-20):
 
-- **Observation floor** — runs on the **`default`** queue / `battlestats-celery` worker
-  (per `settings.CELERY_TASK_ROUTES`; **not** `background`). No active player goes longer
-  than `BATTLE_OBSERVATION_FLOOR_HOURS` (live: 8) without a fresh `BattleObservation`.
-  Writes `BattleObservation` (+ a change-gated `BattleEvent`), advances
-  `Player.last_battle_date`, and — since 2026-06-14 — also rebuilds `battles_json` /
+- **Observation floor** — runs on the dedicated **`floor`** queue / `battlestats-celery-floor`
+  worker (`-c 2`; per `settings.CELERY_TASK_ROUTES`; **not** `default` or `background`). No active
+  player goes longer than `BATTLE_OBSERVATION_FLOOR_HOURS` (live: 8) without a fresh
+  `BattleObservation`. Writes `BattleObservation` (+ a change-gated `BattleEvent`), advances
+  `Player.last_battle_date`, and — since 2026-06-14 — can also rebuild `battles_json` /
   `battles_updated_at` for the captured player from the same `ships/stats` response
-  (`FLOOR_REFRESH_BATTLES_JSON_ENABLED`, default on). It does **not** write `Snapshot`.
+  (`FLOOR_REFRESH_BATTLES_JSON_ENABLED`) — **currently deferred / off (`=0`)** during the backlog
+  catch-up phase. It does **not** write `Snapshot`.
 - **Daily-active snapshot engine** — runs on the **`background`** (`-c 3`) worker. Every
   active, visible player gets one gap-free daily `Snapshot` row. Writes `Snapshot` (the
   day-over-day series). This engine exists *because* the floor never writes `Snapshot`.
 
 This doc is narrower and deeper than `queue-data-flow.md` — see that for the full
-four-queue layout. **The two engines run on separate workers** (floor on `default`,
-snapshot on `background`), so they do **not** contend for the same pool — an earlier
-version of this doc wrongly placed the floor on `background`; Level 3 below is corrected.
+five-queue layout. **The two engines run on separate workers** (floor on the dedicated `floor`
+worker, snapshot on `background`), so they do **not** contend for the same pool — an earlier
+version of this doc wrongly placed the floor on `background`, then on `default`; the floor now
+has its own `floor` worker, and Level 3 below is corrected.
 
 Sources: `runbook-bulk-battle-observation-capture-2026-06-06.md`,
 `runbook-daily-active-snapshots-2026-06-09.md`,
@@ -40,7 +42,7 @@ flowchart LR
     WG["Wargaming API (upstream)"]
     BEAT["Celery Beat (per-realm striped)"]
 
-    subgraph DW["default worker (-c 3): floor + dispatchers/lazy-refresh/watchdogs"]
+    subgraph FW["floor worker (-c 2): battlestats-celery-floor — recency-first, random-only, self-chaining"]
         FLOOR["ensure_daily_battle_observations_task<br/>(per-realm, 'observation-floor-&lt;realm&gt;')"]
     end
     subgraph BG["background worker (-c 3): snapshot + enrichment/hot/warmers"]
@@ -91,9 +93,10 @@ flowchart LR
 
 **The freshness clock the floor selects on** is the latest `BattleObservation.observed_at`
 (the `_candidates` `stale_hours` test) — *not* `battles_updated_at`. `battles_updated_at`
-tracks the displayed `battles_json` chart refresh; since 2026-06-14 the floor **also**
-advances it for active players from the same `ships/stats` response
-(`FLOOR_REFRESH_BATTLES_JSON_ENABLED`), alongside incremental refresh and lazy-refresh-on-view.
+tracks the displayed `battles_json` chart refresh; since 2026-06-14 the floor **can also**
+advance it for active players from the same `ships/stats` response
+(`FLOOR_REFRESH_BATTLES_JSON_ENABLED`) alongside incremental refresh and lazy-refresh-on-view —
+but that rebuild is **currently deferred / off (`=0`)** during the backlog catch-up phase.
 (The hot-player Tier-3 freshness sweep that previously advanced it was retired 2026-06-15.)
 
 ### The reuse seam
@@ -213,15 +216,21 @@ floor runs on a rolling `BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES` cycle (live: **
 (live: 8). The snapshot engine runs every `SNAPSHOT_ACTIVE_INTERVAL_MINUTES` (default 30,
 48 idempotent runs/day → convergence).
 
-**Corrected 2026-06-19.** The floor runs on the **`default`** worker; the snapshot engine,
-enrichment, hot-player capture, and warmers run on the **separate `background`** worker — so the
-floor is **not** contended by those background tenants (an earlier version claimed it was, from a
-wrong-worker reading). They still share the 2-vCPU PG and the global WG budget, just not a pool.
+**Current 2026-06-20.** The floor runs on its **own dedicated `floor` worker**
+(`battlestats-celery-floor`, `-c 2`); the snapshot engine, enrichment, hot-player capture, and
+warmers run on the **separate `background`** worker, and dispatchers / lazy-refresh / watchdogs on
+`default` — so the floor is **not** contended by any of those tenants (earlier versions wrongly placed
+it on `background`, then `default`). They still share the 2-vCPU PG and the global WG budget, just not
+a worker pool. The **binding constraint is that shared 2-vCPU managed PG** — and within it the
+analytical **warmers** (best-clans / distributions / correlations) + large-row `warships_player`
+updates, **not** the floor's own observation/event INSERTs (a minor cost) and **not** WG (the floor
+draws only ~1.5–2.4 of the 9 req/s bucket). A standing managed-PG load monitor watches for sustained
+saturation (`load15 > 2.3`).
 
 ```mermaid
 sequenceDiagram
     participant BEAT as Celery Beat
-    participant POOL as default worker (-c 3) — the floor runs here
+    participant POOL as floor worker (-c 2) — battlestats-celery-floor
     participant LOCK as Redis (per-realm single-flight lock)
     participant WG as Wargaming API (global token-bucket ~2-3 of 10 req/s)
     participant PG as PostgreSQL (2-vCPU managed)
@@ -239,14 +248,16 @@ sequenceDiagram
         POOL->>PG: BattleObservation (+ gated BattleEvent) + last_battle_date + battles_json
     end
     POOL->>LOCK: release lock
-    Note over POOL: if SELF_CHAIN_ENABLED: re-dispatch while _candidates() >= THRESHOLD.<br/>The gate-skip cooldown drains the non-mover wall so this TERMINATES.
+    Note over POOL: SELF_CHAIN_ENABLED=1 (all realms): re-dispatch (~120s) while _candidates() >= THRESHOLD (500).<br/>The per-realm backlogs are persistently > THRESHOLD, so with -c2 self-chain CONTINUOUSLY chews them<br/>(does NOT terminate — that's intended for a freshness floor). Yields during crawls.
 
-    Note over POOL,PG: separate `background` worker runs snapshot/enrichment/hot/warmers —<br/>shares the 2-vCPU PG + WG budget, NOT the floor's worker pool.
+    Note over POOL,PG: separate `background` worker runs snapshot/enrichment/hot/warmers; `default` runs<br/>dispatchers/lazy-refresh/watchdogs — all share the 2-vCPU PG (warmers are the main hog) + WG budget,<br/>NOT the floor's worker pool.
 ```
 
-### What actually bounds throughput (corrected 2026-06-19)
+### What actually bounds throughput (current 2026-06-20)
 
-Phase-0a instrumentation read on the **default** worker (the floor's real home) showed it healthy
+The binding constraint is the shared **2-vCPU managed PG**, and within it the analytical **warmers**
+(best-clans / distributions / correlations) + large-row `warships_player` updates — **not** WG and
+**not** the floor's own writes. Phase-0a instrumentation showed the floor healthy
 (11 clean cycles/12h, `aborted=False`) but:
 
 - **asia is permanently `FLOOR_LIMIT`-bound** (~12,000 candidates/cycle), ~90–95% `gated_skipped`
@@ -255,17 +266,20 @@ Phase-0a instrumentation read on the **default** worker (the floor's real home) 
   (≈ the 181k `stale_over_24h`). When the stale pool exceeds the cap, recent movers in the overflow
   wait a full cycle. **This corrects the earlier "NOT FLOOR_LIMIT" claim** — the cap *is* binding on
   asia (the prior reading conflated workers).
-- **battles_json rebuild** is ~16–48% of cycle wall-time — secondary; the per-mover `ships/stats`
-  serial fetch dominates.
-- **Not WG** (limiter idles ~2–3 of 10 req/s), and **not background-pool contention** (the floor
-  isn't on that pool).
+- **battles_json rebuild** was ~16–48% of cycle wall-time — now **deferred / off (`=0`)** during the
+  backlog catch-up phase, so the per-mover `ships/stats` serial fetch is the remaining per-mover cost.
+- **Not WG** (the floor draws only ~1.5–2.4 of the 9 req/s bucket), and **not worker-pool contention**
+  (the floor has its own dedicated `floor` worker).
 
-**The fix (gate-skip cooldown + self-chain, 2026-06-19).** `Player.floor_gate_skipped_at` lets
-`_candidates()` suppress the recently-checked non-mover wall, so the candidate pool drains to genuine
-work and the **self-chain terminates** — draining the limit-bound backlog in the idle time between
-Beat cycles instead of spinning on the wall (which, on the `default` worker, would starve
-dispatchers / lazy-refresh / watchdogs). See `runbook-floor-throughput-tuning-2026-06-13.md`
-(gate-skip cooldown section).
+**The current mode (recency-first + dedicated worker + continuous self-chain, 2026-06-20).**
+The floor is **under-capacity**, not mis-tuned: the per-realm active pools are large (na 50k / eu 88k /
+asia 61k active-7d; only ~10–23% fresh<8h). So rather than try to make self-chain "terminate", the
+floor runs on its **own `floor` worker (`-c 2`)** with **recency-first** ordering (capacity to the
+likeliest movers) and **continuous self-chain** (`SELF_CHAIN_ENABLED=1`, all realms): two realms chew
+concurrently to continuously drain the persistent backlogs. The earlier gate-skip-cooldown +
+"self-chain terminates" framing assumed the floor was slot-bound on a shared pool; it is not — the
+binding constraint is the shared 2-vCPU PG (warmer-dominated), and self-chain on the isolated worker is
+the right tool. See `runbook-floor-throughput-tuning-2026-06-13.md` (CURRENT STATE section).
 
 ### Crawl-coexist (no deferral)
 
@@ -304,8 +318,10 @@ the live prod values differ where noted.
 | `BATTLE_OBSERVATION_FLOOR_CHANGE_GATE_ENABLED` | `0` | `1` | Pre-fetch random change-gate (skip non-movers) |
 | `BATTLE_OBSERVATION_FLOOR_RANKED_GATE_ENABLED` | `0` | `1` | Pre-fetch ranked change-gate (`last_battle_time`) |
 | `BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_ENABLED` | `0` | `1` | Route current-season ranked only; Random > Ranked |
-| `BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED` | `0` | `0` (deferred) | Heavy ranked sweep once/day vs every slot |
-| `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED` | `0` | `0` (DB-gated) | Refill idle floor time between Beat slots |
+| `BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED` | `0` | `1` | Heavy ranked sweep once/day (primary slot) vs every slot — random-only otherwise |
+| `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED` | `0` | `1` (all realms) | Continuously re-dispatch while stale backlog ≥ `_SELF_CHAIN_THRESHOLD` (500); fills the `-c 2` concurrency; yields during crawls |
+| `FLOOR_REFRESH_BATTLES_JSON_ENABLED` | `1` | `0` (deferred) | Per-mover `battles_json` rebuild from the same `ships/stats` — deferred during backlog catch-up |
+| `CELERY_FLOOR_CONCURRENCY` | — | `2` | Dedicated `floor` worker (`battlestats-celery-floor`) concurrency — two realms chew concurrently |
 
 ### Notes
 

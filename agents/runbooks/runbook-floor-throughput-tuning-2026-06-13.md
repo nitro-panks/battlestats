@@ -15,6 +15,53 @@ This is a **phased, reversible, independently-sequenced** plan. Each phase lands
 
 Read this with `runbook-bulk-battle-observation-capture-2026-06-06.md` (floor design + benchmarks) and `runbook-hot-players-engagement-queue-2026-06-10.md` (the other `background`-pool sweep family).
 
+## CURRENT STATE (2026-06-20) — supersedes all sections below
+
+The floor has settled into a **dedicated-worker + continuous-self-chain** mode. The sections
+below are the chronological investigation that led here; where they conflict with this section,
+**this section wins**. Specifically, the **"Iteration 2 — self-chain RETIRED"** conclusion below is
+**REVERSED**: self-chain is back on for all realms (see "Self-chain re-enabled" below), and the
+"starved on the background pool (-c3)" / "WG-bound" / "self-chain is the WRONG tool" framings
+scattered through the older sections are **outdated** — read them through this section.
+
+**Settled config (prod, 2026-06-20):**
+
+- **Dedicated `floor` worker** — own `floor` queue + `battlestats-celery-floor` at **`-c 2`** (history:
+  `-c 3` → briefly `-c 1` → now `-c 2`, settled 2026-06-20). Off the user-facing `default` lane, so the
+  floor never starves dispatchers / lazy-refresh-on-view / watchdogs.
+- **`CYCLE_MINUTES=180`** — each realm fires every 3h, striped 60 min apart.
+- **Recency-first** candidate ordering (`-last_battle_date`) — scarce capture capacity goes to the
+  likeliest movers, not the stalest/crawl-inflated tail.
+- **Random-only per cycle** — `BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED=1` (the heavy ranked
+  sweep runs only on each realm's primary daily slot).
+- **`battles_json` rebuild DEFERRED** — `FLOOR_REFRESH_BATTLES_JSON_ENABLED=0` (intentional during the
+  backlog catch-up phase; re-enable once past it — see the "steady-state re-enable" note in Iteration 2).
+- **`FLOOR_LIMIT=12000`** per-cycle count cap. (A per-cycle time-box was explored but **NOT built**.)
+
+**Self-chain RE-ENABLED (all realms) — this REVERSES "Iteration 2 self-chain RETIRED" below.**
+`BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1`, `_SELF_CHAIN_REALMS` empty (= all realms). Each realm
+re-dispatches itself (~120s countdown, `_SELF_CHAIN_INTERVAL`) while its stale backlog ≥
+`_SELF_CHAIN_THRESHOLD` (500); self-chain only fires when **not** in a crawl (it yields to crawls).
+With `-c 2`, two realms chew concurrently and a third queues. The earlier "self-chain is the WRONG
+tool / spins an un-drainable pool" conclusion assumed the floor was on the shared `default`/`background`
+pool and WG/slot-bound; that premise was wrong. On its **own** `-c 2` worker, continuous self-chain is
+exactly the right mode: it fills the concurrency to continuously chew the large per-realm backlogs.
+It does **not** need to "terminate" — a freshness floor wants the backlog perpetually drained, and
+the pools are persistently larger than the threshold, so continuous chewing is by design.
+
+**The binding constraint is the shared 2-vCPU managed PG — NOT WG, NOT the floor's own writes.**
+Profiling (2026-06-20): the floor draws only **~1.5–2.4 req/s** (~25% of the 9 req/s WG bucket); its
+observation/event INSERTs are a **minor** DB cost. The dominant DB costs are the analytical **warmers**
+(best-clans / distributions / correlations) plus large-row `warships_player` updates. The DB has
+baseline headroom (load1 ~0.6–0.9 quiet) and is spiked mainly by the warmers (~hourly), not the floor.
+A standing **managed-PG load monitor** watches for **sustained** saturation (`load15 > 2.3`). The older
+"WG-bound" and "floor slot-starved on the background pool" framings are therefore **wrong/outdated**
+(the floor is on its own queue and was never on `background`).
+
+**Pool sizes (active-7d / stale>8h):** na 50,373 / 38,994 · eu 87,592 / 76,830 · asia 60,957 / 55,068.
+Only ~10–23% are fresh<8h, so the floor is **under-capacity** and the backlogs are large — which is
+precisely why continuous self-chain at `-c 2` is the right mode.
+
 ## Two background-pool relief changes landed 2026-06-13 — attribution note
 
 **Phase 1 was not the only `background`-pool change that day.** On the same date the
@@ -56,6 +103,10 @@ occupying a worker. **The pool's binding pressure is partly write contention aga
 managed PG, not only WG/CPU** — this matters for Phase 3 (below).
 
 ## Diagnosis (what's actually binding)
+
+> **OUTDATED — see "CURRENT STATE" at the top (2026-06-20).** This section's "shared `background` pool"
+> diagnosis predates the dedicated `floor` worker; the floor was never on `background`, and the real
+> binding constraint is the shared 2-vCPU PG (warmer-dominated), not WG and not background-pool slots.
 
 The floor is **not** capacity-bound by its own knobs:
 
@@ -312,6 +363,13 @@ appears once `remaining < THRESHOLD`. Spin = many `re-dispatched` with the pool 
 update this note with the confirmed `stop` once observed.**
 
 ## Iteration 2 — the actual fix: recency-first + dedicated worker (self-chain RETIRED, 2026-06-19)
+
+> **SUPERSEDED 2026-06-20 — see "CURRENT STATE" at the top.** The "self-chain RETIRED" conclusion in
+> this section was **reversed**: self-chain is **re-enabled for all realms** on the dedicated `floor`
+> worker (now `-c 2`, not `-c 3`). The floor is DB-bound (shared 2-vCPU PG, warmer-dominated), not
+> WG/slot-bound, and continuous self-chain is the correct way to keep the large per-realm backlogs
+> drained. Read the recency-first / dedicated-worker / `battles_json`-deferred content below as still
+> live; read the self-chain retirement as outdated.
 
 The na pilot proved the floor is **under-capacity**, not mis-tuned: na has **~52k active-7d /
 ~35k active-1d** players but the floor captures ~12k/cycle serially (~140 movers/min). The stale

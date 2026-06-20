@@ -18,14 +18,15 @@ flowchart LR
     end
 
     %% ===== Broker =====
-    MQ{{"RabbitMQ (task broker, 4 queues)"}}
+    MQ{{"RabbitMQ (task broker, 5 queues)"}}
 
     %% ===== Queue workers =====
     subgraph QUEUES["Celery queue workers"]
-        DEF["default (c=3): dispatchers, lazy-refresh, watchdogs, OBSERVATION FLOOR, incremental ranked/player refresh"]
+        DEF["default (c=3): dispatchers, lazy-refresh, watchdogs, incremental ranked/player refresh"]
         HYD["hydration (c=3): per-player / per-clan WG refresh"]
         BG["background (c=3): enrichment, snapshot engine, hot-players capture, warmers"]
         WARM["background warmers: landing, distributions, correlations, top-ships, hot-entity"]
+        FLOOR["floor (c=2): observation-floor-&lt;realm&gt; — recency-first capture, self-chaining, 2 realms concurrent"]
     end
     CRAWL["crawls (c=1, exclusive): crawl_all_clans_task (multi-day)"]
 
@@ -48,19 +49,23 @@ flowchart LR
     MQ --> HYD
     MQ --> BG
     MQ --> WARM
+    MQ --> FLOOR
     MQ --> CRAWL
 
     %% ---- Ingest: pull from WG, write Postgres ----
     HYD <-->|"fetch stats"| WG
     BG <-->|"fetch stats"| WG
+    FLOOR <-->|"fetch stats"| WG
     CRAWL <-->|"fetch stats"| WG
     HYD -->|"write"| PG
     BG -->|"write"| PG
+    FLOOR -->|"write"| PG
     CRAWL -->|"write"| PG
 
     %% ---- Dispatch / chaining ----
     DEF -.->|"dispatch / re-enqueue"| MQ
     BG -.->|"self-chain next batch"| MQ
+    FLOOR -.->|"self-chain next floor cycle (own floor queue)"| MQ
 
     %% ---- Warming path ----
     WARM -->|"read aggregates"| PG
@@ -87,10 +92,10 @@ flowchart LR
 2. **Lazy-refresh path** — a stale profile/clan view enqueues `update_battle_data_task`
    / `update_ranked_data_task` (hydration) or `update_player_data_task` (default) via
    `_delay_task_safely` (60s dedup). Workers fetch WG and write Postgres.
-3. **Scheduled ingest path** — Beat enqueues default/background/crawls work
-   (the observation floor + incremental refresh on **default**; enrichment, the
-   snapshot engine, hot-players capture on **background**; the full clan crawl on
-   **crawls**). Workers fetch WG and write Postgres.
+3. **Scheduled ingest path** — Beat enqueues default/background/floor/crawls work
+   (incremental refresh on **default**; the observation floor on its own **floor**
+   worker; enrichment, the snapshot engine, hot-players capture on **background**;
+   the full clan crawl on **crawls**). Workers fetch WG and write Postgres.
 4. **Warming path** — Beat-scheduled warmers (on the background queue) read Postgres
    aggregates and publish payloads to Redis, which the serve path then reads back.
 
@@ -100,7 +105,7 @@ flowchart LR
   (`CELERY_TASK_IGNORE_RESULT`). **Redis** holds published API payloads, single-flight
   locks, and dispatch-dedup keys — no Celery results.
 - **`crawls`** is a single-slot, exclusive, multi-day worker, architecturally distinct
-  from the other three concurrent queues — drawn separately.
+  from the other four concurrent queues (default, hydration, background, floor) — drawn separately.
 - Most of the **scheduled ingest path is gated by `ENABLE_CRAWLER_SCHEDULES`**
   (default off): the daily clan crawl, crawl watchdog, observation floor, hot-player
   capture, and incremental player/ranked refresh. Enrichment, snapshots, hot-player
