@@ -641,6 +641,18 @@ def is_efficiency_rank_snapshot_refresh_pending(realm: str = DEFAULT_REALM) -> b
 
 
 def queue_efficiency_rank_snapshot_refresh(realm: str = DEFAULT_REALM):
+    # Event-driven efficiency-rank recompute is gated OFF by default (2026-06-20).
+    # The rank is a slowly-changing population percentile, now recomputed once daily
+    # by the efficiency-rank-snapshot-warmer-{realm} Beat task (signals.py). Per-event
+    # recompute (clan crawl / efficiency-data refresh / per-player efficiency update)
+    # was the #1 DB WAL hog (~488 GB cumulative) for negligible benefit — a single
+    # player's data change does not move population percentiles. Badges/landing read
+    # the persisted snapshot columns (get_published_efficiency_rank_payload), so they
+    # never blank between recomputes. Flip EFFICIENCY_RANK_EVENT_TRIGGER_ENABLED=1 to
+    # restore event-triggering. The daily Beat calls the task directly (not this
+    # helper), so it is unaffected by this gate.
+    if os.getenv("EFFICIENCY_RANK_EVENT_TRIGGER_ENABLED", "0") != "1":
+        return {"status": "skipped", "reason": "event-trigger-disabled"}
     if cache.get(_efficiency_snapshot_refresh_failure_key(realm=realm)):
         return {"status": "skipped", "reason": "broker-unavailable"}
 

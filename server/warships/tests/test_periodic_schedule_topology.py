@@ -36,14 +36,19 @@ from warships.signals import (
 # Schedule families that get a per-realm row with a striped crontab.
 # Tuples are (name_prefix, cycle_env_default_minutes).
 STRIPED_PER_REALM_FAMILIES = [
-    ("landing-page-warmer", 120),
-    ("player-distribution-warmer", 360),
-    ("player-correlation-warmer", 360),
+    ("landing-page-warmer", 360),
+    ("player-distribution-warmer", 1440),
+    ("player-correlation-warmer", 1440),
+    ("efficiency-rank-snapshot-warmer", 1440),
     ("hot-entity-cache-warmer", 30),
-    ("recently-viewed-player-warmer", 10),
     ("incremental-player-refresh", 180),
     ("incremental-ranked-refresh", 120),
     ("hot-players-capture", 1440),
+]
+
+# Retired/removed per-realm schedule prefixes — must NOT exist after register.
+RETIRED_PER_REALM_FAMILIES = [
+    "recently-viewed-player-warmer",  # vestigial; landing Recent pill removed (2026-06-20)
 ]
 
 
@@ -80,6 +85,49 @@ class ExpectedScheduleNamesTests(TestCase):
                 PeriodicTask.objects.filter(name=name).exists(),
                 f"Missing singleton PeriodicTask row: {name}",
             )
+
+    def test_retired_per_realm_schedules_absent(self):
+        # Removed warmers must leave no PeriodicTask rows (legacy single name or
+        # per-realm) — else they keep firing. (recently-viewed-player-warmer, 2026-06-20)
+        for prefix in RETIRED_PER_REALM_FAMILIES:
+            self.assertFalse(
+                PeriodicTask.objects.filter(name=prefix).exists(),
+                f"Retired legacy schedule should be gone: {prefix}",
+            )
+            for realm in VALID_REALMS:
+                name = f"{prefix}-{realm}"
+                self.assertFalse(
+                    PeriodicTask.objects.filter(name=name).exists(),
+                    f"Retired per-realm schedule should be gone: {name}",
+                )
+
+
+class EfficiencyRankEventTriggerGateTests(TestCase):
+    """Efficiency-rank recompute is daily-Beat-only; event triggers gated OFF by default."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_queue_skips_when_event_trigger_disabled_by_default(self):
+        from warships.tasks import queue_efficiency_rank_snapshot_refresh
+        env = dict(os.environ)
+        env.pop("EFFICIENCY_RANK_EVENT_TRIGGER_ENABLED", None)
+        with mock.patch.dict(os.environ, env, clear=True):
+            result = queue_efficiency_rank_snapshot_refresh(realm="na")
+        self.assertEqual(result.get("reason"), "event-trigger-disabled")
+
+    def test_queue_passes_gate_when_enabled(self):
+        from warships.tasks import queue_efficiency_rank_snapshot_refresh
+        with mock.patch.dict(
+            os.environ, {"EFFICIENCY_RANK_EVENT_TRIGGER_ENABLED": "1"}
+        ), mock.patch(
+            "warships.tasks.refresh_efficiency_rank_snapshot_task.delay"
+        ) as delay:
+            result = queue_efficiency_rank_snapshot_refresh(realm="na")
+        # Gate passed -> not short-circuited; it proceeds to dispatch the task.
+        self.assertNotEqual(result.get("reason"), "event-trigger-disabled")
+        delay.assert_called_once()
 
 
 class StripedSchedulesAreCrontabTests(TestCase):

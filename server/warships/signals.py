@@ -178,7 +178,10 @@ def register_periodic_schedules(sender, **kwargs):
         PeriodicTask.objects.filter(
             name="clan-battle-summary-warmer").update(enabled=False)
 
-    landing_warm_minutes = int(os.getenv("LANDING_PAGE_WARM_MINUTES", "120"))
+    # 2026-06-20: 120 -> 360 (6h). Best-players read a once-daily materialized snapshot,
+    # so the warm mostly re-reads cheap caches; 6h (not daily) keeps the post-deploy
+    # namespace-bump cold window short (see runbook). Cost-reduction: analytical warmers.
+    landing_warm_minutes = int(os.getenv("LANDING_PAGE_WARM_MINUTES", "360"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
             realm, landing_warm_minutes, base_minute=55)
@@ -301,7 +304,10 @@ def register_periodic_schedules(sender, **kwargs):
         )
 
     # -- Player Distribution Warmer (split from landing warmer) --
-    dist_warm_minutes = int(os.getenv("DISTRIBUTION_WARM_MINUTES", "360"))
+    # 2026-06-20: 360 -> 1440 (daily). Population histograms move slowly; 12h cache TTL
+    # + :published fallback serve between warms. Cuts the MV refresh + 4-bin rebuild from
+    # 4x/day to 1x/day/realm. Cost-reduction: analytical warmers.
+    dist_warm_minutes = int(os.getenv("DISTRIBUTION_WARM_MINUTES", "1440"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
             realm, dist_warm_minutes, base_minute=50)
@@ -327,7 +333,11 @@ def register_periodic_schedules(sender, **kwargs):
         )
 
     # -- Player Correlation Warmer (split from landing warmer) --
-    corr_warm_minutes = int(os.getenv("CORRELATION_WARM_MINUTES", "360"))
+    # 2026-06-20: 360 -> 1440 (daily). The tier-type correlation is the JSONB CROSS JOIN
+    # LATERAL scan over ~200k battles_json (a top DB cost); it's already ~12h-effective via
+    # skip-if-fresh, and the request path is allow_rebuild=False (never cold-computes in the
+    # request thread). Daily makes the floor explicit. Cost-reduction: analytical warmers.
+    corr_warm_minutes = int(os.getenv("CORRELATION_WARM_MINUTES", "1440"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
             realm, corr_warm_minutes, base_minute=45)
@@ -349,6 +359,41 @@ def register_periodic_schedules(sender, **kwargs):
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
                 "description": f"Refreshes player population correlations — tier-type, WR-survival, ranked WR-battles ({realm.upper()}).",
+            },
+        )
+
+    # -- Efficiency-Rank Snapshot Warmer (2026-06-20, daily) --
+    # The efficiency-rank snapshot is a full-population rank UPDATE — the #1 DB WAL hog
+    # (~488 GB cumulative). It was event-driven (per clan crawl / efficiency-data refresh /
+    # per-player efficiency update); now recomputed once daily here, with the event triggers
+    # gated OFF by default (EFFICIENCY_RANK_EVENT_TRIGGER_ENABLED; see
+    # queue_efficiency_rank_snapshot_refresh). Ranks are slow-moving population percentiles
+    # within a 48h staleness budget; badges/landing read the persisted snapshot columns
+    # (get_published_efficiency_rank_payload) so they never blank between recomputes. This
+    # Beat calls the task directly, bypassing the gated queue helper.
+    eff_rank_warm_minutes = int(
+        os.getenv("EFFICIENCY_RANK_SNAPSHOT_WARM_MINUTES", "1440"))
+    for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = _realm_crontab_for_cycle(
+            realm, eff_rank_warm_minutes, base_minute=40)
+        eff_rank_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"efficiency-rank-snapshot-warmer-{realm}",
+            defaults={
+                "task": "warships.tasks.refresh_efficiency_rank_snapshot_task",
+                "crontab": eff_rank_warm_schedule,
+                "interval": None,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Recomputes the efficiency-rank snapshot (full-population percentile UPDATE) — daily ({realm.upper()}).",
             },
         )
 
@@ -401,33 +446,15 @@ def register_periodic_schedules(sender, **kwargs):
 
     PeriodicTask.objects.filter(name="bulk-entity-cache-loader").delete()
 
-    recently_viewed_warm_minutes = int(
-        os.getenv("RECENTLY_VIEWED_WARM_MINUTES", "10"))
-    for realm in sorted(VALID_REALMS):
-        minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, recently_viewed_warm_minutes, base_minute=2)
-        recently_viewed_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute=minute_str,
-            hour=hour_str,
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"recently-viewed-player-warmer-{realm}",
-            defaults={
-                "task": "warships.tasks.warm_recently_viewed_players_task",
-                "crontab": recently_viewed_warm_schedule,
-                "interval": None,
-                "enabled": True,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Re-caches recently-viewed players whose detail cache entry is missing ({realm.upper()}).",
-            },
-        )
-
-    PeriodicTask.objects.filter(name="recently-viewed-player-warmer").delete()
+    # -- Recently-Viewed Player Warmer: REMOVED (2026-06-20) --
+    # Vestigial. Its only consumer was the landing "Recent pill", removed in d5c00db
+    # (the pill now invalidates via the BattleEvent capture path; the frontend never
+    # calls /api/landing/recent). It then only redundantly pre-warmed player-detail
+    # caches already covered by the bulk-entity-loader (12h) + hot-entity warmer (30min),
+    # yet fired every 10min x 3 realms. Delete all registrations (legacy single name +
+    # per-realm) so they stop firing. Cost-reduction: analytical warmers.
+    PeriodicTask.objects.filter(
+        name__startswith="recently-viewed-player-warmer").delete()
 
     # -- Player Enrichment Kickstart --
     # The enrichment task self-chains between batches via apply_async(countdown=10s),
