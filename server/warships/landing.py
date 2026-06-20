@@ -130,6 +130,12 @@ LANDING_PLAYER_BEST_MIN_HIGH_TIER_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_TARGET_HIGH_TIER_PVP_BATTLES = 5000
 LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 1200
 LANDING_PLAYER_SIGMA_MIN_PVP_BATTLES = 500
+# Popular surface threshold. Restores the value of the removed
+# LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES (500) — the d5c00db "remove Random
+# surface" refactor deleted that constant but left a dangling reference in
+# resolve_landing_players_by_id_order (used by the still-live Popular surface),
+# which NameError'd on every warm → Popular never cached → perpetual re-warm storm.
+LANDING_PLAYER_POPULAR_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_MODES = ('best', 'sigma', 'popular')
 LANDING_PLAYER_BEST_WR_WEIGHT = 0.40
 LANDING_PLAYER_BEST_PLAYER_SCORE_WEIGHT = 0.22
@@ -878,7 +884,7 @@ def resolve_landing_players_by_id_order(player_ids: list[int], realm: str = DEFA
             player_id__in=normalized_ids,
             is_hidden=False,
             days_since_last_battle__lte=180,
-            pvp_battles__gt=LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES,
+            pvp_battles__gt=LANDING_PLAYER_POPULAR_MIN_PVP_BATTLES,
         ).exclude(
             last_battle_date__isnull=True,
         ).values(

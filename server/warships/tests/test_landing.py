@@ -1400,3 +1400,40 @@ class LandingWarmScopeTests(TestCase):
         # Players dirty key must survive — clan scope did not rebuild player surfaces.
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
+
+
+class ResolveLandingPlayersByIdOrderTests(TestCase):
+    """The Popular surface resolves players via resolve_landing_players_by_id_order.
+
+    Regression guard: the d5c00db "remove Random surface" refactor deleted
+    LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES but left a reference here, so this path
+    NameError'd on every warm in prod — Popular never cached, driving a perpetual
+    re-warm storm that saturated the DB. The existing Popular tests all mock
+    _build_popular_landing_players, so they never exercised this query. This test
+    calls it directly so the threshold constant must resolve.
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    def test_resolves_eligible_player_without_nameerror(self):
+        from warships.landing import (
+            LANDING_PLAYER_POPULAR_MIN_PVP_BATTLES,
+            resolve_landing_players_by_id_order,
+        )
+        now = timezone.now()
+        eligible = Player.objects.create(
+            name='PopularPlayer', player_id=7701, realm='na', is_hidden=False,
+            total_battles=3000, pvp_battles=LANDING_PLAYER_POPULAR_MIN_PVP_BATTLES + 100,
+            pvp_ratio=55.0, days_since_last_battle=3, last_battle_date=now,
+        )
+        # Below the Popular pvp_battles threshold → excluded.
+        Player.objects.create(
+            name='TooFewBattles', player_id=7702, realm='na', is_hidden=False,
+            total_battles=400, pvp_battles=LANDING_PLAYER_POPULAR_MIN_PVP_BATTLES - 100,
+            pvp_ratio=55.0, days_since_last_battle=3, last_battle_date=now,
+        )
+        rows = resolve_landing_players_by_id_order([7701, 7702], realm='na')
+        names = [r['name'] for r in rows]
+        self.assertIn('PopularPlayer', names)
+        self.assertNotIn('TooFewBattles', names)
