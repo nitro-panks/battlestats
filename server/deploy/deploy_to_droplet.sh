@@ -617,15 +617,16 @@ set_env_value CELERY_BACKGROUND_MAX_TASKS_PER_CHILD 50
 set_env_value CELERY_DEFAULT_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_HYDRATION_MAX_MEMORY_PER_CHILD_KB 393216
 set_env_value CELERY_BACKGROUND_MAX_MEMORY_PER_CHILD_KB 786432
-# Dedicated observation-floor worker: -c 1 (iteration 4, 2026-06-20). The floor is
-# WG-BOUND (shared 9 req/s token bucket), so running realms concurrently buys ZERO
-# throughput — it just splits the same budget into slower, contending parallel
-# streams. One realm at a time runs at full WG speed (fast, predictable cycle_ms,
-# no contention). At CYCLE_MINUTES=180 (stride 60min) realms are naturally ~1 at a
-# time anyway; -c 1 makes it a hard guarantee (a realm dispatched while another runs
-# simply queues behind it). Reverted from the earlier -c 3 (which assumed cross-realm
-# concurrency was a throughput win — refuted: the bottleneck is WG, not workers).
-set_env_value CELERY_FLOOR_CONCURRENCY 1
+# Dedicated observation-floor worker: -c 2 (iteration 4, 2026-06-20, profiled). Per-realm
+# floor draws only ~1.5-2.4 req/s (~25% of the 9 req/s WG bucket) and the real bottleneck
+# is the shared 2-vCPU managed-PG. Profiling showed: (1) the floor's own writes are a MINOR
+# DB cost (the hogs are analytical warmers + large-row warships_player updates); (2) the DB
+# has baseline headroom (load1 ~0.6-0.9 at -c1, quiet) and is spiked mainly by warmers
+# (~hourly), not the floor. So -c2 ~doubles floor mover-capture/coverage and is DB-safe in
+# steady state (only transient warmer overlaps push the DB over saturation, briefly). A
+# standing managed-PG load monitor watches for SUSTAINED saturation. (-c1 was a short-lived
+# measurement choice; -c3 over-saturates the DB when a warmer coincides — do not.)
+set_env_value CELERY_FLOOR_CONCURRENCY 2
 set_env_value CELERY_FLOOR_MAX_TASKS_PER_CHILD 50
 set_env_value CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB 786432
 set_env_value BEST_CLAN_EXCLUDED_IDS 1000068602
@@ -788,7 +789,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q floor -c "${CELERY_FLOOR_CONCURRENCY:-1}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_FLOOR_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n floor@%%h'
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/celery" -A battlestats worker -l INFO -Q floor -c "${CELERY_FLOOR_CONCURRENCY:-2}" --time-limit=21600 --prefetch-multiplier=1 --max-tasks-per-child="${CELERY_FLOOR_MAX_TASKS_PER_CHILD:-50}" --max-memory-per-child="${CELERY_FLOOR_MAX_MEMORY_PER_CHILD_KB:-786432}" --without-gossip --without-mingle -n floor@%%h'
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
