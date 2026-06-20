@@ -238,13 +238,15 @@ else
   echo 'BATTLE_OBSERVATION_FLOOR_RANDOM_FIRST_REALMS=na,eu,asia' >> /etc/battlestats-server.env
 fi
 
-# Floor tuning env (iterate loop, 2026-06-19). Outcome of the day's diagnosis:
-# the self-chain + gate-skip cooldown (#62) are the WRONG tool under-capacity
-# (na ~52k active-7d vs ~12k captured/cycle — the stale pool never drains, the
-# self-chain grinds an un-drainable backlog), so they are kept OFF. The real win
-# is recency-first candidate ordering (#66, in code: spends scarce capture
-# capacity on the likeliest movers) plus the dedicated `floor` worker below
-# (isolation from the user-facing `default` lane + cross-realm concurrency).
+# Floor tuning env (iteration 4, 2026-06-20). SELF_CHAIN_ENABLED=1 (all realms):
+# self-chain re-dispatches each realm while its stale backlog >= threshold so the
+# dedicated floor worker's -c2 concurrency continuously chews the large per-realm
+# backlogs (na 39k/eu 77k/asia 55k stale). This REVERSES the 2026-06-19 "self-chain
+# is the WRONG tool" call — that assumed the floor was WG/slot-bound on a shared
+# pool; profiling showed the real constraint is the shared 2-vCPU PG (warmers are
+# the hog, not the floor), which has baseline headroom. Self-chain yields during
+# crawls. GATE_SKIP_COOLDOWN_HOURS stays 0 (code kept, flag-gated). The other wins:
+# recency-first candidate ordering (#66) plus the dedicated `floor` worker below.
 # FLOOR_REFRESH_BATTLES_JSON_ENABLED=0 defers the per-mover battles_json rebuild
 # (~16-48% of per-mover wall-time) to maximize capture rate during the catch-up
 # phase — flip to 1 for steady-state once headroom is confirmed (displayed ship
@@ -256,7 +258,7 @@ fi
 # live 2026-06-19.
 for kv in \
   'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=0' \
-  'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=0' \
+  'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1' \
   'FLOOR_REFRESH_BATTLES_JSON_ENABLED=0' \
   'BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED=1'; do
   k="${kv%%=*}"
