@@ -250,10 +250,15 @@ fi
 # phase — flip to 1 for steady-state once headroom is confirmed (displayed ship
 # stats then age until a page-view). Runbook:
 # runbook-floor-throughput-tuning-2026-06-13.md.
+# RANKED_DAILY_ENABLED=1: run the heavy per-player ranked sweep only on each realm's
+# primary daily slot (na 1h/eu 3h/asia 5h UTC), random-only on the rest — ranked is
+# niche (Random > Ranked) and was dominating cycle time + holding locks. Validated
+# live 2026-06-19.
 for kv in \
   'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=0' \
   'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=0' \
-  'FLOOR_REFRESH_BATTLES_JSON_ENABLED=0'; do
+  'FLOOR_REFRESH_BATTLES_JSON_ENABLED=0' \
+  'BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED=1'; do
   k="${kv%%=*}"
   if grep -q "^${k}=" /etc/battlestats-server.env; then
     sed -i "s|^${k}=.*|${kv}|" /etc/battlestats-server.env
@@ -283,7 +288,13 @@ fi
 for kv in \
   'BATTLE_OBSERVATION_FLOOR_LIMIT=12000' \
   'BATTLE_OBSERVATION_FLOOR_CRAWL_LIMIT=3000' \
-  'BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES=180'; do
+  'BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES=120'; do
+  # Iteration 3 (2026-06-20): 180->120 to use the floor worker's ~40min/hour idle.
+  # 120 => 12 cycles/realm/day, stride 40min, up to 2 realms concurrent on the
+  # dedicated floor worker (-c 3). Measured step: watch distinct_productive /
+  # mover_capture_rate rise vs the 180 baseline, WG limiter waits, load15<2, and
+  # hydration not sustained-backed. Next step (90) only if still rising + guardrails
+  # clear; never 60 (3 concurrent realms saturate the 9 req/s WG bucket).
   k="${kv%%=*}"
   if grep -q "^${k}=" /etc/battlestats-server.env; then
     sed -i "s|^${k}=.*|${kv}|" /etc/battlestats-server.env
