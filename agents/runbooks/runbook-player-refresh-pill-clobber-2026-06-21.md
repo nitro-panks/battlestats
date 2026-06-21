@@ -2,7 +2,7 @@
 
 _Created: 2026-06-21_
 _Context: A live report that `https://battlestats.online/player/HMSHOOD06?realm=na` "hung on Updating…" — traced to the FE pill staying lit ~65s while the backend had the data ready in ~2s._
-_Status: FIX IMPLEMENTED 2026-06-21 — scoped `update_fields` save in `data.py` `update_ranked_data` (kills a concurrent read-modify-write clobber of `battles_updated_at`); regression test added._
+_Status: FIX IMPLEMENTED 2026-06-21 — scoped `update_fields` saves in BOTH bare-save clobberers on the visit path: `update_ranked_data` (the reported <23h ranked race) and `update_player_data` (the cold >23h variant, which also reverted ranked/derived fields; the `stats_updated_at → battles_updated_at` write was deleted). Two regression suites; follow-ups #3/#4 closed._
 
 ## Purpose
 
@@ -130,18 +130,26 @@ the ranked payload is still written exactly as before.
    server/warships/data.py` shows ~9 sites (e.g. `4342`, `4607`, `4668`, `4760`); each should be
    scoped to `update_fields` or re-read-before-save. Treat as a small follow-up sweep, not part of
    this slice.
-3. **Secondary clobber path — genuinely-cold (>23h) players.** When `update_player_data` does NOT
-   early-return (`data.py:4774`), its full save at `data.py:4879` writes `battles_updated_at` from
-   WG's `account/info.stats_updated_at` (`data.py:4821`) — an older, **tz-aware**
-   `datetime.fromtimestamp(ts, tz=utc)` value (the rest of the codebase uses naive `datetime.now()`;
-   `USE_TZ=False`). That can move the anchor backwards for a cold player even without the ranked race.
-   Not triggered in this trace (the player was <23h fresh). If it surfaces, the fix is a monotonic +
-   naive guard at `4821` (only advance `battles_updated_at`; build the WG value with
-   `datetime.utcfromtimestamp`). Deferred — out of this slice.
-4. **Consider a dedicated pill anchor (deeper, deferred).** The design smell is that one column means
-   both "visit battle-refresh clock" and "upstream stats source clock". A separate monotonic
-   `last_visit_refresh_at` the pill owns would end the whole class of clobbers. Only revisit if the
-   dual-meaning bites again.
+3. **Secondary clobber path — genuinely-cold (>23h) players — FIXED 2026-06-21.** When
+   `update_player_data` does NOT early-return (`data.py:4774`, `last_fetch > ~23h`) it does an
+   account/info refresh then a **bare `player.save()`**, which wrote back the task's stale snapshot of
+   **every** field — not just `battles_updated_at` but `ranked_json` / `efficiency` / `tiers` / `type`
+   / `randoms` — reverting the scoped writes that `update_battle_data` / `update_ranked_data` land
+   concurrently on the same cold visit (so it could even un-fix the ranked clobber from #1). It also
+   wrote `battles_updated_at` from WG's older, tz-aware `account/info.stats_updated_at`.
+   **Fix:** the non-hidden save is now **scoped to the account/info fields it owns**
+   (`update_fields=[...]`, excluding `battles_updated_at` + all `*_json`/`*_updated_at`), and the
+   `stats_updated_at → battles_updated_at` write is **deleted** (account/info is not battle data; the
+   pill anchor is owned solely by `update_battle_data`). The hidden branch keeps the bare save (it
+   legitimately wipes every battle/derived field and isn't racing); a brand-new row (`_state.adding`)
+   also bare-saves (full insert, no race). Regression: `test_update_player_data_scoped_save.py`
+   (concurrent `battles_updated_at` + `ranked_json` writes both survive; account/info no longer writes
+   the anchor) — verified fail-on-bare-save / pass-on-scoped.
+4. **Dedicated pill anchor — NOT needed (deferred/closed).** The design smell is that one column means
+   both "visit battle-refresh clock" and "upstream stats source clock". With both bare-save clobberers
+   now scoped (`update_ranked_data` #1, `update_player_data` #3), the anchor has a single writer
+   (`update_battle_data` → `now()`), so a separate `last_visit_refresh_at` column is unnecessary. Only
+   revisit if a new bare-save writer of the field appears (see #2).
 5. Relation: this is the persistent-cause sequel to the FE-pill *artifact* first framed as a
    poll-cadence issue — see `runbook-player-refresh-latency-2026-06-10.md` and the
    `project_player_page_loading_pill_diagnosis` memory.

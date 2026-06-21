@@ -4826,9 +4826,13 @@ def update_player_data(player: Player, force_refresh: bool = False, realm: str |
 
     # If the player is not hidden, map additional statistics
     if not player.is_hidden:
-        stats_updated_at = player_data.get("stats_updated_at")
-        player.battles_updated_at = datetime.fromtimestamp(
-            stats_updated_at, tz=timezone.utc) if stats_updated_at else None
+        # NOTE: do not write battles_updated_at here. This is an account/info
+        # refresh — it does not fetch battle/ships data. battles_updated_at is
+        # the "battle data was fetched" clock the live-refresh pill anchors on
+        # (_player_refresh_signals), owned by update_battle_data (now()). Writing
+        # WG's older account-level stats_updated_at moved it backwards and
+        # re-armed the "Updating…" pill on cold (>23h) visits
+        # (runbook-player-refresh-pill-clobber-2026-06-21).
         stats = player_data.get("statistics", {})
         player.total_battles = stats.get("battles", 0)
         pvp_stats = stats.get("pvp", {})
@@ -4885,7 +4889,26 @@ def update_player_data(player: Player, force_refresh: bool = False, realm: str |
         player.verdict = None
 
     player.last_fetch = datetime.now()
-    player.save()
+    if player.is_hidden or player._state.adding:
+        # Hidden path legitimately owns wiping every battle/derived field
+        # (battles_updated_at / *_json included); a brand-new row must be
+        # inserted in full. Neither races concurrent battle/ranked writes.
+        player.save()
+    else:
+        # Scoped to the account/info fields THIS refresh owns. A bare save()
+        # writes back the task's stale snapshot of battles_json /
+        # battles_updated_at / ranked_json / efficiency / tiers / type / randoms,
+        # reverting the scoped writes that update_battle_data / update_ranked_data
+        # land concurrently on the same cold (>23h) visit — a lost-update race
+        # (runbook-player-refresh-pill-clobber-2026-06-21).
+        player.save(update_fields=[
+            'realm', 'name', 'player_id', 'clan', 'creation_date',
+            'last_battle_date', 'days_since_last_battle', 'is_hidden',
+            'total_battles', 'pvp_battles', 'pvp_wins', 'pvp_losses',
+            'pvp_frags', 'pvp_survived_battles', 'pvp_deaths', 'actual_kdr',
+            'pvp_ratio', 'pvp_survival_rate', 'wins_survival_rate', 'verdict',
+            'last_fetch',
+        ])
     if not player.is_hidden:
         update_player_efficiency_data(
             player, force_refresh=force_refresh, realm=player.realm)
