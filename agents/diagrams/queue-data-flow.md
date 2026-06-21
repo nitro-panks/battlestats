@@ -22,9 +22,9 @@ flowchart LR
 
     %% ===== Queue workers =====
     subgraph QUEUES["Celery queue workers"]
-        DEF["default (c=3): dispatchers, lazy-refresh, watchdogs, incremental ranked/player refresh"]
-        HYD["hydration (c=3): per-player / per-clan WG refresh"]
-        BG["background (c=3): enrichment, snapshot engine, hot-players capture, warmers"]
+        DEF["default (c=3): crawl dispatcher + watchdog, unrouted periodic maintenance"]
+        HYD["hydration (c=3): per-player / per-clan WG refresh (on-view lazy-refresh)"]
+        BG["background (c=3): enrichment, snapshot engine, hot-players capture, incremental player/ranked refresh, warmers"]
         WARM["background warmers: landing, distributions, correlations, top-ships, hot-entity"]
         FLOOR["floor (c=2): observation-floor-&lt;realm&gt; — recency-first capture, self-chaining (two realms chew concurrently)"]
     end
@@ -90,12 +90,14 @@ flowchart LR
    (durable fallback) → JSON`. Cache-first, lazy-refresh; the view never calls WG
    directly.
 2. **Lazy-refresh path** — a stale profile/clan view enqueues `update_battle_data_task`
-   / `update_ranked_data_task` (hydration) or `update_player_data_task` (default) via
-   `_delay_task_safely` (60s dedup). Workers fetch WG and write Postgres.
+   / `update_ranked_data_task` / `update_player_data_task` (all **hydration**, since the
+   2026-06-17 interactive-refresh-lane consolidation) via `_delay_task_safely` (60s
+   dedup). Workers fetch WG and write Postgres.
 3. **Scheduled ingest path** — Beat enqueues default/background/floor/crawls work
-   (incremental refresh on **default**; the observation floor on its own **floor**
-   worker; enrichment, the snapshot engine, hot-players capture on **background**;
-   the full clan crawl on **crawls**). Workers fetch WG and write Postgres.
+   (the observation floor on its own **floor** worker; enrichment, the snapshot engine,
+   hot-players capture, and the incremental player/ranked refresh tiers on **background**;
+   the crawl dispatcher + watchdog on **default**; the full clan crawl on **crawls**).
+   Workers fetch WG and write Postgres.
 4. **Warming path** — Beat-scheduled warmers (on the background queue) read Postgres
    aggregates and publish payloads to Redis, which the serve path then reads back.
 
@@ -197,7 +199,7 @@ sequenceDiagram
     participant RD as Redis (detail cache)
     participant PG as PostgreSQL
     participant MQ as RabbitMQ
-    participant WK as Celery worker (hydration / default)
+    participant WK as Celery worker (hydration)
     participant WG as Wargaming API
 
     V->>API: GET /api/player/<name>
@@ -240,7 +242,7 @@ sequenceDiagram
 - **Lean dispatch on a warm cache.** A cache *hit* enqueues only the stale-randoms +
   ranked refresh (`update_battle_data_task` via `_delay_task_safely`, 60s dedup; and
   `update_ranked_data_task` via `queue_ranked_data_refresh`, 15-min dedup) — both on the
-  hydration/default workers. A cache *miss* (cold) fans out the fuller hydration suite
+  hydration worker. A cache *miss* (cold) fans out the fuller hydration suite
   (player + clan + members + battles + clan-battles).
 - **Dedup guards a thundering herd.** The 60s / 15-min dispatch windows plus per-player 6h
   locks mean many simultaneous visitors to the same stale player enqueue the work once.

@@ -1,7 +1,7 @@
 # Runbook: Give Player-Visit Core Refresh Its Own Lane
 
 **Created**: 2026-06-17
-**Status**: Proposed — implementation slice not yet landed
+**Status**: SHIPPED — `update_player_data_task` + `update_clan_data_task` are routed to `hydration` in `CELERY_TASK_ROUTES` (`server/battlestats/settings.py`), completing the interactive-lane consolidation. The "Question"/"Diagnosis" below describe the pre-fix `default`-fallthrough state for context; the observation floor has also since moved to its own dedicated `floor` worker, so it no longer camps a `default` slot either.
 **Depends on**: `runbook-celery-queue-strategy.md`, `runbook-player-refresh-latency-2026-06-10.md`, `runbook-backend-droplet-deploy.md`
 **Supersedes/advances**: the "Option A — keep 3 queues, refine routing" recommendation in `runbook-celery-queue-strategy.md` (Findings 1 + Recommended Direction)
 
