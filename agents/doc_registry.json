@@ -3005,6 +3005,36 @@
             "archive_on": [
                 "clan-chart-activity-filter-superseded"
             ]
+        },
+        "agents/runbooks/runbook-player-fetch-orchestration-2026-06-21.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "architecture",
+            "owner": "frontend",
+            "aliases": [
+                "player fetch orchestration",
+                "client request layer",
+                "fetch queue cancellation timeout",
+                "degradation monitor",
+                "clan rail de-waterfall",
+                "player page loading"
+            ],
+            "tags": [
+                "frontend",
+                "sharedJsonFetch",
+                "requestQueue",
+                "degradationMonitor",
+                "PlayerRequestScopeContext",
+                "cancellation",
+                "concurrency",
+                "429",
+                "de-waterfall",
+                "player-page"
+            ],
+            "archive_on": [
+                "player-fetch-orchestration-superseded"
+            ]
         }
     }
 }

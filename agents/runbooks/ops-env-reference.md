@@ -17,7 +17,8 @@ rationale, dates, and incident history behind specific settings.
 
 Cache/warming:
 - `HOT_ENTITY_PINNED_PLAYER_NAMES` (empty), `HOT_ENTITY_PLAYER_LIMIT`/`HOT_ENTITY_CLAN_LIMIT` (20/10)
-- `RECENTLY_VIEWED_PLAYER_LIMIT` (10), `RECENTLY_VIEWED_WARM_MINUTES` (60), `WARM_CACHES_ON_STARTUP` (1)
+- `WARM_CACHES_ON_STARTUP` (1). (`RECENTLY_VIEWED_*` vars are dead — the recently-viewed-player warmer Beat was **removed 2026-06-20**: its landing "Recent" consumer was gone, and it only redundantly re-warmed caches the bulk-loader/hot-entity already cover.)
+- **Analytical-warmer cadence** (reduced 2026-06-20 to cut managed-PG WAL/CPU — these slowly-changing full-population aggregates were recomputing far more often than the data warranted): `LANDING_PAGE_WARM_MINUTES` (**360** = 6h), `DISTRIBUTION_WARM_MINUTES` / `CORRELATION_WARM_MINUTES` / `EFFICIENCY_RANK_SNAPSHOT_WARM_MINUTES` (**1440** = daily, per-realm striped), `EFFICIENCY_RANK_EVENT_TRIGGER_ENABLED` (**0** — neuters the 3 per-event efficiency-rank recompute triggers so only the daily Beat fires it). **Confirmed effective 2026-06-21** (pg_stat_statements, 6.3h post-reset): efficiency-rank recompute fell to ~3/realm/day (≈0.7 GB/day WAL) from event-triggered hundreds/day (was the #1 cumulative WAL hog, ~488 GB); the deeper per-row-change UPDATE optimization is **not needed**. Ranks never blank between recomputes — badges/landing read persisted DB columns.
 - `CLAN_BATTLE_WARM_CLAN_IDS`, `BEST_CLAN_EXCLUDED_IDS`, `ANALYTICAL_WORK_MEM` (8MB)
 - Clan-battle summary fetch (per-member `clans/seasonstats/`, WG won't batch account_id): `CLAN_BATTLE_SUMMARY_FETCH_CONCURRENCY` (3) caps the per-task thread fan-out to stay under WG's ~10 req/s; `CLAN_BATTLE_PLAYER_STATS_ERROR_TTL` (300) short-caches a failed fetch so a transient `REQUEST_LIMIT_EXCEEDED` isn't persisted as a wrong "0 CB battles" for the 6h player TTL
 
@@ -88,7 +89,11 @@ Local-dev only: `BATTLESTATS_DISABLE_LIVE_REFRESH` (serve stale snapshots, no li
 
 ## Client env
 
+Sourced from `/etc/battlestats-client.env` on the droplet at frontend **build** time (host-maintained; the deploy script sources it before `npm run build`). `NEXT_PUBLIC_*` vars are inlined into the bundle at build, so changing one requires a redeploy.
+
 - `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`)
+- `NEXT_PUBLIC_PLAYER_DEWATERFALL` (default off; **prod=1**) — fetch the clan-members rail in parallel with the chart warmup instead of gating it behind warmup. Removes both gates (`warmupSettled` in `PlayerDetail`, `chartFetchesInFlight` in `useClanMembers`). Instantly reversible: set `0` + redeploy frontend. See `runbook-player-fetch-orchestration-2026-06-21.md`.
+- `NEXT_PUBLIC_APP_VERSION` — not in this file; captured at build from the repo-root `VERSION` via `next.config.mjs` (surfaced in the footer). Every version bump needs a client rebuild/deploy.
 
 ## Umami analytics
 
