@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchSharedJson, invalidateSharedJsonByPrefix } from '../lib/sharedJsonFetch';
 import { withRealm } from '../lib/realmParams';
+import { useDocumentVisible } from '../lib/useDocumentVisible';
 import type { PlayerData } from './entityTypes';
 
 // Live-update contract surfaced by the player-detail endpoint (see
@@ -84,6 +85,11 @@ export const usePlayerLiveRefresh = ({
     const [nextRefresh, setNextRefresh] = useState<number | null>(initialNextRefresh);
     const [secondsRemaining, setSecondsRemaining] = useState(() => computeSecondsRemaining(initialNextRefresh));
     const [refreshNonce, setRefreshNonce] = useState(0);
+    // Pause network polling while the tab is hidden; resume (and re-poll
+    // immediately) on focus. A backgrounded tab otherwise re-fires the
+    // visit-refresh poll every ~15 min forever — pure waste, and it compounds
+    // across many open tabs.
+    const visible = useDocumentVisible();
 
     const onRehydrateRef = useRef(onRehydrate);
     useEffect(() => {
@@ -97,9 +103,11 @@ export const usePlayerLiveRefresh = ({
         setSecondsRemaining(computeSecondsRemaining(initialNextRefresh));
     }, [playerName, realm, initialPending, initialNextRefresh]);
 
-    // Poll-to-rehydrate while a refresh is in flight.
+    // Poll-to-rehydrate while a refresh is in flight. Paused while the tab is
+    // hidden: re-runs (and polls immediately) when `visible` flips back to true,
+    // so a refresh that came due while backgrounded is picked up on focus.
     useEffect(() => {
-        if (!pending) {
+        if (!pending || !visible) {
             return;
         }
         let cancelled = false;
@@ -170,7 +178,7 @@ export const usePlayerLiveRefresh = ({
             cancelled = true;
             if (timer) clearTimeout(timer);
         };
-    }, [pending, playerName, realm]);
+    }, [pending, playerName, realm, visible]);
 
     // Countdown tick during cooldown (recompute from the absolute target each
     // tick, so it's correct after tab sleep / throttling). When the cooldown
