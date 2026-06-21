@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClanMemberData } from './clanMembersShared';
 import { getChartFetchesInFlight } from '../lib/sharedJsonFetch';
+import { isPlayerDewaterfallEnabled } from '../lib/featureFlags';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -161,7 +162,10 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
             }
         };
 
-        if (getChartFetchesInFlight() > 0) {
+        // De-waterfall: fetch the roster immediately, in parallel with the chart
+        // warmup, instead of waiting for chart fetches to drain. The clan rail is
+        // above-the-fold and has no data dependency on the charts.
+        if (!isPlayerDewaterfallEnabled() && getChartFetchesInFlight() > 0) {
             gateIntervalId = setInterval(() => {
                 if (getChartFetchesInFlight() === 0) {
                     clearInterval(gateIntervalId!);

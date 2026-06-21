@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { buildClanPath } from '../lib/entityRoutes';
+import { isPlayerDewaterfallEnabled } from '../lib/featureFlags';
 import ClanSVG from './ClanSVG';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
@@ -212,6 +213,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     const [clanBattleSummary, setClanBattleSummary] = useState<PlayerClanBattleSummary | null>(() => getInitialClanBattleHeaderState(player));
     const [shouldLoadClanMembers, setShouldLoadClanMembers] = useState(false);
     const [warmupSettled, setWarmupSettled] = useState(false);
+    const dewaterfall = isPlayerDewaterfallEnabled();
     const handleWarmupSettled = useCallback(() => setWarmupSettled(true), []);
     const isClanBattleEnjoyer = clanBattleSummary !== null;
     const { members: clanMembers, loading: clanMembersLoading, error: clanMembersError } = useClanMembers(player.clan_id || null, shouldLoadClanMembers);
@@ -233,21 +235,24 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         player.clan_battle_header_overall_win_rate,
     ]);
 
-    // Hard timeout: ensure clan members always load even if warmup fails
+    // Hard timeout: ensure clan members always load even if warmup fails.
+    // Unneeded when de-waterfalled — the clan fetch no longer waits on warmup.
     useEffect(() => {
+        if (dewaterfall) return;
         if (warmupSettled || !player.clan_id) return;
         const timeoutId = window.setTimeout(() => setWarmupSettled(true), 10_000);
         return () => window.clearTimeout(timeoutId);
-    }, [warmupSettled, player.clan_id, player.player_id]);
+    }, [dewaterfall, warmupSettled, player.clan_id, player.player_id]);
 
-    // Gate clan member fetch on warmup completion
+    // Gate clan member fetch on warmup completion (legacy). When de-waterfalled,
+    // activate as soon as a clan_id is known — in parallel with the chart warmup.
     useEffect(() => {
         if (!player.clan_id) {
             setShouldLoadClanMembers(false);
             return;
         }
 
-        if (!warmupSettled) {
+        if (!dewaterfall && !warmupSettled) {
             setShouldLoadClanMembers(false);
             return;
         }
@@ -270,7 +275,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                 window.clearTimeout(timeoutId);
             }
         };
-    }, [player.clan_id, player.player_id, warmupSettled]);
+    }, [dewaterfall, player.clan_id, player.player_id, warmupSettled]);
 
     useEffect(() => {
         if (shareState === 'idle') {

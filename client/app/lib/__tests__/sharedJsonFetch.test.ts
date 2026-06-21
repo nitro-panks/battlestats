@@ -42,7 +42,11 @@ describe('sharedJsonFetch', () => {
             label: 'clan members',
         });
 
-        expect(fetchMock).toHaveBeenCalledWith('/api/fetch/clan_members/123?foo=bar', undefined);
+        // fetch always receives a combined abort signal now (for the per-request timeout).
+        expect(fetchMock).toHaveBeenCalledWith(
+            '/api/fetch/clan_members/123?foo=bar',
+            expect.objectContaining({ signal: expect.anything() }),
+        );
     });
 
     it('leaves non-api urls unchanged', async () => {
@@ -50,7 +54,10 @@ describe('sharedJsonFetch', () => {
             label: 'player page',
         });
 
-        expect(fetchMock).toHaveBeenCalledWith('/player/example/', undefined);
+        expect(fetchMock).toHaveBeenCalledWith(
+            '/player/example/',
+            expect.objectContaining({ signal: expect.anything() }),
+        );
     });
 
     describe('retry option', () => {
@@ -119,6 +126,69 @@ describe('sharedJsonFetch', () => {
             })).rejects.toMatchObject({ status: 404, isServerError: false });
             // Terminal client error → exactly one fetch, no retry.
             expect(fetchMock).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('cancellation', () => {
+        it('rejects immediately with an AbortError if the caller signal is already aborted', async () => {
+            fetchMock.mockReset();
+            const controller = new AbortController();
+            controller.abort();
+
+            await expect(fetchSharedJson('/api/player/abort-pre', {
+                label: 'p',
+                cacheKey: 'abort-pre',
+                signal: controller.signal,
+            })).rejects.toHaveProperty('name', 'AbortError');
+            // Never even hit the network.
+            expect(fetchMock).not.toHaveBeenCalled();
+        });
+
+        it('rejects the caller when its signal aborts mid-flight', async () => {
+            fetchMock.mockReset();
+            // A fetch that never settles on its own.
+            fetchMock.mockImplementation(() => new Promise(() => {}));
+            const controller = new AbortController();
+
+            const pending = fetchSharedJson('/api/player/abort-mid', {
+                label: 'p',
+                cacheKey: 'abort-mid',
+                signal: controller.signal,
+            });
+
+            controller.abort();
+
+            await expect(pending).rejects.toHaveProperty('name', 'AbortError');
+        });
+
+        it('does NOT abort the shared fetch while another subscriber still awaits it', async () => {
+            fetchMock.mockReset();
+            let abortedDuringFlight = false;
+            fetchMock.mockImplementation((_url: string, init?: RequestInit) => new Promise((resolve) => {
+                init?.signal?.addEventListener('abort', () => { abortedDuringFlight = true; });
+                // resolve shortly after, so the surviving subscriber gets data.
+                setTimeout(() => resolve(jsonResponse({ ok: true })), 5);
+            }));
+
+            const aborter = new AbortController();
+            const keeper = new AbortController();
+
+            const leaving = fetchSharedJson('/api/player/shared', {
+                label: 'p', cacheKey: 'shared-dedup', signal: aborter.signal,
+            });
+            const staying = fetchSharedJson<{ ok: boolean }>('/api/player/shared', {
+                label: 'p', cacheKey: 'shared-dedup', signal: keeper.signal,
+            });
+
+            // Only one underlying fetch (deduped).
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+
+            aborter.abort();
+            await expect(leaving).rejects.toHaveProperty('name', 'AbortError');
+
+            // The surviving subscriber still resolves; the shared fetch was never aborted.
+            await expect(staying).resolves.toMatchObject({ data: { ok: true } });
+            expect(abortedDuringFlight).toBe(false);
         });
     });
 });
