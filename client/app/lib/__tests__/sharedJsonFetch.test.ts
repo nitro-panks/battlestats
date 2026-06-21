@@ -115,6 +115,31 @@ describe('sharedJsonFetch', () => {
             expect(fetchMock).toHaveBeenCalledTimes(2);
         });
 
+        it('retries a 429 throttle (when retry enabled) then succeeds', async () => {
+            fetchMock.mockReset();
+            fetchMock
+                .mockResolvedValueOnce(errorResponse(429))
+                .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+            const result = await fetchSharedJson<{ ok: boolean }>('/api/player/throttled', {
+                label: 'p',
+                cacheKey: 'retry-429',
+                retry: { attempts: 2, backoffMs: 1 },
+            });
+
+            expect(result.data).toEqual({ ok: true });
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        });
+
+        it('does NOT retry a 429 without retry opt-in', async () => {
+            fetchMock.mockReset();
+            fetchMock.mockResolvedValue(errorResponse(429));
+
+            await expect(fetchSharedJson('/api/player/throttled-noretry', { label: 'p', cacheKey: 'no-retry-429' }))
+                .rejects.toMatchObject({ status: 429, isThrottled: true });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+        });
+
         it('does NOT retry a 404 even when retry is enabled', async () => {
             fetchMock.mockReset();
             fetchMock.mockResolvedValue(errorResponse(404));
@@ -180,15 +205,18 @@ describe('sharedJsonFetch', () => {
                 label: 'p', cacheKey: 'shared-dedup', signal: keeper.signal,
             });
 
-            // Only one underlying fetch (deduped).
+            // Let the queue grant a slot and dispatch the (single, deduped) fetch.
+            await new Promise((resolve) => setTimeout(resolve, 0));
             expect(fetchMock).toHaveBeenCalledTimes(1);
 
+            // Abort one subscriber while the shared fetch is still in flight.
             aborter.abort();
             await expect(leaving).rejects.toHaveProperty('name', 'AbortError');
 
             // The surviving subscriber still resolves; the shared fetch was never aborted.
             await expect(staying).resolves.toMatchObject({ data: { ok: true } });
             expect(abortedDuringFlight).toBe(false);
+            expect(fetchMock).toHaveBeenCalledTimes(1);
         });
     });
 });

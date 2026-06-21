@@ -1,3 +1,6 @@
+import { requestQueue, type RequestPriority } from './requestQueue';
+import { emitFetchTelemetry, type FetchTelemetryEvent } from './fetchTelemetry';
+
 type SharedJsonFetchHeaders = Record<string, string | null>;
 
 export interface SharedJsonFetchResult<T> {
@@ -33,6 +36,10 @@ interface SharedJsonFetchOptions {
     // fresh budget). A timeout is a retriable transport error. Default
     // DEFAULT_TIMEOUT_MS; pass 0 to disable (e.g. a deliberately long stream).
     timeoutMs?: number;
+    // Scheduling priority in the global concurrency queue. 'critical' (the player
+    // detail / the active view's data) jumps ahead of 'high' (above-the-fold rails
+    // + charts), which jumps ahead of 'low' (background prefetch). Default 'high'.
+    priority?: RequestPriority;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -43,18 +50,45 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 // `status` is undefined for a non-HTTP failure (e.g. a malformed-JSON 2xx body).
 export class SharedJsonFetchError extends Error {
     readonly status?: number;
+    // Parsed from a 429's Retry-After header (ms), when present, so the retry
+    // backoff can honor the server's requested wait.
+    readonly retryAfterMs?: number;
 
-    constructor(message: string, status?: number) {
+    constructor(message: string, status?: number, retryAfterMs?: number) {
         super(message);
         this.name = 'SharedJsonFetchError';
         this.status = status;
+        this.retryAfterMs = retryAfterMs;
     }
 
     // A 5xx response — the only HTTP class worth retrying.
     get isServerError(): boolean {
         return this.status !== undefined && this.status >= 500;
     }
+
+    // A 429 throttle — also transient/retriable, but with backoff that honors
+    // Retry-After.
+    get isThrottled(): boolean {
+        return this.status === 429;
+    }
 }
+
+// Parse a Retry-After header (RFC 7231: either delta-seconds or an HTTP-date)
+// into milliseconds. Returns undefined when absent or unparseable.
+const parseRetryAfterMs = (value: string | null): number | undefined => {
+    if (!value) {
+        return undefined;
+    }
+    const seconds = Number(value);
+    if (Number.isFinite(seconds)) {
+        return Math.max(0, seconds * 1000);
+    }
+    const dateMs = Date.parse(value);
+    if (Number.isFinite(dateMs)) {
+        return Math.max(0, dateMs - Date.now());
+    }
+    return undefined;
+};
 
 interface SettledCacheEntry {
     expiresAt: number;
@@ -162,7 +196,14 @@ const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T
 
     if (!response.ok) {
         const body = await response.text();
-        throw new SharedJsonFetchError(`${label} failed with ${response.status}: ${body.slice(0, 120)}`, response.status);
+        const retryAfterMs = response.status === 429
+            ? parseRetryAfterMs(response.headers.get('Retry-After'))
+            : undefined;
+        throw new SharedJsonFetchError(
+            `${label} failed with ${response.status}: ${body.slice(0, 120)}`,
+            response.status,
+            retryAfterMs,
+        );
     }
 
     if (!contentType.toLowerCase().includes('application/json')) {
@@ -222,7 +263,7 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 // (every caller left — there is no one to retry for).
 const isRetriable = (error: unknown): boolean => {
     if (error instanceof SharedJsonFetchError) {
-        return error.isServerError;
+        return error.isServerError || error.isThrottled;
     }
     if (error instanceof DOMException) {
         // AbortSignal.timeout aborts with a TimeoutError — that is transient.
@@ -232,8 +273,38 @@ const isRetriable = (error: unknown): boolean => {
     return true; // fetch threw → network/transport error
 };
 
+// Jittered exponential backoff. For a 429 we wait at least the server's
+// Retry-After. Full jitter (random within the window) spreads a thundering herd
+// of retries that would otherwise re-collide.
+const computeBackoffMs = (error: unknown, retry: SharedJsonRetryOptions, attempt: number): number => {
+    const exponential = retry.backoffMs * (2 ** (attempt - 1));
+    let base = exponential;
+    if (error instanceof SharedJsonFetchError && error.retryAfterMs !== undefined) {
+        base = Math.max(base, error.retryAfterMs);
+    }
+    return base + Math.random() * base * 0.25;
+};
+
+// Map a settled attempt to a telemetry event for the degradation monitor. An
+// abort is NOT degradation, so it returns null (not emitted).
+const classifyTelemetry = (error: unknown, durationMs: number): FetchTelemetryEvent | null => {
+    if (error instanceof SharedJsonFetchError) {
+        if (error.isThrottled) {
+            return { kind: 'throttled', status: error.status, durationMs };
+        }
+        return { kind: 'error', status: error.status, durationMs };
+    }
+    if (error instanceof DOMException) {
+        if (error.name === 'TimeoutError') {
+            return { kind: 'timeout', durationMs };
+        }
+        return null; // AbortError — caller/cancellation, not a network signal
+    }
+    return { kind: 'error', durationMs }; // network/transport
+};
+
 export const fetchSharedJson = <T,>(url: string, options: SharedJsonFetchOptions): Promise<SharedJsonFetchResult<T>> => {
-    const { init, label, responseHeaders = [], ttlMs = 0, retry, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+    const { init, label, responseHeaders = [], ttlMs = 0, retry, signal, timeoutMs = DEFAULT_TIMEOUT_MS, priority = 'high' } = options;
     const normalizedUrl = normalizeApiUrl(url);
     const cacheKey = buildCacheKey(normalizedUrl, init, options.cacheKey);
 
@@ -259,6 +330,13 @@ export const fetchSharedJson = <T,>(url: string, options: SharedJsonFetchOptions
         const promise = (async () => {
             const maxAttempts = retry ? retry.attempts + 1 : 1;
             for (let attempt = 1; ; attempt += 1) {
+                // Wait for a concurrency slot (priority-ordered). Throws an
+                // AbortError if the controller fires while queued — i.e. a
+                // cancelled request that never started simply never fetches.
+                const release = await requestQueue.acquire(priority, controller.signal);
+                const startedAt = Date.now();
+                let result: SharedJsonFetchResult<T> | undefined;
+                let attemptError: unknown;
                 try {
                     const attemptSignal = buildAttemptSignal(controller.signal, timeoutMs);
                     const response = await fetch(normalizedUrl, { ...init, signal: attemptSignal });
@@ -267,19 +345,26 @@ export const fetchSharedJson = <T,>(url: string, options: SharedJsonFetchOptions
                         accumulator[headerName] = response.headers.get(headerName);
                         return accumulator;
                     }, {});
-
-                    return {
-                        data,
-                        headers,
-                    };
+                    result = { data, headers };
+                    emitFetchTelemetry({ kind: 'success', status: response.status, durationMs: Date.now() - startedAt });
                 } catch (error) {
-                    // Stop on the last attempt, or on a non-retriable failure
-                    // (4xx / non-JSON 2xx / controller abort).
-                    if (attempt >= maxAttempts || !retry || !isRetriable(error)) {
-                        throw error;
-                    }
-                    await delay(retry.backoffMs);
+                    attemptError = error;
+                    emitFetchTelemetry(classifyTelemetry(error, Date.now() - startedAt));
+                } finally {
+                    // Free the slot BEFORE any backoff wait, so a retry doesn't
+                    // hold concurrency while it sleeps.
+                    release();
                 }
+
+                if (result !== undefined) {
+                    return result;
+                }
+                // Stop on the last attempt, or on a non-retriable failure
+                // (4xx / non-JSON 2xx / controller abort).
+                if (attempt >= maxAttempts || !retry || !isRetriable(attemptError)) {
+                    throw attemptError;
+                }
+                await delay(computeBackoffMs(attemptError, retry, attempt));
             }
         })();
 
