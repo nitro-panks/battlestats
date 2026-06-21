@@ -198,4 +198,29 @@ describe('PlayerRouteView', () => {
         expect(profileFetchCount()).toBe(3);
         expect(trackEntityDetailViewMock).not.toHaveBeenCalled();
     });
+
+    it('aborts the previous player\'s in-flight requests when navigating to another player', async () => {
+        let firstSignal: AbortSignal | undefined;
+        (global.fetch as jest.Mock).mockImplementation((url: string, init?: RequestInit) => {
+            if (
+                typeof url === 'string'
+                && url.includes('Player%20A')
+                && !url.includes('battle-history')
+                && !firstSignal
+            ) {
+                firstSignal = init?.signal ?? undefined;
+            }
+            // Never resolves — the request stays in-flight so we can observe its abort.
+            return new Promise<never>(() => {});
+        });
+
+        const { rerender } = render(<PlayerRouteView playerName="Player A" />);
+        await waitFor(() => expect(firstSignal).toBeTruthy());
+        expect(firstSignal!.aborted).toBe(false);
+
+        // Navigate to a different player — the page scope changes, so player A's
+        // whole request group is cancelled.
+        rerender(<PlayerRouteView playerName="Player B" />);
+        await waitFor(() => expect(firstSignal!.aborted).toBe(true));
+    });
 });

@@ -16,7 +16,8 @@ import type { TierTypePayload } from './playerProfileChartData';
 import { deriveTierRowsFromTierTypePayload, deriveTypeRowsFromTierTypePayload } from './playerProfileChartData';
 import { dispatchPlayerRouteSectionRendered } from './usePlayerRouteDiagnostics';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
-import { decrementChartFetches, fetchSharedJson, incrementChartFetches } from '../lib/sharedJsonFetch';
+import { decrementChartFetches, fetchSharedJson, incrementChartFetches, isAbortError } from '../lib/sharedJsonFetch';
+import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
 import { useTheme } from '../context/ThemeContext';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
@@ -164,6 +165,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
 }) => {
     const { theme } = useTheme();
     const { realm } = useRealm();
+    const requestSignal = usePlayerRequestSignal();
     const [activeTab, setActiveTab] = useState<InsightsTabId>('activity');
     // null = unknown (still resolving); true/false once the Activity card's first
     // payload lands. Drives the default-tab choice and the dark Activity tab.
@@ -214,6 +216,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 label: `Activity re-probe ${playerName}`,
                 ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
                 cacheKey: battleHistoryCacheKey(playerName, realm, 'month', 'random', 0, refreshNonce),
+                signal: requestSignal,
             },
         )
             .then(({ data }) => {
@@ -257,6 +260,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     label: `Tier type correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                     priority: 'low',
+                    signal: requestSignal,
                     cacheKey: `tier-type:${playerId}:0:0:${refreshNonce}`,
                     responseHeaders: ['X-Tier-Type-Pending'],
                 }),
@@ -264,12 +268,14 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     label: `Ranked correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                     priority: 'low',
+                    signal: requestSignal,
                     cacheKey: `ranked-corr:${playerId}:${refreshNonce}`,
                 }),
                 fetchSharedJson<unknown>(withRealm(`/api/fetch/ranked_data/${playerId}/`, realm), {
                     label: `Ranked data ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                     priority: 'low',
+                    signal: requestSignal,
                     cacheKey: `ranked-data:${playerId}:0:0:${refreshNonce}`,
                     responseHeaders: ['X-Ranked-Pending'],
                 }),
@@ -281,6 +287,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         label: `Player clan battle seasons ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                         priority: 'low',
+                        signal: requestSignal,
                         cacheKey: `clan-cb-seasons:${playerId}:${refreshNonce}`,
                     }),
                 );
@@ -326,6 +333,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     const payload = await fetchSharedJson<TierTypePayload>(withRealm(`/api/fetch/player_correlation/tier_type/${playerId}/`, realm), {
                         label: `Tier type correlation ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                        signal: requestSignal,
                         cacheKey: `tier-type:${playerId}:${pendingAttempts}:${attempt}:${refreshNonce}`,
                         responseHeaders: ['X-Tier-Type-Pending'],
                     });
@@ -334,7 +342,11 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         data: payload.data,
                         pending: payload.headers['X-Tier-Type-Pending'] === 'true',
                     };
-                } catch {
+                } catch (err) {
+                    // Navigated away / realm switch — stop, don't retry or error.
+                    if (isAbortError(err)) {
+                        return null;
+                    }
                     if (attempt === 0) {
                         await delay(PROFILE_FETCH_RETRY_DELAY_MS);
                         if (cancelled) {

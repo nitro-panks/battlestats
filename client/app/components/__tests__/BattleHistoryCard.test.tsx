@@ -13,6 +13,7 @@ import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
+    isAbortError: (error: unknown) => error instanceof DOMException && error.name === 'AbortError',
 }));
 
 const mockTrackEvent = jest.fn();

@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
+import { degradationMonitor } from '../lib/degradationMonitor';
+import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
 import wrColor from '../lib/wrColor';
 import { chartColors } from '../lib/chartTheme';
 import { useTheme } from '../context/ThemeContext';
@@ -116,12 +118,13 @@ export const battleHistoryCacheKey = (
  * render the card), but the request is cheap and the card handles its own
  * errors/404 — so do NOT gate this on is_hidden (that info isn't here yet).
  */
-export const prefetchBattleHistory = (playerName: string, realm: string): void => {
+export const prefetchBattleHistory = (playerName: string, realm: string, signal?: AbortSignal): void => {
     void fetchSharedJson<BattleHistoryPayload>(battleHistoryFetchUrl(playerName, realm), {
         label: 'BattleHistoryCard:month:random',
         ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
         cacheKey: battleHistoryCacheKey(playerName, realm),
         responseHeaders: ['X-Ranked-Observation-Pending'],
+        signal,
     }).catch(() => { /* the card re-fetches + surfaces errors on mount */ });
 };
 
@@ -633,6 +636,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     embedded = false,
     onAvailabilityChange,
 }) => {
+    const requestSignal = usePlayerRequestSignal();
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
     const [monthByDay, setMonthByDay] = useState<BattleHistoryByDay[]>([]);
     // Lifetime baseline from the month fetch, used to anchor the sparkline's
@@ -680,6 +684,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
                 cacheKey: battleHistoryCacheKey(playerName, realm, window, mode, cacheBust, refreshNonce),
                 responseHeaders: ['X-Ranked-Observation-Pending'],
+                signal: requestSignal,
             })
                 .then(({ data, headers }) => {
                     if (cancelled) return;
@@ -694,11 +699,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         pendingAttempts += 1;
                         pollTimer = setTimeout(
                             () => fetchOnce(pendingAttempts),
-                            RANKED_PENDING_RETRY_DELAY_MS,
+                            RANKED_PENDING_RETRY_DELAY_MS * degradationMonitor.getPollIntervalMultiplier(),
                         );
                     }
                 })
                 .catch((e: unknown) => {
+                    // Page navigated away / realm switched — benign.
+                    if (isAbortError(e)) return;
                     if (!cancelled) {
                         setError(e instanceof Error ? e : new Error(String(e)));
                         setPayload(null);
@@ -727,6 +734,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 label: `BattleHistoryCard:sparkline`,
                 ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
                 cacheKey: battleHistoryCacheKey(playerName, realm, 'month', mode, 0, refreshNonce),
+                signal: requestSignal,
             },
         )
             .then(({ data }) => {

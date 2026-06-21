@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
-import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
+import { degradationMonitor } from '../lib/degradationMonitor';
+import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -109,6 +111,7 @@ const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
 
 const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = false }) => {
     const { realm } = useRealm();
+    const requestSignal = usePlayerRequestSignal();
     const [seasons, setSeasons] = useState<RankedSeason[]>([]);
     const [isChartLoading, setIsChartLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -127,6 +130,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                     const payload = await fetchSharedJson<RankedSeason[]>(withRealm(`/api/fetch/ranked_data/${playerId}/`, realm), {
                         label: `Ranked data ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                        signal: requestSignal,
                         cacheKey: `ranked-data:${playerId}:${pendingAttempts}:${attempt}`,
                         responseHeaders: ['X-Ranked-Pending'],
                     });
@@ -135,7 +139,13 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                         data: payload.data,
                         pending: payload.headers['X-Ranked-Pending'] === 'true',
                     };
-                } catch {
+                } catch (err) {
+                    // Navigated away / realm switch — rethrow so the caller swallows
+                    // it (returning null here would surface a spurious "unable to
+                    // load" error on a benign cancellation).
+                    if (isAbortError(err)) {
+                        throw err;
+                    }
                     if (attempt === 0) {
                         await delay(RANKED_FETCH_RETRY_DELAY_MS);
                         continue;
@@ -175,10 +185,14 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                     pendingAttempts += 1;
                     timeoutId = setTimeout(() => {
                         void fetchData();
-                    }, RANKED_PENDING_RETRY_DELAY_MS);
+                    }, RANKED_PENDING_RETRY_DELAY_MS * degradationMonitor.getPollIntervalMultiplier());
                     return;
                 }
-            } catch {
+            } catch (err) {
+                // Benign cancellation (nav / realm switch) — leave state alone.
+                if (isAbortError(err)) {
+                    return;
+                }
                 if (!isMounted) {
                     return;
                 }

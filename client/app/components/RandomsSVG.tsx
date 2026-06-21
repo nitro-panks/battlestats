@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
-import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
+import { degradationMonitor } from '../lib/degradationMonitor';
+import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
@@ -277,6 +279,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     theme = 'light',
 }) => {
     const { realm } = useRealm();
+    const requestSignal = usePlayerRequestSignal();
     // Seed from the module-scope cache so a tab-switch return repaints the prior
     // (already-fresh) result instantly instead of flashing a loader or showing
     // the stale-then-corrected ladder again.
@@ -328,6 +331,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     // cache-first) server. Instant paint is handled by the module
                     // cache seed above; in-flight dedup still prevents dup fetches.
                     ttlMs: 0,
+                    signal: requestSignal,
                     cacheKey: `randoms:${playerId}:${attempt}`,
                 });
 
@@ -345,9 +349,13 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                         if (!cancelled) {
                             void fetchRandoms(attempt + 1);
                         }
-                    }, RANDOMS_REHYDRATE_DELAY_MS);
+                    }, RANDOMS_REHYDRATE_DELAY_MS * degradationMonitor.getPollIntervalMultiplier());
                 }
             } catch (error) {
+                // Benign cancellation (nav / realm switch) — not an error.
+                if (isAbortError(error)) {
+                    return;
+                }
                 if (!cancelled) {
                     console.error('Error fetching data:', error);
                 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClanMemberData } from './clanMembersShared';
 import { fetchSharedJson, getChartFetchesInFlight, isAbortError } from '../lib/sharedJsonFetch';
+import { degradationMonitor } from '../lib/degradationMonitor';
 import { isPlayerDewaterfallEnabled } from '../lib/featureFlags';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
@@ -125,9 +126,9 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
                 if (shouldPollAgain && attempt < HYDRATION_POLL_LIMIT) {
                     attemptsRef.current = attempt + 1;
                     const baseDelay = resolveHydrationPollDelay(hydrationState);
-                    const priorityDelay = getChartFetchesInFlight() > 0
+                    const priorityDelay = (getChartFetchesInFlight() > 0
                         ? Math.max(baseDelay, HYDRATION_DEFERRED_POLL_INTERVAL_MS)
-                        : baseDelay;
+                        : baseDelay) * degradationMonitor.getPollIntervalMultiplier();
                     timeoutId = setTimeout(() => {
                         void fetchMembers(false, attempt + 1);
                     }, priorityDelay);

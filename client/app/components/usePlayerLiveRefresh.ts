@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchSharedJson, invalidateSharedJsonByPrefix } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, invalidateSharedJsonByPrefix, isAbortError } from '../lib/sharedJsonFetch';
+import { degradationMonitor } from '../lib/degradationMonitor';
 import { withRealm } from '../lib/realmParams';
 import { useDocumentVisible } from '../lib/useDocumentVisible';
 import type { PlayerData } from './entityTypes';
@@ -61,6 +62,9 @@ interface UsePlayerLiveRefreshParams {
     // re-hydrates (header summary updates from the prop; charts re-fetch via the
     // bumped refreshNonce).
     onRehydrate: (data: PlayerData) => void;
+    // The page-scoped abort signal (PlayerRouteView). The poll fetch is cancelled
+    // when the player/realm changes or the page unmounts.
+    signal?: AbortSignal;
 }
 
 /**
@@ -80,6 +84,7 @@ export const usePlayerLiveRefresh = ({
     initialPending,
     initialNextRefresh,
     onRehydrate,
+    signal,
 }: UsePlayerLiveRefreshParams): LiveRefreshState => {
     const [pending, setPending] = useState(initialPending);
     const [nextRefresh, setNextRefresh] = useState<number | null>(initialNextRefresh);
@@ -123,6 +128,7 @@ export const usePlayerLiveRefresh = ({
                         label: `PlayerLiveRefresh ${playerName}`,
                         cacheKey: `player-live:${playerName}:${realm}:${attempt}`,
                         responseHeaders: [PLAYER_REFRESH_PENDING_HEADER, PLAYER_NEXT_REFRESH_HEADER],
+                        signal,
                     },
                 );
                 if (cancelled) return;
@@ -157,7 +163,8 @@ export const usePlayerLiveRefresh = ({
                 if (attempt < POLL_LIMIT) {
                     // Still refreshing — keep checking the header, but do NOT touch
                     // playerData/refreshNonce (no re-render storm, no chart reloads).
-                    timer = setTimeout(poll, pollDelayMs(attempt));
+                    // Slow the cadence while the network is degraded.
+                    timer = setTimeout(poll, pollDelayMs(attempt) * degradationMonitor.getPollIntervalMultiplier());
                 } else {
                     // Gave up waiting — stop the spinner without forcing a reload;
                     // the countdown reflects whatever freshness we have.
@@ -165,7 +172,11 @@ export const usePlayerLiveRefresh = ({
                     setPending(false);
                     setSecondsRemaining(computeSecondsRemaining(next));
                 }
-            } catch {
+            } catch (error) {
+                // Navigated away / switched realm — benign, leave state untouched.
+                if (isAbortError(error)) {
+                    return;
+                }
                 if (!cancelled) {
                     // Fail open into cooldown rather than spin on a broken refresh.
                     setPending(false);
@@ -178,7 +189,7 @@ export const usePlayerLiveRefresh = ({
             cancelled = true;
             if (timer) clearTimeout(timer);
         };
-    }, [pending, playerName, realm, visible]);
+    }, [pending, playerName, realm, visible, signal]);
 
     // Countdown tick during cooldown (recompute from the absolute target each
     // tick, so it's correct after tab sleep / throttling). When the cooldown

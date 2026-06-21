@@ -8,7 +8,8 @@ import { prefetchBattleHistory } from './BattleHistoryCard';
 import type { PlayerData } from './entityTypes';
 import { buildPlayerPath } from '../lib/entityRoutes';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
-import { fetchSharedJson, SharedJsonFetchError } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, SharedJsonFetchError, isAbortError } from '../lib/sharedJsonFetch';
+import { PlayerRequestScopeProvider } from '../context/PlayerRequestScopeContext';
 import {
     PLAYER_NEXT_REFRESH_HEADER,
     PLAYER_REFRESH_PENDING_HEADER,
@@ -36,6 +37,23 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
     const [initialNextRefresh, setInitialNextRefresh] = useState<number | null>(null);
     const trackedPlayerIdRef = useRef<number | null>(null);
 
+    // One AbortController for the whole page, scoped to (playerName, realm).
+    // Created during render so the signal is available synchronously to every
+    // child fetch; aborted in the cleanup below when the scope changes or the
+    // page unmounts — cancelling ALL of this player's in-flight + queued requests
+    // at once (frees the queue for the page the user actually navigated to).
+    const scopeKey = `${playerName}:${realm}`;
+    const scopeRef = useRef<{ key: string; controller: AbortController } | null>(null);
+    if (!scopeRef.current || scopeRef.current.key !== scopeKey) {
+        scopeRef.current = { key: scopeKey, controller: new AbortController() };
+    }
+    const requestSignal = scopeRef.current.controller.signal;
+
+    useEffect(() => {
+        const controller = scopeRef.current!.controller;
+        return () => controller.abort();
+    }, [scopeKey]);
+
     useEffect(() => {
         let cancelled = false;
 
@@ -48,12 +66,13 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
             // renders, so without this its fetch starts serially after the
             // profile; firing it here moves that round-trip off the critical
             // path. The card's own fetch dedupes onto this (shared cacheKey).
-            prefetchBattleHistory(playerName, realm);
+            prefetchBattleHistory(playerName, realm, requestSignal);
 
             try {
                 const { data, headers } = await fetchSharedJson<PlayerData>(withRealm(`/api/player/${encodeURIComponent(playerName)}/`, realm), {
                     label: `Player ${playerName}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    signal: requestSignal,
                     priority: 'critical', // the page-blocking fetch — first in the queue
                     responseHeaders: [PLAYER_REFRESH_PENDING_HEADER, PLAYER_NEXT_REFRESH_HEADER],
                     // Short-backoff retry on a transient 5xx / network blip ONLY so a
@@ -69,6 +88,10 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
                     setInitialNextRefresh(parseNextRefreshHeader(headers[PLAYER_NEXT_REFRESH_HEADER]));
                 }
             } catch (fetchError) {
+                // Navigated away / switched realm mid-flight — benign, leave state alone.
+                if (isAbortError(fetchError)) {
+                    return;
+                }
                 console.error('Error loading player route:', fetchError);
                 if (!cancelled) {
                     setPlayerData(null);
@@ -122,6 +145,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
         initialPending,
         initialNextRefresh,
         onRehydrate: setPlayerData,
+        signal: requestSignal,
     });
 
     if (isLoading) {
@@ -133,14 +157,16 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
     }
 
     return (
-        <PlayerDetail
-            player={playerData}
-            onBack={() => router.push('/')}
-            onSelectMember={(memberName) => router.push(buildPlayerPath(memberName, realm))}
-            isLoading={false}
-            refreshStatus={{ phase: liveRefresh.phase, secondsRemaining: liveRefresh.secondsRemaining }}
-            refreshNonce={liveRefresh.refreshNonce}
-        />
+        <PlayerRequestScopeProvider value={requestSignal}>
+            <PlayerDetail
+                player={playerData}
+                onBack={() => router.push('/')}
+                onSelectMember={(memberName) => router.push(buildPlayerPath(memberName, realm))}
+                isLoading={false}
+                refreshStatus={{ phase: liveRefresh.phase, secondsRemaining: liveRefresh.secondsRemaining }}
+                refreshNonce={liveRefresh.refreshNonce}
+            />
+        </PlayerRequestScopeProvider>
     );
 };
 

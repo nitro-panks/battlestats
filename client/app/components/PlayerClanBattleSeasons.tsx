@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import wrColor from '../lib/wrColor';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
-import { fetchSharedJson } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
+import { degradationMonitor } from '../lib/degradationMonitor';
+import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -56,6 +58,7 @@ const CB_SEASONS_PENDING_RETRY_LIMIT = 12;
 
 const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playerId, onSummaryChange }) => {
     const { realm } = useRealm();
+    const requestSignal = usePlayerRequestSignal();
     const [seasons, setSeasons] = useState<PlayerClanBattleSeason[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -77,6 +80,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                 const { data, headers } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
                     label: `Player clan battle seasons ${playerId}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    signal: requestSignal,
                     cacheKey: `clan-cb-seasons:${playerId}:${pendingAttempts}`,
                     responseHeaders: ['X-Clan-Battle-Seasons-Pending'],
                 });
@@ -92,10 +96,14 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                     pendingAttempts += 1;
                     timeoutId = setTimeout(() => {
                         void fetchSeasons();
-                    }, CB_SEASONS_PENDING_RETRY_DELAY_MS);
+                    }, CB_SEASONS_PENDING_RETRY_DELAY_MS * degradationMonitor.getPollIntervalMultiplier());
                     return;
                 }
             } catch (fetchError) {
+                // Benign cancellation (nav / realm switch) — leave state untouched.
+                if (isAbortError(fetchError)) {
+                    return;
+                }
                 console.error('Error fetching player clan battle seasons:', fetchError);
                 if (!cancelled) {
                     setError('Unable to load clan battle seasons right now.');
