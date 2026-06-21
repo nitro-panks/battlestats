@@ -233,7 +233,10 @@ same static head every run while the tail starves (incident 2026-06-15; see
 floor-missed set cycles in **~12 days**. A bounded **self-chain** (re-enqueue while
 `stopped_early` and pull-work remains, capped depth) is the planned follow-up to tighten
 this to ~2 days, at the cost of ~`800×~6s`≈80 min/realm/day of pulls competing with the
-floor on the shared `background` pool — **not yet shipped**; ship rotation+budget first.
+floor on the shared `background` pool. Rotation+budget **shipped 2026-06-15**; the bounded
+self-chain is the one remaining unbuilt piece, and its ROI depends on the seed being
+floor-missed (which it is not in prod — see the status banner at the top). Scope:
+`agents/work-items/scope-hot-players-rotation-budget-2026-06-15.md`.
 
 ### Scheduling — per-realm striped, `signals.py`
 

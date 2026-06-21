@@ -40,12 +40,13 @@ Do not start in `archive/`, `../archive/`, or `../work-items/` unless an active 
 - `runbook-daily-data-refresh-schedule-2026-04-05.md`: daily refresh cadences and periodic task windows (note: the DO Functions enrichment schedule referenced inside was reverted 2026-04-08 — see the status banner at the top of that runbook).
 - `runbook-daily-active-snapshots-2026-06-09.md`: daily `Snapshot` engine for every active player (`snapshot_active_players_task`, coexists with crawls; kill switch `SNAPSHOT_ACTIVE_PLAYERS_ENABLED`).
 - `runbook-leaderboard-updates.md`: ship-leaderboard / standings freshness and snapshot cadence ("is the leaderboard stale?").
-- `runbook-floor-throughput-tuning-2026-06-13.md`: observation-floor throughput tuning — background-pool contention, enrichment self-chain spin fix, coverage levers.
+- `runbook-floor-throughput-tuning-2026-06-13.md`: **canonical current-state entry for the battle-observation floor** (see its "CURRENT STATE" header) — dedicated `floor` worker (`-c2`, self-chaining, recency-first, random-only), DB-as-binding-constraint, coverage levers. Start here for "how does the observation floor work / why is coverage where it is", then branch to the supporting family: `runbook-bulk-battle-observation-capture-2026-06-06.md` (bulk account/info + change-gate capture path), `runbook-floor-battles-json-refresh-2026-06-14.md` (the deferred `battles_json` rebuild seam, `=0` in prod), `runbook-hot-players-engagement-queue-2026-06-10.md` (visitor-interest capture queue, **disabled in prod**), and the diagram `../diagrams/observation-floor-data-flow.md`.
 - `runbook-incident-celery-zombie-worker-2026-04-12.md`: the celery zombie-worker failure mode (service `active` with 0 consumers) and watchdog recovery.
 - `runbook-droplet-hardening-2026-04-09.md`: droplet security posture — ssh/tls/nginx/systemd hardening.
 
 ## Evergreen Architecture And Policy Guides
 
+- `runbook-player-fetch-orchestration-2026-06-21.md`: **canonical client request layer for the player page** (frontend) — the single `sharedJsonFetch` entry point, the priority concurrency queue + 429/Retry-After backoff, the degradation monitor (cap 6→2 + poll backoff), the whole-page `PlayerRequestScopeContext` cancellation, and the de-waterfalled clan rail (`NEXT_PUBLIC_PLAYER_DEWATERFALL=1`). Shipped v2.6.0/2.7.0/2.8.0; supersedes `archive/runbook-player-page-load-priority.md`. Start here for any player-page fetch/hydration/loading/latency work.
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`: cache-first and lazy-refresh contract.
 - `spec-multi-realm-eu-support.md`: multi-realm architecture, rollout status, and migration behavior.
 - `spec-production-data-refresh-strategy.md`: data refresh and maintenance intent (partially implemented; enrichment runs on the droplet's Celery `background` worker).

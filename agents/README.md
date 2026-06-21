@@ -31,6 +31,10 @@ This directory is the shortest useful path for agents that are told to review pr
   Start with `runbooks/README.md`.
 - API contracts or smoke coverage:
   Read `runbooks/runbook-api-surface.md`.
+- Frontend player-page fetching, hydration, loading, request cancellation, or perceived latency:
+  Read `runbooks/runbook-player-fetch-orchestration-2026-06-21.md` (the canonical client request layer: shared fetch, priority queue, degradation monitor, whole-page cancellation, clan-rail de-waterfall).
+- Battle-observation floor, capture coverage/freshness, daily snapshots, or capture throughput:
+  Read `runbooks/runbook-floor-throughput-tuning-2026-06-13.md` (canonical current state) and the diagram `diagrams/observation-floor-data-flow.md`; branch to the supporting family from the floor entry in `runbooks/README.md`.
 - Multi-realm behavior, crawl/warmup, or EU migration:
   Read `runbooks/spec-multi-realm-eu-support.md` and then the related operational runbooks from the active index.
 - Deploy, droplet runtime, or memory tuning:

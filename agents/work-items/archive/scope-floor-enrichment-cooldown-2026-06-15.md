@@ -1,5 +1,11 @@
 # Scope: Floor Throughput — Enrichment `_candidates()` Re-clog Root-Fix (Concern B)
 
+> **CLOSED / ARCHIVED 2026-06-21.** The concern was already shipped (`0ad8797`, migration `0070`)
+> at scope time, and the sole remaining deliverable — the **D1** doc reconcile — is now present in
+> `runbook-floor-throughput-tuning-2026-06-13.md:146` ("Caveat (RESOLVED 2026-06-14): … the per-row
+> cooldown root-fix shipped … so they no longer re-clog the front"). Nothing outstanding; retained
+> for the verify-before-scope trail only.
+
 _Created: 2026-06-15_
 _Scope-only doc (no code). Source: `agents/runbooks/runbook-floor-throughput-tuning-2026-06-13.md` (Follow-ups)._
 _Verify-before-scope method: read runbook → grep/read live code + git log → ground every claim in file:line / commit._
