@@ -10,6 +10,8 @@ import ThemeToggle from "./components/ThemeToggle";
 import RealmSelector from "./components/RealmSelector";
 import { ThemeProvider } from "./context/ThemeContext";
 import { RealmProvider } from "./context/RealmContext";
+import { DegradationProvider } from "./context/DegradationContext";
+import ConnectionHint from "./components/ConnectionHint";
 import { getSiteOrigin } from "./lib/siteOrigin";
 import "./globals.css";
 
@@ -50,6 +52,7 @@ export default function RootLayout({
       <body className={inter.className}>
         <ThemeProvider>
           <RealmProvider>
+            <DegradationProvider>
             <div className="mx-auto max-w-6xl px-4 md:px-6">
               <header className="flex flex-col gap-4 bg-[var(--bg-page)] py-5 pl-5 md:flex-row md:items-center md:justify-between md:py-6">
                 <Logo />
@@ -61,9 +64,13 @@ export default function RootLayout({
                   </Suspense>
                 </div>
               </header>
-              <main className="pt-6 pb-8">{children}</main>
+              <main className="pt-6 pb-8">
+                <ConnectionHint />
+                {children}
+              </main>
               <Footer />
             </div>
+            </DegradationProvider>
           </RealmProvider>
         </ThemeProvider>
       </body>
