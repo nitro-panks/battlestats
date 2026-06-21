@@ -998,8 +998,9 @@ WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
 # The command self-gates on PRUNE_BATTLES_JSON_ENABLED (no-op while unset), so
-# the unit calls it directly — same shape as the downsample unit. No inline
-# shell gate (an earlier `\$\$`-escaped gate broke the deploy heredoc).
+# the unit calls it directly, same shape as the downsample unit. (An earlier
+# version put an escaped shell gate in ExecStart that broke the deploy heredoc;
+# keep this body free of backticks and dollar signs.)
 ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py prune_inactive_player_battles_json --batch-size 5000 --sleep 0.5'
 EOF
 
