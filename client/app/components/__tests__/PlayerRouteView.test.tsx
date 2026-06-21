@@ -94,7 +94,12 @@ describe('PlayerRouteView', () => {
         render(<PlayerRouteView playerName="Player One" />);
 
         await waitFor(() => {
-            expect(global.fetch).toHaveBeenCalledWith('/api/player/Player%20One?realm=na', undefined);
+            // fetchSharedJson always passes a combined abort signal now (for the
+            // per-request timeout), so the second arg is { signal } rather than undefined.
+            expect(global.fetch).toHaveBeenCalledWith(
+                '/api/player/Player%20One?realm=na',
+                expect.objectContaining({ signal: expect.anything() }),
+            );
         });
 
         expect(await screen.findByTestId('player-detail')).toBeInTheDocument();
