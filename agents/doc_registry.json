@@ -2002,6 +2002,31 @@
                 "latency-tiers-1-3-shipped"
             ]
         },
+        "agents/runbooks/runbook-player-refresh-pill-clobber-2026-06-21.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "platform",
+            "aliases": [
+                "updating pill lingers",
+                "player page hangs on updating",
+                "battles_updated_at clobber",
+                "ranked save race"
+            ],
+            "tags": [
+                "live refresh",
+                "player detail",
+                "battles_updated_at",
+                "read-modify-write race",
+                "update_fields",
+                "update_ranked_data",
+                "pending header"
+            ],
+            "archive_on": [
+                "pill-clobber-followups-closed"
+            ]
+        },
         "agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md": {
             "kind": "runbook",
             "status": "active",

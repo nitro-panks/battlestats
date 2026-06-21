@@ -4278,7 +4278,12 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
         player.ranked_json = []
         player.ranked_updated_at = datetime.now()
         player.ranked_last_season_id = None
-        player.save()
+        # Scoped save: this task only owns the ranked_* columns. A bare save() would
+        # write back EVERY field on the snapshot loaded at the top — including a now-stale
+        # battles_updated_at — clobbering a concurrent update_battle_data now()-write and
+        # re-arming the "Updating…" pill (runbook-player-refresh-pill-clobber-2026-06-21).
+        player.save(update_fields=[
+            'ranked_json', 'ranked_updated_at', 'ranked_last_season_id'])
         return
 
     requested_season_ids = sorted(
@@ -4308,7 +4313,11 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
     # observation floor's random-first routing (heavy ranked sweep only for
     # current-season players). NULL when they have no ranked battles.
     player.ranked_last_season_id = ranked_last_season_from_json(result)
-    player.save()
+    # Scoped save — see the no-rank_info branch above: a bare save() races a concurrent
+    # update_battle_data now()-write on battles_updated_at and re-arms the live-refresh
+    # pill (runbook-player-refresh-pill-clobber-2026-06-21).
+    player.save(update_fields=[
+        'ranked_json', 'ranked_updated_at', 'ranked_last_season_id'])
     refresh_player_explorer_summary(player, ranked_rows=result)
     logging.info(
         f'Updated ranked data for {player.name}: {len(result)} seasons')
