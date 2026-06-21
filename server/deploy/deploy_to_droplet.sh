@@ -693,6 +693,27 @@ set_env_value BATTLE_HISTORY_ARCHIVE_BATCH_SIZE 2000
 set_env_value BATTLE_HISTORY_ARCHIVE_SLEEP 0.5
 set_env_value BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT 180
 
+# Storage-retention maintenance jobs (data-lifecycle assessment 2026-06-21,
+# runbook-data-lifecycle-architecture-2026-06-21.md). Each runs as a systemd
+# oneshot+timer below (NOT a Celery task — a destructive sweep runs too long
+# for a worker slot). All three are gated OFF by default: the timers fire but
+# the command no-ops, so the first automated destructive run is a deliberate
+# env flip, never a deploy side-effect.
+#
+# Snapshot 90d downsample (downsample_snapshots): collapse >90d Snapshot rows
+# to one-per-player-per-ISO-week. The command self-gates on this env.
+set_env_value SNAPSHOT_DOWNSAMPLE_ENABLED 0
+set_env_value SNAPSHOT_DOWNSAMPLE_RETENTION_DAYS 90
+# Inactive battles_json TOAST prune (prune_inactive_player_battles_json): NULL
+# the never-read battles_json blob on >180d-inactive players (reversible —
+# refetched on next view). Gated by the timer wrapper below.
+set_env_value PRUNE_BATTLES_JSON_ENABLED 0
+# Raw entity-visit event cleanup (cleanup_entity_visit_events): delete
+# EntityVisitEvent rows older than the window, keeping EntityVisitDaily
+# aggregates. Gated by the timer wrapper below.
+set_env_value ENTITY_VISIT_CLEANUP_ENABLED 0
+set_env_value ENTITY_VISIT_CLEANUP_OLDER_THAN_DAYS 180
+
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"
 
@@ -925,6 +946,105 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+# --- Storage-retention maintenance timers (data-lifecycle 2026-06-21) --------
+# Same oneshot+timer convention as the archive job above. Each command no-ops
+# while its gate env is unset/0, so installing + enabling these timers changes
+# nothing operationally until an env flip (see the set_env_value block above).
+
+# Snapshot 90d downsample — weekly. The command self-gates on
+# SNAPSHOT_DOWNSAMPLE_ENABLED.
+cat > /etc/systemd/system/battlestats-downsample-snapshots.service <<EOF
+[Unit]
+Description=Battlestats Snapshot 90d downsample
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py downsample_snapshots --sleep 0.5'
+EOF
+
+cat > /etc/systemd/system/battlestats-downsample-snapshots.timer <<'EOF'
+[Unit]
+Description=Run Battlestats Snapshot downsample weekly (Mon 04:30 UTC)
+
+[Timer]
+OnCalendar=Mon *-*-* 04:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Inactive battles_json TOAST prune — weekly. Wrapper gates on
+# PRUNE_BATTLES_JSON_ENABLED (the command has no enable env of its own; its
+# built-in guard still refuses unless --inactive-days > ENRICH_MAX_INACTIVE_DAYS).
+cat > /etc/systemd/system/battlestats-prune-battles-json.service <<EOF
+[Unit]
+Description=Battlestats inactive battles_json TOAST prune
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+# systemd expands ${...} on ExecStart and lacks the :-default form, so escape
+# the runtime gate as $$ (literal $ to systemd) and let bash do the expansion.
+ExecStart=/bin/bash -lc 'if [ "\$\${PRUNE_BATTLES_JSON_ENABLED:-0}" = "1" ]; then exec "${APP_ROOT}/venv/bin/python" manage.py prune_inactive_player_battles_json --batch-size 5000 --sleep 0.5; else echo "PRUNE_BATTLES_JSON_ENABLED!=1 — no-op"; fi'
+EOF
+
+cat > /etc/systemd/system/battlestats-prune-battles-json.timer <<'EOF'
+[Unit]
+Description=Run Battlestats inactive battles_json prune weekly (Sun 05:00 UTC)
+
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Raw entity-visit event cleanup — monthly. Wrapper gates on
+# ENTITY_VISIT_CLEANUP_ENABLED; window from ENTITY_VISIT_CLEANUP_OLDER_THAN_DAYS.
+cat > /etc/systemd/system/battlestats-cleanup-entity-visits.service <<EOF
+[Unit]
+Description=Battlestats raw entity-visit event cleanup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+# $$ escapes the gate so systemd passes a literal $ to bash (see prune unit).
+ExecStart=/bin/bash -lc 'if [ "\$\${ENTITY_VISIT_CLEANUP_ENABLED:-0}" = "1" ]; then exec "${APP_ROOT}/venv/bin/python" manage.py cleanup_entity_visit_events --older-than-days "\$\${ENTITY_VISIT_CLEANUP_OLDER_THAN_DAYS:-180}"; else echo "ENTITY_VISIT_CLEANUP_ENABLED!=1 — no-op"; fi'
+EOF
+
+cat > /etc/systemd/system/battlestats-cleanup-entity-visits.timer <<'EOF'
+[Unit]
+Description=Run Battlestats entity-visit cleanup monthly (8th 05:30 UTC)
+
+[Timer]
+OnCalendar=*-*-08 05:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 # Enable the new crawls unit on first install so it auto-starts on reboot.
 # Idempotent — `systemctl enable` is a no-op when the unit is already enabled.
@@ -932,6 +1052,10 @@ systemctl enable battlestats-celery-crawls 2>/dev/null || true
 systemctl enable battlestats-celery-floor 2>/dev/null || true
 systemctl enable --now battlestats-celery-watchdog.timer 2>/dev/null || true
 systemctl enable --now battlestats-archive-battle-history.timer 2>/dev/null || true
+# Storage-retention timers (gated OFF via env — fire but no-op until flipped).
+systemctl enable --now battlestats-downsample-snapshots.timer 2>/dev/null || true
+systemctl enable --now battlestats-prune-battles-json.timer 2>/dev/null || true
+systemctl enable --now battlestats-cleanup-entity-visits.timer 2>/dev/null || true
 # configure_local_rabbitmq already ran before `manage.py migrate` above — the
 # env file and broker credentials are finalized at this point.
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true

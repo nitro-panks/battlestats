@@ -2292,6 +2292,43 @@
                 "cpu-saturation-root-caused-and-resolved"
             ]
         },
+        "agents/runbooks/runbook-data-lifecycle-architecture-2026-06-21.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "architecture",
+            "owner": "platform",
+            "aliases": [
+                "data lifecycle policy",
+                "retention strategy",
+                "table archival",
+                "disk runway baseline",
+                "toast management",
+                "explorersummary bloat",
+                "snapshot downsample",
+                "per-table lifecycle matrix"
+            ],
+            "tags": [
+                "postgres",
+                "storage",
+                "retention",
+                "archive",
+                "lifecycle",
+                "disk",
+                "runway",
+                "vacuum",
+                "repack",
+                "compaction",
+                "toast",
+                "bloat",
+                "battleobservation",
+                "snapshot"
+            ],
+            "archive_on": [
+                "lifecycle-strategy-replaced",
+                "all-tables-have-retention-policy"
+            ]
+        },
         "agents/runbooks/runbook-db-growth-analysis-2026-06-15.md": {
             "kind": "runbook",
             "status": "active",

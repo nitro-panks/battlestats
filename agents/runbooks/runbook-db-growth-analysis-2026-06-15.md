@@ -1,5 +1,11 @@
 # Runbook: Database growth analysis & runway (managed Postgres `db-postgresql-nyc3-11231`)
 
+> **Superseded for current numbers (2026-06-21):** live figures here (23 GB DB, "2.5–4 month
+> runway", 49.6% disk) are stale. See `runbook-data-lifecycle-architecture-2026-06-21.md` for the
+> current measured state (38.3 GB / 62.5% disk used, ~6–9 month runway, per-table policy register).
+> This doc is retained for its **growth attribution + ~105 MB/day slope isolation**, which the newer
+> runbook builds on.
+
 _Created: 2026-06-15_
 _Author role: DBA_
 _Context: The DO managed Postgres backing battlestats grew ~10%+ since 2026-06-09 (user-flagged). This runbook measures the growth from the live cluster, attributes it per-table, answers "are we saving the right info / optimally?", and computes runway against the **60 GiB hard wall** (storage autoscale is **disabled** — a full disk = read-only outage, as happened 2026-05-24). It is the durable follow-up to `runbook-db-size-optimization-2026-05-26.md` (which got `defaultdb` 24 → 19 GB) — the DB has since regrown to 23 GB._
