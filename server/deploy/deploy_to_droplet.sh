@@ -706,11 +706,11 @@ set_env_value SNAPSHOT_DOWNSAMPLE_ENABLED 0
 set_env_value SNAPSHOT_DOWNSAMPLE_RETENTION_DAYS 90
 # Inactive battles_json TOAST prune (prune_inactive_player_battles_json): NULL
 # the never-read battles_json blob on >180d-inactive players (reversible —
-# refetched on next view). Gated by the timer wrapper below.
+# refetched on next view). The command self-gates on this env.
 set_env_value PRUNE_BATTLES_JSON_ENABLED 0
 # Raw entity-visit event cleanup (cleanup_entity_visit_events): delete
 # EntityVisitEvent rows older than the window, keeping EntityVisitDaily
-# aggregates. Gated by the timer wrapper below.
+# aggregates. The command self-gates on this env.
 set_env_value ENTITY_VISIT_CLEANUP_ENABLED 0
 set_env_value ENTITY_VISIT_CLEANUP_OLDER_THAN_DAYS 180
 
@@ -997,9 +997,10 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-# systemd expands ${...} on ExecStart and lacks the :-default form, so escape
-# the runtime gate as $$ (literal $ to systemd) and let bash do the expansion.
-ExecStart=/bin/bash -lc 'if [ "\$\${PRUNE_BATTLES_JSON_ENABLED:-0}" = "1" ]; then exec "${APP_ROOT}/venv/bin/python" manage.py prune_inactive_player_battles_json --batch-size 5000 --sleep 0.5; else echo "PRUNE_BATTLES_JSON_ENABLED!=1 — no-op"; fi'
+# The command self-gates on PRUNE_BATTLES_JSON_ENABLED (no-op while unset), so
+# the unit calls it directly — same shape as the downsample unit. No inline
+# shell gate (an earlier `\$\$`-escaped gate broke the deploy heredoc).
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py prune_inactive_player_battles_json --batch-size 5000 --sleep 0.5'
 EOF
 
 cat > /etc/systemd/system/battlestats-prune-battles-json.timer <<'EOF'
@@ -1014,8 +1015,9 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-# Raw entity-visit event cleanup — monthly. Wrapper gates on
-# ENTITY_VISIT_CLEANUP_ENABLED; window from ENTITY_VISIT_CLEANUP_OLDER_THAN_DAYS.
+# Raw entity-visit event cleanup — monthly. The command self-gates on
+# ENTITY_VISIT_CLEANUP_ENABLED and defaults its window from
+# ENTITY_VISIT_CLEANUP_OLDER_THAN_DAYS, so the unit calls it directly.
 cat > /etc/systemd/system/battlestats-cleanup-entity-visits.service <<EOF
 [Unit]
 Description=Battlestats raw entity-visit event cleanup
@@ -1029,8 +1031,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_ROOT}/current/server
 EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
-# $$ escapes the gate so systemd passes a literal $ to bash (see prune unit).
-ExecStart=/bin/bash -lc 'if [ "\$\${ENTITY_VISIT_CLEANUP_ENABLED:-0}" = "1" ]; then exec "${APP_ROOT}/venv/bin/python" manage.py cleanup_entity_visit_events --older-than-days "\$\${ENTITY_VISIT_CLEANUP_OLDER_THAN_DAYS:-180}"; else echo "ENTITY_VISIT_CLEANUP_ENABLED!=1 — no-op"; fi'
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py cleanup_entity_visit_events'
 EOF
 
 cat > /etc/systemd/system/battlestats-cleanup-entity-visits.timer <<'EOF'

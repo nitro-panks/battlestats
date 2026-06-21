@@ -128,10 +128,13 @@ destructive jobs stay **gated OFF** until an env flip.
    28-day interval window + the 29-day `activity_json`); account-merge tolerates week-granularity old
    rows. Gated by `SNAPSHOT_DOWNSAMPLE_ENABLED` (default off); `--dry-run` always allowed. 5 unit tests.
 3. **Three systemd timers** in `deploy_to_droplet.sh` (mirroring the archive timer), each **gated OFF**
-   so they fire but no-op until flipped:
-   - `battlestats-downsample-snapshots.timer` — weekly (Mon 04:30 UTC).
-   - `battlestats-prune-battles-json.timer` — weekly (Sun 05:00 UTC), wrapper-gated on `PRUNE_BATTLES_JSON_ENABLED`.
-   - `battlestats-cleanup-entity-visits.timer` — monthly (8th 05:30 UTC), wrapper-gated on `ENTITY_VISIT_CLEANUP_ENABLED`.
+   so they fire but no-op until flipped. Each unit's `ExecStart` is a **direct command call**; the
+   command **self-gates** on its env kill switch (an earlier inline `\$\$`-escaped shell gate in the
+   `ExecStart` broke the deploy heredoc and stopped services mid-deploy — fixed 2026-06-21, all three
+   now match the downsample shape):
+   - `battlestats-downsample-snapshots.timer` — weekly (Mon 04:30 UTC), self-gated on `SNAPSHOT_DOWNSAMPLE_ENABLED`.
+   - `battlestats-prune-battles-json.timer` — weekly (Sun 05:00 UTC), self-gated on `PRUNE_BATTLES_JSON_ENABLED`.
+   - `battlestats-cleanup-entity-visits.timer` — monthly (8th 05:30 UTC), self-gated on `ENTITY_VISIT_CLEANUP_ENABLED` (window from `ENTITY_VISIT_CLEANUP_OLDER_THAN_DAYS`).
 
 ---
 

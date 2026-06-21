@@ -64,6 +64,18 @@ def _human_bytes(n: int | None) -> str:
     return f"{size:.1f} TB"
 
 
+def _enabled() -> bool:
+    """Env kill switch read at call time (testable, reflects the live env).
+
+    Mirrors ``downsample_snapshots._enabled`` so the systemd timer can call this
+    command directly (no fragile inline shell gate in the unit's ExecStart) and
+    it no-ops while disabled. See runbook-data-lifecycle-architecture-2026-06-21.
+    """
+    return os.getenv("PRUNE_BATTLES_JSON_ENABLED", "0").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 class Command(BaseCommand):
     help = (
         "NULL Player.battles_json on long-inactive, visible, non-PENDING "
@@ -127,6 +139,15 @@ class Command(BaseCommand):
             raise CommandError("--statement-timeout must be >= 0")
         if options["max_rows"] < 0:
             raise CommandError("--max-rows must be >= 0")
+
+        # Kill switch gates only live deletes; --dry-run is always allowed so the
+        # timer/operator can measure without flipping the env.
+        if not options["dry_run"] and not _enabled():
+            self.stdout.write(self.style.WARNING(
+                "PRUNE_BATTLES_JSON_ENABLED is not set — no-op. "
+                "Re-run with --dry-run to preview, or set the env to prune."
+            ))
+            return
 
         # Read the enrichment activity ceiling here (not at import time) so the
         # guard reflects the running env and stays testable.
