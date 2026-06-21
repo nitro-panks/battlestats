@@ -54,6 +54,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
                 const { data, headers } = await fetchSharedJson<PlayerData>(withRealm(`/api/player/${encodeURIComponent(playerName)}/`, realm), {
                     label: `Player ${playerName}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    priority: 'critical', // the page-blocking fetch — first in the queue
                     responseHeaders: [PLAYER_REFRESH_PENDING_HEADER, PLAYER_NEXT_REFRESH_HEADER],
                     // Short-backoff retry on a transient 5xx / network blip ONLY so a
                     // single stalled upstream (the 502-on-the-request-thread tail) no

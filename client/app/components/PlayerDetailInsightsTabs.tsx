@@ -249,21 +249,27 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
         let idleCallbackId: number | null = null;
 
         const warmTabData = () => {
+            // Background prefetch of NON-visible tabs (Profile/Ranked/Career). Low
+            // priority so it never delays the visible content (detail, clan rail,
+            // the default Activity tab's battle history).
             const requests: Array<Promise<unknown>> = [
                 fetchSharedJson<unknown>(withRealm(`/api/fetch/player_correlation/tier_type/${playerId}/`, realm), {
                     label: `Tier type correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                    priority: 'low',
                     cacheKey: `tier-type:${playerId}:0:0:${refreshNonce}`,
                     responseHeaders: ['X-Tier-Type-Pending'],
                 }),
                 fetchSharedJson<unknown>(withRealm(`/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`, realm), {
                     label: `Ranked correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                    priority: 'low',
                     cacheKey: `ranked-corr:${playerId}:${refreshNonce}`,
                 }),
                 fetchSharedJson<unknown>(withRealm(`/api/fetch/ranked_data/${playerId}/`, realm), {
                     label: `Ranked data ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                    priority: 'low',
                     cacheKey: `ranked-data:${playerId}:0:0:${refreshNonce}`,
                     responseHeaders: ['X-Ranked-Pending'],
                 }),
@@ -274,6 +280,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
                         label: `Player clan battle seasons ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                        priority: 'low',
                         cacheKey: `clan-cb-seasons:${playerId}:${refreshNonce}`,
                     }),
                 );

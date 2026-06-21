@@ -3,7 +3,7 @@ import wrColor from '../lib/wrColor';
 import { useRealm } from '../context/RealmContext';
 import { useTheme } from '../context/ThemeContext';
 import { withRealm } from '../lib/realmParams';
-import { getChartFetchesInFlight } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, getChartFetchesInFlight, isAbortError } from '../lib/sharedJsonFetch';
 import ClanBattleSeasonsSVG from './ClanBattleSeasonsSVG';
 
 interface ClanBattleSeason {
@@ -54,6 +54,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
         let gateIntervalId: ReturnType<typeof setInterval> | null = null;
         let attempts = 0;
+        const controller = new AbortController();
 
         const fetchSeasons = async () => {
             // Clear previous timeout ref so the finally block can detect
@@ -66,19 +67,24 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
             }
 
             try {
-                const response = await fetch(withRealm(`/api/fetch/clan_battle_seasons/${clanId}`, realm));
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch clan battle seasons: ${response.status}`);
-                }
-
-                const data = await response.json();
+                const { data, headers } = await fetchSharedJson<ClanBattleSeason[]>(
+                    withRealm(`/api/fetch/clan_battle_seasons/${clanId}`, realm),
+                    {
+                        label: `Clan battle seasons ${clanId}`,
+                        responseHeaders: ['X-Clan-Battles-Pending'],
+                        ttlMs: 0, // polled cold-cache freshness
+                        priority: 'high',
+                        signal: controller.signal,
+                        cacheKey: `clan-battle-seasons:${clanId}:${realm}:${attempts}`,
+                    },
+                );
                 if (cancelled) {
                     return;
                 }
 
                 setSeasons(Array.isArray(data) ? data : []);
 
-                const isPending = response.headers.get('X-Clan-Battles-Pending') === 'true';
+                const isPending = headers['X-Clan-Battles-Pending'] === 'true';
                 if (isPending && attempts < 5) {
                     attempts += 1;
                     timeoutId = setTimeout(() => {
@@ -87,6 +93,9 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
                     return;
                 }
             } catch (err) {
+                if (isAbortError(err)) {
+                    return;
+                }
                 console.error('Error fetching clan battle seasons:', err);
                 if (!cancelled) {
                     setError('Unable to load clan battles seasons.');
@@ -112,6 +121,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
 
         return () => {
             cancelled = true;
+            controller.abort();
             if (timeoutId) {
                 clearTimeout(timeoutId);
             }

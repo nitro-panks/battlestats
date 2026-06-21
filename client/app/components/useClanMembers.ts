@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ClanMemberData } from './clanMembersShared';
-import { getChartFetchesInFlight } from '../lib/sharedJsonFetch';
+import { fetchSharedJson, getChartFetchesInFlight, isAbortError } from '../lib/sharedJsonFetch';
 import { isPlayerDewaterfallEnabled } from '../lib/featureFlags';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
@@ -8,6 +8,18 @@ import { withRealm } from '../lib/realmParams';
 const HYDRATION_POLL_LIMIT = 12;
 const HYDRATION_ACTIVE_POLL_INTERVAL_MS = 3000;
 const HYDRATION_DEFERRED_POLL_INTERVAL_MS = 6000;
+
+type ClanMembersHeaders = Record<string, string | null>;
+
+const HYDRATION_HEADER_NAMES = [
+    'X-Ranked-Hydration-Queued',
+    'X-Ranked-Hydration-Deferred',
+    'X-Ranked-Hydration-Pending',
+    'X-Efficiency-Hydration-Queued',
+    'X-Efficiency-Hydration-Deferred',
+    'X-Efficiency-Hydration-Pending',
+    'X-Clan-Idle-Pending',
+];
 
 interface ClanMembersHydrationState {
     rankedQueued: number;
@@ -18,39 +30,18 @@ interface ClanMembersHydrationState {
     efficiencyPending: number;
 }
 
-const isAbortError = (error: unknown): boolean => {
-    return error instanceof DOMException && error.name === 'AbortError';
-};
-
-const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {
-    const contentType = response.headers.get('content-type') || '';
-
-    if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`${label} failed with ${response.status}: ${body.slice(0, 120)}`);
-    }
-
-    if (!contentType.toLowerCase().includes('application/json')) {
-        const body = await response.text();
-        throw new Error(`${label} returned non-JSON content: ${body.slice(0, 120)}`);
-    }
-
-    return response.json() as Promise<T>;
-};
-
-const readCountHeader = (response: Response, headerName: string): number => {
-    const rawValue = response.headers.get(headerName);
-    const parsedValue = Number.parseInt(rawValue || '0', 10);
+const readCountHeader = (headers: ClanMembersHeaders, headerName: string): number => {
+    const parsedValue = Number.parseInt(headers[headerName] || '0', 10);
     return Number.isFinite(parsedValue) ? Math.max(parsedValue, 0) : 0;
 };
 
-const readHydrationState = (response: Response): ClanMembersHydrationState => ({
-    rankedQueued: readCountHeader(response, 'X-Ranked-Hydration-Queued'),
-    rankedDeferred: readCountHeader(response, 'X-Ranked-Hydration-Deferred'),
-    rankedPending: readCountHeader(response, 'X-Ranked-Hydration-Pending'),
-    efficiencyQueued: readCountHeader(response, 'X-Efficiency-Hydration-Queued'),
-    efficiencyDeferred: readCountHeader(response, 'X-Efficiency-Hydration-Deferred'),
-    efficiencyPending: readCountHeader(response, 'X-Efficiency-Hydration-Pending'),
+const readHydrationState = (headers: ClanMembersHeaders): ClanMembersHydrationState => ({
+    rankedQueued: readCountHeader(headers, 'X-Ranked-Hydration-Queued'),
+    rankedDeferred: readCountHeader(headers, 'X-Ranked-Hydration-Deferred'),
+    rankedPending: readCountHeader(headers, 'X-Ranked-Hydration-Pending'),
+    efficiencyQueued: readCountHeader(headers, 'X-Efficiency-Hydration-Queued'),
+    efficiencyDeferred: readCountHeader(headers, 'X-Efficiency-Hydration-Deferred'),
+    efficiencyPending: readCountHeader(headers, 'X-Efficiency-Hydration-Pending'),
 });
 
 const resolveHydrationPollDelay = (state: ClanMembersHydrationState): number => {
@@ -103,25 +94,30 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
             activeController = controller;
 
             try {
-                const response = await fetch(withRealm(`/api/fetch/clan_members/${clanId}`, realm), {
-                    signal: controller.signal,
-                });
-                const data = await readJsonOrThrow<ClanMemberData[]>(response, `Clan members ${clanId}`);
-                if (controller.signal.aborted) {
-                    return;
-                }
+                const { data, headers } = await fetchSharedJson<ClanMemberData[]>(
+                    withRealm(`/api/fetch/clan_members/${clanId}`, realm),
+                    {
+                        label: `Clan members ${clanId}`,
+                        responseHeaders: HYDRATION_HEADER_NAMES,
+                        ttlMs: 0, // polled freshness — never serve a cached body
+                        priority: 'high', // above-the-fold rail
+                        signal: controller.signal,
+                        cacheKey: `clan-members:${clanId}:${realm}:${attempt}`,
+                    },
+                );
 
-                setMembers(Array.isArray(data) ? data : []);
+                const rows = Array.isArray(data) ? data : [];
+                setMembers(rows);
                 setError('');
 
-                const hydrationState = readHydrationState(response);
-                const hasPendingHydration = data.some(
+                const hydrationState = readHydrationState(headers);
+                const hasPendingHydration = rows.some(
                     (member) => member.ranked_hydration_pending
                         || member.efficiency_hydration_pending,
                 );
                 // Roster idle bulk-refresh in flight: re-poll so corrected
                 // "X days idle" (fresh last_battle_date) replaces stale values.
-                const idlePending = response.headers.get('X-Clan-Idle-Pending') === 'true';
+                const idlePending = headers['X-Clan-Idle-Pending'] === 'true';
                 const shouldPollAgain = hasPendingHydration
                     || idlePending
                     || hydrationState.rankedPending > 0
