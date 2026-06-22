@@ -48,7 +48,7 @@ const ShipToolLink: React.FC<ShipToolLinkProps> = ({
                     ship_id: shipId ?? 0,
                 })
             }
-            className="inline-flex shrink-0 items-center justify-center rounded bg-white p-0.5 ring-1 ring-[var(--border)] transition-transform hover:scale-110 hover:ring-[var(--accent-mid)]"
+            className="ml-1 inline-flex shrink-0 items-center justify-center rounded bg-white p-0.5 ring-1 ring-[var(--border)] transition-transform hover:scale-110 hover:ring-[var(--accent-mid)]"
         >
             {/* eslint-disable-next-line @next/next/no-img-element -- tiny static brand icon; next/image optimization is unnecessary here */}
             <img
