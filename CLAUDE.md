@@ -69,7 +69,7 @@ Background enrichment runs on the Celery `background` worker via `enrich_player_
 
 ### Routing
 
-- `/` — Landing: search, featured players/clans, discovery charts
+- `/` — Landing: search, discovery charts (top-ships treemap), inline ship leaderboard
 - `/player/[playerName]` — Player detail (URL-encoded name, reload-safe)
 - `/clan/[clanSlug]` — Clan detail (`<clan_id>-<optional-slug>`)
 - `/ship/[shipSlug]` — Ship standings (`<ship_id>-<optional-slug>`). Snapshot-backed T10 leaderboard for the active realm (`GET /api/realm/<realm>/ship/<ship_id>/leaderboard`)
@@ -90,7 +90,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 ### Key frontend patterns
 
 - D3-based SVG chart components (TierSVG, TypeSVG, ActivitySVG, RankedWRBattlesHeatmapSVG, …)
-- `app/context/ThemeContext.tsx` + `app/components/ThemeToggle.tsx` — dark/light/system theme, localStorage-persisted; `app/lib/chartTheme.ts` D3 colors + shared chart helpers (`wrColorByRatio`/`wrColorByPercent`, `formatCompactCount`, `resolveChartWidth`, `expandDomain`); `app/globals.css` CSS custom properties (`--bg-*`/`--text-*`/`--accent-*`, `[data-theme="dark"]`)
+- `app/context/ThemeContext.tsx` + `app/components/ThemeToggle.tsx` — dark/light/system theme, localStorage-persisted; `app/lib/chartTheme.ts` D3 colors + shared chart helpers (`wrColorByRatio`, `formatCompactCount`, `resolveChartWidth`); `app/globals.css` CSS custom properties (`--bg-*`/`--text-*`/`--accent-*`, `[data-theme="dark"]`)
 - `app/lib/wrColor.ts` — shared win-rate → color mapping
 - `app/lib/sharedJsonFetch.ts` — the client request layer all `/api/` traffic flows through: in-flight dedup + settled SWR cache + opt-in retry, ref-counted per-caller cancellation (`signal`, `isAbortError`/`isTimeoutError`), 15s per-attempt timeout, 429/Retry-After + jittered-exponential backoff, a global priority concurrency queue (`app/lib/requestQueue.ts`, cap 6, `critical`/`high`/`low`), and telemetry (`app/lib/fetchTelemetry.ts`). A degradation monitor (`app/lib/degradationMonitor.ts` + `DegradationContext` + `ConnectionHint`) consumes telemetry → drops the cap 6→2 + slows polls + shows a subtle "connection slow" hint while degraded. `PlayerRequestScopeContext` carries one per-(player,realm) abort signal so nav/realm-switch cancels the whole page's requests. Full architecture: `agents/runbooks/runbook-player-fetch-orchestration-2026-06-21.md`. (`chartFetchesInFlight` is the legacy warmup-gate counter.)
 - `app/lib/entityRoutes.ts` — URL encode/decode for player/clan routes
