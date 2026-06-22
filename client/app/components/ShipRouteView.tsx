@@ -10,6 +10,7 @@ import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import wrColor from '../lib/wrColor';
 import { shipClass, nationLabel } from '../lib/shipIdentity';
 import TopShipIcon from './TopShipIcon';
+import ShipToolLink from './ShipToolLink';
 import { trackEvent } from '../lib/umami';
 
 const RANKING_TOOLTIP = "Ranked by a blend of win rate, average damage, and kills per battle (win rate weighted most), each tempered for games played (empirical-Bayes shrinkage) so a short hot streak doesn't outrank a high-volume player. Shows the top 15 for the window.";
@@ -43,6 +44,7 @@ interface ShipLeaderboard {
         ship_type: string | null;
         nation: string;
         is_premium: boolean;
+        shiptool_code?: string | null;
     };
     players: ShipLeaderboardPlayer[];
 }
@@ -215,6 +217,13 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                             <span aria-hidden="true">★</span>Premium
                         </span>
                     )}
+                    <ShipToolLink
+                        code={ship.shiptool_code}
+                        shipName={ship.name}
+                        realm={realm}
+                        shipId={ship.ship_id}
+                        size="md"
+                    />
                 </div>
                 {chips.length > 0 && (
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">

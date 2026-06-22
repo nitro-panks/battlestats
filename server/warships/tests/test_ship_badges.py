@@ -379,6 +379,9 @@ class ShipBadgeSnapshotTests(TestCase):
 
         board = get_ship_leaderboard("na", SHIMA)
         self.assertEqual(board["ship"]["name"], "Shimakaze")
+        # No code populated for this fixture ship -> field present but null,
+        # so the frontend hides the Ship Tool link.
+        self.assertIsNone(board["ship"]["shiptool_code"])
         self.assertEqual(board["window_days"], 14)
         self.assertEqual([p["player_name"] for p in board["players"]],
                         ["Ace", "Mid", "Low"])
@@ -386,6 +389,18 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertAlmostEqual(board["players"][0]["win_rate"], 90.0)
         self.assertEqual(board["players"][0]["avg_damage"], 50_000)  # 1_000_000 / 20
         self.assertEqual(board["players"][0]["kills_per_battle"], 1.5)  # 30 / 20
+
+    def test_get_ship_leaderboard_surfaces_shiptool_code(self):
+        # A populated shiptool_code is passed through verbatim so the frontend
+        # can deep-link to shiptool.st/params?S=<code>.
+        Ship.objects.filter(ship_id=SHIMA).update(shiptool_code="JD110")
+        self._event(self._player("Ace"), SHIMA, battles=20, wins=18)
+        for i in range(3):
+            self._event(self._player(f"Pad{i}"), SHIMA, battles=20, wins=10 + i)
+        self._run("na")
+
+        board = get_ship_leaderboard("na", SHIMA)
+        self.assertEqual(board["ship"]["shiptool_code"], "JD110")
 
     def test_get_players_ship_badges_bulk_maps_pk_to_badges(self):
         # Bulk fetch (used by landing/clan lists) returns each player's badges

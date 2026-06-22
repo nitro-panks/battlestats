@@ -153,6 +153,11 @@ class Ship(models.Model):
     ship_type = models.CharField(max_length=200)
     tier = models.IntegerField(null=True, blank=True)
     is_premium = models.BooleanField(default=False)
+    # Ship Tool (shiptool.st) short index, e.g. "RC110" for Moskva. Derived
+    # from the WoWS GameParams index (sourced from WG Vortex) by
+    # populate_shiptool_codes; powers the external "View on Ship Tool" link.
+    # Blank when no GameParams index matched (link is then hidden).
+    shiptool_code = models.CharField(max_length=16, blank=True, default='')
 
     def __str__(self):
         return str(self.ship_id) + " - " + self.name

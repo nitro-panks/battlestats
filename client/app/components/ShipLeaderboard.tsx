@@ -18,6 +18,7 @@ import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useRealm } from '../context/RealmContext';
 import { shipClass } from '../lib/shipIdentity';
+import ShipToolLink from './ShipToolLink';
 import { buildPlayerPath } from '../lib/entityRoutes';
 import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
@@ -82,6 +83,7 @@ interface ShipLeaderboardPayload {
         ship_type: string | null;
         nation: string;
         is_premium: boolean;
+        shiptool_code?: string | null;
     };
     players: LeaderboardPlayer[];
 }
@@ -548,10 +550,6 @@ const ShipBoard: React.FC<{
     onSortChange: (key: keyof LeaderboardPlayer, dir: SortDir) => void;
 }> = ({ realm, fallbackName, board, loading, error, onClear, onSortChange }) => {
     const ship = board?.ship;
-    const cls = ship ? shipClass(ship.ship_type) : null;
-    const subtitle = ship
-        ? `T${ship.tier ?? '?'} ${cls?.label ?? ship.ship_type ?? ''}`.trim()
-        : '';
     const players = useMemo(() => board?.players ?? [], [board]);
     const { sort, onSort } = useTableSort<LeaderboardPlayer>(['player_name'], onSortChange);
     // Player click-through analytics. ship_id + rank are low-cardinality and
@@ -582,9 +580,14 @@ const ShipBoard: React.FC<{
                 >
                     ‹ Clear
                 </button>
-                <span className="text-sm font-semibold text-[var(--text-strong)]">
+                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--text-strong)]">
                     {ship?.name ?? fallbackName}
-                    {subtitle && <span className="ml-2 font-normal text-[var(--text-muted)]">· {subtitle}</span>}
+                    <ShipToolLink
+                        code={ship?.shiptool_code}
+                        shipName={ship?.name ?? fallbackName}
+                        realm={realm}
+                        shipId={ship?.ship_id}
+                    />
                 </span>
             </div>
 

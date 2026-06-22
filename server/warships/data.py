@@ -6573,6 +6573,7 @@ def get_ship_leaderboard(realm: str, ship_id: int) -> Optional[dict]:
             'ship_type': ship.ship_type,
             'nation': ship.nation,
             'is_premium': ship.is_premium,
+            'shiptool_code': ship.shiptool_code or None,
         },
         'players': players,
     }

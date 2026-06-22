@@ -3128,6 +3128,32 @@
                 "landing-featured-boards-revived",
                 "landing-decommission-superseded"
             ]
+        },
+        "agents/runbooks/runbook-shiptool-integration-2026-06-22.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "product",
+            "aliases": [
+                "shiptool integration",
+                "shiptool.st deep link",
+                "ship tool link",
+                "createShortIndex short code",
+                "vortex gameparams index"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "ship-route",
+                "external-link",
+                "shiptool",
+                "vortex",
+                "management-command",
+                "frontend"
+            ],
+            "archive_on": [
+                "shiptool-integration-superseded"
+            ]
         }
     }
 }
