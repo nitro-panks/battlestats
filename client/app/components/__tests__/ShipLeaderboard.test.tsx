@@ -328,6 +328,43 @@ describe('ShipLeaderboard', () => {
         });
     });
 
+    describe('class/tier share %', () => {
+        it('renders each ship\'s battles as a share of the bucket total_battles', async () => {
+            // total_battles 40,000 → Gearing 11,044 = 27.6%, Shimakaze 20,310 = 50.8%.
+            mockFetch.mockImplementation((url: string) => {
+                if (url.includes('/ships?')) {
+                    return Promise.resolve({ data: { ...listFixture, total_battles: 40000 } } as never);
+                }
+                return routeFetch(url);
+            });
+            render(<ShipLeaderboard />);
+            selectTierAndType('DD');
+            await screen.findAllByText('Gearing');
+
+            // The share renders in its own parenthesised span (desktop + mobile),
+            // so each percentage appears at least once.
+            expect(screen.getAllByText('(27.6%)').length).toBeGreaterThan(0);
+            expect(screen.getAllByText('(50.8%)').length).toBeGreaterThan(0);
+        });
+
+        it('omits the share when total_battles is absent (e.g. a pre-field payload)', async () => {
+            mockFetch.mockImplementation((url: string) => {
+                if (url.includes('/ships?')) {
+                    // No total_battles key at all → battles-only, no NaN%.
+                    return Promise.resolve({ data: listFixture } as never);
+                }
+                return routeFetch(url);
+            });
+            render(<ShipLeaderboard />);
+            selectTierAndType('DD');
+            await screen.findAllByText('Gearing');
+
+            // No parenthesised share token anywhere (win rate uses no parens).
+            expect(screen.queryByText(/\(\d+(\.\d+)?%\)/)).toBeNull();
+            expect(screen.queryByText('<0.1%')).toBeNull();
+        });
+    });
+
     describe('umami tracking', () => {
         it('tracks tier and type filter clicks with a clear control field', async () => {
             render(<ShipLeaderboard />);

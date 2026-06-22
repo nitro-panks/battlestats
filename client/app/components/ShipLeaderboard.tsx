@@ -56,6 +56,11 @@ interface ShipsByTierType {
     realm: string;
     tier: number;
     ship_type: string;
+    // Total battles across every ship of this tier+type in the window — the
+    // denominator for each ship's class/tier share %. Optional so a payload from
+    // before this field shipped (e.g. a durable `:published` fallback served
+    // mid-deploy) degrades to battles-only rather than NaN%.
+    total_battles?: number;
     ships: ListShip[];
 }
 
@@ -111,6 +116,17 @@ function sortRows<T>(rows: T[], key: keyof T, dir: SortDir): T[] {
         }
         return (Number(av) - Number(bv)) * factor;
     });
+}
+
+// A ship's share of all battles played in its tier+class bucket this window,
+// formatted for the Battles column ("12.4%"). Returns null when the denominator
+// is missing/zero (old payload, empty bucket) so the caller renders battles
+// only. Tiny-but-nonzero shares clamp to "<0.1%" rather than rounding to 0.0%.
+function classSharePct(battles: number, total: number | undefined): string | null {
+    if (!total || total <= 0) return null;
+    const pct = (battles / total) * 100;
+    if (pct > 0 && pct < 0.1) return '<0.1%';
+    return `${pct.toFixed(1)}%`;
 }
 
 function useTableSort<T>(
@@ -194,6 +210,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
     const [selectedShip, setSelectedShip] = useState<{ id: number; name: string } | null>(null);
 
     const [list, setList] = useState<ListShip[] | null>(null);
+    const [listTotalBattles, setListTotalBattles] = useState(0);
     const [listLoading, setListLoading] = useState(false);
     const [listError, setListError] = useState(false);
 
@@ -269,6 +286,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
             .then(({ data }) => {
                 if (reqId !== listReqId.current) return;
                 setList(data.ships ?? []);
+                setListTotalBattles(data.total_battles ?? 0);
                 setListLoading(false);
             })
             .catch(() => {
@@ -393,6 +411,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
                 ) : (
                     <ShipList
                         ships={list}
+                        totalBattles={listTotalBattles}
                         loading={listLoading}
                         error={listError}
                         tierTypeLabel={`T${tier} ${typeLabel ?? ''}`.trim()}
@@ -414,12 +433,13 @@ const PLAYER_LINK =
 
 const ShipList: React.FC<{
     ships: ListShip[] | null;
+    totalBattles: number;
     loading: boolean;
     error: boolean;
     tierTypeLabel: string;
     onOpen: (s: ListShip) => void;
     onSortChange: (key: keyof ListShip, dir: SortDir) => void;
-}> = ({ ships, loading, error, tierTypeLabel, onOpen, onSortChange }) => {
+}> = ({ ships, totalBattles, loading, error, tierTypeLabel, onOpen, onSortChange }) => {
     const { sort, onSort } = useTableSort<ListShip>(['ship_name'], onSortChange);
     const sortedShips = useMemo(
         () => (ships && sort ? sortRows(ships, sort.key, sort.dir) : ships),
@@ -473,7 +493,12 @@ const ShipList: React.FC<{
                                     {s.ship_name}
                                 </button>
                             </td>
-                            <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">{s.battles.toLocaleString()}</td>
+                            <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">
+                                {s.battles.toLocaleString()}
+                                {classSharePct(s.battles, totalBattles) && (
+                                    <span className="ml-1 text-[var(--text-muted)]">({classSharePct(s.battles, totalBattles)})</span>
+                                )}
+                            </td>
                             <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">{s.avg_damage.toLocaleString()}</td>
                             <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-muted)]">{s.kills_per_battle.toFixed(2)}</td>
                             <td className="py-2 text-right tabular-nums font-semibold" style={{ color: wrColor(s.win_rate) }}>
@@ -499,7 +524,10 @@ const ShipList: React.FC<{
                             </span>
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs tabular-nums text-[var(--text-muted)]">
-                            <span><span className="text-[var(--text-primary)]">{s.battles.toLocaleString()}</span> battles</span>
+                            <span>
+                                <span className="text-[var(--text-primary)]">{s.battles.toLocaleString()}</span> battles
+                                {classSharePct(s.battles, totalBattles) && ` (${classSharePct(s.battles, totalBattles)})`}
+                            </span>
                             <span><span className="text-[var(--text-primary)]">{s.avg_damage.toLocaleString()}</span> avg dmg</span>
                             <span>{s.kills_per_battle.toFixed(2)} kills/battle</span>
                         </div>

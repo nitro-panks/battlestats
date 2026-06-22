@@ -97,6 +97,35 @@ class RealmShipsByTierTypeTests(TestCase):
         self.assertEqual(g["avg_damage"], 60_000)
         self.assertEqual(g["kills_per_battle"], 1.4)
         self.assertEqual(g["ship_name"], "Gearing")
+        # Whole-bucket denominator = every T10 Destroyer battle in the window
+        # (here exactly the two listed ships: 200 + 100).
+        self.assertEqual(payload["total_battles"], 300)
+
+    def test_total_battles_counts_ships_excluded_from_the_list(self):
+        # "True class/tier total" semantics: a thin ship below the min-battles
+        # floor is NOT listed, but its battles STILL count toward total_battles
+        # (the share-% denominator). This assertion is what distinguishes the
+        # chosen "whole bucket" denominator from a naive "sum of shown ships".
+        self._snapshot(SHIMA)
+        self._snapshot(GEARING)
+        self._event(SHIMA, battles=200, wins=110)
+        self._event(GEARING, battles=10, wins=6)  # below SHIP_LIST_MIN_BATTLES (50)
+
+        payload = compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", use_cache=False)
+        # Only Shimakaze clears the floor and is listed…
+        self.assertEqual([s["ship_id"] for s in payload["ships"]], [SHIMA])
+        # …but the denominator still includes Gearing's 10 battles.
+        self.assertEqual(payload["total_battles"], 210)
+
+    def test_total_battles_zero_on_empty_bucket(self):
+        # No snapshot anywhere → empty list and a 0 denominator (the field is
+        # always present so the client can guard total <= 0).
+        self._event(SHIMA, battles=500, wins=300)
+        payload = compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", use_cache=False)
+        self.assertEqual(payload["ships"], [])
+        self.assertEqual(payload["total_battles"], 0)
 
     def test_filters_to_requested_tier_and_type(self):
         # Yamato (BB) and the T9 DD have events + snapshots but must not appear

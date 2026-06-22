@@ -6768,6 +6768,16 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
         "captured_on": captured_on.isoformat() if captured_on else None,
         "window_start": window_start_d.isoformat(),
         "window_end": window_end_d.isoformat(),
+        # Total battles played across **every** ship of this tier+type in the
+        # window — the whole-bucket denominator the client divides each ship's
+        # battles into for its class/tier share %. Deliberately broader than the
+        # listed ships: it counts low-population ships that miss the snapshot /
+        # min-battles floor, so the per-ship shares sum to <100%. Filters mirror
+        # the per-ship `rows` query below exactly (same window/realm/mode, and no
+        # `is_hidden` filter — `rows` has none either, so numerator and
+        # denominator share the same basis), broadened only to the full tier+type
+        # ship set and dropping the min-battles floor.
+        "total_battles": 0,
         "ships": [],
     }
     # Empty buckets (no snapshot, or no ships of this tier+type ranked) are not
@@ -6794,6 +6804,24 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     }
     if not ships:
         return _store_realm_ship_cache(cache_key, published_key, payload) if not use_cache else payload
+
+    # Whole-bucket denominator: battles over **all** ships of this tier+type in
+    # the window (not just the snapshot-ranked candidates), so each listed ship's
+    # client-side class/tier share % is a true fraction of every game played in
+    # the bucket. Same filters as the per-ship `rows` query (window/realm/mode,
+    # no `is_hidden`); only the ship set is broadened and the min-battles floor
+    # dropped. See the `total_battles` note on the payload above.
+    bucket_ids = list(
+        Ship.objects.filter(tier=tier, ship_type=ship_type)
+        .values_list('ship_id', flat=True)
+    )
+    if bucket_ids:
+        payload["total_battles"] = int(
+            BattleEvent.objects
+            .filter(detected_at__gte=window_start, detected_at__lt=window_end,
+                    player__realm=realm, mode=mode, ship_id__in=bucket_ids)
+            .aggregate(t=Sum("battles_delta"))["t"] or 0
+        )
 
     # ship_id is a plain BigIntegerField (no FK), so there is no ORM join to
     # Ship — aggregate the candidate ids directly, then attach metadata in Python.
