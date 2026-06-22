@@ -185,36 +185,10 @@ export const wrColorByRatio = (winRatio: number): string => {
     return '#a50f15';
 };
 
-// Win-rate → color on the 0–100 percentage scale. Identical palette to
-// wrColorByRatio, just a different input scale (used by the landing scatters).
-export const wrColorByPercent = (winRatio: number): string => wrColorByRatio(winRatio / 100);
-
 // SI-compact integer formatting for axis ticks / counts, relabeling the SI
 // "giga" suffix (G) to "B" for billions (e.g. 1.2G → 1.2B).
 export const formatCompactCount = (value: number): string =>
     d3.format('~s')(value).replace('G', 'B');
-
-// Pad a [min, max] data extent by paddingRatio of its span, optionally clamping
-// to a floor/ceiling, and guarantee a non-zero span. Shared by the landing
-// scatter charts for their axis domains.
-export const expandDomain = (
-    minValue: number,
-    maxValue: number,
-    paddingRatio: number,
-    floor?: number,
-    ceiling?: number,
-): [number, number] => {
-    const span = Math.max(maxValue - minValue, 1);
-    const padding = span * paddingRatio;
-    const paddedMin = floor == null ? minValue - padding : Math.max(floor, minValue - padding);
-    const paddedMax = ceiling == null ? maxValue + padding : Math.min(ceiling, maxValue + padding);
-
-    if (paddedMin === paddedMax) {
-        return [paddedMin - 1, paddedMax + 1];
-    }
-
-    return [paddedMin, paddedMax];
-};
 
 // Responsive chart width: clamp the container's measured width to [minWidth,
 // svgWidth], falling back to svgWidth when the container has not laid out yet.

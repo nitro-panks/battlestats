@@ -142,6 +142,20 @@ _RETIRED_SCHEDULE_NAMES = [
     "hot-players-freshness-na",
     "hot-players-freshness-eu",
     "hot-players-freshness-asia",
+    # Landing "best players" + "best clans" featured boards decommissioned
+    # 2026-06-22 (near-zero clicks — Umami 30d: 0 player-clicks, 1 clan-click).
+    # Their two Beat warmer families are retired; the task functions
+    # (warm_landing_page_content_task / materialize_landing_player_best_snapshots_task)
+    # are kept for revival but no longer scheduled, so these rows must be purged or
+    # celery-beat keeps dispatching them. See
+    # agents/runbooks/runbook-landing-featured-boards-decommission-2026-06-22.md.
+    "landing-page-warmer",
+    "landing-page-warmer-na",
+    "landing-page-warmer-eu",
+    "landing-page-warmer-asia",
+    "landing-best-player-snapshot-materializer-na",
+    "landing-best-player-snapshot-materializer-eu",
+    "landing-best-player-snapshot-materializer-asia",
 ]
 
 
@@ -178,35 +192,12 @@ def register_periodic_schedules(sender, **kwargs):
         PeriodicTask.objects.filter(
             name="clan-battle-summary-warmer").update(enabled=False)
 
-    # 2026-06-20: 120 -> 360 (6h). Best-players read a once-daily materialized snapshot,
-    # so the warm mostly re-reads cheap caches; 6h (not daily) keeps the post-deploy
-    # namespace-bump cold window short (see runbook). Cost-reduction: analytical warmers.
-    landing_warm_minutes = int(os.getenv("LANDING_PAGE_WARM_MINUTES", "360"))
-    for realm in sorted(VALID_REALMS):
-        minute_str, hour_str = _realm_crontab_for_cycle(
-            realm, landing_warm_minutes, base_minute=55)
-        landing_warm_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute=minute_str,
-            hour=hour_str,
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"landing-page-warmer-{realm}",
-            defaults={
-                "task": "warships.tasks.warm_landing_page_content_task",
-                "crontab": landing_warm_schedule,
-                "interval": None,
-                "enabled": True,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Refreshes landing page caches ({realm.upper()}).",
-            },
-        )
-
-    PeriodicTask.objects.filter(name="landing-page-warmer").delete()
+    # The landing "best players"/"best clans" featured boards were decommissioned
+    # 2026-06-22 (near-zero clicks — Umami 30d). Their Beat warmer
+    # (landing-page-warmer-{realm} -> warm_landing_page_content_task) is retired;
+    # the schedule names are purged via _RETIRED_SCHEDULE_NAMES. The task function
+    # is kept for easy revival. See
+    # agents/runbooks/runbook-landing-featured-boards-decommission-2026-06-22.md.
 
     # -- Realm top-ships treemap warmer --
     # The treemap + inline tier/type list aggregate over the rolling trailing
@@ -244,30 +235,10 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
-    landing_best_snapshot_hour = int(
-        os.getenv("LANDING_BEST_PLAYER_SNAPSHOT_HOUR", "1"))
-    for realm in sorted(VALID_REALMS):
-        realm_hour = (landing_best_snapshot_hour +
-                      REALM_CRAWL_CRON_HOURS.get(realm, 0)) % 24
-        landing_best_snapshot_schedule, _ = CrontabSchedule.objects.get_or_create(
-            minute="15",
-            hour=str(realm_hour),
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-            timezone="UTC",
-        )
-        PeriodicTask.objects.update_or_create(
-            name=f"landing-best-player-snapshot-materializer-{realm}",
-            defaults={
-                "task": "warships.tasks.materialize_landing_player_best_snapshots_task",
-                "crontab": landing_best_snapshot_schedule,
-                "enabled": True,
-                "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Materializes daily landing Best-player sub-sort snapshots ({realm.upper()}).",
-            },
-        )
+    # The landing best-player materializer (landing-best-player-snapshot-
+    # materializer-{realm} -> materialize_landing_player_best_snapshots_task) fed
+    # the now-decommissioned featured boards (2026-06-22). Retired via
+    # _RETIRED_SCHEDULE_NAMES; the task function is kept for revival.
 
     # -- Rolling T10 Top-Ship-Player snapshot (per realm, striped, every 12h) --
     # Beat fires twice daily (12h apart); each run recomputes the trailing-window

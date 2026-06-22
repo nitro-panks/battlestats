@@ -555,6 +555,14 @@ def _clear_cache_family_dirty(*dirty_keys: str) -> None:
 
 
 def _queue_landing_republish(realm: str = DEFAULT_REALM, scope: str = 'all') -> None:
+    # DECOMMISSIONED 2026-06-22: the landing "best players"/"best clans" featured
+    # boards were removed (near-zero clicks), so player/clan writes no longer need
+    # to warm those caches. This is the third warm-dispatch path beyond the two
+    # retired Beat families; it is short-circuited here. The body below is kept
+    # intact for easy revival — drop this early return to restore warm-on-write.
+    # See agents/runbooks/runbook-landing-featured-boards-decommission-2026-06-22.md.
+    return
+
     from warships.tasks import queue_landing_page_warm
 
     # Debounce: coalesce bursts of invalidations into at most one warm per

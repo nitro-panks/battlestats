@@ -101,7 +101,9 @@ class LandingHelperTests(TestCase):
             'na', LANDING_CLANS_BEST_CACHE_KEY)), ['best'])
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_CLANS_DIRTY_KEY)))
-        mock_delay.assert_called_once_with(realm='na', scope='clans')
+        # Decommissioned 2026-06-22: invalidation still marks the family dirty and
+        # preserves the current keys, but no longer dispatches a warm (boards gone).
+        mock_delay.assert_not_called()
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_preserves_namespace_by_default(self, mock_delay):
@@ -121,7 +123,8 @@ class LandingHelperTests(TestCase):
         self.assertEqual(original_published_key, rebuilt_published_key)
         self.assertIsNotNone(
             cache.get(realm_cache_key('na', LANDING_PLAYERS_DIRTY_KEY)))
-        mock_delay.assert_called_once_with(realm='na', scope='players')
+        # Decommissioned 2026-06-22: invalidation no longer dispatches a warm.
+        mock_delay.assert_not_called()
 
     @patch('warships.tasks.warm_landing_page_content_task.delay')
     def test_invalidate_landing_player_caches_bumps_namespace_when_requested(self, mock_delay):
@@ -631,26 +634,17 @@ class LandingHelperTests(TestCase):
         self.assertIn(8202, waiter_ids)
         self.assertEqual(cache.get(lock_key), 1)
 
-    def test_queue_landing_republish_debounces_within_cooldown(self):
-        # Regression guard for the background-queue flood: bursts of clan/player
-        # invalidations must coalesce into at most one warm per realm within the
-        # cooldown window. See runbook-db-cpu-saturation-2026-05-24.md.
+    def test_queue_landing_republish_is_decommissioned_noop(self):
+        # The landing "best" featured boards were decommissioned 2026-06-22, so
+        # the invalidation-driven republish no longer dispatches any warm — it is
+        # short-circuited to a no-op (third warm-dispatch path retired alongside
+        # the two Beat warmer families). Drop the early return to revive.
         from warships import landing as landing_mod
         with patch('warships.tasks.queue_landing_page_warm') as mock_warm:
             landing_mod._queue_landing_republish(realm='na')
-            landing_mod._queue_landing_republish(realm='na')  # within cooldown
-            landing_mod._queue_landing_republish(realm='na')  # within cooldown
-            self.assertEqual(mock_warm.call_count, 1)
-            # A different realm is gated independently.
-            landing_mod._queue_landing_republish(realm='eu')
-            self.assertEqual(mock_warm.call_count, 2)
-
-    def test_queue_landing_republish_dispatches_warm(self):
-        # An invalidation-driven republish enqueues the all-scope landing warm.
-        from warships import landing as landing_mod
-        with patch('warships.tasks.queue_landing_page_warm') as mock_warm:
             landing_mod._queue_landing_republish(realm='na')
-            mock_warm.assert_called_once_with(realm='na', scope='all')
+            landing_mod._queue_landing_republish(realm='eu', scope='clans')
+            mock_warm.assert_not_called()
 
     def test_best_clan_wr_sort_ignores_tiny_cb_samples(self):
         now = timezone.now()
@@ -992,8 +986,10 @@ class LandingHelperTests(TestCase):
         self.assertEqual(payload, [{'name': 'published-clan'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
         mock_builder.assert_not_called()
-        mock_queue_warm.assert_called_once_with(
-            realm='na', scope='clans')
+        # Decommissioned 2026-06-22: serving the published fallback no longer
+        # queues a warm (the landing-best boards are gone; _queue_landing_republish
+        # is a no-op). The durable payload is still served.
+        mock_queue_warm.assert_not_called()
 
     @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
     def test_landing_players_use_published_fallback_when_primary_cache_is_missing(self, mock_queue_warm):
@@ -1013,8 +1009,8 @@ class LandingHelperTests(TestCase):
         self.assertEqual(payload, [{'name': 'published-player'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_PLAYER_CACHE_TTL)
         mock_builder.assert_not_called()
-        mock_queue_warm.assert_called_once_with(
-            realm='na', scope='players')
+        # Decommissioned 2026-06-22: published-fallback serve no longer warms.
+        mock_queue_warm.assert_not_called()
 
     def test_landing_clan_primary_cache_hit_backfills_published_fallback(self):
         cache.set(realm_cache_key('na', LANDING_CLANS_CACHE_KEY),
@@ -1077,8 +1073,10 @@ class LandingHelperTests(TestCase):
         self.assertEqual(payload, [{'name': 'published-best-clan'}])
         self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
         mock_builder.assert_not_called()
-        mock_queue_warm.assert_called_once_with(
-            realm='na', scope='clans')
+        # Decommissioned 2026-06-22: serving the published fallback no longer
+        # queues a warm (the landing-best boards are gone; _queue_landing_republish
+        # is a no-op). The durable payload is still served.
+        mock_queue_warm.assert_not_called()
 
     @patch('warships.tasks.queue_landing_page_warm', return_value={'status': 'queued'})
     def test_best_landing_clans_preserve_non_empty_published_payload_when_primary_is_empty(self, mock_queue_warm):
@@ -1108,8 +1106,10 @@ class LandingHelperTests(TestCase):
         self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
         self.assertEqual(cache.get(published_cache_key),
                          [{'name': 'durable-best-clan'}])
-        mock_queue_warm.assert_called_once_with(
-            realm='na', scope='clans')
+        # Decommissioned 2026-06-22: serving the published fallback no longer
+        # queues a warm (the landing-best boards are gone; _queue_landing_republish
+        # is a no-op). The durable payload is still served.
+        mock_queue_warm.assert_not_called()
 
     def test_get_landing_players_payload_rebuilds_when_dirty_instead_of_serving_published(self):
         cache_key = landing_player_cache_key('best', 5, sort='ranked')

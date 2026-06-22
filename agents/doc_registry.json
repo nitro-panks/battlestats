@@ -3097,6 +3097,37 @@
             "archive_on": [
                 "player-fetch-orchestration-superseded"
             ]
+        },
+        "agents/runbooks/runbook-landing-featured-boards-decommission-2026-06-22.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "landing featured boards decommission",
+                "remove best players scatterplot",
+                "remove best clans scatterplot",
+                "stop landing warmers",
+                "landing best board removal",
+                "decommission landing scatterplots"
+            ],
+            "tags": [
+                "landing-page",
+                "decommission",
+                "warmer",
+                "celery beat",
+                "PlayerSearch",
+                "LandingPlayerSVG",
+                "LandingClanSVG",
+                "score_best_clans",
+                "umami",
+                "revival"
+            ],
+            "archive_on": [
+                "landing-featured-boards-revived",
+                "landing-decommission-superseded"
+            ]
         }
     }
 }

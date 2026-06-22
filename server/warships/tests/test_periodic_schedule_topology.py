@@ -36,7 +36,6 @@ from warships.signals import (
 # Schedule families that get a per-realm row with a striped crontab.
 # Tuples are (name_prefix, cycle_env_default_minutes).
 STRIPED_PER_REALM_FAMILIES = [
-    ("landing-page-warmer", 360),
     ("player-distribution-warmer", 1440),
     ("player-correlation-warmer", 1440),
     ("efficiency-rank-snapshot-warmer", 1440),
@@ -49,6 +48,10 @@ STRIPED_PER_REALM_FAMILIES = [
 # Retired/removed per-realm schedule prefixes — must NOT exist after register.
 RETIRED_PER_REALM_FAMILIES = [
     "recently-viewed-player-warmer",  # vestigial; landing Recent pill removed (2026-06-20)
+    # Landing "best" featured boards decommissioned 2026-06-22 — both warmer
+    # families retired (see runbook-landing-featured-boards-decommission-2026-06-22.md).
+    "landing-page-warmer",
+    "landing-best-player-snapshot-materializer",
 ]
 
 
@@ -348,7 +351,6 @@ class MinuteLaneDePileTests(TestCase):
         "observation-floor",
         "player-distribution-warmer",
         "player-correlation-warmer",
-        "landing-page-warmer",
         "hot-players-capture",
     ]
 
