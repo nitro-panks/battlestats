@@ -2395,7 +2395,10 @@ def update_tiers_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
 
     player.tiers_json = data
     player.tiers_updated_at = datetime.now()
-    player.save()
+    # Scoped: owns only tiers_*. A bare save() writes back this regenerator's stale
+    # snapshot of battles_json / ranked_json / etc., reverting concurrent scoped
+    # writes (runbook-player-refresh-pill-clobber-2026-06-21 #2 — bare-save audit).
+    player.save(update_fields=['tiers_json', 'tiers_updated_at'])
 
 
 def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM, refresh_player: bool = True) -> None:
@@ -2502,7 +2505,8 @@ def update_activity_data(player_id: int, realm: str = DEFAULT_REALM) -> None:
 
     player.activity_json = month
     player.activity_updated_at = datetime.now()
-    player.save()
+    # Scoped: owns only activity_* (bare-save audit, see update_tiers_data).
+    player.save(update_fields=['activity_json', 'activity_updated_at'])
     refresh_player_explorer_summary(player, activity_rows=month)
 
     logging.info(f'Updated activity data for player {player.name}')
@@ -4348,7 +4352,8 @@ def update_type_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     player.type_json = _aggregate_battles_by_key(
         player.battles_json, 'ship_type')
     player.type_updated_at = datetime.now()
-    player.save()
+    # Scoped: owns only type_* (bare-save audit, see update_tiers_data).
+    player.save(update_fields=['type_json', 'type_updated_at'])
 
     logging.info(f'Updated type data for player {player.name}')
 
@@ -4613,7 +4618,8 @@ def update_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
     player = Player.objects.get(player_id=player_id, realm=realm)
     player.randoms_json = extract_randoms_rows(player.battles_json, limit=20)
     player.randoms_updated_at = datetime.now()
-    player.save()
+    # Scoped: owns only randoms_* (bare-save audit, see update_tiers_data).
+    player.save(update_fields=['randoms_json', 'randoms_updated_at'])
 
     logging.info(f'Updated randoms data for player {player.name}')
 
@@ -4650,7 +4656,12 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     clan.leader_id = data.get('leader_id', None)
     clan.leader_name = data.get('leader_name', '')
     clan.last_fetch = datetime.now()
-    clan.save()
+    # Scoped: owns only these account/info fields. A bare save() would write back
+    # this task's stale snapshot of the cached-aggregate columns that
+    # refresh_clan_cached_aggregates writes concurrently (bare-save audit).
+    clan.save(update_fields=[
+        'members_count', 'tag', 'name', 'description', 'leader_id',
+        'leader_name', 'last_fetch'])
     invalidate_landing_clan_caches()
     _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
     cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
@@ -4674,7 +4685,11 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
         else:
             if player.clan != clan:
                 player.clan = clan
-                player.save()
+                # Scoped: only the clan FK changed here. A bare save() during a
+                # clan refresh would write back this loop's stale player snapshot,
+                # reverting a concurrent per-player battle/ranked/account write
+                # (bare-save audit, runbook-player-refresh-pill-clobber-2026-06-21 #2).
+                player.save(update_fields=['clan'])
 
     reconcile_clan_departures(clan, member_ids, realm=realm)
 
@@ -4766,7 +4781,11 @@ def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
         else:
             if player.clan != clan:
                 player.clan = clan
-                player.save()
+                # Scoped: only the clan FK changed here. A bare save() during a
+                # clan refresh would write back this loop's stale player snapshot,
+                # reverting a concurrent per-player battle/ranked/account write
+                # (bare-save audit, runbook-player-refresh-pill-clobber-2026-06-21 #2).
+                player.save(update_fields=['clan'])
 
         update_player_data(player)
 

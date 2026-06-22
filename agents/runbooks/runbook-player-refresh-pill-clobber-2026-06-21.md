@@ -124,12 +124,20 @@ the ranked payload is still written exactly as before.
 ## Next steps / follow-ups
 
 1. **Ship + deploy** this patch (backend); re-verify live per Validation.
-2. **Audit the other full `player.save()` sites for the same race (recommended).** Any task
-   dispatched concurrently with a visit refresh that does a bare `player.save()` after a slow fetch
-   can lost-update *any* field, not just `battles_updated_at`. `grep -n "player\.save()"
-   server/warships/data.py` shows ~9 sites (e.g. `4342`, `4607`, `4668`, `4760`); each should be
-   scoped to `update_fields` or re-read-before-save. Treat as a small follow-up sweep, not part of
-   this slice.
+2. **Audit the other bare `player.save()` sites — DONE 2026-06-21.** Swept every `.save()` in
+   `data.py`. Fixed (scoped to `update_fields`) the remaining player-write clobberers that run
+   concurrently with the visit fan-out: the four chart **regenerators** `update_tiers_data` /
+   `update_type_data` / `update_randoms_data` / `update_activity_data` (each owns only its 2 chart
+   columns but bare-saved the whole row; they run as **unrouted Celery tasks** on `default` +
+   the request hydration path) → scoped to their `*_json` + `*_updated_at`; and the clan-refresh
+   member-reassignment `player.clan = clan; player.save()` in `update_clan_data` / `update_clan_members`
+   → scoped to `['clan']`. Also scoped the clan-object save in `update_clan_data`
+   (raced `refresh_clan_cached_aggregates`) to its 7 account/info columns. Test:
+   `test_regenerator_scoped_saves.py` (concurrent `ranked_json` write survives + all four use scoped
+   `update_fields`), verified fail-on-bare-save. **Intentional bare saves left as-is:** the hidden /
+   brand-new-row branch of `update_player_data` (legit full wipe / insert), `update_snapshot_data`'s
+   `snapshot.save()` (per-day `Snapshot` row, single-writer, not the Player). Net: every visit-concurrent
+   Player writer is now field-scoped.
 3. **Secondary clobber path — genuinely-cold (>23h) players — FIXED 2026-06-21.** When
    `update_player_data` does NOT early-return (`data.py:4774`, `last_fetch > ~23h`) it does an
    account/info refresh then a **bare `player.save()`**, which wrote back the task's stale snapshot of
