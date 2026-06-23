@@ -43,7 +43,11 @@ export async function generateMetadata({ params, searchParams }: PlayerPageProps
 
 const PlayerPage = async ({ params }: PlayerPageProps) => {
     const { playerName } = await params;
-    return <PlayerRouteView playerName={playerName} />;
+    // key={playerName} remounts the main well on a soft-nav player swap so
+    // per-player well state (selected tab, scroll, sort) never bleeds across
+    // players. The clan rail lives in the parent layout and is NOT keyed, so it
+    // stays mounted — see app/player/layout.tsx + the soft-nav runbook.
+    return <PlayerRouteView key={playerName} playerName={playerName} />;
 };
 
 
