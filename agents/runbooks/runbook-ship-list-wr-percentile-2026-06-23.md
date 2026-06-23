@@ -171,3 +171,18 @@ computed na/T10/Cruiser in ~31s → re-request ready (31 ships, same set), sibli
 50% instant from the same warm. Screenshots confirmed All / crunching / top-50 /
 top-25 render with the same ship set, WR + damage climbing as the percentile
 narrows (Sicilia 56.6%→ Aki 70.3%, Slava 118k→140k avg dmg at top-25%).
+
+## Validation — nightly pre-warm (prod, 2026-06-23, v2.14.1)
+
+After deploying the all-buckets pre-warm, `warm_realm_ships_pct_task` was
+triggered per realm (serially): na `warmed=11 skipped=4`, eu `15/0`, asia `15/0`
+(prod `_badge_tiers()` = {8,9,10} → 15 buckets/realm). Acceptance test — a
+previously-lazy bucket now serves instantly with **no** `X-Ships-WR-Pending`
+header and `pending: null`:
+- na T10 Cruiser 25% → 31 ships, Svea 70.6%; T10 DD 50% → 27 ships, Småland 68.8%;
+  T10 CV 25% → 8 ships, Essex 73.0%.
+- eu T10 Cruiser 25% → 36 ships, San Martín 79.2%; asia T10 BB 50% → 35 ships,
+  Sicilia 66.3%.
+Droplet load15 stayed ~0.7 across the three serial warms (alarm threshold 2.3).
+Going forward the warm runs automatically, chained off the nightly top-ships Beat
++ the 2×/day snapshot (skip-if-warm → one real pass/window).
