@@ -2486,6 +2486,32 @@
                 "crawl-control-model-replaced"
             ]
         },
+        "agents/runbooks/runbook-ship-list-wr-percentile-2026-06-23.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "data",
+            "aliases": [
+                "ship list win rate filter",
+                "top 50% top 25% players ship stats",
+                "how are good players doing ship list",
+                "wr_pct ship leaderboard",
+                "ships-by-pct warm"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "landing-page",
+                "caching",
+                "pending-poll",
+                "warmer",
+                "celery",
+                "frontend"
+            ],
+            "archive_on": [
+                "ship-list-wr-percentile-superseded"
+            ]
+        },
         "agents/runbooks/runbook-shipleaderboard-warm-before-evict-2026-06-18.md": {
             "kind": "runbook",
             "status": "active",

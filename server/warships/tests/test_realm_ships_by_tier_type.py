@@ -11,6 +11,7 @@ rolling trailing ``SHIP_LEADERBOARD_WINDOW_DAYS`` anchored on the realm's latest
 """
 
 from datetime import timedelta
+from unittest import mock
 
 from django.core.cache import cache
 from django.test import TestCase
@@ -248,6 +249,9 @@ class RealmShipsByTierTypeWarmTests(TestCase):
         self.assertEqual(result["status"], "completed")
         # 1 badge tier (default {10}) x 5 ship types.
         self.assertEqual(result["results"]["tier_type_buckets"], 5)
+        # The landing default (top-50%) bucket's percentile is pre-warmed too, so
+        # the primary landing view loads instant rather than queue+poll.
+        self.assertEqual(result["results"]["default_pct_bucket"], "t10/Battleship")
 
         # The T10/Destroyer bucket is now a warm hit carrying the WR-ranked ship.
         cached = cache.get(self._bucket_key(10, "Destroyer"))
@@ -309,3 +313,193 @@ class RealmShipsByTierTypeViewTests(TestCase):
     def test_aircarrier_no_space_accepted(self):
         resp = self.client.get("/api/realm/na/ships/?tier=10&type=AirCarrier")
         self.assertEqual(resp.status_code, 200)
+
+
+class RealmShipsByTierTypeWrPctTests(TestCase):
+    """Win-rate-percentile views (top 50% / 25% of each ship's players by WR).
+
+    Pins the load-bearing constraint — the listed *ship set* is identical to the
+    all-view (membership gates on full-population battles, never the subset) — plus
+    the re-pooling math, the per-player ranking floor + its never-drop fallback,
+    and the equivalence of the percentile path to the cheap all-path at 100%.
+    """
+
+    def setUp(self):
+        cache.clear()
+        Ship.objects.create(ship_id=SHIMA, name="Shimakaze", nation="japan",
+                            ship_type="Destroyer", tier=10)
+        Ship.objects.create(ship_id=GEARING, name="Gearing", nation="usa",
+                            ship_type="Destroyer", tier=10)
+        self.snap_player = Player.objects.create(
+            name="snap_anchor", player_id=889000, realm="na", pvp_battles=1)
+        self.captured_on = timezone.now().date()
+        self.window_start, _ = _season_window_datetimes(
+            self.captured_on - timedelta(days=14), self.captured_on)
+        self._next_pid = 889001
+
+    def _snapshot(self, ship_id):
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=self.captured_on, realm="na", ship_id=ship_id,
+            ship_name="x", rank=1, player=self.snap_player, win_rate=50.0, battles=1)
+
+    def _player_event(self, ship_id, battles, wins, *, avg_damage=0, frags=0):
+        """One player's whole-window aggregate for a ship (a fresh player each)."""
+        p = Player.objects.create(
+            name=f"p{self._next_pid}", player_id=self._next_pid, realm="na",
+            pvp_battles=battles)
+        self._next_pid += 1
+        obs_a = BattleObservation.objects.create(player=p, pvp_battles=1)
+        obs_b = BattleObservation.objects.create(player=p, pvp_battles=2)
+        ev = BattleEvent.objects.create(
+            player=p, ship_id=ship_id, ship_name="x", mode="random",
+            battles_delta=battles, wins_delta=wins, losses_delta=battles - wins,
+            frags_delta=frags, damage_delta=avg_damage * battles,
+            from_observation=obs_a, to_observation=obs_b)
+        BattleEvent.objects.filter(pk=ev.pk).update(
+            detected_at=self.window_start + timedelta(days=1))
+        return p
+
+    def _four_skill_tiers(self, ship_id):
+        # Four equal-battle players spanning the skill range, all clearing the
+        # per-player floor (15). Pooled all-view WR = 240/400 = 60%.
+        self._player_event(ship_id, 100, 90, avg_damage=80_000, frags=200)  # 90%
+        self._player_event(ship_id, 100, 70, avg_damage=60_000, frags=150)  # 70%
+        self._player_event(ship_id, 100, 50, avg_damage=40_000, frags=100)  # 50%
+        self._player_event(ship_id, 100, 30, avg_damage=20_000, frags=50)   # 30%
+
+    def test_top_quartile_pools_only_the_best_players(self):
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        payload = compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=25, use_cache=False)
+        self.assertEqual(payload["wr_pct"], 25)
+        s = payload["ships"][0]
+        # Top 25% of 4 players = the single 90%-WR player.
+        self.assertEqual(s["battles"], 100)
+        self.assertEqual(s["win_rate"], 90.0)
+        self.assertEqual(s["avg_damage"], 80_000)
+        self.assertEqual(s["kills_per_battle"], 2.0)
+
+    def test_top_half_pools_the_better_half(self):
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        payload = compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=50, use_cache=False)
+        s = payload["ships"][0]
+        # Top 50% = the 90% + 70% players: 160 wins / 200 battles = 80%.
+        self.assertEqual(s["battles"], 200)
+        self.assertEqual(s["win_rate"], 80.0)
+        self.assertEqual(s["avg_damage"], 70_000)  # (80k + 60k) / 2
+
+    def test_does_not_change_the_listed_ship_set(self):
+        # Both ships are listed in the all-view; the percentile views must list the
+        # exact same set (only the stats narrow) — the load-bearing constraint.
+        self._snapshot(SHIMA)
+        self._snapshot(GEARING)
+        self._four_skill_tiers(SHIMA)
+        self._four_skill_tiers(GEARING)
+        all_ids = {s["ship_id"] for s in compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", use_cache=False)["ships"]}
+        for pct in (50, 25):
+            ids = {s["ship_id"] for s in compute_realm_ships_by_tier_type(
+                "na", tier=10, ship_type="Destroyer", wr_pct=pct,
+                use_cache=False)["ships"]}
+            self.assertEqual(ids, all_ids, f"wr_pct={pct} changed the ship set")
+
+    def test_player_floor_fallback_never_drops_a_thin_ship(self):
+        # A ship whose every player is below the per-player ranking floor (15) but
+        # whose FULL-population battles clear the ship floor (50) stays listed —
+        # falling back to full-population stats rather than vanishing.
+        self._snapshot(SHIMA)
+        for _ in range(6):
+            self._player_event(SHIMA, 10, 6, avg_damage=50_000)  # 10 < floor 15
+        payload = compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=25, use_cache=False)
+        self.assertEqual([s["ship_id"] for s in payload["ships"]], [SHIMA])
+        s = payload["ships"][0]
+        # Full-population fallback: 60 battles, 36/60 = 60% WR.
+        self.assertEqual(s["battles"], 60)
+        self.assertEqual(s["win_rate"], 60.0)
+        self.assertEqual(s["avg_damage"], 50_000)
+
+    def test_pct_100_no_floor_matches_the_all_path_exactly(self):
+        # The equivalence hatch: top-100% with no floor must reproduce the cheap
+        # all-path row-for-row, pinning the two code paths together.
+        self._snapshot(SHIMA)
+        self._snapshot(GEARING)
+        self._four_skill_tiers(SHIMA)
+        self._player_event(GEARING, 200, 130, avg_damage=55_000, frags=240)
+        self._player_event(GEARING, 40, 10, avg_damage=30_000, frags=20)
+        all_payload = compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", use_cache=False)
+        pct_payload = compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=100,
+            player_min_battles=0, use_cache=False)
+        # Same ships, same order, same stat fields (wr_pct aside).
+        self.assertEqual(
+            [{k: v for k, v in s.items()} for s in pct_payload["ships"]],
+            [{k: v for k, v in s.items()} for s in all_payload["ships"]])
+
+    def test_cold_pct_read_serves_pending_and_queues_one_warm(self):
+        # The read path must NOT compute the heavy aggregation synchronously: on a
+        # cold percentile key it returns a `pending` payload and queues a single
+        # background warm (the client polls until the warm fills the key).
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        with mock.patch("warships.tasks.queue_ships_by_pct_warm") as q:
+            payload = compute_realm_ships_by_tier_type(
+                "na", tier=10, ship_type="Destroyer", wr_pct=25, use_cache=True)
+        self.assertTrue(payload["pending"])
+        self.assertEqual(payload["ships"], [])
+        self.assertEqual(payload["wr_pct"], 25)
+        q.assert_called_once()
+
+    def test_warm_then_cached_read_serves_ready_not_pending(self):
+        # After the background warm runs (use_cache=False), a normal read hits the
+        # warm fresh key and serves the ready payload — no pending, no re-queue.
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        # Simulate the background warm (caches both 50 and 25 fresh keys).
+        compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=50, use_cache=False)
+        with mock.patch("warships.tasks.queue_ships_by_pct_warm") as q:
+            payload = compute_realm_ships_by_tier_type(
+                "na", tier=10, ship_type="Destroyer", wr_pct=25, use_cache=True)
+        self.assertNotIn("pending", payload)
+        self.assertEqual(payload["ships"][0]["win_rate"], 90.0)  # top 25%
+        q.assert_not_called()
+
+    def test_view_honors_wr_pct_param(self):
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        # Warm first so the view serves the ready payload (not a pending stub).
+        compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=50, use_cache=False)
+        resp = self.client.get(
+            "/api/realm/na/ships/?tier=10&type=Destroyer&wr_pct=25")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["wr_pct"], 25)
+        self.assertEqual(body["ships"][0]["win_rate"], 90.0)
+        self.assertNotIn("X-Ships-WR-Pending", resp)
+
+    def test_view_cold_pct_sets_pending_header(self):
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        with mock.patch("warships.tasks.queue_ships_by_pct_warm"):
+            resp = self.client.get(
+                "/api/realm/na/ships/?tier=10&type=Destroyer&wr_pct=25")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp["X-Ships-WR-Pending"], "true")
+        self.assertEqual(resp.json()["ships"], [])
+
+    def test_view_ignores_unsupported_wr_pct(self):
+        # Anything outside the offered set falls through to the all-view.
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        resp = self.client.get(
+            "/api/realm/na/ships/?tier=10&type=Destroyer&wr_pct=10")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIsNone(body["wr_pct"])
+        self.assertEqual(body["ships"][0]["win_rate"], 60.0)  # full-population

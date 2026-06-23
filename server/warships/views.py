@@ -2176,14 +2176,20 @@ def realm_ships_by_tier_type(request, realm: str) -> Response:
     `tier` (one of the badge tiers, prod 8/9/10) and `type` (a raw WG ship-type
     string). 404 on unknown realm; 400 on missing/invalid tier or type.
 
+    Optional ``wr_pct`` (one of ``SHIP_LIST_WR_PCTS`` — 50 or 25) switches each
+    listed ship's stats to the top ``wr_pct``% of its players by win rate (the
+    listed ship set is unchanged); omit it (or any other value) for the default
+    realm-wide aggregate.
+
     Response shape:
-        {realm, window_days, tier, ship_type, mode, captured_on,
+        {realm, window_days, tier, ship_type, mode, wr_pct, captured_on,
          window_start, window_end,
          ships: [{ship_id, ship_name, ship_type, tier, nation, is_premium,
                   battles, win_rate, avg_damage, kills_per_battle}]}
     """
     from warships.data import (
         compute_realm_ships_by_tier_type, _badge_tiers, SHIP_LEADERBOARD_TYPES,
+        SHIP_LIST_WR_PCTS,
     )
 
     realm = (realm or DEFAULT_REALM).lower().strip()
@@ -2206,13 +2212,28 @@ def realm_ships_by_tier_type(request, realm: str) -> Response:
                        f"{', '.join(SHIP_LEADERBOARD_TYPES)}."},
             status=status.HTTP_400_BAD_REQUEST)
 
+    # Win-rate-percentile selector — only the offered 50/25 are honored; anything
+    # else (incl. absent) falls through to the default all-view (wr_pct=None).
+    try:
+        wr_pct = int(request.query_params.get("wr_pct", ""))
+    except (TypeError, ValueError):
+        wr_pct = None
+    if wr_pct not in SHIP_LIST_WR_PCTS:
+        wr_pct = None
+
     payload = compute_realm_ships_by_tier_type(
         realm,
         tier=tier,
         ship_type=ship_type,
         mode=request.query_params.get("mode", "random"),
+        wr_pct=wr_pct,
     )
-    return Response(payload)
+    response = Response(payload)
+    # Cold percentile bucket — a background warm is computing; the client polls
+    # (also signalled by `pending: true` in the body) until it lands.
+    if payload.get("pending"):
+        response["X-Ships-WR-Pending"] = "true"
+    return response
 
 
 @api_view(["GET"])

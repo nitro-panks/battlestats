@@ -32,6 +32,18 @@ export const SHIP_TYPES = ['Battleship', 'Cruiser', 'Destroyer', 'AirCarrier', '
 export type ShipType = (typeof SHIP_TYPES)[number];
 const TIERS: Tier[] = [8, 9, 10];
 
+// Win-rate-percentile filter for the ship LIST: narrows each ship's displayed
+// stats (battles, avg dmg, kills/battle, WR) to the top N% of that ship's
+// players by win rate — answering "how are good/great players doing with these
+// ships?". `null` is the default realm-wide aggregate. Must match the backend's
+// SHIP_LIST_WR_PCTS (50/25). Does NOT change which ships are listed.
+export type WrPct = 50 | 25 | null;
+const WR_PCTS: { value: WrPct; label: string }[] = [
+    { value: null, label: 'All' },
+    { value: 50, label: '50%' },
+    { value: 25, label: '25%' },
+];
+
 // Imperative handle the landing treemap drives to drill straight into a ship's
 // player board in place (see runbook-treemap-shipleaderboard-handoff). Kept as a
 // command rather than lifted state so this component keeps owning its list/board
@@ -63,6 +75,10 @@ interface ShipsByTierType {
     // mid-deploy) degrades to battles-only rather than NaN%.
     total_battles?: number;
     ships: ListShip[];
+    // True when a cold win-rate-percentile bucket is still being computed by a
+    // background warm (the heavy per-player aggregation). The client polls until
+    // a non-pending payload (with ships) lands. Absent on ready payloads.
+    pending?: boolean;
 }
 
 interface LeaderboardPlayer {
@@ -176,7 +192,8 @@ const ariaSort = (active: boolean, dir: SortDir): 'ascending' | 'descending' | '
     active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none';
 
 const DATA_BASIS_HINT =
-    'Stats are aggregated from battle observations recorded during the rolling trailing 14-day window.';
+    'Stats are aggregated from battle observations recorded during the rolling trailing 14-day window. ' +
+    'The WR filter narrows each ship’s stats to its top 50% or 25% of players by win rate (the ships listed never change).';
 
 // Info affordance with a hover/focus tooltip — styled to match the circle-info
 // buttons in the Players/Clans landing sections below (FontAwesomeIcon + the
@@ -209,12 +226,20 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
     // (these buckets are pre-warmed daily — see warm_realm_top_ships_task).
     const [tier, setTier] = useState<Tier | null>(10);
     const [type, setType] = useState<ShipType | null>('Battleship');
+    // WR-percentile filter applies to the ship LIST only (not the drilled-in
+    // player board). Defaults to the top 50% ("how are good players doing with
+    // these ships?"); `null` is the all-players view. The default landing bucket
+    // is pre-warmed (warm_realm_top_ships_task) so this view loads instantly.
+    const [wrPct, setWrPct] = useState<WrPct>(50);
     const [selectedShip, setSelectedShip] = useState<{ id: number; name: string } | null>(null);
 
     const [list, setList] = useState<ListShip[] | null>(null);
     const [listTotalBattles, setListTotalBattles] = useState(0);
     const [listLoading, setListLoading] = useState(false);
     const [listError, setListError] = useState(false);
+    // True while a cold WR-percentile bucket is being computed server-side and we
+    // are polling for it (drives a distinct "crunching" message vs first load).
+    const [listPending, setListPending] = useState(false);
 
     const [board, setBoard] = useState<ShipLeaderboardPayload | null>(null);
     const [boardLoading, setBoardLoading] = useState(false);
@@ -234,6 +259,13 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
         setType(t);
         setSelectedShip(null);
         trackEvent('ship-leaderboard-filter', { realm, control: 'type', tier: tier ?? 0, type: t });
+    };
+    // WR-percentile filter — list-only, so it never abandons a board (the pills
+    // are hidden while drilled in). 0 stands in for "all" in the analytics log.
+    const chooseWrPct = (p: WrPct) => {
+        if (p === wrPct) return;
+        setWrPct(p);
+        trackEvent('ship-leaderboard-wr-filter', { realm, wr_pct: p ?? 0, tier: tier ?? 0, type: type ?? '' });
     };
 
     // Column-sort analytics, one event for both tables (scope distinguishes the
@@ -271,32 +303,61 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
     }, [eggKind, realm]);
 
     // Ship list fetch (only with both filters set and no ship drilled into).
+    // The default "all" view is client-cached (LIST_FETCH_TTL_MS); the WR
+    // percentile views are NOT — they may come back `pending` (a cold bucket
+    // being computed by a background warm), so we bypass the settled cache
+    // (ttlMs:0) and poll until ships land. This also avoids a pending stub
+    // poisoning the client cache. The server cache + in-flight dedup keep the
+    // warm-bucket re-fetches cheap.
     const listReqId = useRef(0);
     useEffect(() => {
         if (!bothSelected || selectedShip || isEasterEgg) return;
         const reqId = ++listReqId.current;
         setListLoading(true);
         setListError(false);
-        fetchSharedJson<ShipsByTierType>(
-            `/api/realm/${encodeURIComponent(realm)}/ships?tier=${tier}&type=${encodeURIComponent(type as string)}`,
-            {
-                label: `ShipsByTierType:${realm}:${tier}:${type}`,
-                ttlMs: LIST_FETCH_TTL_MS,
-                cacheKey: `ships-by:${realm}:${tier}:${type}`,
-            },
-        )
-            .then(({ data }) => {
-                if (reqId !== listReqId.current) return;
-                setList(data.ships ?? []);
-                setListTotalBattles(data.total_battles ?? 0);
-                setListLoading(false);
+        setListPending(false);
+
+        const wrParam = wrPct ? `&wr_pct=${wrPct}` : '';
+        const wrTag = wrPct ?? 'all';
+        const url = `/api/realm/${encodeURIComponent(realm)}/ships?tier=${tier}&type=${encodeURIComponent(type as string)}${wrParam}`;
+        // Poll cadence for a pending percentile bucket: ~3s × 16 ≈ 48s, comfortably
+        // over the heaviest observed cold compute (~28s) plus warm-queue latency.
+        const POLL_MS = 3000;
+        const MAX_POLLS = 16;
+        let polls = 0;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+
+        const run = () => {
+            fetchSharedJson<ShipsByTierType>(url, {
+                label: `ShipsByTierType:${realm}:${tier}:${type}:${wrTag}`,
+                ttlMs: wrPct ? 0 : LIST_FETCH_TTL_MS,
+                cacheKey: wrPct ? undefined : `ships-by:${realm}:${tier}:${type}:${wrTag}`,
             })
-            .catch(() => {
-                if (reqId !== listReqId.current) return;
-                setListError(true);
-                setListLoading(false);
-            });
-    }, [realm, tier, type, bothSelected, selectedShip, isEasterEgg]);
+                .then(({ data }) => {
+                    if (reqId !== listReqId.current) return;
+                    if (data.pending && polls < MAX_POLLS) {
+                        polls += 1;
+                        setListPending(true);
+                        timer = setTimeout(run, POLL_MS);
+                        return;
+                    }
+                    setList(data.ships ?? []);
+                    setListTotalBattles(data.total_battles ?? 0);
+                    setListPending(false);
+                    setListLoading(false);
+                })
+                .catch(() => {
+                    if (reqId !== listReqId.current) return;
+                    setListError(true);
+                    setListPending(false);
+                    setListLoading(false);
+                });
+        };
+        run();
+        return () => {
+            if (timer) clearTimeout(timer);
+        };
+    }, [realm, tier, type, wrPct, bothSelected, selectedShip, isEasterEgg]);
 
     // Ship board fetch (drill-down) — reuses the existing /ship leaderboard.
     const boardReqId = useRef(0);
@@ -386,7 +447,32 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
                             </button>
                         );
                     })}
-                    {/* Data-basis hint sits at the end of the row, right of SS. */}
+                </div>
+                {/* WR-percentile group sits to the right of SS — list-only, so it is
+                    hidden while a ship board is open (it would not apply there). */}
+                <div className="flex flex-wrap items-center gap-2">
+                    {!selectedShip && (
+                        <>
+                            <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">WR</span>
+                            {WR_PCTS.map(({ value, label }) => (
+                                <button
+                                    key={label}
+                                    type="button"
+                                    onClick={() => chooseWrPct(value)}
+                                    className={`${PILL_BASE} ${wrPct === value ? PILL_ON : PILL_OFF}`}
+                                    aria-pressed={wrPct === value}
+                                    title={
+                                        value === null
+                                            ? 'All players'
+                                            : `Top ${value}% of players by win rate`
+                                    }
+                                >
+                                    {label}
+                                </button>
+                            ))}
+                        </>
+                    )}
+                    {/* Data-basis hint sits at the end of the row. */}
                     <InfoHint text={DATA_BASIS_HINT} />
                 </div>
             </div>
@@ -416,6 +502,8 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
                         totalBattles={listTotalBattles}
                         loading={listLoading}
                         error={listError}
+                        pending={listPending}
+                        wrPct={wrPct}
                         tierTypeLabel={`T${tier} ${typeLabel ?? ''}`.trim()}
                         onOpen={openShip}
                         onSortChange={trackSort('ships')}
@@ -438,16 +526,28 @@ const ShipList: React.FC<{
     totalBattles: number;
     loading: boolean;
     error: boolean;
+    pending: boolean;
+    wrPct: WrPct;
     tierTypeLabel: string;
     onOpen: (s: ListShip) => void;
     onSortChange: (key: keyof ListShip, dir: SortDir) => void;
-}> = ({ ships, totalBattles, loading, error, tierTypeLabel, onOpen, onSortChange }) => {
+}> = ({ ships, totalBattles, loading, error, pending, wrPct, tierTypeLabel, onOpen, onSortChange }) => {
     const { sort, onSort } = useTableSort<ListShip>(['ship_name'], onSortChange);
     const sortedShips = useMemo(
         () => (ships && sort ? sortRows(ships, sort.key, sort.dir) : ships),
         [ships, sort],
     );
 
+    // A cold percentile bucket is being computed server-side — show a distinct
+    // one-time "crunching" message rather than the stale all-population list.
+    if (pending) {
+        return (
+            <p className="py-6 text-sm text-[var(--text-muted)]">
+                Crunching stats for the top {wrPct}% of each ship’s players… this can take
+                a few seconds the first time, then it’s instant.
+            </p>
+        );
+    }
     if (loading && !ships) {
         return <p className="py-6 text-sm text-[var(--text-muted)]">Loading ships…</p>;
     }
@@ -464,6 +564,12 @@ const ShipList: React.FC<{
     });
     return (
         <>
+            {wrPct && (
+                <p className="mb-2 text-xs text-[var(--text-muted)]">
+                    Showing stats for the <span className="font-semibold text-[var(--accent-mid)]">top {wrPct}%</span> of
+                    each ship’s players by win rate.
+                </p>
+            )}
             {/* Desktop: dense table, win rate the only color, ship name the action.
                 Viewport caps to ~15 rows; the rest scroll under a sticky header. */}
             <div className="hidden max-h-[580px] max-w-[900px] overflow-y-auto sm:block">

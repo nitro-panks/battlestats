@@ -6701,9 +6701,94 @@ SHIP_LEADERBOARD_TYPES = ('Battleship', 'Cruiser', 'Destroyer', 'AirCarrier', 'S
 # so this just drops any oddly-thin row that still slipped through.
 SHIP_LIST_MIN_BATTLES = int(os.getenv('SHIP_LIST_MIN_BATTLES', '50'))
 
+# Win-rate-percentile views ("how are good/great players doing with these ships").
+# When the inline ship list is filtered to the top 50% / 25% of each ship's
+# players (by window win rate), the stats shown are re-pooled over that subset.
+# These are the percentiles offered besides the default "all"; 100 is an internal
+# hatch used only to assert the percentile path reproduces the cheap all-path.
+SHIP_LIST_WR_PCTS = (50, 25)
+# Per-PLAYER window-battle floor for the percentile ranking. A player needs at
+# least this many battles in the window to enter the ranked population, so
+# "top 25% by win rate" reflects players with a real sample rather than
+# tiny-sample 100%-WR tourists (who would otherwise crowd out the genuinely good
+# high-battle players). DISTINCT from SHIP_LIST_MIN_BATTLES, which gates whether a
+# *ship* is listed (on full-population battles) and is unchanged by this filter.
+SHIP_LIST_WR_PCT_PLAYER_MIN_BATTLES = int(
+    os.getenv('SHIP_LIST_WR_PCT_PLAYER_MIN_BATTLES', '15'))
+# The bucket the landing inline ship list opens on (mirrors ShipLeaderboard.tsx's
+# initial tier/type). The list now defaults to the top-50% WR view, so the daily
+# warmer pre-computes this one percentile bucket per realm to keep the primary
+# landing view instant; every other pct bucket stays lazy (queue + poll on view).
+SHIP_LIST_DEFAULT_TIER = int(os.getenv('SHIP_LIST_DEFAULT_TIER', '10'))
+SHIP_LIST_DEFAULT_TYPE = os.getenv('SHIP_LIST_DEFAULT_TYPE', 'Battleship')
+
+
+def _pool_player_rows(rows):
+    """Sum (battles, wins, damage, frags) over per-player annotate dicts.
+
+    damage/wins/frags are nullable Sums (coalesced to 0). Returns a 4-tuple.
+    """
+    battles = wins = damage = frags = 0
+    for r in rows:
+        battles += int(r["battles"] or 0)
+        wins += int(r["wins"] or 0)
+        damage += int(r["damage"] or 0)
+        frags += int(r["frags"] or 0)
+    return battles, wins, damage, frags
+
+
+def _pct_ship_stats(player_rows, pct, player_floor):
+    """Re-pool one ship's stats over the top-``pct``% of its players by win rate.
+
+    ``player_rows`` is every player's window aggregate for the ship (annotate
+    dicts with battles/wins/damage/frags + the ``player`` id). Players are ranked
+    by win rate (descending; battles then player-id as deterministic tie-breaks)
+    among those clearing ``player_floor`` window battles, and the top ``pct``%
+    *by player count* (ceil, at least 1) are pooled into the displayed stats.
+
+    Returns ``(battles, win_rate, avg_damage, kills_per_battle)`` or ``None`` when
+    the ship has no positive-battle players at all. The ship is NEVER dropped for
+    having too few players above the floor — if the floor leaves the ranked
+    population empty, this falls back to the ship's full-population stats so the
+    listed ship set stays identical to the all-view (the load-bearing constraint).
+    ``pct >= 100`` ignores the floor entirely and pools every player, which makes
+    the percentile path reproduce the cheap all-path exactly (equivalence hatch).
+    """
+    positive = [r for r in player_rows if int(r["battles"] or 0) > 0]
+    if not positive:
+        return None
+
+    if pct >= 100:
+        subset = positive
+    else:
+        ranked = [r for r in positive if int(r["battles"] or 0) >= player_floor]
+        if not ranked:
+            # Floor wiped out the population for this thin ship — keep it listed
+            # with its full-population numbers rather than dropping it.
+            subset = positive
+        else:
+            ranked.sort(key=lambda r: (
+                -(int(r["wins"] or 0) / int(r["battles"])),
+                -int(r["battles"]),
+                r["player"],
+            ))
+            k = max(1, math.ceil(len(ranked) * pct / 100))
+            subset = ranked[:k]
+
+    battles, wins, damage, frags = _pool_player_rows(subset)
+    if battles <= 0:
+        return None
+    return (
+        battles,
+        round(wins / battles * 100, 1),
+        round(damage / battles),
+        round(frags / battles, 2),
+    )
+
 
 def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
-                                     min_battles=None, use_cache=True):
+                                     min_battles=None, wr_pct=None,
+                                     player_min_battles=None, use_cache=True):
     """Ships of one tier+type on a realm, ranked by win rate over the rolling window.
 
     Powers the landing-page inline ship leaderboard (the filterable table under
@@ -6725,6 +6810,17 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     ``compute_realm_top_ships``). Returns a payload dict; ``ships`` is ``[]`` when
     no ship in the bucket qualifies. ``tier``/``ship_type`` are assumed validated
     by the caller (the view rejects out-of-range values).
+
+    ``wr_pct`` (one of ``SHIP_LIST_WR_PCTS`` — 50/25 — or ``None`` for the default
+    "all") switches to the **win-rate-percentile view**: each listed ship's stats
+    are re-pooled over only the top ``wr_pct``% of its players by window win rate
+    (answering "how are good/great players doing with these ships"). The *listed
+    ship set is unchanged* — membership still gates on full-population battles ≥
+    ``min_battles`` — only the displayed numbers narrow. ``player_min_battles``
+    floors which players enter the ranking. The percentile path runs a heavier
+    per-(ship,player) aggregation, derives every offered percentile from one query,
+    and caches each under its own window-keyed fresh key with NO durable
+    ``:published`` fallback (the daily warmer recomputes only the all-buckets).
     """
     from warships.models import BattleEvent, ShipTopPlayerSnapshot
 
@@ -6739,26 +6835,72 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     ship_type = (ship_type or "").strip()
     if min_battles is None:
         min_battles = SHIP_LIST_MIN_BATTLES
+    if player_min_battles is None:
+        player_min_battles = SHIP_LIST_WR_PCT_PLAYER_MIN_BATTLES
+    # Normalize the percentile selector. Anything outside the offered set (plus the
+    # internal 100 equivalence hatch) collapses to None = the default all-view.
+    if wr_pct is not None:
+        try:
+            wr_pct = int(wr_pct)
+        except (TypeError, ValueError):
+            wr_pct = None
+        if wr_pct not in (*SHIP_LIST_WR_PCTS, 100):
+            wr_pct = None
+    is_pct = wr_pct is not None
 
     captured_on, window_start_d, window_end_d = latest_ship_snapshot_window(realm)
     window_start, window_end = _season_window_datetimes(window_start_d, window_end_d)
 
-    cache_key = realm_cache_key(
-        realm, f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}")
-    published_key = realm_cache_key(
-        realm, f"ships-by:published:{mode}:t{tier}:{ship_type}")
+    if is_pct:
+        # Percentile views are keyed by their pct and carry NO durable published
+        # fallback (see docstring) — the all-only warmer can't refresh them.
+        cache_key = realm_cache_key(
+            realm,
+            f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}:wr{wr_pct}")
+        published_key = None
+    else:
+        cache_key = realm_cache_key(
+            realm, f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}")
+        published_key = realm_cache_key(
+            realm, f"ships-by:published:{mode}:t{tier}:{ship_type}")
     if use_cache:
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
+        # Cold PERCENTILE bucket: the per-(ship,player) recompute is too heavy
+        # (~10–28s for popular T10 buckets, over the client's 15s timeout) to run
+        # on the request thread. Queue a background warm and return a `pending`
+        # payload — the client polls (ttlMs:0) until the warm fills this
+        # window-keyed fresh key. (Only once there's a snapshot/window to compute
+        # against; with captured_on None we fall through to the empty payload so
+        # the client doesn't poll forever.) See warm_ships_by_pct_task.
+        if is_pct and captured_on is not None:
+            from warships.tasks import queue_ships_by_pct_warm
+            queue_ships_by_pct_warm(realm, tier, ship_type, mode)
+            return {
+                "realm": realm,
+                "window_days": SHIP_LEADERBOARD_WINDOW_DAYS,
+                "tier": tier,
+                "ship_type": ship_type,
+                "mode": mode,
+                "wr_pct": wr_pct,
+                "captured_on": captured_on.isoformat(),
+                "window_start": window_start_d.isoformat(),
+                "window_end": window_end_d.isoformat(),
+                "total_battles": 0,
+                "ships": [],
+                "pending": True,
+            }
         # Fresh key cold (window rotation gap / eviction): serve last-good and
         # queue a warm — warm-before-evict, never block on the aggregation. See
         # compute_realm_top_ships for the full rationale + the alignment note.
-        published = cache.get(published_key)
-        if published is not None:
-            from warships.tasks import queue_realm_top_ships_warm
-            queue_realm_top_ships_warm(realm)
-            return published
+        # (Percentile views have no published key, so they fall through above.)
+        if published_key is not None:
+            published = cache.get(published_key)
+            if published is not None:
+                from warships.tasks import queue_realm_top_ships_warm
+                queue_realm_top_ships_warm(realm)
+                return published
 
     payload = {
         "realm": realm,
@@ -6769,6 +6911,8 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
         "captured_on": captured_on.isoformat() if captured_on else None,
         "window_start": window_start_d.isoformat(),
         "window_end": window_end_d.isoformat(),
+        # None for the default all-view; 50/25 for a win-rate-percentile view.
+        "wr_pct": wr_pct,
         # Total battles played across **every** ship of this tier+type in the
         # window — the whole-bucket denominator the client divides each ship's
         # battles into for its class/tier share %. Deliberately broader than the
@@ -6787,7 +6931,7 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     # serve. On the **warm** path (use_cache=False) we DO publish the empty so a
     # bucket that went empty this window clears its stale last-good.
     if captured_on is None:
-        return _store_realm_ship_cache(cache_key, published_key, payload) if not use_cache else payload
+        return _store_realm_ship_cache(cache_key, published_key, payload) if (not use_cache and not is_pct) else payload
 
     # Candidate ships: this tier+type AND ranked in the latest snapshot
     # (guarantees a populated drill-down board for every listed ship).
@@ -6797,14 +6941,14 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
         .values_list('ship_id', flat=True)
     )
     if not snapshot_ids:
-        return _store_realm_ship_cache(cache_key, published_key, payload) if not use_cache else payload
+        return _store_realm_ship_cache(cache_key, published_key, payload) if (not use_cache and not is_pct) else payload
     ships = {
         s.ship_id: s
         for s in Ship.objects.filter(
             ship_id__in=snapshot_ids, tier=tier, ship_type=ship_type)
     }
     if not ships:
-        return _store_realm_ship_cache(cache_key, published_key, payload) if not use_cache else payload
+        return _store_realm_ship_cache(cache_key, published_key, payload) if (not use_cache and not is_pct) else payload
 
     # Whole-bucket denominator: battles over **all** ships of this tier+type in
     # the window (not just the snapshot-ranked candidates), so each listed ship's
@@ -6823,6 +6967,70 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
                     player__realm=realm, mode=mode, ship_id__in=bucket_ids)
             .aggregate(t=Sum("battles_delta"))["t"] or 0
         )
+
+    def _ship_meta(ship_id, ship):
+        """Static identity fields shared by the all-path and percentile rows."""
+        return {
+            "ship_id": ship_id,
+            "ship_name": (ship.name if ship and ship.name else f"Ship {ship_id}"),
+            "ship_type": ship.ship_type if ship else ship_type,
+            "tier": ship.tier if ship else tier,
+            "nation": ship.nation if ship else "",
+            "is_premium": bool(ship.is_premium) if ship else False,
+        }
+
+    if is_pct:
+        # Win-rate-percentile view. ONE per-(ship,player) aggregation feeds every
+        # offered percentile (so a 50↔25 toggle never re-runs this heavier query);
+        # each pct is built + cached under its own window-keyed fresh key.
+        player_rows_by_ship = {}
+        for r in (
+            BattleEvent.objects
+            .filter(detected_at__gte=window_start, detected_at__lt=window_end,
+                    player__realm=realm, mode=mode, ship_id__in=ships.keys())
+            .values("ship_id", "player")
+            .annotate(
+                battles=Sum("battles_delta"),
+                wins=Sum("wins_delta"),
+                damage=Sum("damage_delta"),
+                frags=Sum("frags_delta"),
+            )
+        ):
+            player_rows_by_ship.setdefault(r["ship_id"], []).append(r)
+
+        requested = None
+        for pct in {wr_pct, *SHIP_LIST_WR_PCTS}:
+            ships_out = []
+            for ship_id, prows in player_rows_by_ship.items():
+                # Membership mirrors the all-path EXACTLY: gate on the ship's
+                # FULL-population battles (never the subset), so the listed ship
+                # set is identical to the all-view — the load-bearing constraint.
+                full_battles, *_ = _pool_player_rows(prows)
+                if full_battles < min_battles:
+                    continue
+                stats = _pct_ship_stats(prows, pct, player_min_battles)
+                if stats is None:
+                    continue
+                battles, win_rate, avg_damage, kpb = stats
+                row = _ship_meta(ship_id, ships.get(ship_id))
+                row.update({
+                    "battles": battles,
+                    "win_rate": win_rate,
+                    "avg_damage": avg_damage,
+                    "kills_per_battle": kpb,
+                })
+                ships_out.append(row)
+            ships_out.sort(key=lambda s: (-s["win_rate"], -s["battles"]))
+            p = dict(payload)
+            p["wr_pct"] = pct
+            p["ships"] = ships_out
+            pct_key = realm_cache_key(
+                realm,
+                f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}:wr{pct}")
+            cache.set(pct_key, p, timeout=26 * 3600)
+            if pct == wr_pct:
+                requested = p
+        return requested
 
     # ship_id is a plain BigIntegerField (no FK), so there is no ORM join to
     # Ship — aggregate the candidate ids directly, then attach metadata in Python.
@@ -6849,19 +7057,14 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
         wins = int(r["wins"] or 0)
         damage = int(r["damage"] or 0)
         frags = int(r["frags"] or 0)
-        ship = ships.get(r["ship_id"])
-        payload_ships.append({
-            "ship_id": r["ship_id"],
-            "ship_name": (ship.name if ship and ship.name else f"Ship {r['ship_id']}"),
-            "ship_type": ship.ship_type if ship else ship_type,
-            "tier": ship.tier if ship else tier,
-            "nation": ship.nation if ship else "",
-            "is_premium": bool(ship.is_premium) if ship else False,
+        row = _ship_meta(r["ship_id"], ships.get(r["ship_id"]))
+        row.update({
             "battles": battles,
             "win_rate": round(wins / battles * 100, 1),
             "avg_damage": round(damage / battles),
             "kills_per_battle": round(frags / battles, 2),
         })
+        payload_ships.append(row)
 
     # Win rate descending; battles as a deterministic tie-break.
     payload_ships.sort(key=lambda s: (-s["win_rate"], -s["battles"]))

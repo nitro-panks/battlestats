@@ -164,6 +164,16 @@ def _realm_top_ships_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_realm_top_ships:{realm}:dispatch"
 
 
+def _ships_by_pct_warm_lock_key(realm, tier, ship_type, mode) -> str:
+    return (f"warships:tasks:warm_ships_by_pct:{realm}:{mode}"
+            f":t{tier}:{ship_type}:lock")
+
+
+def _ships_by_pct_warm_dispatch_key(realm, tier, ship_type, mode) -> str:
+    return (f"warships:tasks:warm_ships_by_pct:{realm}:{mode}"
+            f":t{tier}:{ship_type}:dispatch")
+
+
 def _landing_player_best_snapshot_refresh_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:materialize_landing_player_best_snapshots:{realm}:lock"
 
@@ -401,6 +411,42 @@ def queue_realm_top_ships_warm(realm: str = DEFAULT_REALM):
         cache.delete(dispatch_key)
         logger.warning(
             "Skipping realm top-ships warm enqueue because broker dispatch failed: %s",
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def queue_ships_by_pct_warm(realm=DEFAULT_REALM, tier=None, ship_type=None,
+                            mode="random"):
+    """Lock- + dispatch-aware enqueue of the win-rate-percentile ship-list warmer.
+
+    Called from the cold-cache read path (data.compute_realm_ships_by_tier_type)
+    when a percentile bucket's window-keyed fresh key is cold. The percentile
+    recompute is a heavy per-(ship,player) aggregation (~10–28s for popular T10
+    buckets — over the client's 15s timeout), so the request thread NEVER computes
+    it: it serves a `pending` payload and the client polls while this background
+    warm fills the fresh key. The per-bucket lock + dispatch dedup coalesce the
+    fanout so a burst of polling clients enqueues at most one warm. Mirrors
+    queue_realm_top_ships_warm (per bucket rather than per realm).
+    """
+    lock_key = _ships_by_pct_warm_lock_key(realm, tier, ship_type, mode)
+    if cache.get(lock_key):
+        return {"status": "skipped", "reason": "already-running"}
+
+    dispatch_key = _ships_by_pct_warm_dispatch_key(realm, tier, ship_type, mode)
+    if not cache.add(
+        dispatch_key, "queued", timeout=REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT,
+    ):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        warm_ships_by_pct_task.delay(
+            realm=realm, tier=tier, ship_type=ship_type, mode=mode)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        logger.warning(
+            "Skipping ships-by-pct warm enqueue because broker dispatch failed: %s",
             error,
         )
         return {"status": "skipped", "reason": "enqueue-failed"}
@@ -1271,6 +1317,7 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
     from warships.data import (
         compute_realm_top_ships, compute_realm_ships_by_tier_type,
         _badge_tiers, SHIP_LEADERBOARD_TYPES,
+        SHIP_LIST_DEFAULT_TIER, SHIP_LIST_DEFAULT_TYPE,
     )
 
     lock_key = _realm_top_ships_warm_lock_key(realm)
@@ -1296,6 +1343,20 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
                 bucket_count += 1
         results["tier_type_buckets"] = bucket_count
 
+        # The landing list now defaults to the top-50% WR view, so pre-warm the
+        # ONE default bucket's percentile (one heavy per-(ship,player) query that
+        # materializes both 50 & 25) to keep the primary landing view instant.
+        # Every other pct bucket stays lazy (queue + poll on first view). Guard
+        # the default tier against the realm's badge tiers so a misconfigured
+        # default can't 400 the warm.
+        if SHIP_LIST_DEFAULT_TIER in _badge_tiers():
+            compute_realm_ships_by_tier_type(
+                realm, tier=SHIP_LIST_DEFAULT_TIER,
+                ship_type=SHIP_LIST_DEFAULT_TYPE, mode="random",
+                wr_pct=50, use_cache=False)
+            results["default_pct_bucket"] = (
+                f"t{SHIP_LIST_DEFAULT_TIER}/{SHIP_LIST_DEFAULT_TYPE}")
+
         logger.info(
             "Warmed top-ships realm=%s modes+buckets=%s", realm, results)
         return {"status": "completed", "realm": realm, "results": results}
@@ -1303,6 +1364,48 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
         cache.delete(lock_key)
         # Let the next cold-read enqueue fire (mirrors the other warmers).
         cache.delete(_realm_top_ships_warm_dispatch_key(realm))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_ships_by_pct_task(self, realm=DEFAULT_REALM, tier=None, ship_type=None,
+                           mode="random"):
+    """Compute + cache the win-rate-percentile ship-list buckets for one tier+type.
+
+    Backs the inline ship list's WR filter (top 50% / 25% of each ship's players).
+    The recompute is a per-(ship,player) BattleEvent aggregation — too heavy for
+    the request thread — so the cold read path (compute_realm_ships_by_tier_type)
+    queues THIS background task and serves a pending payload; the client polls
+    until the fresh key is filled. One run materializes BOTH offered percentiles
+    (50 & 25) from a single query (wr_pct=50 derives 25 too). Per-bucket lock so
+    concurrent enqueues for the same bucket coalesce. Runs on the `background`
+    queue (off the user-facing lanes). See queue_ships_by_pct_warm.
+    """
+    from warships.data import compute_realm_ships_by_tier_type
+
+    lock_key = _ships_by_pct_warm_lock_key(realm, tier, ship_type, mode)
+    if not cache.add(lock_key, self.request.id, timeout=300):
+        logger.info(
+            "Skipping warm_ships_by_pct_task realm=%s t%s/%s — already running",
+            realm, tier, ship_type)
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        # use_cache=False forces the heavy compute; the function caches both the
+        # 50 and 25 fresh keys and returns the wr_pct=50 payload.
+        payload = compute_realm_ships_by_tier_type(
+            realm, tier=tier, ship_type=ship_type, mode=mode,
+            wr_pct=50, use_cache=False)
+        ships = len(payload.get("ships", []))
+        logger.info(
+            "Warmed ships-by-pct realm=%s t%s/%s ships=%s",
+            realm, tier, ship_type, ships)
+        return {"status": "completed", "realm": realm, "tier": tier,
+                "ship_type": ship_type, "ships": ships}
+    finally:
+        cache.delete(lock_key)
+        # Let the next cold-read enqueue fire (mirrors the other warmers).
+        cache.delete(
+            _ships_by_pct_warm_dispatch_key(realm, tier, ship_type, mode))
 
 
 @app.task(bind=True, **TASK_OPTS)

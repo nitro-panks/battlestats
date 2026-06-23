@@ -89,14 +89,18 @@ describe('ShipLeaderboard', () => {
         // No "pick a tier/type" prompt — both filters are pre-selected.
         expect(screen.queryByText(/pick a tier and a type/i)).not.toBeInTheDocument();
         await waitFor(() => {
+            // Default view is the top-50% WR cut — fetched with &wr_pct=50 and
+            // bypassing the client settled cache (ttlMs:0).
             expect(mockFetch).toHaveBeenCalledWith(
-                '/api/realm/na/ships?tier=10&type=Battleship',
-                expect.objectContaining({ cacheKey: 'ships-by:na:10:Battleship' }),
+                '/api/realm/na/ships?tier=10&type=Battleship&wr_pct=50',
+                expect.objectContaining({ ttlMs: 0 }),
             );
         });
-        // T10 and BB pills render pre-pressed.
+        // T10, BB and the 50% WR pill render pre-pressed; All is not.
         expect(screen.getByRole('button', { name: '10' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getByRole('button', { name: 'BB' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: '50%' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false');
     });
 
     it('switching type re-fetches and renders the list WR-desc', async () => {
@@ -104,10 +108,11 @@ describe('ShipLeaderboard', () => {
         selectTierAndType('DD');
 
         await screen.findAllByText('Gearing');
-        // List endpoint hit with the tier+type query params.
+        // List endpoint hit with the tier+type query params (the default 50% WR
+        // filter persists across a type switch).
         expect(mockFetch).toHaveBeenCalledWith(
-            '/api/realm/na/ships?tier=10&type=Destroyer',
-            expect.objectContaining({ cacheKey: 'ships-by:na:10:Destroyer' }),
+            '/api/realm/na/ships?tier=10&type=Destroyer&wr_pct=50',
+            expect.objectContaining({ ttlMs: 0 }),
         );
         // Ordered as the payload returned (WR desc): Gearing before Shimakaze.
         const names = screen.getAllByRole('button', { name: /Gearing|Shimakaze/ }).map((b) => b.textContent);
@@ -119,7 +124,7 @@ describe('ShipLeaderboard', () => {
         selectTierAndType('CV');
         await waitFor(() => {
             expect(mockFetch).toHaveBeenCalledWith(
-                '/api/realm/na/ships?tier=10&type=AirCarrier',
+                '/api/realm/na/ships?tier=10&type=AirCarrier&wr_pct=50',
                 expect.anything(),
             );
         });
@@ -202,8 +207,8 @@ describe('ShipLeaderboard', () => {
             fireEvent.click(screen.getByRole('button', { name: /clear/i }));
             await waitFor(() => {
                 expect(mockFetch).toHaveBeenCalledWith(
-                    '/api/realm/na/ships?tier=10&type=Destroyer',
-                    expect.objectContaining({ cacheKey: 'ships-by:na:10:Destroyer' }),
+                    '/api/realm/na/ships?tier=10&type=Destroyer&wr_pct=50',
+                    expect.objectContaining({ ttlMs: 0 }),
                 );
             });
             expect(screen.getByRole('button', { name: '10' })).toHaveAttribute('aria-pressed', 'true');
@@ -420,6 +425,106 @@ describe('ShipLeaderboard', () => {
                 'ship-leaderboard-sort',
                 { realm: 'na', scope: 'players', column: 'win_rate', dir: 'desc' },
             );
+        });
+    });
+
+    describe('WR-percentile filter', () => {
+        // A distinct top-25% fixture so we can assert the list actually swaps to
+        // the filtered numbers (Gearing's WR climbs, battle count drops).
+        const top25Fixture = {
+            ...listFixture,
+            wr_pct: 25,
+            ships: [
+                { ship_id: 222, ship_name: 'Gearing', ship_type: 'Destroyer', tier: 10, nation: 'usa', is_premium: false, battles: 2700, win_rate: 71.4, avg_damage: 78900, kills_per_battle: 1.21 },
+                { ship_id: 111, ship_name: 'Shimakaze', ship_type: 'Destroyer', tier: 10, nation: 'japan', is_premium: false, battles: 5100, win_rate: 64.8, avg_damage: 69800, kills_per_battle: 1.02 },
+            ],
+        };
+        const routeWithPct = (url: string) => {
+            if (url.includes('/ships?') && url.includes('wr_pct=25')) {
+                return Promise.resolve({ data: top25Fixture } as never);
+            }
+            return routeFetch(url);
+        };
+
+        it('refetches with &wr_pct and a pct-tagged cacheKey when 25% is picked', async () => {
+            mockFetch.mockImplementation((url: string) => routeWithPct(url));
+            render(<ShipLeaderboard />);
+            await screen.findAllByText('Gearing');
+
+            fireEvent.click(screen.getByRole('button', { name: '25%' }));
+            await waitFor(() => {
+                expect(mockFetch).toHaveBeenCalledWith(
+                    '/api/realm/na/ships?tier=10&type=Battleship&wr_pct=25',
+                    // Percentile views bypass the client settled cache (ttlMs:0) so a
+                    // `pending` stub never poisons it and polling always hits the server.
+                    expect.objectContaining({ ttlMs: 0 }),
+                );
+            });
+            // The 25% pill is pressed and the filtered numbers are shown.
+            expect(screen.getByRole('button', { name: '25%' })).toHaveAttribute('aria-pressed', 'true');
+            expect(screen.getAllByText('71.4%').length).toBeGreaterThan(0);
+            expect(screen.getAllByText(/top 25%/i).length).toBeGreaterThan(0);
+        });
+
+        it('polls a pending bucket, shows a crunching message, then renders ships', async () => {
+            let pctCalls = 0;
+            mockFetch.mockImplementation((url: string) => {
+                if (url.includes('/ships?') && url.includes('wr_pct=25')) {
+                    pctCalls += 1;
+                    // First response is the cold pending stub; the poll then lands.
+                    return Promise.resolve({
+                        data: pctCalls === 1
+                            ? { ...listFixture, wr_pct: 25, ships: [], pending: true }
+                            : top25Fixture,
+                    } as never);
+                }
+                return routeFetch(url);
+            });
+            render(<ShipLeaderboard />);
+            await screen.findAllByText('Gearing');
+
+            fireEvent.click(screen.getByRole('button', { name: '25%' }));
+            // Pending → the crunching message shows (not the stale all-list numbers).
+            await screen.findByText(/crunching/i);
+            // The poll (~3s) then resolves to the ready top-25% numbers.
+            await screen.findAllByText('71.4%', undefined, { timeout: 6000 });
+            expect(pctCalls).toBeGreaterThanOrEqual(2);
+        });
+
+        it('All issues no wr_pct param (default behavior) and tracks the filter', async () => {
+            mockFetch.mockImplementation((url: string) => routeWithPct(url));
+            render(<ShipLeaderboard />);
+            await screen.findAllByText('Gearing');
+
+            // Go to 25%, then back to All.
+            fireEvent.click(screen.getByRole('button', { name: '25%' }));
+            await waitFor(() =>
+                expect(screen.getByRole('button', { name: '25%' })).toHaveAttribute('aria-pressed', 'true'),
+            );
+            fireEvent.click(screen.getByRole('button', { name: 'All' }));
+
+            await waitFor(() => {
+                expect(mockFetch).toHaveBeenCalledWith(
+                    '/api/realm/na/ships?tier=10&type=Battleship',
+                    expect.objectContaining({ cacheKey: 'ships-by:na:10:Battleship:all' }),
+                );
+            });
+            expect(mockTrack).toHaveBeenCalledWith(
+                'ship-leaderboard-wr-filter',
+                expect.objectContaining({ realm: 'na', wr_pct: 25 }),
+            );
+        });
+
+        it('hides the WR pills while a ship board is open (list-only filter)', async () => {
+            render(<ShipLeaderboard />);
+            await clickShip('Shimakaze');
+            await screen.findAllByText('UsunU');
+            // In board view the WR pills are gone…
+            expect(screen.queryByRole('button', { name: '25%' })).not.toBeInTheDocument();
+            // …and come back on Clear.
+            fireEvent.click(screen.getByRole('button', { name: /clear/i }));
+            await screen.findAllByText('Gearing');
+            expect(screen.getByRole('button', { name: '25%' })).toBeInTheDocument();
         });
     });
 });
