@@ -150,6 +150,57 @@ describe('BattleHistoryCard', () => {
         expect(screen.getByLabelText(/30-day battle activity/i)).toBeInTheDocument();
     });
 
+    test('caps sparkline bars at 50 battles/day: over-cap days pin to full height + note it in the tooltip', async () => {
+        // The sparkline windows monthByDay to the last 30 UTC days, so build
+        // dates relative to UTC "today" to keep them in-window without faking
+        // the clock.
+        const utcDay = (offset: number): string => {
+            const d = new Date();
+            d.setUTCDate(d.getUTCDate() - offset);
+            return d.toISOString().slice(0, 10);
+        };
+        const byDay: BattleHistoryByDay[] = [
+            { date: utcDay(3), battles: 250, wins: 130, damage: 0, frags: 0 }, // far over cap
+            { date: utcDay(2), battles: 60, wins: 30, damage: 0, frags: 0 },   // just over cap
+            { date: utcDay(1), battles: 25, wins: 12, damage: 0, frags: 0 },   // half the cap
+            { date: utcDay(0), battles: 5, wins: 3, damage: 0, frags: 0 },     // small day
+        ];
+        // Drive every fetch (main window + always-month sparkline) with this by_day.
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({ available_modes: ['random'], by_day: byDay }),
+            headers: {},
+        });
+
+        const { container } = render(<BattleHistoryCard playerName="grinder" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+
+        const titles = Array.from(container.querySelectorAll('title'));
+        const heightFor = (battles: number): number => {
+            const t = titles.find((el) => el.textContent?.includes(`${battles} battles`));
+            expect(t).toBeTruthy();
+            const rect = t!.parentElement!.querySelector('rect[fill="rgba(120,120,120,0.25)"]');
+            return parseFloat(rect!.getAttribute('height') ?? '0');
+        };
+        const titleFor = (battles: number): string =>
+            titles.find((el) => el.textContent?.includes(`${battles} battles`))!.textContent ?? '';
+
+        // Both over-cap days (250 and 60) pin to the same full-height bar — neither
+        // towers over the other, and the true count stays in the tooltip.
+        expect(heightFor(250)).toBeCloseTo(heightFor(60), 5);
+        expect(titleFor(250)).toMatch(/bar capped at 50/);
+        expect(titleFor(60)).toMatch(/bar capped at 50/);
+        expect(titleFor(250)).toContain('250 battles');
+
+        // A sub-cap day scales against the cap (25/50 → half height), not the
+        // 250-game spike, and carries no cap note.
+        expect(heightFor(25)).toBeLessThan(heightFor(60));
+        expect(heightFor(25)).toBeCloseTo(heightFor(60) / 2, 1);
+        expect(titleFor(25)).not.toMatch(/bar capped/);
+    });
+
     test('splits Win Rate into sortable WR/S (session) and WR/O (overall + delta) columns', async () => {
         resolveWith(buildPayload({
             by_ship: [

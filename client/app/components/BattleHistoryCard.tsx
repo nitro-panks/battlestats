@@ -502,7 +502,13 @@ const InlineSparkline: React.FC<{
     const H = 64;
     const gap = 0.5;
     const barW = (W - gap * (days.length - 1)) / days.length;
-    const maxBattles = Math.max(1, ...days.map(d => d.battles));
+    // Hard-cap the bar y-domain at 50 battles/day. Early daily-data backfills
+    // observed multi-day gaps as a single spike (e.g. 250 games on one day),
+    // which flattened every normal <20-game day to no visible height. We pin the
+    // domain to 50 (auto-scaling below that when no day reaches it) and clamp any
+    // over-cap day to full height; the true count stays in the tooltip.
+    const BAR_CAP = 50;
+    const maxBattles = Math.min(BAR_CAP, Math.max(1, ...days.map(d => d.battles)));
 
     // Overlay: a continuous line tracing the player's OVERALL (lifetime) win rate
     // over the window — not the per-day session WR. Anchored to the lifetime
@@ -556,16 +562,18 @@ const InlineSparkline: React.FC<{
         >
             {days.map((d, i) => {
                 const x = i * (barW + gap);
+                // Clamp the bar to the capped domain so an over-cap day pins to
+                // full height instead of overflowing the chart.
                 const totalH = d.battles === 0
                     ? 2
-                    : Math.max(4, (d.battles / maxBattles) * (H - 2));
+                    : Math.max(4, Math.min(1, d.battles / maxBattles) * (H - 2));
                 const totalY = H - totalH;
                 const winsH = d.battles > 0 ? (d.wins / d.battles) * totalH : 0;
                 const winsY = H - winsH;
                 const wr = d.battles > 0 ? (d.wins / d.battles) * 100 : null;
                 const losses = d.battles - d.wins;
                 const tooltip = d.battles > 0
-                    ? `${d.date}: ${d.battles} battles — ${d.wins}W / ${losses}L (${wr!.toFixed(1)}%)`
+                    ? `${d.date}: ${d.battles} battles — ${d.wins}W / ${losses}L (${wr!.toFixed(1)}%)${d.battles > BAR_CAP ? ` · bar capped at ${BAR_CAP}` : ''}`
                     : `${d.date}: no battles`;
                 return (
                     <g key={d.date}>
