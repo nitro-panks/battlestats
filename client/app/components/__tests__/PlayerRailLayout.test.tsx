@@ -56,7 +56,7 @@ jest.mock('../../lib/sharedJsonFetch', () => ({
 // remounts across a swap; it surfaces clanId + the marker as data-attributes.
 jest.mock('../ClanSVG', () => ({
     __esModule: true,
-    default: (props: { clanId: number; highlightedPlayerName?: string }) => {
+    default: function MockClanSvg(props: { clanId: number; highlightedPlayerName?: string }) {
         const ReactLocal = require('react');
         ReactLocal.useEffect(() => {
             mockClanSvg.mounts += 1;
