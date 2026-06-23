@@ -29,6 +29,24 @@ CRAWL_TASK_OPTS = {
     "soft_time_limit": 5 * 60 * 60 + 45 * 60,
     "ignore_result": True,
 }
+# The per-bucket win-rate-percentile warmer walks every tier×type bucket for a
+# realm serially (each a ~10–28s per-(ship,player) aggregation for popular T10
+# buckets, ~15 buckets in prod), so it needs far more headroom than TASK_OPTS'
+# 540s soft limit. Generous ceiling; skip-if-warm keeps the common run cheap.
+SHIP_PCT_WARM_TASK_OPTS = {
+    "time_limit": 30 * 60,        # 30 min hard
+    "soft_time_limit": 27 * 60,   # 27 min soft
+    "ignore_result": True,
+}
+# Short DB-breather between heavy percentile buckets (load-spreading on the shared
+# 2-vCPU managed Postgres). Tunable; 0 disables.
+SHIP_PCT_WARM_PAUSE_SECONDS = float(
+    os.getenv("SHIP_LIST_WR_PCT_WARM_PAUSE_SECONDS", "5"))
+# Per-realm lock for the pct warmer — must OUTLIVE the task's hard time_limit so a
+# slow run can't be duplicated by a concurrent trigger (snapshot fires 2×/day +
+# the nightly top-ships Beat both chain it).
+SHIP_PCT_WARM_LOCK_TIMEOUT = int(
+    os.getenv("SHIP_LIST_WR_PCT_WARM_LOCK_TIMEOUT", str(40 * 60)))
 CLAN_CRAWL_LOCK_TIMEOUT = 8 * 60 * 60
 CLAN_CRAWL_HEARTBEAT_STALE_AFTER = 15 * 60
 # Run-scoped resume marker: timestamp at which the current full crawl pass
@@ -172,6 +190,14 @@ def _ships_by_pct_warm_lock_key(realm, tier, ship_type, mode) -> str:
 def _ships_by_pct_warm_dispatch_key(realm, tier, ship_type, mode) -> str:
     return (f"warships:tasks:warm_ships_by_pct:{realm}:{mode}"
             f":t{tier}:{ship_type}:dispatch")
+
+
+def _realm_ships_pct_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_realm_ships_pct:{realm}:lock"
+
+
+def _realm_ships_pct_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_realm_ships_pct:{realm}:dispatch"
 
 
 def _landing_player_best_snapshot_refresh_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -447,6 +473,37 @@ def queue_ships_by_pct_warm(realm=DEFAULT_REALM, tier=None, ship_type=None,
         cache.delete(dispatch_key)
         logger.warning(
             "Skipping ships-by-pct warm enqueue because broker dispatch failed: %s",
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def queue_realm_ships_pct_warm(realm: str = DEFAULT_REALM):
+    """Lock- + dispatch-aware enqueue of the per-realm all-buckets pct warmer.
+
+    Chained from warm_realm_top_ships_task (which itself fires from the nightly
+    Beat + after each ship snapshot) so every tier×type win-rate-percentile
+    bucket is pre-warmed right after the window rotates — visitors never pay the
+    ~20s crunch. The task's own lock + skip-if-warm make the repeated triggers
+    cheap; this dispatch dedup just stops closely-timed fires from piling up.
+    Mirrors queue_realm_top_ships_warm.
+    """
+    if cache.get(_realm_ships_pct_warm_lock_key(realm)):
+        return {"status": "skipped", "reason": "already-running"}
+
+    dispatch_key = _realm_ships_pct_warm_dispatch_key(realm)
+    if not cache.add(
+        dispatch_key, "queued", timeout=REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT,
+    ):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        warm_realm_ships_pct_task.delay(realm=realm)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        logger.warning(
+            "Skipping realm ships-pct warm enqueue because broker dispatch failed: %s",
             error,
         )
         return {"status": "skipped", "reason": "enqueue-failed"}
@@ -1357,6 +1414,13 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
             results["default_pct_bucket"] = (
                 f"t{SHIP_LIST_DEFAULT_TIER}/{SHIP_LIST_DEFAULT_TYPE}")
 
+        # Chain the per-realm all-buckets pct warmer so EVERY other tier×type
+        # win-rate-percentile bucket is pre-warmed too (visitors never trigger the
+        # ~20s crunch). It skip-if-warms, so it won't recompute the default bucket
+        # just warmed above, and the repeated triggers (Beat + 2×/day snapshot)
+        # collapse to one real pass per window. See queue_realm_ships_pct_warm.
+        results["pct_warm_chain"] = queue_realm_ships_pct_warm(realm)
+
         logger.info(
             "Warmed top-ships realm=%s modes+buckets=%s", realm, results)
         return {"status": "completed", "realm": realm, "results": results}
@@ -1406,6 +1470,84 @@ def warm_ships_by_pct_task(self, realm=DEFAULT_REALM, tier=None, ship_type=None,
         # Let the next cold-read enqueue fire (mirrors the other warmers).
         cache.delete(
             _ships_by_pct_warm_dispatch_key(realm, tier, ship_type, mode))
+
+
+@app.task(bind=True, **SHIP_PCT_WARM_TASK_OPTS)
+def warm_realm_ships_pct_task(self, realm=DEFAULT_REALM):
+    """Pre-warm EVERY tier×type win-rate-percentile ship-list bucket for a realm.
+
+    The inline ship list defaults to the top-50% WR view, and the recompute is a
+    heavy per-(ship,player) BattleEvent aggregation (~10–28s for popular T10
+    buckets). Originally only the default bucket was warmed and every other bucket
+    was lazy (queue + ~20s poll on first view) — too much burden on visitors. This
+    walks all tier×type buckets serially, computing each at wr_pct=50 (which
+    materializes BOTH 50 & 25 from one query), so visitors never trigger the
+    crunch.
+
+    Load discipline on the shared 2-vCPU Postgres:
+    - **skip-if-warm** — buckets whose fresh key already exists for the current
+      window are skipped, so the repeated triggers (nightly Beat + the 2×/day
+      snapshot, all chaining this) collapse to ONE real pass per window, and an
+      ACKS_LATE redelivery after a mid-loop crash resumes where it stopped.
+    - **default bucket first** — the primary landing view warms before the rest.
+    - **per-bucket pause** — a short DB breather between heavy buckets.
+    - **per-bucket lock** — grabs the lazy task's lock before computing, so a
+      visitor opening a still-cold bucket mid-pass doesn't double-run the query.
+
+    Per-realm lock; the realms are hour-striped upstream so two never overlap on
+    the DB. Runs on the `background` queue. Chained via queue_realm_ships_pct_warm.
+    """
+    from warships.data import (
+        compute_realm_ships_by_tier_type, ship_pct_bucket_cache_key,
+        _badge_tiers, SHIP_LEADERBOARD_TYPES,
+        SHIP_LIST_DEFAULT_TIER, SHIP_LIST_DEFAULT_TYPE,
+    )
+
+    lock_key = _realm_ships_pct_warm_lock_key(realm)
+    if not cache.add(lock_key, self.request.id, timeout=SHIP_PCT_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_realm_ships_pct_task realm=%s — already running", realm)
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        # Default bucket first so the primary landing view warms before the rest.
+        buckets = [(t, ty) for t in sorted(_badge_tiers())
+                   for ty in SHIP_LEADERBOARD_TYPES]
+        default = (SHIP_LIST_DEFAULT_TIER, SHIP_LIST_DEFAULT_TYPE)
+        if default in buckets:
+            buckets.remove(default)
+            buckets.insert(0, default)
+
+        warmed = skipped = 0
+        for tier, ship_type in buckets:
+            # Skip-if-warm: don't recompute a bucket already filled this window.
+            if cache.get(ship_pct_bucket_cache_key(realm, tier, ship_type)) is not None:
+                skipped += 1
+                continue
+            # Coalesce with the lazy per-bucket task: if a visitor's cold read is
+            # already warming this bucket, let it — don't run the query twice.
+            bucket_lock = _ships_by_pct_warm_lock_key(
+                realm, tier, ship_type, "random")
+            if not cache.add(bucket_lock, self.request.id, timeout=300):
+                skipped += 1
+                continue
+            try:
+                compute_realm_ships_by_tier_type(
+                    realm, tier=tier, ship_type=ship_type, mode="random",
+                    wr_pct=50, use_cache=False)
+                warmed += 1
+            finally:
+                cache.delete(bucket_lock)
+            if SHIP_PCT_WARM_PAUSE_SECONDS > 0:
+                time.sleep(SHIP_PCT_WARM_PAUSE_SECONDS)
+
+        result = {"status": "completed", "realm": realm,
+                  "warmed": warmed, "skipped": skipped}
+        logger.info("Warmed realm ships-pct realm=%s %s", realm, result)
+        return result
+    finally:
+        cache.delete(lock_key)
+        cache.delete(_realm_ships_pct_warm_dispatch_key(realm))
 
 
 @app.task(bind=True, **TASK_OPTS)

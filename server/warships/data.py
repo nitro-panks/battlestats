@@ -6716,9 +6716,11 @@ SHIP_LIST_WR_PCTS = (50, 25)
 SHIP_LIST_WR_PCT_PLAYER_MIN_BATTLES = int(
     os.getenv('SHIP_LIST_WR_PCT_PLAYER_MIN_BATTLES', '15'))
 # The bucket the landing inline ship list opens on (mirrors ShipLeaderboard.tsx's
-# initial tier/type). The list now defaults to the top-50% WR view, so the daily
-# warmer pre-computes this one percentile bucket per realm to keep the primary
-# landing view instant; every other pct bucket stays lazy (queue + poll on view).
+# initial tier/type). The list defaults to the top-50% WR view, so the daily
+# top-ships warmer warms this one percentile bucket inline (instant primary view)
+# and chains warm_realm_ships_pct_task, which pre-warms EVERY other tier×type pct
+# bucket per realm (skip-if-warm, so the inline default isn't recomputed). The
+# lazy queue+poll path remains only as a rare rotation-gap fallback.
 SHIP_LIST_DEFAULT_TIER = int(os.getenv('SHIP_LIST_DEFAULT_TIER', '10'))
 SHIP_LIST_DEFAULT_TYPE = os.getenv('SHIP_LIST_DEFAULT_TYPE', 'Battleship')
 
@@ -6786,6 +6788,48 @@ def _pct_ship_stats(player_rows, pct, player_floor):
     )
 
 
+def _ships_by_fresh_cache_key(realm, mode, window_end_d, tier, ship_type,
+                              wr_pct=None):
+    """Single source of truth for the window-keyed ship-list *fresh* cache key.
+
+    Components must already be normalized exactly as
+    ``compute_realm_ships_by_tier_type`` normalizes them (realm/mode lowercased,
+    tier ``int``, ship_type stripped). ``wr_pct=None`` is the default all-view;
+    50/25/100 is a win-rate-percentile view (suffixed ``:wr<pct>``). Both the
+    writer (compute) and the warmer's warm-state check
+    (:func:`ship_pct_bucket_cache_key`) build the key through here so the two can
+    never drift — a duplicated key string is the bug that silently turns the
+    warmer's skip-if-warm into "always recompute".
+    """
+    base = f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}"
+    if wr_pct is not None:
+        base = f"{base}:wr{wr_pct}"
+    return realm_cache_key(realm, base)
+
+
+def ship_pct_bucket_cache_key(realm, tier, ship_type, mode="random", wr_pct=50):
+    """Fresh cache key for a percentile ship-list bucket, normalized identically
+    to :func:`compute_realm_ships_by_tier_type`.
+
+    Exposed so ``warm_realm_ships_pct_task`` can check whether a bucket is already
+    warm for the current window (and skip it) without re-running the heavy
+    per-(ship,player) aggregation. Both 50 & 25 are written together by one
+    compute, so a single percentile's presence implies the bucket is warm.
+    """
+    realm = (realm or DEFAULT_REALM).lower().strip()
+    mode = (str(mode) if mode is not None else "random").lower().strip()
+    if mode not in ("random", "ranked"):
+        mode = "random"
+    try:
+        tier = int(tier)
+    except (TypeError, ValueError):
+        tier = None
+    ship_type = (ship_type or "").strip()
+    _, _, window_end_d = latest_ship_snapshot_window(realm)
+    return _ships_by_fresh_cache_key(
+        realm, mode, window_end_d, tier, ship_type, int(wr_pct))
+
+
 def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
                                      min_battles=None, wr_pct=None,
                                      player_min_battles=None, use_cache=True):
@@ -6820,7 +6864,9 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     floors which players enter the ranking. The percentile path runs a heavier
     per-(ship,player) aggregation, derives every offered percentile from one query,
     and caches each under its own window-keyed fresh key with NO durable
-    ``:published`` fallback (the daily warmer recomputes only the all-buckets).
+    ``:published`` fallback. The nightly ``warm_realm_ships_pct_task`` pre-warms
+    every tier×type percentile bucket per realm (skip-if-warm), so a cold read
+    here is a rare rotation-gap fallback, not the normal first-view path.
     """
     from warships.models import BattleEvent, ShipTopPlayerSnapshot
 
@@ -6853,14 +6899,16 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
 
     if is_pct:
         # Percentile views are keyed by their pct and carry NO durable published
-        # fallback (see docstring) — the all-only warmer can't refresh them.
-        cache_key = realm_cache_key(
-            realm,
-            f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}:wr{wr_pct}")
+        # fallback (see docstring) — the all-only warmer can't refresh them. The
+        # nightly per-bucket pct warmer (warm_realm_ships_pct_task) pre-fills
+        # these fresh keys so the pending/poll path is a rare rotation-gap
+        # fallback rather than the normal first-view experience.
+        cache_key = _ships_by_fresh_cache_key(
+            realm, mode, window_end_d, tier, ship_type, wr_pct)
         published_key = None
     else:
-        cache_key = realm_cache_key(
-            realm, f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}")
+        cache_key = _ships_by_fresh_cache_key(
+            realm, mode, window_end_d, tier, ship_type)
         published_key = realm_cache_key(
             realm, f"ships-by:published:{mode}:t{tier}:{ship_type}")
     if use_cache:
@@ -7024,9 +7072,8 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
             p = dict(payload)
             p["wr_pct"] = pct
             p["ships"] = ships_out
-            pct_key = realm_cache_key(
-                realm,
-                f"ships-by:{mode}:win{window_end_d.isoformat()}:t{tier}:{ship_type}:wr{pct}")
+            pct_key = _ships_by_fresh_cache_key(
+                realm, mode, window_end_d, tier, ship_type, pct)
             cache.set(pct_key, p, timeout=26 * 3600)
             if pct == wr_pct:
                 requested = p

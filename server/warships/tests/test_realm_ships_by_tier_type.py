@@ -20,6 +20,7 @@ from django.utils import timezone
 from warships.data import (
     _season_window_datetimes,
     compute_realm_ships_by_tier_type,
+    ship_pct_bucket_cache_key,
 )
 from warships.models import (
     BattleEvent, BattleObservation, Player, Ship, ShipTopPlayerSnapshot,
@@ -245,13 +246,18 @@ class RealmShipsByTierTypeWarmTests(TestCase):
         # Cold before the warm.
         self.assertIsNone(cache.get(self._bucket_key(10, "Destroyer")))
 
-        result = warm_realm_top_ships_task.apply(kwargs={"realm": "na"}).get()
+        # The top-ships warm chains the per-realm all-buckets pct warmer (a
+        # separate background task); stub the enqueue so this test stays scoped to
+        # the all-view warm + the inline default-pct bucket.
+        with mock.patch("warships.tasks.queue_realm_ships_pct_warm") as chain:
+            result = warm_realm_top_ships_task.apply(kwargs={"realm": "na"}).get()
         self.assertEqual(result["status"], "completed")
         # 1 badge tier (default {10}) x 5 ship types.
         self.assertEqual(result["results"]["tier_type_buckets"], 5)
-        # The landing default (top-50%) bucket's percentile is pre-warmed too, so
-        # the primary landing view loads instant rather than queue+poll.
+        # The landing default (top-50%) bucket's percentile is pre-warmed inline so
+        # the primary landing view loads instant; the rest are warmed by the chain.
         self.assertEqual(result["results"]["default_pct_bucket"], "t10/Battleship")
+        chain.assert_called_once_with("na")
 
         # The T10/Destroyer bucket is now a warm hit carrying the WR-ranked ship.
         cached = cache.get(self._bucket_key(10, "Destroyer"))
@@ -503,3 +509,107 @@ class RealmShipsByTierTypeWrPctTests(TestCase):
         body = resp.json()
         self.assertIsNone(body["wr_pct"])
         self.assertEqual(body["ships"][0]["win_rate"], 60.0)  # full-population
+
+    def test_pct_bucket_cache_key_matches_what_compute_writes(self):
+        # The skip-if-warm guard reads ship_pct_bucket_cache_key; if it drifts even
+        # slightly from the key compute writes, every warm trigger reads "cold" and
+        # silently recomputes all buckets (the exact 2-3x daily PG load the design
+        # avoids). Pin the helper against a key the REAL compute just wrote — both
+        # build it through _ships_by_fresh_cache_key, so this guards that contract.
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=50, use_cache=False)
+        key = ship_pct_bucket_cache_key("na", 10, "Destroyer", wr_pct=50)
+        self.assertIsNotNone(cache.get(key))
+        # Spacing/case normalization must collapse to the same key, too.
+        self.assertEqual(
+            ship_pct_bucket_cache_key("NA", "10", " Destroyer ".strip()),
+            key)
+
+
+class RealmShipsPctWarmTests(TestCase):
+    """The per-realm all-buckets pct warmer (warm_realm_ships_pct_task).
+
+    Pre-warms EVERY tier x type win-rate-percentile bucket so visitors never pay
+    the ~20s crunch. Pins: it fills the fresh keys, is idempotent (skip-if-warm),
+    and warms the default bucket first. Pause is patched to 0 so the test is fast.
+    """
+
+    def setUp(self):
+        cache.clear()
+        Ship.objects.create(ship_id=SHIMA, name="Shimakaze", nation="japan",
+                            ship_type="Destroyer", tier=10)
+        self.snap_player = Player.objects.create(
+            name="pct_warm_anchor", player_id=890000, realm="na", pvp_battles=1)
+        self.captured_on = timezone.now().date()
+        self.window_start, _ = _season_window_datetimes(
+            self.captured_on - timedelta(days=14), self.captured_on)
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=self.captured_on, realm="na", ship_id=SHIMA,
+            ship_name="x", rank=1, player=self.snap_player, win_rate=50.0,
+            battles=1)
+        # Four equal-battle players spanning the skill range on SHIMA (T10 DD),
+        # all clearing the per-player floor (15) so 50% vs 25% select differently.
+        for pid, (b, w, dmg) in enumerate([
+                (100, 90, 80_000), (100, 70, 60_000),
+                (100, 50, 40_000), (100, 30, 20_000)]):
+            p = Player.objects.create(
+                name=f"pw{pid}", player_id=890100 + pid, realm="na",
+                pvp_battles=b)
+            obs_a = BattleObservation.objects.create(player=p, pvp_battles=1)
+            obs_b = BattleObservation.objects.create(player=p, pvp_battles=2)
+            ev = BattleEvent.objects.create(
+                player=p, ship_id=SHIMA, ship_name="x", mode="random",
+                battles_delta=b, wins_delta=w, losses_delta=b - w,
+                frags_delta=0, damage_delta=dmg * b,
+                from_observation=obs_a, to_observation=obs_b)
+            BattleEvent.objects.filter(pk=ev.pk).update(
+                detected_at=self.window_start + timedelta(days=1))
+
+    @mock.patch("warships.tasks.SHIP_PCT_WARM_PAUSE_SECONDS", 0)
+    def test_warms_all_pct_buckets_filling_both_50_and_25(self):
+        from warships.tasks import warm_realm_ships_pct_task
+
+        # Cold before the warm.
+        self.assertIsNone(
+            cache.get(ship_pct_bucket_cache_key("na", 10, "Destroyer", wr_pct=50)))
+
+        result = warm_realm_ships_pct_task.apply(kwargs={"realm": "na"}).get()
+        self.assertEqual(result["status"], "completed")
+        # 1 badge tier (default {10}) x 5 types, all cold => all attempted.
+        self.assertEqual(result["warmed"], 5)
+        self.assertEqual(result["skipped"], 0)
+
+        # Both percentiles for the populated T10/Destroyer bucket are filled from
+        # the single per-(ship,player) query.
+        p50 = cache.get(ship_pct_bucket_cache_key("na", 10, "Destroyer", wr_pct=50))
+        p25 = cache.get(ship_pct_bucket_cache_key("na", 10, "Destroyer", wr_pct=25))
+        self.assertEqual(p50["ships"][0]["win_rate"], 80.0)  # top 2 of 4: (90+70)/2
+        self.assertEqual(p25["ships"][0]["win_rate"], 90.0)  # top 1 of 4
+
+    @mock.patch("warships.tasks.SHIP_PCT_WARM_PAUSE_SECONDS", 0)
+    def test_skip_if_warm_is_idempotent(self):
+        from warships.tasks import warm_realm_ships_pct_task
+
+        # Pre-warm the one populated bucket; the warmer must skip it next pass so
+        # the repeated triggers (Beat + 2x/day snapshot) collapse to no real work.
+        compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=50, use_cache=False)
+        result = warm_realm_ships_pct_task.apply(kwargs={"realm": "na"}).get()
+        # The populated bucket is skipped; the 4 empty types have no fresh key to
+        # short-circuit on (compute bails before caching), so they re-attempt.
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(result["warmed"], 4)
+
+    @mock.patch("warships.tasks.SHIP_PCT_WARM_PAUSE_SECONDS", 0)
+    def test_second_realm_lock_prevents_concurrent_run(self):
+        from warships.tasks import (
+            warm_realm_ships_pct_task, _realm_ships_pct_warm_lock_key,
+        )
+        # Hold the per-realm lock; a concurrent run must no-op rather than double
+        # the heavy load on the shared DB.
+        cache.add(_realm_ships_pct_warm_lock_key("na"), "held", timeout=60)
+        result = warm_realm_ships_pct_task.apply(kwargs={"realm": "na"}).get()
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "already-running")
