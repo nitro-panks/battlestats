@@ -497,6 +497,9 @@ const InlineSparkline: React.FC<{
 }> = ({
     days, ariaLabel, lifetimeBattles, lifetimeWinRate,
 }) => {
+    // Stable per-instance id for the WR-line draw-reveal clipPath (colons from
+    // useId aren't valid in a url(#...) fragment, so strip them).
+    const wrClipId = `sparkline-wr-${React.useId().replace(/:/g, '')}`;
     if (days.length < 2) return null;
     const W = 100;
     const H = 64;
@@ -551,6 +554,14 @@ const InlineSparkline: React.FC<{
         }
     }
 
+    // The card mounts with an all-zero padded window first, then the real days
+    // land when the async battle-history fetch resolves. Flip this key on that
+    // empty→populated transition so the bar-rise (and the WR-line draw) play
+    // their entrance once when data arrives — and stay put across live-refresh
+    // polls (the key is stable while data is present, so it doesn't re-fire).
+    const hasBattleData = days.some(d => d.battles > 0);
+    const entranceKey = hasBattleData ? 'ready' : 'empty';
+
     return (
         <svg
             viewBox={`0 0 ${W} ${H}`}
@@ -560,41 +571,73 @@ const InlineSparkline: React.FC<{
             aria-label={ariaLabel}
             role="img"
         >
-            {days.map((d, i) => {
-                const x = i * (barW + gap);
-                // Clamp the bar to the capped domain so an over-cap day pins to
-                // full height instead of overflowing the chart.
-                const totalH = d.battles === 0
-                    ? 2
-                    : Math.max(4, Math.min(1, d.battles / maxBattles) * (H - 2));
-                const totalY = H - totalH;
-                const winsH = d.battles > 0 ? (d.wins / d.battles) * totalH : 0;
-                const winsY = H - winsH;
-                const wr = d.battles > 0 ? (d.wins / d.battles) * 100 : null;
-                const losses = d.battles - d.wins;
-                const tooltip = d.battles > 0
-                    ? `${d.date}: ${d.battles} battles — ${d.wins}W / ${losses}L (${wr!.toFixed(1)}%)${d.battles > BAR_CAP ? ` · bar capped at ${BAR_CAP}` : ''}`
-                    : `${d.date}: no battles`;
-                return (
-                    <g key={d.date}>
-                        <title>{tooltip}</title>
-                        <rect x={x} y={totalY} width={barW} height={totalH} fill="rgba(120,120,120,0.25)" rx="0.5" />
-                        {winsH > 0 && (
-                            <rect x={x} y={winsY} width={barW} height={winsH} fill={wrColor(wr)} opacity={0.85} rx="0.5" />
-                        )}
-                    </g>
-                );
-            })}
+            {/* Keyed on the data-presence transition so the bars remount and
+                replay their grow-from-the-x-axis entrance when the real window
+                lands (the padded all-zero stubs they mount with don't count). */}
+            <g key={entranceKey}>
+                {days.map((d, i) => {
+                    const x = i * (barW + gap);
+                    // Clamp the bar to the capped domain so an over-cap day pins to
+                    // full height instead of overflowing the chart.
+                    const totalH = d.battles === 0
+                        ? 2
+                        : Math.max(4, Math.min(1, d.battles / maxBattles) * (H - 2));
+                    const totalY = H - totalH;
+                    const winsH = d.battles > 0 ? (d.wins / d.battles) * totalH : 0;
+                    const winsY = H - winsH;
+                    const wr = d.battles > 0 ? (d.wins / d.battles) * 100 : null;
+                    const losses = d.battles - d.wins;
+                    const tooltip = d.battles > 0
+                        ? `${d.date}: ${d.battles} battles — ${d.wins}W / ${losses}L (${wr!.toFixed(1)}%)${d.battles > BAR_CAP ? ` · bar capped at ${BAR_CAP}` : ''}`
+                        : `${d.date}: no battles`;
+                    return (
+                        // Each day's bars rise from the x-axis (scaleY 0→1, origin
+                        // bottom) with a small left-to-right stagger so they sweep
+                        // in alongside the WR-line draw. Both rects share the group
+                        // transform, so the wins overlay stays pinned to the total.
+                        <g
+                            key={d.date}
+                            className="sparkline-bar-rise"
+                            style={{ animationDelay: `${i * 18}ms` }}
+                        >
+                            <title>{tooltip}</title>
+                            <rect x={x} y={totalY} width={barW} height={totalH} fill="rgba(120,120,120,0.25)" rx="0.5" />
+                            {winsH > 0 && (
+                                <rect x={x} y={winsY} width={barW} height={winsH} fill={wrColor(wr)} opacity={0.85} rx="0.5" />
+                            )}
+                        </g>
+                    );
+                })}
+            </g>
             {wrPoints.length >= 2 && (
-                <polyline
-                    points={wrPoints.join(' ')}
-                    fill="none"
-                    stroke="var(--accent-secondary-mid)"
-                    strokeWidth={1.75}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    vectorEffect="non-scaling-stroke"
-                />
+                <>
+                    {/* Clip rect wiped left→right by CSS (.sparkline-wr-reveal) to
+                        "draw" the WR line along its path of travel. Keyed on the
+                        same entrance signal as the bars so the draw plays once
+                        when data lands and stays put across live-refresh polls. */}
+                    <defs>
+                        <clipPath id={wrClipId}>
+                            <rect
+                                key={entranceKey}
+                                className="sparkline-wr-reveal"
+                                x={0}
+                                y={0}
+                                width={W}
+                                height={H}
+                            />
+                        </clipPath>
+                    </defs>
+                    <polyline
+                        points={wrPoints.join(' ')}
+                        fill="none"
+                        stroke="var(--accent-secondary-mid)"
+                        strokeWidth={1.75}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        vectorEffect="non-scaling-stroke"
+                        clipPath={`url(#${wrClipId})`}
+                    />
+                </>
             )}
             {wrPoints.length === 1 && (
                 <circle

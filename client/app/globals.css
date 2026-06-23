@@ -179,6 +179,58 @@ body {
   }
 }
 
+/* Left-to-right "draw" reveal for the BattleHistoryCard win-rate sparkline
+   overlay. The WR line is monotonic in x (one point per day), so wiping a
+   clip rect from the left edge rightward is visually identical to tracing
+   the line along its path of travel (cf. the D3 connected-scatterplot
+   draw-in). `transform-box: fill-box` is required so `transform-origin: left`
+   anchors to the rect's own bbox (x=0) rather than the SVG viewport, and the
+   `both` fill mode holds scaleX(0) before the animation so the line never
+   flashes fully-drawn on the first frame. */
+.sparkline-wr-reveal {
+  transform-box: fill-box;
+  transform-origin: left;
+  animation: sparkline-wr-reveal 1521ms ease-out both;
+}
+
+@keyframes sparkline-wr-reveal {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No wipe — show the full line immediately (identity transform). */
+  .sparkline-wr-reveal {
+    animation: none;
+    transform: none;
+  }
+}
+
+/* Per-day bar grow-in for the BattleHistoryCard sparkline: each bar group
+   scales up from the x-axis (scaleY 0→1). `transform-box: fill-box` anchors
+   `transform-origin: bottom` to the group's own bbox (whose bottom edge sits
+   on the x-axis at y=H), so the bars rise from the baseline rather than the
+   SVG viewport. A per-bar `animation-delay` (set inline, ~14ms × index) sweeps
+   the rise left-to-right alongside the WR-line draw. */
+.sparkline-bar-rise {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: sparkline-bar-rise 410ms ease-out both;
+}
+
+@keyframes sparkline-bar-rise {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No rise — bars at full height immediately. */
+  .sparkline-bar-rise {
+    animation: none;
+    transform: none;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
