@@ -68,6 +68,19 @@ const Footer: React.FC = () => {
                     World of Warships data is sourced from the official Wargaming API. Battlestats is an independent fan project and is not affiliated with, endorsed by, or sponsored by Wargaming.
                 </p>
                 <p>
+                    Ship parameter links are provided via{' '}
+                    <a
+                        href="https://shiptool.st/"
+                        onClick={() => trackEvent('outbound-link', { target: 'shiptool' })}
+                        className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
+                        target="_blank"
+                        rel="noreferrer"
+                    >
+                        Ship Tool
+                    </a>
+                    {' '}(shiptool.st), an independent community project. Battlestats is not affiliated with or endorsed by Ship Tool.
+                </p>
+                <p>
                     <a
                         href="https://worldofwarships.com/"
                         onClick={() => trackEvent('outbound-link', { target: 'wows' })}
