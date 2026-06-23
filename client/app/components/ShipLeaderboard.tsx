@@ -453,7 +453,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
                 <div className="flex flex-wrap items-center gap-2">
                     {!selectedShip && (
                         <>
-                            <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">WR</span>
+                            <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">WR&nbsp;&ge;</span>
                             {WR_PCTS.map(({ value, label }) => (
                                 <button
                                     key={label}
