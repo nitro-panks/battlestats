@@ -55,7 +55,7 @@ describe('PlayerRouteView', () => {
         consoleErrorSpy.mockRestore();
     });
 
-    it('loads player details from the routed player API and wires navigation callbacks', async () => {
+    it('loads player details from the routed player API', async () => {
         (global.fetch as jest.Mock).mockResolvedValue({
             ok: true,
             headers: {
@@ -112,16 +112,9 @@ describe('PlayerRouteView', () => {
             entitySlug: 'Player One',
         });
 
-        const props = capturedProps.current as {
-            onBack: () => void;
-            onSelectMember: (name: string) => void;
-        };
-
-        props.onBack();
-        props.onSelectMember('Other Player');
-
-        expect(pushMock).toHaveBeenNthCalledWith(1, '/');
-        expect(pushMock).toHaveBeenNthCalledWith(2, '/player/Other%20Player?realm=na');
+        // Member/back navigation now lives in the parent rail layout
+        // (app/player/layout.tsx → PlayerRailLayout), not in PlayerRouteView;
+        // that wiring is covered by PlayerRailLayout.test.tsx.
     });
 
     it('shows a not found state on a 404, with NO retry', async () => {

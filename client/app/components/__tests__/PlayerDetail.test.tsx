@@ -185,28 +185,10 @@ describe('PlayerDetail efficiency-rank icon', () => {
         jest.useRealTimers();
     });
 
-    it('loads clan members through the shared hook using the player clan id', () => {
-        render(
-            <PlayerDetail
-                player={{
-                    ...basePlayer,
-                    clan_id: 4444,
-                    clan_name: 'Fixture Clan',
-                }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
-            />,
-        );
-
-        expect(mockUseClanMembers).toHaveBeenCalledWith(4444, false);
-    });
-
     it('shows the loading affordance while a visit refresh is pending', () => {
         render(
             <PlayerDetail
                 player={basePlayer}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
                 refreshStatus={{ phase: 'loading', secondsRemaining: 0 }}
             />,
         );
@@ -222,8 +204,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
         render(
             <PlayerDetail
                 player={basePlayer}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
                 refreshStatus={{ phase: 'cooldown', secondsRemaining: 720 }}
             />,
         );
@@ -238,8 +218,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
         render(
             <PlayerDetail
                 player={basePlayer}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
                 refreshStatus={{ phase: 'cooldown', secondsRemaining: 0 }}
             />,
         );
@@ -251,8 +229,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
         render(
             <PlayerDetail
                 player={{ ...basePlayer, is_hidden: true }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
                 refreshStatus={{ phase: 'loading', secondsRemaining: 0 }}
             />,
         );
@@ -260,35 +236,10 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.queryByTestId('live-refresh-status')).not.toBeInTheDocument();
     });
 
-    it('renders the clan chart on the player page when clan data exists', () => {
-        render(
-            <PlayerDetail
-                player={{
-                    ...basePlayer,
-                    clan_id: 4444,
-                    clan_name: 'Fixture Clan',
-                }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
-            />,
-        );
-
-        expect(screen.getByTestId('player-clan-chart')).toBeInTheDocument();
-        expect(screen.queryByText('Loading clan chart...')).not.toBeInTheDocument();
-        expect(mockClanSvg).toHaveBeenCalledWith(expect.objectContaining({
-            clanId: 4444,
-            highlightedPlayerName: 'Rank Captain',
-            svgHeight: 280,
-            membersData: [],
-        }));
-    });
-
     it('renders actual KDR in the summary cards instead of weighted KDR', () => {
         render(
             <PlayerDetail
                 player={basePlayer}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -308,8 +259,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     efficiency_rank_population_size: 120,
                     efficiency_rank_updated_at: '2026-03-16T00:00:00Z',
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -326,8 +275,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     efficiency_rank_percentile: 0.62,
                     efficiency_rank_population_size: 84,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -345,8 +292,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     efficiency_rank_population_size: 120,
                     efficiency_rank_updated_at: '2026-03-16T00:00:00Z',
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -363,8 +308,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     has_efficiency_rank_icon: false,
                     efficiency_rank_percentile: 0.81,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -382,8 +325,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     efficiency_rank_percentile: 0.99,
                     efficiency_rank_population_size: 120,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -412,8 +353,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                         },
                     ],
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -438,8 +377,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     efficiency_rank_tier: null,
                     has_efficiency_rank_icon: false,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -456,8 +393,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     pvp_battles: 9549,
                     is_pve_player: true,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -473,8 +408,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     pvp_battles: 464,
                     is_pve_player: false,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -490,8 +423,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     twitch_handle: 'rankcaptain',
                     twitch_url: 'https://www.twitch.tv/rankcaptain',
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -510,8 +441,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     clan_battle_header_seasons_played: 3,
                     clan_battle_header_overall_win_rate: 56.3,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -536,8 +465,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     clan_battle_header_seasons_played: 3,
                     clan_battle_header_overall_win_rate: 56.3,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -564,8 +491,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     clan_battle_header_seasons_played: 3,
                     clan_battle_header_overall_win_rate: 56.3,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -586,48 +511,10 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     clan_battle_header_seasons_played: 3,
                     clan_battle_header_overall_win_rate: 56.3,
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
         expect(screen.getByLabelText(/clan battle enjoyer 56\.3 percent WR/i)).toBeInTheDocument();
-    });
-
-    it('wires clan and back navigation controls from the rendered detail view', () => {
-        const onBack = jest.fn();
-
-        render(
-            <PlayerDetail
-                player={{
-                    ...basePlayer,
-                    clan_id: 4444,
-                    clan_name: 'Fixture Clan',
-                    clan_tag: 'FX',
-                }}
-                onBack={onBack}
-                onSelectMember={() => undefined}
-            />,
-        );
-
-        expect(screen.getByRole('link', { name: 'Open clan page for Fixture Clan' })).toHaveAttribute('href', '/clan/4444-fixture-clan?realm=na');
-        fireEvent.click(screen.getByRole('button', { name: 'Return to landing page' }));
-
-        expect(onBack).toHaveBeenCalled();
-    });
-
-    it('renders no-clan messaging and omits the clan route button for clanless players', () => {
-        render(
-            <PlayerDetail
-                player={basePlayer}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
-            />,
-        );
-
-        expect(screen.getByText('No Clan')).toBeInTheDocument();
-        expect(screen.getByText('No clan data available')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /Open clan page/i })).not.toBeInTheDocument();
     });
 
     it('renders hidden-player messaging and suppresses detail-only sections', () => {
@@ -639,8 +526,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     clan_id: 4444,
                     clan_name: 'Fixture Clan',
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -657,8 +542,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     clan_id: 4444,
                     clan_name: 'Fixture Clan',
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -702,8 +585,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     ranked_json: [{ total_battles: 120, total_wins: 70, highest_league_name: 'Gold' }],
                     verdict: 'Warrior',
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -721,8 +602,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
         render(
             <PlayerDetail
                 player={basePlayer}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -748,8 +627,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
         render(
             <PlayerDetail
                 player={basePlayer}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -765,8 +642,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
         render(
             <PlayerDetail
                 player={basePlayer}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -782,8 +657,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     ...basePlayer,
                     ranked_json: [{ total_battles: 0, total_wins: 0 }],
                 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -802,18 +675,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.queryByText('Ranked Games vs Win Rate')).not.toBeInTheDocument();
     });
 
-    it('shows the loading overlay when the player detail is refreshing', () => {
-        render(
-            <PlayerDetail
-                player={basePlayer}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
-                isLoading
-            />,
-        );
-
-        expect(screen.getByText('Loading player...')).toBeInTheDocument();
-    });
 });
 describe('PlayerDetail ship-badge banner', () => {
     let consoleErrorSpy: jest.SpyInstance;
@@ -841,8 +702,6 @@ describe('PlayerDetail ship-badge banner', () => {
         render(
             <PlayerDetail
                 player={{ ...basePlayer, ship_badges } as never}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -885,8 +744,6 @@ describe('PlayerDetail ship-badge banner', () => {
         render(
             <PlayerDetail
                 player={{ ...basePlayer, realm: 'na', ship_badges: [badge()] } as never}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 
@@ -914,8 +771,6 @@ describe('PlayerDetail ship-badge banner', () => {
                     badge({ ship_id: 10, ship_name: 'Shimakaze', rank: 1 }),
                     badge({ ship_id: 20, ship_name: 'Zao', rank: 2 }),
                 ] } as never}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
             />,
         );
 

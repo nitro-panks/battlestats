@@ -1,15 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import dynamic from 'next/dynamic';
-import Link from 'next/link';
-import { buildClanPath } from '../lib/entityRoutes';
-import { isPlayerDewaterfallEnabled } from '../lib/featureFlags';
-import ClanSVG from './ClanSVG';
-import DeferredSection from './DeferredSection';
-import { resilientDynamicImport } from './resilientDynamicImport';
+import React, { useEffect, useState } from 'react';
 import { getHighestRankedLeagueName, type RankedLeagueName } from './rankedLeague';
 import PlayerDetailInsightsTabs from './PlayerDetailInsightsTabs';
-import LoadingPanel from './LoadingPanel';
-import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import LeaderCrownIcon from './LeaderCrownIcon';
@@ -22,7 +13,6 @@ import ShipTopPlayerBanner, { ShipBadge } from './ShipTopPlayerBanner';
 import TopShipBadges from './TopShipBadges';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
-import { useTheme } from '../context/ThemeContext';
 import { useRealm } from '../context/RealmContext';
 import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
@@ -103,20 +93,12 @@ interface PlayerDetailProps {
             highest_league_name?: RankedLeagueName | null;
         }> | null;
     };
-    onBack: () => void;
-    onSelectMember: (memberName: string) => void;
     isLoading?: boolean;
     // Visit-based live-update status (see usePlayerLiveRefresh). When omitted the
     // page renders exactly as before — the badge and chart re-fetch are inert.
     refreshStatus?: { phase: 'loading' | 'cooldown'; secondsRemaining: number };
     refreshNonce?: number;
 }
-
-const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMembers'), 'PlayerDetail-ClanMembers'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading clan members..." minHeight={96} />,
-});
-
 
 const formatKillRatio = (killRatio: number | null): string => {
     if (killRatio == null) {
@@ -187,13 +169,10 @@ const areEquivalentClanBattleHeaderStates = (
 
 const PlayerDetail: React.FC<PlayerDetailProps> = ({
     player,
-    onBack,
-    onSelectMember,
     isLoading = false,
     refreshStatus,
     refreshNonce = 0,
 }) => {
-    const { theme } = useTheme();
     const { realm } = useRealm();
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
@@ -211,18 +190,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         ? player.ranked_json.some((row) => (row?.total_battles || 0) > 0)
         : true;
     const [clanBattleSummary, setClanBattleSummary] = useState<PlayerClanBattleSummary | null>(() => getInitialClanBattleHeaderState(player));
-    const [shouldLoadClanMembers, setShouldLoadClanMembers] = useState(false);
-    const [warmupSettled, setWarmupSettled] = useState(false);
-    const dewaterfall = isPlayerDewaterfallEnabled();
-    const handleWarmupSettled = useCallback(() => setWarmupSettled(true), []);
     const isClanBattleEnjoyer = clanBattleSummary !== null;
-    const { members: clanMembers, loading: clanMembersLoading, error: clanMembersError } = useClanMembers(player.clan_id || null, shouldLoadClanMembers);
 
     usePlayerRouteDiagnostics(player.player_id, player.name);
-
-    useEffect(() => {
-        setWarmupSettled(false);
-    }, [player.player_id]);
 
     useEffect(() => {
         setClanBattleSummary(getInitialClanBattleHeaderState(player));
@@ -234,48 +204,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         player.clan_battle_header_seasons_played,
         player.clan_battle_header_overall_win_rate,
     ]);
-
-    // Hard timeout: ensure clan members always load even if warmup fails.
-    // Unneeded when de-waterfalled — the clan fetch no longer waits on warmup.
-    useEffect(() => {
-        if (dewaterfall) return;
-        if (warmupSettled || !player.clan_id) return;
-        const timeoutId = window.setTimeout(() => setWarmupSettled(true), 10_000);
-        return () => window.clearTimeout(timeoutId);
-    }, [dewaterfall, warmupSettled, player.clan_id, player.player_id]);
-
-    // Gate clan member fetch on warmup completion (legacy). When de-waterfalled,
-    // activate as soon as a clan_id is known — in parallel with the chart warmup.
-    useEffect(() => {
-        if (!player.clan_id) {
-            setShouldLoadClanMembers(false);
-            return;
-        }
-
-        if (!dewaterfall && !warmupSettled) {
-            setShouldLoadClanMembers(false);
-            return;
-        }
-
-        let idleCallbackId: number | null = null;
-        let timeoutId: number | null = null;
-        const activate = () => setShouldLoadClanMembers(true);
-
-        if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-            idleCallbackId = window.requestIdleCallback(activate, { timeout: 500 });
-        } else if (typeof window !== 'undefined') {
-            timeoutId = window.setTimeout(activate, 500);
-        }
-
-        return () => {
-            if (idleCallbackId != null && typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
-                window.cancelIdleCallback(idleCallbackId);
-            }
-            if (timeoutId != null) {
-                window.clearTimeout(timeoutId);
-            }
-        };
-    }, [dewaterfall, player.clan_id, player.player_id, warmupSettled]);
 
     useEffect(() => {
         if (shareState === 'idle') {
@@ -295,11 +223,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         if (!player.is_hidden) {
             dispatchPlayerRouteSectionRendered('summary-cards', player.player_id, 'immediate');
         }
-
-        if (player.clan_id) {
-            dispatchPlayerRouteSectionRendered('clan-plot', player.player_id, 'immediate');
-        }
-    }, [player.clan_id, player.is_hidden, player.player_id]);
+    }, [player.is_hidden, player.player_id]);
 
     const handleShare = async () => {
         trackEvent('player-share', { realm });
@@ -329,66 +253,8 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     };
 
     return (
-        <div className="relative bg-[var(--bg-page)] p-6">
-            {isLoading ? (
-                <div className="absolute inset-0 z-20 flex items-start justify-center bg-[var(--bg-page)]/70 pt-6">
-                    <div className="rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-1 text-sm font-medium text-[var(--text-secondary)] shadow-sm">
-                        Loading player...
-                    </div>
-                </div>
-            ) : null}
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[350px_1fr]">
-                {/* Left rail: clan info (below player info on mobile) */}
-                <div className="order-2 lg:order-1">
-                    <div className="mb-4 pb-1">
-                        {player.clan_id ? (
-                            <Link
-                                href={buildClanPath(player.clan_id, player.clan_name || "Clan", realm)}
-                                className="mt-1 text-xl font-semibold text-[var(--accent-mid)] underline-offset-4 hover:underline"
-                                aria-label={`Open clan page for ${player.clan_name || "clan"}`}
-                            >
-                                {player.clan_tag ? `[${player.clan_tag}] ` : ''}{player.clan_name || 'Clan'}
-                            </Link>
-                        ) : (
-                            <h2 className="mt-1 text-xl font-semibold text-[var(--accent-mid)]">No Clan</h2>
-                        )}
-                    </div>
-                    {player.clan_id ? (
-                        <>
-                            <div id="clan_plot_container" className="mb-5 min-h-[280px]" data-perf-section="clan-plot">
-                                <ClanSVG
-                                    clanId={player.clan_id}
-                                    onSelectMember={onSelectMember}
-                                    highlightedPlayerName={player.name}
-                                    svgHeight={280}
-                                    membersData={clanMembers}
-                                    theme={theme}
-                                />
-
-                            </div>
-                            <DeferredSection
-                                className="pt-5"
-                                minHeight={clanMembers.length > 0 ? Math.max(96, clanMembers.length * 26 + 48) : 96}
-                                placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
-                                playerId={player.player_id}
-                                rootMargin="80px 0px"
-                                sectionId="clan-members"
-                            >
-                                <div id="clan_members_container" className="pl-8">
-                                    <ClanMembers members={clanMembers} loading={clanMembersLoading} error={clanMembersError} onSelectMember={onSelectMember} layout="stacked" highlightedPlayerName={player.name} source="player" />
-                                </div>
-                            </DeferredSection>
-                        </>
-                    ) : (
-                        <>
-                            <p className="text-sm text-[var(--accent-light)]">No clan data available</p>
-                        </>
-                    )}
-                </div>
-
-                {/* Right rail: player info (on top on mobile) */}
-                <div className="order-1 min-w-0 text-left lg:order-2 lg:pl-4">
-                    <div className="mb-6 border-b border-[var(--border)] pb-3" data-perf-section="player-header">
+        <>
+            <div className="mb-6 border-b border-[var(--border)] pb-3" data-perf-section="player-header">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                             <div className="flex min-w-0 flex-wrap items-center gap-2">
                                 <h1 className="text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
@@ -531,24 +397,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 hasClan={Boolean(player.clan_id)}
                                 efficiencyRows={player.efficiency_json}
                                 onClanBattleSummaryChange={handleClanBattleSummaryChange}
-                                onWarmupSettled={handleWarmupSettled}
                                 isLoading={isLoading}
                             />
                         </>
                     )}
-                </div>
-            </div>
-            <div className="mt-8 pt-5">
-                <button
-                    type="button"
-                    onClick={onBack}
-                    className="inline-flex items-center rounded-md border border-[var(--accent-mid)] px-4 py-2 text-sm font-medium text-[var(--accent-mid)] transition-colors hover:bg-[var(--accent-faint)]"
-                    aria-label="Return to landing page"
-                >
-                    Back
-                </button>
-            </div>
-        </div>
+        </>
     );
 
 };

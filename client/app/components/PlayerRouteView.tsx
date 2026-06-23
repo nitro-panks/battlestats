@@ -1,12 +1,10 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import PlayerDetail from './PlayerDetail';
 import LoadingPanel from './LoadingPanel';
 import { prefetchBattleHistory } from './BattleHistoryCard';
 import type { PlayerData } from './entityTypes';
-import { buildPlayerPath } from '../lib/entityRoutes';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, SharedJsonFetchError, isAbortError } from '../lib/sharedJsonFetch';
 import { PlayerRequestScopeProvider } from '../context/PlayerRequestScopeContext';
@@ -28,7 +26,6 @@ interface PlayerRouteViewProps {
 
 
 const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
-    const router = useRouter();
     const { realm } = useRealm();
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -160,8 +157,6 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
         <PlayerRequestScopeProvider value={requestSignal}>
             <PlayerDetail
                 player={playerData}
-                onBack={() => router.push('/')}
-                onSelectMember={(memberName) => router.push(buildPlayerPath(memberName, realm))}
                 isLoading={false}
                 refreshStatus={{ phase: liveRefresh.phase, secondsRemaining: liveRefresh.secondsRemaining }}
                 refreshNonce={liveRefresh.refreshNonce}

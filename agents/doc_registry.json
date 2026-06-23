@@ -2027,6 +2027,31 @@
                 "pill-clobber-followups-closed"
             ]
         },
+        "agents/runbooks/runbook-player-rail-soft-nav-2026-06-23.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "spec",
+            "owner": "frontend",
+            "aliases": [
+                "clan rail soft navigation",
+                "in-place player swap",
+                "player page member click no remount",
+                "parent layout rail"
+            ],
+            "tags": [
+                "frontend",
+                "player-page",
+                "clan-rail",
+                "soft-navigation",
+                "useSelectedLayoutSegment",
+                "app-router-layout",
+                "spike"
+            ],
+            "archive_on": [
+                "player-rail-soft-nav-shipped"
+            ]
+        },
         "agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md": {
             "kind": "runbook",
             "status": "active",
