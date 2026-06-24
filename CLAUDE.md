@@ -114,7 +114,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 
 ### Celery queues
 
-Five queues with dedicated workers: **default** (`-c 3`, light API refreshes), **hydration** (`-c 5`, request-driven upstream refreshes), **background** (`-c 3`, warmers/incrementals/snapshots/enrichment), **floor** (`-c 2`, the observation-floor capture cycles — recency-first, random-only, self-chaining), **crawls** (`-c 1`, the multi-day clan crawl + watchdog only).
+Five queues with dedicated workers: **default** (`-c 3`, light API refreshes), **hydration** (`-c 3`, request-driven upstream refreshes), **background** (`-c 3`, warmers/incrementals/snapshots/enrichment), **floor** (`-c 2`, the observation-floor capture cycles — recency-first, random-only, self-chaining), **crawls** (`-c 1`, the multi-day clan crawl + watchdog only).
 
 Resilience: `CELERY_TASK_ACKS_LATE = True` (at-least-once delivery); RabbitMQ `consumer_timeout` disabled (long tasks); consumer watchdog systemd timer restarts zombie workers (alive process, 0 consumers); soft systemd deps (`Wants=`, not `Requires=`).
 
