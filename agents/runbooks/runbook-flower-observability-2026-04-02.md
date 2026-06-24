@@ -10,7 +10,7 @@ history without hand-combining `rabbitmqctl`, `celery inspect`, and `journalctl`
 | Piece | Where | Exposure |
 | --- | --- | --- |
 | Flower 2.0.1 | `battlestats-flower.service`, `127.0.0.1:5555` | `https://battlestats.online/flower` — nginx home-IP allowlist + Flower basic-auth |
-| RabbitMQ management UI | `rabbitmq_management` plugin, `127.0.0.1:15672` | SSH tunnel only (ufw blocks 15672; no nginx block — see "RabbitMQ exposure") |
+| RabbitMQ management UI | `rabbitmq_management` plugin, `127.0.0.1:15672` | `https://rabbitmq.battlestats.online` — own subdomain, root path, nginx home-IP allowlist + RabbitMQ login |
 | Task events | `worker_send_task_events=True` in `server/battlestats/celery.py` | n/a — makes Flower's task history populate |
 
 The earlier (2026-04-02) plan assumed Flower in the **app** venv via
@@ -98,20 +98,32 @@ chown root:battlestats /etc/battlestats-flower.env && chmod 640 /etc/battlestats
 
 - **Flower (daily driver):** from the home network (allow-listed IP), browse
   `https://battlestats.online/flower` and log in with `FLOWER_BASIC_AUTH`.
-- **RabbitMQ UI / Flower without the allowlist:** SSH tunnel —
+- **RabbitMQ UI:** from the home network, browse `https://rabbitmq.battlestats.online`
+  and log in as `flower` (password in `/etc/battlestats-flower.env`).
+- **Either, off the home network:** SSH tunnel —
   `ssh -N -L 5555:127.0.0.1:5555 -L 15672:127.0.0.1:15672 root@battlestats.online`,
-  then `http://localhost:5555/flower` and `http://localhost:15672`
-  (login `flower:<pass from /etc/battlestats-flower.env>`).
+  then `http://localhost:5555/flower` and `http://localhost:15672`.
 
-## RabbitMQ exposure (why it's tunnel-only)
+## RabbitMQ exposure (own subdomain, deployed 2026-06-24)
 
-The RabbitMQ management SPA only proxies cleanly under a subpath with
-`management.path_prefix` in `rabbitmq.conf` — which needs a broker restart. Deploys
-already restart the broker, so it could ride along, but it wasn't worth the extra
-public surface: **Flower already surfaces queue depth** (via `broker_api`), so the
-raw RabbitMQ UI is for occasional deep broker introspection, which the SSH tunnel
-covers. If browser access is wanted later, prefer a `rabbitmq.` subdomain (root path,
-no prefix gymnastics) over a subpath.
+The management SPA doesn't proxy cleanly under a subpath without
+`management.path_prefix` (a `rabbitmq.conf` change needing a broker restart), so it
+lives on its **own subdomain at root path** instead — no prefix gymnastics, no broker
+restart. Setup (DNS is DigitalOcean, `doctl` authed on the droplet; cert via certbot):
+
+```bash
+doctl compute domain records create battlestats.online --record-type A \
+  --record-name rabbitmq --record-data 45.55.66.19 --record-ttl 300
+certbot certonly --nginx -d rabbitmq.battlestats.online --non-interactive
+# nginx: sites-available/rabbitmq-ui.conf — 80→443 redirect + a 443 server that
+#   allow 130.44.131.215; deny all;  then  proxy_pass http://127.0.0.1:15672;
+#   (full block written by deploy/scratch script rabbitmq_subdomain.sh)
+```
+
+Same two-layer model as Flower: nginx home-IP allowlist at the edge, RabbitMQ's own
+login as the credential layer. ufw still blocks 15672 directly. Flower also surfaces
+queue depth via `broker_api`, so this UI is mainly for deeper broker introspection
+(connections, channels, exchanges, message rates).
 
 ## Security model
 
