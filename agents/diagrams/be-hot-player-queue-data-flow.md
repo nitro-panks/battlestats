@@ -1,11 +1,19 @@
 # Hot-Player Engagement Queue — Data Flow
 
+> **⚠️ DISABLED IN PROD (2026-06-16).** This subsystem is kill-switched off in production
+> (`HOT_PLAYERS_ENABLED=0`): the live hot set was ~98.5% active-7d — i.e. already covered by
+> the observation floor — so the queue was near-pure overlap. The **code, models, and
+> `HotPlayer` rows are retained and the feature is reversible** (`HOT_PLAYERS_ENABLED=1`),
+> which is why this diagram is kept as reference rather than deleted. The flow below describes
+> the subsystem **as built**, not as currently running. Re-enable rationale + cost model:
+> `runbook-hot-players-engagement-queue-2026-06-10.md`.
+
 How **durable visitor interest** — not a player's own activity or skill — qualifies a
 player for guaranteed daily battle-history capture. Two sweeps share one `HotPlayer`
 table: a DB-only *brain* that decides membership, and one WG-consuming *hand* (capture)
 that acts on it. A one-time `backfill_hot_players` seed can fill the queue to the cap with
 the most-active players. This doc drills into that subsystem only; for the wider Celery
-topology see `queue-data-flow.md`.
+topology see `be-queue-data-flow.md`.
 
 > **Retired 2026-06-15:** a third sweep — `refresh_hot_player_freshness_task`, the per-12-min
 > "Tier 3" sweep that advanced `battles_updated_at` for sub-second visit resolution — was
@@ -202,4 +210,4 @@ The engagement signal that earns a player gap-free day-over-day history — and 
 seed of the most-active players — both feed one durable `HotPlayer` set with a single
 guarantee: **≥1 battle-history pull per hot player per 24h.** (The former sub-second-on-visit
 "fast page" guarantee was the retired Tier 3 freshness sweep; a visit to a stale hot player
-now takes the normal lazy-refresh-on-view round trip — see `queue-data-flow.md`.)
+now takes the normal lazy-refresh-on-view round trip — see `be-queue-data-flow.md`.)

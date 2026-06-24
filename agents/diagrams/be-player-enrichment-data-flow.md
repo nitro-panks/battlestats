@@ -4,7 +4,7 @@ How the **one-time-per-player backfill** pipeline fills `battles_json` (and the
 sibling `tiers_json` / `type_json` / `randoms_json` / `ranked_json` + snapshot /
 explorer-summary / clan-battle fields), and how the daily DB-only pool-maintenance
 machinery keeps the candidate pool correct between runs. This is a narrow drill-down
-of the `background`-queue enrichment tenant in `queue-data-flow.md` — read that first
+of the `background`-queue enrichment tenant in `be-queue-data-flow.md` — read that first
 for the broader Celery topology.
 
 Enrichment is **filter-gated, not throughput-gated**: it targets only established,

@@ -16,7 +16,7 @@ with **distinct write targets** that run on **different workers** (current 2026-
   active, visible player gets one gap-free daily `Snapshot` row. Writes `Snapshot` (the
   day-over-day series). This engine exists *because* the floor never writes `Snapshot`.
 
-This doc is narrower and deeper than `queue-data-flow.md` — see that for the full
+This doc is narrower and deeper than `be-queue-data-flow.md` — see that for the full
 five-queue layout. **The two engines run on separate workers** (floor on the dedicated `floor`
 worker, snapshot on `background`), so they do **not** contend for the same pool — an earlier
 version of this doc wrongly placed the floor on `background`, then on `default`; the floor now
@@ -302,7 +302,7 @@ crawl is already drawing on. The crawl is *secondary contention*, never a hard s
 `HOT_OBSERVE_FLOOR_HOURS` check), so hot players who are *also* active-7d are already
 covered by the floor and cost nothing extra — the hot sweep's marginal work is only the
 hot-but-inactive set the floor wouldn't reach. (Full hot-player loop: see the hot-players
-drill-down in `queue-data-flow.md`.)
+drill-down in `be-queue-data-flow.md`.)
 
 ---
 

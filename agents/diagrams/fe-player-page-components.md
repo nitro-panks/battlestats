@@ -7,11 +7,11 @@ the ship-top banner, and the seven-tab insights deck.
 
 Boxes are React components; `file:line` annotations point at the part worth reading. The root
 chrome (header search, theme/realm selectors, footer) is detailed in
-[landing-page-components.md](landing-page-components.md) and only stubbed here.
+[fe-landing-page-components.md](fe-landing-page-components.md) and only stubbed here.
 
 ```mermaid
 flowchart TD
-    CHROME["Root layout chrome<br/>app/layout.tsx — header search / theme / realm / footer<br/>(see landing-page-components.md)"]
+    CHROME["Root layout chrome<br/>app/layout.tsx — header search / theme / realm / footer<br/>(see fe-landing-page-components.md)"]
 
     %% ---- Route shell ----
     LAYOUT["Route layout<br/>app/player/layout.tsx:11<br/>wraps children in PlayerRailLayout"]

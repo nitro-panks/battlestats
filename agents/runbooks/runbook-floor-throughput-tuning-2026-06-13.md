@@ -272,7 +272,7 @@ worker (per `settings.CELERY_TASK_ROUTES`; confirmed live 2026-06-19 — Beat di
 `battlestats-celery`). The `background`-pool contention the earlier phases describe is real for the
 **snapshot engine / enrichment / warmers**, but the floor does **not** share that pool — so an
 earlier "floor slot-starved on background" read this session was a measurement error (grepping the
-wrong worker). NOTE: `agents/diagrams/queue-data-flow.md` and `observation-floor-data-flow.md` still
+wrong worker). NOTE: `agents/diagrams/be-queue-data-flow.md` and `be-observation-floor-data-flow.md` still
 mis-place the floor on `background`; flagged for a separate doc fix.
 
 **The real finding (Phase 0a instrumentation, live 2026-06-19).** The floor is healthy on the
