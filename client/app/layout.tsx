@@ -53,7 +53,7 @@ export default function RootLayout({
         <ThemeProvider>
           <RealmProvider>
             <DegradationProvider>
-            <div className="mx-auto max-w-6xl px-4 md:px-6">
+            <div className="mx-auto max-w-[1200px] px-4 md:px-6">
               <header className="flex flex-col gap-4 bg-[var(--bg-page)] py-5 pl-5 md:flex-row md:items-center md:justify-between md:py-6">
                 <Logo />
                 <div className="flex w-full flex-wrap items-center justify-end gap-3 pr-2 md:w-auto md:flex-nowrap">

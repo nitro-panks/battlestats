@@ -16,7 +16,6 @@ interface ClanDetailProps {
         tag: string;
         members_count: number;
     };
-    onBack: () => void;
     onSelectMember: (memberName: string) => void;
 }
 
@@ -42,10 +41,9 @@ const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMem
     loading: () => <LoadingPanel tone="muted" label="Loading clan members..." minHeight={96} />,
 });
 
-const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember }) => {
+const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onSelectMember }) => {
     const { theme } = useTheme();
     const { realm } = useRealm();
-    const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const [chartMode, setChartMode] = useState<'2d' | '3d'>('2d');
 
     // Pre-signal chart loading so hooks that check chartFetchesInFlight
@@ -82,64 +80,21 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
         : 0;
     const is3DAvailable = kdrCoverage >= 0.5 && !tiersLoading;
 
-    useEffect(() => {
-        if (shareState === 'idle') {
-            return;
-        }
-
-        const timeoutId = window.setTimeout(() => {
-            setShareState('idle');
-        }, 1800);
-
-        return () => window.clearTimeout(timeoutId);
-    }, [shareState]);
-
-    const handleShare = async () => {
-        trackEvent('clan-share', { realm });
-        try {
-            const url = new URL(window.location.href);
-            if (!url.searchParams.has('realm')) {
-                url.searchParams.set('realm', realm);
-            }
-            await navigator.clipboard.writeText(url.toString());
-            setShareState('copied');
-        } catch (error) {
-            console.error('Failed to copy clan URL:', error);
-            setShareState('failed');
-        }
-    };
-
     return (
         <div className="bg-[var(--bg-page)] p-6">
-            <div className="mb-3 pb-3">
+            <div className="mx-auto mb-3 max-w-[900px] pb-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <h1 className="text-3xl font-semibold tracking-tight text-[var(--text-primary)]">
                         [{clan.tag}] {clan.name}
                     </h1>
-                    <div className="flex items-center gap-2 self-start">
-                        <button
-                            type="button"
-                            onClick={handleShare}
-                            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
-                            aria-label="Copy shareable clan URL"
-                        >
-                            Share
-                        </button>
-                        {shareState === 'copied' ? (
-                            <span className="text-xs font-medium text-[var(--accent-mid)]">Copied</span>
-                        ) : null}
-                        {shareState === 'failed' ? (
-                            <span className="text-xs font-medium text-red-600 dark:text-red-400">Copy failed</span>
-                        ) : null}
-                    </div>
                 </div>
                 <p className="mt-1 text-sm text-[var(--text-secondary)]">
                     {clan.members_count} members
                 </p>
             </div>
 
-            {/* Body content is constrained to the 900px chart width */}
-            <div className="max-w-[900px]">
+            {/* Body content is constrained to the 900px chart width, centered in the page */}
+            <div className="mx-auto max-w-[900px]">
             {/* 2D/3D toggle — desktop only */}
             <div className="hidden md:flex items-center gap-1 mb-3">
                 <div className="inline-flex rounded-md border border-[var(--border)] text-xs font-medium">
@@ -210,12 +165,6 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 </div>
             </DeferredSection>
 
-            <button
-                onClick={onBack}
-                className="mt-5 rounded-md border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-            >
-                Back
-            </button>
             </div>
         </div>
     );

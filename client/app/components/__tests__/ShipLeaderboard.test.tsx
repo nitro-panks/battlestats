@@ -70,6 +70,9 @@ describe('ShipLeaderboard', () => {
         mockFetch.mockReset();
         mockFetch.mockImplementation((url: string) => routeFetch(url));
         mockTrack.mockClear();
+        // The component now persists tier/type/WR to localStorage; clear it so a
+        // selection made in one test doesn't get restored into the next.
+        localStorage.clear();
         // jsdom has no scrollIntoView; the imperative handle calls it.
         Element.prototype.scrollIntoView = jest.fn();
     });

@@ -44,6 +44,36 @@ const WR_PCTS: { value: WrPct; label: string }[] = [
     { value: 25, label: '25%' },
 ];
 
+// Persist the landing tier/type/WR selection so it survives a return visit.
+// Stored under one key; read once on mount (after SSR, so no hydration mismatch)
+// and written on every change. Each field is validated on read so a malformed or
+// stale value falls back to the component default rather than fetching garbage.
+// wrPct's `null` ("All") is a real stored value, distinct from "absent".
+const SHIP_LB_PREFS_KEY = 'bs-ship-leaderboard';
+
+interface ShipLbPrefs {
+    tier: Tier;
+    type: ShipType;
+    wrPct: WrPct;
+}
+
+function readStoredShipLbPrefs(): Partial<ShipLbPrefs> | null {
+    if (typeof window === 'undefined') return null;
+    try {
+        const raw = window.localStorage.getItem(SHIP_LB_PREFS_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        if (!parsed || typeof parsed !== 'object') return null;
+        const out: Partial<ShipLbPrefs> = {};
+        if (TIERS.includes(parsed.tier as Tier)) out.tier = parsed.tier as Tier;
+        if (SHIP_TYPES.includes(parsed.type as ShipType)) out.type = parsed.type as ShipType;
+        if (parsed.wrPct === null || parsed.wrPct === 50 || parsed.wrPct === 25) out.wrPct = parsed.wrPct as WrPct;
+        return out;
+    } catch {
+        return null;
+    }
+}
+
 // Imperative handle the landing treemap drives to drill straight into a ship's
 // player board in place (see runbook-treemap-shipleaderboard-handoff). Kept as a
 // command rather than lifted state so this component keeps owning its list/board
@@ -233,6 +263,33 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
     const [wrPct, setWrPct] = useState<WrPct>(50);
     const [selectedShip, setSelectedShip] = useState<{ id: number; name: string } | null>(null);
 
+    // Restore the persisted tier/type/WR on mount (post-SSR, so the first client
+    // render still matches the server's default markup — no hydration mismatch).
+    // The list fetch is gated on this so it fires once, with the restored bucket,
+    // instead of flashing the default bucket first.
+    const [prefsRestored, setPrefsRestored] = useState(false);
+    useEffect(() => {
+        const stored = readStoredShipLbPrefs();
+        if (stored) {
+            if (stored.tier !== undefined) setTier(stored.tier);
+            if (stored.type !== undefined) setType(stored.type);
+            if (stored.wrPct !== undefined) setWrPct(stored.wrPct);
+        }
+        setPrefsRestored(true);
+    }, []);
+
+    // Persist the selection on every change (once restore has run, so the initial
+    // default render never overwrites a stored preference). Treemap drill-downs
+    // also set tier/type, so they persist too — which matches user intent.
+    useEffect(() => {
+        if (!prefsRestored || tier == null || type == null) return;
+        try {
+            window.localStorage.setItem(SHIP_LB_PREFS_KEY, JSON.stringify({ tier, type, wrPct }));
+        } catch {
+            // localStorage unavailable
+        }
+    }, [prefsRestored, tier, type, wrPct]);
+
     const [list, setList] = useState<ListShip[] | null>(null);
     const [listTotalBattles, setListTotalBattles] = useState(0);
     const [listLoading, setListLoading] = useState(false);
@@ -311,7 +368,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
     // warm-bucket re-fetches cheap.
     const listReqId = useRef(0);
     useEffect(() => {
-        if (!bothSelected || selectedShip || isEasterEgg) return;
+        if (!prefsRestored || !bothSelected || selectedShip || isEasterEgg) return;
         const reqId = ++listReqId.current;
         setListLoading(true);
         setListError(false);
@@ -357,7 +414,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
         return () => {
             if (timer) clearTimeout(timer);
         };
-    }, [realm, tier, type, wrPct, bothSelected, selectedShip, isEasterEgg]);
+    }, [realm, tier, type, wrPct, bothSelected, selectedShip, isEasterEgg, prefsRestored]);
 
     // Ship board fetch (drill-down) — reuses the existing /ship leaderboard.
     const boardReqId = useRef(0);

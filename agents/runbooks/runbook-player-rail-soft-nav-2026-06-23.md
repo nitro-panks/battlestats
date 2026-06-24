@@ -96,9 +96,10 @@ app/player/
 
 1. **Split `PlayerDetail.tsx`'s two-column grid** (`lg:grid-cols-[350px_1fr]`): the left rail
    (clan name link, `#clan_plot_container` → `ClanSVG`, `#clan_members_container` → `ClanMembers`)
-   moved into `PlayerRailLayout` (rendered by the new `app/player/layout.tsx`). The grid, the outer
-   `bg-[var(--bg-page)] p-6` wrapper, and the page-level **Back** button (`router.push('/')`) now live in
-   `PlayerRailLayout`; `{children}` (the page well) is the right cell (`order-1 lg:order-2 lg:pl-4`).
+   moved into `PlayerRailLayout` (rendered by the new `app/player/layout.tsx`). The grid and the outer
+   `bg-[var(--bg-page)] p-6` wrapper now live in `PlayerRailLayout`; `{children}` (the page well) is the
+   right cell (`order-1 lg:order-2 lg:pl-4`). (The page-level **Back**-to-landing button this layout
+   originally rendered was removed 2026-06-24 along with the per-page Share buttons.)
    `PlayerDetail` is now just the right-well content (player header, summary cards, ship banner, tabs) — it
    no longer takes `onBack`/`onSelectMember` and no longer loads clan members. The legacy
    `warmupSettled`/`shouldLoadClanMembers` gating was dropped (the rail loads on `clan_id`, the prod

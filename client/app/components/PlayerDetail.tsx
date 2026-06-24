@@ -13,8 +13,6 @@ import ShipTopPlayerBanner, { ShipBadge } from './ShipTopPlayerBanner';
 import TopShipBadges from './TopShipBadges';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
-import { useRealm } from '../context/RealmContext';
-import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
 
 interface PlayerDetailProps {
@@ -173,8 +171,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     refreshStatus,
     refreshNonce = 0,
 }) => {
-    const { realm } = useRealm();
-    const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
     const isPveEnjoyer = Boolean(player.is_pve_player);
     const rankedBattleCount = Array.isArray(player.ranked_json)
@@ -206,39 +202,12 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     ]);
 
     useEffect(() => {
-        if (shareState === 'idle') {
-            return;
-        }
-
-        const timeoutId = window.setTimeout(() => {
-            setShareState('idle');
-        }, 1800);
-
-        return () => window.clearTimeout(timeoutId);
-    }, [shareState]);
-
-    useEffect(() => {
         dispatchPlayerRouteSectionRendered('player-header', player.player_id, 'immediate');
 
         if (!player.is_hidden) {
             dispatchPlayerRouteSectionRendered('summary-cards', player.player_id, 'immediate');
         }
     }, [player.is_hidden, player.player_id]);
-
-    const handleShare = async () => {
-        trackEvent('player-share', { realm });
-        try {
-            const url = new URL(window.location.href);
-            if (!url.searchParams.has('realm')) {
-                url.searchParams.set('realm', realm);
-            }
-            await navigator.clipboard.writeText(url.toString());
-            setShareState('copied');
-        } catch (error) {
-            console.error('Failed to copy player URL:', error);
-            setShareState('failed');
-        }
-    };
 
     const handleClanBattleSummaryChange = (nextSummary: PlayerClanBattleSummary | null) => {
         const nextHeaderState = buildClanBattleHeaderState(nextSummary);
@@ -268,22 +237,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {isClanBattleEnjoyer && clanBattleSummary ? <ClanBattleShieldIcon winRate={clanBattleSummary.overallWinRate} size="header" /> : null}
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
                                 {!player.is_hidden && <TopShipBadges badges={player.ship_badges} realm={player.realm} size="header" />}
-                            </div>
-                            <div className="flex items-center gap-2 self-start">
-                                <button
-                                    type="button"
-                                    onClick={handleShare}
-                                    className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm font-medium text-[var(--accent-mid)] transition-colors hover:bg-[var(--accent-faint)]"
-                                    aria-label="Copy shareable player URL"
-                                >
-                                    Share
-                                </button>
-                                {shareState === 'copied' ? (
-                                    <span className="text-xs font-medium text-[var(--accent-mid)]">Copied</span>
-                                ) : null}
-                                {shareState === 'failed' ? (
-                                    <span className="text-xs font-medium text-red-500">Copy failed</span>
-                                ) : null}
                             </div>
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-3">

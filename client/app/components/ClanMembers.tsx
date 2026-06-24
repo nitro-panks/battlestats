@@ -202,7 +202,7 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                 </div>
             )}
             {!loading && members.length > 0 && layout !== 'columns' && (
-                <div className={layout === 'stacked' ? 'mt-2 space-y-1 text-sm text-[var(--accent-light)]' : 'mt-2 text-sm leading-7 text-[var(--accent-light)]'}>
+                <div className={layout === 'stacked' ? 'mt-2 max-h-[700px] space-y-1 overflow-y-auto pr-2 text-sm text-[var(--accent-light)]' : 'mt-2 text-sm leading-7 text-[var(--accent-light)]'}>
                     {members.map((member) => {
                         const isCurrentPlayer = normalizedCurrentPlayer != null
                             && member.name.trim().toLowerCase() === normalizedCurrentPlayer;

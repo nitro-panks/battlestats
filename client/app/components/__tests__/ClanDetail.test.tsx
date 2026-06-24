@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import ClanDetail from '../ClanDetail';
 
 const mockUseClanMembers = jest.fn();
@@ -88,7 +88,6 @@ describe('ClanDetail clan roster hydration wiring', () => {
                     tag: 'FX',
                     members_count: 12,
                 }}
-                onBack={() => undefined}
                 onSelectMember={() => undefined}
             />,
         );
@@ -105,7 +104,6 @@ describe('ClanDetail clan roster hydration wiring', () => {
                     tag: 'FX',
                     members_count: 12,
                 }}
-                onBack={() => undefined}
                 onSelectMember={onSelectMemberSpy}
             />,
         );
@@ -125,7 +123,6 @@ describe('ClanDetail clan roster hydration wiring', () => {
                     tag: 'FX',
                     members_count: 12,
                 }}
-                onBack={() => undefined}
                 onSelectMember={() => undefined}
             />,
         );
@@ -134,9 +131,7 @@ describe('ClanDetail clan roster hydration wiring', () => {
         expect(screen.getByText('12 members')).toBeInTheDocument();
     });
 
-    it('wires member selection and back navigation controls', () => {
-        const onBack = jest.fn();
-
+    it('wires member selection controls', () => {
         render(
             <ClanDetail
                 clan={{
@@ -145,87 +140,13 @@ describe('ClanDetail clan roster hydration wiring', () => {
                     tag: 'FX',
                     members_count: 12,
                 }}
-                onBack={onBack}
                 onSelectMember={onSelectMemberSpy}
             />,
         );
 
         fireEvent.click(screen.getByRole('button', { name: 'Select member' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Back' }));
 
         expect(onSelectMemberSpy).toHaveBeenCalledWith('DeckBoss');
-        expect(onBack).toHaveBeenCalled();
-    });
-
-    it('copies the clan URL and clears the copied state after the timeout', async () => {
-        jest.useFakeTimers();
-        mockClipboardWriteText.mockResolvedValue(undefined);
-
-        render(
-            <ClanDetail
-                clan={{
-                    clan_id: 5555,
-                    name: 'Fixture Clan',
-                    tag: 'FX',
-                    members_count: 12,
-                }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
-            />,
-        );
-
-        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable clan URL' }));
-
-        await waitFor(() => {
-            expect(mockClipboardWriteText).toHaveBeenCalled();
-        });
-        expect(await screen.findByText('Copied')).toBeInTheDocument();
-
-        await act(async () => {
-            jest.advanceTimersByTime(1800);
-        });
-
-        await waitFor(() => {
-            expect(screen.queryByText('Copied')).not.toBeInTheDocument();
-        });
-    });
-
-    it('shows a share failure state when clipboard copying fails', async () => {
-        mockClipboardWriteText.mockRejectedValue(new Error('no clipboard'));
-
-        render(
-            <ClanDetail
-                clan={{
-                    clan_id: 5555,
-                    name: 'Fixture Clan',
-                    tag: 'FX',
-                    members_count: 12,
-                }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
-            />,
-        );
-
-        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable clan URL' }));
-
-        expect(await screen.findByText('Copy failed')).toBeInTheDocument();
-        expect(consoleErrorSpy).toHaveBeenCalled();
-    });
-
-    it('fires a clan-share umami event when the share button is clicked', async () => {
-        mockClipboardWriteText.mockResolvedValue(undefined);
-
-        render(
-            <ClanDetail
-                clan={{ clan_id: 5555, name: 'Fixture Clan', tag: 'FX', members_count: 12 }}
-                onBack={() => undefined}
-                onSelectMember={() => undefined}
-            />,
-        );
-
-        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable clan URL' }));
-
-        expect(trackEventMock).toHaveBeenCalledWith('clan-share', expect.objectContaining({ realm: expect.any(String) }));
     });
 
     it('fires name-encoded clan-chart-3d / clan-chart-2d events for the dimension toggle', () => {
@@ -238,7 +159,6 @@ describe('ClanDetail clan roster hydration wiring', () => {
         render(
             <ClanDetail
                 clan={{ clan_id: 5555, name: 'Fixture Clan', tag: 'FX', members_count: 12 }}
-                onBack={() => undefined}
                 onSelectMember={() => undefined}
             />,
         );

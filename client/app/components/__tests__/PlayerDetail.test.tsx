@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import PlayerDetail from '../PlayerDetail';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
 
@@ -200,7 +200,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(status).toHaveClass('rainbow-text');
     });
 
-    it('shows the cooldown countdown in minutes left of the share button', () => {
+    it('shows the cooldown countdown in minutes', () => {
         render(
             <PlayerDetail
                 player={basePlayer}
@@ -593,61 +593,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.getByLabelText(/ranked enjoyer/i)).toBeInTheDocument();
         expect(screen.queryByText('Playstyle:')).not.toBeInTheDocument();
         expect(screen.queryByText('Warrior')).not.toBeInTheDocument();
-    });
-
-    it('copies the player URL and clears the copied state after the timeout', async () => {
-        jest.useFakeTimers();
-        mockClipboardWriteText.mockResolvedValue(undefined);
-
-        render(
-            <PlayerDetail
-                player={basePlayer}
-            />,
-        );
-
-        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable player URL' }));
-
-        await waitFor(() => {
-            expect(mockClipboardWriteText).toHaveBeenCalled();
-        });
-        expect(await screen.findByText('Copied')).toBeInTheDocument();
-
-        await act(async () => {
-            jest.advanceTimersByTime(1800);
-        });
-
-        await waitFor(() => {
-            expect(screen.queryByText('Copied')).not.toBeInTheDocument();
-        });
-    });
-
-    it('shows a share failure state when clipboard copying fails', async () => {
-        mockClipboardWriteText.mockRejectedValue(new Error('no clipboard'));
-
-        render(
-            <PlayerDetail
-                player={basePlayer}
-            />,
-        );
-
-        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable player URL' }));
-
-        expect(await screen.findByText('Copy failed')).toBeInTheDocument();
-        expect(consoleErrorSpy).toHaveBeenCalled();
-    });
-
-    it('fires a player-share umami event when the share button is clicked', () => {
-        mockClipboardWriteText.mockResolvedValue(undefined);
-
-        render(
-            <PlayerDetail
-                player={basePlayer}
-            />,
-        );
-
-        fireEvent.click(screen.getByRole('button', { name: 'Copy shareable player URL' }));
-
-        expect(mockTrackEvent).toHaveBeenCalledWith('player-share', expect.objectContaining({ realm: expect.any(String) }));
     });
 
     it('defaults to Activity, then falls back to Ships when the player has no battle activity', async () => {

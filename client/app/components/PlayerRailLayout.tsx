@@ -141,7 +141,7 @@ const PlayerRailLayout: React.FC<{ children: React.ReactNode }> = ({ children })
                             </div>
                             <DeferredSection
                                 className="pt-5"
-                                minHeight={clanMembers.length > 0 ? Math.max(96, clanMembers.length * 26 + 48) : 96}
+                                minHeight={clanMembers.length > 0 ? Math.min(700, Math.max(96, clanMembers.length * 26 + 48)) : 96}
                                 placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
                                 playerId={clanIdentity.playerId}
                                 rootMargin="80px 0px"
@@ -174,16 +174,6 @@ const PlayerRailLayout: React.FC<{ children: React.ReactNode }> = ({ children })
                 <div className="order-1 min-w-0 text-left lg:order-2 lg:pl-4">
                     {children}
                 </div>
-            </div>
-            <div className="mt-8 pt-5">
-                <button
-                    type="button"
-                    onClick={() => router.push('/')}
-                    className="inline-flex items-center rounded-md border border-[var(--accent-mid)] px-4 py-2 text-sm font-medium text-[var(--accent-mid)] transition-colors hover:bg-[var(--accent-faint)]"
-                    aria-label="Return to landing page"
-                >
-                    Back
-                </button>
             </div>
         </div>
     );
