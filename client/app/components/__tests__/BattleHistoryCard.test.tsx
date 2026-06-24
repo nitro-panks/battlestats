@@ -511,6 +511,48 @@ describe('BattleHistoryCard', () => {
         expect(all).toHaveAttribute('aria-pressed', 'false');
     });
 
+    test('opens on Ranked when both modes available but the default window has zero random battles', async () => {
+        // The reported case: a player who has stopped playing Random but is
+        // active in Ranked. A stale Random PDSS row keeps 'random' in
+        // available_modes, so the length-1 auto-switch never fires — but the
+        // default month window has 0 random battles, so the card should open on
+        // Ranked rather than an empty Random view.
+        mockByMode(
+            { available_modes: ['random', 'ranked'] },
+            {
+                random: {
+                    totals: {
+                        battles: 0, wins: 0, losses: 0, win_rate: 0,
+                        damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                        planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                    },
+                    by_ship: [],
+                    by_day: [],
+                },
+                ranked: {
+                    totals: {
+                        battles: 5, wins: 3, losses: 2, win_rate: 60.0,
+                        damage: 200_000, avg_damage: 40_000, frags: 7,
+                        xp: 3_000, planes_killed: 0, survived_battles: 3,
+                        survival_rate: 60.0,
+                    },
+                },
+            },
+        );
+        render(<BattleHistoryCard playerName="ranked_active" realm="eu" />);
+        // The auto-switch refetches the main window with mode=ranked.
+        await waitFor(() => {
+            expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
+        });
+        // Both pills stay reachable (dual-mode), but Ranked is the live default.
+        const ranked = screen.getByRole('button', { name: /^Ranked$/ });
+        const random = screen.getByRole('button', { name: /^Random$/ });
+        await waitFor(() => {
+            expect(ranked).toHaveAttribute('aria-pressed', 'true');
+        });
+        expect(random).toHaveAttribute('aria-pressed', 'false');
+    });
+
     test('clicking ranked pill refetches with mode=ranked', async () => {
         // Dual-mode payload → default stays random (no auto-switch).
         mockByMode({ available_modes: ['random', 'ranked'] });

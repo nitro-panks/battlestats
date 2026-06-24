@@ -801,24 +801,43 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     }, [playerName, realm, mode, refreshNonce]);
 
     // Auto-select the right default mode based on what the player actually
-    // has data in. Skipped once the user has explicitly clicked a pill.
-    //   - both modes available → keep the initial 'random' default so the
-    //     player sees their random battles first (Ranked/All pills remain
-    //     available to switch to)
-    //   - only one mode available → switch to that one. The edge case here is
-    //     a ranked-only player, who gets defaulted to Ranked since there's no
-    //     random data to show.
-    //   - default initial state is 'random' so the first fetch matches the
-    //     pre-Phase-5 contract; the ranked-only auto-switch may then fire one
-    //     refetch.
+    // has recent data in. `available_modes` is the set of modes with rows in
+    // PlayerDailyShipStats (pruned to ~32d), i.e. "played in the last month or
+    // so" — not a lifetime signal. Decided ONCE off the first resolved (random)
+    // payload per (player, realm), then latched: this is an initial-default
+    // chooser, not a live reaction to the visible window, so a user toggling to
+    // an empty window later can't yank their mode out from under them. Skipped
+    // once the user has explicitly clicked a pill.
+    //   - only one mode available → switch to it (the ranked-only player, who
+    //     has no random data to show, lands on Ranked).
+    //   - both modes available but the default month window has zero random
+    //     battles while ranked is in play → open on Ranked. This catches the
+    //     player who has stopped playing Random but is active in Ranked: their
+    //     stale Random row keeps 'random' in available_modes, so the length-1
+    //     branch never fires and the card would otherwise open on an empty
+    //     Random window. (We switch on "recent ranked rows exist", a proxy — if
+    //     ranked is also empty in-window it's an empty-vs-empty wash.)
+    //   - otherwise keep the initial 'random' default (Ranked/All pills remain
+    //     reachable). Initial state is 'random' so the first fetch dedupes onto
+    //     PlayerRouteView's parallel prefetch; any switch fires one refetch.
+    const initialModeResolvedRef = useRef(false);
     useEffect(() => {
-        if (userPickedMode) return;
+        if (userPickedMode || initialModeResolvedRef.current) return;
         const available = payload?.available_modes;
         if (!available) return;
-        if (available.length === 1 && available[0] !== mode) {
-            setMode(available[0]);
+        initialModeResolvedRef.current = true;
+        if (available.length === 1) {
+            if (available[0] !== mode) setMode(available[0]);
+            return;
         }
-    }, [payload?.available_modes, mode, userPickedMode]);
+        if (
+            mode === 'random'
+            && available.includes('ranked')
+            && (payload?.totals?.battles ?? 0) === 0
+        ) {
+            setMode('ranked');
+        }
+    }, [payload, mode, userPickedMode]);
 
     // Availability is a one-shot, stable signal: report it from the FIRST
     // resolved payload (or error) per (player, realm), then latch. Basing it on
@@ -827,6 +846,11 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const availabilityReportedRef = useRef(false);
     useEffect(() => {
         availabilityReportedRef.current = false;
+        // The default-mode decision is also one-shot per (player, realm): a
+        // realm switch keeps this card mounted (only a player soft-nav remounts
+        // it, via PlayerRouteView's key={playerName}), so reset the latch here
+        // or a realm switch would freeze the prior realm's mode choice.
+        initialModeResolvedRef.current = false;
     }, [playerName, realm]);
 
     useEffect(() => {
