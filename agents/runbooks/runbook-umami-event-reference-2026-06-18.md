@@ -85,14 +85,14 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | `ship-stats-open` | `{ship_id, source:'row', mode, window, realm}` | Click a ship row in battle history to open its combat-stats panel | `BattleHistoryCard.tsx:813` | ✅ live-verified 2026-06-18 (the long zero was discoverability, not a bug) |
 | `ship-stats-close` | `{ship_id, source:'button'\|'row', mode, window, realm}` | Close the ship-stats panel (X button, or click another row) | `BattleHistoryCard.tsx:821,813` | ✅ live-verified 2026-06-18 |
 | `randoms-filter` | `{realm, control:'type'\|'tier', value}` | Toggle a ship-type / tier filter pill (or "All") in the "Ships" insights tab. `value` is the type name, tier number, or `'all'` | `RandomsSVG.tsx` (toggleType/toggleTier/selectAll*) | 🟡 deployed v2.5.0, 0 captures |
-| `player-share` | `{realm}` | Click "Share" on a player detail page | `PlayerDetail.tsx:300` | ✅ 10 (10) |
+| `player-share` | `{realm}` | ~~Click "Share" on a player detail page~~ | — | ❌ **removed v2.15.0** (Share button deleted globally 2026-06-24) |
 
 ### Clan detail
 
 | Event | Payload | Trigger & reproduction | Source | Status (30d) |
 |---|---|---|---|---|
 | `clan-member-click` | `{realm, source:'clan'\|'player'}` | Click a roster member name. One leaf attach point (`ClanMembers.tsx`); `source` distinguishes the clan page (`'clan'`) from the player-page clan section (`'player'`) — no double-count with the landing player grid | `ClanMembers.tsx:138` | ✅ working; `source` added v2.5.0 |
-| `clan-share` | `{realm}` | Click "Share" on a clan detail page | `ClanDetail.tsx:98` | ✅ live-verified 2026-06-18 (rare action, not broken) |
+| `clan-share` | `{realm}` | ~~Click "Share" on a clan detail page~~ | — | ❌ **removed v2.15.0** (Share button deleted globally 2026-06-24) |
 | `clan-chart-2d` | `{realm}` | Click the "2D" chart toggle (desktop) | `ClanDetail.tsx:148` | ✅ 23 (16) |
 | `clan-chart-3d` | `{realm}` | Click the "3D" chart toggle (desktop, when 3D data present) | `ClanDetail.tsx:158` | ✅ 38 (23) |
 | `clan-chart-linear` | `{realm}` | Switch the clan efficiency chart to linear scale | `ClanSVG.tsx:629` | ✅ 136 (78) |

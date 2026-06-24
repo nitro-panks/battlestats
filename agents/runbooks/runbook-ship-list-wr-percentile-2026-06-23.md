@@ -29,6 +29,17 @@ click-sortable on the new numbers.
 The filter applies to the **ship list only**, not the drilled-in per-player board;
 the WR pills are hidden while a ship board is open.
 
+**Selection persistence (v2.15.0, 2026-06-24).** The Tier / Type / WR selection is
+saved to `localStorage` under `bs-ship-leaderboard` (`{tier, type, wrPct}`) on every
+change and restored on a return visit. Restore runs in a mount effect — *after* SSR —
+so the first client render still matches the server's default markup (no hydration
+mismatch); the list fetch is gated on restore so it fires once with the restored
+bucket instead of flashing the default T10/BB/50 first. Each field is validated on
+read (`readStoredShipLbPrefs` in `ShipLeaderboard.tsx`), so a stale/malformed value
+falls back to the component default rather than fetching garbage. `wrPct: null`
+("All") is a real stored value, distinct from absent. Treemap drill-downs also set
+tier/type, so those persist too.
+
 ## Backend
 
 `compute_realm_ships_by_tier_type(realm, tier, ship_type, mode, wr_pct=None, player_min_battles=None, use_cache=True)`
