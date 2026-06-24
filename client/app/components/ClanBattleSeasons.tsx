@@ -4,7 +4,17 @@ import { useRealm } from '../context/RealmContext';
 import { useTheme } from '../context/ThemeContext';
 import { withRealm } from '../lib/realmParams';
 import { fetchSharedJson, getChartFetchesInFlight, isAbortError } from '../lib/sharedJsonFetch';
+import { degradationMonitor } from '../lib/degradationMonitor';
 import ClanBattleSeasonsSVG from './ClanBattleSeasonsSVG';
+
+// Cold-cache poll: a cold clan serves [] + X-Clan-Battles-Pending while a
+// background roster-wide CB aggregation runs. That warm fans out across the
+// whole roster, so it can outlast a single player's fetch — size the budget
+// generously (mirrors PlayerClanBattleSeasons) and, on timeout-while-pending,
+// show a "still warming" hint instead of the definitive empty state (which read
+// as "No data" then flipped to real data on reload).
+const CB_SEASONS_PENDING_RETRY_DELAY_MS = 1500;
+const CB_SEASONS_PENDING_RETRY_LIMIT = 12;
 
 interface ClanBattleSeason {
     season_id: number;
@@ -46,6 +56,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
     const [seasons, setSeasons] = useState<ClanBattleSeason[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [isPendingRefresh, setIsPendingRefresh] = useState(false);
     const [sortKey, setSortKey] = useState<SortKey>('start_date');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
@@ -64,6 +75,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
             if (!cancelled && attempts === 0) {
                 setLoading(true);
                 setError('');
+                setIsPendingRefresh(false);
             }
 
             try {
@@ -85,11 +97,12 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
                 setSeasons(Array.isArray(data) ? data : []);
 
                 const isPending = headers['X-Clan-Battles-Pending'] === 'true';
-                if (isPending && attempts < 5) {
+                setIsPendingRefresh(isPending);
+                if (isPending && attempts < CB_SEASONS_PENDING_RETRY_LIMIT) {
                     attempts += 1;
                     timeoutId = setTimeout(() => {
                         void fetchSeasons();
-                    }, 1500);
+                    }, CB_SEASONS_PENDING_RETRY_DELAY_MS * degradationMonitor.getPollIntervalMultiplier());
                     return;
                 }
             } catch (err) {
@@ -99,6 +112,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
                 console.error('Error fetching clan battle seasons:', err);
                 if (!cancelled) {
                     setError('Unable to load clan battles seasons.');
+                    setIsPendingRefresh(false);
                 }
             } finally {
                 if (!cancelled && !timeoutId) {
@@ -182,7 +196,10 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
         <div>
             {loading && <p className="text-sm text-[var(--text-secondary)]">Loading clan battles seasons...</p>}
             {!loading && error && <p className="text-sm text-[var(--text-secondary)]">{error}</p>}
-            {!loading && !error && seasons.length === 0 && (
+            {!loading && !error && seasons.length === 0 && isPendingRefresh && (
+                <p className="text-sm text-[var(--text-secondary)]">Clan battle data is still loading — refresh in a moment.</p>
+            )}
+            {!loading && !error && seasons.length === 0 && !isPendingRefresh && (
                 <p className="text-sm text-[var(--text-secondary)]">No clan battles season data available.</p>
             )}
 
