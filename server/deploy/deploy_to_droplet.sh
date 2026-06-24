@@ -477,6 +477,12 @@ EOF
   systemctl restart rabbitmq-server
   rabbitmqctl await_startup
 
+  # Management plugin powers the RabbitMQ web UI (127.0.0.1:15672, ufw-blocked
+  # publicly) and Flower's broker_api queue-length view. Idempotent; the enable
+  # is persisted in the enabled_plugins file so it survives the restart above.
+  # See agents/runbooks/runbook-flower-observability-2026-04-02.md.
+  rabbitmq-plugins enable rabbitmq_management >/dev/null 2>&1 || true
+
   current_broker_url="$(get_env_value CELERY_BROKER_URL || true)"
   if [[ -n "${current_broker_url}" ]]; then
     broker_password="$(extract_existing_broker_password "${current_broker_url}" 2>/dev/null || true)"
@@ -863,6 +869,41 @@ TimeoutStartSec=120
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# Flower (Celery monitoring UI) — observability, NOT part of the app runtime.
+# Runs from its own venv (${FLOWER_HOME}) + env file, both provisioned one-time
+# out-of-band so Flower is decoupled from the app release cycle. We (re)assert
+# the unit here only when that provisioning is present, so a fresh box without
+# it doesn't get a failing unit. Bound to 127.0.0.1:5555; exposed at /flower
+# behind the nginx home-IP allowlist. Full setup (venv, env, monitoring user,
+# nginx block): agents/runbooks/runbook-flower-observability-2026-04-02.md.
+FLOWER_HOME=/opt/battlestats-flower
+if [[ -x "${FLOWER_HOME}/venv/bin/celery" && -f /etc/battlestats-flower.env ]]; then
+cat > /etc/systemd/system/battlestats-flower.service <<EOF
+[Unit]
+Description=Battlestats Flower (Celery monitoring UI, localhost only)
+After=network.target rabbitmq-server.service redis-server.service
+Wants=rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${FLOWER_HOME}
+EnvironmentFile=/etc/battlestats-flower.env
+ExecStart=${FLOWER_HOME}/venv/bin/celery --broker=\${FLOWER_BROKER} flower --url_prefix=flower --address=127.0.0.1 --port=5555 --broker_api=\${FLOWER_BROKER_API} --basic_auth=\${FLOWER_BASIC_AUTH} --persistent=True --db=${FLOWER_HOME}/flower.db
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl enable --now battlestats-flower >/dev/null 2>&1 || true
+  systemctl try-restart battlestats-flower >/dev/null 2>&1 || true
+  echo "[deploy] battlestats-flower.service (re)asserted"
+else
+  echo "[deploy] flower venv/env absent — skipping flower unit (see runbook-flower-observability-2026-04-02.md)"
+fi
 
 # Celery consumer watchdog: detects zombie workers (process alive, AMQP
 # consumer dead) and restarts them. Runs every 5 minutes via systemd timer.
