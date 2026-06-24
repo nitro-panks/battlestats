@@ -36,8 +36,10 @@ The earlier (2026-04-02) plan assumed Flower in the **app** venv via
 - `/etc/systemd/system/battlestats-flower.service` — re-asserted by
   `deploy_to_droplet.sh` whenever the venv + env exist (guarded, so a fresh box
   without the one-time provisioning doesn't get a failing unit).
-- nginx: `location /flower { allow 130.44.131.215; deny all; proxy_pass http://127.0.0.1:5555; … }`
+- nginx: `location = /flower { return 301 /flower/; }` + `location /flower/ { allow 130.44.131.215; deny all; proxy_pass http://127.0.0.1:5555; … }`
   in `sites-available/battlestats-client.conf` — same allowlist pattern as `/umami`.
+  The bare-`/flower` redirect matters: Flower (`url_prefix=flower`) only serves under
+  `/flower/` and 404s the un-slashed path, so a greedy `location /flower` would 404.
 
 ## What the deploy script does for you
 
@@ -79,8 +81,10 @@ chown root:battlestats /etc/battlestats-flower.env && chmod 640 /etc/battlestats
 # 4. the systemd unit is written by the next deploy; or hand-write it (see /etc/systemd/system/battlestats-flower.service)
 
 # 5. nginx — add inside the 443 server block of sites-available/battlestats-client.conf,
-#    just before `location / {` (mirror the /umami block; rotate the allow IP if home IP changes):
-#      location /flower {
+#    just before `location / {` (mirror the /umami block; rotate the allow IP if home IP changes).
+#    Note the bare-/flower redirect — Flower serves only under /flower/ and 404s otherwise:
+#      location = /flower { return 301 /flower/; }
+#      location /flower/ {
 #          allow 130.44.131.215; deny all;
 #          proxy_pass http://127.0.0.1:5555;
 #          proxy_http_version 1.1;
