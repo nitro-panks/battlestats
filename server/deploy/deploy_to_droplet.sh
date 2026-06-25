@@ -264,10 +264,17 @@ fi
 # primary daily slot (na 1h/eu 3h/asia 5h UTC), random-only on the rest — ranked is
 # niche (Random > Ranked) and was dominating cycle time + holding locks. Validated
 # live 2026-06-19.
+# FETCH_CONCURRENCY=4 (2026-06-25): the per-player ships/stats fallback (the dominant floor
+# cost) is serial, so far-realm WG latency dominates each cycle (ASIA ~1.3s/mover vs EU
+# ~0.5s — Stage-1 diag). A bounded thread pool overlaps that latency; the shared blocking WG
+# token-bucket limiter keeps the global budget unchanged (verified live: 0 WG-side
+# REQUEST_LIMIT_EXCEEDED; the floor only fills its ~0.75 req/s headroom). Restart the floor
+# worker to apply. See runbook-floor-throughput-tuning-2026-06-13.md.
 for kv in \
   'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=8' \
   'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1' \
   'FLOOR_REFRESH_BATTLES_JSON_ENABLED=0' \
+  'BATTLE_OBSERVATION_FLOOR_FETCH_CONCURRENCY=4' \
   'BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED=1'; do
   k="${kv%%=*}"
   if grep -q "^${k}=" /etc/battlestats-server.env; then
