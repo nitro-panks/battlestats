@@ -1061,6 +1061,18 @@ def record_observations_bulk(
     except ValueError:
         _gate_skip_cooldown_on = False
 
+    # Concurrency for the per-player ships/stats fallback (the dominant floor
+    # cost — serial WG latency, ~1.3s/mover on ASIA vs ~0.5s on EU). >1 overlaps
+    # that latency via a bounded thread pool in _per_player_ship_fallback; the
+    # shared blocking WG token-bucket limiter still caps the global budget, so
+    # this only fills the floor's existing WG headroom (it pulls ~0.75 req/s of
+    # the ~9 req/s bucket). Default 1 (serial) → no-op until the knob is set.
+    try:
+        _ship_fetch_concurrency = max(
+            1, int(os.getenv("BATTLE_OBSERVATION_FLOOR_FETCH_CONCURRENCY", "1") or 1))
+    except ValueError:
+        _ship_fetch_concurrency = 1
+
     ids = [int(pid) for pid in player_ids]
     tally = {
         "status": "completed",
@@ -1181,7 +1193,8 @@ def record_observations_bulk(
             tally["status"] = "aborted"
             break
         if ship_err == "INVALID_ACCOUNT_ID":
-            ship_data = _per_player_ship_fallback(ships_ids, realm)
+            ship_data = _per_player_ship_fallback(
+                ships_ids, realm, max_workers=_ship_fetch_concurrency)
         elif ship_err:
             logger.warning(
                 "bulk observation floor skipping ships for chunk [%s] on "

@@ -195,7 +195,11 @@ rejects `n>=2` `account_id` values with `INVALID_ACCOUNT_ID` (confirmed by raw `
 even the same valid id twice fails). So the path is:
 
 - **bulk `account/info`** — 100 ids/call (~0.01 WG/player), the change-gate signal source.
-- **per-player `ships/stats`** — 1 call/player, *unavoidable*, only for gate movers.
+- **per-player `ships/stats`** — 1 call/player, *unavoidable*, only for gate movers. Its serial WG
+  latency is the dominant floor cost on far realms (ASIA ~1.3s/mover vs EU ~0.5s), so it can be fetched
+  **concurrently** via a bounded thread pool (`BATTLE_OBSERVATION_FLOOR_FETCH_CONCURRENCY`, default 1 =
+  serial). The shared blocking WG token-bucket limiter still caps the global budget, so concurrency only
+  overlaps latency within the floor's existing ~0.75 req/s headroom (no DB in the fetch).
 
 The original "~100× cheaper / daily-every-active-player" justification was **refuted on
 prod**: enrichment's `_bulk_fetch_ship_stats` had always been silently falling back to

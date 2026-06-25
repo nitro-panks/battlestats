@@ -235,7 +235,7 @@ class BulkObservationEngineTests(TestCase):
                 mock.patch(SHIP_FALLBACK_PATH, return_value=fallback_ships) as fb:
             tally = record_observations_bulk([8001, 8002], realm="na")
 
-        fb.assert_called_once_with([8001, 8002], "na")
+        fb.assert_called_once_with([8001, 8002], "na", max_workers=1)
         self.assertEqual(tally["completed"], 2)
         self.assertEqual(tally["events"], 2)
         self.assertEqual(
@@ -1384,3 +1384,50 @@ class GateSkipCooldownTests(TestCase):
         self._stale_candidate_player(7104, skipped_at=timezone.now())
         with mock.patch.dict(os.environ, {self.ENV: "0"}):
             self.assertIn(7104, self._candidate_ids())
+
+
+class PerPlayerShipFallbackConcurrencyTest(SimpleTestCase):
+    """The per-player ships/stats fallback gained a bounded thread pool to
+    overlap WG latency (the dominant floor cost on far realms). Concurrency must
+    be pure parity with the serial path: same {pid: payload|None|"SKIP"} mapping,
+    every id fetched exactly once, exceptions isolated to a "SKIP" sentinel."""
+
+    from warships.api.ships import _per_player_ship_fallback as _fallback
+
+    def _run(self, ids, side_effect, max_workers):
+        # SINGLE_SHIP_PATH is _fetch_ship_stats_for_player — the per-call fetch.
+        with mock.patch(SINGLE_SHIP_PATH, side_effect=side_effect) as m:
+            out = type(self)._fallback(ids, "asia", max_workers=max_workers)
+        return out, m
+
+    def test_parallel_matches_serial_mapping(self):
+        payloads = {1: {"ships": "a"}, 2: {"ships": "b"}, 3: {"ships": "c"}}
+        side = lambda pid, realm=None: payloads[int(pid)]
+        serial, m1 = self._run([1, 2, 3], side, max_workers=1)
+        parallel, m4 = self._run([1, 2, 3], side, max_workers=4)
+        self.assertEqual(serial, {"1": {"ships": "a"}, "2": {"ships": "b"}, "3": {"ships": "c"}})
+        self.assertEqual(parallel, serial)  # parity
+        self.assertEqual(m1.call_count, 3)
+        self.assertEqual(m4.call_count, 3)  # every id fetched exactly once
+
+    def test_parallel_isolates_exception_to_skip(self):
+        def side(pid, realm=None):
+            if int(pid) == 2:
+                raise RuntimeError("transient")
+            return {"ships": str(pid)}
+        out, _ = self._run([1, 2, 3], side, max_workers=4)
+        self.assertEqual(out["1"], {"ships": "1"})
+        self.assertEqual(out["2"], "SKIP")  # only the failing id
+        self.assertEqual(out["3"], {"ships": "3"})
+
+    def test_parallel_preserves_none_empty(self):
+        def side(pid, realm=None):
+            return None if int(pid) == 2 else {"ships": str(pid)}
+        out, _ = self._run([1, 2, 3], side, max_workers=4)
+        self.assertIsNone(out["2"])  # explicit empty stays None, not "SKIP"
+
+    def test_single_id_stays_serial(self):
+        # max_workers>1 but one id: no pool spun up; still correct.
+        out, m = self._run([7], lambda pid, realm=None: {"ok": 1}, max_workers=8)
+        self.assertEqual(out, {"7": {"ok": 1}})
+        self.assertEqual(m.call_count, 1)

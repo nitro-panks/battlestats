@@ -269,24 +269,47 @@ def _bulk_fetch_ship_stats(player_ids: list[int], realm: str) -> tuple[dict, str
     return (data if isinstance(data, dict) else {}), err
 
 
-def _per_player_ship_fallback(player_ids: list[int], realm: str) -> dict:
+def _per_player_ship_fallback(
+    player_ids: list[int], realm: str, max_workers: int = 1,
+) -> dict:
     """Fallback: fetch ships/stats individually to isolate poison IDs.
 
     Relocated from enrich_player_data.py (D10). Returns
     {str(pid): <ships list> | None | "SKIP"} where "SKIP" is a transient
     per-player failure the caller must treat as 'skip this tick'.
+
+    `max_workers > 1` fetches the chunk concurrently via a bounded thread pool.
+    The per-call WG `ships/stats` latency is the dominant floor cost on the
+    geographically-distant realms (ASIA ~1.3s/mover vs EU ~0.5s) and it is
+    serial here, so concurrency overlaps that latency. It is safe because each
+    call still passes the **shared, blocking Redis token-bucket rate limiter**
+    (`api/client.py`), so the global WG budget is unchanged — threads wait on
+    the bucket instead of each other — and the fetch touches **no DB** (the
+    persist stays serial in the caller). `max_workers <= 1` keeps the exact
+    serial path; only the observation floor opts into concurrency via
+    `BATTLE_OBSERVATION_FLOOR_FETCH_CONCURRENCY`.
     """
-    out: dict = {}
-    for pid in player_ids:
+    def _one(pid: int):
         try:
             r = _fetch_ship_stats_for_player(pid, realm=realm)
-            if r is not None:
-                out[str(pid)] = r
-            else:
-                out[str(pid)] = None  # explicit empty -> EMPTY outcome
+            # explicit None -> EMPTY outcome; otherwise the ships payload.
+            return str(pid), (r if r is not None else None)
         except Exception:
             logging.warning("Per-player ship fallback failed for %s [%s]", pid, realm)
-            out[str(pid)] = "SKIP"  # sentinel: transient
+            return str(pid), "SKIP"  # sentinel: transient
+
+    if max_workers and max_workers > 1 and len(player_ids) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        out: dict = {}
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(player_ids))) as pool:
+            for key, value in pool.map(_one, player_ids):
+                out[key] = value
+        return out
+
+    out = {}
+    for pid in player_ids:
+        key, value = _one(pid)
+        out[key] = value
     return out
 
 
