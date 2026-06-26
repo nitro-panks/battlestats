@@ -41,7 +41,7 @@ No new index for v1: the candidate query is a seq-scan + top-N sort run once/rea
 
 ## Components
 
-- Command: `server/warships/management/commands/recapture_lapsed_players.py` — the sweep + a yield readout bucketed into *reactivated INTO active_7d* (floor harvests free) vs *advanced but still lapsed* (out of floor scope), each split clanned/clanless. Clanless-into-7d is the marginal value nothing else recovers.
+- Command: `server/warships/management/commands/recapture_lapsed_players.py` — the sweep + a yield readout bucketed into *reactivated INTO active_7d* (floor harvests free) vs *advanced but still lapsed* (out of floor scope), each split clanned/clanless. Clanless-into-7d is the marginal value nothing else recovers. At the end of each run it writes a durable per-run JSON snapshot to `RECAPTURE_BENCHMARK_DIR` (default `/opt/battlestats-server/shared/benchmarks/recapture-lapsed/YYYY-MM-DD_HHMMZ_<realm>.json`) — the `/recapture` skill reads these, **not** the worker journal: the `background` worker suppresses module-logger INFO (verified 2026-06-26 — `_bulk_fetch_account_info`'s own INFO line propagates 0×), so a logged summary line never lands. Same reason `/observation` and `/crawl-yield` read files.
 - Task: `recapture_lapsed_players_task` (`tasks.py`, `background` queue) — env-gated, lock-wrapped thin wrapper around the command (mirrors `snapshot_active_players_task`).
 - Beat: `recapture-lapsed-players-{realm}` in `signals.py`, per-realm striped daily ~10:10/10:30/10:50 UTC (clear of the realm-hour analytical-warmer burst and the 08:x drift reclassify), registered `enabled` only when `RECAPTURE_LAPSED_ENABLED=1`.
 - Tests: `warships/tests/test_recapture_lapsed_players.py` (detect-only writes nothing; apply promotes a returner + stamps the cursor without touching `last_fetch`; still-dormant is stamped but not promoted; band excludes active + >max tail; LRU cursor picks never-checked first; task gate skips when disabled).
@@ -75,4 +75,4 @@ Clean run with both fixes: **805 passed, 2 skipped**.
 
 ## Status
 
-Built 2026-06-26 on `feat/recapture-lapsed-players` (worktree `.claude/worktrees/battlestats-wt-recapture-lapsed`). **Not committed; not deployed; not measured in prod.** Defaults ship it inert (`ENABLED=0`). Yield measurement (Rollout step 2) is the gate on whether to enable writes.
+Built + shipped 2026-06-26 (merged to `main`, backend deploy release `20260626014757`). **Live in prod with `RECAPTURE_LAPSED_ENABLED=1` + `RECAPTURE_LAPSED_APPLY=1`** (full run, persisted in the deploy script env block). Per-realm Beat fires ~10:10/10:30/10:50 UTC. Code default stays inert (`ENABLED=0`) for any other environment. First prod EU run (manual kick, 2026-06-26 ~05:51 UTC) stamped 30,000 rows end-to-end, confirming the apply path; the per-run JSON snapshots (read via `/recapture`) carry the actual yield from each scheduled run. Reversible at any time via `RECAPTURE_LAPSED_ENABLED=0`.

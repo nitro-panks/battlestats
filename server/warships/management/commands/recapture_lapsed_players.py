@@ -42,6 +42,7 @@ Yield is bucketed into the two groups that matter for the design:
 and each is split clanned vs clanless. Clanless-into-7d is the marginal value:
 returners nothing else recovers.
 """
+import json
 import logging
 import os
 import time
@@ -55,6 +56,15 @@ from warships.models import Clan, DEFAULT_REALM, DeletedAccount, Player, VALID_R
 
 BULK_ACCOUNT_INFO_SIZE = 100  # WG account/info max account_ids per call
 CURSOR_STAMP_CHUNK = 2000     # ids per cursor UPDATE statement
+
+# Durable per-run yield snapshots (sibling of the crawl-yield / observation-floor
+# benchmarks). The /recapture skill reads these rather than the worker journal,
+# because the background worker suppresses module-logger INFO (so a logged summary
+# line never lands). Latest file per realm = "the last run".
+RECAPTURE_BENCHMARK_DIR = os.getenv(
+    "RECAPTURE_BENCHMARK_DIR",
+    "/opt/battlestats-server/shared/benchmarks/recapture-lapsed",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -224,8 +234,7 @@ class Command(BaseCommand):
         mode = "APPLY (promoted + cursor stamped)" if apply else "DETECT-ONLY (no writes)"
         rate = (advanced / scanned * 100) if scanned else 0.0
 
-        # One structured line for the /recapture readout skill to grep out of the
-        # worker journal (the multi-line stdout block below is for humans).
+        # One structured line for any worker whose INFO does propagate (secondary).
         logger.info(
             "recapture-summary realm=%s mode=%s band=%d-%d scanned=%d wg_calls=%d "
             "advanced=%d into7d=%d into7d_clanless=%d still_lapsed=%d "
@@ -234,6 +243,38 @@ class Command(BaseCommand):
             wg_calls, advanced, into7d, into7d_clanless, still_lapsed,
             still_dormant, hidden, no_data, chunk_errors,
         )
+
+        # Durable per-run snapshot — the /recapture skill's source of truth.
+        snapshot = {
+            "captured_at": now_dt.isoformat(),
+            "realm": realm,
+            "mode": "apply" if apply else "detect",
+            "band_days": [min_days, max_days],
+            "active_days": active_days,
+            "limit": limit,
+            "scanned": scanned,
+            "wg_calls": wg_calls,
+            "chunk_errors": chunk_errors,
+            "no_data": no_data,
+            "hidden": hidden,
+            "still_dormant": still_dormant,
+            "advanced": advanced,
+            "yield_frac": round(advanced / scanned, 4) if scanned else 0.0,
+            "into7d": into7d,
+            "into7d_clanned": into7d_clanned,
+            "into7d_clanless": into7d_clanless,
+            "still_lapsed": still_lapsed,
+            "still_lapsed_clanless": lapsed_clanless,
+            "cursor_stamped": len(checked_ids) if apply else 0,
+        }
+        try:
+            os.makedirs(RECAPTURE_BENCHMARK_DIR, exist_ok=True)
+            fname = f"{now_dt.strftime('%Y-%m-%d_%H%MZ')}_{realm}.json"
+            with open(os.path.join(RECAPTURE_BENCHMARK_DIR, fname), "w") as handle:
+                json.dump(snapshot, handle, indent=2)
+        except Exception:
+            logger.warning("recapture snapshot write failed (dir=%s)",
+                           RECAPTURE_BENCHMARK_DIR, exc_info=True)
 
         out(f"=== recapture_lapsed_players  realm={realm}  band={min_days}-{max_days}d  {mode} ===")
         out(f"  scanned={scanned}  WG_calls={wg_calls}  chunk_errors={chunk_errors}  "

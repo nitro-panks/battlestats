@@ -3,6 +3,7 @@
 Command: ``recapture_lapsed_players`` (+ ``recapture_lapsed_players_task``).
 See agents/runbooks/runbook-recapture-lapsed-players-2026-06-26.md.
 """
+import os
 from datetime import timedelta
 from io import StringIO
 from unittest.mock import patch
@@ -105,6 +106,27 @@ class RecaptureLapsedPlayersTests(TestCase):
         self.assertIn("mode=apply", line)
         self.assertIn("advanced=1", line)
         self.assertIn("into7d=1", line)
+
+    def test_writes_yield_snapshot_file(self):
+        # The /recapture skill reads these per-run JSON snapshots.
+        import json
+        import tempfile
+        self._mk(7010, days_idle=100)
+        with tempfile.TemporaryDirectory() as d:
+            with patch(
+                "warships.management.commands.recapture_lapsed_players."
+                "RECAPTURE_BENCHMARK_DIR", d):
+                self._run(
+                    lambda ids, realm: ({str(i): _info(i, 1) for i in ids}, None),
+                    apply=True)
+            files = os.listdir(d)
+            self.assertEqual(len(files), 1)
+            self.assertTrue(files[0].endswith("_na.json"))
+            snap = json.loads(open(os.path.join(d, files[0])).read())
+        self.assertEqual(snap["mode"], "apply")
+        self.assertEqual(snap["advanced"], 1)
+        self.assertEqual(snap["into7d"], 1)
+        self.assertEqual(snap["cursor_stamped"], 1)
 
     def test_lru_cursor_orders_never_checked_first(self):
         recent = self._mk(7007, days_idle=60,

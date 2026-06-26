@@ -5,12 +5,14 @@ description: Read the latest lapsed-player recapture sweep results from the prod
 
 # recapture
 
-Reads the structured summary line that `recapture_lapsed_players` logs at the end
-of each run (one `recapture-summary realm=… …` line per realm, emitted from
-`server/warships/management/commands/recapture_lapsed_players.py`) out of the
-**`battlestats-celery-background`** worker journal, and renders a per-realm yield
+Reads the durable per-run JSON yield snapshots that `recapture_lapsed_players`
+writes at the end of each run (`<RECAPTURE_BENCHMARK_DIR>/YYYY-MM-DD_HHMMZ_<realm>.json`,
+default dir `/opt/battlestats-server/shared/benchmarks/recapture-lapsed`, sibling
+of the crawl-yield / observation-floor benchmarks), and renders a per-realm yield
 readout answering: is the daily dormant-pool sweep actually finding returning
-players, and how many re-enter floor scope for free?
+players, and how many re-enter floor scope for free? (Files, not the worker
+journal: the background worker suppresses module-logger INFO, so a logged summary
+line never lands — same reason `/observation` and `/crawl-yield` read files.)
 
 Background: the observation floor only sees active-7d players, so a player who's
 been quiet longer is never re-checked and a returner stays invisible to battle
@@ -38,31 +40,34 @@ Do **not** invoke for: floor coverage (`/observation`), clan-crawl yield
 
 ## How to read it
 
-Pull the last summary line per realm from the background worker journal, plus the
-live config so you can tell apply-mode from detect-only:
+Pull the latest snapshot per realm plus the live config (so you can tell
+apply-mode from detect-only):
 
 ```bash
 ssh root@battlestats.online '
-echo "=== last recapture-summary per realm (background worker journal) ===";
-journalctl -u battlestats-celery-background --since "2 days ago" --no-pager \
-  | grep -oE "recapture-summary realm=[a-z]+ .*" | tail -n 30;
+DIR=/opt/battlestats-server/shared/benchmarks/recapture-lapsed
+echo "=== latest snapshot per realm ===";
+for r in na eu asia; do
+  f=$(ls -1t "$DIR"/*_"$r".json 2>/dev/null | head -1);
+  [ -n "$f" ] && { echo "--- $r ($(basename "$f")) ---"; cat "$f"; } || echo "--- $r: (no run yet) ---";
+done
 echo "=== config (env) ===";
 grep -E "^RECAPTURE_LAPSED_" /etc/battlestats-server.env || echo "(no RECAPTURE_LAPSED_* set)";
-echo "=== beat family ===";
 '
 ```
 
-If the grep is empty: either no run has completed yet (the Beat fires at
-~10:10/10:30/10:50 UTC; a manual kick is
-`python manage.py shell -c "from warships.tasks import recapture_lapsed_players_task as t; t.delay(realm=\"eu\")"` run from the server venv), or the journal has rotated past it
-(widen `--since`). If `RECAPTURE_LAPSED_ENABLED` is not `1`, the task is gated off
-and never runs — say so.
+If a realm shows "(no run yet)": either the Beat hasn't fired yet (it runs
+~10:10/10:30/10:50 UTC) or `RECAPTURE_LAPSED_ENABLED` is not `1` (gated off — say
+so). A manual kick is `recapture_lapsed_players_task.delay(realm="eu")` from a
+server-venv `manage.py shell` (or `manage.py recapture_lapsed_players --realm eu
+--limit 5000` for a one-off detect-only sample). Snapshots are timestamped and
+kept, so a realm's `ls -1t … | head` is "the last run"; older files are history.
 
-## The summary fields
+## The snapshot fields
 
-Each `recapture-summary` line carries: `realm`, `mode` (`apply` writes +
-rotates; `detect` measures only), `band` (e.g. `8-365`), `scanned`, `wg_calls`,
-and the yield breakdown:
+Each JSON snapshot carries: `realm`, `mode` (`apply` writes + rotates; `detect`
+measures only), `band_days`, `scanned`, `wg_calls`, `cursor_stamped`, and the
+yield breakdown:
 
 - **`advanced`** — players whose WG `last_battle_time` moved past our stored value
   = genuine new activity since we last knew. This is the headline "returners

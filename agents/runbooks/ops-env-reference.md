@@ -48,6 +48,7 @@ Lapsed-player recapture (`recapture_lapsed_players_task`, per-realm striped dail
 - `RECAPTURE_LAPSED_MIN_DAYS` (8) / `RECAPTURE_LAPSED_MAX_DAYS` (365) — the lapsed band (last battle 8–365d ago); the deeper >365d tail (~400k rows) is huge + low-yield so it's left out of v1.
 - `RECAPTURE_LAPSED_LIMIT` (30000) — max rows checked per realm per run; sized so the largest realm's band (EU ~192k) rotates fully in ~a week of daily runs. ~limit/100 WG calls + a single cursor-stamp UPDATE per 2000 rows; coexists with crawls (light DB cost).
 - `RECAPTURE_LAPSED_DELAY` (0.2) — seconds between bulk `account/info` batches.
+- `RECAPTURE_BENCHMARK_DIR` (`/opt/battlestats-server/shared/benchmarks/recapture-lapsed`) — where each run writes its per-realm yield snapshot (`YYYY-MM-DD_HHMMZ_<realm>.json`); the `/recapture` skill reads these (the `background` worker suppresses module-logger INFO, so a journal line is unreliable).
 
 Enrichment:
 - `ENRICH_REALMS` (all), `ENRICH_BATCH_SIZE` (500), `ENRICH_MIN_PVP_BATTLES` (500), `ENRICH_MIN_WR` (48.0; **prod=0** — enrich the active low-WR base too), `ENRICH_DELAY` (0.2), `ENRICH_PAUSE_BETWEEN_BATCHES` (10)
