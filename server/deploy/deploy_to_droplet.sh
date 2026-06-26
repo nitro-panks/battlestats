@@ -63,6 +63,10 @@ install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/server"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/logs"
 touch "${APP_ROOT}/shared/logs/django.log"
 chown "${APP_USER}:${APP_USER}" "${APP_ROOT}/shared/logs/django.log"
+# Per-run recapture yield snapshots (the /recapture skill reads these). The
+# benchmarks/ parent is root-owned, so the worker (battlestats) can't makedirs the
+# subdir itself — pre-create it owned by the app user.
+install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/benchmarks/recapture-lapsed"
 rm -rf "${REMOTE_RELEASE}/server/logs"
 ln -sfn "${APP_ROOT}/shared/logs" "${REMOTE_RELEASE}/server/logs"
 REMOTE
