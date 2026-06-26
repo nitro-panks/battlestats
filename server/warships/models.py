@@ -120,6 +120,19 @@ class Player(models.Model):
     # last_battle_date / observation staleness, which still excludes a captured
     # mover regardless of this stamp.
     floor_gate_skipped_at = models.DateTimeField(null=True, blank=True)
+    # Rotation cursor for the lapsed-player recapture sweep
+    # (recapture_lapsed_players). A player who goes quiet for more than the
+    # floor's active window (7d) drops out of the observation floor's scope and
+    # nothing passively re-checks them, so a returning player stays invisible to
+    # battle capture until an event (a profile view or a clan crawl) forces a
+    # refresh. The recapture sweep cheaply re-checks the dormant pool via bulk
+    # account/info and stamps this column on every check, so its candidate query
+    # (ordered last_idle_check_at NULLS FIRST) rotates LRU through the whole
+    # dormant pool over ~a week instead of re-checking the just-lapsed end every
+    # run. Orthogonal to last_fetch (never bumped by the sweep, so the floor's
+    # real per-player refresh stays armed) and to last_battle_date (only
+    # rewritten when WG reports a genuinely newer battle = a returner).
+    last_idle_check_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         clan_name = self.clan.name if self.clan else "No Clan"

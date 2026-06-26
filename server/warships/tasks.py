@@ -162,6 +162,10 @@ def _snapshot_active_players_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:snapshot_active_players:{realm}:lock"
 
 
+def _recapture_lapsed_lock_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:recapture_lapsed_players:{realm}:lock"
+
+
 def _landing_page_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_landing_page_content:{realm}:lock"
 
@@ -2047,6 +2051,51 @@ def snapshot_active_players_task(self, realm=DEFAULT_REALM):
             min_battles=int(os.getenv('SNAPSHOT_ACTIVE_MIN_BATTLES', '0')),
             delay=float(os.getenv('SNAPSHOT_ACTIVE_DELAY', '0.2')),
         )
+        return {"status": "completed"}
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def recapture_lapsed_players_task(self, realm=DEFAULT_REALM):
+    """Cheap bulk re-discovery of returning ("lapsed") players.
+
+    Dormant players (last battle > the floor's active window) fall out of the
+    observation floor's scope, so a returning player stays invisible to battle
+    capture until a profile view or clan crawl forces a refresh. This sweep
+    re-checks the dormant pool via bulk account/info (~1 WG call per 100
+    players); when a player's WG last_battle_time has advanced back inside
+    active_7d, it rewrites last_battle_date so the *existing floor* harvests them
+    next cycle (the "let the floor catch it" design — no new harvest path).
+
+    Writes ONLY last_battle_date + days_since_last_battle (for returners) and
+    last_idle_check_at (the LRU rotation cursor, for every checked row) — NEVER
+    last_fetch, so the floor's real per-player refresh stays armed. Coexists with
+    clan crawls (light, DB cost is minor). Two flags: RECAPTURE_LAPSED_ENABLED
+    gates running at all; RECAPTURE_LAPSED_APPLY gates writes (off => detect-only
+    yield measurement in prod before trusting writes). Sizing knobs:
+    RECAPTURE_LAPSED_{MIN,MAX}_DAYS / _LIMIT / _DELAY.
+    """
+    if os.getenv("RECAPTURE_LAPSED_ENABLED", "0") != "1":
+        return {"status": "skipped", "reason": "disabled"}
+
+    lock_key = _recapture_lapsed_lock_key(realm)
+    if not cache.add(lock_key, self.request.id, timeout=PLAYER_REFRESH_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping recapture_lapsed_players_task — another run is active for %s", realm)
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        kwargs = dict(
+            realm=realm,
+            min_days=int(os.getenv('RECAPTURE_LAPSED_MIN_DAYS', '8')),
+            max_days=int(os.getenv('RECAPTURE_LAPSED_MAX_DAYS', '365')),
+            limit=int(os.getenv('RECAPTURE_LAPSED_LIMIT', '30000')),
+            delay=float(os.getenv('RECAPTURE_LAPSED_DELAY', '0.2')),
+        )
+        if os.getenv('RECAPTURE_LAPSED_APPLY', '0') == '1':
+            kwargs['apply'] = True
+        call_command('recapture_lapsed_players', **kwargs)
         return {"status": "completed"}
     finally:
         cache.delete(lock_key)

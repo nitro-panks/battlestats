@@ -2889,6 +2889,31 @@
                 "daily-snapshot-engine-removed"
             ]
         },
+        "agents/runbooks/runbook-recapture-lapsed-players-2026-06-26.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "recapture lapsed players",
+                "returning players",
+                "dormant player recapture",
+                "lapsed player sweep"
+            ],
+            "tags": [
+                "recapture",
+                "lapsed",
+                "dormant",
+                "returning",
+                "account-info-bulk",
+                "observation-floor",
+                "crawl-coexist"
+            ],
+            "archive_on": [
+                "recapture-lapsed-players-removed"
+            ]
+        },
         "agents/runbooks/runbook-floor-battles-json-refresh-2026-06-14.md": {
             "kind": "runbook",
             "status": "active",

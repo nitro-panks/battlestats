@@ -284,6 +284,27 @@ for kv in \
   fi
 done
 
+# Lapsed-player recapture (2026-06-26). Cheap daily bulk account/info sweep of the
+# dormant pool that re-discovers returning players the active-7d observation floor
+# can't see: when WG last_battle_time has advanced back inside active-7d we rewrite
+# last_battle_date so the existing floor harvests them next cycle (never last_fetch).
+# ENABLED=1 turns on the per-realm Beat family (registered enabled only when this is
+# set at post_migrate). APPLY=1 promotes returners + stamps the last_idle_check_at
+# rotation cursor (APPLY=0 = detect-only yield logging, no writes). Reversible via
+# ENABLED=0. Runbook: runbook-recapture-lapsed-players-2026-06-26.md.
+for kv in \
+  'RECAPTURE_LAPSED_ENABLED=1' \
+  'RECAPTURE_LAPSED_APPLY=1' \
+  'RECAPTURE_LAPSED_MAX_DAYS=365' \
+  'RECAPTURE_LAPSED_LIMIT=30000'; do
+  k="${kv%%=*}"
+  if grep -q "^${k}=" /etc/battlestats-server.env; then
+    sed -i "s|^${k}=.*|${kv}|" /etc/battlestats-server.env
+  else
+    echo "${kv}" >> /etc/battlestats-server.env
+  fi
+done
+
 # R2: clan crawl core-only (enabled 2026-06-07). Skips the redundant per-player
 # efficiency+achievements enrichment (~85% of the crawl's WG cost) that made it
 # hold the realm lock for hours and pre-empt the battle-history floor. Discovery

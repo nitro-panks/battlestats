@@ -511,6 +511,42 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
+    # -- Recapture lapsed (returning) players (per realm, striped, daily) --
+    # Cheap bulk account/info sweep of the dormant pool that re-discovers players
+    # who quietly came back: when WG last_battle_time has advanced back inside
+    # active_7d we rewrite last_battle_date so the existing observation floor
+    # harvests them next cycle. DB-only writes (last_battle_date/days_since +
+    # the last_idle_check_at rotation cursor; never last_fetch), coexists with
+    # crawls. Striped late-morning UTC, clear of the heavy analytical-warmer
+    # burst (realm-hour :40-:50) and the 08:x drift reclassify. Gated by
+    # RECAPTURE_LAPSED_ENABLED (default off — enable with APPLY off first to
+    # measure yield in prod). Runbook:
+    # agents/runbooks/runbook-recapture-lapsed-players-2026-06-26.md
+    recapture_enabled = _env_flag("RECAPTURE_LAPSED_ENABLED", False)
+    recapture_times = {"na": ("10", "10"), "eu": ("30", "10"), "asia": ("50", "10")}
+    for realm in sorted(VALID_REALMS):
+        minute_str, hour_str = recapture_times.get(realm, ("10", "10"))
+        recapture_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=minute_str,
+            hour=hour_str,
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"recapture-lapsed-players-{realm}",
+            defaults={
+                "task": "warships.tasks.recapture_lapsed_players_task",
+                "crontab": recapture_schedule,
+                "interval": None,
+                "enabled": recapture_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Daily cheap bulk account/info sweep of the lapsed/dormant pool ({realm.upper()}) — promotes returners back into floor scope via last_battle_date; LRU-rotates the dormant pool over ~a week. Coexists with crawls. Striped per realm.",
+            },
+        )
+
     # -- Clan Crawl + Incremental Refresh Families --
     # Gated by ENABLE_CRAWLER_SCHEDULES. These four families were retired on
     # 2026-04-04 for the DO Functions migration and restored on 2026-04-11
