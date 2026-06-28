@@ -235,4 +235,27 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+
+  /* Always render a visible scrollbar when the element overflows, instead of
+     the platform default (overlay scrollbars on macOS/iOS fade out, so a
+     scrollable list reads as a fixed, complete list and users miss the bottom
+     rows). Pairs with `overflow-y-auto`: the gutter only appears when there is
+     something to scroll. Styling `::-webkit-scrollbar` also opts WebKit out of
+     the fading overlay treatment, keeping the thumb persistently visible. */
+  .scrollbar-always {
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-light) transparent;
+  }
+  .scrollbar-always::-webkit-scrollbar {
+    width: 10px;
+  }
+  .scrollbar-always::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-always::-webkit-scrollbar-thumb {
+    background-color: var(--accent-light);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
 }
