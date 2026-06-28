@@ -236,15 +236,31 @@ body {
     text-wrap: balance;
   }
 
-  /* Always render a visible scrollbar when the element overflows, instead of
-     the platform default (overlay scrollbars on macOS/iOS fade out, so a
-     scrollable list reads as a fixed, complete list and users miss the bottom
-     rows). Pairs with `overflow-y-auto`: the gutter only appears when there is
-     something to scroll. Styling `::-webkit-scrollbar` also opts WebKit out of
-     the fading overlay treatment, keeping the thumb persistently visible. */
+  /* Make an overflowing list's "there is more below" cue unmissable. Two
+     independent mechanisms, because no single one covers every browser:
+
+     1. A forced, always-visible (non-overlay, space-reserving) scrollbar in
+        Chrome/Safari via ::-webkit-scrollbar. CRITICAL: we must NOT also set
+        `scrollbar-width`/`scrollbar-color` here — in Chrome 121+ / Safari 18.2+
+        a non-`auto` value of either standard property SUPPRESSES all
+        ::-webkit-scrollbar rules on the element, which silently re-enables the
+        fading macOS overlay bar (the bug behind the first attempt).
+
+     2. A pure-CSS scroll-shadow (Lea Verou's technique) so the bottom edge
+        always shows a soft cue when content continues. This is the only cue
+        Firefox-on-macOS gets — it follows the OS overlay-fade and offers no CSS
+        escape hatch — and it is theme-robust via `--accent-mid` + color-mix.
+
+     The cover gradients use `background-attachment: local` (ride with the
+     content, unmasking a shadow only when that edge scrolls out of view); the
+     shadows use `background-attachment: scroll` (pinned to the element box).
+     Cover colour is `--bg-page`, which is exactly what this list sits on. */
   .scrollbar-always {
-    scrollbar-width: thin;
-    scrollbar-color: var(--accent-light) transparent;
+    background:
+      linear-gradient(var(--bg-page) 28%, transparent) center top / 100% 24px no-repeat local,
+      linear-gradient(transparent, var(--bg-page) 72%) center bottom / 100% 24px no-repeat local,
+      radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--accent-mid) 32%, transparent), transparent) center top / 100% 12px no-repeat scroll,
+      radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--accent-mid) 32%, transparent), transparent) center bottom / 100% 12px no-repeat scroll;
   }
   .scrollbar-always::-webkit-scrollbar {
     width: 10px;
