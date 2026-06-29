@@ -2537,6 +2537,29 @@
                 "ship-list-wr-percentile-superseded"
             ]
         },
+        "agents/runbooks/runbook-ship-leaderboard-architecture-2026-06-18.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "reference",
+            "owner": "data",
+            "aliases": [
+                "ship leaderboard architecture",
+                "how ship standings work",
+                "ship badges end to end",
+                "ship leaderboard pipeline",
+                "ship standings reference"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "ship-badges",
+                "architecture",
+                "reference",
+                "snapshot",
+                "celery beat",
+                "caching"
+            ]
+        },
         "agents/runbooks/runbook-shipleaderboard-warm-before-evict-2026-06-18.md": {
             "kind": "runbook",
             "status": "active",
