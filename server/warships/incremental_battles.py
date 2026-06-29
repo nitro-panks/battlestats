@@ -812,6 +812,31 @@ def record_observation_from_payloads(
         else:
             events = compute_battle_events(previous_snapshot, snapshot)
 
+        # Fidelity instrument — compare the account-level pvp battle advance
+        # (account/info, authoritative count) against the sum of per-ship
+        # deltas the diff actually captured (ships/stats). They should track
+        # closely for a densely-observed player; a large gap means ships/stats
+        # lagged account/info at fetch time (the "not in lockstep" case noted
+        # in compute_battle_events), so the battle-history timeline under-counts
+        # real play. Common on sparsely-observed / returning players. Logged
+        # here, at diff time, before the nightly prune compacts ships_stats_json
+        # to NULL — so a live case can be diagnosed from the raw observations.
+        if not random_prior_broken:
+            account_delta = (snapshot.pvp_battles or 0) - (previous.pvp_battles or 0)
+            ship_delta_sum = sum(e["battles_delta"] for e in events)
+            if account_delta > 0 and abs(account_delta - ship_delta_sum) > max(5, account_delta // 4):
+                gap_hours = (
+                    observation.observed_at - previous.observed_at
+                ).total_seconds() / 3600.0
+                logger.warning(
+                    "battle-event diff fidelity gap player_id=%s realm=%s "
+                    "account_delta=%s ship_delta_sum=%s missed=%s gap_hours=%.1f "
+                    "prev_obs=%s ship_events=%s",
+                    player.player_id, player.realm, account_delta, ship_delta_sum,
+                    account_delta - ship_delta_sum, gap_hours,
+                    previous.observed_at.isoformat(), len(events),
+                )
+
         previous_ranked = _hydrate_previous_ranked_snapshot(
             previous, player=player)
         # Ranked-side broken-prior guard: if walk-back found no non-NULL

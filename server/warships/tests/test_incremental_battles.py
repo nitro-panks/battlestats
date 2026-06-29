@@ -296,6 +296,43 @@ class RecordObservationFromPayloadsTests(TestCase):
         self.assertEqual(event.xp_delta, 1_500)
         self.assertTrue(event.survived)
 
+    def test_fidelity_gap_warns_when_account_delta_outruns_ship_deltas(self):
+        # Reproduces the CaptCornholeo shape: account/info pvp advances a lot
+        # but the per-ship ships/stats diff captures only a little (ships/stats
+        # lagged account/info at fetch time). The diff-time instrument must warn.
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.pvp_battles = 160  # account-level +60
+        self.player.save()
+        with self.assertLogs(
+            "warships.incremental_battles", level="WARNING",
+        ) as cm:
+            record_observation_from_payloads(
+                self.player,
+                ship_data=self._ship_payload(battles=102),  # ships +2 only
+            )
+        line = "\n".join(cm.output)
+        self.assertIn("battle-event diff fidelity gap", line)
+        self.assertIn("account_delta=60", line)
+        self.assertIn("ship_delta_sum=2", line)
+        self.assertIn("missed=58", line)
+
+    def test_fidelity_gap_silent_on_clean_advance(self):
+        # Account and ships move in lockstep — no warning.
+        record_observation_from_payloads(
+            self.player, ship_data=self._ship_payload(battles=100),
+        )
+        self.player.pvp_battles = 110  # account-level +10
+        self.player.save()
+        with self.assertNoLogs(
+            "warships.incremental_battles", level="WARNING",
+        ):
+            record_observation_from_payloads(
+                self.player,
+                ship_data=self._ship_payload(battles=110),  # ships +10 too
+            )
+
     def test_dedup_via_observation_pair_unique_key(self):
         # Baseline + advance.
         record_observation_from_payloads(
