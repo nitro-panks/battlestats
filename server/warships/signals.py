@@ -270,7 +270,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
-                "description": f"T10 top-player rolling snapshot ({realm.upper()}) — every-12h recompute of the trailing {os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '14')}-day board.",
+                "description": f"T10 top-player rolling snapshot ({realm.upper()}) — every-12h recompute of the trailing {os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '30')}-day board.",
             },
         )
 

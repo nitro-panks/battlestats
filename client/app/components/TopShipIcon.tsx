@@ -2,7 +2,7 @@ import React from 'react';
 import MedalIcon from './MedalIcon';
 
 // Small classification-tray icon for a player who currently holds a top-spot
-// (rank 1..SHIP_BADGE_TOP_N) in a Tier-10 ship's fortnight standings. One icon
+// (rank 1..SHIP_BADGE_TOP_N) in a Tier-10 ship's rolling-window standings. One icon
 // per held spot, rendered alongside the other player classification icons in the
 // player header, clan-member rows, and landing/home rows. Tooltip-only (matches
 // the other tray icons — not a link). Fed by the player payload's `ship_badges`.

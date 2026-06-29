@@ -26,7 +26,7 @@ export async function generateMetadata({ params, searchParams }: ShipPageProps):
 
     return {
         title: `Best ${titleLabel} players — Ship — WoWs Battlestats`,
-        description: `Top World of Warships players in the ${titleLabel} over the last 14 days — win rate, battles, and standings on ${realmParam.toUpperCase()}.`,
+        description: `Top World of Warships players in the ${titleLabel} over the last 30 days — win rate, battles, and standings on ${realmParam.toUpperCase()}.`,
         alternates: { canonical: url },
         openGraph: {
             title: `Best ${titleLabel} players — WoWs Battlestats`,

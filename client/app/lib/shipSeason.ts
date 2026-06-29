@@ -1,7 +1,7 @@
 // Ship-standings window label formatter.
 //
 // The ship standings (treemap, /ship leaderboards, profile medals) are a rolling
-// trailing 14-day window recomputed nightly — there is no fixed "season" anymore
+// trailing 30-day window recomputed nightly — there is no fixed "season" anymore
 // (the fixed-fortnight model was retired 2026-06-15). This module keeps the one
 // helper still needed: a UTC date-range label for that window's [start, end)
 // bounds, e.g. "11–24 May". Dates are formatted in UTC since the window bounds

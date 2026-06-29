@@ -16,6 +16,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import (
+    SHIP_LEADERBOARD_WINDOW_DAYS,
     compute_ship_top_player_snapshot,
     get_player_ship_badges,
     get_players_ship_badges_bulk,
@@ -83,7 +84,7 @@ class ShipBadgeSnapshotTests(TestCase):
         Each player gets its own observation pair, so the per-pair unique
         constraint never collides across players. Default `detected_days_ago=1`
         (yesterday) so events land inside BOTH the explicit-window `_run` and the
-        task's default trailing window `[today-14d, today)` (whose end is exclusive
+        task's default trailing window `[today-30d, today)` (whose end is exclusive
         at today-midnight, excluding events stamped at the current time).
         """
         from_obs = BattleObservation.objects.create(player=player, pvp_battles=0)
@@ -110,7 +111,7 @@ class ShipBadgeSnapshotTests(TestCase):
         with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
             return compute_ship_top_player_snapshot(
                 realm=realm,
-                window_start=today - timedelta(days=14),
+                window_start=today - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS),
                 window_end=today + timedelta(days=1),
                 captured_on=today,
             )
@@ -286,18 +287,19 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertTrue(
             ShipTopPlayerSnapshot.objects.filter(ship_id=T9_SHIP).exists())
 
-    def test_rolling_14d_window_excludes_older_events(self):
-        # Battles 20 days ago fall outside the 14-day fortnight window.
+    def test_rolling_window_excludes_older_events(self):
+        # Battles beyond the trailing window fall outside it.
         for i in range(3):
             self._event(self._player(f"Old{i}"), SHIMA,
-                        battles=20, wins=10, detected_days_ago=20)
+                        battles=20, wins=10,
+                        detected_days_ago=SHIP_LEADERBOARD_WINDOW_DAYS + 6)
 
         result = self._run("na")
 
         self.assertEqual(result["ranked_rows"], 0)
 
-    def test_rolling_14d_window_includes_recent_events(self):
-        # 10 days ago is inside the fortnight window.
+    def test_rolling_window_includes_recent_events(self):
+        # 10 days ago is inside the trailing rolling window.
         for i in range(3):
             self._event(self._player(f"Recent{i}"), SHIMA,
                         battles=20, wins=10 + i, detected_days_ago=10)
@@ -344,7 +346,7 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertEqual(len(badges), 1)
         b = badges[0]
         self.assertEqual(b["avg_damage"], 62_400)        # 6_240_000 / 100
-        self.assertEqual(b["window_days"], 14)
+        self.assertEqual(b["window_days"], SHIP_LEADERBOARD_WINDOW_DAYS)
         # KDR / survival are intentionally not exposed (not accurately computable).
         self.assertNotIn("kdr", b)
         self.assertNotIn("survival_rate", b)
@@ -382,7 +384,7 @@ class ShipBadgeSnapshotTests(TestCase):
         # No code populated for this fixture ship -> field present but null,
         # so the frontend hides the Ship Tool link.
         self.assertIsNone(board["ship"]["shiptool_code"])
-        self.assertEqual(board["window_days"], 14)
+        self.assertEqual(board["window_days"], SHIP_LEADERBOARD_WINDOW_DAYS)
         self.assertEqual([p["player_name"] for p in board["players"]],
                         ["Ace", "Mid", "Low"])
         self.assertEqual([p["rank"] for p in board["players"]], [1, 2, 3])
@@ -611,7 +613,7 @@ class ShipBadgeSnapshotTests(TestCase):
         env = {**BADGE_ENV, "SHIP_BADGE_TIERS": "8,9,10"}
         with mock.patch.dict("os.environ", env, clear=False):
             compute_ship_top_player_snapshot(
-                realm="na", window_start=today - timedelta(days=14),
+                realm="na", window_start=today - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS),
                 window_end=today + timedelta(days=1), captured_on=today)
 
         self.assertEqual(
@@ -631,7 +633,7 @@ class ShipBadgeSnapshotTests(TestCase):
         env = {**BADGE_ENV, "SHIP_BADGE_TIERS": "8,9,10"}
         with mock.patch.dict("os.environ", env, clear=False):
             compute_ship_top_player_snapshot(
-                realm="na", window_start=today - timedelta(days=14),
+                realm="na", window_start=today - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS),
                 window_end=today + timedelta(days=1), captured_on=today)
             badges = get_player_ship_badges(star)
             bulk = get_players_ship_badges_bulk([star.pk])[star.pk]
@@ -658,7 +660,7 @@ class ShipBadgeSnapshotTests(TestCase):
                 mock.patch("warships.data.compute_realm_top_ships",
                            return_value={"ships": [{"ship_id": T5}]}):
             compute_ship_top_player_snapshot(
-                realm="na", window_start=today - timedelta(days=14),
+                realm="na", window_start=today - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS),
                 window_end=today + timedelta(days=1), captured_on=today)
             badges = get_player_ship_badges(champ)
 
@@ -675,8 +677,8 @@ class ShipBadgeSnapshotTests(TestCase):
             lb = get_ship_leaderboard("na", SHIMA)
 
         self.assertEqual(lb["captured_on"], today.isoformat())
-        self.assertEqual(lb["window_days"], 14)
-        self.assertEqual(lb["window_start"], (today - timedelta(days=14)).isoformat())
+        self.assertEqual(lb["window_days"], SHIP_LEADERBOARD_WINDOW_DAYS)
+        self.assertEqual(lb["window_start"], (today - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS)).isoformat())
         # No fixed-season framing under the rolling model.
         self.assertNotIn("season_start", lb)
         self.assertNotIn("season_end", lb)

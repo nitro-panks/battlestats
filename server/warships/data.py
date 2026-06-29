@@ -6012,7 +6012,7 @@ def bulk_load_entity_caches(
 # snapshot is overwritten each night, so this is just the lookback span; the
 # evolution *speed* of the badges is governed by this length (longer = more
 # stable night-to-night). Operator-tunable without a redeploy.
-SHIP_LEADERBOARD_WINDOW_DAYS = int(os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '14'))
+SHIP_LEADERBOARD_WINDOW_DAYS = int(os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '30'))
 SHIP_LEADERBOARD_CACHE_TTL = 900   # 15 min read-cache on the /ship endpoint
 
 

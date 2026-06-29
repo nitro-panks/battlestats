@@ -2,7 +2,7 @@
 
 // Realm top-ships treemap.
 //
-// The 25 most-played ships on the active realm over the ROLLING TRAILING 14-DAY
+// The 25 most-played ships on the active realm over the ROLLING TRAILING 30-DAY
 // SHIP-STANDINGS WINDOW (the same window the /ship leaderboard + profile medals
 // read — 1:1 with the player lists), as a treemap: each tile is one ship, sized
 // by battles, COLORED BY SHIP TYPE and SHADED BY TIER (lighter = low tier, darker
@@ -278,7 +278,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({ onSel
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex items-center gap-3">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                        {displayRealm.toUpperCase()} most-played ships · Previous Fortnight{windowLabel ? ` · ${windowLabel}` : ''}
+                        {displayRealm.toUpperCase()} most-played ships{windowLabel ? ` · ${windowLabel}` : ''}
                     </h2>
                     <div className="flex items-center gap-1 text-xs" role="group" aria-label="Battle mode">
                         {SHIP_MODES.map((m) => (
@@ -308,13 +308,13 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({ onSel
                         <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
                             <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Most-played ships</p>
                             <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">The 25 most-played ships on this realm — each tile is one ship, sized by battles, colored by ship type and shaded by tier (lighter = lower tier). Tap a tile to open that ship&rsquo;s leaderboard; toggle Random / Ranked to switch battle mode.</p>
-                            <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]"><span className="font-semibold text-[var(--accent-mid)]">Eligibility window:</span> a rolling, trailing 14-day ship-standings window recomputed nightly — the same window the ship leaderboards and profile medals read. The dates shown are its current bounds.</p>
+                            <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]"><span className="font-semibold text-[var(--accent-mid)]">Eligibility window:</span> a rolling, trailing 30-day ship-standings window recomputed nightly — the same window the ship leaderboards and profile medals read. The dates shown are its current bounds.</p>
                         </div>
                     </div>
                 </div>
             </div>
             <div ref={containerRef} className="relative w-full max-w-[900px]">
-                <svg ref={svgRef} role="img" aria-label={`${displayRealm} top ${SHIP_LIMIT} most-played ships over the rolling trailing 14-day ship-standings window`} />
+                <svg ref={svgRef} role="img" aria-label={`${displayRealm} top ${SHIP_LIMIT} most-played ships over the rolling trailing 30-day ship-standings window`} />
                 {hover && (
                     <div
                         className="pointer-events-none absolute z-10 rounded bg-[var(--bg-page)] px-2 py-1 text-xs shadow-md ring-1 ring-[var(--accent-faint)]"

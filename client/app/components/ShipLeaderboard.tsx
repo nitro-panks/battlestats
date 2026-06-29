@@ -222,7 +222,7 @@ const ariaSort = (active: boolean, dir: SortDir): 'ascending' | 'descending' | '
     active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none';
 
 const DATA_BASIS_HINT =
-    'Stats are aggregated from battle observations recorded during the rolling trailing 14-day window. ' +
+    'Stats are aggregated from battle observations recorded during the rolling trailing 30-day window. ' +
     'The WR filter narrows each ship’s stats to its top 50% or 25% of players by win rate (the ships listed never change).';
 
 // Info affordance with a hover/focus tooltip — styled to match the circle-info

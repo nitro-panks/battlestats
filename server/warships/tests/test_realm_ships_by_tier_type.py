@@ -18,6 +18,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from warships.data import (
+    SHIP_LEADERBOARD_WINDOW_DAYS,
     _season_window_datetimes,
     compute_realm_ships_by_tier_type,
     ship_pct_bucket_cache_key,
@@ -50,7 +51,7 @@ class RealmShipsByTierTypeTests(TestCase):
         # Anchor the rolling window on captured_on=today (the snapshots created by
         # _snapshot share this date, so they are the candidate set).
         self.captured_on = timezone.now().date()
-        self.window_start_d = self.captured_on - timedelta(days=14)
+        self.window_start_d = self.captured_on - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS)
         self.window_start, self.window_end = _season_window_datetimes(
             self.window_start_d, self.captured_on)
 
@@ -88,7 +89,7 @@ class RealmShipsByTierTypeTests(TestCase):
 
         self.assertEqual(payload["tier"], 10)
         self.assertEqual(payload["ship_type"], "Destroyer")
-        self.assertEqual(payload["window_days"], 14)
+        self.assertEqual(payload["window_days"], SHIP_LEADERBOARD_WINDOW_DAYS)
         self.assertEqual(payload["captured_on"], self.captured_on.isoformat())
         self.assertNotIn("season_index", payload)
         ids = [s["ship_id"] for s in payload["ships"]]
@@ -220,7 +221,7 @@ class RealmShipsByTierTypeWarmTests(TestCase):
                             ship_type="Destroyer", tier=10)
         self.captured_on = timezone.now().date()
         self.window_start, _ = _season_window_datetimes(
-            self.captured_on - timedelta(days=14), self.captured_on)
+            self.captured_on - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS), self.captured_on)
         ShipTopPlayerSnapshot.objects.create(
             captured_on=self.captured_on, realm="na", ship_id=SHIMA,
             ship_name="Shimakaze", rank=1, player=self.player,
@@ -340,7 +341,7 @@ class RealmShipsByTierTypeWrPctTests(TestCase):
             name="snap_anchor", player_id=889000, realm="na", pvp_battles=1)
         self.captured_on = timezone.now().date()
         self.window_start, _ = _season_window_datetimes(
-            self.captured_on - timedelta(days=14), self.captured_on)
+            self.captured_on - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS), self.captured_on)
         self._next_pid = 889001
 
     def _snapshot(self, ship_id):
@@ -544,7 +545,7 @@ class RealmShipsPctWarmTests(TestCase):
             name="pct_warm_anchor", player_id=890000, realm="na", pvp_battles=1)
         self.captured_on = timezone.now().date()
         self.window_start, _ = _season_window_datetimes(
-            self.captured_on - timedelta(days=14), self.captured_on)
+            self.captured_on - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS), self.captured_on)
         ShipTopPlayerSnapshot.objects.create(
             captured_on=self.captured_on, realm="na", ship_id=SHIMA,
             ship_name="x", rank=1, player=self.snap_player, win_rate=50.0,

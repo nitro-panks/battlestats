@@ -94,6 +94,7 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task,
         mock_update_clan_members_task,
     ):
+        from warships.data import SHIP_LEADERBOARD_WINDOW_DAYS
         now = timezone.now()
         player = Player.objects.create(
             name="BadgeHolder", player_id=9077, realm="na", last_fetch=now,
@@ -118,7 +119,7 @@ class PlayerViewSetTests(TestCase):
         self.assertEqual(badges[0]["win_rate"], 64.0)
         self.assertEqual(badges[0]["battles"], 312)
         self.assertEqual(badges[0]["avg_damage"], 62_000)        # 19_344_000/312
-        self.assertEqual(badges[0]["window_days"], 14)
+        self.assertEqual(badges[0]["window_days"], SHIP_LEADERBOARD_WINDOW_DAYS)
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
