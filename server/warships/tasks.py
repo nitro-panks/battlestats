@@ -1213,7 +1213,7 @@ def refresh_efficiency_rank_snapshot_task(self, realm=DEFAULT_REALM):
 
 @app.task(bind=True, **TASK_OPTS)
 def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
-    """Per-realm T10 top-player snapshot over the trailing 14-day window.
+    """Per-realm T10 top-player snapshot over the trailing SHIP_LEADERBOARD_WINDOW_DAYS window.
 
     No-op unless SHIP_BADGE_SNAPSHOT_ENABLED=1 (the rollout switch). The beat
     schedule fires **nightly** (per-realm striped); each run recomputes the
