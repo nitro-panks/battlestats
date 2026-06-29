@@ -33,6 +33,12 @@ The bootstrap installs:
 
 ## Deploy
 
+> **Before deploying: regenerate the cloud env files from Pass.** The authoritative
+> env-var values live in the operator's `pass` store; `server/.env.cloud` and
+> `server/.env.secrets.cloud` are generated artifacts. The deploy rsyncs the working
+> tree (not committed HEAD), so a local file left stale after a Pass change silently
+> ships wrong values to production. Regenerate both from Pass, then deploy.
+
 When backend changes are ready:
 
 ```bash

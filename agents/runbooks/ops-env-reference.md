@@ -7,7 +7,14 @@ Catalog of environment files and runtime env vars (with defaults). Moved out of
 `agents/runbooks/runbook-claude-md-durability.md`). See `agents/runbooks/` for the
 rationale, dates, and incident history behind specific settings.
 
-## Server env files (`server/`)
+**Canonical source: Pass.** The authoritative env-var values live in the operator's
+`pass` password store. Every on-disk env file below (and the droplet
+`/etc/battlestats-*.env`) is a **generated artifact** — to change a value, update
+Pass and regenerate the file; do not hand-edit a file as the source of truth. (Deploy
+rsyncs the working tree, so a stale local file silently ships wrong values — see the
+deploy runbooks.)
+
+## Server env files (`server/`, generated from Pass)
 
 - `.env` — non-secret connection values (DB_HOST, DB_ENGINE, DJANGO_ALLOWED_HOSTS)
 - `.env.secrets` — secrets (WG_APP_ID, DB_PASSWORD, DJANGO_SECRET_KEY)
@@ -98,7 +105,7 @@ Local-dev only: `BATTLESTATS_DISABLE_LIVE_REFRESH` (serve stale snapshots, no li
 
 ## Client env
 
-Sourced from `/etc/battlestats-client.env` on the droplet at frontend **build** time (host-maintained; the deploy script sources it before `npm run build`). `NEXT_PUBLIC_*` vars are inlined into the bundle at build, so changing one requires a redeploy.
+Sourced from `/etc/battlestats-client.env` on the droplet at frontend **build** time (its values come from Pass like the server env; the deploy script sources the file before `npm run build`). `NEXT_PUBLIC_*` vars are inlined into the bundle at build, so changing one requires a redeploy.
 
 - `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`)
 - `NEXT_PUBLIC_PLAYER_DEWATERFALL` (default off; **prod=1**) — fetch the clan-members rail in parallel with the chart warmup instead of gating it behind warmup. Removes both gates (`warmupSettled` in `PlayerDetail`, `chartFetchesInFlight` in `useClanMembers`). Instantly reversible: set `0` + redeploy frontend. See `runbook-player-fetch-orchestration-2026-06-21.md`.

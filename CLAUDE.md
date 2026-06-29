@@ -176,7 +176,7 @@ Semantic versioning with root `VERSION` as the single source of truth, surfaced 
 
 Env files, the full runtime env-var catalog (defaults), Umami, and Docker ports live in `agents/runbooks/ops-env-reference.md`. Quick orientation:
 
-- Server secrets in `server/.env.secrets`; cloud overrides in `*.cloud` files.
+- Env-var values are kept canonically in Pass (the operator's `pass` store); the on-disk env files (`server/.env`, `.env.secrets`, the `*.cloud` overrides, the droplet `/etc/battlestats-*.env`) are generated from it. Update Pass and regenerate the file; do not hand-edit a file as the source of truth.
 - Master kill switches: `ENABLE_CRAWLER_SCHEDULES` (crawlers), `BATTLE_HISTORY_*_ENABLED` (battle-history phases), `SHIP_BADGE_SNAPSHOT_ENABLED` (ship standings), `ENRICHMENT_POOL_MAINTENANCE_ENABLED` (daily enrichment pool reclassify/retry).
 - Client: `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`); `NEXT_PUBLIC_PLAYER_DEWATERFALL=1` (clan-rail de-waterfall, build-time, set in `/etc/battlestats-client.env` on the droplet).
 - Docker ports: 8888 Django · 3001 Next.js (dev) · 3002 Umami (prod) · 15672 RabbitMQ.

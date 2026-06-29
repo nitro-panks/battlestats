@@ -67,7 +67,10 @@ If the rollout also requires deploy-scoped smoke checks or backend follow-up war
 
 ## Runtime config
 
-The droplet reads runtime variables from `/etc/battlestats-client.env`.
+The droplet reads runtime variables from `/etc/battlestats-client.env`. Its values
+are kept canonically in the operator's `pass` store (like the server env); the
+on-droplet file is a generated artifact — update Pass and regenerate it rather than
+hand-editing.
 
 Current supported values:
 
