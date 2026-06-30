@@ -236,6 +236,11 @@ const ShipStats: React.FC<ShipStatsProps> = ({
                                         <tr>
                                             <td colSpan={4} className="pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--accent-mid)]">
                                                 {cluster.name}
+                                                {/* Accuracy hit-rates read the player's CAREER totals (30-day
+                                                    gunnery is too sparse) while the rest are 30-day — flag it. */}
+                                                {cluster.name === 'Accuracy' ? (
+                                                    <span className="font-normal text-[var(--text-muted)]"> · career</span>
+                                                ) : null}
                                             </td>
                                         </tr>
                                     ) : null}

@@ -85,7 +85,9 @@ describe('ShipStats', () => {
         await screen.findByText('Win rate');
         expect(screen.queryByText('Outcomes')).not.toBeInTheDocument();
         expect(screen.getByText('Combat output')).toBeInTheDocument();
-        expect(screen.getByText('Accuracy')).toBeInTheDocument();
+        // Accuracy is tagged "career" (player side is lifetime, not the 30d window).
+        expect(screen.getByText('Accuracy', { exact: false })).toBeInTheDocument();
+        expect(screen.getByText('· career')).toBeInTheDocument();
     });
 
     it('emphasizes the better reading per row, not the column', async () => {
