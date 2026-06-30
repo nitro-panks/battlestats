@@ -1150,8 +1150,6 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     realm={realm}
                     shipId={selectedShip.ship_id}
                     shipName={selectedShip.ship_name}
-                    shipTier={selectedShip.ship_tier}
-                    shipType={selectedShip.ship_type}
                     onClose={closeShipStats}
                 />
             ) : null}
