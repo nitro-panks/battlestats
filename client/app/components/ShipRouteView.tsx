@@ -13,9 +13,6 @@ import TopShipIcon from './TopShipIcon';
 import ShipToolLink from './ShipToolLink';
 import { trackEvent } from '../lib/umami';
 
-const RANKING_TOOLTIP = "Ranked by a blend of win rate, average damage, and kills per battle (win rate weighted most), each tempered for games played (empirical-Bayes shrinkage) so a short hot streak doesn't outrank a high-volume player. Shows the top 15 for the window.";
-
-
 const SHIP_LEADERBOARD_FETCH_TTL_MS = 900_000; // 15 min — mirrors the backend cache
 // Display cap. The backend already limits each board to SHIP_BADGE_LIST_SIZE
 // (15), but this guarantees the page never shows more than the top 15 even if a
@@ -182,41 +179,46 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
     const onPlayerClick = (rank: number) =>
         trackEvent('ship-player', { ship_id: ship.ship_id, ship_name: ship.name, rank, realm });
 
-    // Provenance — when this board was captured. Hidden when the payload omits
-    // it (no "as of —"). Date-only ISO parses as UTC midnight; render in UTC.
-    const capturedMs = data.captured_on ? Date.parse(data.captured_on) : null;
-    const capturedLabel = capturedMs !== null && !Number.isNaN(capturedMs)
-        ? new Date(capturedMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
-        : null;
+    const rankingTooltip = `Top 15 players on this ship over the trailing ${data.window_days} days, ranked by a blend of win rate, average damage, and kills per battle (win rate weighted most), each tempered for games played (empirical-Bayes shrinkage) so a short hot streak doesn't outrank a high-volume player. Recomputed nightly.`;
 
     return (
         <section className="mx-auto max-w-3xl">
-            <header className="mb-5">
-                <div className="flex flex-wrap items-center gap-2.5">
-                    {cls && (
-                        // Decorative: the full class name is already conveyed by the
-                        // text chip below, so the glyph stays aria-hidden to avoid a
-                        // double screen-reader announcement. `title` is a sighted hover.
-                        <span
-                            title={cls.label}
-                            aria-hidden="true"
-                            className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded border border-[var(--border)] bg-[var(--accent-faint)] px-1 text-[11px] font-bold tracking-tight text-[var(--accent-mid)]"
+            {/* Masthead: ship name with its identity attributes (class is conveyed
+                once here — the old standalone class glyph was a duplicate) as a plain
+                bullet-separated line to the right, and the Ship Tool link right-
+                aligned. */}
+            <header className="mb-[30px] flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <h1 className="break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)] sm:text-4xl">
+                    {ship.name}
+                </h1>
+                {chips.length > 0 && (
+                    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm text-[var(--text-muted)]">
+                        {chips.map((c, i) => (
+                            <React.Fragment key={c}>
+                                {i > 0 && <span aria-hidden="true" className="text-[var(--border)]">·</span>}
+                                <span>{c}</span>
+                            </React.Fragment>
+                        ))}
+                        <button
+                            type="button"
+                            title={rankingTooltip}
+                            aria-label={rankingTooltip}
+                            className="ml-0.5 inline-flex cursor-help rounded-sm text-[var(--text-muted)] hover:text-[var(--accent-mid)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)]"
                         >
-                            {cls.abbr}
-                        </span>
-                    )}
-                    <h1 className="break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)] sm:text-4xl">
-                        {ship.name}
-                    </h1>
-                    {ship.is_premium && (
-                        <span
-                            title="Premium ship"
-                            className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold"
-                            style={{ color: 'var(--metal-gold)', borderColor: 'var(--metal-gold)' }}
-                        >
-                            <span aria-hidden="true">★</span>Premium
-                        </span>
-                    )}
+                            <FontAwesomeIcon icon={faCircleInfo} aria-hidden="true" />
+                        </button>
+                    </p>
+                )}
+                {ship.is_premium && (
+                    <span
+                        title="Premium ship"
+                        className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold"
+                        style={{ color: 'var(--metal-gold)', borderColor: 'var(--metal-gold)' }}
+                    >
+                        <span aria-hidden="true">★</span>Premium
+                    </span>
+                )}
+                <span className="ml-auto">
                     <ShipToolLink
                         code={ship.shiptool_code}
                         shipName={ship.name}
@@ -224,33 +226,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                         shipId={ship.ship_id}
                         size="md"
                     />
-                </div>
-                {chips.length > 0 && (
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        {chips.map((c) => (
-                            <span
-                                key={c}
-                                className="inline-flex items-center rounded-full border border-[var(--border)] bg-[var(--accent-faint)] px-2 py-0.5 text-xs font-medium text-[var(--text-muted)]"
-                            >
-                                {c}
-                            </span>
-                        ))}
-                    </div>
-                )}
-                <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                    {realm.toUpperCase()} · best players · trailing {data.window_days} days · updated daily ·
-                    <button
-                        type="button"
-                        title={RANKING_TOOLTIP}
-                        aria-label={RANKING_TOOLTIP}
-                        className="inline-flex cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)]"
-                    >
-                        <FontAwesomeIcon icon={faCircleInfo} aria-hidden="true" />
-                    </button>
-                </p>
-                {capturedLabel && (
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">Standings captured {capturedLabel} UTC · recomputed nightly</p>
-                )}
+                </span>
             </header>
 
             {players.length === 0 ? (
@@ -276,15 +252,10 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                         <tbody>
                             {visible.map((p) => {
                                 const isChampion = p.rank === 1;
-                                // Subtle podium/field divider: only the rank-3 row carries
-                                // a border (when there's a field below it to separate from).
-                                // Avoids per-row border noise and the fragile `/40` opacity
-                                // modifier on a CSS var.
-                                const podiumEdge = p.rank === 3 && players.length > 3;
                                 return (
                                     <tr
                                         key={p.rank}
-                                        className={`transition-colors hover:bg-[var(--bg-hover)] ${podiumEdge ? 'border-b border-[var(--border)]' : ''} ${isChampion ? 'bg-[var(--champion-tint)]' : ''}`}
+                                        className={`transition-colors hover:bg-[var(--bg-hover)] ${isChampion ? 'bg-[var(--champion-tint)]' : ''}`}
                                         style={isChampion ? { boxShadow: 'inset 3px 0 0 var(--champion-edge)' } : undefined}
                                     >
                                         <td className="py-2 pl-2 pr-3 align-top tabular-nums text-[var(--text-muted)]">{p.rank}</td>
