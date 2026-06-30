@@ -21,6 +21,13 @@ const TONE_GOOD = '#74c476';
 const TONE_BAD = '#a50f15';
 const TONE_NEUTRAL = 'var(--text-muted)';
 
+// Comparison column accents: the profile owner ("Player") toward blue, the
+// population average toward orange (palette --accent-mid + chartTheme's
+// wrAverage orange). Used to tint the table's Average/Player headers. "Player"
+// never means "you" — this is the viewed account, not necessarily the viewer.
+const COLOR_PLAYER = 'var(--accent-mid)';
+const COLOR_AVERAGE = '#fd8d3c';
+
 // Skill brackets, by overall account random win rate (see backend). The user
 // can compare against all players, the top 50%, or the top 25%.
 type SkillBracket = 'all' | 'top50' | 'top25';
@@ -66,11 +73,9 @@ interface ShipStatsProps {
     playerName: string;
     realm: string;
     shipId: number;
-    // Identity hints from the clicked table row — render the header instantly
-    // before the fetch resolves; the payload refines them.
+    // Ship name from the clicked table row — render the header instantly before
+    // the fetch resolves; the payload refines it.
     shipName?: string;
-    shipTier?: number | null;
-    shipType?: string | null;
     onClose: () => void;
 }
 
@@ -89,94 +94,26 @@ const formatMetricValue = (value: number | null, unit: string): string => {
     return unit ? `${formatted}${unit}` : formatted;
 };
 
-const MetricRow: React.FC<{ metric: ShipStatMetric; bracket: SkillBracket }> = ({ metric, bracket }) => {
-    const { user, better, unit, label } = metric;
-    const average = metric.averages[bracket];
-    const scaleMax = Math.max(user ?? 0, average ?? 0, 1) * 1.15;
-    const userPct = user == null ? 0 : Math.min(100, (user / scaleMax) * 100);
-    const avgPct = average == null ? null : Math.min(100, (average / scaleMax) * 100);
-
-    let deltaText = '';
-    let deltaTone = TONE_NEUTRAL;
-    if (user != null && average != null && average > 0) {
-        const deltaPct = ((user - average) / average) * 100;
-        const isBetter = better === 'high' ? deltaPct > 0 : deltaPct < 0;
-        const magnitude = Math.abs(deltaPct);
-        if (magnitude >= 0.5) {
-            deltaTone = isBetter ? TONE_GOOD : TONE_BAD;
-            deltaText = `${deltaPct > 0 ? '+' : '−'}${magnitude.toFixed(0)}%`;
-        } else {
-            deltaText = '≈ avg';
-        }
+// Player-vs-average delta as a signed percent, toned good/bad by whether the
+// direction is favorable for the metric (a lower torpedo-miss rate is "better").
+const computeDelta = (user: number | null, average: number | null, better: 'high' | 'low') => {
+    if (user == null || average == null || average === 0) {
+        return { text: '', tone: TONE_NEUTRAL };
     }
-
-    return (
-        // Left column (capped at 60% of the panel width): left-justified title +
-        // comparison bar. Right column: the you · avg · Δ details, right-aligned.
-        <div className="grid grid-cols-[60%_1fr] items-center gap-x-4 py-1.5">
-            <div className="min-w-0">
-                <div className="text-xs text-[var(--text-muted)]">{label}</div>
-                {/* Comparison track. The player's fill is one color up to the
-                    ship average, then switches (green when exceeding the average
-                    is good, red when it isn't) for the surplus beyond it — so the
-                    color change itself marks the average. A high-contrast tick
-                    with a panel-colored halo, extending past the bar, reinforces
-                    the average position in both light and dark mode. */}
-                <div
-                    className="relative mt-2 mb-1 h-2.5 w-full"
-                    role="img"
-                    aria-label={`${label}: you ${formatMetricValue(user, unit)}, average ${formatMetricValue(average, unit)}`}
-                >
-                    <div
-                        className="absolute inset-0 overflow-hidden rounded-full"
-                        style={{ backgroundColor: 'var(--accent-faint)' }}
-                    >
-                        {/* Fill up to the average (or to the player value if below). */}
-                        <div
-                            className="absolute inset-y-0 left-0"
-                            style={{
-                                width: `${avgPct == null ? userPct : Math.min(userPct, avgPct)}%`,
-                                backgroundColor: 'var(--accent-secondary-mid)',
-                            }}
-                        />
-                        {/* Surplus beyond the average, tone-coded by performance. */}
-                        {avgPct != null && userPct > avgPct ? (
-                            <div
-                                className="absolute inset-y-0"
-                                style={{
-                                    left: `${avgPct}%`,
-                                    width: `${userPct - avgPct}%`,
-                                    backgroundColor: better === 'high' ? TONE_GOOD : TONE_BAD,
-                                }}
-                            />
-                        ) : null}
-                    </div>
-                    {avgPct != null ? (
-                        <div
-                            className="absolute top-[-3px] bottom-[-3px] w-[2px] rounded-full"
-                            style={{
-                                left: `calc(${avgPct}% - 1px)`,
-                                backgroundColor: 'var(--text-strong)',
-                                boxShadow: '0 0 0 1.5px var(--bg-surface)',
-                            }}
-                            title={`Ship average: ${formatMetricValue(average, unit)}`}
-                        />
-                    ) : null}
-                </div>
-            </div>
-            <div className="whitespace-nowrap text-right text-xs tabular-nums">
-                <span className="font-semibold text-[var(--text-strong)]">{formatMetricValue(user, unit)}</span>
-                <span className="text-[var(--text-muted)]">{' · avg '}{formatMetricValue(average, unit)}</span>
-                {deltaText ? (
-                    <span className="ml-1.5 font-semibold" style={{ color: deltaTone }}>{deltaText}</span>
-                ) : null}
-            </div>
-        </div>
-    );
+    const deltaPct = ((user - average) / average) * 100;
+    const magnitude = Math.abs(deltaPct);
+    if (magnitude < 0.5) {
+        return { text: '≈ avg', tone: TONE_NEUTRAL };
+    }
+    const isBetter = better === 'high' ? deltaPct > 0 : deltaPct < 0;
+    return {
+        text: `${deltaPct > 0 ? '+' : '−'}${magnitude.toFixed(0)}%`,
+        tone: isBetter ? TONE_GOOD : TONE_BAD,
+    };
 };
 
 const ShipStats: React.FC<ShipStatsProps> = ({
-    playerName, realm, shipId, shipName, shipTier, shipType, onClose,
+    playerName, realm, shipId, shipName, onClose,
 }) => {
     const [payload, setPayload] = useState<ShipCombatPayload | null>(null);
     const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
@@ -205,43 +142,38 @@ const ShipStats: React.FC<ShipStatsProps> = ({
     }, [playerName, realm, shipId]);
 
     const headerName = payload?.ship_name || shipName || `Ship ${shipId}`;
-    const headerTier = payload?.ship_tier ?? shipTier ?? null;
-    const headerType = payload?.ship_type ?? shipType ?? null;
 
     return (
         <div
-            className="mt-5 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-surface)] p-4"
+            className="relative mt-5 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-surface)] p-4"
             data-testid="ship-stats"
             aria-label={`Combat profile for ${headerName}`}
         >
-            <div className="flex items-start justify-between gap-3">
-                <div>
-                    <div className="flex items-baseline gap-2">
-                        <h3 className="text-sm font-semibold text-[var(--text-strong)]">{headerName}</h3>
-                        {headerTier != null ? (
-                            <span className="text-xs text-[var(--text-muted)]">Tier {headerTier}</span>
-                        ) : null}
-                        {headerType ? (
-                            <span className="text-xs text-[var(--text-muted)]">· {headerType}</span>
-                        ) : null}
-                    </div>
-                    {state === 'ready' && payload ? (
-                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-                            {payload.window_days}d performance in Random battles
-                            {payload.brackets[bracket].players > 0
-                                ? ` (${payload.brackets[bracket].players.toLocaleString()} captains, ${payload.brackets[bracket].battles.toLocaleString()} battles)`
-                                : ''}
-                        </p>
-                    ) : null}
+            <button
+                type="button"
+                onClick={onClose}
+                aria-label="Hide ship combat profile"
+                className="absolute right-3 top-3 rounded px-2 py-0.5 text-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--accent-faint)] hover:text-[var(--text-strong)]"
+            >
+                ✕
+            </button>
+
+            {/* One centered, shrink-to-fit column so the title, subtitle, filters,
+                and table all share the table's left edge while the block stays
+                centered in the panel. */}
+            <div className="mx-auto w-fit">
+            <div>
+                <div className="flex items-baseline gap-2">
+                    <h3 className="text-xl font-bold text-[var(--text-strong)]">{headerName}</h3>
                 </div>
-                <button
-                    type="button"
-                    onClick={onClose}
-                    aria-label="Hide ship combat profile"
-                    className="rounded px-2 py-0.5 text-sm text-[var(--text-muted)] transition-colors hover:bg-[var(--accent-faint)] hover:text-[var(--text-strong)]"
-                >
-                    ✕
-                </button>
+                {state === 'ready' && payload ? (
+                    <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                        {payload.window_days}d performance in Random battles
+                        {payload.brackets[bracket].players > 0
+                            ? ` (${payload.brackets[bracket].players.toLocaleString()} captains, ${payload.brackets[bracket].battles.toLocaleString()} battles)`
+                            : ''}
+                    </p>
+                ) : null}
             </div>
 
             {state === 'loading' ? (
@@ -275,8 +207,8 @@ const ShipStats: React.FC<ShipStatsProps> = ({
                                         aria-pressed={isActive}
                                         className={`px-2.5 py-1 transition-colors ${
                                             isActive
-                                                ? 'bg-[var(--accent-secondary-mid)] font-semibold text-[var(--bg-card)]'
-                                                : 'text-[var(--accent-secondary-mid)] hover:bg-[var(--accent-faint)]'
+                                                ? 'bg-[var(--accent-mid)] font-semibold text-[var(--bg-card)]'
+                                                : 'text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]'
                                         }`}
                                     >
                                         {opt.label}
@@ -286,28 +218,66 @@ const ShipStats: React.FC<ShipStatsProps> = ({
                         </div>
                     </div>
 
-                    <div className="mt-3 space-y-4">
-                        {payload.clusters.map((cluster) => (
-                            <section key={cluster.name}>
-                                <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--accent-mid)]">
-                                    {cluster.name}
-                                </h4>
-                                <div className="divide-y divide-[var(--accent-faint)]">
-                                    {cluster.metrics.map((metric) => (
-                                        <MetricRow key={metric.key} metric={metric} bracket={bracket} />
-                                    ))}
-                                </div>
-                            </section>
-                        ))}
-                    </div>
+                    {/* Content-width table; the wrapping column is centered, so the
+                        table sets the shared left edge. Metrics grouped by cluster rows. */}
+                    <table className="mt-4 text-sm">
+                        <thead>
+                            <tr className="border-b border-[var(--accent-faint)] text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+                                <th className="py-1.5 pr-8 text-left font-medium" />
+                                <th className="px-4 py-1.5 text-right font-semibold min-w-[10rem]" style={{ color: COLOR_AVERAGE }}>Average</th>
+                                <th className="px-4 py-1.5 text-right font-semibold min-w-[10rem]" style={{ color: COLOR_PLAYER }}>Player</th>
+                                <th className="py-1.5 pl-4 text-right font-medium min-w-[4.75rem]">Delta</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {payload.clusters.map((cluster) => (
+                                <React.Fragment key={cluster.name}>
+                                    {cluster.name !== 'Outcomes' ? (
+                                        <tr>
+                                            <td colSpan={4} className="pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--accent-mid)]">
+                                                {cluster.name}
+                                            </td>
+                                        </tr>
+                                    ) : null}
+                                    {cluster.metrics.map((metric) => {
+                                        const average = metric.averages[bracket];
+                                        const delta = computeDelta(metric.user, average, metric.better);
+                                        // Emphasis (white/semibold) follows the better reading per row,
+                                        // not the column; the weaker one is muted. With one side missing,
+                                        // the present value is emphasized.
+                                        const playerBetter = (metric.user != null && average != null)
+                                            ? (metric.better === 'high' ? metric.user >= average : metric.user <= average)
+                                            : metric.user != null;
+                                        const strong = 'font-semibold text-[var(--text-strong)]';
+                                        const muted = 'text-[var(--text-muted)]';
+                                        // A "per X" unit (e.g. /battle) reads better appended to the
+                                        // metric name, leaving the value cells as bare numbers; "%" stays
+                                        // inline with the value.
+                                        const unitInLabel = metric.unit.startsWith('/');
+                                        const labelText = unitInLabel ? `${metric.label}${metric.unit}` : metric.label;
+                                        const valueUnit = unitInLabel ? '' : metric.unit;
+                                        return (
+                                            <tr key={metric.key} className="border-t border-[var(--accent-faint)]">
+                                                <td className="py-1.5 pr-8 text-left text-[var(--text-strong)]">{labelText}</td>
+                                                <td className={`px-4 py-1.5 text-right tabular-nums min-w-[10rem] ${playerBetter ? muted : strong}`}>{formatMetricValue(average, valueUnit)}</td>
+                                                <td className={`px-4 py-1.5 text-right tabular-nums min-w-[10rem] ${playerBetter ? strong : muted}`}>{formatMetricValue(metric.user, valueUnit)}</td>
+                                                <td className="py-1.5 pl-4 text-right font-semibold tabular-nums min-w-[4.75rem]" style={{ color: delta.tone }}>{delta.text}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </React.Fragment>
+                            ))}
+                        </tbody>
+                    </table>
                 </>
             ) : null}
 
             {state === 'ready' && payload && !payload.has_user_data ? (
                 <p className="mt-3 text-xs text-[var(--text-muted)]">
-                    No battles in the last 30 days on this ship for you — showing the server average only.
+                    No battles in the last 30 days on this ship for this player — showing the server average only.
                 </p>
             ) : null}
+            </div>
         </div>
     );
 };
