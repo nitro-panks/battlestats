@@ -182,6 +182,62 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertFalse(
             ShipTopPlayerSnapshot.objects.filter(player=e).exists())
 
+    def test_win_rate_gate_excludes_sub_threshold_damage_farmer(self):
+        # The essential_HT case: a losing record (sub-50% WR) with elite damage +
+        # kills is dropped from the board entirely by the hard win-rate gate
+        # (default 50). The ship stays ranked — the population guard counts the full
+        # pool *before* the gate — and its >=50% players are unaffected. A player at
+        # exactly 50% (break-even) is kept.
+        farmer = self._player("Farmer")   # 40% WR, top damage + kills
+        winner = self._player("Winner")   # 70% WR
+        steady = self._player("Steady")   # 55% WR
+        even = self._player("Even")       # exactly 50% — kept
+        self._event(farmer, SHIMA, battles=30, wins=12,
+                    damage=4_000_000, frags=75)
+        self._event(winner, SHIMA, battles=30, wins=21,
+                    damage=1_500_000, frags=30)
+        self._event(steady, SHIMA, battles=20, wins=11,
+                    damage=1_000_000, frags=20)
+        self._event(even, SHIMA, battles=20, wins=10,
+                    damage=1_000_000, frags=20)
+
+        # _run uses BADGE_ENV, which omits SHIP_BADGE_MIN_WIN_RATE → code default 50.
+        self._run("na")
+
+        ranked_ids = set(
+            ShipTopPlayerSnapshot.objects.filter(ship_id=SHIMA)
+            .values_list("player_id", flat=True))
+        self.assertNotIn(farmer.id, ranked_ids)  # gated out despite top damage
+        self.assertEqual(ranked_ids, {winner.id, steady.id, even.id})
+
+    def test_win_rate_gate_disabled_admits_sub_threshold_player(self):
+        # With the gate disabled (0) the same sub-50% farmer is admitted on
+        # composite score — confirming the gate, not some other filter, removes it.
+        farmer = self._player("Farmer")
+        winner = self._player("Winner")
+        steady = self._player("Steady")
+        self._event(farmer, SHIMA, battles=30, wins=12,
+                    damage=4_000_000, frags=75)
+        self._event(winner, SHIMA, battles=30, wins=21,
+                    damage=1_500_000, frags=30)
+        self._event(steady, SHIMA, battles=20, wins=11,
+                    damage=1_000_000, frags=20)
+
+        today = timezone.now().date()
+        with mock.patch.dict("os.environ",
+                             {**BADGE_ENV, "SHIP_BADGE_MIN_WIN_RATE": "0"},
+                             clear=False):
+            compute_ship_top_player_snapshot(
+                realm="na",
+                window_start=today - timedelta(days=SHIP_LEADERBOARD_WINDOW_DAYS),
+                window_end=today + timedelta(days=1),
+                captured_on=today,
+            )
+
+        self.assertTrue(
+            ShipTopPlayerSnapshot.objects.filter(
+                ship_id=SHIMA, player=farmer).exists())
+
     def test_population_guard_suppresses_sparse_ship(self):
         # Only 2 qualifiers for Zao (< population floor of 3) → not ranked.
         for i in range(2):

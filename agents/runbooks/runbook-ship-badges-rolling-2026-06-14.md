@@ -51,6 +51,25 @@ the `ShipAward` model and Ship Honors panel no longer exist.
   purged, so the table is empty and the drop is low-risk.
 - **Window length: 14 days, nightly** (chosen 2026-06-14 for gradual/stable turnover
   and unchanged ship coverage). Tunable later via `SHIP_LEADERBOARD_WINDOW_DAYS`.
+- **Win-rate matters more (2026-06-29).** Two coupled changes after a 48.4%-WR player
+  (essential_HT) ranked #7 on Hildebrand on the strength of elite damage + kills:
+  - Composite weights raised **0.50/0.35/0.15 → 0.60/0.25/0.15**
+    (`SHIP_BADGE_WEIGHT_WINS`/`_DAMAGE`/`_KILLS`). The old split let damage(.35)+kills(.15)
+    = .50 fully offset win rate's .50, so a top-of-pool farmer could cancel a
+    bottom-of-pool win rate.
+  - New **hard win-rate gate** `SHIP_BADGE_MIN_WIN_RATE` (default **50**): after scoring,
+    players below this raw win rate are trimmed from the board entirely, regardless of
+    damage/kills. Applied to the **output only** — the population guard still counts the
+    full qualifying pool first, so a thin ship is **never delisted** by the gate; only its
+    sub-50% rows drop. Set 0 to disable.
+  - **Modeled against the live NA pool** (147 ships, 24,359 rows) before shipping: the
+    weight bump alone moved essential_HT #7→#10 and cut sub-50% ranked rows 2.8%→2.1% with
+    zero coverage loss; weights + gate removed him entirely and drove sub-50% rows to 0,
+    trimming only 26 of 2,205 rows, with **0** ships delisted and **0** boards dropping
+    below 3-deep (badges intact). The rejected alternative — raising the battle floor +
+    prior (`SHIP_BADGE_MIN_BATTLES`/`_PRIOR_BATTLES`) — is a *sample-reliability* knob, not
+    a win-rate knob: it removed essential_HT only by delisting his whole (thinned) ship and
+    cost 20–30 ships of coverage, so it was not used.
 
 ## Prod sizing (the aggregation, measured 2026-06-14)
 

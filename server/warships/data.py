@@ -6104,7 +6104,10 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     a **volume-aware composite score** — the win proportion shrunk toward 50% by
     `SHIP_BADGE_PRIOR_BATTLES` pseudo-battles (empirical-Bayes), tiebreak raw
     battles — so a short hot streak doesn't outrank a high-volume player; the
-    stored/displayed `win_rate` is still the raw rate. For each ranked ship it
+    stored/displayed `win_rate` is still the raw rate. Players below
+    `SHIP_BADGE_MIN_WIN_RATE` (default 50) are then trimmed from the board
+    entirely (the population guard runs on the full pool first, so a thin ship is
+    never delisted by the gate). For each ranked ship it
     writes the top `SHIP_BADGE_LIST_SIZE` players as `ShipTopPlayerSnapshot`
     rows (ranks 1..N) — the ship-page leaderboard — of which ranks
     1..`SHIP_BADGE_TOP_N` (3) are the gold/silver/bronze profile badges a player
@@ -6166,11 +6169,23 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     # tempered by `prior_battles` pseudo-games so a small sample regresses toward
     # a baseline (win rate → `prior_wr`; damage/kills → the ship's pool mean).
     # High-volume players keep ~their true rate, so activity is never penalized.
-    # Wins-led default (0.50/0.35/0.15): win rate stays dominant, damage a strong
-    # secondary, kills a light tertiary (it overlaps damage).
-    w_wins = float(os.getenv('SHIP_BADGE_WEIGHT_WINS', '0.5'))
-    w_damage = float(os.getenv('SHIP_BADGE_WEIGHT_DAMAGE', '0.35'))
+    # Wins-led default (0.60/0.25/0.15): win rate dominates, damage a secondary,
+    # kills a light tertiary (it overlaps damage). Raised from 0.50/0.35/0.15 on
+    # 2026-06-29 because damage(.35)+kills(.15) summed to .50 — equal to win rate —
+    # so a top-of-pool damage farmer could fully offset a bottom-of-pool win rate
+    # (the essential_HT case). Modeled against the live NA pool: this nudge alone
+    # demoted that case #7→#10 and cut sub-50% ranked rows 2.8%→2.1% with no
+    # coverage loss. Paired with the `min_win_rate` hard gate below.
+    w_wins = float(os.getenv('SHIP_BADGE_WEIGHT_WINS', '0.6'))
+    w_damage = float(os.getenv('SHIP_BADGE_WEIGHT_DAMAGE', '0.25'))
     w_kills = float(os.getenv('SHIP_BADGE_WEIGHT_KILLS', '0.15'))
+    # Hard win-rate gate: a player whose raw win rate is below this is dropped from
+    # the ranked board entirely, regardless of damage/kills — so a damage farmer on
+    # a losing record never appears on a ship's leaderboard or wears a badge. The
+    # population guard below still counts the FULL qualifying pool, so a thin ship
+    # is never delisted by the gate; only its sub-gate rows are trimmed from the
+    # output. Default 50 (break-even kept; <50 cut). Set 0 to disable.
+    min_win_rate = float(os.getenv('SHIP_BADGE_MIN_WIN_RATE', '50'))
 
     realm = (realm or DEFAULT_REALM).lower().strip()
     # Default to the trailing SHIP_LEADERBOARD_WINDOW_DAYS ending today; callers
@@ -6286,7 +6301,13 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
         for entry, zw, zd, zk in zip(pool, z_wr, z_dpb, z_kpb):
             entry['_score'] = w_wins * zw + w_damage * zd + w_kills * zk
         pool.sort(key=lambda e: (-e['_score'], -(e['battles'] or 0)))
-        for rank, entry in enumerate(pool[:list_size], start=1):
+        # Hard win-rate gate on the OUTPUT only: trim sub-`min_win_rate` players
+        # from the board after scoring. The population guard above already passed
+        # on the full qualifying pool, so the ship stays ranked — its board simply
+        # excludes losing records, no matter how high their damage.
+        ranked = ([e for e in pool if (e['win_rate'] or 0) >= min_win_rate]
+                  if min_win_rate > 0 else pool)
+        for rank, entry in enumerate(ranked[:list_size], start=1):
             snapshot_rows.append(ShipTopPlayerSnapshot(
                 captured_on=captured_on,
                 realm=realm,
