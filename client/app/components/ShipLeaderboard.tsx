@@ -19,6 +19,7 @@ import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useRealm } from '../context/RealmContext';
 import { shipClass } from '../lib/shipIdentity';
 import ShipToolLink from './ShipToolLink';
+import TopShipIcon from './TopShipIcon';
 import { buildPlayerPath } from '../lib/entityRoutes';
 import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
@@ -714,6 +715,12 @@ const ShipBoard: React.FC<{
 }> = ({ realm, fallbackName, board, loading, error, onClear, onSortChange }) => {
     const ship = board?.ship;
     const players = useMemo(() => board?.players ?? [], [board]);
+    // Top-3 medal, mirroring the full /ship page (ShipRouteView): the same
+    // gold/silver/bronze TopShipIcon next to the player name. The drill-down shows
+    // the identical leaderboard, so the podium treatment stays visually identical.
+    const shipName = ship?.name ?? fallbackName;
+    const medal = (rank: number) =>
+        rank <= 3 ? <TopShipIcon rank={rank} shipName={shipName} tier={ship?.tier} realm={realm} size="podium" /> : null;
     const { sort, onSort } = useTableSort<LeaderboardPlayer>(['player_name'], onSortChange);
     // Player click-through analytics. ship_id + rank are low-cardinality and
     // tell us which standings drive profile visits; player name is omitted to
@@ -792,9 +799,12 @@ const ShipBoard: React.FC<{
                                     <tr key={p.rank} className="transition-colors hover:bg-[var(--bg-hover)]">
                                         <td className="py-2 pl-2 pr-3 tabular-nums text-[var(--text-muted)]">{p.rank}</td>
                                         <td className="py-2 pr-8">
-                                            <Link href={buildPlayerPath(p.player_name, realm)} className={PLAYER_LINK} onClick={() => trackPlayerClick(p.rank)}>
-                                                {p.player_name}
-                                            </Link>
+                                            <span className="inline-flex items-center gap-2">
+                                                <Link href={buildPlayerPath(p.player_name, realm)} className={PLAYER_LINK} onClick={() => trackPlayerClick(p.rank)}>
+                                                    {p.player_name}
+                                                </Link>
+                                                {medal(p.rank)}
+                                            </span>
                                         </td>
                                         <td className="py-2 pr-8 text-right tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>{p.win_rate.toFixed(1)}%</td>
                                         <td className="py-2 pr-8 text-right tabular-nums text-[var(--text-primary)]">{p.battles.toLocaleString()}</td>
@@ -815,6 +825,7 @@ const ShipBoard: React.FC<{
                                             <Link href={buildPlayerPath(p.player_name, realm)} className={`${PLAYER_LINK} truncate`} onClick={() => trackPlayerClick(p.rank)}>
                                                 {p.player_name}
                                             </Link>
+                                            {medal(p.rank)}
                                         </span>
                                         <span className="shrink-0 tabular-nums font-semibold" style={{ color: wrColor(p.win_rate) }}>{p.win_rate.toFixed(1)}%</span>
                                     </div>
