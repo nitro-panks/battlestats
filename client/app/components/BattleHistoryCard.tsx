@@ -240,145 +240,6 @@ const SortableTh: React.FC<SortableThProps> = ({
     );
 };
 
-interface WrCellProps {
-    periodWinRate: number;
-    lifetimeWinRate: number | null | undefined;
-    deltaWinRate: number | null | undefined;
-    isNewShip?: boolean;
-    isRankedOnlyPeriod?: boolean;
-    stacked?: boolean;
-}
-
-const WrCell: React.FC<WrCellProps> = ({
-    periodWinRate, lifetimeWinRate, deltaWinRate,
-    isNewShip = false, isRankedOnlyPeriod = false, stacked = false,
-}) => {
-    const tone = deltaWinRate == null
-        ? 'var(--text-muted)'
-        : deltaWinRate > 0
-            ? '#74c476'
-            : deltaWinRate < 0
-                ? '#a50f15'
-                : 'var(--text-muted)';
-    const signedDelta = deltaWinRate == null
-        ? null
-        : `${deltaWinRate > 0 ? '+' : ''}${deltaWinRate.toFixed(1)}%`;
-    const lifetimeMissing = lifetimeWinRate == null;
-    const tooltip = lifetimeMissing
-        ? `Period ${formatPercent(periodWinRate)} · Lifetime N/A (never played)`
-        : `Period ${formatPercent(periodWinRate)} · Lifetime ${formatPercent(lifetimeWinRate)}${signedDelta != null ? ` (Δ${signedDelta})` : ''}`;
-    const periodEl = (
-        <span style={{ color: wrColor(periodWinRate) }} className="font-semibold">
-            {formatPercent(periodWinRate)}
-        </span>
-    );
-    const lifetimeEl = !lifetimeMissing ? (
-        <span className="text-xs" style={{ color: wrColor(lifetimeWinRate) }}>
-            {formatPercent(lifetimeWinRate)}
-        </span>
-    ) : (
-        <span className="text-xs text-[var(--text-muted)]">N/A</span>
-    );
-    const deltaEl = signedDelta != null ? (
-        <span className="text-xs font-medium" style={{ color: tone }}>
-            Δ{signedDelta}
-        </span>
-    ) : isNewShip ? (
-        <span
-            className="text-[10px] font-bold uppercase tracking-wider rounded-sm px-1.5 py-[1px]"
-            style={{
-                color: 'var(--accent-mid)',
-                backgroundColor: 'var(--accent-faint)',
-            }}
-            title="First-time random battles in this ship — no prior state to compute a delta against."
-        >
-            NEW
-        </span>
-    ) : isRankedOnlyPeriod ? (
-        <span
-            className="text-[10px] font-bold uppercase tracking-wider rounded-sm px-1.5 py-[1px]"
-            style={{
-                color: 'var(--text-muted)',
-                backgroundColor: 'var(--accent-faint)',
-            }}
-            title="All this ship's battles in the window were ranked — no random lifetime to anchor a delta against."
-        >
-            RANKED
-        </span>
-    ) : (
-        <span className="text-xs text-[var(--text-muted)]">—</span>
-    );
-
-    // Render shapes:
-    //  * NEW ship, no priors        → <period%> / <NEW badge>
-    //  * NEW ship, sparse priors    → <period%> / <lifetime%> / NEW
-    //  * Ranked-only-in-period      → <period%> / <RANKED badge>
-    //  * Other (no baseline at all) → <period%>
-    //  * Default                    → <period%> / <lifetime%> / Δsigned
-    const newWithoutLifetime = lifetimeMissing && isNewShip;
-    const rankedOnlyBadge = lifetimeMissing && !isNewShip && isRankedOnlyPeriod;
-    const periodOnlyCollapse = lifetimeMissing && signedDelta == null
-        && !isNewShip && !isRankedOnlyPeriod;
-
-    if (stacked) {
-        if (periodOnlyCollapse) {
-            return (
-                <span className="tabular-nums flex flex-col items-start" title={tooltip}>
-                    {periodEl}
-                </span>
-            );
-        }
-        if (newWithoutLifetime || rankedOnlyBadge) {
-            return (
-                <span className="tabular-nums flex flex-col items-start" title={tooltip}>
-                    {periodEl}
-                    {deltaEl}
-                </span>
-            );
-        }
-        return (
-            <span className="tabular-nums flex flex-col items-start" title={tooltip}>
-                {periodEl}
-                <span className="inline-grid grid-cols-[3rem_4rem] gap-2 items-baseline whitespace-nowrap">
-                    <span className="text-left">{lifetimeEl}</span>
-                    <span className="text-left">{deltaEl}</span>
-                </span>
-            </span>
-        );
-    }
-    if (periodOnlyCollapse) {
-        return (
-            <span
-                className="tabular-nums inline-grid grid-cols-[3.5rem] items-baseline whitespace-nowrap"
-                title={tooltip}
-            >
-                <span className="text-right">{periodEl}</span>
-            </span>
-        );
-    }
-    if (newWithoutLifetime || rankedOnlyBadge) {
-        return (
-            <span
-                className="tabular-nums inline-grid grid-cols-[3.5rem_4rem] gap-2 items-baseline whitespace-nowrap"
-                title={tooltip}
-            >
-                <span className="text-right">{periodEl}</span>
-                <span className="text-right">{deltaEl}</span>
-            </span>
-        );
-    }
-    return (
-        <span
-            className="tabular-nums inline-grid grid-cols-[3.5rem_3rem_4rem] gap-2 items-baseline whitespace-nowrap"
-            title={tooltip}
-        >
-            <span className="text-right">{periodEl}</span>
-            <span className="text-right">{lifetimeEl}</span>
-            <span className="text-right">{deltaEl}</span>
-        </span>
-    );
-};
-
 // Session (period) win rate — the left of the two split WR columns. Sortable
 // by `win_rate`. Just the period %, colored by the WG community thresholds.
 const SessionWrCell: React.FC<{ periodWinRate: number }> = ({ periodWinRate }) => (
@@ -1109,23 +970,80 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             )}
             {hasBattles && (() => {
                 const kdr = totals!.battles > 0 ? totals!.frags / totals!.battles : 0;
+                // Split the old single "Win rate" tile into two clearly-headed
+                // columns — Session WR (this window) and Overall WR (lifetime) —
+                // mirroring the table's WR and Overall WR columns so the totals row
+                // reads the same way as the rows it summarizes.
+                const lifetimeWr = totals!.lifetime_win_rate;
+                const deltaWr = totals!.delta_win_rate;
+                const deltaTone = deltaWr == null
+                    ? 'var(--text-muted)'
+                    : deltaWr > 0 ? '#74c476' : deltaWr < 0 ? '#a50f15' : 'var(--text-muted)';
+                // Three logical groups, snug within each and gutter-separated from
+                // the next: count (Battles) · the WR cluster · the combat cluster.
+                // Mobile keeps a flat 2-col grid — the `contents` wrappers collapse so
+                // all seven tiles flow into it; at sm they become flex clusters.
                 return (
-                    <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5 sm:items-end">
+                    <div className="mt-4 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:gap-x-4 xl:gap-x-[37px]">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
                         </div>
+                        {/* Hairline section rules: flex items, so the 37px gap falls on
+                            each side → ~75px between groups. Hidden on the mobile grid. */}
+                        <div className="hidden w-px self-stretch bg-[var(--accent-faint)] sm:block" aria-hidden="true" />
+                        <div className="contents sm:flex sm:items-end sm:gap-x-4">
                         <div>
-                            <div className="text-xs text-[var(--text-muted)]">Win rate</div>
-                            <div className="text-lg">
-                                <WrCell
-                                    periodWinRate={totals!.win_rate}
-                                    lifetimeWinRate={totals!.lifetime_win_rate}
-                                    deltaWinRate={totals!.delta_win_rate}
-                                    stacked
-                                />
+                            <div className="text-xs text-[var(--text-muted)]">Window WR</div>
+                            <div
+                                className="text-lg font-semibold tabular-nums"
+                                style={{ color: wrColor(totals!.win_rate) }}
+                                title={`Win rate over this window — ${formatPercent(totals!.win_rate)}`}
+                            >
+                                {formatPercent(totals!.win_rate)}
                             </div>
                         </div>
+                        <div>
+                            <div className="text-xs text-[var(--text-muted)]">Overall WR</div>
+                            {lifetimeWr != null ? (
+                                <div
+                                    className="text-lg font-semibold tabular-nums"
+                                    style={{ color: wrColor(lifetimeWr) }}
+                                    title={`Lifetime win rate ${formatPercent(lifetimeWr)}`}
+                                >
+                                    {formatPercent(lifetimeWr)}
+                                </div>
+                            ) : (
+                                <div
+                                    className="text-lg font-semibold text-[var(--text-muted)]"
+                                    title="No lifetime baseline for this mode"
+                                >
+                                    N/A
+                                </div>
+                            )}
+                        </div>
+                        <div>
+                            <div className="text-xs text-[var(--text-muted)]">WR Δ</div>
+                            {deltaWr != null ? (
+                                <div
+                                    className="text-lg font-semibold tabular-nums"
+                                    style={{ color: deltaTone }}
+                                    title={`Session win rate ${deltaWr > 0 ? 'above' : deltaWr < 0 ? 'below' : 'even with'} lifetime by ${Math.abs(deltaWr).toFixed(1)}%`}
+                                >
+                                    {deltaWr > 0 ? '+' : ''}{deltaWr.toFixed(1)}%
+                                </div>
+                            ) : (
+                                <div
+                                    className="text-lg font-semibold text-[var(--text-muted)]"
+                                    title="No lifetime baseline to compare against"
+                                >
+                                    —
+                                </div>
+                            )}
+                        </div>
+                        </div>
+                        <div className="hidden w-px self-stretch bg-[var(--accent-faint)] sm:block" aria-hidden="true" />
+                        <div className="contents sm:flex sm:items-end sm:gap-x-4">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
@@ -1137,6 +1055,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Avg KDR</div>
                             <div className="text-lg font-semibold text-[var(--text-strong)]">{kdr.toFixed(2)}</div>
+                        </div>
                         </div>
                     </div>
                 );
@@ -1166,8 +1085,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             <SortableTh sortKey="ship_tier" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship tier (1–10, with the lowest tier ships being the smallest, less powerful, with the highest tier ships being the largest, most powerful). Click to sort by tier.">Tier</SortableTh>
                             <SortableTh sortKey="ship_type" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Hull type — DD = Destroyer, CL/CA = Cruiser, BB = Battleship, CV = Carrier, SS = Submarine. Click to sort by type.">Type</SortableTh>
                             <SortableTh sortKey="battles" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Battles played on this ship in the selected period. Click to sort by volume.">#</SortableTh>
-                            <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Session win rate — wins this period on this ship. Color codes use Wargaming community thresholds. Click to sort by session WR.">WR/S</SortableTh>
-                            <SortableTh sortKey="lifetime_win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Overall (lifetime) win rate and its delta (Δ) vs this session. Click to sort by overall WR.">WR/O</SortableTh>
+                            <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Win rate over the selected window on this ship. Color codes use Wargaming community thresholds. Click to sort by window WR.">WR</SortableTh>
+                            <SortableTh sortKey="lifetime_win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Overall (lifetime) win rate and its delta (Δ) vs this window. Click to sort by overall WR.">Overall WR</SortableTh>
                             <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average damage dealt per battle on this ship in the selected period. Click to sort.">Avg dmg</SortableTh>
                             <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average kills per battle this period (frags ÷ battles). Hover a row to see raw frag + battle counts. Click to sort.">Avg KDR</SortableTh>
                         </tr>
