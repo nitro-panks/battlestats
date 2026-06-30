@@ -201,7 +201,7 @@ describe('BattleHistoryCard', () => {
         expect(titleFor(25)).not.toMatch(/bar capped/);
     });
 
-    test('splits Win Rate into sortable WR/S (session) and WR/O (overall + delta) columns', async () => {
+    test('splits Win Rate into sortable WR (window) and Overall WR (overall + delta) columns', async () => {
         resolveWith(buildPayload({
             by_ship: [
                 {
@@ -226,8 +226,10 @@ describe('BattleHistoryCard', () => {
         });
 
         // The single "Win Rate" column is now two distinct sortable columns.
-        expect(screen.getByRole('columnheader', { name: /WR\/S/ })).toBeInTheDocument();
-        expect(screen.getByRole('columnheader', { name: /WR\/O/ })).toBeInTheDocument();
+        // ("Overall WR" also appears in the totals bar, so scope these to the
+        // table via the columnheader role rather than getByText.)
+        expect(screen.getByRole('columnheader', { name: 'WR' })).toBeInTheDocument();
+        expect(screen.getByRole('columnheader', { name: 'Overall WR' })).toBeInTheDocument();
         expect(screen.queryByRole('columnheader', { name: /^Win Rate$/i })).not.toBeInTheDocument();
 
         // Session WR (WR/S), overall WR (WR/O), and the delta all render.
@@ -239,14 +241,14 @@ describe('BattleHistoryCard', () => {
         // Default sort is battles desc → Yamato (6) before Dalian (2).
         expect(screen.getAllByRole('row')[1].textContent).toContain('Yamato');
 
-        // Sort by overall WR (WR/O), desc → Dalian (60.0) above Yamato (55.0).
-        fireEvent.click(screen.getByText('WR/O'));
+        // Sort by overall WR, desc → Dalian (60.0) above Yamato (55.0).
+        fireEvent.click(screen.getByRole('columnheader', { name: 'Overall WR' }));
         let rows = screen.getAllByRole('row');
         expect(rows[1].textContent).toContain('Dalian');
         expect(rows[2].textContent).toContain('Yamato');
 
-        // Session WR (WR/S) sorts independently, desc → Yamato (66.7) above Dalian (50.0).
-        fireEvent.click(screen.getByText('WR/S'));
+        // Window WR sorts independently, desc → Yamato (66.7) above Dalian (50.0).
+        fireEvent.click(screen.getByRole('columnheader', { name: 'WR' }));
         rows = screen.getAllByRole('row');
         expect(rows[1].textContent).toContain('Yamato');
         expect(rows[2].textContent).toContain('Dalian');
