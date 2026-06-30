@@ -3,7 +3,9 @@
 The `/player/[playerName]` route. Two persistent regions under the root-layout chrome: a
 **clan rail** that lives in the route layout and stays mounted across a soft-nav player swap,
 and a **keyed main well** (`PlayerRouteView`, remounted per player) holding the player header,
-the ship-top banner, and the seven-tab insights deck.
+the ship-top banner, and the seven-tab insights deck. The Activity tab's `BattleHistoryCard`
+hosts one nested drilldown — `ShipStats`, a per-ship combat profile toggled by a table-row
+click — which is its own component, not part of the card.
 
 Boxes are React components; `file:line` annotations point at the part worth reading. The root
 chrome (header search, theme/realm selectors, footer) is detailed in
@@ -42,6 +44,7 @@ flowchart TD
     subgraph TABDECK["Insights tabs — dynamic imports, fetch-on-activate"]
         direction TB
         T_ACT["Activity → BattleHistoryCard<br/>GET /api/player/name/battle-history/ (BattleHistoryCard.tsx:100)"]
+        T_SHIPSTATS["ShipStats (per-ship combat profile)<br/>app/components/ShipStats.tsx<br/>GET /api/player/name/ship/shipId/combat-stats"]
         T_SHIPS["Ships → RandomsSVG<br/>GET /api/fetch/randoms_data/id/?all=true (RandomsSVG.tsx:325)"]
         T_PROFILE["Profile → TierTypeHeatmapSVG / TypeSVG / TierSVG<br/>GET /api/fetch/player_correlation/tier_type/id/ (Tabs:333)"]
         T_RANKED["Ranked → RankedWRBattlesHeatmapSVG + RankedSeasons<br/>GET player_correlation/ranked_wr_battles/id/ + ranked_data/id/ (Tabs:267/274)"]
@@ -75,6 +78,7 @@ flowchart TD
     TABS --> T_POP
 
     %% ---- nav + data edges ----
+    T_ACT -- "ship-row click → toggle drilldown<br/>(BattleHistoryCard.tsx:1147; 2nd click on same ship hides)" --> T_SHIPSTATS
     CLANMEMBERS -- "member click → soft-nav swaps well only<br/>rail stays mounted (page.tsx:46 key)" --> PAGE
     CLANSVG -. "clan name → /clan/slug" .-> CLANPAGE["/clan/slug page<br/>app/clan/..."]
     HEADER -. "clan tag → /clan/slug" .-> CLANPAGE
@@ -83,6 +87,7 @@ flowchart TD
     ROUTEVIEW --> FETCH
     CLANHOOK --> FETCH
     T_ACT --> FETCH
+    T_SHIPSTATS --> FETCH
     T_SHIPS --> FETCH
     T_PROFILE --> FETCH
     T_RANKED --> FETCH
@@ -93,7 +98,7 @@ flowchart TD
 
 | Tab (`InsightsTabId`) | Panel components | Endpoint(s) | Notes |
 |---|---|---|---|
-| `activity` | `BattleHistoryCard` | `GET /api/player/<name>/battle-history/` | default tab; day/week/month/year windows resolve to the daily layer |
+| `activity` | `BattleHistoryCard` → `ShipStats` (row drilldown) | `GET /api/player/<name>/battle-history/` · `GET /api/player/<name>/ship/<shipId>/combat-stats` | default tab; day/week/month/year windows resolve to the daily layer. A ship-row click toggles `ShipStats` below the rollup |
 | `ships` | `RandomsSVG` | `GET /api/fetch/randoms_data/<id>/?all=true` | per-ship random-battle aggregates |
 | `profile` | `TierTypeHeatmapSVG`, `TypeSVG`, `TierSVG` | `GET /api/fetch/player_correlation/tier_type/<id>/` | one payload derives all three charts |
 | `ranked` | `RankedWRBattlesHeatmapSVG`, `RankedSeasons` | `…/ranked_wr_battles/<id>/` + `…/ranked_data/<id>/` | cold `ranked_data` serves `[]` + `X-Ranked-Pending` |
@@ -118,3 +123,12 @@ flowchart TD
 - **Badge-dispatch is inline, on purpose.** Which classification icons the header tray
   renders, and in what order, is inlined at `PlayerDetail.tsx:263-270` (the clan-members row
   has its own order in `ClanMembers.tsx`) — the orders genuinely differ per surface.
+- **Activity-tab ship drilldown.** `ShipStats` (`app/components/ShipStats.tsx`) is a separate
+  component the Activity tab's `BattleHistoryCard` hosts, not part of the card. A ship-row
+  click sets `selectedShip` and renders the panel between the stats rollup and the ships table
+  (`BattleHistoryCard.tsx:1147`); a second click on the same ship hides it. It fetches
+  `GET /api/player/<name>/ship/<shipId>/combat-stats` and charts the player's **career**
+  per-ship rate (gunnery / torpedo / secondary accuracy, spotting, objective play, survival)
+  against the ship's **30-day population average**, with an All / Top 50% / Top 25% skill
+  bracket toggle. Role-irrelevant metric clusters are omitted server-side. Origin:
+  `runbook-battle-history-data-operationalization-2026-06-16.md`.
