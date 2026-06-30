@@ -431,6 +431,40 @@ describe('ShipLeaderboard', () => {
         });
     });
 
+    describe('drill-down top-3 medals', () => {
+        // A four-player board so we can assert the medal is worn by ranks 1–3 and
+        // not by rank 4 — mirroring the /ship page (ShipRouteView) podium.
+        const medalBoardFixture = {
+            realm: 'na',
+            ship: { ship_id: 111, name: 'Shimakaze', tier: 10, ship_type: 'Destroyer', nation: 'japan', is_premium: false },
+            players: [
+                { rank: 1, player_name: 'GoldPlayer', win_rate: 65.3, battles: 95, avg_damage: 68227, kills_per_battle: 1.07 },
+                { rank: 2, player_name: 'SilverPlayer', win_rate: 62.1, battles: 120, avg_damage: 61020, kills_per_battle: 0.98 },
+                { rank: 3, player_name: 'BronzePlayer', win_rate: 60.4, battles: 210, avg_damage: 57110, kills_per_battle: 0.91 },
+                { rank: 4, player_name: 'NoMedalPlayer', win_rate: 58.0, battles: 305, avg_damage: 54000, kills_per_battle: 0.83 },
+            ],
+        };
+        const routeMedalBoard = (url: string) => {
+            if (url.includes('/leaderboard')) return Promise.resolve({ data: medalBoardFixture } as never);
+            return routeFetch(url);
+        };
+
+        it('renders a gold/silver/bronze medal beside the top-3 players, none for rank 4', async () => {
+            mockFetch.mockImplementation((url: string) => routeMedalBoard(url));
+            render(<ShipLeaderboard />);
+            await clickShip('Shimakaze');
+            await screen.findAllByText('GoldPlayer');
+
+            // The medal is a TopShipIcon whose aria-label names the held rank. Names
+            // render twice (desktop table + mobile cards), so each label appears 2×.
+            expect(screen.getAllByLabelText(/Currently #1 Shimakaze/).length).toBeGreaterThan(0);
+            expect(screen.getAllByLabelText(/Currently #2 Shimakaze/).length).toBeGreaterThan(0);
+            expect(screen.getAllByLabelText(/Currently #3 Shimakaze/).length).toBeGreaterThan(0);
+            // Rank 4 wears no medal.
+            expect(screen.queryByLabelText(/Currently #4 Shimakaze/)).toBeNull();
+        });
+    });
+
     describe('WR-percentile filter', () => {
         // A distinct top-25% fixture so we can assert the list actually swaps to
         // the filtered numbers (Gearing's WR climbs, battle count drops).
