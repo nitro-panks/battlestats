@@ -178,11 +178,32 @@ function classSharePct(battles: number, total: number | undefined): string | nul
     return `${pct.toFixed(1)}%`;
 }
 
+// Sort persistence: when a `storageKey` is supplied the chosen column/dir is
+// remembered in localStorage so a visitor's preferred default (e.g. Avg dmg
+// instead of the server's win-rate order) survives reloads. The persisted value
+// is hydrated in an effect — not the useState initializer — because localStorage
+// is client-only and reading it during the initial render would desync SSR/CSR.
 function useTableSort<T>(
     textKeys: ReadonlyArray<keyof T>,
     onChange?: (key: keyof T, dir: SortDir) => void,
+    storageKey?: string,
 ) {
     const [sort, setSort] = useState<{ key: keyof T; dir: SortDir } | null>(null);
+
+    useEffect(() => {
+        if (!storageKey || typeof window === 'undefined') return;
+        try {
+            const raw = window.localStorage.getItem(storageKey);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.key && (parsed.dir === 'asc' || parsed.dir === 'desc')) {
+                setSort({ key: parsed.key as keyof T, dir: parsed.dir });
+            }
+        } catch {
+            /* ignore a malformed persisted sort — fall back to natural order */
+        }
+    }, [storageKey]);
+
     const onSort = (key: keyof T) => {
         // Compute the next sort from the current render's value (not inside the
         // setState updater) so analytics fire exactly once, never doubled.
@@ -192,9 +213,19 @@ function useTableSort<T>(
                 : { key, dir: textKeys.includes(key) ? 'asc' : 'desc' };
         setSort(next);
         onChange?.(next.key, next.dir);
+        if (storageKey && typeof window !== 'undefined') {
+            try {
+                window.localStorage.setItem(storageKey, JSON.stringify(next));
+            } catch {
+                /* private mode / quota — persistence is best-effort */
+            }
+        }
     };
     return { sort, onSort };
 }
+
+// localStorage key for the inline ship-list column sort (persisted per browser).
+const SHIP_LIST_SORT_STORAGE_KEY = 'battlestats:ship-list:sort';
 
 const SortButton: React.FC<{ label: string; active: boolean; dir: SortDir; onClick: () => void }> = ({
     label,
@@ -590,7 +621,7 @@ const ShipList: React.FC<{
     onOpen: (s: ListShip) => void;
     onSortChange: (key: keyof ListShip, dir: SortDir) => void;
 }> = ({ ships, totalBattles, loading, error, pending, wrPct, tierTypeLabel, onOpen, onSortChange }) => {
-    const { sort, onSort } = useTableSort<ListShip>(['ship_name'], onSortChange);
+    const { sort, onSort } = useTableSort<ListShip>(['ship_name'], onSortChange, SHIP_LIST_SORT_STORAGE_KEY);
     const sortedShips = useMemo(
         () => (ships && sort ? sortRows(ships, sort.key, sort.dir) : ships),
         [ships, sort],

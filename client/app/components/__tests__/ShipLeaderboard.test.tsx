@@ -431,6 +431,42 @@ describe('ShipLeaderboard', () => {
         });
     });
 
+    describe('ship-list sort persistence', () => {
+        const STORAGE_KEY = 'battlestats:ship-list:sort';
+
+        const rowOrder = () =>
+            screen
+                .getAllByRole('button', { name: /Gearing|Shimakaze/ })
+                .map((b) => b.textContent);
+
+        it('persists the chosen ship-list column sort to localStorage', async () => {
+            render(<ShipLeaderboard />);
+            selectTierAndType('DD');
+            await screen.findAllByText('Gearing');
+
+            // Battles desc reorders Shimakaze (20310) ahead of Gearing (11044) —
+            // distinct from the payload's natural win-rate order (Gearing first).
+            fireEvent.click(screen.getAllByRole('button', { name: /Battles/ })[0]);
+            expect(rowOrder()[0]).toContain('Shimakaze');
+            expect(JSON.parse(localStorage.getItem(STORAGE_KEY) as string)).toEqual({
+                key: 'battles',
+                dir: 'desc',
+            });
+        });
+
+        it('restores the persisted sort on a fresh mount instead of the server order', async () => {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ key: 'battles', dir: 'desc' }));
+
+            render(<ShipLeaderboard />);
+            selectTierAndType('DD');
+            await screen.findAllByText('Gearing');
+
+            // Hydrated from storage: Shimakaze leads on battles, not the WR-desc
+            // payload order (which would put Gearing first).
+            await waitFor(() => expect(rowOrder()[0]).toContain('Shimakaze'));
+        });
+    });
+
     describe('drill-down top-3 medals', () => {
         // A four-player board so we can assert the medal is worn by ranks 1–3 and
         // not by rank 4 — mirroring the /ship page (ShipRouteView) podium.
