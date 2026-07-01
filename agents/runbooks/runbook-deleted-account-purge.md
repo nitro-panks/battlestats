@@ -1,8 +1,8 @@
 # Runbook: Deleted Account Purge (GDPR / WG Account Deletion Request)
 
 **Created**: 2026-03-30
-**Last executed**: 2026-05-30 (third batch — see "Execution Results" section)
-**Status**: Recurring — tooling deployed v1.2.13; executed 2026-03-30 (11,839 IDs / 0 found), 2026-04-30 (9,723 IDs / 14 found), and 2026-05-30 (9,729 IDs / 79 found), responses sent to Wargaming after each batch. Expect future batches at irregular cadence.
+**Last executed**: 2026-07-01 (fourth batch — see "Execution Results" section)
+**Status**: Recurring — tooling deployed v1.2.13; executed 2026-03-30 (11,839 IDs / 0 found), 2026-04-30 (9,723 IDs / 14 found), 2026-05-30 (9,729 IDs / 79 found), and 2026-07-01 (9,822 IDs / 85 found), responses sent to Wargaming after each batch. Expect future batches at irregular cadence.
 
 ## Context
 
@@ -262,6 +262,58 @@ ssh root@battlestats.online '/opt/battlestats-server/venv/bin/python /opt/battle
 ```
 
 **Transcript**: `/tmp/purge_transcript_20260530.jsonl` on the droplet (9,730 lines: 9,729 per-account + 1 summary).
+
+---
+
+## Execution Results (2026-07-01)
+
+Source: `deleted_accounts(1).zip` arrived from WG data protection team (email dated 2026-06-30, downloaded 2026-07-01). Same envelope as prior batches (zip -> `accounts.csv` with header `account_id`). The CSV contained 9,823 lines, i.e. 9,822 account IDs plus the header. The zip landed in the Windows Downloads folder (`/mnt/c/Users/augus/Downloads/`, WSL host) rather than directly in the repo — copied into `deleted/` before processing.
+
+**Pre-flight (read-only)**: Ran `purge_deleted_accounts --dry-run` locally against the cloud DB (env loaded from `.env.cloud` + `.env.secrets.cloud` in a sub-shell, DB host verified as the managed-PG cloud host before trusting the output). Predicted 85/9,822 found, 9,822 to blocklist. Followed by a read-only summary query for response context.
+
+Match distribution: 45 EU, 27 ASIA, 13 NA. 4 of 85 matched players were clan members. Battle volume: 52 had <250 lifetime PvP battles, 13 had 250-999, and 20 had >=1,000.
+
+**Execution**: On the droplet:
+```bash
+scp deleted/deleted_accounts_20260701.zip root@battlestats.online:/tmp/deleted_accounts.zip
+ssh root@battlestats.online '/opt/battlestats-server/venv/bin/python /opt/battlestats-server/current/server/manage.py purge_deleted_accounts /tmp/deleted_accounts.zip --transcript /tmp/purge_transcript_20260701.jsonl'
+```
+
+```json
+{
+  "total_ids": 9822,
+  "found_in_db": 85,
+  "not_found": 9737,
+  "total_player_rows": 85,
+  "total_snapshot_rows": 66,
+  "total_achievement_rows": 292,
+  "total_explorer_rows": 46,
+  "total_visit_event_rows": 1,
+  "total_visit_daily_rows": 1,
+  "total_cache_keys_deleted": 0,
+  "total_clan_leaders_nulled": 1,
+  "blocked": 9822
+}
+```
+
+Live run matched the dry-run prediction exactly on `found_in_db` and every row count. 85 players were purged with full cascade: 85 `Player` rows, 66 `Snapshot` rows, 292 `PlayerAchievementStat` rows, 46 `PlayerExplorerSummary` rows, 1 `EntityVisitEvent` row, 1 `EntityVisitDaily` row. 1 clan-leader reference was nulled. Cache invalidation found no live keys, consistent with prior cold-account batches (the dry-run's 680 is the template-count estimate, not actual live keys — see 2026-04-30 lesson #4).
+
+**Post-purge verification**:
+```json
+{
+  "players_remaining": 0,
+  "blocklisted_for_batch": 9822,
+  "visit_events_remaining": 0,
+  "visit_daily_remaining": 0,
+  "clan_leaders_remaining": 0
+}
+```
+
+**Transcript**: `/tmp/purge_transcript_20260701.jsonl` on the droplet (9,823 lines: 9,822 per-account + 1 summary).
+
+### New lesson
+
+The WG deletion-request zip does not always land in the repo's `deleted/` folder automatically — the user may download it via a browser to the Windows Downloads folder when working from WSL (`/mnt/c/Users/<winuser>/Downloads/`). If the zip isn't found in `deleted/`, check there before searching Gmail for the raw attachment; the file may already be on disk under a different username than the WSL Linux user (`ls /mnt/c/Users/*/Downloads/` can silently glob-miss if the Windows username differs from `$USER` — use `find /mnt/c/Users -maxdepth 2 -iname Downloads` to enumerate profiles first).
 
 ---
 
