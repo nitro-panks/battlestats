@@ -600,4 +600,56 @@ describe('ShipLeaderboard', () => {
             expect(screen.getByRole('button', { name: '25%' })).toBeInTheDocument();
         });
     });
+
+    describe('onBucket emit (feeds the landing treemap)', () => {
+        const lastBucket = (fn: jest.Mock) => fn.mock.calls.at(-1)?.[0];
+
+        it('emits the resolved default bucket with its ships once the list lands', async () => {
+            const onBucket = jest.fn();
+            render(<ShipLeaderboard onBucket={onBucket} />);
+            await screen.findAllByText('Gearing');
+            await waitFor(() => expect(lastBucket(onBucket)?.loading).toBe(false));
+
+            const b = lastBucket(onBucket);
+            expect(b.tier).toBe(10);
+            expect(b.type).toBe('Battleship');
+            expect(b.wrPct).toBe(50);
+            expect(b.pending).toBe(false);
+            expect(b.empty).toBe(false);
+            // The treemap is fed the same ships (WR-desc) the table shows.
+            expect(b.ships.map((s: { ship_name: string }) => s.ship_name)).toEqual([
+                'Gearing',
+                'Shimakaze',
+            ]);
+        });
+
+        it('re-emits with the new tier+type when the filter changes', async () => {
+            const onBucket = jest.fn();
+            render(<ShipLeaderboard onBucket={onBucket} />);
+            await waitFor(() => expect(lastBucket(onBucket)?.loading).toBe(false));
+
+            fireEvent.click(screen.getByRole('button', { name: 'DD' }));
+            await waitFor(() => {
+                const b = lastBucket(onBucket);
+                expect(b.type).toBe('Destroyer');
+                expect(b.loading).toBe(false);
+            });
+        });
+
+        it('emits empty:true for the T9 submarine easter-egg bucket (no ships)', async () => {
+            const onBucket = jest.fn();
+            render(<ShipLeaderboard onBucket={onBucket} />);
+            await screen.findAllByText('Gearing');
+
+            fireEvent.click(screen.getByRole('button', { name: '9' }));
+            fireEvent.click(screen.getByRole('button', { name: 'SS' }));
+            await waitFor(() => {
+                const b = lastBucket(onBucket);
+                expect(b.tier).toBe(9);
+                expect(b.type).toBe('Submarine');
+                expect(b.empty).toBe(true);
+                expect(b.ships).toEqual([]);
+            });
+        });
+    });
 });

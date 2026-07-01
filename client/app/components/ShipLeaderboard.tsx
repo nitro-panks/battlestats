@@ -83,7 +83,32 @@ export interface ShipLeaderboardHandle {
     selectShip(sel: { id: number; name: string; tier: Tier; type: ShipType }): void;
 }
 
-interface ListShip {
+// The resolved ship bucket this component emits upward (to PlayerSearch → the
+// treemap) on every filter change / load transition, so the treemap can render
+// the same tier+type (+ WR-percentile) selection without a second fetch. `empty`
+// is true for the T9 sub/CV easter-egg buckets and any resolved-but-shipless
+// bucket, distinct from a still-loading one.
+export interface ShipBucket {
+    tier: Tier | null;
+    type: ShipType | null;
+    wrPct: WrPct;
+    ships: ListShip[];
+    totalBattles: number;
+    windowStart?: string;
+    windowEnd?: string;
+    loading: boolean;
+    pending: boolean;
+    empty: boolean;
+}
+
+interface ShipLeaderboardProps {
+    onBucket?: (bucket: ShipBucket) => void;
+}
+
+// Exported so the landing treemap (RealmTopShipsTreemapSVG) can render the same
+// bucket this component fetches — the treemap is fed the resolved `ListShip[]`
+// via PlayerSearch rather than fetching its own copy.
+export interface ListShip {
     ship_id: number;
     ship_name: string;
     ship_type: string | null;
@@ -105,6 +130,11 @@ interface ShipsByTierType {
     // before this field shipped (e.g. a durable `:published` fallback served
     // mid-deploy) degrades to battles-only rather than NaN%.
     total_battles?: number;
+    // Rolling-window bounds (date-only ISO, UTC) the treemap heading reads. Same
+    // window the /ship board + medals use; optional so an old durable `:published`
+    // fallback payload degrades gracefully.
+    window_start?: string;
+    window_end?: string;
     ships: ListShip[];
     // True when a cold win-rate-percentile bucket is still being computed by a
     // background warm (the heavy per-player aggregation). The client polls until
@@ -280,9 +310,13 @@ const InfoHint: React.FC<{ text: string }> = ({ text }) => (
     </div>
 );
 
-const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
+const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(({ onBucket }, ref) => {
     const { realm } = useRealm();
     const sectionRef = useRef<HTMLElement>(null);
+    // Mirror onBucket into a ref so the emit effect doesn't depend on the parent
+    // passing a stable callback identity (it re-emits on real state change only).
+    const onBucketRef = useRef(onBucket);
+    useEffect(() => { onBucketRef.current = onBucket; });
 
     // Land on T10 Battleships so the board shows real standings immediately
     // (these buckets are pre-warmed daily — see warm_realm_top_ships_task).
@@ -324,6 +358,14 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
 
     const [list, setList] = useState<ListShip[] | null>(null);
     const [listTotalBattles, setListTotalBattles] = useState(0);
+    // Rolling-window bounds from the last resolved list payload — surfaced to the
+    // treemap heading (via onBucket) so it can show the same date range.
+    const [listWindow, setListWindow] = useState<{ start?: string; end?: string }>({});
+    // The tier|type|wrPct the current `list` was fetched for. On a filter switch
+    // `list` still holds the PREVIOUS bucket until the new fetch resolves; the
+    // treemap uses this to know its ships are stale (so it dims + waits rather than
+    // painting the old bucket under the new heading).
+    const [listBucketKey, setListBucketKey] = useState<string | null>(null);
     const [listLoading, setListLoading] = useState(false);
     const [listError, setListError] = useState(false);
     // True while a cold WR-percentile bucket is being computed server-side and we
@@ -432,6 +474,8 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
                     }
                     setList(data.ships ?? []);
                     setListTotalBattles(data.total_battles ?? 0);
+                    setListWindow({ start: data.window_start, end: data.window_end });
+                    setListBucketKey(`${tier}|${type}|${wrPct}`);
                     setListPending(false);
                     setListLoading(false);
                 })
@@ -498,6 +542,33 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle>((_props, ref) => {
             sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         },
     }), [realm]);
+
+    // Emit the resolved bucket upward (→ PlayerSearch → the landing treemap) on
+    // every filter change / load transition, so the treemap renders the SAME
+    // tier+type (+ WR-percentile) selection off this fetch — no second request.
+    // Keyed on state, not on onBucket's identity (mirrored in a ref above).
+    useEffect(() => {
+        // `list` lags one render behind a filter switch (the refetch runs in an
+        // effect after this commit), so it may still hold the previous bucket.
+        // Flag that as stale so the treemap dims the old map and waits, never
+        // painting the prior bucket's ships under the new heading.
+        const stale = !isEasterEgg && listBucketKey !== `${tier}|${type}|${wrPct}`;
+        const resolvedOnce = list !== null || listError;
+        const loading = listLoading || stale || (!resolvedOnce && !isEasterEgg);
+        onBucketRef.current?.({
+            tier,
+            type,
+            wrPct,
+            ships: isEasterEgg ? [] : (list ?? []),
+            totalBattles: listTotalBattles,
+            windowStart: listWindow.start,
+            windowEnd: listWindow.end,
+            loading,
+            pending: listPending,
+            empty: isEasterEgg
+                || (!stale && resolvedOnce && !listLoading && !listPending && (list?.length ?? 0) === 0),
+        });
+    }, [tier, type, wrPct, list, listLoading, listPending, listTotalBattles, listWindow, listBucketKey, isEasterEgg, listError]);
 
     const typeLabel = useMemo(() => (type ? shipClass(type)?.label ?? type : null), [type]);
 

@@ -3283,6 +3283,30 @@
             "archive_on": [
                 "shiptool-integration-superseded"
             ]
+        },
+        "agents/runbooks/runbook-landing-treemap-filter-correlation-2026-07-01.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "frontend",
+            "aliases": [
+                "landing treemap filter correlation",
+                "treemap follows ship filters",
+                "treemap tier type wr filter",
+                "treemap win rate color tiles"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "landing-page",
+                "treemap",
+                "frontend",
+                "d3",
+                "reuse"
+            ],
+            "archive_on": [
+                "landing-treemap-filter-correlation-superseded"
+            ]
         }
     }
 }

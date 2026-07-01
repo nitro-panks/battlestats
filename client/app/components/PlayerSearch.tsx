@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import RealmTopShipsTreemapSVG from './RealmTopShipsTreemapSVG';
-import ShipLeaderboard, { type ShipLeaderboardHandle } from './ShipLeaderboard';
+import ShipLeaderboard, { type ShipBucket, type ShipLeaderboardHandle } from './ShipLeaderboard';
 import { buildPlayerPath } from '../lib/entityRoutes';
 import { useRealm } from '../context/RealmContext';
 
@@ -11,6 +11,11 @@ const PlayerSearch: React.FC = () => {
     const { realm } = useRealm();
     const router = useRouter();
     const shipLeaderboardRef = useRef<ShipLeaderboardHandle>(null);
+    // The ship bucket the leaderboard has resolved for the active filters. The
+    // treemap renders off this (same tier+type+WR selection), so the two surfaces
+    // stay in lockstep without the treemap issuing its own fetch. Null until the
+    // leaderboard's first emit — the treemap shows a loading state meanwhile.
+    const [bucket, setBucket] = useState<ShipBucket | null>(null);
 
     // A landing search resolves to the canonical player route — the player view
     // now lives only at /player/<name> (with its clan rail in the route layout,
@@ -38,15 +43,26 @@ const PlayerSearch: React.FC = () => {
                 runbook-audience-device-optimization). */}
             <div className="mt-2 pt-6">
                 <RealmTopShipsTreemapSVG
+                    ships={bucket?.ships ?? []}
+                    tier={bucket?.tier ?? null}
+                    type={bucket?.type ?? null}
+                    wrPct={bucket?.wrPct ?? null}
+                    windowStart={bucket?.windowStart}
+                    windowEnd={bucket?.windowEnd}
+                    loading={bucket ? bucket.loading : true}
+                    pending={bucket?.pending ?? false}
+                    empty={bucket?.empty ?? false}
                     onSelect={(sel) => shipLeaderboardRef.current?.selectShip(sel)}
                 />
             </div>
 
             {/* Inline ship leaderboard: filter by tier+type, rank ships by
-                win rate, drill into any ship's player board in place. A
-                treemap tile click hands off here via the ref (in place);
-                tiles the board can't represent fall back to /ship/<id>. */}
-            <ShipLeaderboard ref={shipLeaderboardRef} />
+                win rate, drill into any ship's player board in place. It owns the
+                bucket fetch and emits it up via onBucket so the treemap above
+                renders the same selection. A treemap tile click hands off here via
+                the ref (in place); tiles the board can't represent fall back to
+                /ship/<id>. */}
+            <ShipLeaderboard ref={shipLeaderboardRef} onBucket={setBucket} />
         </div>
     );
 };
