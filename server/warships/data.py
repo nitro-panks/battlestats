@@ -5221,6 +5221,20 @@ BULK_CACHE_PLAYER_TTL = int(
     os.getenv('BULK_CACHE_PLAYER_TTL', str(24 * 60 * 60)))
 BULK_CACHE_CLAN_TTL = int(os.getenv('BULK_CACHE_CLAN_TTL', str(24 * 60 * 60)))
 
+# Best-* prewarm gate. `score_best_clans()` (the #1 DB-time sink on the shared
+# managed PG — a ~22s full clan×player scan) and the Best-player landing payloads
+# (`get_landing_players_payload('best', …)`) were built to rank the landing
+# Best-clans / Best-players featured boards, BOTH decommissioned 2026-06-22. The
+# 12h bulk-entity-loader then repurposed them to pick detail-cache prewarm
+# targets — a job the 30-min view-driven hot-entity warmer already covers for
+# actually-viewed entities. When off, the loader skips those cohorts (keeping the
+# cheap pinned-player prewarm), which leaves `score_best_clans()` with no live
+# caller (the landing best-clans path is idle post-decommission). Reversible via
+# env; default on to preserve behaviour where the boards might be revived.
+# See runbook-landing-featured-boards-decommission-2026-06-22.md.
+BULK_CACHE_BEST_PREWARM_ENABLED = os.getenv(
+    'BULK_CACHE_BEST_PREWARM_ENABLED', '1') not in ('0', 'false', 'False')
+
 
 def _bulk_cache_key_player(player_id: int, realm: str = DEFAULT_REALM) -> str:
     return realm_cache_key(realm, f'player:detail:v1:{player_id}')
@@ -5861,50 +5875,63 @@ def bulk_load_player_cache(
 
     from warships.landing import get_landing_players_payload, normalize_landing_player_best_sort
 
-    # Cohort 1: union of shipped Best-player sub-sort cohorts
+    top_players: list = []
+    seen_ids: set[int] = set()
     best_player_ids: list[int] = []
-    seen_best_ids: set[int] = set()
-    for player_sort in ('overall', 'ranked', 'efficiency', 'wr', 'cb'):
-        normalized_sort = normalize_landing_player_best_sort(player_sort)
-        for row in get_landing_players_payload(
-            'best',
-            top_player_limit,
-            sort=normalized_sort,
-            realm=realm,
-        ):
-            try:
-                player_id = int(row.get('player_id') or 0)
-            except (TypeError, ValueError):
-                continue
-            if player_id <= 0 or player_id in seen_best_ids:
-                continue
-            seen_best_ids.add(player_id)
-            best_player_ids.append(player_id)
+    clan_members: list = []
+    best_clan_ids: list[int] = []
 
-    top_players = list(
-        Player.objects
-        .filter(realm=realm, player_id__in=best_player_ids)
-        .exclude(name='')
-        .filter(is_hidden=False)
-        .select_related('clan', 'explorer_summary')
-    )
-    top_players.sort(
-        key=lambda player: best_player_ids.index(player.player_id)
-        if player.player_id in seen_best_ids else len(best_player_ids)
-    )
-    seen_ids = {p.player_id for p in top_players}
+    # Cohorts 1 & 2 rank the (decommissioned 2026-06-22) Best-player /
+    # Best-clan boards; gated off so their heavy scans (Best-player landing
+    # payloads + the ~22s score_best_clans clan×player scan — the #1 DB-time
+    # sink) stop running. The view-driven Cohort 4 + the 30-min hot-entity
+    # warmer keep actually-viewed entities warm; unvisited top-N pages hydrate
+    # lazily on first view. See BULK_CACHE_BEST_PREWARM_ENABLED.
+    if BULK_CACHE_BEST_PREWARM_ENABLED:
+        # Cohort 1: union of shipped Best-player sub-sort cohorts
+        best_player_ids: list[int] = []
+        seen_best_ids: set[int] = set()
+        for player_sort in ('overall', 'ranked', 'efficiency', 'wr', 'cb'):
+            normalized_sort = normalize_landing_player_best_sort(player_sort)
+            for row in get_landing_players_payload(
+                'best',
+                top_player_limit,
+                sort=normalized_sort,
+                realm=realm,
+            ):
+                try:
+                    player_id = int(row.get('player_id') or 0)
+                except (TypeError, ValueError):
+                    continue
+                if player_id <= 0 or player_id in seen_best_ids:
+                    continue
+                seen_best_ids.add(player_id)
+                best_player_ids.append(player_id)
 
-    # Cohort 2: members of the best clans (composite scoring)
-    best_clan_ids, _ = score_best_clans(limit=clan_member_clans, realm=realm)
-    clan_members = list(
-        Player.objects
-        .filter(realm=realm, clan_id__in=best_clan_ids)
-        .exclude(name='')
-        .exclude(player_id__in=seen_ids)
-        .select_related('clan', 'explorer_summary')
-    )
-    top_players.extend(clan_members)
-    seen_ids.update(p.player_id for p in clan_members)
+        top_players = list(
+            Player.objects
+            .filter(realm=realm, player_id__in=best_player_ids)
+            .exclude(name='')
+            .filter(is_hidden=False)
+            .select_related('clan', 'explorer_summary')
+        )
+        top_players.sort(
+            key=lambda player: best_player_ids.index(player.player_id)
+            if player.player_id in seen_best_ids else len(best_player_ids)
+        )
+        seen_ids = {p.player_id for p in top_players}
+
+        # Cohort 2: members of the best clans (composite scoring)
+        best_clan_ids, _ = score_best_clans(limit=clan_member_clans, realm=realm)
+        clan_members = list(
+            Player.objects
+            .filter(realm=realm, clan_id__in=best_clan_ids)
+            .exclude(name='')
+            .exclude(player_id__in=seen_ids)
+            .select_related('clan', 'explorer_summary')
+        )
+        top_players.extend(clan_members)
+        seen_ids.update(p.player_id for p in clan_members)
 
     # Cohort 3: pinned players
     pinned_ids = _get_pinned_player_ids(realm=realm)
@@ -5961,6 +5988,12 @@ def bulk_load_player_cache(
 def bulk_load_clan_cache(limit: int = BULK_CACHE_CLAN_LIMIT, realm: str = DEFAULT_REALM) -> dict[str, Any]:
     """Bulk-load top clan detail payloads into Redis from DB."""
     from warships.serializers import ClanSerializer
+
+    # Entirely score_best_clans-driven (the #1 DB-time sink). Gated off with the
+    # decommissioned Best boards — the hot-entity warmer covers viewed clans and
+    # cold clan pages hydrate lazily. See BULK_CACHE_BEST_PREWARM_ENABLED.
+    if not BULK_CACHE_BEST_PREWARM_ENABLED:
+        return {'status': 'skipped', 'reason': 'best-prewarm-disabled', 'loaded': 0}
 
     best_clan_ids, _ = score_best_clans(limit=limit, realm=realm)
     clans = (
