@@ -2920,6 +2920,34 @@
                 "warmer-db-load-refactor-supersedes"
             ]
         },
+        "agents/runbooks/runbook-tier-type-correlation-rework-2026-07-01.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "spec",
+            "owner": "platform",
+            "aliases": [
+                "tier-type correlation rework",
+                "tier type population correlation",
+                "incremental tier-type aggregate",
+                "correlation warmer optimization"
+            ],
+            "tags": [
+                "database",
+                "warmers",
+                "correlation",
+                "tier-type",
+                "battles_json",
+                "postgres",
+                "performance",
+                "incremental aggregate",
+                "spec"
+            ],
+            "archive_on": [
+                "tier-type-rework-shipped",
+                "correlation-warmer-superseded"
+            ]
+        },
         "agents/runbooks/runbook-daily-active-snapshots-2026-06-09.md": {
             "kind": "runbook",
             "status": "active",
