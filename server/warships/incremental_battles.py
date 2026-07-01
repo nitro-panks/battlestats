@@ -1002,6 +1002,48 @@ def record_observation_from_payloads(
 _BULK_OBSERVATION_CHUNK = 100
 
 
+def _fetch_with_407_retry(fetch_fn, label: str, realm: str):
+    """Call ``fetch_fn() -> (data, err)``, retrying on 407 with backoff.
+
+    The shared WG token-bucket already paces egress, so a `REQUEST_LIMIT_EXCEEDED`
+    here is the *rare* transient case (bucket fail-open, or a WG-side burst). The
+    legacy behaviour aborted the whole sweep on the first 407, throwing away the
+    rest of the cycle — cheap when the floor drew ~2 of 9 req/s, but wasteful once
+    we densify the per-mover fetch (`FETCH_CONCURRENCY > 1`). This retries up to
+    ``BATTLE_OBSERVATION_FLOOR_407_RETRIES`` times with a capped exponential
+    backoff, then returns the final ``(data, err)`` so the caller's abort path
+    still triggers if the limit is genuinely sustained. Any non-407 result
+    (success, INVALID_ACCOUNT_ID, transient) returns immediately, unchanged.
+    """
+    try:
+        max_retries = max(
+            0, int(os.getenv("BATTLE_OBSERVATION_FLOOR_407_RETRIES", "3") or 3))
+    except ValueError:
+        max_retries = 3
+    try:
+        base = float(
+            os.getenv("BATTLE_OBSERVATION_FLOOR_407_BACKOFF_SECONDS", "2.0") or 2.0)
+    except ValueError:
+        base = 2.0
+    try:
+        cap = float(
+            os.getenv("BATTLE_OBSERVATION_FLOOR_407_BACKOFF_MAX_SECONDS", "15.0") or 15.0)
+    except ValueError:
+        cap = 15.0
+
+    attempt = 0
+    while True:
+        data, err = fetch_fn()
+        if err != "REQUEST_LIMIT_EXCEEDED" or attempt >= max_retries:
+            return data, err
+        delay = min(cap, base * (2 ** attempt))
+        logger.warning(
+            "bulk observation floor 407 on %s [%s] — backoff %.1fs (retry %d/%d)",
+            label, realm.upper(), delay, attempt + 1, max_retries)
+        time.sleep(delay)
+        attempt += 1
+
+
 def _gate_needs_ships(acct: Optional[Dict[str, Any]],
                       prior_battles: Optional[int]):
     """Change-detector decision: does this player need a `ships/stats` fetch?
@@ -1142,11 +1184,14 @@ def record_observations_bulk(
         # below: 407 aborts the sweep (shared ~10 req/s budget; must not keep
         # hammering); INVALID_ACCOUNT_ID isolates the bad id via per-player
         # fallback; any other transient error skips the chunk.
-        acct_data, acct_err = _bulk_fetch_account_info(chunk_ids, realm)
+        acct_data, acct_err = _fetch_with_407_retry(
+            lambda: _bulk_fetch_account_info(chunk_ids, realm),
+            "account/info", realm)
         if acct_err == "REQUEST_LIMIT_EXCEEDED":
             logger.warning(
-                "bulk observation floor hit 407 on account/info [%s] — aborting "
-                "sweep, partial results persisted", realm.upper())
+                "bulk observation floor hit 407 on account/info [%s] after "
+                "retries — aborting sweep, partial results persisted",
+                realm.upper())
             tally["aborted"] = True
             tally["status"] = "aborted"
             break
@@ -1209,11 +1254,14 @@ def record_observations_bulk(
         # ── Bulk ships/stats for the (gated) subset. WG rejects ≥2 ids with
         # INVALID_ACCOUNT_ID, so this falls back to per-player; the gate keeps
         # that fallback small. 407 aborts; other transient skips the subset.
-        ship_data, ship_err = _bulk_fetch_ship_stats(ships_ids, realm)
+        ship_data, ship_err = _fetch_with_407_retry(
+            lambda: _bulk_fetch_ship_stats(ships_ids, realm),
+            "ships/stats", realm)
         if ship_err == "REQUEST_LIMIT_EXCEEDED":
             logger.warning(
-                "bulk observation floor hit 407 on ships/stats [%s] — aborting "
-                "sweep, partial results persisted", realm.upper())
+                "bulk observation floor hit 407 on ships/stats [%s] after "
+                "retries — aborting sweep, partial results persisted",
+                realm.upper())
             tally["aborted"] = True
             tally["status"] = "aborted"
             break

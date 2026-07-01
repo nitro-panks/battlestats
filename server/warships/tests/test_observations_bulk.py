@@ -360,20 +360,28 @@ class BulkObservationEngineTests(TestCase):
         self.assertEqual(tally["completed"], 1)
         self.assertEqual(tally["baseline"], 1)
 
-    def test_407_aborts_sweep_and_persists_partial(self):
+    @mock.patch.dict(os.environ, {"BATTLE_OBSERVATION_FLOOR_407_RETRIES": "2"})
+    @mock.patch("warships.incremental_battles.time.sleep")
+    def test_407_aborts_sweep_after_retries_and_persists_partial(self, sleep_mock):
         p1 = self._make_player(3070)
         p2 = self._make_player(3071)
         self._baseline(p1)
         self._baseline(p2)
 
-        # 200 ids -> two chunks of 100. Chunk 1 succeeds, chunk 2 returns 407.
+        # 200 ids -> two chunks of 100. Chunk 1 succeeds, chunk 2 returns a
+        # SUSTAINED 407 (every attempt), so it aborts only after exhausting the
+        # bounded retries — the pre-retry behaviour (abort on first 407) still
+        # holds for a genuinely sustained limit.
         chunk1 = [3070] + list(range(4000, 4099))   # 100 ids
         chunk2 = [3071] + list(range(4100, 4199))   # 100 ids
         ids = chunk1 + chunk2
 
+        acct_calls = {"n": 0}
+
         def acct_side(chunk_ids, realm):
             if 3070 in chunk_ids:
                 return {"3070": _account_payload(battles=101, wins=51)}, None
+            acct_calls["n"] += 1
             return {}, "REQUEST_LIMIT_EXCEEDED"
 
         def ship_side(chunk_ids, realm):
@@ -388,10 +396,50 @@ class BulkObservationEngineTests(TestCase):
 
         self.assertTrue(tally["aborted"])
         self.assertEqual(tally["status"], "aborted")
+        # Chunk 2's account/info was retried: 1 initial + 2 retries = 3 calls.
+        self.assertEqual(acct_calls["n"], 3)
+        self.assertEqual(sleep_mock.call_count, 2)
         # Chunk 1 persisted (p1 got its observation); chunk 2 never ran.
         self.assertEqual(tally["completed"], 1)
         self.assertEqual(BattleObservation.objects.filter(player=p1).count(), 2)
         self.assertEqual(BattleObservation.objects.filter(player=p2).count(), 1)
+
+    @mock.patch.dict(os.environ, {"BATTLE_OBSERVATION_FLOOR_407_RETRIES": "3"})
+    @mock.patch("warships.incremental_battles.time.sleep")
+    def test_407_retry_then_succeeds_records_observation(self, sleep_mock):
+        # A transient 407 (bucket fail-open / WG burst) that clears on retry must
+        # NOT abort the sweep: the player's observation is still captured.
+        p = self._make_player(3072)
+        self._baseline(p)
+
+        acct_calls = {"n": 0}
+        ship_calls = {"n": 0}
+
+        def acct_side(chunk_ids, realm):
+            acct_calls["n"] += 1
+            if acct_calls["n"] == 1:
+                return {}, "REQUEST_LIMIT_EXCEEDED"  # first attempt limited
+            return {"3072": _account_payload(battles=101, wins=51)}, None
+
+        def ship_side(chunk_ids, realm):
+            ship_calls["n"] += 1
+            if ship_calls["n"] == 1:
+                return {}, "REQUEST_LIMIT_EXCEEDED"  # first attempt limited
+            return {"3072": _ship_payload(battles=101, wins=51, survived=1,
+                                          damage=42_000)}, None
+
+        with mock.patch(ACCT_PATH, side_effect=acct_side), \
+                mock.patch(SHIP_PATH, side_effect=ship_side):
+            tally = record_observations_bulk([3072], realm="na")
+
+        self.assertFalse(tally["aborted"])
+        self.assertEqual(tally["status"], "completed")
+        self.assertEqual(tally["events"], 1)
+        # Each endpoint was called twice (1 limited + 1 success), backing off once.
+        self.assertEqual(acct_calls["n"], 2)
+        self.assertEqual(ship_calls["n"], 2)
+        self.assertEqual(sleep_mock.call_count, 2)
+        self.assertEqual(BattleObservation.objects.filter(player=p).count(), 2)
 
     def test_transient_error_skips_chunk(self):
         p = self._make_player(3080)
