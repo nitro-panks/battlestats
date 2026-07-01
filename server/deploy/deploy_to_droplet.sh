@@ -186,6 +186,22 @@ else
   echo 'ANALYTICS_IGNORE_IPS=130.44.131.215' >> /etc/battlestats-server.env
 fi
 
+# Gate the score_best_clans best-* prewarm OFF in prod. The 12h bulk-entity-
+# loader used score_best_clans() (a ~22s clan×player scan — the #1 managed-PG
+# DB-time sink) + the Best-player landing payloads to pick detail-cache prewarm
+# targets; both rankers served the landing Best boards decommissioned 2026-06-22.
+# The 30-min view-driven hot-entity warmer already covers viewed entities, so
+# this pin keeps the sink off across deploys (code default is 1 = on). Set live
+# 2026-07-01; pinned here so a redeploy doesn't silently revert it (cf. the
+# RANKED_CAPTURE incident above). Canonical Pass value can also be set; this pin
+# is the deploy-enforced floor. See BULK_CACHE_BEST_PREWARM_ENABLED +
+# runbook-landing-featured-boards-decommission-2026-06-22.md.
+if grep -q '^BULK_CACHE_BEST_PREWARM_ENABLED=' /etc/battlestats-server.env; then
+  sed -i 's|^BULK_CACHE_BEST_PREWARM_ENABLED=.*|BULK_CACHE_BEST_PREWARM_ENABLED=0|' /etc/battlestats-server.env
+else
+  echo 'BULK_CACHE_BEST_PREWARM_ENABLED=0' >> /etc/battlestats-server.env
+fi
+
 # Pin the rolling-6h BattleObservation floor staleness threshold to 8h
 # (tightened from 22h on 2026-05-09 alongside the cadence promotion).
 # Code defaults to 8h too; setting it explicitly here makes the live
