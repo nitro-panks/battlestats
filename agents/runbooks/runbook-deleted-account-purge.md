@@ -354,7 +354,7 @@ The blocklist (`DeletedAccount`) is permanent and should not be rolled back. Pla
 
 For the next batch (and every batch after), follow this sequence — it captures every step that worked on 2026-04-30 and avoids the two stumbles from that run.
 
-1. **Receive zip from WG.** Drop into `deleted/deleted_accounts.zip` in the repo working tree (already in `.gitignore` if needed; the artifact is sensitive PII).
+1. **Receive zip from WG.** The user downloads it via browser — it does **not** land in the repo automatically. Under WSL, check the Windows Downloads folder first: `find /mnt/c/Users -maxdepth 2 -iname Downloads` (enumerates profiles — do not assume the Windows username matches `$USER`), then `ls -la <that path>/Downloads/ | grep -i delet`. Copy the located file into `deleted/deleted_accounts_<YYYYMMDD>.zip` in the repo working tree (already in `.gitignore` if needed; the artifact is sensitive PII). Only fall back to searching Gmail for the raw attachment if it isn't in Downloads.
 2. **Inspect briefly.** `unzip -p deleted/deleted_accounts.zip accounts.csv | head -3 && unzip -p deleted/deleted_accounts.zip accounts.csv | wc -l` — confirm header is `account_id` and row count is sensible.
 3. **Read-only dry-run against cloud DB** (no env switch — sub-shell scope only):
    ```bash
