@@ -2890,6 +2890,36 @@
                 "all-phases-landed-or-dropped"
             ]
         },
+        "agents/runbooks/runbook-db-write-efficiency-eval-2026-07-01.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "spec",
+            "owner": "platform",
+            "aliases": [
+                "db write efficiency eval",
+                "bulk ingest evaluation",
+                "copy vs row-at-a-time ingest",
+                "ingest write batching"
+            ],
+            "tags": [
+                "database",
+                "writes",
+                "bulk insert",
+                "copy",
+                "observation floor",
+                "snapshot",
+                "enrichment",
+                "clan crawler",
+                "postgres",
+                "performance",
+                "spec"
+            ],
+            "archive_on": [
+                "ingest-write-model-changed",
+                "warmer-db-load-refactor-supersedes"
+            ]
+        },
         "agents/runbooks/runbook-daily-active-snapshots-2026-06-09.md": {
             "kind": "runbook",
             "status": "active",
