@@ -275,10 +275,15 @@ fi
 # same top-12k every cycle (the spin that got self-chain retired the first time;
 # self-chain WITHOUT this cooldown is the broken half). The other wins persist:
 # recency-first candidate ordering (#66) plus the dedicated `floor` worker below.
-# FLOOR_REFRESH_BATTLES_JSON_ENABLED=0 defers the per-mover battles_json rebuild
-# (~16-48% of per-mover wall-time) to maximize capture rate during the catch-up
-# phase — flip to 1 for steady-state once headroom is confirmed (displayed ship
-# stats then age until a page-view). Runbook:
+# FLOOR_REFRESH_BATTLES_JSON_ENABLED=1 (re-enabled 2026-07-08): the backlog
+# catch-up phase is over — self-chain drains every realm's stale backlog to
+# <500 remaining several times a day (floor journal "Floor self-chain stop"),
+# so the ~16-48% per-mover wall-time the rebuild costs no longer starves
+# capture. Rebuilding battles_json from the SAME ships/stats response keeps
+# active-but-unviewed players' displayed stats fresh at zero extra WG cost.
+# Watch cycle_ms + managed-PG load15 (<2.3) for ~2 days after flipping; revert
+# to 0 if capture regresses. Runbooks:
+# runbook-floor-battles-json-refresh-2026-06-14.md,
 # runbook-floor-throughput-tuning-2026-06-13.md.
 # RANKED_DAILY_ENABLED=1: run the heavy per-player ranked sweep only on each realm's
 # primary daily slot (na 1h/eu 3h/asia 5h UTC), random-only on the rest — ranked is
@@ -293,7 +298,7 @@ fi
 for kv in \
   'BATTLE_OBSERVATION_FLOOR_GATE_SKIP_COOLDOWN_HOURS=8' \
   'BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED=1' \
-  'FLOOR_REFRESH_BATTLES_JSON_ENABLED=0' \
+  'FLOOR_REFRESH_BATTLES_JSON_ENABLED=1' \
   'BATTLE_OBSERVATION_FLOOR_FETCH_CONCURRENCY=4' \
   'BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED=1'; do
   k="${kv%%=*}"
