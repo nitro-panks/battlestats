@@ -32,7 +32,7 @@ flowchart TD
     %% ---- Discovery surface ----
     subgraph BODY["Landing discovery surface — PlayerSearch.tsx:16-56"]
         direction TB
-        TREEMAP["RealmTopShipsTreemapSVG (presentational, no fetch)<br/>app/components/RealmTopShipsTreemapSVG.tsx:79<br/>renders the shared bucket (size=battles, color=WR)"]
+        TREEMAP["RealmTopShipsTreemapSVG (presentational, no fetch)<br/>app/components/RealmTopShipsTreemapSVG.tsx:79<br/>Map/Plot view toggle (localStorage bs-landing-ship-view, default Map)<br/>Map=treemap (size=battles, color=WR) · Plot=scatter (x=battles, y=WR, color=WR)"]
         SHIPLB["ShipLeaderboard<br/>app/components/ShipLeaderboard.tsx:313 (forwardRef)<br/>tier+type filter, WR-pct filter, in-place ship board; owns the fetch"]
     end
 
@@ -103,9 +103,16 @@ frontend reads it since the treemap moved to the shared bucket (2026-07-01).
   `RealmTopShipsTreemapSVG` (no second fetch, no `random/ranked` toggle — both stay in lockstep
   on the current tier/type/WR selection). Runbook:
   `runbook-landing-treemap-filter-correlation-2026-07-01.md`.
-- Treemap → leaderboard drilldown is in-place via an imperative ref
+- **Map/Plot view toggle.** A top-right toggle switches the shared bucket between two
+  presentations of the same ships: **Map** (default) — the treemap (tile size=battles,
+  color=WR, capped at `TILE_LIMIT=25` for label legibility); **Plot** — a scatterplot of the
+  **full** bucket (x=battles, y=win rate, dots color=WR, axed like the other D3 charts). The
+  choice is a per-browser preference (`localStorage` key `bs-landing-ship-view`, default `map`,
+  restored in a mount effect so SSR stays deterministic). Both views share the same click
+  handoff (drill in place / `/ship/<id>` fallback) and hover tooltip.
+- Treemap/scatter → leaderboard drilldown is in-place via an imperative ref
   (`ShipLeaderboardHandle.selectShip`, ShipLeaderboard.tsx:536-544, wired at
-  PlayerSearch.tsx:55); only tiles the inline board can't represent fall back to the standalone
+  PlayerSearch.tsx:55); only ships the inline board can't represent fall back to the standalone
   `/ship/<id>` page.
 - WR-pct filter defaults to **50%** (top 50% of each ship's players by WR); buckets are
   pre-warmed nightly, with a lazy `X-Ships-WR-Pending` poll fallback (`ttlMs:0`, list fetch

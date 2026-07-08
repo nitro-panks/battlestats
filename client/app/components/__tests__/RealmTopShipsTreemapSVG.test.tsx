@@ -2,9 +2,12 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import RealmTopShipsTreemapSVG from '../RealmTopShipsTreemapSVG';
 import type { ListShip } from '../ShipLeaderboard';
+import { trackEvent } from '../../lib/umami';
 
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }) }));
 jest.mock('../../lib/umami', () => ({ trackEvent: jest.fn() }));
+
+const mockTrackEvent = trackEvent as jest.Mock;
 
 // The treemap sizes itself off a ResizeObserver; jest's default stub reports no
 // width so d3 draws nothing. Give it a real width so tiles + labels render and
@@ -40,6 +43,7 @@ describe('RealmTopShipsTreemapSVG (presentational)', () => {
     const realRO = globalThis.ResizeObserver;
     beforeAll(() => { globalThis.ResizeObserver = WidthReportingResizeObserver as unknown as typeof ResizeObserver; });
     afterAll(() => { globalThis.ResizeObserver = realRO; });
+    afterEach(() => { window.localStorage.clear(); mockTrackEvent.mockClear(); });
 
     it('renders a bucket-specific heading reflecting tier, type and WR filter', () => {
         render(
@@ -109,5 +113,69 @@ describe('RealmTopShipsTreemapSVG (presentational)', () => {
             />,
         );
         expect(screen.getByText('Loading ships…')).toBeInTheDocument();
+    });
+
+    it('defaults to the Map view and offers a Map/Plot toggle', () => {
+        render(
+            <RealmTopShipsTreemapSVG ships={[ship({})]} tier={10} type="Cruiser" wrPct={null} />,
+        );
+        expect(screen.getByRole('button', { name: 'Map' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Plot' })).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('toggling to Plot swaps tiles for a battles-vs-WR scatter, plots the full bucket, and persists the choice', () => {
+        const onSelect = jest.fn();
+        const { container } = render(
+            <RealmTopShipsTreemapSVG
+                ships={[
+                    ship({ ship_id: 1, ship_name: 'Moskva', battles: 5000, win_rate: 58 }),
+                    ship({ ship_id: 2, ship_name: 'Petropavlovsk', battles: 3000, win_rate: 52 }),
+                    ship({ ship_id: 3, ship_name: 'Stalingrad', battles: 1500, win_rate: 61 }),
+                ]}
+                tier={10}
+                type="Cruiser"
+                wrPct={null}
+                onSelect={onSelect}
+            />,
+        );
+        // Map view first: one rect per ship, no scatter points.
+        expect(container.querySelectorAll('svg rect').length).toBe(3);
+        expect(container.querySelectorAll('svg circle.pt').length).toBe(0);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Plot' }));
+
+        // Scatter: one dot per ship (no legibility cap), no treemap tiles.
+        const dots = container.querySelectorAll('svg circle.pt');
+        expect(dots.length).toBe(3);
+        expect(container.querySelectorAll('svg rect').length).toBe(0);
+        expect(screen.getByRole('button', { name: 'Plot' })).toHaveAttribute('aria-pressed', 'true');
+        // Choice persisted for subsequent loads.
+        expect(window.localStorage.getItem('bs-landing-ship-view')).toBe('plot');
+        // The view change is tracked in Umami.
+        expect(mockTrackEvent).toHaveBeenCalledWith(
+            'landing-chart-view',
+            expect.objectContaining({ view: 'plot' }),
+        );
+
+        // Re-clicking the already-active view is a no-op and fires nothing more.
+        mockTrackEvent.mockClear();
+        fireEvent.click(screen.getByRole('button', { name: 'Plot' }));
+        expect(mockTrackEvent).not.toHaveBeenCalled();
+
+        // A dot click drills the same way a tile does.
+        fireEvent.click(dots[0]);
+        expect(onSelect).toHaveBeenCalledWith(
+            expect.objectContaining({ tier: 10, type: 'Cruiser' }),
+        );
+    });
+
+    it('restores the persisted Plot preference on mount', () => {
+        window.localStorage.setItem('bs-landing-ship-view', 'plot');
+        const { container } = render(
+            <RealmTopShipsTreemapSVG ships={[ship({})]} tier={10} type="Cruiser" wrPct={null} />,
+        );
+        expect(screen.getByRole('button', { name: 'Plot' })).toHaveAttribute('aria-pressed', 'true');
+        expect(container.querySelectorAll('svg circle.pt').length).toBe(1);
+        expect(container.querySelectorAll('svg rect').length).toBe(0);
     });
 });
