@@ -478,6 +478,14 @@ Repeat per realm. **GATE: `mismatch=0`.** Any `mismatch` ⇒ STOP, inspect with 
 - `snapshot_today` / `snapshot_coverage_frac` (÷ active-7d) — guards the denominator: if snapshot coverage is well under 100%, the mover denominator is itself incomplete and the snapshot engine (`SNAPSHOT_ACTIVE_LIMIT`) needs scaling before the KPI can be trusted.
 - All four are `null` until two snapshot days exist (`snapshot_dates` in the JSON shows which two were diffed).
 
+**24h-gap decomposition (`gap_1d`, added 2026-07-08).** With `mover_capture_rate` sustained at 1.1–1.4 (the floor captures essentially every PvP mover), the residual `coverage_ratio_vs_1d` gap (~23% overall; NA ~40%) needed decomposing before spending more capture budget on it. Per realm + total, `gap_1d` classifies every active-1d player who produced **no BattleEvent** in the window:
+- `pvp_mover` — snapshot pair shows cumulative PvP battles rose: a real capture miss. Sub-count `pvp_mover_no_event_48h` narrows it to movers with no event in the trailing 48h either (fixed lookback, independent of `--window-hours`): a genuinely uncaptured mover, vs one merely captured late across the window boundary.
+- `non_pvp_active` — account-level `last_battle_date` moved but cumulative PvP battles stayed flat: activity outside Random PvP (co-op / Operations), structurally invisible to the PvP-only `ships/stats` extraction. Upper-bound caveat: a player whose battles rose only after today's snapshot was taken lands here today and re-presents as a mover tomorrow.
+- `no_snapshot_pair` — missing today/prior `Snapshot` row; unclassifiable.
+- `null` until two snapshot days exist. Human output adds a `GAP-1D:` line after `MOVER-CAPTURE:`.
+
+Read it as a routing decision: a dominant `non_pvp_active` means the remaining gap is a **capture-surface question** (widen `ships/stats` with `extra=` PvE/Operations blocks, or declare non-PvP out of scope and define the goal over `snapshot_movers`), not a floor-throughput question; a material `pvp_mover_no_event_48h` is the only bucket that justifies more floor cadence/limit.
+
 The `config` block now also records `RANDOM_FIRST_ENABLED`, `RANKED_DAILY_ENABLED`, `SELF_CHAIN_ENABLED`, and the feeding engines (`SNAPSHOT_ACTIVE_PLAYERS_ENABLED`, `SNAPSHOT_ACTIVE_LIMIT`, `HOT_PLAYERS_ENABLED`, `HOT_PLAYERS_MAX`) so each daily snapshot is self-describing about the floor/snapshot config that produced it (e.g. confirming `CHANGE_GATE=1` is live rather than assuming the `"0"` default). Tests: `server/warships/tests/test_benchmark_observation_floor.py`.
 
 ### Crawl yield-by-source instrumentation (added 2026-06-17) — does the daily clan crawl still earn its cost?
