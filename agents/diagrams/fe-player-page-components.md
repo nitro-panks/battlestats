@@ -3,7 +3,9 @@
 The `/player/[playerName]` route. Two persistent regions under the root-layout chrome: a
 **clan rail** that lives in the route layout and stays mounted across a soft-nav player swap,
 and a **keyed main well** (`PlayerRouteView`, remounted per player) holding the player header,
-the ship-top banner, and the seven-tab insights deck.
+the ship-top banner, and the seven-tab insights deck. The Activity tab's `BattleHistoryCard`
+hosts one nested drilldown — `ShipStats`, a per-ship combat profile toggled by a table-row
+click — which is its own component, not part of the card.
 
 Boxes are React components; `file:line` annotations point at the part worth reading. The root
 chrome (header search, theme/realm selectors, footer) is detailed in
@@ -121,3 +123,13 @@ flowchart TD
 - **Badge-dispatch is inline, on purpose.** Which classification icons the header tray
   renders, and in what order, is inlined at `PlayerDetail.tsx:263-270` (the clan-members row
   has its own order in `ClanMembers.tsx`) — the orders genuinely differ per surface.
+- **Activity-tab ship drilldown.** `ShipStats` (`app/components/ShipStats.tsx`) is a separate
+  component the Activity tab's `BattleHistoryCard` hosts, not part of the card. A ship-row
+  click sets `selectedShip` and renders the panel between the stats rollup and the ships table
+  (`BattleHistoryCard.tsx:1067`; toggle handler :743 — a second click on the same ship hides
+  it). It fetches `GET /api/player/<name>/ship/<shipId>/combat-stats` and renders an
+  Average|Player|Delta comparison table (v2.18.0) of the player's per-ship rates (gunnery /
+  torpedo / secondary accuracy, spotting, objective play, survival; the Accuracy cluster is
+  career-scoped) against the ship's **30-day population average**, with an All / Top 50% /
+  Top 25% skill bracket toggle. Role-irrelevant metric clusters are omitted server-side. Origin:
+  `runbook-battle-history-data-operationalization-2026-06-16.md`.
