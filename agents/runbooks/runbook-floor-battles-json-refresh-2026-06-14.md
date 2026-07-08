@@ -2,7 +2,7 @@
 
 _Created: 2026-06-14_
 _Context: The most-active, most-viewed players' displayed per-ship stats (`battles_json`) were routinely stale (65–78% of active-7d players >7d stale) because only page-visits and the ≤500/realm hot-freshness sweep rebuilt them. The observation floor already fetches `ships/stats` for every active-7d player on its cadence — it just threw the response away after writing the diff. This change reuses that same response to refresh `battles_json` + `battles_updated_at`._
-_Status: IMPLEMENTED 2026-06-14. Backend 677 passed (sqlite). Deployed + monitored (see Validation)._
+_Status: IMPLEMENTED 2026-06-14. Backend 677 passed (sqlite). Deployed + monitored (see Validation). **Deferred in prod (`=0`) during the floor backlog catch-up phase; RE-ENABLED 2026-07-08** — self-chain drains every realm's stale backlog to <500 several times a day, so the ~16–48% per-mover rebuild cost no longer starves capture. Now pinned `=1` in `server/deploy/deploy_to_droplet.sh`._
 
 ## What changed
 
@@ -39,8 +39,9 @@ Opt-in is passed at the three floor/poll entry points: `record_observation_and_d
 `FLOOR_REFRESH_BATTLES_JSON_ENABLED` (default `1`, on). To disable durably:
 `sed -i 's/^FLOOR_REFRESH_BATTLES_JSON_ENABLED=.*/FLOOR_REFRESH_BATTLES_JSON_ENABLED=0/' /etc/battlestats-server.env` (or append it) then
 `systemctl restart battlestats-celery-background battlestats-celery battlestats-celery-hydration`.
-Not pinned in the deploy script (code default is on); pin `=0` there if you need it
-off across deploys.
+Pinned `=1` in `server/deploy/deploy_to_droplet.sh` since 2026-07-08 (it was hand-set `=0`
+on the droplet during the catch-up phase, which a deploy would silently wipe); change the
+pin there to hold a different value across deploys.
 
 ## Cost watch
 

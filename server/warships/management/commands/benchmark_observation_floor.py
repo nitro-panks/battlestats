@@ -17,6 +17,14 @@ The headline metric is `coverage_ratio` = distinct players productively captured
 limit toward the full active set) should drive this toward 1.0 and cut the
 `stale_over_24h` fraction.
 
+`gap_1d` (2026-07-08) decomposes the residual 24h capture gap: active-1d
+players with no BattleEvent in the window are split into missed PvP movers
+(snapshot battles-delta > 0; with a `pvp_mover_no_event_48h` sub-count for
+those still uncaptured at 48h), non-PvP actives (account clock moved, PvP
+battles flat — co-op/Operations, invisible to PvP-only extraction), and
+no-snapshot-pair (unclassifiable). It answers: is the remaining gap a floor
+throughput problem or a capture-surface (game-mode) problem?
+
 A root cron on the droplet runs this command daily (04:30 UTC) via
 `server/scripts/snapshot_observation_floor.sh` and saves the JSON to
 `/opt/battlestats-server/shared/benchmarks/observation-floor/YYYY-MM-DD_HHMMZ.json`.
@@ -38,6 +46,15 @@ from warships.models import (
     Player,
     Snapshot,
     VALID_REALMS,
+)
+
+# Buckets of the 24h-gap decomposition (`gap_1d` in the JSON payload).
+_GAP_KEYS = (
+    "total",                    # active-1d players with no BattleEvent in window
+    "pvp_mover",                # snapshot pair shows PvP battles rose → real miss
+    "pvp_mover_no_event_48h",   # …and still no event in 48h → genuinely uncaptured
+    "non_pvp_active",           # account clock moved, PvP battles flat (co-op/Ops)
+    "no_snapshot_pair",         # missing today/prior snapshot row → unclassifiable
 )
 
 FLOOR_FLAGS = [
@@ -102,6 +119,8 @@ class Command(BaseCommand):
         # Player for realm/is_hidden, tallied per realm + total in Python.
         snap_today_count: dict[str, int] = {}   # realm/'__total__' -> active-7d w/ snapshot today
         snap_movers: dict[str, int] = {}        # realm/'__total__' -> active-7d cumulative battles rose
+        today_b: dict[int, int] = {}
+        prior_b: dict[int, int] = {}
         if latest_date is not None:
             # Scope the denominator to non-hidden active-7d players (the population
             # the per-ship-daily goal targets; also makes snapshot_coverage_frac =
@@ -115,8 +134,6 @@ class Command(BaseCommand):
                 Player.objects.filter(is_hidden=False, last_battle_date__gte=cut7)
                 .values_list("id", "realm").iterator()
             )
-            today_b: dict[int, int] = {}
-            prior_b: dict[int, int] = {}
             for pid, sdate, battles in (
                 Snapshot.objects
                 .filter(date__in=[latest_date] + ([prior_date] if prior_date else []))
@@ -136,6 +153,51 @@ class Command(BaseCommand):
                 if pb is not None and tb > pb:
                     for key in (prealm, "__total__"):
                         snap_movers[key] = snap_movers.get(key, 0) + 1
+
+        # 24h-gap decomposition (2026-07-08): of active-1d players who produced
+        # NO BattleEvent in the trailing window, how many are (a) real missed
+        # PvP movers (snapshot pair shows a cumulative-battles rise), (b) active
+        # only outside Random PvP (account clock moved but cumulative PvP
+        # battles flat — co-op/Operations/etc., structurally invisible to the
+        # PvP-only `ships/stats` extraction), or (c) unclassifiable (no
+        # snapshot pair)? `pvp_mover_no_event_48h` narrows (a) to genuinely
+        # uncaptured movers: a mover with an event in the trailing 48h (fixed,
+        # independent of --window-hours) was captured late across the window
+        # boundary, not lost. Caveat: (b) is an upper bound — a player whose
+        # battles rose only AFTER today's snapshot was taken lands in (b)
+        # today and re-presents as a mover tomorrow.
+        gap_stats: dict[str, dict[str, int]] = {}
+        if latest_date is not None and prior_date is not None:
+            since48 = now - timedelta(hours=48)
+            active1_realm = dict(
+                Player.objects.filter(is_hidden=False, last_battle_date__gte=cut1)
+                .values_list("id", "realm").iterator()
+            )
+            prod_ids = set(
+                BattleEvent.objects.filter(detected_at__gte=since)
+                .values_list("player_id", flat=True)
+            )
+            prod_ids_48h = set(
+                BattleEvent.objects.filter(detected_at__gte=since48)
+                .values_list("player_id", flat=True)
+            )
+            for pid, prealm in active1_realm.items():
+                if pid in prod_ids:
+                    continue
+                tb = today_b.get(pid)
+                pb = prior_b.get(pid)
+                if tb is None or pb is None:
+                    bucket = "no_snapshot_pair"
+                elif tb > pb:
+                    bucket = "pvp_mover"
+                else:
+                    bucket = "non_pvp_active"
+                for key in (prealm, "__total__"):
+                    g = gap_stats.setdefault(key, dict.fromkeys(_GAP_KEYS, 0))
+                    g["total"] += 1
+                    g[bucket] += 1
+                    if bucket == "pvp_mover" and pid not in prod_ids_48h:
+                        g["pvp_mover_no_event_48h"] += 1
 
         result = {
             "captured_at": now.isoformat(),
@@ -218,6 +280,12 @@ class Command(BaseCommand):
                 "snapshot_movers": snapshot_movers,
                 "snapshot_coverage_frac": snapshot_coverage_frac,
                 "mover_capture_rate": mover_capture_rate,
+                # 24h-gap decomposition; None until two snapshot days exist.
+                "gap_1d": (
+                    gap_stats.get(realm, dict.fromkeys(_GAP_KEYS, 0))
+                    if latest_date is not None and prior_date is not None
+                    else None
+                ),
             }
             if is_total:
                 result["totals"] = metrics
@@ -274,3 +342,14 @@ class Command(BaseCommand):
                 "MOVER-CAPTURE: insufficient snapshot history "
                 f"(dates {result['snapshot_dates']}) — need two snapshot days "
                 "to compute the mover denominator.")
+        # 24h-gap decomposition: where the uncaptured slice of active-1d
+        # actually lives (missed PvP movers vs non-PvP activity).
+        g = t.get("gap_1d")
+        if g is not None:
+            self.stdout.write(
+                f"GAP-1D: {g['total']:,} of {t['active_1d']:,} active-1d "
+                f"players produced no BattleEvent in {window_h}h — "
+                f"{g['non_pvp_active']:,} active outside Random PvP "
+                f"(co-op/Operations), {g['pvp_mover']:,} missed PvP movers "
+                f"({g['pvp_mover_no_event_48h']:,} still uncaptured at 48h), "
+                f"{g['no_snapshot_pair']:,} unclassifiable (no snapshot pair).")
