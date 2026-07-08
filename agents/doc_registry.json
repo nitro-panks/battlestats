@@ -3335,6 +3335,32 @@
             "archive_on": [
                 "landing-treemap-filter-correlation-superseded"
             ]
+        },
+        "agents/runbooks/runbook-ingress-gap-decomposition-2026-07-08.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "ingress gap decomposition",
+                "gap_1d",
+                "24h capture gap",
+                "battles_json re-enable"
+            ],
+            "tags": [
+                "observation-floor",
+                "ingress",
+                "gap-1d",
+                "mover-capture",
+                "battles-json",
+                "benchmark",
+                "pve",
+                "kpi"
+            ],
+            "archive_on": [
+                "step1-decision-landed"
+            ]
         }
     }
 }
