@@ -13,7 +13,7 @@ Files are prefixed by side of the stack: **`be-`** = backend (Celery/queue/data 
 
 | Doc | Surface | What it covers |
 |---|---|---|
-| [fe-landing-page-components.md](fe-landing-page-components.md) | Landing page (`/`) | Component block diagram of the `/` route: root-layout chrome (header search), `PlayerSearch` discovery surface, the realm top-ships treemap → inline `ShipLeaderboard` in-place drilldown, and each component's `file:line` anchors + backing endpoint |
+| [fe-landing-page-components.md](fe-landing-page-components.md) | Landing page (`/`) | Component block diagram of the `/` route: root-layout chrome (header search), `PlayerSearch` discovery surface, a filter-correlated ship treemap that mirrors the inline `ShipLeaderboard`'s tier/type/WR bucket (shared off one fetch via `onBucket`) → in-place ship drilldown, and each component's `file:line` anchors + backing endpoint |
 | [fe-player-page-components.md](fe-player-page-components.md) | Player page (`/player/[name]`) | Component block diagram of the player route: the persistent clan rail (`ClanMembers`) vs. the keyed main well (`PlayerRouteView` → `PlayerDetail` header/badge tray + `ShipTopPlayerBanner` + the 7-tab insights deck), with each tab's panel components, `file:line` anchors, and backing endpoint |
 
 ## Backend (`be-`)

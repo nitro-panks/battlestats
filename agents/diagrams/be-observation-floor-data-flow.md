@@ -248,14 +248,14 @@ sequenceDiagram
     POOL->>WG: bulk account/info (gate) + per-player ships/stats (movers)
     alt 407 REQUEST_LIMIT_EXCEEDED
         WG-->>POOL: rate-limited
-        Note over POOL: ABORT sweep, persist partial
+        Note over POOL: retry with capped exponential backoff (transient 407)<br/>up to BATTLE_OBSERVATION_FLOOR_407_RETRIES, then abort + persist partial
     else ok
         POOL->>PG: BattleObservation (+ gated BattleEvent) + last_battle_date + battles_json
     end
     POOL->>LOCK: release lock
-    Note over POOL: SELF_CHAIN_ENABLED=1 — self-chain is ON (all realms): re-dispatch (~120s) while stale<br/>backlog >= threshold(500), so two realms chew concurrently. Re-enabled after the warm-storm fix; yields during crawls.
+    Note over POOL: SELF_CHAIN_ENABLED=1 — self-chain is ON (all realms): re-dispatch (~120s) while stale<br/>backlog >= threshold(500), so two realms chew concurrently. Re-enabled after the warm-storm fix, yields during crawls.
 
-    Note over POOL,PG: separate `background` worker runs snapshot/enrichment/hot/warmers; `default` runs<br/>dispatchers/lazy-refresh/watchdogs — all share the 2-vCPU PG (warmers are the main hog) + WG budget,<br/>NOT the floor's worker pool.
+    Note over POOL,PG: separate `background` worker runs snapshot/enrichment/hot/warmers, while `default` runs<br/>dispatchers/lazy-refresh/watchdogs — all share the 2-vCPU PG (warmers are the main hog) + WG budget,<br/>NOT the floor's worker pool.
 ```
 
 ### What actually bounds throughput (current 2026-06-20)
@@ -308,6 +308,21 @@ covered by the floor and cost nothing extra — the hot sweep's marginal work is
 hot-but-inactive set the floor wouldn't reach. (Full hot-player loop: see the hot-players
 drill-down in `be-queue-data-flow.md`.)
 
+### Interaction with the lapsed-player recapture sweep
+
+`recapture_lapsed_players_task` (per-realm striped daily, **`background` queue**, coexists
+with crawls) closes the floor's structural blind spot: the floor only ever selects
+**active-7d** candidates, so a dormant player who *returns* is invisible to it until
+something advances their `last_battle_date`. The recapture sweep is a **cheap bulk
+`account/info` pass** over the dormant pool (8–365d) that detects players whose
+`last_battle_time` moved back inside active-7d and rewrites **only** their `last_battle_date`
+(never `last_fetch`, which would suppress the real per-player refresh) — so the existing
+floor harvests them on its next cycle ("let the floor catch it"). It does **no** `ships/stats`
+fetch itself. `Player.last_idle_check_at` is the LRU rotation cursor that walks the whole
+dormant pool over ~a week; `RECAPTURE_LAPSED_APPLY` gates the writes (off = detect-only yield
+logging). Kill switch `RECAPTURE_LAPSED_ENABLED`. Readout: `/recapture` skill. Full loop:
+`agents/runbooks/runbook-recapture-lapsed-players-2026-06-26.md`.
+
 ---
 
 ## Gating & flags (live vs default)
@@ -330,6 +345,8 @@ the live prod values differ where noted.
 | `BATTLE_OBSERVATION_FLOOR_RANKED_DAILY_ENABLED` | `0` | `1` | Heavy ranked sweep once/day (primary slot) vs every slot — random-only otherwise |
 | `BATTLE_OBSERVATION_FLOOR_SELF_CHAIN_ENABLED` | `0` | `1` | ON (all realms): re-dispatch (~120s) while stale backlog ≥ 500, so two realms chew concurrently. Re-enabled after the NameError warm-storm fix freed DB headroom |
 | `FLOOR_REFRESH_BATTLES_JSON_ENABLED` | `1` | `0` (deferred) | Per-mover `battles_json` rebuild from the same `ships/stats` — deferred during backlog catch-up |
+| `BATTLE_OBSERVATION_FLOOR_407_RETRIES` | `3` | `3` | Transient 407 retries (capped exp. backoff) before the sweep aborts — was abort-on-first-407 |
+| `RECAPTURE_LAPSED_ENABLED` / `RECAPTURE_LAPSED_APPLY` | `0` / `0` | `1` / `1` | Lapsed-player recapture sweep on/off; APPLY gates the `last_battle_date` writes |
 | `CELERY_FLOOR_CONCURRENCY` | — | `2` | Dedicated `floor` worker (`battlestats-celery-floor`) concurrency — `-c 2` re-enabled 2026-06-20 after the warm-storm fix; watched by the managed-PG load monitor |
 
 ### Notes

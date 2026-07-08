@@ -32,22 +32,23 @@ flowchart TD
 
         subgraph DETAIL["PlayerDetail — app/components/PlayerDetail.tsx"]
             direction TB
-            HEADER["Header identity + badge tray<br/>PlayerDetail.tsx:263-270 / 329<br/>Activity·Hidden·LeaderCrown·PveEnjoyer·Ranked·ClanBattleShield·EfficiencyRank·TopShipBadges·Twitch"]
-            BANNER["ShipTopPlayerBanner (current T10 top-3)<br/>app/components/ShipTopPlayerBanner.tsx<br/>rendered PlayerDetail.tsx:385 (ship_badges)"]
-            TABS["PlayerDetailInsightsTabs (7-tab deck)<br/>app/components/PlayerDetailInsightsTabs.tsx:151<br/>TAB_CONFIG :108 / panel switch :478-633"]
+            HEADER["Header identity + badge tray<br/>PlayerDetail.tsx:232-239<br/>Activity·Hidden·LeaderCrown·PveEnjoyer·Ranked·ClanBattleShield·EfficiencyRank·TopShipBadges·Twitch"]
+            BANNER["ShipTopPlayerBanner (current T10 top-3)<br/>app/components/ShipTopPlayerBanner.tsx<br/>rendered PlayerDetail.tsx:338 (ship_badges)"]
+            TABS["PlayerDetailInsightsTabs (7-tab deck)<br/>app/components/PlayerDetailInsightsTabs.tsx:151<br/>TAB_CONFIG :108 / panel switch :482-635"]
         end
     end
 
     %% ---- Tabs (each lazy-loaded, fetch on activate) ----
     subgraph TABDECK["Insights tabs — dynamic imports, fetch-on-activate"]
         direction TB
-        T_ACT["Activity → BattleHistoryCard<br/>GET /api/player/name/battle-history/ (BattleHistoryCard.tsx:100)"]
+        T_ACT["Activity → BattleHistoryCard (+ ShipStats on ship-row click)<br/>GET /api/player/name/battle-history/ (BattleHistoryCard.tsx:100)<br/>totals: clustered stat bar, WR split Window·Overall·Δ (:972-1062)"]
         T_SHIPS["Ships → RandomsSVG<br/>GET /api/fetch/randoms_data/id/?all=true (RandomsSVG.tsx:325)"]
         T_PROFILE["Profile → TierTypeHeatmapSVG / TypeSVG / TierSVG<br/>GET /api/fetch/player_correlation/tier_type/id/ (Tabs:333)"]
         T_RANKED["Ranked → RankedWRBattlesHeatmapSVG + RankedSeasons<br/>GET player_correlation/ranked_wr_battles/id/ + ranked_data/id/ (Tabs:267/274)"]
         T_CB["Clan Battles → PlayerClanBattleSeasons<br/>GET /api/fetch/player_clan_battle_seasons/id/ (Tabs:286)"]
         T_EFF["Efficiency → PlayerEfficiencyBadges<br/>(from player payload, no extra fetch)"]
         T_POP["Population → WR / Battles / Score DistributionSVG<br/>(realm distributions from player payload)"]
+        SHIPSTATS["ShipStats (combat-profile panel, ship-row click)<br/>app/components/ShipStats.tsx · rendered BattleHistoryCard.tsx:1067<br/>Average|Player|Delta table (Accuracy cluster = career)<br/>GET /api/player/name/ship/id/combat-stats"]
     end
 
     FETCH["fetchSharedJson<br/>app/lib/sharedJsonFetch.ts<br/>dedup + SWR cache + priority queue + retry"]
@@ -73,6 +74,7 @@ flowchart TD
     TABS --> T_CB
     TABS --> T_EFF
     TABS --> T_POP
+    T_ACT -- "ship-row click → combat panel" --> SHIPSTATS
 
     %% ---- nav + data edges ----
     CLANMEMBERS -- "member click → soft-nav swaps well only<br/>rail stays mounted (page.tsx:46 key)" --> PAGE
@@ -87,13 +89,14 @@ flowchart TD
     T_PROFILE --> FETCH
     T_RANKED --> FETCH
     T_CB --> FETCH
+    SHIPSTATS --> FETCH
 ```
 
 ## Tabs → panels → endpoints
 
 | Tab (`InsightsTabId`) | Panel components | Endpoint(s) | Notes |
 |---|---|---|---|
-| `activity` | `BattleHistoryCard` | `GET /api/player/<name>/battle-history/` | default tab; day/week/month/year windows resolve to the daily layer |
+| `activity` | `BattleHistoryCard` (+ `ShipStats` on ship-row click) | `GET /api/player/<name>/battle-history/`; ship panel `…/ship/<id>/combat-stats` | default tab; day/week/month/year windows resolve to the daily layer. Totals bar is clustered/divided with a 3-tile WR split (Window · Overall · Δ, payload adds `lifetime_win_rate`/`delta_win_rate`). `ShipStats` expands below as an Average\|Player\|Delta table |
 | `ships` | `RandomsSVG` | `GET /api/fetch/randoms_data/<id>/?all=true` | per-ship random-battle aggregates |
 | `profile` | `TierTypeHeatmapSVG`, `TypeSVG`, `TierSVG` | `GET /api/fetch/player_correlation/tier_type/<id>/` | one payload derives all three charts |
 | `ranked` | `RankedWRBattlesHeatmapSVG`, `RankedSeasons` | `…/ranked_wr_battles/<id>/` + `…/ranked_data/<id>/` | cold `ranked_data` serves `[]` + `X-Ranked-Pending` |
