@@ -106,13 +106,16 @@ const PlayerScoreDistributionSVG = dynamic(() => resilientDynamicImport(() => im
 });
 
 const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; minHeight: number; }> = [
+    // Order reflects measured Umami tab-click demand (90d, 2026-07-08): Activity
+    // stays first as the default landing tab; the remaining tabs are ranked by
+    // click volume — Ships > Profile > Population > Efficiency > Ranked > Clan Battles.
     { id: 'activity', label: 'Activity', panelLabel: 'Recent battle activity', minHeight: 420 },
     { id: 'ships', label: 'Ships', panelLabel: 'Ship insights', minHeight: 560 },
     { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 920 },
+    { id: 'population', label: 'Population', panelLabel: 'Population insights', minHeight: 720 },
+    { id: 'badges', label: 'Efficiency', panelLabel: 'Efficiency insights', minHeight: 360 },
     { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 620 },
     { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
-    { id: 'badges', label: 'Efficiency', panelLabel: 'Efficiency insights', minHeight: 360 },
-    { id: 'population', label: 'Population', panelLabel: 'Population insights', minHeight: 720 },
 ];
 
 const panelSectionIdByTab: Record<InsightsTabId, string> = {
