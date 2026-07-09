@@ -173,14 +173,38 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
     const [profileChartPayload, setProfileChartPayload] = useState<TierTypePayload | null>(null);
     const [profileChartState, setProfileChartState] = useState<'idle' | 'loading' | 'ready' | 'warming' | 'error'>('idle');
+    // Gates the one-time tab-strip attention glow (see `.tab-attention-glow--armed`
+    // in globals.css). We withhold it until the Activity sparkline's D3 entrance
+    // finishes so the two animations don't compete on load; when there's no
+    // sparkline to wait for it arms immediately. Re-armed per player below.
+    const [glowArmed, setGlowArmed] = useState(false);
 
-    // Reset BOTH together on player change: keeping a stale `activityAvailable`
-    // would let the previous player's empty verdict bounce the new player off the
-    // Activity tab before their card refetches.
+    // Reset on player change: keeping a stale `activityAvailable` would let the
+    // previous player's empty verdict bounce the new player off the Activity tab
+    // before their card refetches; re-arm the glow so it replays for the new page.
     useEffect(() => {
         setActiveTab('activity');
         setActivityAvailable(null);
+        setGlowArmed(false);
     }, [playerId]);
+
+    // Arm the tab-strip glow. If there's no sparkline to wait for — the user isn't
+    // on the Activity tab, or Activity has no data (unavailable) — proceed on load.
+    // Otherwise wait for the card's `onSparklineAnimationEnd`, with a safety
+    // fallback anchored to data-landed (`activityAvailable === true`) so a missed
+    // event can never leave the glow permanently suppressed.
+    useEffect(() => {
+        if (glowArmed) return;
+        if (activeTab !== 'activity' || activityAvailable === false) {
+            setGlowArmed(true);
+            return;
+        }
+        if (activityAvailable === true) {
+            const fallback = setTimeout(() => setGlowArmed(true), 6000);
+            return () => clearTimeout(fallback);
+        }
+        // activityAvailable === null → still resolving; keep waiting.
+    }, [glowArmed, activeTab, activityAvailable]);
 
     const handleActivityAvailability = useCallback((available: boolean) => {
         setActivityAvailable(available);
@@ -459,7 +483,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     }
                                     setActiveTab(tab.id);
                                 }}
-                                className={`${base} ${stateClass}`}
+                                className={`${base} ${stateClass}${isDisabled ? '' : ` tab-attention-glow${glowArmed ? ' tab-attention-glow--armed' : ''}`}`}
                             >
                                 {tab.label}
                             </button>
@@ -489,6 +513,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             realm={realm}
                             refreshNonce={refreshNonce}
                             onAvailabilityChange={handleActivityAvailability}
+                            onSparklineAnimationEnd={() => setGlowArmed(true)}
                         />
                     )
                 ) : null}
