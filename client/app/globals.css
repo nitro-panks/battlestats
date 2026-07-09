@@ -231,6 +231,80 @@ body {
   }
 }
 
+/* Attention glow for the player-detail insight tabs (Activity, Ships, Profile,
+   Ranked, …). The tab strip gets overlooked, so we pull the eye to it: a bright
+   accent ring+halo flashes ONCE across all tabs together when the page loads,
+   then again on hover.
+
+   IMPORTANT (perf): we animate OPACITY, never box-shadow. The glow ring is a
+   static box-shadow painted once onto two pseudo-element layers; the animation
+   only fades their opacity, which the compositor drives without a per-frame
+   repaint. Animating box-shadow directly repaints every frame and stutters when
+   the main thread is busy — exactly what the player page is doing on load (data
+   fetches resolving, D3 charts mounting).
+
+   Two layers, deliberately:
+     - `::before` = the one-time load flash. It only runs once the strip is ARMED
+       (the `.tab-attention-glow--armed` modifier is added), which the tab bar
+       withholds until the Activity tab's D3 sparkline has finished its entrance
+       animation (or immediately when there is no sparkline to wait for). All tabs
+       carry the same class, so they flash in unison.
+     - `::after` = the hover pulse. Always live (not gated on arming). Base
+       animation is `none`, so entering hover flips animation-name none→fade
+       (restart) and leaving flips it back to none (stop) — replays on every
+       hover without re-firing the load flash. */
+.tab-attention-glow {
+  position: relative;
+}
+
+.tab-attention-glow::before,
+.tab-attention-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    0 0 14px 4px color-mix(in srgb, var(--accent-mid) 85%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--accent-mid) 70%, transparent);
+}
+
+/* One-time load flash — all tabs together. `both` holds opacity 0 before and
+   after so nothing lingers. Runs only once the strip is armed (see the JS gate
+   that waits for the sparkline). */
+.tab-attention-glow--armed::before {
+  animation: tab-attention-glow-fade 1.6s ease-in-out both;
+}
+
+/* Hover pulse (replayable); immediate — the chase delay only rides ::before. */
+.tab-attention-glow::after {
+  animation: none;
+}
+
+.tab-attention-glow:hover::after {
+  animation: tab-attention-glow-fade 1.5s ease-in-out;
+}
+
+@keyframes tab-attention-glow-fade {
+  /* Peak opacity 0.5 (not 1) = ~50% flash intensity; halves both the load flash
+     and the hover pulse, since they share this keyframe. */
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.5; }
+}
+
+/* Reduced-motion: honour the preference (no fade), but keep a visible static
+   glow on hover so the affordance still lands without any animation. */
+@media (prefers-reduced-motion: reduce) {
+  .tab-attention-glow--armed::before {
+    animation: none;
+  }
+  .tab-attention-glow:hover::after {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

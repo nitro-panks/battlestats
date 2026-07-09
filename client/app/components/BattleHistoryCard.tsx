@@ -162,6 +162,11 @@ interface BattleHistoryCardProps {
     // payload — never re-fired on user window/mode switches, so toggling to an
     // empty window can't retroactively disable the tab the user is on.
     onAvailabilityChange?: (available: boolean) => void;
+    // Fired when the sparkline's D3 entrance (the WR-line draw-reveal) finishes,
+    // so a parent can sequence its own animation after the chart settles. Fires
+    // once when the populated reveal completes; not fired when the player has no
+    // WR line to draw (no battles / pure-ranked with no lifetime baseline).
+    onSparklineAnimationEnd?: () => void;
 }
 
 const formatInt = (n: number): string => n.toLocaleString();
@@ -547,6 +552,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     refreshNonce = 0,
     embedded = false,
     onAvailabilityChange,
+    onSparklineAnimationEnd,
 }) => {
     const requestSignal = usePlayerRequestSignal();
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
@@ -859,7 +865,21 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 : 'mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5'}
             aria-label="Recent battles"
         >
-            <div className="w-full pb-5">{sparkline}</div>
+            <div
+                className="w-full pb-5"
+                // The WR-line draw-reveal is the sparkline's longest entrance
+                // animation; its bubbled animationend (caught here at the painted
+                // wrapper, since the rect itself lives in <defs>) marks "the D3
+                // sparkline finished". Filter by name so the 30 bar-rise events
+                // don't trigger it. Idempotent for the caller.
+                onAnimationEnd={(e) => {
+                    if (e.animationName === 'sparkline-wr-reveal') {
+                        onSparklineAnimationEnd?.();
+                    }
+                }}
+            >
+                {sparkline}
+            </div>
             <hr className="mb-5 border-[var(--accent-faint)]" />
             <header className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex flex-wrap items-baseline gap-3">
