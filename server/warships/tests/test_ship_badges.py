@@ -480,6 +480,62 @@ class ShipBadgeSnapshotTests(TestCase):
         self.assertNotIn(nobody.pk, bulk)
         self.assertEqual(bulk[ace.pk][0]["ship_name"], "Shimakaze")
 
+    def test_badge_dropped_when_absent_from_current_generation(self):
+        # Regression (the "displaced #1 still wears the badge" bug): a player who
+        # held #1 in an OLDER snapshot generation but is ABSENT from the ship's
+        # CURRENT generation must NOT wear the badge. Badges anchor on the realm's
+        # latest captured_on (the same the /ship board reads), not the player's own
+        # most-recent row — which lingers up to SHIP_BADGE_RETENTION_DAYS after they
+        # fall off the board. Keying on player-latest would show a stale "1st place"
+        # the live board has already reassigned.
+        today = timezone.now().date()
+        yesterday = today - timedelta(days=1)
+        dropped = self._player("Dropped")
+        holder = self._player("Holder")
+        # Yesterday's generation: `dropped` held Shimakaze #1 (thin 19-battle run).
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=yesterday, realm="na", ship_id=SHIMA,
+            ship_name="Shimakaze", rank=1, player=dropped, win_rate=94.0,
+            battles=19, damage=1_000_000,
+        )
+        # Today's (current) generation: `holder` is #1; `dropped` has no row.
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=today, realm="na", ship_id=SHIMA, ship_name="Shimakaze",
+            rank=1, player=holder, win_rate=67.0, battles=83, damage=5_000_000,
+        )
+
+        with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
+            self.assertEqual(get_player_ship_badges(dropped), [])
+            self.assertEqual(self._badge_ranks(holder), [1])
+            # Bulk variant agrees even when the dropped player is queried too — its
+            # anchor is the realm-current generation over ALL rows, so a candidate
+            # who fell off can't drag it back to their stale generation.
+            bulk = get_players_ship_badges_bulk([dropped.pk, holder.pk])
+            self.assertNotIn(dropped.pk, bulk)
+            self.assertEqual(bulk[holder.pk], get_player_ship_badges(holder))
+
+    def test_badge_dropped_when_player_absent_from_all_current_boards(self):
+        # Same failure isolated to the bulk path when EVERY queried candidate has
+        # only stale rows: the anchor must still be the realm's current generation
+        # (computed over all rows, including boards the candidates aren't on), so a
+        # lone dropped player returns no badge rather than their own stale latest.
+        today = timezone.now().date()
+        yesterday = today - timedelta(days=1)
+        dropped = self._player("Dropped")
+        holder = self._player("Holder")
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=yesterday, realm="na", ship_id=SHIMA,
+            ship_name="Shimakaze", rank=1, player=dropped, win_rate=94.0,
+            battles=19, damage=1_000_000,
+        )
+        ShipTopPlayerSnapshot.objects.create(
+            captured_on=today, realm="na", ship_id=SHIMA, ship_name="Shimakaze",
+            rank=1, player=holder, win_rate=67.0, battles=83, damage=5_000_000,
+        )
+
+        with mock.patch.dict("os.environ", BADGE_ENV, clear=False):
+            self.assertEqual(get_players_ship_badges_bulk([dropped.pk]), {})
+
     def test_get_ship_leaderboard_unknown_ship_returns_none(self):
         self.assertIsNone(get_ship_leaderboard("na", 1234567))
 

@@ -6,7 +6,8 @@ import MedalIcon, { RANK_COLOR } from './MedalIcon';
 import { buildShipPath } from '../lib/entityRoutes';
 
 // Profile banner for a player's current top-3 finishes in a Tier-10 ship
-// (rolling trailing window, recomputed nightly; worn while held).
+// (rolling trailing window, recomputed nightly; the badge tracks the current
+// board generation and drops the moment the player is displaced).
 // One award card per badge, stacked above the Battle History card, each linking
 // to that ship's standings page. Fed by the player payload's `ship_badges`
 // (data.get_player_ship_badges).

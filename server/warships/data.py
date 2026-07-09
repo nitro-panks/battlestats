@@ -6446,12 +6446,14 @@ def get_player_ship_badges(player: Player) -> list:
         return []
 
     top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
-    latest = (
-        ShipTopPlayerSnapshot.objects.filter(player=player)
-        .order_by('-captured_on')
-        .values_list('captured_on', flat=True)
-        .first()
-    )
+    # Anchor on the REALM's current snapshot generation (the same captured_on the
+    # /ship board reads via latest_ship_snapshot_window), NOT the player's own most
+    # recent row. A player knocked off the board keeps a row for
+    # SHIP_BADGE_RETENTION_DAYS; keying on their own latest captured_on would wear a
+    # "1st place" badge the live board has already reassigned to someone else, until
+    # that stale row prunes. Absent from the current generation → no badge.
+    realm = (getattr(player, 'realm', '') or '').lower().strip()
+    latest, _, _ = latest_ship_snapshot_window(realm)
     if latest is None:
         return []
 
@@ -6494,14 +6496,16 @@ def get_player_ship_badges(player: Player) -> list:
 def get_players_ship_badges_bulk(player_pks, realm: Optional[str] = None) -> dict:
     """Bulk variant of `get_player_ship_badges` for player lists (avoids N+1).
 
-    Returns ``{player_pk: [badge_dict, ...]}`` for the given players, each using
-    that player's own latest snapshot date. Two queries total regardless of list
-    size — used by the landing and clan-member payloads so a 50-row list doesn't
-    fan out to 100 per-player lookups. ``player_pks`` are ``Player`` PKs (the
-    snapshot FK), NOT WG account ids. ``realm`` is an optional narrowing filter
-    (a player only has snapshots for their own realm, so it's safe to omit).
-    Players holding no top-spot are absent from the result. Same badge shape as
-    `get_player_ship_badges`.
+    Returns ``{player_pk: [badge_dict, ...]}`` for the given players, each anchored
+    on that player's realm's CURRENT snapshot generation (the `/ship` board's
+    latest ``captured_on``) — NOT the player's own latest row, which lags and would
+    surface a stale badge after they fall off the board (see `get_player_ship_badges`).
+    Used by the landing and clan-member payloads so a 50-row list doesn't fan out
+    to per-player lookups. ``player_pks`` are ``Player`` PKs (the snapshot FK), NOT
+    WG account ids. ``realm`` is an optional narrowing filter (a player only has
+    snapshots for their own realm, so it's safe to omit — the realms in play are
+    derived from the candidates). Players absent from the current generation are
+    absent from the result. Same badge shape as `get_player_ship_badges`.
     """
     from warships.models import ShipTopPlayerSnapshot
 
@@ -6510,34 +6514,42 @@ def get_players_ship_badges_bulk(player_pks, realm: Optional[str] = None) -> dic
         return {}
     top_n = int(os.getenv('SHIP_BADGE_TOP_N', '3'))
 
-    # Exclude now-hidden accounts (see get_player_ship_badges) — drives both the
-    # latest-per-player map and, via its keys, the row fetch below.
+    # Exclude now-hidden accounts (see get_player_ship_badges). `base` restricts to
+    # the candidate players only to discover which realms they span; the
+    # realm-current generation below is computed over ALL rows so a candidate who
+    # fell off the board can't drag the anchor backward.
     base = ShipTopPlayerSnapshot.objects.filter(
         player_id__in=pks, player__is_hidden=False)
     if realm:
         base = base.filter(realm=(realm or '').lower().strip())
-    latest_per_player = {
-        row['player_id']: row['latest']
-        for row in base.values('player_id').annotate(latest=Max('captured_on'))
-    }
-    if not latest_per_player:
+    realms = set(base.values_list('realm', flat=True).distinct())
+    if not realms:
         return {}
+    # Anchor on each realm's CURRENT snapshot generation (the /ship board's latest
+    # captured_on), NOT each candidate's own latest row — a displaced ex-#1 must
+    # drop the badge immediately, not wear a stale one until SHIP_BADGE_RETENTION_DAYS
+    # prunes it. See get_player_ship_badges.
+    latest_by_realm = {}
+    for r in realms:
+        cap, _, _ = latest_ship_snapshot_window(r)
+        if cap is not None:
+            latest_by_realm[r] = cap
+    if not latest_by_realm:
+        return {}
+    gen_q = Q()
+    for r, cap in latest_by_realm.items():
+        gen_q |= Q(realm=r, captured_on=cap)
 
     result: dict = {}
     rows = list(
         ShipTopPlayerSnapshot.objects
-        .filter(player_id__in=latest_per_player.keys(),
-                captured_on__in=set(latest_per_player.values()),
-                rank__lte=top_n)
+        .filter(player_id__in=pks, player__is_hidden=False, rank__lte=top_n)
+        .filter(gen_q)
         .order_by('rank', 'ship_name')
     )
     tier_by_ship = _ship_tier_map([r.ship_id for r in rows])
     eligible = _badge_tiers()
     for r in rows:
-        # captured_on__in widens to every player's latest; keep only the row that
-        # matches THIS player's own latest snapshot date.
-        if r.captured_on != latest_per_player.get(r.player_id):
-            continue
         # Off-scope treemap ships hold board rows but are not profile badges.
         if tier_by_ship.get(r.ship_id) not in eligible:
             continue

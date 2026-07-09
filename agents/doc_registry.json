@@ -3018,6 +3018,30 @@
                 "floor-battles-json-refresh-superseded"
             ]
         },
+        "agents/runbooks/runbook-ship-badge-current-generation-2026-07-08.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "features",
+            "owner": "backend",
+            "aliases": [
+                "stale ship badge",
+                "displaced number one still wears badge",
+                "badge current generation anchor",
+                "ship badge leaderboard mismatch"
+            ],
+            "tags": [
+                "ship-badges",
+                "ShipTopPlayerSnapshot",
+                "get_player_ship_badges",
+                "current-generation-anchor",
+                "SHIP_BADGE_RETENTION_DAYS"
+            ],
+            "archive_on": [
+                "ship-standings-feature-removed",
+                "ship-badge-generation-anchor-superseded"
+            ]
+        },
         "agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md": {
             "kind": "runbook",
             "status": "active",
