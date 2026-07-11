@@ -121,7 +121,7 @@ For **totals** and **each realm** (na / eu / asia), compute L and the Δ vs D-1 
 | `stale_over_24h` | active-7d players whose latest obs is >24h old. **Mostly the change-gate "non-mover wall" — by design, not a backlog:** a non-mover is gate-skipped *without* a fresh observation, so it stays stale until it plays again. A large/steady value is expected (live: ~181k); only read a *rising* one as cadence-falling-behind if `distinct_productive` is also dropping. |
 | `obs_bulk_floor` / `obs_poll` | capture-cost split (cheap bulk floor vs per-player poll) |
 | `never_observed` | should be ~0; a rise is a signal |
-| `gap_1d` | 24h-gap decomposition (added 2026-07-08): active-1d players with **no BattleEvent** in the window, split into `pvp_mover` (snapshot PvP delta > 0 — real miss; sub-count `pvp_mover_no_event_48h` = still uncaptured at 48h, the only bucket that justifies more floor throughput), `non_pvp_active` (account clock moved, PvP battles flat — co-op/Operations, structurally invisible to PvP-only extraction; expected to dominate, NA highest), and `no_snapshot_pair` (unclassifiable). `null` until two snapshot days exist. |
+| `gap_1d` | 24h-gap decomposition (added 2026-07-08): active-1d players with **no BattleEvent** in the window, split into `pvp_mover` (snapshot PvP delta > 0; sub-count `pvp_mover_no_event_48h` = no event in 48h either — **capture LATENCY, not loss**: verified 2026-07-11 these players are already in the pipeline and backfill on the next observation; a low-hundreds/day tail is expected, only a sustained RISE is a throughput signal), `non_pvp_active` (account clock moved, PvP battles flat — co-op/Operations, structurally invisible to PvP-only extraction; expected to dominate, NA highest), and `no_snapshot_pair` (unclassifiable). `null` until two snapshot days exist. |
 
 **Ceiling framing (corrects the command's own headline).** The snapshot's built-in HEADLINE says "drive both toward 100%." That is optimistic: `coverage_ratio_vs_7d`'s realistic ceiling is the **daily-active fraction** `active_1d / active_7d` (~25–45%, historically declining), because a player who didn't battle in the window *can't* produce an event. Report cov/7d **both raw and as a % of that ceiling** — the latter is the honest "how close to the achievable max" number. Don't bury the raw `distinct_productive / active_7d` counts under the editorializing.
 
@@ -131,7 +131,7 @@ For **totals** and **each realm** (na / eu / asia), compute L and the Δ vs D-1 
 - NA `productive_rate` runs well below EU/ASIA — known, not a regression on its own.
 - A jump/drop right after a `config` change (compare the `config` block across snapshots — `LIMIT`, `HOURS`, gate flags) *may* explain a step change — but only if step 3 confirms the worker restarted to apply it. Call the config delta out explicitly.
 - Rising `never_observed` while cov is flat → floor cadence falling behind the active set.
-- `gap_1d` routing: a dominant `non_pvp_active` means the residual cov/1d gap is a capture-surface question (PvE/Operations invisible to PvP-only `ships/stats`), NOT a floor-throughput deficit — do not recommend cadence/limit raises off it. Only a material, sustained `pvp_mover_no_event_48h` justifies floor tuning. (Rising `stale_over_24h` alone is **not** that signal — it's mostly the change-gate non-mover wall, see the metric note above; only treat it as falling-behind if `distinct_productive` drops too.)
+- `gap_1d` routing: a dominant `non_pvp_active` means the residual cov/1d gap is a capture-surface question (PvE/Operations invisible to PvP-only `ships/stats`), NOT a floor-throughput deficit — do not recommend cadence/limit raises off it. `pvp_mover_no_event_48h` is a latency tail (players backfill on the next observation), not a loss count; only a **material, sustained RISE** in it — or any rise in `never_observed` — justifies floor tuning. Also discount mid-day snapshots: this bucket is time-of-day inflated (in-flight EU/ASIA), so compare 04:30Z-to-04:30Z. (Rising `stale_over_24h` alone is **not** that signal — it's mostly the change-gate non-mover wall, see the metric note above; only treat it as falling-behind if `distinct_productive` drops too.)
 
 ### 5. Report
 
@@ -150,7 +150,7 @@ Capture cost (total, 24h): bulk_floor <…>  /  poll <…>
 never_observed: <…>
 
 Read: <one line — what moved, numerator vs denominator, and how much is signal vs noise>
-Gap-1d (totals): <N> uncaptured of <active_1d> — <non_pvp_active> non-PvP, <pvp_mover> missed movers (<pvp_mover_no_event_48h> still uncaptured at 48h), <no_snapshot_pair> unclassifiable
+Gap-1d (totals): <N> no-event of <active_1d> — <non_pvp_active> non-PvP, <pvp_mover> movers (<pvp_mover_no_event_48h> at >48h latency, not lost), <no_snapshot_pair> unclassifiable
 ```
 
 **Verdict discipline — do NOT cry regression off one snapshot.** Day-to-day

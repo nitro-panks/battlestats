@@ -1,7 +1,7 @@
 # Runbook: Ingress 24h Capture-Gap Decomposition (gap_1d) + battles_json Re-enable
 
-_Created: 2026-07-08_
-_Context: Next step in player-data-ingress optimization. The observation floor turned out not to be throughput-bound; this tranche shipped an instrument that decomposes the residual 24h capture gap and re-enabled the floor's displayed-stats rebuild. A Step 1 decision (widen capture to PvE vs re-baseline the KPI) is parked here, to be picked up after ~3 clean nightly snapshots (on or after 2026-07-11)._
+_Created: 2026-07-08 · Updated: 2026-07-11 (pick-up done, Step 1b decided)_
+_Context: Next step in player-data-ingress optimization. The observation floor turned out not to be throughput-bound; this tranche shipped an instrument that decomposes the residual 24h capture gap and re-enabled the floor's displayed-stats rebuild. **The parked Step 1 decision was made on 2026-07-11: branch 1b (re-baseline the KPI, declare PvP capture complete).** See "Step 1 decision (RESOLVED)" below._
 _QA: Backend suite 819 passed / 2 skipped (sqlite, `DJANGO_SECRET_KEY` set). Live-verified on prod 2026-07-08: gap_1d emitted at scale; first post-restart floor cycle rebuilt battles_json for 89/89 movers._
 
 ## Purpose
@@ -26,7 +26,9 @@ GAP-1D: 76,716 of 139,715 active-1d players produced no BattleEvent in 24h —
   2,448 unclassifiable (no snapshot pair).
 ```
 
-Reading: 85% of the gap is non-PvP activity; of the "missed" PvP movers, all but **9 players across all three realms** had an event within 48h (late capture across the window boundary, not loss). The floor loses essentially nothing.
+Reading: 85% of the gap is non-PvP activity. The floor loses essentially nothing.
+
+> **Correction (2026-07-11):** the "9 still uncaptured at 48h" figure above was an under-count — a mid-day one-off run taken minutes after the instrument deployed, before the trailing snapshot history had matured. The canonical 04:30Z series shows `pvp_mover_no_event_48h` steady at **~250–380/day**, not 9. That tail is **capture latency, not loss** (see "Step 1 decision (RESOLVED)"); the "floor loses essentially nothing" conclusion still holds, but the honest number is low-hundreds/day at >48h latency, not single digits.
 
 ## What shipped (v2.22.3)
 
@@ -41,7 +43,18 @@ Reading: 85% of the gap is non-PvP activity; of the "missed" PvP movers, all but
 
 Deployed 2026-07-08 ~20:28 UTC (backend release `20260708162724`, client `20260708162902`); floor worker restarted with the flag; first cycle: `movers=89 battles_json_rebuilds=89 battles_json_total_ms=29092` (~330ms/rebuild), healthcheck clean, footer 2.22.3.
 
-## Pick-up procedure (on or after 2026-07-11)
+## Pick-up results (2026-07-11) — all checks passed
+
+Ran the procedure below on 2026-07-11. Findings:
+
+- **Re-enable healthy.** `bulk floor done` shows `battles_json_rebuilds ≈ movers` on every cycle (e.g. 1537/1537, 5136/5136, 2808/2808); one 729→723. Flag held (pinned in `deploy_to_droplet.sh`).
+- **Throughput / load healthy.** Self-chain reaches `stop (remaining < 500)` on na/eu/asia repeatedly; managed-PG `load15 = 1.33`, well under the 2.3 alarm (the 3.00 load1 was a momentary spike). Cycle times in-band.
+- **Decomposition holds.** Three clean 04:30Z snapshots (07-09/10/11): `non_pvp_active` dominant at **80–84%** of the gap; `pvp_mover_no_event_48h` steady at **281 / 252 / 376** (not the 9 from the 07-08 one-off — see the Correction above).
+- **`pvp_mover_no_event_48h` is latency, not loss (sampled live).** Of 25 flagged players: **0 never-observed**; ~19 last polled by the floor >48h ago (backfill on next observation; only per-battle timeline resolution across the gap is lost); ~5 baseline/broken-prior diffs that can't emit an event. The bucket is also time-of-day inflated (mid-day reproduction 885, 788 of them EU mid-session; same-day 04:30Z EU was 37).
+
+**Decision: branch 1b** (below). Because the tail is latency and `non_pvp_active` dominates, there is no throughput deficit to tune.
+
+## Pick-up procedure (on or after 2026-07-11) — retained for re-runs
 
 1. **Health of the re-enable (Step 2 watch, ~2 days):**
    ```bash
@@ -56,18 +69,21 @@ Deployed 2026-07-08 ~20:28 UTC (backend release `20260708162724`, client `202607
 3. **Confirm the decomposition holds:** `non_pvp_active` dominant (expect roughly 60 to 85% of the gap; NA highest), `pvp_mover_no_event_48h` negligible (single digits to low hundreds). If instead `pvp_mover_no_event_48h` is material and sustained, that (and only that) justifies floor tuning: `HOURS` 8→6 first, then cadence, then revisit `BATTLE_OBSERVATION_FLOOR_CRAWL_LIMIT=3000` if misses cluster in crawl-coexist windows. Do not change `CELERY_FLOOR_CONCURRENCY` without August's explicit approval.
 4. **Make the Step 1 decision** (below) and open the follow-on work item.
 
-## Step 1 decision: two branches
+## Step 1 decision (RESOLVED 2026-07-11): branch 1b
 
-**1a. Widen capture to co-op/Operations** (engineering + product):
+**Chosen: 1b — re-baseline the KPI, declare PvP capture complete.** The 24h goal is now defined over `snapshot_movers` (true PvP movers): sustain `mover_capture_rate ≥ 1.0` (live 1.1–1.4) with `never_observed` ~0. `pvp_mover_no_event_48h` is **not** a goal metric — it is a latency tail (~250–380/day, verified above), and the honest re-baseline language is "low-hundreds/day at >48h latency, not lost," **not** "≈ 0" (that was the too-optimistic 07-08 reading). Only a material, sustained RISE in it, or any rise in `never_observed`, is a throughput signal.
+
+Landed as a docs/metrics change (branch `docs/gap-1d-rebaseline-1b`):
+- `benchmark_observation_floor.py`: module docstring + `_GAP_KEYS` comment + classification comment corrected to "latency, not loss"; `MOVER-CAPTURE:` headline states the PvP-capture-complete goal; `GAP-1D:` line reworded from "still uncaptured at 48h" to ">48h latency — captured late/backfilled, not lost".
+- `runbook-bulk-battle-observation-capture-2026-06-06.md`: gap_1d section carries the re-baseline + the 2026-07-11 latency/loss verification.
+- `.claude/skills/observation/SKILL.md`: gap_1d metric row, routing cue, and readout template updated (latency framing + 04:30Z-vs-mid-day discipline).
+
+**1a (NOT chosen, parked as a product decision).** Widen capture to co-op/Operations. No capture-completeness pressure sits behind it; pursue only if a product surface for PvE data is decided on. Details retained below.
+
+### 1a. Widen capture to co-op/Operations (parked — product decision):
 - Mechanism: add `extra=pve,pve_solo,oper_solo,oper_div,oper_div_hard` (verify exact block names against the WG API before building) to the floor's `ships/stats` fetch. Zero additional WG calls; the co-op players are already polled every cycle as gate-skipped non-movers, so their polls become productive.
 - Main risk: payload size. BattleObservation JSON bloat caused the 2026-05-24 disk/CPU incident; extras must be compacted to per-ship counters at persist time, never stored raw. Scope as its own vertical slice: fetch param, compaction, BattleEvent mode tagging, change-gate interaction (account-level `last_battle_time` moves on co-op play, so the gate must not classify a co-op mover as "no change"), UI exposure question.
 - Product question first: leaderboards and battle history are PvP surfaces today; PveEnjoyerIcon suggests the population matters. Decide what the data would actually feed before building.
-
-**1b. Re-baseline the KPI** (declare PvP capture complete):
-- Define the 24h goal over `snapshot_movers` (PvP movers), not `active_1d`: sustain `mover_capture_rate ≥ 1.0` and keep `pvp_mover_no_event_48h` ≈ 0. Update the benchmark HEADLINE text and the goal language in `runbook-bulk-battle-observation-capture-2026-06-06.md`; non-PvP players remain visible via `non_pvp_active` should priorities change.
-- Cost: a docs/metrics change only. This is the default if 1a's product answer is "PvE data has no surface to feed."
-
-The 2026-07-08 evidence (85% non-PvP, 9 lost movers) leans strongly toward this being a product choice, not an engineering gap.
 
 ## Related
 
@@ -76,4 +92,4 @@ The 2026-07-08 evidence (85% non-PvP, 9 lost movers) leans strongly toward this 
 - `runbook-floor-throughput-tuning-2026-06-13.md` (floor tuning arc; binding-constraint history)
 - `.claude/skills/observation/SKILL.md` (day-over-day readout, now gap_1d-aware)
 
-**Archive when:** the Step 1 decision is made and its follow-on work item (or KPI re-baseline commit) has landed; fold any durable findings into the capture runbook.
+**Archive when:** the 1b re-baseline commit (`docs/gap-1d-rebaseline-1b`) has merged to main. The Step 1 decision is made (1b) and the durable findings are folded into `runbook-bulk-battle-observation-capture-2026-06-06.md`; this runbook is retained only as the diagnosis record until that merge, then move to `archive/`.

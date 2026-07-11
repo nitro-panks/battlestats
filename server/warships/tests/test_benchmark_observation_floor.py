@@ -111,8 +111,8 @@ class MoverCaptureKPITest(TestCase):
 
 class Gap1dDecompositionTest(TestCase):
     """Pin the 24h-gap decomposition (`gap_1d`): active-1d players with no
-    BattleEvent in the window, split into missed PvP movers (with a 48h
-    still-uncaptured sub-count), non-PvP actives, and no-snapshot-pair."""
+    BattleEvent in the window, split into PvP movers (with a `no_event_48h`
+    latency sub-count), non-PvP actives, and no-snapshot-pair."""
 
     def setUp(self):
         self.today = timezone.now().date()
@@ -147,7 +147,7 @@ class Gap1dDecompositionTest(TestCase):
         captured = self._player(9001)
         self._two_day_snapshots(captured, prior_battles=10, today_battles=12)
         self._battle_event(captured)
-        # Missed mover, no event at all: pvp_mover + still uncaptured at 48h.
+        # Mover, no event at all: pvp_mover + no_event_48h (>48h latency).
         missed = self._player(9002)
         self._two_day_snapshots(missed, prior_battles=20, today_battles=25)
         # Missed mover with a 30h-old event: late capture, not lost at 48h.

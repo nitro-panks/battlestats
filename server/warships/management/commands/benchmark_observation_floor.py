@@ -18,12 +18,27 @@ limit toward the full active set) should drive this toward 1.0 and cut the
 `stale_over_24h` fraction.
 
 `gap_1d` (2026-07-08) decomposes the residual 24h capture gap: active-1d
-players with no BattleEvent in the window are split into missed PvP movers
+players with no BattleEvent in the window are split into PvP movers
 (snapshot battles-delta > 0; with a `pvp_mover_no_event_48h` sub-count for
-those still uncaptured at 48h), non-PvP actives (account clock moved, PvP
-battles flat — co-op/Operations, invisible to PvP-only extraction), and
-no-snapshot-pair (unclassifiable). It answers: is the remaining gap a floor
-throughput problem or a capture-surface (game-mode) problem?
+those with no event in the trailing 48h either), non-PvP actives (account
+clock moved, PvP battles flat — co-op/Operations, invisible to PvP-only
+extraction), and no-snapshot-pair (unclassifiable). It answers: is the
+remaining gap a floor throughput problem or a capture-surface (game-mode)
+problem?
+
+**Reading `pvp_mover_no_event_48h` (verified live 2026-07-11):** it is
+capture LATENCY, not loss. A sample of the flagged players had zero
+never-observed accounts; ~¾ were players the floor last polled >48h ago
+(their cumulative stats backfill on the next observation, though per-battle
+timeline resolution across that gap is lost), the rest baseline/broken-prior
+diffs that structurally can't emit an event. The count is heavily
+time-of-day inflated (mid-day EU showed ~790 in-flight vs ~37 in the same
+day's 04:30Z snapshot once the floor caught up). So the honest 24h goal is
+defined over `snapshot_movers` — `mover_capture_rate >= 1.0` with
+`never_observed` ~0 — NOT `pvp_mover_no_event_48h` ~0. Treat a low-hundreds
+per-day `pvp_mover_no_event_48h` as the expected latency tail; only a
+material, sustained RISE (or any rise in `never_observed`) is a throughput
+signal. See runbook-ingress-gap-decomposition-2026-07-08.md.
 
 A root cron on the droplet runs this command daily (04:30 UTC) via
 `server/scripts/snapshot_observation_floor.sh` and saves the JSON to
@@ -52,7 +67,7 @@ from warships.models import (
 _GAP_KEYS = (
     "total",                    # active-1d players with no BattleEvent in window
     "pvp_mover",                # snapshot pair shows PvP battles rose → real miss
-    "pvp_mover_no_event_48h",   # …and still no event in 48h → genuinely uncaptured
+    "pvp_mover_no_event_48h",   # …no event in 48h either → >48h capture LATENCY (backfills next obs; not loss)
     "non_pvp_active",           # account clock moved, PvP battles flat (co-op/Ops)
     "no_snapshot_pair",         # missing today/prior snapshot row → unclassifiable
 )
@@ -160,12 +175,17 @@ class Command(BaseCommand):
         # only outside Random PvP (account clock moved but cumulative PvP
         # battles flat — co-op/Operations/etc., structurally invisible to the
         # PvP-only `ships/stats` extraction), or (c) unclassifiable (no
-        # snapshot pair)? `pvp_mover_no_event_48h` narrows (a) to genuinely
-        # uncaptured movers: a mover with an event in the trailing 48h (fixed,
-        # independent of --window-hours) was captured late across the window
-        # boundary, not lost. Caveat: (b) is an upper bound — a player whose
-        # battles rose only AFTER today's snapshot was taken lands in (b)
-        # today and re-presents as a mover tomorrow.
+        # snapshot pair)? `pvp_mover_no_event_48h` narrows (a) to movers with
+        # no event in the trailing 48h either (fixed, independent of
+        # --window-hours). Verified live 2026-07-11: this is capture LATENCY,
+        # not loss — the flagged players are already in the system (0
+        # never-observed), just polled by the floor >48h ago; their cumulative
+        # stats backfill on the next observation. So it is NOT a "genuinely
+        # uncaptured" count; the honest goal is defined over snapshot_movers
+        # (mover_capture_rate, never_observed), not this bucket → 0. Caveat:
+        # (b) is an upper bound — a player whose battles rose only AFTER
+        # today's snapshot was taken lands in (b) today and re-presents as a
+        # mover tomorrow.
         gap_stats: dict[str, dict[str, int]] = {}
         if latest_date is not None and prior_date is not None:
             since48 = now - timedelta(hours=48)
@@ -335,21 +355,23 @@ class Command(BaseCommand):
                 f"{t['snapshot_movers']:,} daily movers captured "
                 f"({(t['mover_capture_rate'] or 0):.1%}); snapshot covers "
                 f"{(t['snapshot_coverage_frac'] or 0):.1%} of active-7d "
-                f"(dates {result['snapshot_dates']}). This is the metric the "
-                f"per-ship-daily goal is defined over.")
+                f"(dates {result['snapshot_dates']}). GOAL (PvP capture): "
+                f"sustain this >= 100% with never_observed ~0; PvP capture is "
+                f"complete, the residual cov/1d gap is non-PvP game modes.")
         else:
             self.stdout.write(
                 "MOVER-CAPTURE: insufficient snapshot history "
                 f"(dates {result['snapshot_dates']}) — need two snapshot days "
                 "to compute the mover denominator.")
-        # 24h-gap decomposition: where the uncaptured slice of active-1d
-        # actually lives (missed PvP movers vs non-PvP activity).
+        # 24h-gap decomposition: where the no-event slice of active-1d
+        # actually lives (PvP-mover latency vs non-PvP activity).
         g = t.get("gap_1d")
         if g is not None:
             self.stdout.write(
                 f"GAP-1D: {g['total']:,} of {t['active_1d']:,} active-1d "
                 f"players produced no BattleEvent in {window_h}h — "
                 f"{g['non_pvp_active']:,} active outside Random PvP "
-                f"(co-op/Operations), {g['pvp_mover']:,} missed PvP movers "
-                f"({g['pvp_mover_no_event_48h']:,} still uncaptured at 48h), "
+                f"(co-op/Operations), {g['pvp_mover']:,} PvP movers "
+                f"({g['pvp_mover_no_event_48h']:,} at >48h latency — captured "
+                f"late/backfilled, not lost), "
                 f"{g['no_snapshot_pair']:,} unclassifiable (no snapshot pair).")
