@@ -1,6 +1,5 @@
 import logging
 import os
-import random
 from datetime import timedelta
 from hashlib import sha256
 from kombu.exceptions import OperationalError as KombuOperationalError
@@ -20,7 +19,7 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
     WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, CompactPlayerCorrelationDistributionSerializer, RankedPlayerCorrelationDistributionSerializer, \
-    PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer, TopEntitiesQuerySerializer, TopEntityVisitSerializer
+    PlayerTierTypeCorrelationSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer
 from warships.data import (
     clan_detail_needs_refresh,
     clan_members_missing_or_incomplete,
@@ -30,7 +29,6 @@ from warships.data import (
     fetch_activity_data,
     fetch_clan_battle_seasons,
     fetch_clan_plot_data,
-    fetch_landing_activity_attrition,
     fetch_player_clan_battle_seasons,
     fetch_player_explorer_page,
     fetch_player_population_distribution,
@@ -55,10 +53,9 @@ from warships.data import (
     PLAYER_BATTLE_DATA_STALE_AFTER,
     refresh_player_explorer_summary,
 )
-from warships.landing import get_landing_best_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, invalidate_landing_clan_caches, normalize_landing_clan_best_sort, normalize_landing_clan_limit, normalize_landing_clan_mode, normalize_landing_player_best_sort, normalize_landing_player_limit, normalize_landing_player_mode
-from warships.visit_analytics import get_top_entities, record_entity_visit
+from warships.visit_analytics import record_entity_visit
 from warships.client_ip import get_client_ip
-from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, queue_landing_best_entity_warm, update_clan_data_task, update_player_data_task, update_clan_members_task
+from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -137,14 +134,12 @@ def _set_player_refresh_headers(response, pending: bool, next_refresh_epoch: int
     response['X-Player-Next-Refresh'] = str(next_refresh_epoch)
 
 
-# `last_lookup` only feeds the soft "recently-viewed" landing-clan ranking, so
-# it does not need second-level precision. Debounce it: this runs on every clan
-# read — including every clan-members hydration poll (up to 12/view) and every
-# response-cache hit (it sits before the cache check in clan_members) — so
-# writing + busting the landing cache unconditionally added a DB write and a
-# landing republish-dispatch per request. Recording at most once per interval
-# collapses a 12-poll view to a single write+invalidation (zero if looked up
-# recently) while preserving the ranking signal.
+# `last_lookup` records a clan's most-recent read. It does not need second-level
+# precision, so debounce it: this runs on every clan read — including every
+# clan-members hydration poll (up to 12/view) and every response-cache hit (it
+# sits before the cache check in clan_members) — so writing it unconditionally
+# added a DB write per request. Recording at most once per interval collapses a
+# 12-poll view to a single write (zero if looked up recently).
 CLAN_LOOKUP_RECORD_INTERVAL = timedelta(minutes=10)
 
 
@@ -154,7 +149,6 @@ def _record_clan_lookup(clan: Clan, realm: str = DEFAULT_REALM) -> None:
         return
     clan.last_lookup = now
     clan.save(update_fields=["last_lookup"])
-    invalidate_landing_clan_caches(realm=realm)
 
 
 # Top-spot ship badges are recomputed only nightly (ShipTopPlayerSnapshot), so
@@ -187,12 +181,6 @@ def _clan_member_badges_cached(clan_id: str, realm: str, member_pks: list) -> di
 
 
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
-LANDING_CLAN_FEATURED_COUNT = 30
-LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
-LANDING_PLAYER_LIMIT = 25
-LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
-LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
-LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 400
 PLAYER_EXPLORER_RESPONSE_CACHE_TTL = 60
 MISSING_PLAYER_LOOKUP_CACHE_TTL = 600
 
@@ -200,26 +188,6 @@ MISSING_PLAYER_LOOKUP_CACHE_TTL = 600
 def _missing_player_lookup_cache_key(player_name: str) -> str:
     normalized_name = (player_name or '').strip().casefold()
     return f'player:lookup:missing:v1:{normalized_name}'
-
-
-def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COUNT, min_total_battles: int = LANDING_CLAN_MIN_TOTAL_BATTLES):
-    eligible = [
-        row for row in rows
-        if (row.get('total_battles') or 0) >= min_total_battles and row.get('clan_wr') is not None
-    ]
-    if not eligible:
-        return rows
-
-    featured = random.sample(eligible, k=min(sample_size, len(eligible)))
-    featured.sort(key=lambda row: (
-        row.get('clan_wr') if row.get('clan_wr') is not None else float('inf'),
-        (row.get('name') or '').lower(),
-        row.get('clan_id') or 0,
-    ))
-
-    featured_ids = {row.get('clan_id') for row in featured}
-    remainder = [row for row in rows if row.get('clan_id') not in featured_ids]
-    return featured + remainder
 
 
 class PlayerViewSet(viewsets.ModelViewSet):
@@ -1978,100 +1946,6 @@ def player_clan_battle_seasons(request, player_id: str) -> Response:
 
 
 @api_view(["GET"])
-@throttle_classes(PUBLIC_API_THROTTLES)
-def landing_activity_attrition(request) -> Response:
-    realm = _get_realm(request)
-    data = fetch_landing_activity_attrition(realm=realm)
-    return _validated_single_response(data, LandingActivityAttritionSerializer)
-
-
-@api_view(["GET"])
-@throttle_classes(PUBLIC_API_THROTTLES)
-def landing_clans(request) -> Response:
-    try:
-        mode = normalize_landing_clan_mode(request.query_params.get('mode'))
-    except ValueError:
-        return Response({'detail': 'mode must be one of: best'}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        best_sort = normalize_landing_clan_best_sort(
-            request.query_params.get('sort'))
-    except ValueError:
-        return Response({'detail': 'sort must be one of: overall, wr'}, status=status.HTTP_400_BAD_REQUEST)
-
-    realm = _get_realm(request)
-    limit = normalize_landing_clan_limit(request.query_params.get('limit'))
-    payload, cache_metadata = get_landing_best_clans_payload_with_cache_metadata(
-        realm=realm,
-        sort=best_sort,
-    )
-
-    payload = payload[:limit]
-
-    response = Response(payload)
-    response['X-Landing-Clans-Cache-Mode'] = mode
-    response['X-Landing-Clans-Cache-Sort'] = best_sort
-    response['X-Landing-Clans-Cache-TTL-Seconds'] = str(
-        cache_metadata['ttl_seconds'])
-    response['X-Landing-Clans-Cache-Cached-At'] = str(
-        cache_metadata['cached_at'])
-    response['X-Landing-Clans-Cache-Expires-At'] = str(
-        cache_metadata['expires_at'])
-    return response
-
-
-@api_view(["GET"])
-@throttle_classes(PUBLIC_API_THROTTLES)
-def landing_players(request) -> Response:
-    try:
-        mode = normalize_landing_player_mode(request.query_params.get('mode'))
-    except ValueError:
-        return Response({'detail': 'mode must be one of: best, sigma, popular'}, status=status.HTTP_400_BAD_REQUEST)
-    best_sort = 'overall'
-    payload_kwargs = {}
-    if mode == 'best':
-        try:
-            best_sort = normalize_landing_player_best_sort(
-                request.query_params.get('sort'))
-        except ValueError as error:
-            return Response({'detail': str(error)}, status=status.HTTP_400_BAD_REQUEST)
-        payload_kwargs['sort'] = best_sort
-    realm = _get_realm(request)
-    limit = normalize_landing_player_limit(request.query_params.get('limit'))
-    payload, cache_metadata = get_landing_players_payload_with_cache_metadata(
-        mode=mode,
-        limit=limit,
-        realm=realm,
-        **payload_kwargs,
-    )
-    response = Response(payload)
-    response['X-Landing-Players-Cache-Mode'] = mode
-    if mode == 'best':
-        response['X-Landing-Players-Cache-Sort'] = best_sort
-    response['X-Landing-Players-Cache-TTL-Seconds'] = str(
-        cache_metadata['ttl_seconds'])
-    response['X-Landing-Players-Cache-Cached-At'] = str(
-        cache_metadata['cached_at'])
-    response['X-Landing-Players-Cache-Expires-At'] = str(
-        cache_metadata['expires_at'])
-    return response
-
-
-@api_view(["GET"])
-@throttle_classes(PUBLIC_API_THROTTLES)
-def landing_best_warmup(request) -> Response:
-    realm = _get_realm(request)
-    result = queue_landing_best_entity_warm(
-        player_limit=LANDING_PLAYER_LIMIT,
-        clan_limit=LANDING_PLAYER_LIMIT,
-        realm=realm,
-    )
-    status_code = status.HTTP_202_ACCEPTED if result.get(
-        'status') == 'queued' else status.HTTP_200_OK
-    return Response(result, status=status_code)
-
-
-@api_view(["GET"])
 def sitemap_entities(request) -> Response:
     """Return recently-visited players and clans for sitemap generation.
 
@@ -2426,15 +2300,3 @@ def analytics_entity_view(request) -> Response:
     response_serializer.is_valid(raise_exception=True)
     status_code = status.HTTP_201_CREATED if result['accepted'] else status.HTTP_200_OK
     return Response(response_serializer.data, status=status_code)
-
-
-@api_view(["GET"])
-@throttle_classes(PUBLIC_API_THROTTLES)
-def analytics_top_entities(request) -> Response:
-    serializer = TopEntitiesQuerySerializer(data=request.query_params)
-    serializer.is_valid(raise_exception=True)
-
-    rows = get_top_entities(**serializer.validated_data)
-    response_serializer = TopEntityVisitSerializer(data=rows, many=True)
-    response_serializer.is_valid(raise_exception=True)
-    return Response(response_serializer.data)

@@ -282,28 +282,6 @@ class EntityVisitIngestResponseSerializer(serializers.Serializer):
     reason = serializers.CharField()
 
 
-class TopEntitiesQuerySerializer(serializers.Serializer):
-    entity_type = serializers.ChoiceField(choices=['player', 'clan'])
-    period = serializers.ChoiceField(choices=['1d', '7d', '30d'], default='7d')
-    metric = serializers.ChoiceField(
-        choices=['views_raw', 'views_deduped',
-                 'unique_visitors', 'unique_sessions'],
-        default='views_deduped',
-    )
-    limit = serializers.IntegerField(min_value=1, max_value=100, default=25)
-
-
-class TopEntityVisitSerializer(serializers.Serializer):
-    entity_type = serializers.CharField()
-    entity_id = serializers.IntegerField()
-    entity_name = serializers.CharField(allow_blank=True)
-    views_raw = serializers.IntegerField()
-    views_deduped = serializers.IntegerField()
-    unique_visitors = serializers.IntegerField()
-    unique_sessions = serializers.IntegerField()
-    last_view_at = serializers.DateTimeField(allow_null=True)
-
-
 class TierDataSerializer(serializers.Serializer):
     ship_tier = serializers.IntegerField()
     pvp_battles = serializers.IntegerField()
@@ -490,20 +468,6 @@ class PlayerCorrelationDomainSerializer(serializers.Serializer):
     bin_width = serializers.FloatField(allow_null=True, required=False)
 
 
-class PlayerCorrelationTileSerializer(serializers.Serializer):
-    x_min = serializers.FloatField()
-    x_max = serializers.FloatField()
-    y_min = serializers.FloatField()
-    y_max = serializers.FloatField()
-    count = serializers.IntegerField()
-
-
-class PlayerCorrelationTrendPointSerializer(serializers.Serializer):
-    x = serializers.FloatField()
-    y = serializers.FloatField()
-    count = serializers.IntegerField()
-
-
 class CompactPlayerCorrelationTileSerializer(serializers.Serializer):
     x_index = serializers.IntegerField(min_value=0)
     y_index = serializers.IntegerField(min_value=0)
@@ -600,36 +564,6 @@ class PlayerTierTypeCorrelationSerializer(serializers.Serializer):
     tiles = PlayerTierTypeTileSerializer(many=True)
     trend = PlayerTierTypeTrendSerializer(many=True)
     player_cells = PlayerTierTypeCellSerializer(many=True)
-
-
-class LandingActivityAttritionMonthSerializer(serializers.Serializer):
-    month = serializers.DateField()
-    total_players = serializers.IntegerField()
-    active_players = serializers.IntegerField()
-    cooling_players = serializers.IntegerField()
-    dormant_players = serializers.IntegerField()
-    active_share = serializers.FloatField()
-
-
-class LandingActivityAttritionSummarySerializer(serializers.Serializer):
-    latest_month = serializers.DateField()
-    population_signal = serializers.CharField()
-    signal_delta_pct = serializers.FloatField(allow_null=True)
-    recent_active_avg = serializers.FloatField()
-    prior_active_avg = serializers.FloatField()
-    recent_new_avg = serializers.FloatField()
-    prior_new_avg = serializers.FloatField()
-    months_compared = serializers.IntegerField()
-
-
-class LandingActivityAttritionSerializer(serializers.Serializer):
-    metric = serializers.CharField()
-    label = serializers.CharField()
-    x_label = serializers.CharField()
-    y_label = serializers.CharField()
-    tracked_population = serializers.IntegerField()
-    months = LandingActivityAttritionMonthSerializer(many=True)
-    summary = LandingActivityAttritionSummarySerializer()
 
 
 class PlayerExplorerRowSerializer(serializers.Serializer):

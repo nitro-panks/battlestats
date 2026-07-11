@@ -85,9 +85,6 @@ EFFICIENCY_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_SNAPSHOT_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
-LANDING_PAGE_WARM_LOCK_TIMEOUT = 20 * 60
-LANDING_PAGE_WARM_DISPATCH_TIMEOUT = 30
-LANDING_PLAYER_BEST_SNAPSHOT_REFRESH_LOCK_TIMEOUT = 2 * 60 * 60
 DISTRIBUTION_WARM_LOCK_TIMEOUT = 15 * 60
 CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60
 CORRELATION_WARM_DISPATCH_TIMEOUT = 30  # Matches landing — coalesces cold-cache fanout
@@ -96,8 +93,6 @@ CORRELATION_WARM_DISPATCH_TIMEOUT = 30  # Matches landing — coalesces cold-cac
 # served (data.compute_realm_top_ships / _ships_by_tier_type queue a warm).
 REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT = 60
 HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
-LANDING_BEST_ENTITY_WARM_LOCK_TIMEOUT = 30 * 60
-LANDING_BEST_ENTITY_WARM_DISPATCH_TIMEOUT = 5 * 60
 CLAN_BATTLE_SUMMARY_REFRESH_DISPATCH_TIMEOUT = 10 * 60
 # Clan roster idle refresh: bulk account/info pass that corrects every member's
 # last_battle_date so "X days idle" is right without a per-member profile view.
@@ -166,14 +161,6 @@ def _recapture_lapsed_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:recapture_lapsed_players:{realm}:lock"
 
 
-def _landing_page_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:warm_landing_page_content:{realm}:lock"
-
-
-def _landing_page_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:warm_landing_page_content:{realm}:dispatch"
-
-
 def _distribution_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_player_distributions:{realm}:lock"
 
@@ -204,10 +191,6 @@ def _realm_ships_pct_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_realm_ships_pct:{realm}:dispatch"
 
 
-def _landing_player_best_snapshot_refresh_lock_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:materialize_landing_player_best_snapshots:{realm}:lock"
-
-
 def _correlation_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_player_correlations:{realm}:lock"
 
@@ -218,14 +201,6 @@ def _correlation_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
 
 def _hot_entity_cache_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_hot_entity_caches:{realm}:lock"
-
-
-def _landing_best_entity_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:warm_landing_best_entity_caches:{realm}:lock"
-
-
-def _landing_best_entity_warm_dispatch_key(realm: str = DEFAULT_REALM) -> str:
-    return f"warships:tasks:warm_landing_best_entity_caches:{realm}:dispatch"
 
 
 def _bulk_cache_load_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -383,35 +358,6 @@ def queue_clan_member_idle_refresh(clan_id: object, realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "enqueue-failed"}
 
 
-def queue_landing_page_warm(realm: str = DEFAULT_REALM, scope: str = 'all'):
-    # If a warm is already executing for this realm, skip enqueue. The 30s
-    # dispatch dedup expires while the 1200s task runs, so without this gate,
-    # cache-fallback paths invoked from inside the warm itself would re-enqueue
-    # in a loop (root cause of the 4581-message background-queue pileup
-    # observed on 2026-04-27).
-    if cache.get(_landing_page_warm_lock_key(realm)):
-        return {"status": "skipped", "reason": "already-running"}
-
-    dispatch_key = _landing_page_warm_dispatch_key(realm)
-    if not cache.add(
-        dispatch_key,
-        "queued",
-        timeout=LANDING_PAGE_WARM_DISPATCH_TIMEOUT,
-    ):
-        return {"status": "skipped", "reason": "already-queued"}
-
-    try:
-        warm_landing_page_content_task.delay(realm=realm, scope=scope)
-        return {"status": "queued"}
-    except Exception as error:
-        cache.delete(dispatch_key)
-        logger.warning(
-            "Skipping landing page warm enqueue because broker dispatch failed: %s",
-            error,
-        )
-        return {"status": "skipped", "reason": "enqueue-failed"}
-
-
 def queue_realm_top_ships_warm(realm: str = DEFAULT_REALM):
     """Lock- + dispatch-aware enqueue of the realm top-ships/tier-type warmer.
 
@@ -538,32 +484,6 @@ def queue_warm_player_correlations(realm: str = DEFAULT_REALM):
         cache.delete(dispatch_key)
         logger.warning(
             "Skipping correlation warm enqueue because broker dispatch failed: %s",
-            error,
-        )
-        return {"status": "skipped", "reason": "enqueue-failed"}
-
-
-def queue_landing_best_entity_warm(player_limit=25, clan_limit=25, force_refresh=False, realm: str = DEFAULT_REALM):
-    dispatch_key = _landing_best_entity_warm_dispatch_key(realm)
-    if not cache.add(
-        dispatch_key,
-        "queued",
-        timeout=LANDING_BEST_ENTITY_WARM_DISPATCH_TIMEOUT,
-    ):
-        return {"status": "skipped", "reason": "already-queued"}
-
-    try:
-        warm_landing_best_entity_caches_task.delay(
-            player_limit=int(player_limit),
-            clan_limit=int(clan_limit),
-            force_refresh=bool(force_refresh),
-            realm=realm,
-        )
-        return {"status": "queued"}
-    except Exception as error:
-        cache.delete(dispatch_key)
-        logger.warning(
-            "Skipping landing best entity warm enqueue because broker dispatch failed: %s",
             error,
         )
         return {"status": "skipped", "reason": "enqueue-failed"}
@@ -1238,26 +1158,16 @@ def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
         lambda: compute_ship_top_player_snapshot(realm=realm),
     )
 
-    # A real snapshot just rewrote this realm's top-3 ship standings, so
-    # re-materialize the landing Best-player snapshots to refresh their baked-in
-    # `ship_badges` (added/removed medals) without waiting for the next daily
-    # materializer — that task then self-republishes the Redis payloads. The
-    # snapshot rows commit inside compute_ship_top_player_snapshot's
-    # transaction.atomic() before _run_locked_task returns, so the materialize
-    # reads committed data. `status != "completed"` means a lock-skip (the
-    # disabled path already returned above) — nothing was rewritten, so skip.
+    # A real snapshot just advanced the window-end date, so the treemap +
+    # tier-type list cache keys (keyed by that date) have rotated cold. Warm
+    # them now — overwriting the durable `:published` fallback with the new
+    # numbers — instead of waiting ~1h for the scheduled warmer. The published
+    # fallback keeps the previous numbers served until this warm lands
+    # (warm-before-evict). The dispatch dedup + the warmer's own lock coalesce
+    # against the scheduled run / any cold-read enqueue. `status != "completed"`
+    # means a lock-skip (the disabled path already returned above) — nothing was
+    # rewritten, so skip.
     if isinstance(result, dict) and result.get("status") == "completed":
-        materialize_landing_player_best_snapshots_task.apply_async(
-            kwargs={"realm": realm},
-            queue="background",
-        )
-        # The snapshot just advanced the window-end date, so the treemap +
-        # tier-type list cache keys (keyed by that date) have rotated cold.
-        # Warm them now — overwriting the durable `:published` fallback with
-        # the new numbers — instead of waiting ~1h for the scheduled warmer.
-        # The published fallback keeps the previous numbers served until this
-        # warm lands (warm-before-evict). The dispatch dedup + the warmer's
-        # own lock coalesce against the scheduled run / any cold-read enqueue.
         queue_realm_top_ships_warm(realm)
 
     return result
@@ -1324,36 +1234,6 @@ def warm_clan_battle_summaries_task(self, clan_ids=None, realm=DEFAULT_REALM):
     logger.info(
         "Finished warm_clan_battle_summaries_task for clan_ids=%s", configured_ids)
     return {"status": "completed", "results": results}
-
-
-@app.task(bind=True, **TASK_OPTS)
-def warm_landing_page_content_task(self, realm=DEFAULT_REALM, scope='all'):
-    from warships.landing import warm_landing_page_content
-
-    logger.info(
-        "Starting warm_landing_page_content_task realm=%s scope=%s",
-        realm,
-        scope,
-    )
-
-    lock_key = _landing_page_warm_lock_key(realm)
-    if not cache.add(lock_key, self.request.id, timeout=LANDING_PAGE_WARM_LOCK_TIMEOUT):
-        logger.info(
-            "Skipping warm_landing_page_content_task because another landing warm is already running"
-        )
-        return {"status": "skipped", "reason": "already-running"}
-
-    try:
-        result = warm_landing_page_content(
-            force_refresh=True,
-            realm=realm,
-            scope=scope,
-        )
-        logger.info("Finished warm_landing_page_content_task: %s", result)
-        return result
-    finally:
-        cache.delete(lock_key)
-        cache.delete(_landing_page_warm_dispatch_key(realm))
 
 
 @app.task(bind=True, **TASK_OPTS)
@@ -1576,59 +1456,6 @@ def warm_player_distributions_task(self, realm=DEFAULT_REALM):
 
 
 @app.task(bind=True, **TASK_OPTS)
-def materialize_landing_player_best_snapshots_task(self, realm=DEFAULT_REALM, sorts=None, warm_after=True):
-    from warships.landing import materialize_landing_player_best_snapshots
-
-    logger.info(
-        "Starting materialize_landing_player_best_snapshots_task realm=%s sorts=%s warm_after=%s",
-        realm,
-        sorts,
-        warm_after,
-    )
-
-    lock_key = _landing_player_best_snapshot_refresh_lock_key(realm)
-    if not cache.add(lock_key, self.request.id, timeout=LANDING_PLAYER_BEST_SNAPSHOT_REFRESH_LOCK_TIMEOUT):
-        logger.info(
-            "Skipping materialize_landing_player_best_snapshots_task because another snapshot refresh is already running"
-        )
-        return {"status": "skipped", "reason": "already-running"}
-
-    normalized_sorts = None
-    if isinstance(sorts, str):
-        normalized_sorts = [sort.strip()
-                            for sort in sorts.split(',') if sort.strip()]
-    elif isinstance(sorts, (list, tuple)):
-        normalized_sorts = list(sorts)
-
-    try:
-        result = materialize_landing_player_best_snapshots(
-            realm=realm,
-            sorts=normalized_sorts,
-        )
-        logger.info(
-            "Finished materialize_landing_player_best_snapshots_task: %s",
-            result,
-        )
-    finally:
-        cache.delete(lock_key)
-
-    # Republish the Redis Best-player payloads straight from the snapshot we just
-    # materialized, so changes (notably new ship badges after the weekly ship
-    # snapshot) reach the live API within seconds instead of waiting up to a full
-    # landing-warmer cycle (~55 min). The warmer holds a *different* lock
-    # (`_landing_page_warm_lock_key`); if an all-scope warm is already mid-flight
-    # this players-scope republish no-ops and the in-flight/next warmer picks up
-    # the fresh snapshot — a bounded ≤1-cycle fallback, never a stale strand.
-    if warm_after:
-        warm_landing_page_content_task.apply_async(
-            kwargs={"realm": realm, "scope": "players"},
-            queue="background",
-        )
-
-    return result
-
-
-@app.task(bind=True, **TASK_OPTS)
 def warm_player_correlations_task(self, realm=DEFAULT_REALM):
     from warships.data import warm_player_correlations
 
@@ -1679,39 +1506,6 @@ def warm_hot_entity_caches_task(self, player_limit=None, clan_limit=None, force_
         return result
     finally:
         cache.delete(lock_key)
-
-
-@app.task(bind=True, **TASK_OPTS)
-def warm_landing_best_entity_caches_task(self, player_limit=25, clan_limit=25, force_refresh=False, realm=DEFAULT_REALM):
-    from warships.data import warm_landing_best_entity_caches
-
-    logger.info(
-        "Starting warm_landing_best_entity_caches_task player_limit=%s clan_limit=%s force_refresh=%s realm=%s",
-        player_limit,
-        clan_limit,
-        force_refresh,
-        realm,
-    )
-
-    lock_key = _landing_best_entity_warm_lock_key(realm)
-    if not cache.add(lock_key, self.request.id, timeout=LANDING_BEST_ENTITY_WARM_LOCK_TIMEOUT):
-        logger.info(
-            "Skipping warm_landing_best_entity_caches_task because another landing best warm is already running"
-        )
-        return {"status": "skipped", "reason": "already-running"}
-
-    try:
-        result = warm_landing_best_entity_caches(
-            player_limit=int(player_limit or 25),
-            clan_limit=int(clan_limit or 25),
-            force_refresh=bool(force_refresh),
-            realm=realm,
-        )
-        logger.info("Finished warm_landing_best_entity_caches_task: %s", result)
-        return result
-    finally:
-        cache.delete(lock_key)
-        cache.delete(_landing_best_entity_warm_dispatch_key(realm))
 
 
 @app.task(bind=True, **TASK_OPTS)

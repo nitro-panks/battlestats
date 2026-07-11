@@ -285,29 +285,6 @@ class PlayerExplorerSummary(models.Model):
         return f"Explorer summary for {self.player_id}"
 
 
-class LandingPlayerBestSnapshot(models.Model):
-    realm = models.CharField(
-        max_length=4,
-        choices=REALM_CHOICES,
-        default=DEFAULT_REALM,
-        db_index=True,
-    )
-    sort = models.CharField(max_length=16, db_index=True)
-    payload_json = models.JSONField(default=list, blank=True)
-    generated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=['realm', 'sort'],
-                name='unique_landing_player_best_snapshot_per_realm_sort',
-            ),
-        ]
-
-    def __str__(self):
-        return f"Landing best snapshot {self.realm}:{self.sort}"
-
-
 class EntityVisitEvent(models.Model):
     ENTITY_TYPE_PLAYER = 'player'
     ENTITY_TYPE_CLAN = 'clan'

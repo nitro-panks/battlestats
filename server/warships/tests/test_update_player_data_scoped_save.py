@@ -53,7 +53,6 @@ def _patches():
         mock.patch("warships.data.update_player_efficiency_data", return_value=[]),
         mock.patch("warships.data.refresh_player_explorer_summary"),
         mock.patch("warships.data.invalidate_player_detail_cache"),
-        mock.patch("warships.landing.invalidate_landing_player_caches"),
     ]
 
 

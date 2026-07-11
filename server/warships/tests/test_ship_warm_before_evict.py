@@ -176,15 +176,13 @@ class SnapshotChainsWarmerTests(TestCase):
         cache.clear()  # LocMemCache persists across tests; clear stale task locks
 
     @patch("warships.tasks.queue_realm_top_ships_warm")
-    @patch("warships.tasks.materialize_landing_player_best_snapshots_task.apply_async")
     @patch("warships.data.compute_ship_top_player_snapshot")
     @patch.dict("os.environ", {"SHIP_BADGE_SNAPSHOT_ENABLED": "1"})
-    def test_chains_warmer_on_completed(self, mock_compute, mock_mat, mock_warm):
+    def test_chains_warmer_on_completed(self, mock_compute, mock_warm):
         from warships.tasks import snapshot_ship_top_players_task
         mock_compute.return_value = {"status": "completed", "realm": "na"}
         snapshot_ship_top_players_task.run(realm="na")
         mock_warm.assert_called_once_with("na")
-        mock_mat.assert_called_once()
 
     @patch("warships.tasks.queue_realm_top_ships_warm")
     @patch("warships.data.compute_ship_top_player_snapshot")

@@ -143,12 +143,11 @@ _RETIRED_SCHEDULE_NAMES = [
     "hot-players-freshness-eu",
     "hot-players-freshness-asia",
     # Landing "best players" + "best clans" featured boards decommissioned
-    # 2026-06-22 (near-zero clicks — Umami 30d: 0 player-clicks, 1 clan-click).
-    # Their two Beat warmer families are retired; the task functions
-    # (warm_landing_page_content_task / materialize_landing_player_best_snapshots_task)
-    # are kept for revival but no longer scheduled, so these rows must be purged or
-    # celery-beat keeps dispatching them. See
-    # agents/runbooks/runbook-landing-featured-boards-decommission-2026-06-22.md.
+    # 2026-06-22 (near-zero clicks — Umami 30d: 0 player-clicks, 1 clan-click)
+    # and the backend subsystem fully removed in 3.0. Their two Beat warmer
+    # families and the backing task functions (warm_landing_page_content_task /
+    # materialize_landing_player_best_snapshots_task) are gone, so these rows
+    # must be purged or celery-beat keeps dispatching a non-existent task name.
     "landing-page-warmer",
     "landing-page-warmer-na",
     "landing-page-warmer-eu",
@@ -193,11 +192,10 @@ def register_periodic_schedules(sender, **kwargs):
             name="clan-battle-summary-warmer").update(enabled=False)
 
     # The landing "best players"/"best clans" featured boards were decommissioned
-    # 2026-06-22 (near-zero clicks — Umami 30d). Their Beat warmer
-    # (landing-page-warmer-{realm} -> warm_landing_page_content_task) is retired;
-    # the schedule names are purged via _RETIRED_SCHEDULE_NAMES. The task function
-    # is kept for easy revival. See
-    # agents/runbooks/runbook-landing-featured-boards-decommission-2026-06-22.md.
+    # 2026-06-22 (near-zero clicks — Umami 30d) and the backend subsystem fully
+    # removed in 3.0. Their Beat warmer (landing-page-warmer-{realm} ->
+    # warm_landing_page_content_task) and its task are gone; the schedule names
+    # are purged via _RETIRED_SCHEDULE_NAMES.
 
     # -- Realm top-ships treemap warmer --
     # The treemap + inline tier/type list aggregate over the rolling trailing
@@ -237,8 +235,8 @@ def register_periodic_schedules(sender, **kwargs):
 
     # The landing best-player materializer (landing-best-player-snapshot-
     # materializer-{realm} -> materialize_landing_player_best_snapshots_task) fed
-    # the now-decommissioned featured boards (2026-06-22). Retired via
-    # _RETIRED_SCHEDULE_NAMES; the task function is kept for revival.
+    # the now-decommissioned featured boards (2026-06-22, backend removed in 3.0).
+    # Retired via _RETIRED_SCHEDULE_NAMES; the task function is gone.
 
     # -- Rolling T10 Top-Ship-Player snapshot (per realm, striped, every 12h) --
     # Beat fires twice daily (12h apart); each run recomputes the trailing-window
