@@ -1,5 +1,4 @@
 import type { RankedLeagueName } from './rankedLeague';
-import type { ShipBadge } from './ShipTopPlayerBanner';
 
 
 export interface LandingClan {
@@ -14,32 +13,6 @@ export interface LandingClan {
     avg_cb_battles?: number | null;
     avg_cb_wr?: number | null;
     cb_recency_days?: number | null;
-}
-
-
-export interface LandingPlayer {
-    player_id?: number;
-    name: string;
-    pvp_ratio: number | null;
-    is_hidden?: boolean;
-    is_streamer?: boolean;
-    pvp_battles?: number | null;
-    high_tier_pvp_ratio?: number | null;
-    high_tier_pvp_battles?: number | null;
-    is_pve_player?: boolean;
-    is_sleepy_player?: boolean;
-    is_ranked_player?: boolean;
-    is_clan_battle_player?: boolean;
-    clan_battle_win_rate?: number | null;
-    clan_battle_total_battles?: number | null;
-    clan_battle_seasons_participated?: number | null;
-    highest_ranked_league?: RankedLeagueName | null;
-    efficiency_rank_percentile?: number | null;
-    efficiency_rank_tier?: 'E' | 'I' | 'II' | 'III' | null;
-    has_efficiency_rank_icon?: boolean;
-    efficiency_rank_population_size?: number | null;
-    efficiency_rank_updated_at?: string | null;
-    ship_badges?: ShipBadge[];
 }
 
 

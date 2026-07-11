@@ -306,10 +306,6 @@ body {
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-
   /* Make an overflowing list's "there is more below" cue unmissable. Two
      independent mechanisms, because no single one covers every browser:
 

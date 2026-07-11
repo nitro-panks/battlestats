@@ -152,12 +152,6 @@ const buildAttemptSignal = (controllerSignal: AbortSignal, timeoutMs: number): A
 export const isAbortError = (error: unknown): boolean =>
     error instanceof DOMException && error.name === 'AbortError';
 
-// A per-request timeout — a REAL transient failure, distinct from an abort.
-// Treat like any network error (retry next cycle / keep stale data), NOT as "we
-// navigated away".
-export const isTimeoutError = (error: unknown): boolean =>
-    error instanceof DOMException && error.name === 'TimeoutError';
-
 const toAbortError = (reason: unknown): unknown =>
     reason instanceof Error ? reason : new DOMException('Aborted', 'AbortError');
 

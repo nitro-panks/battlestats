@@ -1,12 +1,8 @@
-import type { TierTypePayload, TierTypeTile, TierTypeTrendPoint } from './playerProfileChartData';
+import type { TierTypePayload, TierTypeTile } from './playerProfileChartData';
 
 export interface ResolvedTierTypeTile extends TierTypeTile {
     ship_type: string;
     ship_tier: number;
-}
-
-export interface ResolvedTierTypeTrendPoint extends TierTypeTrendPoint {
-    ship_type: string;
 }
 
 export const getTierTypeShipTypes = (payload: TierTypePayload): string[] => payload.x_labels;
@@ -29,22 +25,6 @@ export const resolveTierTypeTile = (payload: TierTypePayload, tile: TierTypeTile
     };
 };
 
-export const resolveTierTypeTrendPoint = (payload: TierTypePayload, point: TierTypeTrendPoint): ResolvedTierTypeTrendPoint | null => {
-    const shipType = payload.x_labels[point.x_index];
-    if (shipType == null) {
-        return null;
-    }
-
-    return {
-        ...point,
-        ship_type: shipType,
-    };
-};
-
 export const resolveTierTypeTiles = (payload: TierTypePayload): ResolvedTierTypeTile[] => payload.tiles
     .map((tile) => resolveTierTypeTile(payload, tile))
     .filter((tile): tile is ResolvedTierTypeTile => tile !== null);
-
-export const resolveTierTypeTrend = (payload: TierTypePayload): ResolvedTierTypeTrendPoint[] => payload.trend
-    .map((point) => resolveTierTypeTrendPoint(payload, point))
-    .filter((point): point is ResolvedTierTypeTrendPoint => point !== null);
