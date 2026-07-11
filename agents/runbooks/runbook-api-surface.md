@@ -1,6 +1,6 @@
 # Runbook: API Surface Coverage
 
-_Last updated: 2026-03-17_
+_Last updated: 2026-07-11_
 
 _Status: Active operational reference_
 
@@ -21,9 +21,9 @@ docker compose exec -T server python scripts/smoke_test_site_endpoints.py
 
 | Endpoint                                     | Method | Smoke Case           | Covered |
 | -------------------------------------------- | ------ | -------------------- | ------- |
-| `/api/landing/clans/`                        | GET    | `landing_clans`      | Yes     |
-| `/api/landing/players/`                      | GET    | `landing_players`    | Yes     |
 | `/api/landing/player-suggestions/?q=<query>` | GET    | `player_suggestions` | Yes     |
+
+_Removed in 3.0 (landing featured-boards decommission): `/api/landing/clans/` (`landing_clans`), `/api/landing/players/` (`landing_players`), and the `landing_best_warmup` / `landing_activity_attrition` / `analytics_top_entities` endpoints. See `runbook-landing-featured-boards-decommission-2026-06-22.md`._
 
 ### Player (Router — PlayerViewSet)
 

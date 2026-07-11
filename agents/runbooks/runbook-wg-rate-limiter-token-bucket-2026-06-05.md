@@ -8,7 +8,7 @@ _Status: **SHIPPED 2026-06-10** (`warships/api/rate_limiter.py`). Implemented as
 
 Specify a single, shared, cross-worker rate limiter for all outbound Wargaming API traffic so the combined request rate across every Celery worker and management command stays under WG's per-`application_id` ceiling — eliminating `407 REQUEST_LIMIT_EXCEEDED` at the source rather than patching each call path. Capture the design decisions, the chosen insertion point, the failure semantics, and a staged rollout so the implementation does not have to re-derive any of it.
 
-This supersedes the scattered per-path throttles as the *coordination* mechanism (those remain as coarse backstops). Read alongside `runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md` (the floor/crawl coexist work that first surfaced the shared-budget contention).
+This supersedes the scattered per-path throttles as the *coordination* mechanism (those remain as coarse backstops). Read alongside `archive/runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md` (the floor/crawl coexist work that first surfaced the shared-budget contention).
 
 ## Background / motivation
 

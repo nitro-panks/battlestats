@@ -136,12 +136,14 @@ score (`active_days` primary, `unique_sessions` then `views_deduped` as tiebreak
 set is bounded and the marginal WG cost stays predictable (doctrine: no unbounded
 fan-out).
 
-**Honest gap — "clicks on insight tabs" is not captured today.** The visit pipeline emits
-**one** event per detail-page load (`trackEntityDetailView` in
-`client/app/lib/visitAnalytics.ts`); chart/insight-tab fetches and autocomplete hits emit
-**nothing**. So "are they clicking the insight tabs?" can't be answered with current data.
-v1 uses page-load recurrence (active-days), which is sufficient. A **Phase 2** depth
-signal is cheap and additive — see Phasing.
+**Resolved (2026-07) — insight-tab clicks ARE now captured.** _This gap is closed._ At v1
+authoring the visit pipeline emitted only **one** event per detail-page load
+(`trackEntityDetailView` in `client/app/lib/visitAnalytics.ts`). Since then per-tab Umami
+events were added — `PlayerDetailInsightsTabs` fires a `trackEvent` per insight-tab click —
+and that demand signal was used to reorder the tabs by measured 90-day click volume (commit
+`03f09db`, v2.22.6). So "are they clicking the insight tabs, and which?" is now answerable.
+v1's page-load-recurrence (active-days) membership signal is unchanged and still sufficient;
+the per-tab depth signal is available as an additive input should it ever feed the queue.
 
 ## Design
 

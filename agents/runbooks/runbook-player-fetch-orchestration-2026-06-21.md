@@ -15,7 +15,8 @@ through `fetchSharedJson` — there are no raw-`fetch` bypasses.
      + `invalidateSharedJsonByPrefix`.
    - **Ref-counted cancellation** (A1): pass `signal`; the shared underlying fetch aborts only when the
      LAST deduped subscriber abandons it (a `settled` flag prevents aborting a finished request). Exports
-     `isAbortError` / `isTimeoutError` so call sites branch a benign cancel from a real timeout.
+     `isAbortError` so call sites can branch a benign cancel from a real error. (`isTimeoutError` was
+     removed in 3.0 — a per-attempt timeout now surfaces as a plain abort.)
    - **Per-attempt timeout** (A1): default 15s via `AbortSignal.timeout` (retriable); `timeoutMs:0` disables.
    - **Priority concurrency queue** (B1) via `app/lib/requestQueue.ts`: a global semaphore (default cap
      `DEFAULT_REQUEST_CONCURRENCY=6`, runtime-adjustable) with `critical` / `high` / `low` priority and

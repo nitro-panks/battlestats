@@ -3,7 +3,7 @@
 **Created**: 2026-03-28
 **Updated**: 2026-03-29
 **Status**: Complete — all 7 changes implemented, tested, deployed
-**Spec**: `spec-mobile-player-detail-ux-2026-03-28.md`
+**Spec**: `archive/spec-mobile-player-detail-ux-2026-03-28.md`
 
 ## Context
 

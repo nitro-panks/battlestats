@@ -217,7 +217,7 @@ repointed to the same rolling window the board reads:
 
 ## Follow-ups
 
-- **Done at implementation (2026-06-14):** archived `runbook-ship-award-ledger-2026-06-05.md`;
+- **Done at implementation (2026-06-14):** archived `archive/runbook-ship-award-ledger-2026-06-05.md`;
   updated `runbook-ship-top-player-badges-2026-06-05.md` to the rolling model; reconciled
   `CLAUDE.md` (Ship standings paragraph, data-models list, kill-switch list).
 - **Done 2026-06-15:** treemap + inline list rolled to the same window (see Addendum above);

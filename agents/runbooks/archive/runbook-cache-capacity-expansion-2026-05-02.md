@@ -140,7 +140,7 @@ Listing matching backup files: `ls -lat /etc/battlestats-server.env.bak-* /etc/s
 ## References
 
 - 4 GB → 8 GB upgrade decision context: ad-hoc droplet resize 2026-05-01.
-- Past OOM hardening: archived `runbook-deploy-oom-startup-warmers.md` (referenced from CLAUDE.md).
+- Past OOM hardening: archived `archive/runbook-deploy-oom-startup-warmers.md` (referenced from CLAUDE.md).
 - Bootstrap script: `server/deploy/bootstrap_droplet.sh`.
 - Redis configuration commands: live edits made via `redis-cli config set` + `redis-cli config rewrite` (the rewrite persists changes to `/etc/redis/redis.conf` so they survive restart).
 - Env file location: `/etc/battlestats-server.env` (non-secret) + `/etc/battlestats-server.secrets.env` (secrets), both consumed by all six battlestats systemd units.

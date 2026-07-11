@@ -3,7 +3,7 @@
 _Created: 2026-06-15_
 _Author role: DBA / backend_
 _Status: **SCOPING ONLY — no code written.** Concern F of the DB-ops followup pass._
-_Parent: `agents/runbooks/runbook-db-growth-analysis-2026-06-15.md` steps 1 (autovacuum) + 2 (rollup decision)._
+_Parent: `agents/runbooks/archive/runbook-db-growth-analysis-2026-06-15.md` steps 1 (autovacuum) + 2 (rollup decision)._
 _Sibling: `agents/work-items/scope-prod-nginx-timeouts-2026-06-15.md` (concern G)._
 
 ## TL;DR
@@ -129,8 +129,8 @@ The period tier is gated OFF *because it is broken*: the yearly-YTD aggregate is
 
 ## Related
 
-- `agents/runbooks/runbook-db-growth-analysis-2026-06-15.md` — parent (steps 1, 2; Q2 bullets on dead-tuple hygiene and the rollups).
-- `agents/runbooks/runbook-db-size-optimization-2026-05-26.md` — the per-table sizing query + the nightly-rollup OOM follow-up origin.
+- `agents/runbooks/archive/runbook-db-growth-analysis-2026-06-15.md` — parent (steps 1, 2; Q2 bullets on dead-tuple hygiene and the rollups).
+- `agents/runbooks/archive/runbook-db-size-optimization-2026-05-26.md` — the per-table sizing query + the nightly-rollup OOM follow-up origin.
 - `agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md` — the rollup engine + the 540s period-tier timeout history.
 - Memory `project_rollup_period_timeout` — the period-tier 540s OOM diagnosis.
 </content>

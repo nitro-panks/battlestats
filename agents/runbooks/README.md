@@ -92,10 +92,8 @@ Open these only when the task matches them directly:
 - `runbook-mobile-player-detail-charts.md`
 - `runbook-mobile-routing-bugs.md`
 - `runbook-multi-realm-hardening.md`
-- `runbook-asia-realm-data-load-2026-04-05.md`: Asia realm data load — clan crawl + enrichment backfill operative plan
 - `runbook-search-toggle.md`: header search toggle between player and clan search, with new clan suggestions endpoint
 - `runbook-ship-top-player-badges-2026-06-05.md`: `/ship` standings leaderboard + profile ship badges (`ShipTopPlayerSnapshot`, `SHIP_BADGE_SNAPSHOT_ENABLED`).
-- `runbook-ship-award-ledger-2026-06-05.md`: durable per-ship career Ship Honors (`ShipAward` append-only ledger).
 - `runbook-ship-banner-ux-pass-2026-06-05.md`: ship-award surfaces UX pass (`ShipTopPlayerBanner` / `ShipHonors` type hierarchy + tokens).
 - `runbook-enriched-data-features-2026-04-12.md`: enrichment-backed feature surfaces (distributions, correlations, explorer summaries).
 

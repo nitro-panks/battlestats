@@ -140,13 +140,15 @@ Current default:
 
 - `POST_DEPLOY_VERIFY_REALMS=na,eu`
 
-Targeted follow-up remains manual via the shared wrapper:
+The shared `scripts/post_deploy_operations.sh` wrapper now exposes only `verify` (release +
+systemd-service checks) and `smoke` (endpoint smoke test). The `snapshots` / `invalidate` /
+`warm-landing` / `warm-best-entities` subcommands — and the underlying
+`run_post_deploy_operations` management command — were **removed in 3.0** with the landing
+featured-boards decommission (see `runbook-landing-featured-boards-decommission-2026-06-22.md`).
 
 ```bash
-./scripts/post_deploy_operations.sh YOUR_DROPLET_IP snapshots --realm na --sort cb
-./scripts/post_deploy_operations.sh YOUR_DROPLET_IP invalidate --realm na --players
-./scripts/post_deploy_operations.sh YOUR_DROPLET_IP warm-landing --realm na
-./scripts/post_deploy_operations.sh YOUR_DROPLET_IP warm-best-entities --realm na --player-limit 25 --clan-limit 25
+./scripts/post_deploy_operations.sh YOUR_DROPLET_IP verify
+./scripts/post_deploy_operations.sh YOUR_DROPLET_IP smoke
 ```
 
 When you are serving the app from a custom domain, pass the root domain and any aliases as a comma-separated `EXTRA_ALLOWED_HOSTS` value so Django accepts the incoming `Host` header.

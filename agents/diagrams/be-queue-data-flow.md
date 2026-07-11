@@ -117,6 +117,12 @@ flowchart LR
 
 ## Drill-down: hot-players engagement capture queue
 
+> **Note — queue DISABLED in prod since 2026-06-16** (`HOT_PLAYERS_ENABLED=0`, reversible via
+> `=1`; rows retained): the live hot set was ~98.5% already active-7d, i.e. near-pure overlap
+> with the observation floor. The flow below describes the queue's design when enabled. See
+> `agents/diagrams/be-hot-player-queue-data-flow.md` and
+> `agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md`.
+
 A loop that lets **durable visitor interest** — not the player's own activity or skill —
 qualify a player for guaranteed daily capture: **engagement → hot queue → daily capture →
 eviction when interest fades**. Two tasks share one `HotPlayer` table — a DB-only *brain*

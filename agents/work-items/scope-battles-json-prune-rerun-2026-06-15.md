@@ -1,13 +1,13 @@
 # Scope — `battles_json` eroded-prune re-run (DB-growth Tier-1, first slice)
 
-_Authored 2026-06-15. Branch `db-battles-json-prune-rerun`. Parent: `runbook-db-growth-analysis-2026-06-15.md` step 3 ("Ship the deferred May Tier-1 items"). This scope corrects two stale claims in that runbook (below) and reduces the slice to the one piece of real work that remains._
+_Authored 2026-06-15. Branch `db-battles-json-prune-rerun`. Parent: `archive/runbook-db-growth-analysis-2026-06-15.md` step 3 ("Ship the deferred May Tier-1 items"). This scope corrects two stale claims in that runbook (below) and reduces the slice to the one piece of real work that remains._
 
 ## TL;DR
 
 The 06-15 runbook bundles two things under "deferred May Tier-1 items":
 
 1. **`PlayerSerializer` wire-trim** — **ALREADY SHIPPED** (May, release `20260526125032`, FU-2). No code work; the "needs contract-test update" caveat is also stale (this serializer is not contract-governed). → **verify-only + correct the runbook.**
-2. **Inactive-`battles_json` prune re-run** — **real work.** The May prune was an **ad-hoc batched `psql` UPDATE**; the durable `prune_player_battles_json` management command proposed in May (`runbook-db-size-optimization-2026-05-26.md` item 3) was **never built**. Erosion has recurred (376K rows bear the blob again). → **build the durable command, dry-run, then run paced + `VACUUM`.**
+2. **Inactive-`battles_json` prune re-run** — **real work.** The May prune was an **ad-hoc batched `psql` UPDATE**; the durable `prune_player_battles_json` management command proposed in May (`archive/runbook-db-size-optimization-2026-05-26.md` item 3) was **never built**. Erosion has recurred (376K rows bear the blob again). → **build the durable command, dry-run, then run paced + `VACUUM`.**
 
 So the first slice = **build + ship `prune_inactive_player_battles_json` as a committed, paced, dry-runnable management command, then execute it against prod.**
 
@@ -16,7 +16,7 @@ So the first slice = **build + ship `prune_inactive_player_battles_json` as a co
 - `server/warships/serializers.py:113-116` — `PlayerSerializer.Meta.exclude` already drops `battles_json, tiers_json, type_json, activity_json, achievements_json`. Shipped `e8b3172` / release `20260526125032`.
 - Contract concern resolved in May (FU-2, archived `runbook-db-optimization-followups-2026-05-26.md`): the player-detail serializer is **not** ODCS-contract-governed (contracts cover `PlayerSummarySerializer` / `PlayerExplorerRowSerializer`). The 06-15 runbook's "needs contract-test update" is wrong — leftover from the *superseded* note #4 in the size runbook.
 - **Redis half holds (re-verified 2026-06-15, with the function attribution corrected):** `get_cached_player_detail` (`data.py:5125-5126`) is a **pure read** — `cache.get(_bulk_cache_key_player(...))`; it does not build the dict. The `allkeys-lru` payload under that key is written in **exactly two** places, and **both go through `PlayerSerializer().to_representation()`**: `warm_player_entity_caches` (`data.py:5825-5829`, the primary hot-entity warmer that populates the bulk player cache) and `warm_recently_viewed_players` (`data.py:5195-5200`, the re-cache fallback). There is **no writer of `_bulk_cache_key_player` that bypasses the serializer** (grep of `_bulk_cache_key_player` in `data.py`: only 5126 read, 5130 delete, 5181/5199 warm, 5829 warm). So the `exclude` trims the Redis copy on every write path — the May "trims wire **and** Redis" claim holds. (The earlier draft cited `data.py:5175,5195` as `get_cached_player_detail` building the dict; that conflated the read accessor with the warm path — corrected here.)
-- **Action:** edit `runbook-db-growth-analysis-2026-06-15.md` step 1/3 to mark the wire-trim DONE (shipped May) and drop the contract-test caveat, so the next reader doesn't re-scope a no-op.
+- **Action:** edit `archive/runbook-db-growth-analysis-2026-06-15.md` step 1/3 to mark the wire-trim DONE (shipped May) and drop the contract-test caveat, so the next reader doesn't re-scope a no-op.
 
 ## The real work — durable inactive-prune command
 
@@ -82,7 +82,7 @@ So a pruned row can be **fed straight into the enrichment pool** — and potenti
 1. `server/warships/management/commands/prune_inactive_player_battles_json.py` (thin wrapper).
 2. Core fn in `incremental_battles.py` (paced batched UPDATE + dry-run estimate), mirroring `compact_battle_observation_payloads`.
 3. Unit tests on sqlite.
-4. Runbook: a short execute-runbook (or an "Eroded-prune re-run" section appended to `runbook-db-growth-analysis-2026-06-15.md`) with the dry-run/run/VACUUM recipe + the disjoint-from-floor safety note.
+4. Runbook: a short execute-runbook (or an "Eroded-prune re-run" section appended to `archive/runbook-db-growth-analysis-2026-06-15.md`) with the dry-run/run/VACUUM recipe + the disjoint-from-floor safety note.
 5. Doc reconciliation: correct the stale wire-trim claim in the 06-15 runbook.
 6. **No VERSION bump / deploy in this slice** unless you also run the prune — the command is an ops tool, not a user-facing change; decide at commit time.
 

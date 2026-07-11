@@ -527,10 +527,10 @@
                 "deploy-follow-up-model-replaced"
             ]
         },
-        "agents/runbooks/runbook-asia-realm-data-load-2026-04-05.md": {
+        "agents/runbooks/archive/runbook-asia-realm-data-load-2026-04-05.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "operations",
             "owner": "platform",
             "aliases": [
@@ -547,9 +547,7 @@
                 "backfill",
                 "data-load"
             ],
-            "archive_on": [
-                "asia-realm-fully-operational-and-steady-state"
-            ]
+            "archive_on": []
         },
         "agents/runbooks/runbook-db-target-switching.md": {
             "kind": "runbook",
@@ -594,10 +592,10 @@
                 "cache-model-replaced"
             ]
         },
-        "agents/runbooks/runbook-cache-capacity-expansion-2026-05-02.md": {
+        "agents/runbooks/archive/runbook-cache-capacity-expansion-2026-05-02.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "platform",
             "owner": "platform",
             "aliases": [
@@ -620,10 +618,7 @@
                 "droplet sizing",
                 "bootstrap gotcha"
             ],
-            "archive_on": [
-                "droplet-resized-again",
-                "bootstrap-script-fixed-and-30-day-stable"
-            ]
+            "archive_on": []
         },
         "agents/runbooks/runbook-contract-strategy-implementation.md": {
             "kind": "runbook",
@@ -1255,10 +1250,10 @@
             ],
             "archive_on": []
         },
-        "agents/runbooks/archive/runbook-flower-observability-2026-04-02.md": {
+        "agents/runbooks/runbook-flower-observability-2026-04-02.md": {
             "kind": "runbook",
-            "status": "archived",
-            "lifecycle": "archived",
+            "status": "active",
+            "lifecycle": "dated-active",
             "section": "feature-recovery",
             "owner": "backend",
             "aliases": [],
@@ -2218,10 +2213,10 @@
                 "chart-design-replaced"
             ]
         },
-        "agents/runbooks/runbook-battle-history-phase7-data-widening-2026-04-29.md": {
+        "agents/runbooks/archive/runbook-battle-history-phase7-data-widening-2026-04-29.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "operations",
             "owner": "backend",
             "aliases": [
@@ -2240,9 +2235,7 @@
                 "data widening",
                 "longitudinal stats"
             ],
-            "archive_on": [
-                "phase7c-shipped-and-30-day-coverage-stable"
-            ]
+            "archive_on": []
         },
         "agents/runbooks/runbook-battle-history-rollup-durability-2026-06-06.md": {
             "kind": "runbook",
@@ -2354,10 +2347,10 @@
                 "all-tables-have-retention-policy"
             ]
         },
-        "agents/runbooks/runbook-db-growth-analysis-2026-06-15.md": {
+        "agents/runbooks/archive/runbook-db-growth-analysis-2026-06-15.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "operations",
             "owner": "platform",
             "aliases": [
@@ -2378,9 +2371,7 @@
                 "retention",
                 "snapshot"
             ],
-            "archive_on": [
-                "db-retention-policy-shipped-and-runway-extended"
-            ]
+            "archive_on": []
         },
         "agents/runbooks/runbook-battle-history-archive-prune-2026-06-17.md": {
             "kind": "runbook",
@@ -2410,10 +2401,10 @@
                 "battle-history-archive-implemented-and-scheduled"
             ]
         },
-        "agents/runbooks/runbook-db-size-optimization-2026-05-26.md": {
+        "agents/runbooks/archive/runbook-db-size-optimization-2026-05-26.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "operations",
             "owner": "platform",
             "aliases": [
@@ -2432,9 +2423,7 @@
                 "performance",
                 "bloat"
             ],
-            "archive_on": [
-                "db-size-optimization-executed-and-reclaimed"
-            ]
+            "archive_on": []
         },
         "agents/runbooks/archive/runbook-db-optimization-followups-2026-05-26.md": {
             "kind": "runbook",
@@ -2558,6 +2547,31 @@
                 "snapshot",
                 "celery beat",
                 "caching"
+            ]
+        },
+        "agents/runbooks/runbook-ship-leaderboard-window-30d-2026-06-29.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "data",
+            "aliases": [
+                "ship leaderboard window 30 days",
+                "SHIP_LEADERBOARD_WINDOW_DAYS 14 to 30",
+                "ship standings rolling window widen",
+                "30 day ship window"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "ship-badges",
+                "snapshot",
+                "window",
+                "retention",
+                "recompute",
+                "data"
+            ],
+            "archive_on": [
+                "ship-leaderboard-window-30d-superseded"
             ]
         },
         "agents/runbooks/runbook-shipleaderboard-warm-before-evict-2026-06-18.md": {
@@ -3360,10 +3374,10 @@
                 "landing-treemap-filter-correlation-superseded"
             ]
         },
-        "agents/runbooks/runbook-ingress-gap-decomposition-2026-07-08.md": {
+        "agents/runbooks/archive/runbook-ingress-gap-decomposition-2026-07-08.md": {
             "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
+            "status": "archived",
+            "lifecycle": "archived",
             "section": "operations",
             "owner": "operations",
             "aliases": [
@@ -3382,9 +3396,7 @@
                 "pve",
                 "kpi"
             ],
-            "archive_on": [
-                "step1-decision-landed"
-            ]
+            "archive_on": []
         }
     }
 }
