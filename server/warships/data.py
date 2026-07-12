@@ -2,7 +2,7 @@ from warships.tasks import update_activity_data_task, update_battle_data_task, u
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
     _fetch_clan_battle_seasons_info, _fetch_clan_battle_season_stats
 from warships.api.players import _fetch_player_personal_data, _fetch_ranked_account_info, _fetch_player_achievements
-from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, _fetch_efficiency_badges_for_player, build_ship_chart_name
+from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_stats_for_player_with_hidden, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, _fetch_efficiency_badges_for_player, build_ship_chart_name
 from warships.achievements_catalog import get_achievement_catalog_entry
 from warships.player_analytics import compute_player_verdict
 from warships.data_support import _coerce_activity_rows, _coerce_battle_rows, _coerce_efficiency_rows, _coerce_ranked_rows, _has_newer_source_timestamp, _is_stale_timestamp, _queue_limited_player_hydration, _timestamped_payload_needs_refresh, clamp
@@ -2267,15 +2267,38 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM,
     logging.info(
         f'Battles data empty or outdated: fetching new data for {player.name}')
 
-    # Fetch ship stats for the player
-    ship_data = _fetch_ship_stats_for_player(player_id, realm=realm)
+    # Fetch ship stats for the player (with WG's hidden-profile flag).
+    ship_data, profile_hidden = _fetch_ship_stats_for_player_with_hidden(
+        player_id, realm=realm)
+    if ship_data is None:
+        # Transient/transport failure — the fetch did not complete. Do NOT
+        # clobber the stored battles_json to [] (that would drop the chart until
+        # some other trigger repopulates) and do NOT flip is_hidden. Leave the
+        # row untouched so the floor / next view retries it.
+        logging.warning(
+            f'Transient ship-stats fetch failure for player_id={player_id}; '
+            'leaving battles_json unchanged for retry.'
+        )
+        return
     if not ship_data:
         logging.warning(
             f'No ship stats returned for player_id={player_id}; recording empty battles_json to avoid re-selection.'
         )
+        update_fields = ['battles_json', 'battles_updated_at']
+        # WG's meta.hidden is a reliable hidden signal, distinct from a
+        # transient empty/error response (profile_hidden=False). Flipping
+        # is_hidden here makes the WHOLE profile reflect the hide, instead of
+        # leaving one chart (the tier-type correlation) to "warm" forever on a
+        # battles_json that can never repopulate while the account is hidden.
+        if profile_hidden and not player.is_hidden:
+            player.is_hidden = True
+            update_fields.append('is_hidden')
+            logging.info(
+                f'WG now hides {player.name} (player_id={player_id}); '
+                'flipping is_hidden=True.')
         player.battles_json = []
         player.battles_updated_at = datetime.now()
-        player.save(update_fields=['battles_json', 'battles_updated_at'])
+        player.save(update_fields=update_fields)
         return
 
     apply_battles_json(player, ship_data, realm=realm)
@@ -3375,7 +3398,13 @@ def fetch_player_tier_type_correlation(player_id: str, player: Player | None = N
             '_population_pending': True,
         }
 
-    if not player.battles_json:
+    if player.battles_json is None:
+        # Never fetched — legitimately warming. Kick a refresh; the view signals
+        # X-Tier-Type-Pending and the client polls until it lands. An empty list
+        # (battles_json == []) is NOT this case: it means the fetch ran and came
+        # back empty (hidden profile / no ships) and will never repopulate, so we
+        # fall through to a terminal empty player_cells instead of re-dispatching
+        # a refresh loop that spins the chart forever.
         _dispatch_async_refresh(update_battle_data_task,
                                 player_id=player_id, realm=realm)
         return {

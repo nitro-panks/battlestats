@@ -1324,8 +1324,8 @@ class UpdateBattleDataCaptureHookTests(TestCase):
     def _run_update_battle_data(self):
         from warships.data import update_battle_data
         with mock.patch(
-            "warships.data._fetch_ship_stats_for_player",
-            return_value=self.ship_payload,
+            "warships.data._fetch_ship_stats_for_player_with_hidden",
+            return_value=(self.ship_payload, False),
         ), mock.patch(
             "warships.data.update_tiers_data",
         ), mock.patch(

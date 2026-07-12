@@ -254,6 +254,56 @@ def _fetch_ship_stats_for_player(player_id: str, realm: str = DEFAULT_REALM) -> 
     return data_dict
 
 
+def _fetch_ship_stats_for_player_with_hidden(
+    player_id: str, realm: str = DEFAULT_REALM,
+) -> tuple[Optional[Dict], bool]:
+    """Like ``_fetch_ship_stats_for_player`` but also reports whether WG flagged
+    the account as hidden, and distinguishes a transient failure from a
+    fetched-but-empty account.
+
+    Returns ``(ships_dict, is_hidden)`` where ``ships_dict`` is:
+      - ``None``  → a transient/transport failure (the request did not complete;
+                    the caller must NOT treat this as "empty" or flip is_hidden —
+                    leave stored state alone and retry later).
+      - ``{}``    → a completed fetch with no ships: either a hidden profile
+                    (``is_hidden=True``, from the response ``meta.hidden`` list)
+                    or a visible account with zero ships (``is_hidden=False``).
+      - non-empty → the account's ships payload.
+
+    The hidden signal comes from ``meta.hidden`` (WG returns ``status: ok`` with
+    an empty ``data`` for a hidden account), a reliable discriminator: a
+    transient failure is never reported as hidden, so a caller can flip
+    ``Player.is_hidden`` without a false positive on a WG blip. Kept separate
+    from ``_fetch_ship_stats_for_player`` so the many observation-floor callers
+    of that function keep their exact ``None``/``{}`` empty semantics.
+    """
+    logging.info(
+        f' ---> EXPENSIVE: Remote fetching all battle stats (with hidden flag) '
+        f'for player_id: {player_id}')
+    result = make_api_request_with_meta(
+        "ships/stats/", {"account_id": player_id}, realm=realm)
+    if result is None:
+        # Transport/API error — the request did not complete. Signal transient
+        # (None) so the caller leaves stored data intact and retries, and never
+        # reports hidden (that would hide a visible player on a WG blip).
+        return None, False
+
+    meta = result.get("meta") or {}
+    hidden_ids = meta.get("hidden") or []
+    try:
+        is_hidden = int(player_id) in {int(pid) for pid in hidden_ids}
+    except (TypeError, ValueError):
+        is_hidden = False
+
+    data = result.get("data") or {}
+    try:
+        data_dict = data[str(player_id)] or {}
+    except (KeyError, TypeError):
+        data_dict = {}
+
+    return data_dict, is_hidden
+
+
 def _bulk_fetch_ship_stats(player_ids: list[int], realm: str) -> tuple[dict, str | None]:
     """Bulk-fetch ships/stats for up to 100 players. Returns (data, error_code).
 
