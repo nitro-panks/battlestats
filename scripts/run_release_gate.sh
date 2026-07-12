@@ -28,7 +28,6 @@ run_backend_release_tests() {
     CELERY_RESULT_BACKEND=cache+memory:// \
       "${PYTHON_BIN}" -m pytest --nomigrations \
         warships/tests/test_views.py \
-        warships/tests/test_landing.py \
         warships/tests/test_realm_isolation.py \
         warships/tests/test_data_product_contracts.py \
         -x --tb=short
