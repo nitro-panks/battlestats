@@ -19,9 +19,6 @@ DEPLOY_USER="${DEPLOY_USER:-root}"
 APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"
 APP_USER="${APP_USER:-battlestats}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
-AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS:-0}"
-MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS:-}"
-MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS:-}"
 RELEASE_ID="$(date +%Y%m%d%H%M%S)"
 REMOTE_RELEASE="${APP_ROOT}/releases/${RELEASE_ID}"
 REMOTE_TMP_ENV="/tmp/battlestats-server.env.${RELEASE_ID}"
@@ -30,15 +27,6 @@ REMOTE_TMP_CERT="/tmp/battlestats-do-ca.${RELEASE_ID}.crt"
 EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:-}"
 DEFAULT_PUBLIC_ALLOWED_HOSTS="${DEFAULT_PUBLIC_ALLOWED_HOSTS:-battlestats.online,www.battlestats.online}"
 POST_DEPLOY_VERIFY_REALMS="${POST_DEPLOY_VERIFY_REALMS:-na,eu}"
-
-case "${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS,,}" in
-  1|true|yes|on)
-    AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS=1
-    ;;
-  *)
-    AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS=0
-    ;;
-esac
 
 DJANGO_ALLOWED_HOSTS="$({
   printf '%s\n' localhost 127.0.0.1 "${HOST}"
@@ -620,50 +608,8 @@ activate_release() {
   fi
 }
 
-materialize_best_player_snapshots() {
-  local args=()
-  local realm=""
-  local sort=""
-
-  # Defaults to disabled — see deploy script header. The
-  # `landing-best-player-snapshot-materializer-{realm}` Celery cron refreshes
-  # the persisted snapshots daily at 01:15 UTC + per-realm offset, and the
-  # snapshots survive deploys, so re-running the materialize on every deploy
-  # is redundant. It also competes with the celery workers / cache warmers /
-  # gunicorn workers that have just been (re)started moments earlier on a
-  # 4 GB droplet, and OOM-killed the deploy on 2026-04-11. Operators that
-  # need a forced rebuild (e.g. after adding a new sort) can set
-  # AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS=1 on the deploy invocation
-  # or run `manage.py materialize_landing_player_best_snapshots` directly.
-  if [[ "${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS}" != "1" ]]; then
-    echo "Skipping landing Best-player snapshot materialization (disabled by default; daily celery cron handles refresh)"
-    return 0
-  fi
-
-  if [[ -n "${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS}" ]]; then
-    while IFS= read -r realm; do
-      [[ -n "${realm}" ]] || continue
-      args+=("--realm" "${realm}")
-    done < <(printf '%s' "${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS}" | tr ',' '\n' | awk 'NF')
-  fi
-
-  if [[ -n "${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS}" ]]; then
-    while IFS= read -r sort; do
-      [[ -n "${sort}" ]] || continue
-      args+=("--sort" "${sort}")
-    done < <(printf '%s' "${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS}" | tr ',' '\n' | awk 'NF')
-  fi
-
-  cd "${APP_ROOT}/current/server"
-  set -a
-  source /etc/battlestats-server.env
-  source /etc/battlestats-server.secrets.env
-  set +a
-  "${APP_ROOT}/venv/bin/python" manage.py materialize_landing_player_best_snapshots "${args[@]}"
-}
-
-# Startup cache warming forced ON (2026-05-28): pre-warms score_best_clans +
-# landing sequentially on the background worker after deploy, replacing the
+# Startup cache warming forced ON (2026-05-28): pre-warms hot-entity + bulk
+# loader sequentially on the background worker after deploy, replacing the
 # request-driven CONCURRENT cold-cache recompute that spiked the 1-vCPU DB to
 # load ~8 immediately post-deploy. set_env_value (not migrate_*) so every
 # deploy enforces it regardless of the prior on-host value (which was 0).
@@ -1158,7 +1104,6 @@ redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-c
 redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
 systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls battlestats-celery-floor battlestats-beat
 verify_broker_connection
-materialize_best_player_snapshots
 active_release_after_restart="$(readlink -f "${APP_ROOT}/current")"
 if [[ "${active_release_after_restart}" != "${REMOTE_RELEASE}" ]]; then
   echo "Release activation drifted after restart: expected ${REMOTE_RELEASE}, got ${active_release_after_restart}" >&2
@@ -1176,9 +1121,6 @@ REMOTE
 ssh "${DEPLOY_USER}@${HOST}" \
   APP_ROOT="${APP_ROOT}" \
   APP_USER="${APP_USER}" \
-  AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS="${AUTO_MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOTS}" \
-  MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_REALMS}" \
-  MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS="${MATERIALIZE_LANDING_PLAYER_BEST_SNAPSHOT_SORTS}" \
   REMOTE_RELEASE="${REMOTE_RELEASE}" \
   REMOTE_TMP_ENV="${REMOTE_TMP_ENV}" \
   REMOTE_TMP_SECRETS="${REMOTE_TMP_SECRETS}" \

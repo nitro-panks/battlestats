@@ -143,12 +143,11 @@ _RETIRED_SCHEDULE_NAMES = [
     "hot-players-freshness-eu",
     "hot-players-freshness-asia",
     # Landing "best players" + "best clans" featured boards decommissioned
-    # 2026-06-22 (near-zero clicks — Umami 30d: 0 player-clicks, 1 clan-click).
-    # Their two Beat warmer families are retired; the task functions
-    # (warm_landing_page_content_task / materialize_landing_player_best_snapshots_task)
-    # are kept for revival but no longer scheduled, so these rows must be purged or
-    # celery-beat keeps dispatching them. See
-    # agents/runbooks/runbook-landing-featured-boards-decommission-2026-06-22.md.
+    # 2026-06-22 (near-zero clicks — Umami 30d: 0 player-clicks, 1 clan-click)
+    # and the backend subsystem fully removed in 3.0. Their two Beat warmer
+    # families and the backing task functions (warm_landing_page_content_task /
+    # materialize_landing_player_best_snapshots_task) are gone, so these rows
+    # must be purged or celery-beat keeps dispatching a non-existent task name.
     "landing-page-warmer",
     "landing-page-warmer-na",
     "landing-page-warmer-eu",
@@ -193,11 +192,10 @@ def register_periodic_schedules(sender, **kwargs):
             name="clan-battle-summary-warmer").update(enabled=False)
 
     # The landing "best players"/"best clans" featured boards were decommissioned
-    # 2026-06-22 (near-zero clicks — Umami 30d). Their Beat warmer
-    # (landing-page-warmer-{realm} -> warm_landing_page_content_task) is retired;
-    # the schedule names are purged via _RETIRED_SCHEDULE_NAMES. The task function
-    # is kept for easy revival. See
-    # agents/runbooks/runbook-landing-featured-boards-decommission-2026-06-22.md.
+    # 2026-06-22 (near-zero clicks — Umami 30d) and the backend subsystem fully
+    # removed in 3.0. Their Beat warmer (landing-page-warmer-{realm} ->
+    # warm_landing_page_content_task) and its task are gone; the schedule names
+    # are purged via _RETIRED_SCHEDULE_NAMES.
 
     # -- Realm top-ships treemap warmer --
     # The treemap + inline tier/type list aggregate over the rolling trailing
@@ -237,8 +235,8 @@ def register_periodic_schedules(sender, **kwargs):
 
     # The landing best-player materializer (landing-best-player-snapshot-
     # materializer-{realm} -> materialize_landing_player_best_snapshots_task) fed
-    # the now-decommissioned featured boards (2026-06-22). Retired via
-    # _RETIRED_SCHEDULE_NAMES; the task function is kept for revival.
+    # the now-decommissioned featured boards (2026-06-22, backend removed in 3.0).
+    # Retired via _RETIRED_SCHEDULE_NAMES; the task function is gone.
 
     # -- Rolling T10 Top-Ship-Player snapshot (per realm, striped, every 12h) --
     # Beat fires twice daily (12h apart); each run recomputes the trailing-window
@@ -458,7 +456,7 @@ def register_periodic_schedules(sender, **kwargs):
     # calls, so it's cheap and coexists with multi-day crawls (no deferral). Kill
     # switch: ENRICHMENT_POOL_MAINTENANCE_ENABLED (default on). The heavier
     # full-catalog reclassify (skipped_* drift) is deliberately NOT scheduled —
-    # prod sizing showed ~36 min/run on the 1-vCPU PG; it stays a supervised manual
+    # prod sizing showed ~36 min/run on the shared managed PG; it stays a supervised manual
     # op pending an incremental redesign. See runbook-enrichment-pool-maintenance.
     pool_maint_enabled = _env_flag("ENRICHMENT_POOL_MAINTENANCE_ENABLED", True)
     pool_maint_schedule, _ = CrontabSchedule.objects.get_or_create(
@@ -485,7 +483,7 @@ def register_periodic_schedules(sender, **kwargs):
     # -- Incremental drift reclassify (per realm, striped, daily) --
     # The skipped_* drift rescue (un-hidden / 500-battle crossers / WR recoveries),
     # scoped to recently-fetched rows via player_last_fetch_idx. ~2.5-6 min/realm —
-    # striped 20 min apart so the 1-vCPU PG sees one realm's scan at a time, not a
+    # striped 20 min apart so the shared managed PG sees one realm's scan at a time, not a
     # multi-realm burst. Gated by the same ENRICHMENT_POOL_MAINTENANCE_ENABLED flag.
     reclass_drift_times = {"na": ("20", "8"), "eu": ("40", "8"), "asia": ("0", "9")}
     for realm in sorted(VALID_REALMS):
@@ -628,7 +626,7 @@ def register_periodic_schedules(sender, **kwargs):
     # NA fires at hours 0,3,6,…, EU at hours 1,4,7,…, ASIA at hours 2,5,8,….
     # The base_minute=5 lane (and the distinct lanes on every other striped
     # family) keeps these off the minute-0 boundary so they don't stack onto
-    # the 1-vCPU DB at the top of the hour — see the minute-lane de-pile in
+    # the shared managed DB at the top of the hour — see the minute-lane de-pile in
     # agents/runbooks/analysis-feed-schedule-optimization-2026-06-08.md (F1).
     # Each cycle walks ~1200 players × 6 WG API calls + DB writes and takes
     # 35-78 min/realm. Striping keeps at most one realm mid-cycle so the
@@ -668,7 +666,7 @@ def register_periodic_schedules(sender, **kwargs):
     # converge on full coverage. Always enabled (independent of
     # ENABLE_CRAWLER_SCHEDULES); kill via SNAPSHOT_ACTIVE_PLAYERS_ENABLED=0. The
     # base_minute=15 lane keeps it off the incremental (:05) and minute-0
-    # boundaries on the 1-vCPU DB.
+    # boundaries on the shared managed DB.
     snapshot_active_minutes = int(
         os.getenv("SNAPSHOT_ACTIVE_INTERVAL_MINUTES", "30"))
     for realm in sorted(VALID_REALMS):
@@ -741,7 +739,7 @@ def register_periodic_schedules(sender, **kwargs):
     # on minute lane :35 — a FREE lane (the de-pile invariant in
     # test_periodic_schedule_topology.py enforces this: :45 collided with
     # player-correlation-warmer, :05/:15/:25/:50/:55 are the other taken lanes on
-    # the 1-vCPU DB).
+    # the shared managed DB).
     hot_capture_cycle_minutes = int(
         os.getenv("HOT_PLAYERS_CAPTURE_CYCLE_MINUTES", "1440"))
     for realm in sorted(VALID_REALMS):
@@ -825,7 +823,7 @@ def register_periodic_schedules(sender, **kwargs):
     # raised to use idle worker capacity once the clan crawl stops monopolising
     # the box (R2 core-only crawl). Default 360 (6h). Set to 180 (3h, 2x) / 120
     # (2h, 3x) etc. The realms stay striped `cycle_minutes // 3` apart so they
-    # don't pile onto the 1-vCPU DB at once. Use a divisor-friendly value
+    # don't pile onto the shared managed DB at once. Use a divisor-friendly value
     # (60/120/180/360/720) per _realm_crontab_for_cycle's contract.
     obs_floor_cycle_minutes = int(
         os.getenv("BATTLE_OBSERVATION_FLOOR_CYCLE_MINUTES", "360"))

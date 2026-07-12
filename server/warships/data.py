@@ -2639,135 +2639,6 @@ _SHIP_TYPE_ALIASES: dict[str, str] = {
 }
 _SHIP_TYPE_EXCLUDED_FROM_HEATMAP: set[str] = {'Unknown'}
 PLAYER_TIER_TYPE_CACHE_VERSION = 'tier_type_population:v3'
-LANDING_ACTIVITY_ATTRITION_CACHE_TTL = 900
-LANDING_ACTIVITY_ATTRITION_MONTHS = 18
-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW = 6
-LANDING_ACTIVITY_ACTIVE_DAYS = 30
-LANDING_ACTIVITY_COOLING_DAYS = 90
-
-
-def _shift_month_start(month_start: date, month_delta: int) -> date:
-    absolute_month = (month_start.year * 12) + \
-        month_start.month - 1 + month_delta
-    shifted_year = absolute_month // 12
-    shifted_month = (absolute_month % 12) + 1
-    return date(shifted_year, shifted_month, 1)
-
-
-def _classify_population_signal(recent_active_avg: float, prior_active_avg: float) -> tuple[str, Optional[float]]:
-    if prior_active_avg <= 0:
-        if recent_active_avg <= 0:
-            return 'stable', None
-        return 'growing', None
-
-    delta_pct = round(
-        ((recent_active_avg - prior_active_avg) / prior_active_avg) * 100, 1)
-    if delta_pct >= 8.0:
-        return 'growing', delta_pct
-    if delta_pct <= -8.0:
-        return 'shrinking', delta_pct
-    return 'stable', delta_pct
-
-
-def fetch_landing_activity_attrition(realm: str = DEFAULT_REALM) -> dict:
-    cache_key = realm_cache_key(realm, 'landing:activity_attrition:v1')
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-
-    today = datetime.now(timezone.utc).date()
-    current_month_start = today.replace(day=1)
-    latest_complete_month = _shift_month_start(current_month_start, -1)
-    earliest_month = _shift_month_start(
-        latest_complete_month,
-        -(LANDING_ACTIVITY_ATTRITION_MONTHS - 1),
-    )
-
-    cohort_rows = list(
-        Player.objects.filter(
-            realm=realm,
-            is_hidden=False,
-            creation_date__isnull=False,
-            creation_date__gte=earliest_month,
-            creation_date__lt=current_month_start,
-        ).annotate(
-            cohort_month=TruncMonth('creation_date'),
-        ).values('cohort_month').annotate(
-            total_players=Count('id'),
-            active_players=Count('id', filter=Q(
-                days_since_last_battle__lte=LANDING_ACTIVITY_ACTIVE_DAYS)),
-            cooling_players=Count(
-                'id',
-                filter=Q(
-                    days_since_last_battle__gt=LANDING_ACTIVITY_ACTIVE_DAYS,
-                    days_since_last_battle__lte=LANDING_ACTIVITY_COOLING_DAYS,
-                ),
-            ),
-            dormant_players=Count('id', filter=Q(
-                days_since_last_battle__gt=LANDING_ACTIVITY_COOLING_DAYS)),
-        ).order_by('cohort_month')
-    )
-
-    rows_by_month = {
-        row['cohort_month'].date(): row
-        for row in cohort_rows
-        if row.get('cohort_month') is not None
-    }
-
-    months = []
-    cursor = earliest_month
-    while cursor <= latest_complete_month:
-        row = rows_by_month.get(cursor, {})
-        total_players = int(row.get('total_players', 0) or 0)
-        active_players = int(row.get('active_players', 0) or 0)
-        cooling_players = int(row.get('cooling_players', 0) or 0)
-        dormant_players = int(row.get('dormant_players', 0) or 0)
-
-        months.append({
-            'month': cursor.isoformat(),
-            'total_players': total_players,
-            'active_players': active_players,
-            'cooling_players': cooling_players,
-            'dormant_players': dormant_players,
-            'active_share': round((active_players / total_players) * 100, 1) if total_players > 0 else 0.0,
-        })
-        cursor = _shift_month_start(cursor, 1)
-
-    recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
-    recent_active_avg = round(
-        sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
-    prior_active_avg = round(
-        sum(row['active_players'] for row in prior_window) / len(prior_window), 1) if prior_window else 0.0
-    recent_new_avg = round(
-        sum(row['total_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
-    prior_new_avg = round(
-        sum(row['total_players'] for row in prior_window) / len(prior_window), 1) if prior_window else 0.0
-    population_signal, signal_delta_pct = _classify_population_signal(
-        recent_active_avg,
-        prior_active_avg,
-    )
-
-    payload = {
-        'metric': 'landing_activity_attrition',
-        'label': 'Player Activity and Attrition',
-        'x_label': 'Account Creation Month',
-        'y_label': 'Players Observed',
-        'tracked_population': sum(row['total_players'] for row in months),
-        'months': months,
-        'summary': {
-            'latest_month': latest_complete_month.isoformat(),
-            'population_signal': population_signal,
-            'signal_delta_pct': signal_delta_pct,
-            'recent_active_avg': recent_active_avg,
-            'prior_active_avg': prior_active_avg,
-            'recent_new_avg': recent_new_avg,
-            'prior_new_avg': prior_new_avg,
-            'months_compared': LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW,
-        },
-    }
-    cache.set(cache_key, payload, LANDING_ACTIVITY_ATTRITION_CACHE_TTL)
-    return payload
 
 
 def _player_distribution_cache_key(metric: str, realm: str = DEFAULT_REALM) -> str:
@@ -3949,11 +3820,6 @@ def _persist_player_clan_battle_summary(
         'clan_battle_summary_updated_at',
     ])
 
-    if payload_changed:
-        from warships.landing import invalidate_landing_player_caches
-
-        invalidate_landing_player_caches()
-
 
 def fetch_player_clan_battle_seasons(
     account_id: int,
@@ -4654,8 +4520,6 @@ def update_randoms_data(player_id: str, realm: str = DEFAULT_REALM) -> None:
 
 
 def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
-    from warships.landing import invalidate_landing_clan_caches
-
     # return if no clan_id is provided
     if not clan_id:
         return
@@ -4691,7 +4555,6 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
     clan.save(update_fields=[
         'members_count', 'tag', 'name', 'description', 'leader_id',
         'leader_name', 'last_fetch'])
-    invalidate_landing_clan_caches()
     _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
     cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
     invalidate_clan_detail_cache(int(clan_id), realm=realm)
@@ -4724,7 +4587,6 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
 
 
 def refresh_clan_cached_aggregates(clan_id: str, realm: str = DEFAULT_REALM) -> None:
-    from warships.landing import invalidate_landing_clan_caches
     from django.db.models import Sum, Count, Q
 
     clan = Clan.objects.get(clan_id=clan_id, realm=realm)
@@ -4746,7 +4608,6 @@ def refresh_clan_cached_aggregates(clan_id: str, realm: str = DEFAULT_REALM) -> 
         'cached_active_member_count', 'cached_clan_wr',
     ])
 
-    invalidate_landing_clan_caches(realm=realm)
     _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
     cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
 
@@ -4823,8 +4684,6 @@ def update_clan_members(clan_id: str, realm: str = DEFAULT_REALM) -> None:
 
 
 def update_player_data(player: Player, force_refresh: bool = False, realm: str | None = None) -> None:
-    from warships.landing import invalidate_landing_player_caches
-
     if realm is not None and player.realm != realm:
         player.realm = realm
 
@@ -4961,7 +4820,6 @@ def update_player_data(player: Player, force_refresh: bool = False, realm: str |
         update_player_efficiency_data(
             player, force_refresh=force_refresh, realm=player.realm)
     refresh_player_explorer_summary(player)
-    invalidate_landing_player_caches()
     invalidate_player_detail_cache(player.player_id, realm=player.realm)
     logging.info(f"Updated player personal data: {player.name}")
 
@@ -5172,69 +5030,6 @@ def warm_clan_entity_caches(clan_ids: Iterable[int], force_refresh: bool = False
     return warmed_clans
 
 
-def warm_landing_best_entity_caches(
-    player_limit: int = 25,
-    clan_limit: int = 25,
-    force_refresh: bool = False,
-    realm: str = DEFAULT_REALM,
-) -> dict[str, Any]:
-    from warships.landing import get_landing_best_clans_payload, get_landing_players_payload, normalize_landing_clan_limit, normalize_landing_player_best_sort, normalize_landing_player_limit
-
-    normalized_player_limit = normalize_landing_player_limit(player_limit)
-    normalized_clan_limit = min(normalize_landing_clan_limit(clan_limit), 25)
-    best_player_ids: list[int] = []
-    seen_player_ids: set[int] = set()
-    for player_sort in ('overall', 'ranked', 'efficiency', 'wr', 'cb'):
-        normalized_sort = normalize_landing_player_best_sort(player_sort)
-        best_player_rows = get_landing_players_payload(
-            'best',
-            normalized_player_limit,
-            sort=normalized_sort,
-            realm=realm,
-        )
-        for row in best_player_rows:
-            try:
-                player_id = int(row.get('player_id') or 0)
-            except (TypeError, ValueError):
-                continue
-            if player_id <= 0 or player_id in seen_player_ids:
-                continue
-            seen_player_ids.add(player_id)
-            best_player_ids.append(player_id)
-    best_clan_rows = get_landing_best_clans_payload(
-        realm=realm)[:normalized_clan_limit]
-
-    clan_ids = [
-        int(row.get('clan_id') or 0)
-        for row in best_clan_rows
-        if row.get('clan_id') is not None
-    ]
-
-    warmed_players = warm_player_entity_caches(
-        best_player_ids,
-        force_refresh=force_refresh,
-        realm=realm,
-    )
-    warmed_clans = warm_clan_entity_caches(
-        clan_ids,
-        force_refresh=force_refresh,
-        realm=realm,
-    )
-
-    return {
-        'status': 'completed',
-        'realm': realm,
-        'warmed': {
-            'players': warmed_players,
-            'clans': warmed_clans,
-        },
-        'candidate_counts': {
-            'players': len(best_player_ids),
-            'clans': len(clan_ids),
-        },
-    }
-
-
 RECENTLY_VIEWED_CACHE_KEY_BASE = 'recently_viewed:players:v1'
 RECENTLY_VIEWED_PLAYER_LIMIT = max(
     1, int(os.getenv('RECENTLY_VIEWED_PLAYER_LIMIT', '100')))
@@ -5249,20 +5044,6 @@ BULK_CACHE_CLAN_MEMBER_CLANS = max(
 BULK_CACHE_PLAYER_TTL = int(
     os.getenv('BULK_CACHE_PLAYER_TTL', str(24 * 60 * 60)))
 BULK_CACHE_CLAN_TTL = int(os.getenv('BULK_CACHE_CLAN_TTL', str(24 * 60 * 60)))
-
-# Best-* prewarm gate. `score_best_clans()` (the #1 DB-time sink on the shared
-# managed PG — a ~22s full clan×player scan) and the Best-player landing payloads
-# (`get_landing_players_payload('best', …)`) were built to rank the landing
-# Best-clans / Best-players featured boards, BOTH decommissioned 2026-06-22. The
-# 12h bulk-entity-loader then repurposed them to pick detail-cache prewarm
-# targets — a job the 30-min view-driven hot-entity warmer already covers for
-# actually-viewed entities. When off, the loader skips those cohorts (keeping the
-# cheap pinned-player prewarm), which leaves `score_best_clans()` with no live
-# caller (the landing best-clans path is idle post-decommission). Reversible via
-# env; default on to preserve behaviour where the boards might be revived.
-# See runbook-landing-featured-boards-decommission-2026-06-22.md.
-BULK_CACHE_BEST_PREWARM_ENABLED = os.getenv(
-    'BULK_CACHE_BEST_PREWARM_ENABLED', '1') not in ('0', 'false', 'False')
 
 
 def _bulk_cache_key_player(player_id: int, realm: str = DEFAULT_REALM) -> str:
@@ -5371,31 +5152,6 @@ def warm_recently_viewed_players(realm: str = DEFAULT_REALM) -> dict[str, Any]:
     }
 
 
-BEST_CLAN_MIN_MEMBERS = 10
-BEST_CLAN_MIN_TRACKED = 5
-BEST_CLAN_MIN_ACTIVE_SHARE = 0.40
-BEST_CLAN_MIN_TOTAL_BATTLES = 50_000
-BEST_CLAN_EXCLUDED_IDS: set[int] = {
-    int(x) for x in os.environ.get('BEST_CLAN_EXCLUDED_IDS', '').split(',') if x.strip()
-} if os.environ.get('BEST_CLAN_EXCLUDED_IDS') else set()
-
-BEST_CLAN_W_WR = 0.30
-BEST_CLAN_W_ACTIVITY = 0.25
-BEST_CLAN_W_MEMBER_SCORE = 0.20
-BEST_CLAN_W_CB_RECENCY = 0.15
-BEST_CLAN_W_VOLUME = 0.10
-BEST_CLAN_WR_MIN_CB_BATTLES = 10.0
-BEST_CLAN_WR_CB_BATTLES_SATURATION = 200.0
-BEST_CLAN_WR_ACTIVE_MEMBERS_TARGET = 25.0
-BEST_CLAN_WR_MEMBER_SCORE_TARGET = 6.0
-BEST_CLAN_WR_CB_LIFT_WEIGHT = 0.40
-BEST_CLAN_CB_SUCCESS_BASELINE = 50.0
-BEST_CLAN_CB_ACTIVE_MEMBERS_TARGET = 25.0
-BEST_CLAN_CB_MEMBER_SCORE_TARGET = 5.0
-BEST_CLAN_CB_WINDOW_COMPLETED_SEASONS = 10
-BEST_CLAN_CB_WINDOW_SEASON_BATTLES_TARGET = 30
-BEST_CLAN_CB_WINDOW_SHORTLIST_MULTIPLIER = 4
-BEST_CLAN_CB_WINDOW_SHORTLIST_MAX = 120
 CLAN_BATTLE_ACTIVITY_BADGE_WINDOW_DAYS = 365 * 3
 CLAN_BATTLE_ACTIVITY_BADGE_MIN_SEASON_BATTLES = 20
 CLAN_BATTLE_ACTIVITY_BADGE_MIN_PARTICIPANTS = 4
@@ -5407,39 +5163,6 @@ CLAN_BATTLE_ACTIVITY_BADGE_RECENCY_WEIGHTS = (
     (365 * 2, 0.6),
     (365 * 3, 0.35),
 )
-BEST_CLAN_SORTS = ('overall', 'wr')
-
-# Read-through cache TTL for the full scored Best-clan ranking (see
-# score_best_clans). The three aggregate queries it runs scan the full
-# player/playerexplorersummary tables (~14-18s each) and dominate DB CPU;
-# caching the ranking lets frequent landing warms reuse it instead of
-# rescanning. Default 3h — the ranking changes slowly, well within tolerance.
-# See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md (CPU axis).
-SCORE_BEST_CLANS_CACHE_TTL = int(
-    os.environ.get('SCORE_BEST_CLANS_CACHE_TTL', 3 * 60 * 60))
-# Single-flight lock so a cold/expired cache can't let concurrent callers
-# (landing warm, bulk loader, cold-start request) all run the heavy
-# 3-aggregate scan at once — the cache-stampede behind the 2026-05-26
-# post-VACUUM-FULL CPU spike. LOCK_TIMEOUT must exceed the worst-case compute
-# (cold-cache ~3 min) so the leader's lock can't expire mid-compute and admit a
-# second leader. LOCK_WAIT is how long a non-leader waits for the leader to
-# publish the cache before computing itself (covers the warm ~15-18s compute;
-# bounded so a pathologically slow leader can't hang the caller indefinitely).
-SCORE_BEST_CLANS_LOCK_TIMEOUT = int(
-    os.environ.get('SCORE_BEST_CLANS_LOCK_TIMEOUT', 5 * 60))
-SCORE_BEST_CLANS_LOCK_WAIT = int(
-    os.environ.get('SCORE_BEST_CLANS_LOCK_WAIT', 30))
-
-
-def _minmax_normalize(values: list[float]) -> list[float]:
-    """Min-max normalize a list of floats to [0, 1]. Returns 0.5 for constant lists."""
-    if not values:
-        return []
-    lo, hi = min(values), max(values)
-    if hi == lo:
-        return [0.5] * len(values)
-    span = hi - lo
-    return [(v - lo) / span for v in values]
 
 
 def _parse_clan_battle_meta_date(raw_value: Any) -> Optional[date]:
@@ -5604,288 +5327,6 @@ def get_clan_battle_activity_badge(
     )
 
 
-def score_best_clans(limit: int = BULK_CACHE_CLAN_MEMBER_CLANS, realm: str = DEFAULT_REALM, sort: str = 'overall') -> tuple[list[int], dict[int, dict]]:
-    """Score and rank clans using the composite Best Clan eligibility criteria.
-
-    Returns a tuple of (clan_ids, cb_metrics_by_clan) where clan_ids is a list
-    of the top `limit` clan IDs sorted by composite score descending, and
-    cb_metrics_by_clan maps each clan ID to its CB sub-sort fields
-    (avg_cb_battles, avg_cb_wr, cb_recency_days).
-    """
-    normalized_sort = (sort or 'overall').strip().lower()
-    if normalized_sort not in BEST_CLAN_SORTS:
-        raise ValueError(f"sort must be one of: {', '.join(BEST_CLAN_SORTS)}")
-
-    # Read-through cache of the full scored ranking, keyed on (realm, sort)
-    # independent of `limit` (limit only slices the tail below, so all callers
-    # share one computation). TTL-only — intentionally NOT invalidated by the
-    # landing dirty-key path: per-clan-write invalidation forcing a recompute
-    # on every warm was the DB-CPU saturation root cause. The ranking changes
-    # slowly; SCORE_BEST_CLANS_CACHE_TTL bounds staleness.
-    # See agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md.
-    # Bump the `v1` key version if the scoring formula/weights change, so a
-    # deploy serves freshly-scored rankings instead of up to TTL of old ones.
-    cache_key = realm_cache_key(
-        realm, f'best-clans:scored:v1:{normalized_sort}')
-    cached = cache.get(cache_key)
-    if cached is not None:
-        cached_ids, cached_metrics = cached
-        return list(cached_ids[:limit]), cached_metrics
-
-    # Single-flight: only one caller computes a given (realm, sort) at a time;
-    # others wait for it to publish the cache rather than running the same heavy
-    # scan concurrently (the cold-cache stampede behind the 2026-05-26 spike).
-    # See SCORE_BEST_CLANS_LOCK_* above.
-    lock_key = f'{cache_key}:lock'
-    have_score_lock = cache.add(lock_key, 1, SCORE_BEST_CLANS_LOCK_TIMEOUT)
-    if not have_score_lock:
-        wait_deadline = time.monotonic() + SCORE_BEST_CLANS_LOCK_WAIT
-        while time.monotonic() < wait_deadline:
-            time.sleep(0.5)
-            cached = cache.get(cache_key)
-            if cached is not None:
-                cached_ids, cached_metrics = cached
-                return list(cached_ids[:limit]), cached_metrics
-        # Leader still computing (rare cold path) — compute ourselves rather
-        # than block the caller any longer. have_score_lock stays False so we
-        # never release a lock we don't own (the leader's auto-expires).
-
-    now = django_timezone.now()
-
-    # Hard filters via ORM annotation
-    candidates = list(
-        Clan.objects.filter(realm=realm)
-        .exclude(name__isnull=True).exclude(name='')
-        .exclude(clan_id__in=BEST_CLAN_EXCLUDED_IDS)
-        .filter(
-            members_count__gt=BEST_CLAN_MIN_MEMBERS,
-            cached_total_battles__gte=BEST_CLAN_MIN_TOTAL_BATTLES,
-            cached_clan_wr__isnull=False,
-            cached_active_member_count__isnull=False,
-        )
-        .annotate(
-            tracked_count=Count(
-                'player', filter=Q(player__name__gt=''),
-            ),
-        )
-        .filter(tracked_count__gte=BEST_CLAN_MIN_TRACKED)
-        .values(
-            'clan_id', 'name', 'cached_clan_wr', 'cached_active_member_count',
-            'members_count', 'cached_total_battles', 'tracked_count',
-        )
-    )
-
-    # Activity ratio hard filter (Python-side — ratio not annotatable cleanly)
-    candidates = [
-        row for row in candidates
-        if ((row['cached_active_member_count'] or 0) / max(row['members_count'] or 0, 1)) >= BEST_CLAN_MIN_ACTIVE_SHARE
-    ]
-
-    if not candidates:
-        logging.warning(
-            "score_best_clans: no clans passed hard filters for sort=%s", normalized_sort)
-        if have_score_lock:
-            cache.delete(lock_key)
-        return [], {}
-
-    clan_ids = [int(row['clan_id']) for row in candidates]
-
-    # Gather per-clan average member score and CB recency via a single query
-    member_stats = list(
-        PlayerExplorerSummary.objects
-        .filter(player__clan__clan_id__in=clan_ids)
-        .exclude(player__name='')
-        .values('player__clan__clan_id')
-        .annotate(
-            avg_score=Avg('player_score'),
-            avg_cb_battles=Avg('clan_battle_total_battles'),
-            avg_cb_wr=Avg('clan_battle_overall_win_rate'),
-        )
-    )
-    member_stats_by_clan: dict[int, dict] = {
-        row['player__clan__clan_id']: row for row in member_stats
-    }
-
-    # CB recency: average clan_battle_summary_updated_at per clan
-    # Done separately because Avg on DateTimeField isn't straightforward
-    from django.db.models import Max
-    cb_recency = dict(
-        PlayerExplorerSummary.objects
-        .filter(
-            player__clan__clan_id__in=clan_ids,
-            clan_battle_summary_updated_at__isnull=False,
-        )
-        .exclude(player__name='')
-        .values_list('player__clan__clan_id')
-        .annotate(latest_cb=Max('clan_battle_summary_updated_at'))
-        .values_list('player__clan__clan_id', 'latest_cb')
-    )
-
-    # Build raw component arrays
-    raw_wr = []
-    raw_activity = []
-    raw_member_score = []
-    raw_cb = []
-    raw_volume = []
-    candidate_rows: list[dict[str, Any]] = []
-
-    for row in candidates:
-        clan_id = int(row['clan_id'])
-        clan_name = row.get('name') or ''
-        clan_wr = row.get('cached_clan_wr') or 0.0
-        active_count = row.get('cached_active_member_count') or 0
-        total_members = row.get('members_count') or 0
-        total_battles = row.get('cached_total_battles') or 0
-
-        raw_wr.append(clan_wr)
-        raw_activity.append(active_count / max(total_members, 1))
-
-        stats = member_stats_by_clan.get(clan_id, {})
-        avg_member_score = stats.get('avg_score') or 0.0
-        raw_member_score.append(avg_member_score)
-
-        # CB recency-weighted score
-        avg_cb_battles = stats.get('avg_cb_battles') or 0.0
-        avg_cb_wr = stats.get('avg_cb_wr') or 0.0
-        latest_cb = cb_recency.get(clan_id)
-        if latest_cb and avg_cb_battles:
-            years_since = max((now - latest_cb).days, 0) / 365.25
-            recency_factor = 1.0 / (1.0 + years_since)
-        else:
-            recency_factor = 0.0
-        cb_support_factor = (
-            min(active_count / BEST_CLAN_CB_ACTIVE_MEMBERS_TARGET, 1.0)
-            * min(avg_member_score / BEST_CLAN_CB_MEMBER_SCORE_TARGET, 1.0)
-            if recency_factor > 0
-            else 0.0
-        )
-        cb_success_margin = max(avg_cb_wr - BEST_CLAN_CB_SUCCESS_BASELINE, 0.0)
-        cb_sort_score = avg_cb_battles * cb_success_margin * \
-            recency_factor * cb_support_factor
-
-        raw_cb.append(cb_sort_score)
-
-        raw_volume.append(math.log(max(total_battles, 1)))
-
-        candidate_rows.append({
-            'clan_id': clan_id,
-            'clan_name': str(clan_name).lower(),
-            'clan_wr': float(clan_wr),
-            'members_count': int(total_members),
-            'active_members': int(active_count),
-            'activity_ratio': active_count / max(total_members, 1),
-            'avg_member_score': float(avg_member_score),
-            'avg_cb_battles': float(avg_cb_battles),
-            'avg_cb_wr': float(avg_cb_wr),
-            'cb_sort_score': float(cb_sort_score),
-            'cb_success_margin': float(cb_success_margin),
-            'cb_support_factor': float(cb_support_factor),
-            'total_battles': int(total_battles),
-            'recency_factor': float(recency_factor),
-            'cb_recency_days': max((now - latest_cb).days, 0) if latest_cb else None,
-        })
-
-    # Normalize and score
-    n_wr = _minmax_normalize(raw_wr)
-    n_activity = _minmax_normalize(raw_activity)
-    n_member_score = _minmax_normalize(raw_member_score)
-    n_cb = _minmax_normalize(raw_cb)
-    n_volume = _minmax_normalize(raw_volume)
-
-    # Collect per-clan CB metrics for sub-sort support
-    cb_metrics_by_clan: dict[int, dict] = {}
-    ranked_rows: list[dict[str, Any]] = []
-    for i, candidate in enumerate(candidate_rows):
-        clan_id = candidate['clan_id']
-        overall_score = (
-            BEST_CLAN_W_WR * n_wr[i]
-            + BEST_CLAN_W_ACTIVITY * n_activity[i]
-            + BEST_CLAN_W_MEMBER_SCORE * n_member_score[i]
-            + BEST_CLAN_W_CB_RECENCY * n_cb[i]
-            + BEST_CLAN_W_VOLUME * n_volume[i]
-        )
-        wr_uses_cb_sample = (
-            candidate['avg_cb_battles'] >= BEST_CLAN_WR_MIN_CB_BATTLES
-            and candidate['avg_cb_wr'] > 0
-        )
-        wr_support_factor = (
-            min(candidate['avg_cb_battles'] /
-                BEST_CLAN_WR_CB_BATTLES_SATURATION, 1.0)
-            * min(candidate['active_members'] / BEST_CLAN_WR_ACTIVE_MEMBERS_TARGET, 1.0)
-            * min(candidate['avg_member_score'] / BEST_CLAN_WR_MEMBER_SCORE_TARGET, 1.0)
-            if wr_uses_cb_sample
-            else 0.0
-        )
-        wr_cb_lift = (
-            max(candidate['avg_cb_wr'] - candidate['clan_wr'], 0.0)
-            * BEST_CLAN_WR_CB_LIFT_WEIGHT
-            * wr_support_factor
-        )
-        composite_wr = candidate['clan_wr'] + wr_cb_lift
-        wr_sort_avg_cb_wr = (
-            candidate['avg_cb_wr'] if wr_cb_lift > 0 else 0.0
-        )
-
-        avg_cb_b = candidate['avg_cb_battles']
-        avg_cb_w = candidate['avg_cb_wr']
-        cb_metrics_by_clan[clan_id] = {
-            'avg_cb_battles': round(avg_cb_b, 1) if avg_cb_b else None,
-            'avg_cb_wr': round(avg_cb_w, 1) if avg_cb_w else None,
-            'cb_recency_days': candidate['cb_recency_days'],
-        }
-
-        ranked_rows.append({
-            **candidate,
-            'overall_score': float(overall_score),
-            'composite_wr': float(composite_wr),
-            'wr_cb_lift': float(wr_cb_lift),
-            'wr_support_factor': float(wr_support_factor),
-            'wr_sort_avg_cb_wr': float(wr_sort_avg_cb_wr),
-        })
-
-    if normalized_sort == 'overall':
-        ranked_rows.sort(key=lambda row: (
-            -row['overall_score'],
-            -row['composite_wr'],
-            -row['clan_wr'],
-            -row['cb_sort_score'],
-            -row['total_battles'],
-            row['clan_name'],
-            row['clan_id'],
-        ))
-    elif normalized_sort == 'wr':
-        ranked_rows.sort(key=lambda row: (
-            -row['composite_wr'],
-            -row['clan_wr'],
-            -row['wr_cb_lift'],
-            -row['avg_member_score'],
-            -row['activity_ratio'],
-            -row['overall_score'],
-            -row['total_battles'],
-            row['clan_name'],
-            row['clan_id'],
-        ))
-    else:
-        raise ValueError(f"sort must be one of: {', '.join(BEST_CLAN_SORTS)}")
-
-    all_clan_ids = [int(row['clan_id']) for row in ranked_rows]
-
-    # Cache the full ranking (all candidates, sorted) so every caller — across
-    # limits — reuses this computation until the TTL lapses.
-    cache.set(cache_key, (all_clan_ids, cb_metrics_by_clan),
-              SCORE_BEST_CLANS_CACHE_TTL)
-    if have_score_lock:
-        cache.delete(lock_key)
-
-    if all_clan_ids:
-        logging.info(
-            "score_best_clans: top %d clans for sort=%s from %d candidates",
-            min(limit, len(all_clan_ids)), normalized_sort, len(candidates),
-        )
-
-    return all_clan_ids[:limit], cb_metrics_by_clan
-
-
 def bulk_load_player_cache(
     top_player_limit: int = BULK_CACHE_TOP_PLAYER_LIMIT,
     clan_member_clans: int = BULK_CACHE_CLAN_MEMBER_CLANS,
@@ -5893,76 +5334,21 @@ def bulk_load_player_cache(
 ) -> dict[str, Any]:
     """Bulk-load player detail payloads into Redis from DB.
 
-    Loads three cohorts into a single cache.set_many() call:
-    1. Top N players by player_score (global best)
-    2. All members of the top M clans by composite Best score
-    3. Pinned players (always included)
+    Loads two cohorts into a single cache.set_many() call:
+    1. Pinned players (always included)
+    2. Recently-viewed players
 
-    Single pass — no API calls, no Celery tasks.
+    Single pass — no API calls, no Celery tasks. The former global-best +
+    best-clan-member cohorts were removed with the Best/Popular landing boards
+    (3.0); the view-driven recently-viewed cohort + the 30-min hot-entity warmer
+    keep actually-viewed entities warm, unvisited pages hydrate lazily on view.
     """
     from warships.serializers import PlayerSerializer
 
-    from warships.landing import get_landing_players_payload, normalize_landing_player_best_sort
-
     top_players: list = []
     seen_ids: set[int] = set()
-    best_player_ids: list[int] = []
-    clan_members: list = []
-    best_clan_ids: list[int] = []
 
-    # Cohorts 1 & 2 rank the (decommissioned 2026-06-22) Best-player /
-    # Best-clan boards; gated off so their heavy scans (Best-player landing
-    # payloads + the ~22s score_best_clans clan×player scan — the #1 DB-time
-    # sink) stop running. The view-driven Cohort 4 + the 30-min hot-entity
-    # warmer keep actually-viewed entities warm; unvisited top-N pages hydrate
-    # lazily on first view. See BULK_CACHE_BEST_PREWARM_ENABLED.
-    if BULK_CACHE_BEST_PREWARM_ENABLED:
-        # Cohort 1: union of shipped Best-player sub-sort cohorts
-        best_player_ids: list[int] = []
-        seen_best_ids: set[int] = set()
-        for player_sort in ('overall', 'ranked', 'efficiency', 'wr', 'cb'):
-            normalized_sort = normalize_landing_player_best_sort(player_sort)
-            for row in get_landing_players_payload(
-                'best',
-                top_player_limit,
-                sort=normalized_sort,
-                realm=realm,
-            ):
-                try:
-                    player_id = int(row.get('player_id') or 0)
-                except (TypeError, ValueError):
-                    continue
-                if player_id <= 0 or player_id in seen_best_ids:
-                    continue
-                seen_best_ids.add(player_id)
-                best_player_ids.append(player_id)
-
-        top_players = list(
-            Player.objects
-            .filter(realm=realm, player_id__in=best_player_ids)
-            .exclude(name='')
-            .filter(is_hidden=False)
-            .select_related('clan', 'explorer_summary')
-        )
-        top_players.sort(
-            key=lambda player: best_player_ids.index(player.player_id)
-            if player.player_id in seen_best_ids else len(best_player_ids)
-        )
-        seen_ids = {p.player_id for p in top_players}
-
-        # Cohort 2: members of the best clans (composite scoring)
-        best_clan_ids, _ = score_best_clans(limit=clan_member_clans, realm=realm)
-        clan_members = list(
-            Player.objects
-            .filter(realm=realm, clan_id__in=best_clan_ids)
-            .exclude(name='')
-            .exclude(player_id__in=seen_ids)
-            .select_related('clan', 'explorer_summary')
-        )
-        top_players.extend(clan_members)
-        seen_ids.update(p.player_id for p in clan_members)
-
-    # Cohort 3: pinned players
+    # Cohort 1: pinned players
     pinned_ids = _get_pinned_player_ids(realm=realm)
     missing_pinned = [pid for pid in pinned_ids if pid not in seen_ids]
     if missing_pinned:
@@ -5973,7 +5359,7 @@ def bulk_load_player_cache(
         )
         seen_ids.update(missing_pinned)
 
-    # Cohort 4: recently-viewed players
+    # Cohort 2: recently-viewed players
     rv_ids = get_recently_viewed_player_ids(realm=realm)
     missing_rv = [pid for pid in rv_ids if pid not in seen_ids]
     if missing_rv:
@@ -6000,56 +5386,14 @@ def bulk_load_player_cache(
         cache.set_many(payloads, timeout=BULK_CACHE_PLAYER_TTL)
 
     logging.info(
-        "bulk_load_player_cache: loaded %d player payloads (best_union=%d, clan_members=%d, clans=%d, recently_viewed=%d)",
-        len(payloads), len(best_player_ids), len(
-            clan_members), len(best_clan_ids), len(missing_rv),
+        "bulk_load_player_cache: loaded %d player payloads (pinned=%d, recently_viewed=%d)",
+        len(payloads), len(missing_pinned), len(missing_rv),
     )
     return {
         'status': 'completed',
         'loaded': len(payloads),
-        'top_players': len(best_player_ids),
-        'clan_member_clans': len(best_clan_ids),
-        'clan_members_added': len(clan_members),
+        'pinned_added': len(missing_pinned),
         'recently_viewed_added': len(missing_rv),
-    }
-
-
-def bulk_load_clan_cache(limit: int = BULK_CACHE_CLAN_LIMIT, realm: str = DEFAULT_REALM) -> dict[str, Any]:
-    """Bulk-load top clan detail payloads into Redis from DB."""
-    from warships.serializers import ClanSerializer
-
-    # Entirely score_best_clans-driven (the #1 DB-time sink). Gated off with the
-    # decommissioned Best boards — the hot-entity warmer covers viewed clans and
-    # cold clan pages hydrate lazily. See BULK_CACHE_BEST_PREWARM_ENABLED.
-    if not BULK_CACHE_BEST_PREWARM_ENABLED:
-        return {'status': 'skipped', 'reason': 'best-prewarm-disabled', 'loaded': 0}
-
-    best_clan_ids, _ = score_best_clans(limit=limit, realm=realm)
-    clans = (
-        Clan.objects
-        .filter(clan_id__in=best_clan_ids, realm=realm)
-    )
-
-    payloads: dict[str, dict] = {}
-    serializer = ClanSerializer()
-    for clan in clans:
-        try:
-            data = serializer.to_representation(clan)
-            key = _bulk_cache_key_clan(clan.clan_id, realm=realm)
-            payloads[key] = data
-        except Exception:
-            logging.warning(
-                "bulk_load_clan_cache: failed to serialize clan %s", clan.clan_id, exc_info=True)
-
-    if payloads:
-        cache.set_many(payloads, timeout=BULK_CACHE_CLAN_TTL)
-
-    logging.info("bulk_load_clan_cache: loaded %d clan detail payloads into cache (limit=%d)", len(
-        payloads), limit)
-    return {
-        'status': 'completed',
-        'loaded': len(payloads),
-        'limit': limit,
     }
 
 
@@ -6059,14 +5403,18 @@ def bulk_load_entity_caches(
     clan_limit: int = BULK_CACHE_CLAN_LIMIT,
     realm: str = DEFAULT_REALM,
 ) -> dict[str, Any]:
-    """Bulk-load player and clan detail payloads into Redis. DB reads only, no tasks."""
+    """Bulk-load player detail payloads into Redis. DB reads only, no tasks.
+
+    The clan cohort was removed with the Best/Popular landing boards (3.0): it
+    was entirely score_best_clans-driven and already gated off in prod. Viewed
+    clans stay warm via the 30-min hot-entity warmer; cold clan pages hydrate
+    lazily on first view.
+    """
     player_result = bulk_load_player_cache(
         top_player_limit, clan_member_clans, realm=realm)
-    clan_result = bulk_load_clan_cache(clan_limit, realm=realm)
     return {
         'status': 'completed',
         'players': player_result,
-        'clans': clan_result,
     }
 
 

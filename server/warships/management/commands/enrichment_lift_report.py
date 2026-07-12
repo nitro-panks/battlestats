@@ -22,12 +22,14 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Count, Q
 
 from warships.data import calculate_tier_filtered_pvp_record
-from warships.landing import LANDING_PLAYER_BEST_MIN_PVP_BATTLES
 from warships.models import Player, PlayerExplorerSummary
 
 HIGH_TIER_MIN_BATTLES = 50   # landing board high-tier floor
 ACTIVE_DAYS = 180            # landing board active window
 MINIMUM_TIER = 5             # T5-T10 = "high tier"
+# Minimum lifetime PvP battles that gated the (removed) landing Best board; kept
+# here as this report's board-eligibility floor. Formerly landing.LANDING_PLAYER_BEST_MIN_PVP_BATTLES.
+LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 
 # (label, low_inclusive, high_exclusive) over high-tier win rate %
 HT_WR_BANDS = [

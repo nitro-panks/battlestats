@@ -12,10 +12,6 @@ usage() {
   cat <<'EOF'
 Usage:
   scripts/post_deploy_operations.sh <host> verify [--realm <realm>]... [--expect-backend-release <path>] [--expect-client-release <path>] [--skip-backend] [--skip-client]
-  scripts/post_deploy_operations.sh <host> snapshots [--realm <realm>]... [--sort <sort>]...
-  scripts/post_deploy_operations.sh <host> invalidate [--realm <realm>]... [--players] [--clans] [--include-recent]
-  scripts/post_deploy_operations.sh <host> warm-landing [--realm <realm>]... [--include-recent] [--force-refresh]
-  scripts/post_deploy_operations.sh <host> warm-best-entities [--realm <realm>]... [--player-limit <n>] [--clan-limit <n>] [--force-refresh]
   scripts/post_deploy_operations.sh <host> smoke [--base-url <url>] [--timeout <seconds>]
 EOF
 }
@@ -28,18 +24,6 @@ fi
 HOST="$1"
 SUBCOMMAND="$2"
 shift 2
-
-run_remote_server_manage() {
-  ssh "${DEPLOY_USER}@${HOST}" APP_ROOT="${SERVER_APP_ROOT}" 'bash -s' -- "$@" <<'REMOTE'
-set -euo pipefail
-cd "${APP_ROOT}/current/server"
-set -a
-source /etc/battlestats-server.env
-source /etc/battlestats-server.secrets.env
-set +a
-"${APP_ROOT}/venv/bin/python" manage.py "$@"
-REMOTE
-}
 
 print_current_release() {
   local label="$1"
@@ -96,15 +80,6 @@ set +a
 REMOTE
 }
 
-append_realm_flags() {
-  local -n target_ref=$1
-  shift
-  local realm=""
-  for realm in "$@"; do
-    target_ref+=(--realm "${realm}")
-  done
-}
-
 case "${SUBCOMMAND}" in
   verify)
     skip_backend=0
@@ -149,9 +124,9 @@ case "${SUBCOMMAND}" in
         print_current_release "backend" "${SERVER_APP_ROOT}"
       fi
       verify_services "backend" battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-beat redis-server rabbitmq-server
-      manage_args=(run_post_deploy_operations verify)
-      append_realm_flags manage_args "${realms[@]}"
-      run_remote_server_manage "${manage_args[@]}"
+      # (--realm flags are still accepted for CLI compatibility but no longer
+      # drive a manage.py step: the landing post-deploy operations were removed
+      # in 3.0 with the featured-board decommission.)
     fi
 
     if [[ "${skip_client}" != "1" ]]; then
@@ -162,88 +137,6 @@ case "${SUBCOMMAND}" in
       fi
       verify_services "client" battlestats-client nginx
     fi
-    ;;
-  snapshots)
-    manage_args=(run_post_deploy_operations snapshots)
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --realm|--sort)
-          manage_args+=("$1" "$2")
-          shift 2
-          ;;
-        *)
-          echo "Unknown snapshots option: $1" >&2
-          usage >&2
-          exit 1
-          ;;
-      esac
-    done
-    run_remote_server_manage "${manage_args[@]}"
-    ;;
-  invalidate)
-    manage_args=(run_post_deploy_operations invalidate)
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --realm|--players|--clans|--include-recent)
-          manage_args+=("$1")
-          if [[ "$1" == "--realm" ]]; then
-            manage_args+=("$2")
-            shift 2
-          else
-            shift
-          fi
-          ;;
-        *)
-          echo "Unknown invalidate option: $1" >&2
-          usage >&2
-          exit 1
-          ;;
-      esac
-    done
-    run_remote_server_manage "${manage_args[@]}"
-    ;;
-  warm-landing)
-    manage_args=(run_post_deploy_operations warm-landing)
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --realm|--include-recent|--force-refresh)
-          manage_args+=("$1")
-          if [[ "$1" == "--realm" ]]; then
-            manage_args+=("$2")
-            shift 2
-          else
-            shift
-          fi
-          ;;
-        *)
-          echo "Unknown warm-landing option: $1" >&2
-          usage >&2
-          exit 1
-          ;;
-      esac
-    done
-    run_remote_server_manage "${manage_args[@]}"
-    ;;
-  warm-best-entities)
-    manage_args=(run_post_deploy_operations warm-best-entities)
-    while [[ $# -gt 0 ]]; do
-      case "$1" in
-        --realm|--player-limit|--clan-limit)
-          manage_args+=("$1" "$2")
-          shift 2
-          ;;
-        --force-refresh)
-          manage_args+=("$1")
-          shift
-          ;;
-        *)
-          echo "Unknown warm-best-entities option: $1" >&2
-          usage >&2
-          exit 1
-          ;;
-      esac
-    done
-    run_remote_server_manage "${manage_args[@]}"
     ;;
   smoke)
     base_url="${DEFAULT_SMOKE_BASE_URL}"
