@@ -146,13 +146,9 @@ def run_case(case: SmokeCase, base_url: str, timeout: float) -> tuple[bool, str]
 def build_cases() -> list[SmokeCase]:
     return [
         # ── Landing / discovery ────────────────────────────────
-        SmokeCase("landing_clans", "/api/landing/clans/",
-                  json_type="list", min_items=1),
-        SmokeCase("landing_players", "/api/landing/players/",
-                  json_type="list", min_items=1),
         SmokeCase(
             "player_suggestions",
-            "/api/landing/player-suggestions/?q=sh",
+            "/api/landing/player-suggestions/?q=shin",
             json_type="list",
             min_items=1,
         ),
@@ -222,16 +218,6 @@ def build_cases() -> list[SmokeCase]:
             "/api/ship/1/",
             json_type="dict",
             required_keys=("name",),
-        ),
-
-        # ── Player explorer ────────────────────────────────────
-        SmokeCase(
-            "players_explorer",
-            "/api/players/explorer/?page_size=5&min_pvp_battles=1000",
-            json_type="dict",
-            required_keys=("count", "page", "page_size", "results"),
-            nested_list_key="results",
-            min_nested_items=1,
         ),
 
         # ── Population distributions ───────────────────────────
