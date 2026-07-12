@@ -17,7 +17,7 @@ from warships.models import DEFAULT_REALM, VALID_REALMS, Player, Clan, Ship, Ent
 from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
-    RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
+    RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, \
     WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, CompactPlayerCorrelationDistributionSerializer, RankedPlayerCorrelationDistributionSerializer, \
     PlayerTierTypeCorrelationSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer
 from warships.data import (
@@ -30,7 +30,6 @@ from warships.data import (
     fetch_clan_battle_seasons,
     fetch_clan_plot_data,
     fetch_player_clan_battle_seasons,
-    fetch_player_explorer_page,
     fetch_player_population_distribution,
     fetch_player_ranked_wr_battles_correlation,
     fetch_player_summary,
@@ -181,7 +180,6 @@ def _clan_member_badges_cached(clan_id: str, realm: str, member_pks: list) -> di
 
 
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
-PLAYER_EXPLORER_RESPONSE_CACHE_TTL = 60
 MISSING_PLAYER_LOOKUP_CACHE_TTL = 600
 
 
@@ -460,15 +458,6 @@ def _validated_single_response(data, serializer_class):
     serializer = serializer_class(data=data)
     serializer.is_valid(raise_exception=True)
     return Response(serializer.data)
-
-
-def _player_explorer_response_cache_key(params: dict[str, object]) -> str:
-    parts = [
-        f"{key}={params[key]}"
-        for key in sorted(params)
-    ]
-    digest = sha256('&'.join(parts).encode('utf-8')).hexdigest()
-    return f'players:explorer:response:v1:{digest}'
 
 
 @api_view(["GET"])
@@ -1537,111 +1526,6 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
         return response
 
     return Response({'detail': 'Unsupported player correlation metric.'}, status=status.HTTP_404_NOT_FOUND)
-
-
-@api_view(["GET"])
-@throttle_classes(PUBLIC_API_THROTTLES)
-def players_explorer(request) -> Response:
-    realm = _get_realm(request)
-    query = (request.query_params.get('q') or '').strip()
-    hidden = (request.query_params.get('hidden') or 'all').strip().lower()
-    activity_bucket = (request.query_params.get(
-        'activity_bucket') or 'all').strip().lower()
-    ranked = (request.query_params.get('ranked') or 'all').strip().lower()
-    sort = (request.query_params.get('sort')
-            or 'player_score').strip()
-    direction = (request.query_params.get(
-        'direction') or 'desc').strip().lower()
-
-    try:
-        min_pvp_battles = max(
-            int(request.query_params.get('min_pvp_battles') or 0), 0)
-    except ValueError:
-        return Response({'detail': 'min_pvp_battles must be an integer.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        page = max(int(request.query_params.get('page') or 1), 1)
-        page_size = min(
-            max(int(request.query_params.get('page_size') or 25), 1), 100)
-    except ValueError:
-        return Response({'detail': 'page and page_size must be integers.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    allowed_hidden = {'all', 'visible', 'hidden'}
-    allowed_activity_buckets = {'all', '7d', '30d', '90d', 'dormant90plus'}
-    allowed_ranked = {'all', 'yes', 'no'}
-    allowed_sorts = {
-        'name',
-        'days_since_last_battle',
-        'pvp_ratio',
-        'pvp_battles',
-        'pvp_survival_rate',
-        'kill_ratio',
-        'player_score',
-        'account_age_days',
-        'battles_last_29_days',
-        'active_days_last_29_days',
-        'ships_played_total',
-        'ranked_seasons_participated',
-    }
-
-    if hidden not in allowed_hidden:
-        return Response({'detail': 'hidden must be one of: all, visible, hidden'}, status=status.HTTP_400_BAD_REQUEST)
-    if activity_bucket not in allowed_activity_buckets:
-        return Response({'detail': 'activity_bucket must be one of: all, 7d, 30d, 90d, dormant90plus'}, status=status.HTTP_400_BAD_REQUEST)
-    if ranked not in allowed_ranked:
-        return Response({'detail': 'ranked must be one of: all, yes, no'}, status=status.HTTP_400_BAD_REQUEST)
-    if sort not in allowed_sorts:
-        return Response({'detail': 'sort must be a supported field.'}, status=status.HTTP_400_BAD_REQUEST)
-    if direction not in {'asc', 'desc'}:
-        return Response({'detail': 'direction must be asc or desc.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    cache_key = _player_explorer_response_cache_key({
-        'activity_bucket': activity_bucket,
-        'direction': direction,
-        'hidden': hidden,
-        'min_pvp_battles': min_pvp_battles,
-        'page': page,
-        'page_size': page_size,
-        'q': query,
-        'ranked': ranked,
-        'realm': realm,
-        'sort': sort,
-    })
-    cached_payload = cache.get(cache_key)
-    if cached_payload is not None:
-        response = Response(cached_payload)
-        response['X-Players-Explorer-Cache'] = 'hit'
-        response['X-Players-Explorer-Cache-TTL-Seconds'] = str(
-            PLAYER_EXPLORER_RESPONSE_CACHE_TTL)
-        return response
-
-    total_count, page_rows = fetch_player_explorer_page(
-        query=query,
-        hidden=hidden,
-        activity_bucket=activity_bucket,
-        ranked=ranked,
-        min_pvp_battles=min_pvp_battles,
-        sort=sort,
-        direction=direction,
-        page=page,
-        page_size=page_size,
-        realm=realm,
-    )
-
-    serializer = PlayerExplorerRowSerializer(data=page_rows, many=True)
-    serializer.is_valid(raise_exception=True)
-    payload = {
-        'count': total_count,
-        'page': page,
-        'page_size': page_size,
-        'results': serializer.data,
-    }
-    cache.set(cache_key, payload, PLAYER_EXPLORER_RESPONSE_CACHE_TTL)
-    response = Response(payload)
-    response['X-Players-Explorer-Cache'] = 'miss'
-    response['X-Players-Explorer-Cache-TTL-Seconds'] = str(
-        PLAYER_EXPLORER_RESPONSE_CACHE_TTL)
-    return response
 
 
 @api_view(["GET"])

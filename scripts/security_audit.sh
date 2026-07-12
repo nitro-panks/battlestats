@@ -53,7 +53,6 @@ SEED_URLS=(
     "${TARGET}/api/landing/recent/"
     "${TARGET}/api/landing/player-suggestions/?q=test"
     "${TARGET}/api/stats/"
-    "${TARGET}/api/players/explorer/?realm=na"
     "${TARGET}/api/sitemap-entities/"
 )
 

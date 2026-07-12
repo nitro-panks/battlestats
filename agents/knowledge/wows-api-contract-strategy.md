@@ -47,7 +47,6 @@ That maps well to things like:
 
 - `player_daily_snapshots`
 - `player_summary`
-- `player_explorer_rows`
 - `ranked_season_rows`
 
 These are internal, curated, and should have explicit field meanings and freshness expectations.
@@ -127,10 +126,10 @@ For machine-readable coverage of WG endpoints, use the upstream YAML profile are
 
 The strategy is now partially implemented in repo artifacts instead of only being proposed.
 
-- ODCS contracts now exist for `player_daily_snapshots`, `player_summary`, and `player_explorer_rows`.
+- ODCS contracts now exist for `player_daily_snapshots` and `player_summary`. (The `player_explorer_rows` contract was removed in 3.0.1 along with the dead players_explorer browse endpoint it described.)
 - Upstream endpoint profiles now exist for `account/info`, `account/list`, `account/statsbydate`, and `clans/accountinfo`.
 - Encyclopedia endpoint coverage now includes verified upstream profiles for `encyclopedia/info`, `encyclopedia/ships`, and `encyclopedia/modules`, plus a player-scoped ship-surface profile for `ships/badges` and narrative notes for the broader encyclopedia/ship namespace.
-- The backend test suite includes contract-alignment checks for upstream endpoint field usage and serializer-backed payload behavior for player summary, explorer, clan membership, and ranked-history surfaces.
+- The backend test suite includes contract-alignment checks for upstream endpoint field usage and serializer-backed payload behavior for player summary, clan membership, and ranked-history surfaces.
 - Recent development expanded stable internal semantics around ranked-history retention and roster markers, which reinforces the need to keep derived contracts tied to current serializer/API output rather than upstream schemas alone.
 
 The practical outcome is that the repo now has a real layered contract baseline: endpoint-focused YAML for unstable upstream behavior, ODCS for stable derived data products, and knowledge notes for investigative evidence.
@@ -141,7 +140,6 @@ If we start small, the best first ODCS candidates are:
 
 1. `player-daily-snapshots.odcs.yaml`
 2. `player-summary.odcs.yaml`
-3. `player-explorer-rows.odcs.yaml`
 
 These are the places where the repo most needs consistent semantics across backend code, charts, and future UI/API work.
 
@@ -153,7 +151,7 @@ These are the places where the repo most needs consistent semantics across backe
 
 ## Next Checks
 
-- Keep the ODCS contracts in sync with serializer fields when player-summary or explorer payloads change.
+- Keep the ODCS contracts in sync with serializer fields when player-summary payloads change.
 - Add upstream YAML profiles for additional relied-on endpoints such as ranked and clan-battle endpoints as their product importance increases.
 - Add upstream YAML profiles for `encyclopedia/ships` and `encyclopedia/modules` if ship-reference or build-comparison features start depending on them directly.
 - Validate derived payloads in tests against contract expectations so contract drift fails in CI rather than in documentation review.

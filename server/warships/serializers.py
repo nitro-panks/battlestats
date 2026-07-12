@@ -564,20 +564,3 @@ class PlayerTierTypeCorrelationSerializer(serializers.Serializer):
     tiles = PlayerTierTypeTileSerializer(many=True)
     trend = PlayerTierTypeTrendSerializer(many=True)
     player_cells = PlayerTierTypeCellSerializer(many=True)
-
-
-class PlayerExplorerRowSerializer(serializers.Serializer):
-    kill_ratio = serializers.FloatField(allow_null=True)
-    player_score = serializers.FloatField(allow_null=True)
-    pvp_survival_rate = serializers.FloatField(allow_null=True)
-    name = serializers.CharField()
-    player_id = serializers.IntegerField()
-    is_hidden = serializers.BooleanField()
-    days_since_last_battle = serializers.IntegerField(allow_null=True)
-    pvp_ratio = serializers.FloatField(allow_null=True)
-    pvp_battles = serializers.IntegerField(allow_null=True)
-    account_age_days = serializers.IntegerField(allow_null=True)
-    battles_last_29_days = serializers.IntegerField(allow_null=True)
-    active_days_last_29_days = serializers.IntegerField(allow_null=True)
-    ships_played_total = serializers.IntegerField(allow_null=True)
-    ranked_seasons_participated = serializers.IntegerField(allow_null=True)

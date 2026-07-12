@@ -10,7 +10,7 @@ Guide agents to implement and maintain the layered contract strategy for WoWS AP
 
 ## Execution Status
 
-- ODCS contracts now exist for `player_summary` and `player_explorer_rows` alongside the existing `player_daily_snapshots` contract.
+- ODCS contracts now exist for `player_summary` alongside the existing `player_daily_snapshots` contract. (The `player_explorer_rows` contract was removed in 3.0.1 with the dead players_explorer endpoint.)
 - Upstream YAML profiles already cover `account/info`, `account/list`, `account/statsbydate`, and `clans/accountinfo`.
 - Contract-alignment tests now cover both upstream endpoint profiles and derived data-product contracts.
 - Narrative knowledge coverage now includes `wows-statsbydate-status.md` and `wows-account-hydration-notes.md`.

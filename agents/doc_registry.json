@@ -1659,27 +1659,6 @@
                 "data-product-replaced"
             ]
         },
-        "agents/contracts/data-products/player-explorer-rows.odcs.yaml": {
-            "kind": "contract",
-            "status": "active",
-            "lifecycle": "evergreen",
-            "section": "contracts",
-            "owner": "data",
-            "aliases": [
-                "player explorer rows",
-                "explorer row contract"
-            ],
-            "tags": [
-                "contract",
-                "data product",
-                "explorer",
-                "player summary",
-                "rows"
-            ],
-            "archive_on": [
-                "data-product-replaced"
-            ]
-        },
         "agents/contracts/data-products/player-summary.odcs.yaml": {
             "kind": "contract",
             "status": "active",

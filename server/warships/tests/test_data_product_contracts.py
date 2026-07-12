@@ -3,7 +3,7 @@ from pathlib import Path
 import yaml
 from django.test import SimpleTestCase
 
-from warships.serializers import PlayerExplorerRowSerializer, PlayerSummarySerializer
+from warships.serializers import PlayerSummarySerializer
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -39,11 +39,4 @@ class DataProductContractAlignmentTests(SimpleTestCase):
         self.assertEqual(
             _property_names(contract),
             _serializer_field_names(PlayerSummarySerializer),
-        )
-
-    def test_player_explorer_contract_matches_serializer_fields(self):
-        contract = _load_contract("player-explorer-rows.odcs.yaml")
-        self.assertEqual(
-            _property_names(contract),
-            _serializer_field_names(PlayerExplorerRowSerializer),
         )

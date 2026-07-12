@@ -31,7 +31,6 @@ Use `agents/knowledge/` instead when the main value is narrative investigation, 
 
 - `data-products/player-daily-snapshots.odcs.yaml`
 - `data-products/player-summary.odcs.yaml`
-- `data-products/player-explorer-rows.odcs.yaml`
 - `upstream/wows-account-info.yaml`
 - `upstream/wows-account-list.yaml`
 - `upstream/wows-account-statsbydate.yaml`
