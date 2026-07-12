@@ -1,7 +1,7 @@
 # Runbook: Battle History Rollout (Playerbase, Longitudinal)
 
 _Created: 2026-04-28_
-_Context: Take the lil_boots incremental-battle PoC (`runbook-incremental-battle-poc-2026-04-27.md`) playerbase-wide as a longitudinal "your last week of battles" feature, surfaced per ship per day for any player on the site. Reuses existing refresh paths so no new WG calls are introduced._
+_Context: Take the lil_boots incremental-battle PoC (`archive/runbook-incremental-battle-poc-2026-04-27.md`) playerbase-wide as a longitudinal "your last week of battles" feature, surfaced per ship per day for any player on the site. Reuses existing refresh paths so no new WG calls are introduced._
 _Status: Implementation complete on local branches; ready to push, open PRs, and execute the production rollout sequence below. All curated release gates pass (backend 268+, frontend 88), with one pre-existing unrelated failure deselected._
 
 ## Purpose

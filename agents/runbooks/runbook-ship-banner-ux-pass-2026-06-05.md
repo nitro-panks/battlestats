@@ -117,5 +117,5 @@ No new dependencies, no new shared primitives, no token-file changes. Both compo
 ## Related
 
 - `agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md` — the feature this banner belongs to.
-- `agents/runbooks/runbook-ship-award-ledger-2026-06-05.md` — `ShipHonors` (the durable sibling, same token bug).
+- `agents/runbooks/archive/runbook-ship-award-ledger-2026-06-05.md` — `ShipHonors` (the durable sibling, same token bug).
 - `agents/archive/personas/designer.md` — the visual-language source consulted for this pass.

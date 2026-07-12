@@ -15,7 +15,7 @@ Pause clan crawls when another WG-heavy job (a large enrichment drain, a backfil
 - Redis keys (Django cache, `:1:` prefix):
   - `crawl_all_clans:<realm>:lock` — held while running (8h TTL + heartbeat). `_clan_crawl_lock_key(realm)`.
   - `crawl_all_clans:<realm>:heartbeat` — freshness (`CLAN_CRAWL_HEARTBEAT_STALE_AFTER`, 15 min).
-  - `crawl_all_clans:<realm>:pass_started_at` — **run-scoped resume marker** (21d TTL). **PRESERVE this** — it lets the crawl resume mid-pass instead of restarting from clan 0 (see `runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md`).
+  - `crawl_all_clans:<realm>:pass_started_at` — **run-scoped resume marker** (21d TTL). **PRESERVE this** — it lets the crawl resume mid-pass instead of restarting from clan 0 (see `archive/runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md`).
 
 ## Pause
 
@@ -52,7 +52,7 @@ ssh root@battlestats.online 'systemctl start battlestats-celery-crawls'
 - **Do NOT just delete the lock while the worker is running** — that doesn't stop the live crawl process (it never re-checks the lock) and lets a second crawl/refresh start concurrently. Stop the worker *first*.
 - **Do NOT leave the worker stopped with a stale lock present** (the SIGKILL case) — a lingering `:lock` keeps enrichment/floor/refresh deferring for that realm even though nothing is crawling. Clear it (step 2) or let the watchdog clear it (~15–20 min once the heartbeat goes stale).
 - **`check_enrichment_crawler.sh` "Crawl locks: HELD" is often a FALSE flag** — its grep matches the `pass_started_at` *markers*, not the real `:lock` keys. Verify real state with `cache.get(_clan_crawl_lock_key(realm))`.
-- **Don't forget to resume.** Leaving crawls stopped indefinitely degrades battle-history/refresh freshness (the failure mode in `runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md`).
+- **Don't forget to resume.** Leaving crawls stopped indefinitely degrades battle-history/refresh freshness (the failure mode in `archive/runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md`).
 
 ## Executed 2026-06-10
 

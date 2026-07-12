@@ -2,12 +2,12 @@
 
 _Created: 2026-06-17_
 _Author role: DBA / platform_
-_Context: The managed Postgres sits on a 60 GiB disk with autoscale OFF (~50% used as of 2026-06-15). `BattleEvent` + `PlayerDailyShipStats` are the monotonic, never-pruned growth slope identified in `runbook-db-growth-analysis-2026-06-15.md`. This runbook specifies a monthly job that introduces a 32-day rolling window in live Postgres: export everything older to a compressed, restorable file on the app droplet, verify, then delete._
+_Context: The managed Postgres sits on a 60 GiB disk with autoscale OFF (~50% used as of 2026-06-15). `BattleEvent` + `PlayerDailyShipStats` are the monotonic, never-pruned growth slope identified in `archive/runbook-db-growth-analysis-2026-06-15.md`. This runbook specifies a monthly job that introduces a 32-day rolling window in live Postgres: export everything older to a compressed, restorable file on the app droplet, verify, then delete._
 _Status: **IMPLEMENTED + ENABLED in prod, 2026-06-17.** The `archive_battle_history` command + core (`incremental_battles.py`), the `battlestats-archive-battle-history.timer` systemd unit (1st + 15th, 03:00 UTC), deploy env knobs, and tests (`test_archive_battle_history.py`, green on sqlite + Postgres) shipped via PR #50. `BATTLE_HISTORY_ARCHIVE_ENABLED=1`. The 2026-06-17 rollout completed: first-run backlog pruned (703,891 + 694,083 rows) + one-time `VACUUM FULL` (~1 GB reclaimed, DB 23→22 GB); timer next fires 2026-07-01. See the Rollout log._
 
 ## Purpose
 
-Cap the unbounded growth of the two append-only, no-retention battle-history tables (`BattleEvent`, `PlayerDailyShipStats`) by enforcing a **32-day rolling window** in live Postgres, while preserving the older data as a **cold queryable archive** (compressed CSV + manifest) on a separate host. Read by the operator who implements the archive command, schedules it, or restores a slice for analysis. It is the durable follow-up to the "biggest single lever is a retention policy" conclusion of `runbook-db-growth-analysis-2026-06-15.md`.
+Cap the unbounded growth of the two append-only, no-retention battle-history tables (`BattleEvent`, `PlayerDailyShipStats`) by enforcing a **32-day rolling window** in live Postgres, while preserving the older data as a **cold queryable archive** (compressed CSV + manifest) on a separate host. Read by the operator who implements the archive command, schedules it, or restores a slice for analysis. It is the durable follow-up to the "biggest single lever is a retention policy" conclusion of `archive/runbook-db-growth-analysis-2026-06-15.md`.
 
 ## TL;DR
 
@@ -21,7 +21,7 @@ Cap the unbounded growth of the two append-only, no-retention battle-history tab
 
 | Decision | Value | Rationale |
 |---|---|---|
-| In scope | `BattleEvent` (filter `detected_at`), `PlayerDailyShipStats` (filter `date`) | The two monotonic no-retention growth tables (`runbook-db-growth-analysis-2026-06-15.md`). |
+| In scope | `BattleEvent` (filter `detected_at`), `PlayerDailyShipStats` (filter `date`) | The two monotonic no-retention growth tables (`archive/runbook-db-growth-analysis-2026-06-15.md`). |
 | Excluded | `BattleObservation` | Already handled by prod compaction (`prune_battle_observations` NULLs heavy JSON, keeps rows). `BattleEvent.from_observation`/`to_observation` are **CASCADE FKs into `BattleObservation`** (`models.py:617–626`), so deleting BO rows would destroy the durable event record — and keeping BO rows keeps archived events re-insertable in practice (parents persist). |
 | Retention | 32 days, both tables | One window for everything in scope. |
 | UI impact (accepted) | week/month/year cap at 32 days | Permanent; impact today is ~2 weeks (pipeline ~6 weeks old). |
@@ -206,6 +206,6 @@ Automated coverage (shipped): `warships/tests/test_archive_battle_history.py` se
 
 ## Related runbooks
 
-- `runbook-db-growth-analysis-2026-06-15.md` — the growth attribution + runway analysis this implements the lead remediation for.
+- `archive/runbook-db-growth-analysis-2026-06-15.md` — the growth attribution + runway analysis this implements the lead remediation for.
 - `runbook-db-cpu-saturation-2026-05-24.md` — the read-only outage this prevents recurrence of.
 - `runbook-battle-history-rollup-durability-2026-06-06.md` — the rollup/`BattleEvent` pipeline whose read paths bound the safety argument.

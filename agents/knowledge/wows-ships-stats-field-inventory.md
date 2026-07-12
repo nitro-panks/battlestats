@@ -45,7 +45,7 @@ the *ship-level* detail is per-player.
 
 ### Phase 7 widening (since v1.11.0, 2026-04-30)
 
-Captured per-event in `BattleEvent.<name>_delta` and aggregated daily in `PlayerDailyShipStats.<name>`. Migration `0056_battle_event_phase7_widening`. See `agents/runbooks/runbook-battle-history-phase7-data-widening-2026-04-29.md` for the rollout history.
+Captured per-event in `BattleEvent.<name>_delta` and aggregated daily in `PlayerDailyShipStats.<name>`. Migration `0056_battle_event_phase7_widening`. See `agents/runbooks/archive/runbook-battle-history-phase7-data-widening-2026-04-29.md` for the rollout history.
 
 | Family | Source field | Future surface motivation |
 |---|---|---|

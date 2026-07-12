@@ -62,10 +62,14 @@ Sizes are live 2026-06-21.
 | `warships_entityvisitdaily` | 3 MB | 9K | rollup of visit events | rebuild-on-demand (bounded) | — |
 | `warships_deletedaccount` | 3 MB | 31K | GDPR blocklist | never pruned (tiny) | — |
 | `warships_hotplayer` | 1.3 MB | 2.4K | engagement queue maintenance | capped at `HOT_PLAYERS_MAX`; **queue disabled** | `HOT_PLAYERS_ENABLED=0` |
-| `Ship`, `LandingPlayerBestSnapshot`, `PlayerActivityHourly`, `StreamerSubmission`, `MvPlayerDistributionStats` | <1 MB each | — | reference / materialized | fixed or rebuilt | — |
+| `Ship`, `PlayerActivityHourly`, `StreamerSubmission`, `MvPlayerDistributionStats` | <1 MB each | — | reference / materialized | fixed or rebuilt | — |
 
 **Dropped 2026-06-15** (migration 0074, ~1.18 GB reclaimed): `PlayerWeekly/Monthly/YearlyShipStats`
 rollups — all UI windows resolve to the daily layer.
+
+**Dropped in 3.0** (landing featured-boards decommission): `LandingPlayerBestSnapshot` (table dropped;
+<1 MB) — the Best-players/Best-clans backend was fully removed. See
+`runbook-landing-featured-boards-decommission-2026-06-22.md`.
 
 ---
 
@@ -191,9 +195,9 @@ FROM pgstattuple('warships_playerexplorersummary');   -- free_pct >>10 => repack
 
 ## 8. Related docs
 
-- `runbook-db-growth-analysis-2026-06-15.md` — growth attribution + the ~105 MB/day slope isolation.
+- `archive/runbook-db-growth-analysis-2026-06-15.md` — growth attribution + the ~105 MB/day slope isolation.
 - `runbook-battle-history-archive-prune-2026-06-17.md` — the 32d archive+prune mechanism (implements the BattleEvent/PDSS rows of §2).
 - `runbook-db-cpu-saturation-2026-05-24.md` — origin of keep=1 compaction + the disk-full read-only incident.
 - `runbook-battle-history-data-operationalization-2026-06-16.md` — the keep-30d-and-operationalize decision for battle history.
 - `runbook-daily-active-snapshots-2026-06-09.md` — the Snapshot engine this runbook adds a retention policy to.
-- `runbook-db-size-optimization-2026-05-26.md` — superseded by this consolidation (candidate to archive).
+- `archive/runbook-db-size-optimization-2026-05-26.md` — superseded by this consolidation (candidate to archive).

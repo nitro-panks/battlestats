@@ -162,7 +162,7 @@ cd server && python manage.py shell -c \
 
 - `agents/work-items/player-enrichment-map-2026-06-08.md` §11–§12 (the data-level map)
 - `runbook-enrichment-crawler-2026-04-03.md`, `runbook-daily-active-snapshots-2026-06-09.md`
-- `runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md` (crawl-deferral context)
+- `archive/runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md` (crawl-deferral context)
 - Memory: `project_enrichment_misses_elite_empty_falseneg`, `project_coverage_ceiling_daily_active`,
   `reference_wg_ships_stats_no_bulk`, `reference_do_db_cpu_metrics_endpoint`
 </content>

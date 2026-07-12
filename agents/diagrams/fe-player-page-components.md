@@ -46,10 +46,10 @@ flowchart TD
         T_ACT["Activity → BattleHistoryCard (+ ShipStats on ship-row click)<br/>GET /api/player/name/battle-history/ (BattleHistoryCard.tsx:100)<br/>totals: clustered stat bar, WR split Window·Overall·Δ (:972-1062)"]
         T_SHIPS["Ships → RandomsSVG<br/>GET /api/fetch/randoms_data/id/?all=true (RandomsSVG.tsx:325)"]
         T_PROFILE["Profile → TierTypeHeatmapSVG / TypeSVG / TierSVG<br/>GET /api/fetch/player_correlation/tier_type/id/ (Tabs:333)"]
+        T_POP["Population → WR / Battles / Score DistributionSVG<br/>(realm distributions from player payload)"]
+        T_EFF["Efficiency → PlayerEfficiencyBadges<br/>(from player payload, no extra fetch)"]
         T_RANKED["Ranked → RankedWRBattlesHeatmapSVG + RankedSeasons<br/>GET player_correlation/ranked_wr_battles/id/ + ranked_data/id/ (Tabs:267/274)"]
         T_CB["Clan Battles → PlayerClanBattleSeasons<br/>GET /api/fetch/player_clan_battle_seasons/id/ (Tabs:286)"]
-        T_EFF["Efficiency → PlayerEfficiencyBadges<br/>(from player payload, no extra fetch)"]
-        T_POP["Population → WR / Battles / Score DistributionSVG<br/>(realm distributions from player payload)"]
         SHIPSTATS["ShipStats (combat-profile panel, ship-row click)<br/>app/components/ShipStats.tsx · rendered BattleHistoryCard.tsx:1067<br/>Average|Player|Delta table (Accuracy cluster = career)<br/>GET /api/player/name/ship/id/combat-stats"]
     end
 
@@ -72,10 +72,10 @@ flowchart TD
     TABS --> T_ACT
     TABS --> T_SHIPS
     TABS --> T_PROFILE
+    TABS --> T_POP
+    TABS --> T_EFF
     TABS --> T_RANKED
     TABS --> T_CB
-    TABS --> T_EFF
-    TABS --> T_POP
     T_ACT -- "ship-row click → combat panel" --> SHIPSTATS
 
     %% ---- nav + data edges ----
@@ -101,10 +101,10 @@ flowchart TD
 | `activity` | `BattleHistoryCard` (+ `ShipStats` on ship-row click) | `GET /api/player/<name>/battle-history/`; ship panel `…/ship/<id>/combat-stats` | default tab; day/week/month/year windows resolve to the daily layer. Totals bar is clustered/divided with a 3-tile WR split (Window · Overall · Δ, payload adds `lifetime_win_rate`/`delta_win_rate`). `ShipStats` expands below as an Average\|Player\|Delta table |
 | `ships` | `RandomsSVG` | `GET /api/fetch/randoms_data/<id>/?all=true` | per-ship random-battle aggregates |
 | `profile` | `TierTypeHeatmapSVG`, `TypeSVG`, `TierSVG` | `GET /api/fetch/player_correlation/tier_type/<id>/` | one payload derives all three charts |
+| `population` | `WRDistributionSVG`, `BattlesDistributionSVG`, `PlayerScoreDistributionSVG` | — (realm distributions in the player payload) | player marker plotted against realm curves |
+| `badges` (Efficiency) | `PlayerEfficiencyBadges` | — (from the player payload) | |
 | `ranked` | `RankedWRBattlesHeatmapSVG`, `RankedSeasons` | `…/ranked_wr_battles/<id>/` + `…/ranked_data/<id>/` | cold `ranked_data` serves `[]` + `X-Ranked-Pending` |
 | `career` (Clan Battles) | `PlayerClanBattleSeasons` | `GET /api/fetch/player_clan_battle_seasons/<id>/` | request path sends `allow_remote_fetch=False`; `X-Clan-Battle-Seasons-Pending` |
-| `badges` (Efficiency) | `PlayerEfficiencyBadges` | — (from the player payload) | |
-| `population` | `WRDistributionSVG`, `BattlesDistributionSVG`, `PlayerScoreDistributionSVG` | — (realm distributions in the player payload) | player marker plotted against realm curves |
 
 ## Notes
 

@@ -207,11 +207,11 @@ Plus 5 `Your database … is low on resources` emails over the window.
 
 The May 1 onset lines up with a cluster of heavy data rollouts dated **2026-05-01/02**. Check these runbooks first — one of them likely added a periodic or backfill workload that the cluster can't absorb:
 
-- `runbook-ranked-baseline-fill-2026-05-02.md`
+- `archive/runbook-ranked-baseline-fill-2026-05-02.md`
 - `runbook-ranked-battle-history-rollout-2026-05-02.md`
-- `runbook-battle-observation-floor-2026-05-02.md`
-- `runbook-cache-capacity-expansion-2026-05-02.md`
-- `runbook-post-rollout-followups-2026-05-01.md`
+- `archive/runbook-battle-observation-floor-2026-05-02.md`
+- `archive/runbook-cache-capacity-expansion-2026-05-02.md`
+- `archive/runbook-post-rollout-followups-2026-05-01.md`
 
 ## Where to look in the codebase
 
@@ -229,7 +229,7 @@ Architecture: Django + Celery, Postgres + Redis + RabbitMQ, three Celery workers
 - **Warmers:** `server/scripts/warm_clan_tiers.py` and the clan-tier-distribution warm task (`tasks.py:1119`).
 - **Backfill/bulk management commands** (likely culprits if one is on a schedule or was left running): `server/warships/management/commands/{backfill_battle_data,bulk_load_entity_caches,enrich_player_data,ensure_daily_battle_observations}.py`.
 - **Client poll pressure:** `client/app/components/use{ClanHydrationPoll,ClanTiersDistribution,ClanMembers,IntervalRefresh}.ts` — interval-driven refetches that hit request-driven refresh paths; if any poll a heavy uncached endpoint, daytime CPU bumps trace here.
-- **Prior related incidents/policy:** `runbook-celery-queue-strategy.md`, `runbook-periodic-task-topology-2026-04-11.md`, `runbook-incident-celery-zombie-worker-2026-04-12.md`, `runbook-daily-data-refresh-schedule-2026-04-05.md`.
+- **Prior related incidents/policy:** `runbook-celery-queue-strategy.md`, `archive/runbook-periodic-task-topology-2026-04-11.md`, `runbook-incident-celery-zombie-worker-2026-04-12.md`, `runbook-daily-data-refresh-schedule-2026-04-05.md`.
 
 ## Suggested investigation order
 

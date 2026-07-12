@@ -3,7 +3,7 @@
 _Created: 2026-06-06_
 _Context: Battle-history data is continuously ingested into `BattleEvent`, and a derived calendrical layer (`PlayerDailyShipStats` → weekly/monthly/yearly) is rebuilt from it. People now rely on this data being current and durable, but the derived layer can silently drift from the source of truth and nothing detects it. This runbook closes the durability drift mode and makes it observable._
 _Status: Code landed on branch `feat/battle-history-rollup-durability` (sweeper trailing window, reconciliation, BRIN migration 0063, ops check script, tests — full backend release gate + new suites green on SQLite and Postgres). Production rollout (Step-0 gate verification + deploy + flag flips) is the remaining operator step — gates default off so the deploy is inert until flipped. This runbook is the durable spec._
-_Supersedes/extends: `runbook-battle-history-rollout-2026-04-28.md` (Phase 3 nightly sweeper), cross-links `runbook-battle-history-phase7-data-widening-2026-04-29.md` and `runbook-battle-observation-floor-2026-05-02.md`._
+_Supersedes/extends: `runbook-battle-history-rollout-2026-04-28.md` (Phase 3 nightly sweeper), cross-links `archive/runbook-battle-history-phase7-data-widening-2026-04-29.md` and `archive/runbook-battle-observation-floor-2026-05-02.md`._
 
 > **UPDATE 2026-06-15 — period tier REMOVED.** The weekly/monthly/yearly rollup tables and all period-writer/reader code were dropped (DB-growth followup, step 2 KILL; reclaims ~1.18 GB). The nightly sweeper now rebuilds the **daily layer only** and its result carries no `period` key; the `BATTLE_HISTORY_PERIOD_ROLLUP_ENABLED` gate is gone. **The yearly-YTD 540s-timeout follow-up below is moot/closed by removal** — there is no period rebuild to time out. The daily self-heal, reconciliation, and BRIN index all remain live. Sections referencing the period tier are retained below for history only.
 
@@ -163,8 +163,8 @@ Extend the existing suites (`RebuildDailyShipStatsTests` 1481, `RankedRollupWrit
 
 ## Known limitations
 
-- **Gap B — bucketing accuracy (structural, out of scope).** Because `detected_at` is the capture time, sparse `BattleObservation` capture collapses many real-play days onto one `detected_at`. The rollup faithfully mirrors *mis-bucketed* events; no amount of rollup recalculation fixes this. It is bounded by observation-floor density — see `runbook-battle-observation-floor-2026-05-02.md` and the floor-starvation note in `runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md`. This runbook guarantees the derived layer is *internally consistent with `BattleEvent`*, not that `BattleEvent` is bucketed on the true battle day.
-- **Phase 7 historical zeros (heals forward only).** The Phase 7 widening columns (gunnery/torpedo/spotting/caps deltas) are `0` for all pre-widening `BattleEvent` rows — the raw observations predate those keys. Rebuilding a historical day cannot recover them. See `runbook-battle-history-phase7-data-widening-2026-04-29.md`.
+- **Gap B — bucketing accuracy (structural, out of scope).** Because `detected_at` is the capture time, sparse `BattleObservation` capture collapses many real-play days onto one `detected_at`. The rollup faithfully mirrors *mis-bucketed* events; no amount of rollup recalculation fixes this. It is bounded by observation-floor density — see `archive/runbook-battle-observation-floor-2026-05-02.md` and the floor-starvation note in `archive/runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md`. This runbook guarantees the derived layer is *internally consistent with `BattleEvent`*, not that `BattleEvent` is bucketed on the true battle day.
+- **Phase 7 historical zeros (heals forward only).** The Phase 7 widening columns (gunnery/torpedo/spotting/caps deltas) are `0` for all pre-widening `BattleEvent` rows — the raw observations predate those keys. Rebuilding a historical day cannot recover them. See `archive/runbook-battle-history-phase7-data-widening-2026-04-29.md`.
 - **Closed ship-badge seasons are frozen.** Ship-standings snapshots for closed seasons are not retroactively corrected by a rollup rebuild; `backfill_ship_seasons --wipe` only helps when the underlying events were dense in the first place.
 - **Reconciliation only alerts.** It never repairs. Beyond-window repair is always an explicit, human-initiated `rebuild_player_daily_ship_stats` run — deliberately, to avoid the unbounded multi-day Python-load OOM ceiling.
 
@@ -199,7 +199,7 @@ Extend the existing suites (`RebuildDailyShipStatsTests` 1481, `RankedRollupWrit
 ## References
 
 - Rollout / Phase 3 sweeper origin: `agents/runbooks/runbook-battle-history-rollout-2026-04-28.md`.
-- Phase 7 widening (historical zeros): `agents/runbooks/runbook-battle-history-phase7-data-widening-2026-04-29.md`.
+- Phase 7 widening (historical zeros): `agents/runbooks/archive/runbook-battle-history-phase7-data-widening-2026-04-29.md`.
 - Observation floor (Gap B density): `agents/runbooks/archive/runbook-battle-observation-floor-2026-05-02.md`.
 - Idempotent rebuild primitives: `server/warships/incremental_battles.py:960` (daily), `:1265,1356` (period).
 - Backfill/repair driver: `server/warships/management/commands/rebuild_player_daily_ship_stats.py`.

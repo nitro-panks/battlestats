@@ -102,3 +102,20 @@ fall back on if it silently doesn't run. The backend deploy runs `manage.py migr
 
 ## Inert env vars (no longer scheduled; safe to leave set)
 `LANDING_PAGE_WARM_MINUTES`, `LANDING_BEST_PLAYER_SNAPSHOT_HOUR`, `LANDING_REPUBLISH_COOLDOWN_SECONDS`.
+
+## 3.0 — backend fully removed (decommission complete)
+
+The 2026-06-22 pass kept the task functions, DRF endpoints, and routes **idle** for cheap
+revival. In **3.0** the backend was **fully removed**, completing the decommission — the
+"kept idle" / "Revival recipe" text above is now historical:
+
+- **Endpoints deleted:** `landing_players`, `landing_clans`, `landing_best_warmup`,
+  `landing_activity_attrition`, `analytics_top_entities`.
+- **Scoring/builders deleted:** `score_best_clans()` and all Best/Popular landing builders.
+- **Warmers deleted:** the Best/Popular landing warm-dispatch paths (including the
+  `BULK_CACHE_BEST_PREWARM_ENABLED` best-prewarm branch of the 12h bulk loader).
+- **Model dropped:** `LandingPlayerBestSnapshot` (table dropped via migration).
+
+Reviving the boards now requires restoring these from git history, not just a registration
+revert. `landing.py` still serves the live surfaces (ship treemap / tier-type list). This
+runbook remains the durable record of the decommission.
