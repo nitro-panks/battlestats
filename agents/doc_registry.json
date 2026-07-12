@@ -3385,6 +3385,32 @@
             "archive_on": [
                 "step1-decision-landed"
             ]
+        },
+        "agents/runbooks/runbook-hidden-profile-chart-warming-2026-07-11.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "runbook",
+            "owner": "platform",
+            "aliases": [
+                "hidden profile chart warming",
+                "profile chart stuck warming",
+                "tier-type chart warms forever",
+                "is_hidden flip on ships/stats"
+            ],
+            "tags": [
+                "player-detail",
+                "tier-type",
+                "correlation",
+                "battles_json",
+                "is_hidden",
+                "hidden-profile",
+                "warming",
+                "bugfix"
+            ],
+            "archive_on": [
+                "hidden-profile-handling-superseded"
+            ]
         }
     }
 }

@@ -1560,7 +1560,11 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
         is_population_pending = data.pop('_population_pending', False)
         response = _validated_single_response(
             data, PlayerTierTypeCorrelationSerializer)
-        if is_population_pending or (not player.battles_json and not data.get('player_cells')):
+        # Pending only when the player's battle data was never fetched
+        # (battles_json is None). An empty list (== []) means the fetch ran and
+        # returned nothing (hidden profile / no ships) — a terminal state, not a
+        # warm-up — so it must NOT set pending, else the client polls forever.
+        if is_population_pending or (player.battles_json is None and not data.get('player_cells')):
             response['X-Tier-Type-Pending'] = 'true'
         return response
 
