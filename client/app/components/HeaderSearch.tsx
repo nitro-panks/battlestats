@@ -6,6 +6,7 @@ import { buildClanPath, buildPlayerPath } from "../lib/entityRoutes";
 import { useRealm } from "../context/RealmContext";
 import { withRealm } from "../lib/realmParams";
 import { trackEvent } from "../lib/umami";
+import { isAbortError } from "../lib/sharedJsonFetch";
 import HiddenAccountIcon from "./HiddenAccountIcon";
 import SearchModeToggle from "./SearchModeToggle";
 import wrColor from "../lib/wrColor";
@@ -32,8 +33,6 @@ const isClanSuggestion = (s: Suggestion): s is ClanSuggestion => "clan_id" in s;
 const SEARCH_SUGGESTION_LIMIT = 8;
 const SEARCH_DEBOUNCE_MS = 180;
 const SEARCH_SUGGESTIONS_ID = "header-player-search-suggestions";
-
-const isAbortError = (error: unknown): boolean => error instanceof DOMException && error.name === "AbortError";
 
 const suggestionCache = new Map<string, Suggestion[]>();
 const SUGGESTION_CACHE_MAX = 200;

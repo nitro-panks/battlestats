@@ -29,16 +29,6 @@ const ACTIVITY_STYLES: Record<Exclude<ActivityBucketKey, 'unknown'>, ActivitySty
 
 const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]', search: 'text-xs' } as const;
 
-// Most-active → least-active. Used to order the clan-page activity columns;
-// 'unknown' is handled separately (no icon, trailing column when present).
-export const ACTIVITY_BUCKET_ORDER: Array<Exclude<ActivityBucketKey, 'unknown'>> = [
-    'active_7d', 'active_30d', 'cooling_90d', 'dormant_180d', 'inactive_180d_plus',
-];
-
-export const activityLabel = (bucket: ActivityBucketKey): string => (
-    bucket === 'unknown' ? 'No recency' : ACTIVITY_STYLES[bucket].label
-);
-
 // Same thresholds as the backend classifier, so a surface that only carries
 // days_since_last_battle (player detail, landing lists) lands in the same
 // bucket the clan-members payload would have computed server-side.
