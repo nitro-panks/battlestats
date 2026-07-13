@@ -483,6 +483,29 @@ def warm_ship_pop_avg_damage_task(self, realm, ship_ids):
             "requested": len(ship_ids), "computed": computed}
 
 
+@app.task(bind=True, **TASK_OPTS)
+def warm_all_ship_pop_avg_damage_task(self, realm=DEFAULT_REALM):
+    """Nightly bulk pre-warm of the damage-treemap baselines for EVERY ship.
+
+    The baseline cache is day-scoped, so all ~900 per-ship keys rotate cold
+    at UTC midnight and (pre-2026-07-13) every day's first viewer of each
+    ship ate the lazy warm (gray tiles → poll → colorize). Chained from
+    snapshot_ship_top_players_task (02:00+ UTC striped, safely after the key
+    rotation), this runs ONE grouped scan per realm (~34s measured) instead
+    of hundreds of scattered per-ship aggregates through the day. The
+    request-driven warm_ship_pop_avg_damage_task remains the fallback for
+    the midnight→snapshot gap and any stragglers."""
+    from warships.data import compute_all_ship_pop_avg_damage
+
+    logger.info(
+        "Starting warm_all_ship_pop_avg_damage_task realm=%s", realm)
+    result = compute_all_ship_pop_avg_damage(realm)
+    logger.info(
+        "warm_all_ship_pop_avg_damage_task completed realm=%s ships=%s",
+        realm, result.get("ships"))
+    return {"status": "completed", "realm": realm, **result}
+
+
 # Dispatch dedup so a burst of battle-history requests (or several players
 # sharing popular ships) enqueues each ship's baseline compute at most once
 # per window. Day-scoped like the value cache it fills.
@@ -1226,6 +1249,18 @@ def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
     # rewritten, so skip.
     if isinstance(result, dict) and result.get("status") == "completed":
         queue_realm_top_ships_warm(realm)
+        # The damage-treemap baselines are day-keyed and rotated cold at UTC
+        # midnight; this snapshot (02:00+ UTC) is the first post-rotation
+        # hook, so chain the one-grouped-scan bulk warm that fills every
+        # ship's baseline for the day. Fail-open: the per-ship lazy warm on
+        # the read path still covers any ship this misses.
+        try:
+            warm_all_ship_pop_avg_damage_task.apply_async(
+                args=[realm], queue="background")
+        except Exception as error:  # noqa: BLE001 — broker-down must not fail the snapshot
+            logger.warning(
+                "Skipping ship-pop bulk warm enqueue because broker "
+                "dispatch failed: %s", error)
 
     return result
 

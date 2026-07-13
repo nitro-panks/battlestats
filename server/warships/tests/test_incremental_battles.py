@@ -2066,6 +2066,50 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertIsNone(by_ship[43]["ship_pop_avg_damage"])
         self.assertIsNone(second.headers.get("X-Ship-Pop-Pending"))
 
+    def test_bulk_warm_all_ship_pop_avg_damage(self):
+        """The nightly bulk warmer (chained from the ship-standings snapshot)
+        computes EVERY ship's baseline in one grouped scan: above-floor ships
+        get real values, below-floor ships the 0 sentinel (attach → None, no
+        re-queue), cross-realm rows never leak in, and afterward the read
+        path reports zero misses for the whole set."""
+        from warships.data import get_cached_ship_pop_avg_damage
+        from warships.tasks import warm_all_ship_pop_avg_damage_task
+
+        today = django_timezone.now().date()
+        self._seed_daily_rows({
+            42: {"battles": 6, "wins": 4, "damage": 287_400,
+                 "ship_name": "Yamato"},
+            43: {"battles": 2, "wins": 1, "damage": 95_000,
+                 "ship_name": "Dalian"},
+        })
+        pop_na = Player.objects.create(
+            name="bulk_pop_na", player_id=44447, realm="na")
+        PlayerDailyShipStats.objects.create(
+            player=pop_na, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=20, wins=10, damage=1_000_000,
+        )
+        # Cross-realm rows must not contaminate the na baselines.
+        pop_eu = Player.objects.create(
+            name="bulk_pop_eu", player_id=44448, realm="eu")
+        PlayerDailyShipStats.objects.create(
+            player=pop_eu, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=50, wins=25, damage=50_000_000,
+        )
+
+        result = warm_all_ship_pop_avg_damage_task.apply(
+            kwargs={"realm": "na"}).get()
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["ships"], 2)
+
+        hits, missing = get_cached_ship_pop_avg_damage("na", [42, 43])
+        self.assertEqual(missing, [])
+        # (287_400 + 1_000_000) / (6 + 20) = 49_515.38… → 49_515
+        self.assertEqual(hits[42], 49_515)
+        # Below the 20-battle floor → 0 sentinel ("computed, no baseline").
+        self.assertEqual(hits[43], 0)
+
     def test_returns_404_when_player_unknown(self):
         with mock.patch.dict(
             "os.environ",

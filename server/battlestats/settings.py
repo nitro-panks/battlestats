@@ -344,6 +344,7 @@ CELERY_TASK_ROUTES = {
     'warships.tasks.snapshot_ship_top_players_task': {'queue': 'background'},
     'warships.tasks.warm_realm_top_ships_task': {'queue': 'background'},
     'warships.tasks.warm_ship_pop_avg_damage_task': {'queue': 'background'},
+    'warships.tasks.warm_all_ship_pop_avg_damage_task': {'queue': 'background'},
     'warships.tasks.warm_player_distributions_task': {'queue': 'background'},
     'warships.tasks.warm_player_correlations_task': {'queue': 'background'},
     'warships.tasks.bulk_load_entity_caches_task': {'queue': 'background'},
