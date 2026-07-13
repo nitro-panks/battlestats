@@ -380,8 +380,16 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                             max={playedShipCount}
                             value={effectiveN}
                             onChange={(e) => chooseTopN(Number(e.target.value))}
-                            onMouseUp={trackScopeRelease}
-                            onTouchEnd={trackScopeRelease}
+                            // pointerup covers mouse, touch, AND pen in one
+                            // handler; keyup covers keyboard-driven changes
+                            // (arrows/Home/End), which fire no pointer events
+                            // at all — without it those zooms went untracked.
+                            onPointerUp={trackScopeRelease}
+                            onKeyUp={(e) => {
+                                if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(e.key)) {
+                                    trackScopeRelease();
+                                }
+                            }}
                             aria-label="Number of most-played ships shown"
                             className="bh-scope-slider w-56 cursor-pointer"
                         />

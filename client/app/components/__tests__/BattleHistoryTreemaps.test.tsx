@@ -140,8 +140,18 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         expect(window.localStorage.getItem('bs-bh-ships-slider')).toBe('5');
         // Analytics fire once, on release — not on every drag tick.
         expect(mockTrackEvent).not.toHaveBeenCalled();
-        fireEvent.mouseUp(slider);
+        fireEvent.pointerUp(slider);
         expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'slider', count: 5 });
+
+        // Keyboard-driven changes track too (no pointer event fires for them),
+        // but only for value-changing keys — Tabbing away emits nothing.
+        mockTrackEvent.mockClear();
+        fireEvent.change(slider, { target: { value: '4' } });
+        fireEvent.keyUp(slider, { key: 'ArrowLeft' });
+        expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'slider', count: 4 });
+        mockTrackEvent.mockClear();
+        fireEvent.keyUp(slider, { key: 'Tab' });
+        expect(mockTrackEvent).not.toHaveBeenCalled();
 
         // Dragging back to max shows everything again.
         fireEvent.change(slider, { target: { value: '12' } });
