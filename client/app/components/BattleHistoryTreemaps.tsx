@@ -50,7 +50,7 @@ const NEUTRAL_TILE = '#6f7683';
 // the ship's realm 30d average. 1.0 = at expectation (neutral gray); the ends
 // clamp at 40% below / 50% above. Lab interpolation keeps the red→gray→green
 // sweep from going muddy.
-const damageRatioColor: (ratio: number) => string = d3.scaleLinear()
+export const damageRatioColor: (ratio: number) => string = d3.scaleLinear()
     .domain([0.6, 1.0, 1.5])
     .range(['#a50f15', '#8b9099', '#2fa14b'] as unknown as number[])
     .interpolate(d3.interpolateLab as unknown as never)

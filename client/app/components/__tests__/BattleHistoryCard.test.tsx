@@ -150,6 +150,30 @@ describe('BattleHistoryCard', () => {
         expect(screen.getByLabelText(/30-day battle activity/i)).toBeInTheDocument();
     });
 
+    test('Avg dmg colors against the ship population baseline; F/B pads to two decimals', async () => {
+        const payload = buildPayload();
+        payload.by_ship[0].ship_pop_avg_damage = 40_000; // 47,900 / 40,000 → +20%
+        resolveWith(payload);
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+
+        // Baselined ship: diverging color + comparison tooltip.
+        const baselined = screen.getByTitle(/\+20% vs this ship's realm 30d average \(40,000\)/);
+        expect(baselined).toHaveTextContent('47,900');
+        expect((baselined as HTMLElement).style.color).not.toBe('');
+
+        // No baseline: neutral fallback with the explanatory tooltip.
+        const neutral = screen.getByTitle(/No ship-average damage baseline/);
+        expect(neutral).toHaveTextContent('47,500');
+
+        // F/B is fixed two decimals: 12 frags / 6 battles → "2.00", 3/2 → "1.50".
+        expect(screen.getByText('2.00')).toBeInTheDocument();
+        expect(screen.getByText('1.50')).toBeInTheDocument();
+    });
+
     test('caps sparkline bars at 50 battles/day: over-cap days pin to full height + note it in the tooltip', async () => {
         // The sparkline windows monthByDay to the last 30 UTC days, so build
         // dates relative to UTC "today" to keep them in-window without faking
