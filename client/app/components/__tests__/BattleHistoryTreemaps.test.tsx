@@ -99,9 +99,9 @@ describe('BattleHistoryTreemaps (presentational)', () => {
 
     it('avg damage (not WR) is the damage tile sub-label, and tooltips carry the vs-average detail on hover', () => {
         render(<BattleHistoryTreemaps byShip={[row({})]} />);
-        // Sub line splits battles into career-prior + window increment (they
-        // sum to lifetime_battles: 510 = 500 + 10), then the tile's value.
-        expect(screen.getByText('500 + 10 · 140k')).toBeInTheDocument();
+        // 140_000 → "140k" at 3 significant digits — the sub line is the value
+        // alone (no battle counts on tiles).
+        expect(screen.getByText('140k')).toBeInTheDocument();
         // Hover specifically a SHIPS-panel tile (the type/tier panels have
         // their own rects with WR tooltips).
         const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
@@ -111,8 +111,8 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         expect(screen.getByText(/ship 30d avg 94\.6k/)).toBeInTheDocument();
     });
 
-    it('ships map defaults to Top 8 by battles; All shows everything and persists', () => {
-        window.localStorage.removeItem('bs-bh-ships-scope');
+    it('small roster shows everything by default; the slider zooms and persists', () => {
+        window.localStorage.removeItem('bs-bh-ships-slider');
         const many = Array.from({ length: 12 }, (_, i) => row({
             ship_id: i + 1,
             ship_name: `Ship${i + 1}`,
@@ -122,20 +122,51 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         }));
         render(<BattleHistoryTreemaps byShip={many} />);
 
+        // Default is min(25, roster) — 12 ships < 25 → all shown.
         const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
-        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(8);
-        // Ships past the play-volume cutoff fall outside the top 8.
-        expect(screen.queryByText('Ship9')).not.toBeInTheDocument();
-
-        fireEvent.click(screen.getByRole('button', { name: 'All' }));
         expect(shipsSvg.querySelectorAll('rect')).toHaveLength(12);
-        expect(window.localStorage.getItem('bs-bh-ships-scope')).toBe('all');
-        expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'all' });
+        const slider = screen.getByRole('slider', { name: /most-played ships shown/i });
+        expect(slider).toHaveAttribute('max', '12');
+        // Legend is bare numbers: the fixed lower bound and the current N.
+        expect(screen.getByText('1')).toBeInTheDocument();
+        expect(screen.getByText('12')).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: 'Top 8' }));
-        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(8);
-        expect(window.localStorage.getItem('bs-bh-ships-scope')).toBe('top8');
-        expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'top8' });
+        fireEvent.change(slider, { target: { value: '5' } });
+        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(5);
+        // Ships past the play-volume cutoff fall outside the top 5.
+        expect(screen.queryByText('Ship6')).not.toBeInTheDocument();
+        expect(screen.getByText('5')).toBeInTheDocument();
+        // The choice persists per-browser as the raw number.
+        expect(window.localStorage.getItem('bs-bh-ships-slider')).toBe('5');
+        // Analytics fire once, on release — not on every drag tick.
+        expect(mockTrackEvent).not.toHaveBeenCalled();
+        fireEvent.mouseUp(slider);
+        expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'slider', count: 5 });
+
+        // Dragging back to max shows everything again.
+        fireEvent.change(slider, { target: { value: '12' } });
+        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(12);
+        expect(screen.getByText('12')).toBeInTheDocument();
+    });
+
+    it('large roster defaults to Top 25; a stored slider value is adopted on load', () => {
+        window.localStorage.removeItem('bs-bh-ships-slider');
+        const many = Array.from({ length: 30 }, (_, i) => row({
+            ship_id: i + 1,
+            ship_name: `Ship${i + 1}`,
+            battles: 100 - i,
+        }));
+        const { unmount } = render(<BattleHistoryTreemaps byShip={many} />);
+        expect(
+            screen.getByRole('img', { name: /ships sized by battles/i }).querySelectorAll('rect'),
+        ).toHaveLength(25);
+        unmount();
+
+        window.localStorage.setItem('bs-bh-ships-slider', '8');
+        render(<BattleHistoryTreemaps byShip={many} />);
+        expect(
+            screen.getByRole('img', { name: /ships sized by battles/i }).querySelectorAll('rect'),
+        ).toHaveLength(8);
     });
 
     it('clicking a ship tile reports the row (ShipStats toggle contract)', () => {

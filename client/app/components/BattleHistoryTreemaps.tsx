@@ -47,19 +47,19 @@ const shipTypeShort = (type: string | null | undefined): string => {
 // damage baseline). A solid gray so the contrast-aware labels still work.
 const NEUTRAL_TILE = '#6f7683';
 
-// The ships map defaults to the top N ships by battles played;
-// beyond that the tiles shred into unreadable slivers. The Top 8 | All filter
-// lets the user opt into the full list, persisted per-browser.
-const SHIP_TILE_CAP = 8;
+// A range slider (1 → played-ship count) zooms the ships map into the top-N
+// most-played ships live — the treemap re-lays-out on every tick. Defaults to
+// 25 (or the player's max when they played fewer); the chosen value persists
+// per-browser as a plain number and is clamped to each player's max on read,
+// so a stored value past a smaller roster simply shows everything.
+const DEFAULT_TOP_N = 25;
+const SHIP_SLIDER_KEY = 'bs-bh-ships-slider';
 
-type ShipScope = 'top8' | 'all';
-const SHIP_SCOPE_KEY = 'bs-bh-ships-scope';
-
-function readStoredShipScope(): ShipScope | null {
+function readStoredShipSliderValue(): number | null {
     if (typeof window === 'undefined') return null;
     try {
-        const raw = window.localStorage.getItem(SHIP_SCOPE_KEY);
-        return raw === 'top8' || raw === 'all' ? raw : null;
+        const n = Number(window.localStorage.getItem(SHIP_SLIDER_KEY));
+        return Number.isInteger(n) && n >= 1 ? n : null;
     } catch {
         return null;
     }
@@ -79,8 +79,7 @@ export const damageRatioColor: (ratio: number) => string = d3.scaleLinear()
 interface TreemapDatum {
     key: string;            // stable identity + default label
     label: string;          // text drawn on the tile
-    sub?: string | null;    // second label line ("prior + new · WR%" / "prior + new · avg dmg")
-    subShort?: string | null; // value-only fallback when the full sub can't fit
+    sub?: string | null;    // second label line (avg dmg on the ships map, WR% on type/tier)
     size: number;           // area (battles)
     color: string;          // tile fill, computed by the parent per map
     tooltip: string[];      // lines for the hover overlay
@@ -100,12 +99,16 @@ interface MiniTreemapProps {
     selectedKey?: string | null;
     onTileClick?: (d: TreemapDatum) => void;
     // Optional control rendered flush right of the title (e.g. the ships
-    // panel's Top 8 | All scope filter).
+    // panel's Top 10 | All scope filter).
     headerRight?: React.ReactNode;
+    // Panel height in px — the second-row type/tier maps run at half the
+    // default so the full-width ships map stays the visual anchor.
+    height?: number;
 }
 
 const MiniTreemap: React.FC<MiniTreemapProps> = ({
     title, ariaLabel, data, selectedKey = null, onTileClick, headerRight,
+    height = PANEL_HEIGHT,
 }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const svgRef = useRef<SVGSVGElement | null>(null);
@@ -133,14 +136,14 @@ const MiniTreemap: React.FC<MiniTreemapProps> = ({
             svg.attr('height', 0);
             return;
         }
-        svg.attr('viewBox', `0 0 ${width} ${PANEL_HEIGHT}`)
+        svg.attr('viewBox', `0 0 ${width} ${height}`)
             .attr('width', '100%')
-            .attr('height', PANEL_HEIGHT);
+            .attr('height', height);
 
         const root = d3.hierarchy({ children: data } as { children: TreemapDatum[] })
             .sum((d: TreemapDatum) => Math.max(0, d.size || 0))
             .sort((a: { value?: number }, b: { value?: number }) => (b.value ?? 0) - (a.value ?? 0));
-        d3.treemap().size([width, PANEL_HEIGHT]).paddingInner(2).round(true)(root);
+        d3.treemap().size([width, height]).paddingInner(2).round(true)(root);
 
         const clickable = !!onTileClickRef.current;
         const g = svg.selectAll('g').data(root.leaves()).join('g')
@@ -195,26 +198,17 @@ const MiniTreemap: React.FC<MiniTreemapProps> = ({
                 .attr('font-size', 10).attr('font-weight', 600).attr('fill', textColor)
                 .style('pointer-events', 'none')
                 .text(label);
-            // The sub line ("battles · value") is drawn only when it fits whole
-            // — a truncated number misleads. Narrow tiles fall back to the
-            // value alone; the tooltip always has the full data.
-            if (h >= 32) {
-                const maxSubChars = Math.floor((w - 6) / 5.4);
-                const sub = d.data.sub && d.data.sub.length <= maxSubChars
-                    ? d.data.sub
-                    : d.data.subShort && d.data.subShort.length <= maxSubChars
-                        ? d.data.subShort
-                        : null;
-                if (sub) {
-                    node.append('text')
-                        .attr('x', 4).attr('y', 25)
-                        .attr('font-size', 9).attr('fill', textColor).attr('opacity', 0.85)
-                        .style('pointer-events', 'none')
-                        .text(sub);
-                }
+            // The sub line (avg dmg / WR%) is drawn only when it fits whole —
+            // a truncated number misleads; the tooltip always has the full data.
+            if (h >= 32 && d.data.sub && d.data.sub.length <= Math.floor((w - 6) / 5.4)) {
+                node.append('text')
+                    .attr('x', 4).attr('y', 25)
+                    .attr('font-size', 9).attr('fill', textColor).attr('opacity', 0.85)
+                    .style('pointer-events', 'none')
+                    .text(d.data.sub);
             }
         });
-    }, [data, width, selectedKey]);
+    }, [data, width, height, selectedKey]);
 
     return (
         <div>
@@ -222,7 +216,7 @@ const MiniTreemap: React.FC<MiniTreemapProps> = ({
                 <span>{title}</span>
                 {headerRight}
             </div>
-            <div ref={containerRef} className="relative w-full" style={{ height: PANEL_HEIGHT }}>
+            <div ref={containerRef} className="relative w-full" style={{ height }}>
                 <svg ref={svgRef} role="img" aria-label={ariaLabel} />
                 {hover && (
                     <div
@@ -249,16 +243,6 @@ interface BattleHistoryTreemapsProps {
     onShipClick?: (row: BattleHistoryByShip) => void;
 }
 
-// Battles shown as "<career prior> + <window increment>" — the two visibly
-// sum to the ship's current career total (`lifetime_battles`, which already
-// includes the window). A row with no usable lifetime figure contributes its
-// window battles as the career floor, so a brand-new ship reads "0 + N".
-const priorBattles = (r: BattleHistoryByShip): number =>
-    Math.max(0, (r.lifetime_battles ?? r.battles) - r.battles);
-
-const fmtBattlesSplit = (prior: number, increment: number): string =>
-    `${prior.toLocaleString()} + ${increment.toLocaleString()}`;
-
 // Aggregate rows into one tile per group (type or tier); WR = wins ÷ battles
 // over the whole group, not an average of per-ship rates.
 const aggregateTiles = (
@@ -266,16 +250,15 @@ const aggregateTiles = (
     groupKey: (r: BattleHistoryByShip) => string | null,
     labelFor: (key: string) => string,
 ): TreemapDatum[] => {
-    const groups = new Map<string, { battles: number; wins: number; damage: number; ships: number; prior: number }>();
+    const groups = new Map<string, { battles: number; wins: number; damage: number; ships: number }>();
     rows.forEach((r) => {
         const key = groupKey(r);
         if (key == null) return;
-        const cur = groups.get(key) ?? { battles: 0, wins: 0, damage: 0, ships: 0, prior: 0 };
+        const cur = groups.get(key) ?? { battles: 0, wins: 0, damage: 0, ships: 0 };
         cur.battles += r.battles;
         cur.wins += r.wins;
         cur.damage += r.damage;
         cur.ships += 1;
-        cur.prior += priorBattles(r);
         groups.set(key, cur);
     });
     return Array.from(groups.entries())
@@ -285,8 +268,7 @@ const aggregateTiles = (
             return {
                 key,
                 label: labelFor(key),
-                sub: `${fmtBattlesSplit(v.prior, v.battles)} · ${wr.toFixed(1)}%`,
-                subShort: `${wr.toFixed(1)}%`,
+                sub: `${wr.toFixed(1)}%`,
                 size: v.battles,
                 color: wrColor(wr),
                 tooltip: [
@@ -315,29 +297,40 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
         ),
         [byShip],
     );
-    // SSR-safe persisted scope: render the default first, then adopt the
-    // stored choice post-hydration (same pattern as the landing Map/Plot
-    // toggle's bs-landing-ship-view).
-    const [shipScope, setShipScopeState] = useState<ShipScope>('top8');
+    // Slider zoom over the ships map: null = no explicit choice yet (use the
+    // default). Kept as the raw slider number, clamped against the current
+    // window's ship count so a window/mode/player switch that shrinks the
+    // list can't strand an oversized N. Stored choice adopted post-hydration
+    // (same SSR-safe pattern the old scope toggle used).
+    const playedShipCount = useMemo(
+        () => byShip.filter((r) => r.battles > 0).length,
+        [byShip],
+    );
+    const [topN, setTopN] = useState<number | null>(null);
     useEffect(() => {
-        const stored = readStoredShipScope();
-        if (stored) setShipScopeState(stored);
+        const stored = readStoredShipSliderValue();
+        if (stored != null) setTopN(stored);
     }, []);
-    const setShipScope = (next: ShipScope) => {
-        setShipScopeState(next);
-        trackEvent('battle-history-ships-scope', { scope: next });
+    const chooseTopN = (v: number) => {
+        setTopN(v);
         try {
-            window.localStorage.setItem(SHIP_SCOPE_KEY, next);
+            window.localStorage.setItem(SHIP_SLIDER_KEY, String(v));
         } catch {
-            // Ignore storage failures (private mode / quota) — the scope still switches.
+            // Ignore storage failures (private mode / quota) — the zoom still applies.
         }
     };
+    const effectiveN = Math.max(1, Math.min(topN ?? DEFAULT_TOP_N, playedShipCount));
+    // One analytics event per RELEASE (not per tick — a drag emits dozens).
+    const trackScopeRelease = () => trackEvent('battle-history-ships-scope', {
+        scope: effectiveN >= playedShipCount ? 'all' : 'slider',
+        count: effectiveN,
+    });
 
     const shipTiles = useMemo(
         () => byShip
             .filter((r) => r.battles > 0)
             .sort((a, b) => b.battles - a.battles)
-            .slice(0, shipScope === 'top8' ? SHIP_TILE_CAP : byShip.length)
+            .slice(0, effectiveN)
             .map((r): TreemapDatum => {
                 const popAvg = r.ship_pop_avg_damage ?? null;
                 const ratio = popAvg != null && popAvg > 0
@@ -349,8 +342,7 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                 return {
                     key: String(r.ship_id),
                     label: r.ship_name || `Ship ${r.ship_id}`,
-                    sub: `${fmtBattlesSplit(priorBattles(r), r.battles)} · ${fmtDamage(r.avg_damage)}`,
-                    subShort: fmtDamage(r.avg_damage),
+                    sub: fmtDamage(r.avg_damage),
                     size: r.battles,
                     color: ratio != null ? damageRatioColor(ratio) : NEUTRAL_TILE,
                     tooltip: [
@@ -364,7 +356,7 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                     shipRow: r,
                 };
             }),
-        [byShip, shipScope],
+        [byShip, effectiveN],
     );
 
     if (typeTiles.length === 0 && shipTiles.length === 0 && tierTiles.length === 0) {
@@ -372,51 +364,55 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
     }
 
     return (
-        <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        // Two rows: the ships map takes the full width on its own line (it has
+        // the most tiles and earns the room); type + tier share the second
+        // line at half width each.
+        <div className="mb-5 space-y-4">
             <MiniTreemap
                 title="battles × dmg"
                 ariaLabel="Ships sized by battles played, colored by the player's average damage versus the ship's realm average"
-                headerRight={(
+                headerRight={playedShipCount > 1 ? (
                     <span className="flex items-center gap-1 normal-case tracking-normal">
-                        <button
-                            type="button"
-                            onClick={() => setShipScope('top8')}
-                            aria-pressed={shipScope === 'top8'}
-                            className={shipScope === 'top8'
-                                ? 'font-semibold text-[var(--text-primary)]'
-                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}
-                        >
-                            Top 8
-                        </button>
-                        <span aria-hidden className="text-[var(--border)]">|</span>
-                        <button
-                            type="button"
-                            onClick={() => setShipScope('all')}
-                            aria-pressed={shipScope === 'all'}
-                            className={shipScope === 'all'
-                                ? 'font-semibold text-[var(--text-primary)]'
-                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}
-                        >
-                            All
-                        </button>
+                        <span className="tabular-nums text-[var(--text-muted)]">1</span>
+                        <input
+                            type="range"
+                            min={1}
+                            max={playedShipCount}
+                            value={effectiveN}
+                            onChange={(e) => chooseTopN(Number(e.target.value))}
+                            onMouseUp={trackScopeRelease}
+                            onTouchEnd={trackScopeRelease}
+                            aria-label="Number of most-played ships shown"
+                            className="bh-scope-slider w-56 cursor-pointer"
+                        />
+                        {/* Content-width so the whole 1↔slider↔N assembly sits
+                            flush against the panel's right edge (a digit-count
+                            change nudges the track a few px — acceptable). */}
+                        <span className="tabular-nums text-[var(--text-muted)]">
+                            {effectiveN}
+                        </span>
                     </span>
-                )}
+                ) : undefined}
                 data={shipTiles}
                 selectedKey={selectedShipId != null ? String(selectedShipId) : null}
                 onTileClick={onShipClick
                     ? (d) => { if (d.shipRow) onShipClick(d.shipRow); }
                     : undefined}
             />
-            <MiniTreemap
-                title="Type × WR"
-                ariaLabel="Battles by ship type, colored by win rate"
-                data={typeTiles}
-            />
-            <MiniTreemap
-                title="Tier × WR"
-                ariaLabel="Battles by ship tier, colored by win rate"
-                data={tierTiles}
-            />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MiniTreemap
+                    title="Type × WR"
+                    ariaLabel="Battles by ship type, colored by win rate"
+                    data={typeTiles}
+                    height={PANEL_HEIGHT / 2}
+                />
+                <MiniTreemap
+                    title="Tier × WR"
+                    ariaLabel="Battles by ship tier, colored by win rate"
+                    data={tierTiles}
+                    height={PANEL_HEIGHT / 2}
+                />
+            </div>
         </div>
     );
 };

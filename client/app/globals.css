@@ -345,3 +345,35 @@ body {
     background-clip: padding-box;
   }
 }
+
+/* Ships-treemap scope slider (BattleHistoryTreemaps): a slim track with a
+   compact thumb — the native knob is oversized for a 10px header row. */
+.bh-scope-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--border);
+  outline: none;
+}
+.bh-scope-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--accent-mid);
+  border: none;
+  cursor: pointer;
+}
+.bh-scope-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--accent-mid);
+  border: none;
+  cursor: pointer;
+}
+.bh-scope-slider:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-faint);
+}
