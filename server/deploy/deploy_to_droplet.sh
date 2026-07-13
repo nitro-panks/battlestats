@@ -1102,7 +1102,13 @@ systemctl enable --now battlestats-cleanup-entity-visits.timer 2>/dev/null || tr
 # env file and broker credentials are finalized at this point.
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
 redis-cli DEL warships:tasks:crawl_all_clans:lock warships:tasks:crawl_all_clans:heartbeat 2>/dev/null || true
-systemctl restart redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls battlestats-celery-floor battlestats-beat
+# Redis is ensured RUNNING but never restarted here (2026-07-13): the deploy
+# writes no Redis config, and a restart dumps the whole cache — every warm
+# `:published`/fresh key, read-caches, locks — turning each deploy into a
+# site-wide cold start (the "Crunching stats…" pending stalls). If a Redis
+# config change ever needs a restart, do it as a deliberate manual op.
+systemctl start redis-server
+systemctl restart rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls battlestats-celery-floor battlestats-beat
 verify_broker_connection
 active_release_after_restart="$(readlink -f "${APP_ROOT}/current")"
 if [[ "${active_release_after_restart}" != "${REMOTE_RELEASE}" ]]; then

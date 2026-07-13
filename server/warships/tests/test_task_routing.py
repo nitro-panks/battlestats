@@ -75,3 +75,23 @@ def test_observation_floor_routes_to_dedicated_queue():
 
 def test_startup_cache_warm_task_declares_background_queue():
     assert startup_warm_caches_task.queue == "background"
+
+
+def test_ship_standings_warm_chain_routes_to_background():
+    # These three back user-visible pending flows (the landing treemap /
+    # tier-type list, the pct "Crunching…" poll, and the battle-history damage
+    # baseline poll). They were unrouted, landing on `default`, where on
+    # 2026-07-13 the post-rotation warm chain sat received-but-unexecuted for
+    # 3.5h — every visitor to a cold bucket ate the pending stall meanwhile.
+    # `background` is the designed home for warmers/snapshots (see the routes
+    # map); the pct sibling (warm_realm_ships_pct_task) was already there.
+    routes = settings.CELERY_TASK_ROUTES
+
+    expected_tasks = {
+        "warships.tasks.snapshot_ship_top_players_task",
+        "warships.tasks.warm_realm_top_ships_task",
+        "warships.tasks.warm_ship_pop_avg_damage_task",
+    }
+
+    for task_name in expected_tasks:
+        assert routes[task_name]["queue"] == "background"

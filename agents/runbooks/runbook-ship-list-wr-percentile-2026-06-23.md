@@ -245,3 +245,19 @@ supersedes: the 2026-06-23 "NO durable `:published` fallback" rationale (an
 all-only warmer can't refresh pct published keys) no longer applies — the pct
 computes now publish their own keys, so they are refreshed by the same warms
 that fill the fresh keys.
+
+**Follow-ups shipped same day (v3.1.2):**
+
+1. **Warm-chain starvation** — `snapshot_ship_top_players_task`,
+   `warm_realm_top_ships_task`, and `warm_ship_pop_avg_damage_task` were
+   *unrouted* (→ `default`), which is where the 3.5 h received-but-unexecuted
+   stall actually happened. All three now route to `background` with the rest
+   of the warmer/snapshot family (`CELERY_TASK_ROUTES`; pinned by
+   `test_ship_standings_warm_chain_routes_to_background`). Note
+   `CELERY_WORKER_PREFETCH_MULTIPLIER=1` was already set globally — prefetch
+   was not the lever; routing was.
+2. **Deploy Redis hygiene** — `server/deploy/deploy_to_droplet.sh` no longer
+   restarts `redis-server` on every backend deploy (it writes no Redis
+   config; the restart only dumped the cache). It now only ensures the
+   service is running (`systemctl start`). A deliberate Redis config change
+   requires a manual restart.

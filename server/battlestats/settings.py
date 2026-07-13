@@ -333,6 +333,17 @@ CELERY_TASK_ROUTES = {
     'warships.tasks.warm_player_ranked_wr_battles_correlation_task': {'queue': 'background'},
     'warships.tasks.warm_ships_by_pct_task': {'queue': 'background'},
     'warships.tasks.warm_realm_ships_pct_task': {'queue': 'background'},
+    # The ship-standings snapshot + warm chain and the battle-history damage
+    # baseline back user-visible pending flows (treemap/tier-type list, the pct
+    # "Crunching…" poll, the damage-baseline card poll). They were unrouted →
+    # `default`, where on 2026-07-13 the post-rotation warm chain sat
+    # received-but-unexecuted for 3.5h behind that lane's traffic while every
+    # cold-bucket visitor ate the pending stall. Route them to `background`
+    # with the rest of the warmer/snapshot family (the chained
+    # warm_realm_ships_pct_task was already here).
+    'warships.tasks.snapshot_ship_top_players_task': {'queue': 'background'},
+    'warships.tasks.warm_realm_top_ships_task': {'queue': 'background'},
+    'warships.tasks.warm_ship_pop_avg_damage_task': {'queue': 'background'},
     'warships.tasks.warm_player_distributions_task': {'queue': 'background'},
     'warships.tasks.warm_player_correlations_task': {'queue': 'background'},
     'warships.tasks.bulk_load_entity_caches_task': {'queue': 'background'},
