@@ -996,10 +996,10 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             (low-signal) and "Avg KDR" (which was already
                             frags ÷ battles under a misleading name) collapsed
                             into it, 2026-07-13. The raw total lives in the
-                            tooltip; the table's Avg KDR column is this same
+                            tooltip; the table's F/B column is this same
                             metric per ship. */}
                         <div className="sm:text-right">
-                            <div className="text-xs text-[var(--text-muted)]">Frags / battle</div>
+                            <div className="text-xs text-[var(--text-muted)]">Frags/Battle</div>
                             <div
                                 className="text-2xl font-semibold text-[var(--text-strong)]"
                                 title={`${formatInt(totals!.frags)} frags over ${formatInt(totals!.battles)} battles this window`}
@@ -1066,7 +1066,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Win rate over the selected window on this ship. Color codes use Wargaming community thresholds. Click to sort by window WR.">WR</SortableTh>
                             <SortableTh sortKey="lifetime_win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Overall (lifetime) win rate and its delta (Δ) vs this window. Click to sort by overall WR.">Overall WR</SortableTh>
                             <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average damage dealt per battle on this ship in the selected period. Click to sort.">Avg dmg</SortableTh>
-                            <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average kills per battle this period (frags ÷ battles). Hover a row to see raw frag + battle counts. Click to sort.">Avg KDR</SortableTh>
+                            <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Frags/Battle — average kills per battle this period (frags ÷ battles). Hover a row to see raw frag + battle counts. Click to sort.">F/B</SortableTh>
                         </tr>
                     </thead>
                     <tbody>
