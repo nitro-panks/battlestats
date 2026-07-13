@@ -6067,6 +6067,43 @@ def _ships_by_fresh_cache_key(realm, mode, window_end_d, tier, ship_type,
     return realm_cache_key(realm, base)
 
 
+def _pct_published_cache_key(realm, mode, tier, ship_type, wr_pct):
+    """Durable window-independent ``:published`` key for a percentile bucket.
+
+    Mirrors the all-view's published key with the pct discriminator appended,
+    so each percentile view keeps a last-good copy across window rotations,
+    Redis restarts, and starved warm chains (see ``_store_realm_ship_cache``).
+    Components must already be normalized as ``compute_realm_ships_by_tier_type``
+    normalizes them.
+    """
+    return realm_cache_key(
+        realm, f"ships-by:published:{mode}:t{tier}:{ship_type}:wr{wr_pct}")
+
+
+def _store_pct_ship_caches(realm, mode, window_end_d, tier, ship_type, payload,
+                           requested_pct):
+    """Write one payload to every offered percentile's fresh + published keys.
+
+    Used by the warm path when a bucket has no candidate ships: the empty
+    result must still be cached (all pcts share it) or the bucket stays
+    permanently ``pending`` — the cold read path answers pending before ever
+    reaching the compute, so an uncached empty pct bucket would poll forever
+    (~48s client stall per view). Returns the requested pct's copy.
+    """
+    requested = None
+    for pct in {requested_pct, *SHIP_LIST_WR_PCTS}:
+        p = dict(payload)
+        p["wr_pct"] = pct
+        _store_realm_ship_cache(
+            _ships_by_fresh_cache_key(
+                realm, mode, window_end_d, tier, ship_type, pct),
+            _pct_published_cache_key(realm, mode, tier, ship_type, pct),
+            p)
+        if pct == requested_pct:
+            requested = p
+    return requested
+
+
 def ship_pct_bucket_cache_key(realm, tier, ship_type, mode="random", wr_pct=50):
     """Fresh cache key for a percentile ship-list bucket, normalized identically
     to :func:`compute_realm_ships_by_tier_type`.
@@ -6122,11 +6159,14 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     ship set is unchanged* — membership still gates on full-population battles ≥
     ``min_battles`` — only the displayed numbers narrow. ``player_min_battles``
     floors which players enter the ranking. The percentile path runs a heavier
-    per-(ship,player) aggregation, derives every offered percentile from one query,
-    and caches each under its own window-keyed fresh key with NO durable
-    ``:published`` fallback. The nightly ``warm_realm_ships_pct_task`` pre-warms
-    every tier×type percentile bucket per realm (skip-if-warm), so a cold read
-    here is a rare rotation-gap fallback, not the normal first-view path.
+    per-(ship,player) aggregation, derives every offered percentile from one
+    query, and caches each under its own window-keyed fresh key PLUS a durable
+    window-independent ``:published`` fallback (``_pct_published_cache_key``) —
+    a cold fresh key serves that last-good copy and queues a warm, exactly like
+    the all-view, so viewers only ever see the `pending` stub on a bucket's
+    first-ever computation. The nightly ``warm_realm_ships_pct_task`` pre-warms
+    every tier×type percentile bucket per realm (skip-if-warm), so even the
+    published fallback is a rotation-gap/restart exception, not the norm.
     """
     from warships.models import BattleEvent, ShipTopPlayerSnapshot
 
@@ -6158,14 +6198,17 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     window_start, window_end = _season_window_datetimes(window_start_d, window_end_d)
 
     if is_pct:
-        # Percentile views are keyed by their pct and carry NO durable published
-        # fallback (see docstring) — the all-only warmer can't refresh them. The
-        # nightly per-bucket pct warmer (warm_realm_ships_pct_task) pre-fills
-        # these fresh keys so the pending/poll path is a rare rotation-gap
-        # fallback rather than the normal first-view experience.
+        # Percentile views are keyed by their pct. Like the all-view they carry
+        # a window-independent durable `:published` fallback (written by the
+        # same warm that fills the fresh keys), so a rotation gap, a starved
+        # warm chain, or a Redis restart serves last-good numbers instead of a
+        # pending stub. The nightly per-bucket pct warmer
+        # (warm_realm_ships_pct_task) pre-fills the fresh keys so even that
+        # fallback is the exception, not the first-view experience.
         cache_key = _ships_by_fresh_cache_key(
             realm, mode, window_end_d, tier, ship_type, wr_pct)
-        published_key = None
+        published_key = _pct_published_cache_key(
+            realm, mode, tier, ship_type, wr_pct)
     else:
         cache_key = _ships_by_fresh_cache_key(
             realm, mode, window_end_d, tier, ship_type)
@@ -6175,13 +6218,27 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
-        # Cold PERCENTILE bucket: the per-(ship,player) recompute is too heavy
-        # (~10–28s for popular T10 buckets, over the client's 15s timeout) to run
-        # on the request thread. Queue a background warm and return a `pending`
+        # Fresh key cold (window rotation gap / eviction / starved warm chain):
+        # serve last-good and queue a warm — warm-before-evict, never block on
+        # the aggregation. See compute_realm_top_ships for the full rationale +
+        # the alignment note.
+        published = cache.get(published_key)
+        if published is not None:
+            if is_pct:
+                from warships.tasks import queue_ships_by_pct_warm
+                queue_ships_by_pct_warm(realm, tier, ship_type, mode)
+            else:
+                from warships.tasks import queue_realm_top_ships_warm
+                queue_realm_top_ships_warm(realm)
+            return published
+        # Cold PERCENTILE bucket with no last-good copy yet (first-ever view of
+        # the bucket): the per-(ship,player) recompute is too heavy (~10–28s for
+        # popular T10 buckets, over the client's 15s timeout) to run on the
+        # request thread. Queue a background warm and return a `pending`
         # payload — the client polls (ttlMs:0) until the warm fills this
-        # window-keyed fresh key. (Only once there's a snapshot/window to compute
-        # against; with captured_on None we fall through to the empty payload so
-        # the client doesn't poll forever.) See warm_ships_by_pct_task.
+        # window-keyed fresh key. (Only once there's a snapshot/window to
+        # compute against; with captured_on None we fall through to the empty
+        # payload so the client doesn't poll forever.) See warm_ships_by_pct_task.
         if is_pct and captured_on is not None:
             from warships.tasks import queue_ships_by_pct_warm
             queue_ships_by_pct_warm(realm, tier, ship_type, mode)
@@ -6199,16 +6256,6 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
                 "ships": [],
                 "pending": True,
             }
-        # Fresh key cold (window rotation gap / eviction): serve last-good and
-        # queue a warm — warm-before-evict, never block on the aggregation. See
-        # compute_realm_top_ships for the full rationale + the alignment note.
-        # (Percentile views have no published key, so they fall through above.)
-        if published_key is not None:
-            published = cache.get(published_key)
-            if published is not None:
-                from warships.tasks import queue_realm_top_ships_warm
-                queue_realm_top_ships_warm(realm)
-                return published
 
     payload = {
         "realm": realm,
@@ -6236,10 +6283,21 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     # Empty buckets (no snapshot, or no ships of this tier+type ranked) are not
     # cached on the read path — they re-run only the cheap candidate query, and
     # caching empty would let it clobber a good published payload during a cold
-    # serve. On the **warm** path (use_cache=False) we DO publish the empty so a
-    # bucket that went empty this window clears its stale last-good.
+    # serve. On the **warm** path (use_cache=False) we DO cache + publish the
+    # empty so a bucket that went empty this window clears its stale last-good —
+    # and, for pct views, so the bucket isn't permanently `pending` (the pct
+    # cold-read answers pending before ever reaching this compute, so an
+    # uncached empty pct bucket would stall every viewer ~48s, forever).
+    def _store_empty_bucket():
+        if use_cache:
+            return payload
+        if is_pct:
+            return _store_pct_ship_caches(
+                realm, mode, window_end_d, tier, ship_type, payload, wr_pct)
+        return _store_realm_ship_cache(cache_key, published_key, payload)
+
     if captured_on is None:
-        return _store_realm_ship_cache(cache_key, published_key, payload) if (not use_cache and not is_pct) else payload
+        return _store_empty_bucket()
 
     # Candidate ships: this tier+type AND ranked in the latest snapshot
     # (guarantees a populated drill-down board for every listed ship).
@@ -6249,14 +6307,14 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
         .values_list('ship_id', flat=True)
     )
     if not snapshot_ids:
-        return _store_realm_ship_cache(cache_key, published_key, payload) if (not use_cache and not is_pct) else payload
+        return _store_empty_bucket()
     ships = {
         s.ship_id: s
         for s in Ship.objects.filter(
             ship_id__in=snapshot_ids, tier=tier, ship_type=ship_type)
     }
     if not ships:
-        return _store_realm_ship_cache(cache_key, published_key, payload) if (not use_cache and not is_pct) else payload
+        return _store_empty_bucket()
 
     # Whole-bucket denominator: battles over **all** ships of this tier+type in
     # the window (not just the snapshot-ranked candidates), so each listed ship's
@@ -6332,9 +6390,11 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
             p = dict(payload)
             p["wr_pct"] = pct
             p["ships"] = ships_out
-            pct_key = _ships_by_fresh_cache_key(
-                realm, mode, window_end_d, tier, ship_type, pct)
-            cache.set(pct_key, p, timeout=26 * 3600)
+            _store_realm_ship_cache(
+                _ships_by_fresh_cache_key(
+                    realm, mode, window_end_d, tier, ship_type, pct),
+                _pct_published_cache_key(realm, mode, tier, ship_type, pct),
+                p)
             if pct == wr_pct:
                 requested = p
         return requested

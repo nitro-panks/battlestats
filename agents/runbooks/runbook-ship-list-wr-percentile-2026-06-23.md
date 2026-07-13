@@ -97,9 +97,10 @@ the recompute is never on the request thread.
     window is skipped. The repeated triggers (the nightly top-ships Beat + the
     2×/day snapshot, all of which chain this warmer) therefore collapse to **one
     real pass per window**; only the post-rotation pass does heavy work. (Empty
-    buckets write no fresh key, so they re-run their *cheap* candidate query each
-    pass — no per-player aggregation.) An ACKS_LATE redelivery after a mid-loop
-    crash also resumes where it stopped.
+    buckets DO write their fresh + published keys on the warm path since
+    2026-07-13 — see the fix section below — so they skip like any other bucket
+    on later passes.) An ACKS_LATE redelivery after a mid-loop crash also
+    resumes where it stopped.
   - **per-bucket pause** — `time.sleep(SHIP_LIST_WR_PCT_WARM_PAUSE_SECONDS)`
     (default 5s, env-tunable, 0 disables) between heavy buckets.
   - **per-bucket lock** — grabs the lazy task's per-bucket lock before computing,
@@ -121,17 +122,19 @@ the recompute is never on the request thread.
 
 **Lazy fallback (retained) — `warm_ships_by_pct_task`:**
 
-- On a cold percentile fresh key the read path queues `warm_ships_by_pct_task`
-  (background queue, per-bucket lock + dispatch dedup → a burst of pollers
-  enqueues at most one warm) and returns a `pending: True` payload (`ships: []`) +
-  sets `X-Ships-WR-Pending: true`. One run materializes BOTH 50 & 25.
-- Percentile keys carry **NO durable `:published` fallback** (unlike the
-  all/treemap keys): the all-only treemap warmer can't refresh a pct published
-  key, so it would serve a frozen window forever. A cold pct key re-queues + polls.
-- Client (`ShipLeaderboard.tsx`, **unchanged by this change**): the percentile
-  fetch uses `ttlMs:0` and polls every ~3s up to ~16× (~48s budget) while
-  `data.pending`, showing a one-time "Crunching stats for the top N%…" message.
-  With the nightly pre-warm in place this path is rarely exercised.
+- On a cold percentile fresh key the read path first serves the bucket's durable
+  `:published` last-good copy (added 2026-07-13, `_pct_published_cache_key` —
+  see the fix section below) and queues `warm_ships_by_pct_task` to refill the
+  fresh key. Only when there is no published copy either (first-ever view of the
+  bucket) does it return a `pending: True` payload (`ships: []`) + set
+  `X-Ships-WR-Pending: true`; the warm task (background queue, per-bucket lock +
+  dispatch dedup → a burst of pollers enqueues at most one warm) materializes
+  BOTH 50 & 25 in one run.
+- Client (`ShipLeaderboard.tsx`, **unchanged**): the percentile fetch uses
+  `ttlMs:0` and polls every ~3s up to ~16× (~48s budget) while `data.pending`,
+  showing a one-time "Crunching stats for the top N%…" message. With the nightly
+  pre-warm + published fallback in place this path fires only on a bucket's
+  first-ever computation.
 
 **Shared cache-key contract.** Both the writer (`compute_realm_ships_by_tier_type`)
 and the warmer's skip-if-warm check (`ship_pct_bucket_cache_key`) build the fresh
@@ -163,9 +166,13 @@ Pinned by `test_pct_bucket_cache_key_matches_what_compute_writes`.
   - `RealmShipsByTierTypeWrPctTests` — top-25/50 re-pooling math, **ship-set
     equivalence to the all-view**, player-floor fallback, the 100% equivalence
     hatch, the cold→pending+queue serve, warm-then-ready, the view honoring /
-    ignoring `wr_pct` + the pending header, and
+    ignoring `wr_pct` + the pending header,
     `test_pct_bucket_cache_key_matches_what_compute_writes` (the shared-key
-    contract that makes skip-if-warm correct).
+    contract that makes skip-if-warm correct), and (2026-07-13) the published
+    last-good fallback (`test_cold_pct_read_serves_published_last_good_not_pending`,
+    `test_view_cold_pct_with_published_serves_ready_no_pending_header`) + the
+    empty-bucket cache write
+    (`test_warm_caches_empty_pct_bucket_so_reads_are_not_permanently_pending`).
   - `RealmShipsPctWarmTests` — the nightly all-buckets warmer
     (`warm_realm_ships_pct_task`): fills both 50 & 25 fresh keys, skip-if-warm
     idempotence, and the per-realm lock preventing a concurrent run. Also
@@ -197,3 +204,44 @@ header and `pending: null`:
 Droplet load15 stayed ~0.7 across the three serial warms (alarm threshold 2.3).
 Going forward the warm runs automatically, chained off the nightly top-ships Beat
 + the 2×/day snapshot (skip-if-warm → one real pass/window).
+
+## Fix 2026-07-13 (v3.1.1): durable `:published` fallback for pct buckets + cached empty buckets
+
+**Symptom.** The "Crunching stats for the top N%…" pending message was showing
+far more often than the "rare rotation-gap" the design promised. Observed on
+prod (2026-07-13): the NA window rotated at 02:30 UTC, the chained
+`warm_realm_top_ships_task` sat prefetched-but-unexecuted behind a busy worker
+for 3.5 h (ACKS_LATE + prefetch during a clan crawl), then the 06:08 backend
+deploy killed it (`WorkerLostError`, and `deploy_to_droplet.sh` restarts
+`redis-server` on every backend deploy). By 07:00 only 6 of NA's 13 usable pct
+buckets were warm — each warmed lazily by a visitor who sat through the 30–70 s
+pending/poll. The default landing view is `wr_pct=50`, so first visitors ate it.
+
+**Root causes fixed (both in `data.py`):**
+
+1. Percentile keys had **no durable `:published` fallback** — any hole in the
+   window-keyed fresh keys (rotation gap, starved/killed warm chain, Redis
+   restart) fell straight to the pending stub. Now every pct compute writes,
+   per pct, the fresh key **plus** a window-independent
+   `ships-by:published:<mode>:t<tier>:<type>:wr<pct>` key
+   (`_pct_published_cache_key`, via the shared `_store_realm_ship_cache`
+   write-new-then-overwrite idiom), and the cold read serves that last-good
+   copy + queues `warm_ships_by_pct_task` — exactly the all-view's
+   warm-before-evict behavior. `pending` now fires only on a bucket's
+   first-ever computation.
+2. **Empty buckets were never cached on the pct warm path** (the early-returns
+   stored all-view payloads only), so a bucket with no snapshot-ranked ships
+   was *permanently pending*: every view returned `pending: True` and the
+   client polled ~48 s then gave up. Masked in practice only because the two
+   structurally-empty buckets (T9 CV/sub) are easter-egged client-side — but it
+   also made the nightly warmer recompute those buckets every pass
+   (`warmed: 2, skipped: 13` in every mid-day log). The warm path now stores
+   the empty payload under both pcts' fresh + published keys
+   (`_store_pct_ship_caches`).
+
+No client, view, task, or payload-shape changes; the lazy pending/poll path is
+retained as the true first-ever-view fallback. Original design decision this
+supersedes: the 2026-06-23 "NO durable `:published` fallback" rationale (an
+all-only warmer can't refresh pct published keys) no longer applies — the pct
+computes now publish their own keys, so they are refreshed by the same warms
+that fill the fresh keys.

@@ -511,6 +511,62 @@ class RealmShipsByTierTypeWrPctTests(TestCase):
         self.assertIsNone(body["wr_pct"])
         self.assertEqual(body["ships"][0]["win_rate"], 60.0)  # full-population
 
+    def test_cold_pct_read_serves_published_last_good_not_pending(self):
+        # Rotation gap / starved warm chain / Redis restart: the window-keyed
+        # fresh key is cold but a previous warm published a durable last-good
+        # copy — serve it instantly (no 30–70s pending/poll) and queue one
+        # background warm to refill the fresh key. Mirrors the all-view's
+        # warm-before-evict idiom.
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=50, use_cache=False)
+        # Simulate the gap: drop the fresh keys, keep the published copies.
+        for pct in (50, 25):
+            cache.delete(ship_pct_bucket_cache_key(
+                "na", 10, "Destroyer", wr_pct=pct))
+        with mock.patch("warships.tasks.queue_ships_by_pct_warm") as q:
+            payload = compute_realm_ships_by_tier_type(
+                "na", tier=10, ship_type="Destroyer", wr_pct=25, use_cache=True)
+        self.assertNotIn("pending", payload)
+        self.assertEqual(payload["wr_pct"], 25)
+        self.assertEqual(payload["ships"][0]["win_rate"], 90.0)  # top 25%
+        q.assert_called_once()
+
+    def test_view_cold_pct_with_published_serves_ready_no_pending_header(self):
+        self._snapshot(SHIMA)
+        self._four_skill_tiers(SHIMA)
+        compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Destroyer", wr_pct=50, use_cache=False)
+        for pct in (50, 25):
+            cache.delete(ship_pct_bucket_cache_key(
+                "na", 10, "Destroyer", wr_pct=pct))
+        with mock.patch("warships.tasks.queue_ships_by_pct_warm"):
+            resp = self.client.get(
+                "/api/realm/na/ships/?tier=10&type=Destroyer&wr_pct=25")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("X-Ships-WR-Pending", resp)
+        self.assertEqual(resp.json()["ships"][0]["win_rate"], 90.0)
+
+    def test_warm_caches_empty_pct_bucket_so_reads_are_not_permanently_pending(self):
+        # A bucket with no snapshot-ranked ships used to early-return WITHOUT a
+        # cache write on the pct path; with no published fallback either, every
+        # read answered `pending` forever and the client polled ~48s then gave
+        # up. The warm must cache the empty result (both pcts) so the next read
+        # serves it ready.
+        self._snapshot(SHIMA)  # snapshot exists, but no Battleship candidates
+        self._four_skill_tiers(SHIMA)
+        warmed = compute_realm_ships_by_tier_type(
+            "na", tier=10, ship_type="Battleship", wr_pct=50, use_cache=False)
+        self.assertEqual(warmed["ships"], [])
+        with mock.patch("warships.tasks.queue_ships_by_pct_warm") as q:
+            payload = compute_realm_ships_by_tier_type(
+                "na", tier=10, ship_type="Battleship", wr_pct=25, use_cache=True)
+        self.assertNotIn("pending", payload)
+        self.assertEqual(payload["ships"], [])
+        self.assertEqual(payload["wr_pct"], 25)
+        q.assert_not_called()
+
     def test_pct_bucket_cache_key_matches_what_compute_writes(self):
         # The skip-if-warm guard reads ship_pct_bucket_cache_key; if it drifts even
         # slightly from the key compute writes, every warm trigger reads "cold" and
