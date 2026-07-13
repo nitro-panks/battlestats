@@ -215,15 +215,16 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
 
     const handleActivityAvailability = useCallback((
         available: boolean,
-        availableModes: ReadonlyArray<'random' | 'ranked'> = [],
+        // Mode list still arrives from the card (and the re-probe effect) but no
+        // longer steers the fallback — kept for signature stability.
+        _availableModes: ReadonlyArray<'random' | 'ranked'> = [],
     ) => {
         setActivityAvailable(available);
         if (!available) {
-            // Nothing random to show — dark out Activity. A ranked-only player
-            // lands on Ranked (their history lives there now); otherwise Ships
-            // (the tab to the right).
-            const fallback: InsightsTabId = availableModes.includes('ranked') ? 'ranked' : 'ships';
-            setActiveTab((current) => (current === 'activity' ? fallback : current));
+            // Nothing random to show — dark out Activity and land on Ships (the
+            // tab to the right). Always Ships, even for a ranked-only player:
+            // the v3.2.0–3.2.7 ranked fallback surprised more than it helped.
+            setActiveTab((current) => (current === 'activity' ? 'ships' : current));
         }
     }, []);
 

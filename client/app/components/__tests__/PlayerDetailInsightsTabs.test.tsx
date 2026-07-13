@@ -180,9 +180,10 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false');
     });
 
-    it('falls back to the Ranked tab (not Ships) when the player is ranked-only', async () => {
-        // Zero random battles but ranked rows exist → Activity darks out and
-        // focus lands on Ranked, where the ranked battle history lives now.
+    it('falls back to the Ships tab even when the player is ranked-only', async () => {
+        // Zero random battles → Activity darks out and focus always lands on
+        // Ships, even when ranked rows exist (2026-07-13 decision: the ranked
+        // fallback surprised more than it helped — see Captain_Shanky/EU).
         mockFetchSharedJson.mockImplementation((url) => {
             if (url.includes('/api/fetch/player_correlation/tier_type/')) {
                 return new Promise(() => { });
@@ -220,10 +221,10 @@ describe('PlayerDetailInsightsTabs', () => {
         );
 
         await waitFor(() => {
-            expect(screen.getByRole('tab', { name: 'Ranked' })).toHaveAttribute('aria-selected', 'true');
+            expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
         });
         expect(screen.getByRole('tab', { name: 'Activity' })).toBeDisabled();
-        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'false');
+        expect(screen.getByRole('tab', { name: 'Ranked' })).toHaveAttribute('aria-selected', 'false');
     });
 
     it('renders the Recent Ranked Battles history card on the Ranked tab', async () => {
