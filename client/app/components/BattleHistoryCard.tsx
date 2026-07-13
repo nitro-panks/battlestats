@@ -846,32 +846,12 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 : 'mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5'}
             aria-label="Recent battles"
         >
-            {/* Three mini-treemaps summarizing the SELECTED window+mode (the
-                same rows as the table below) — unlike the sparkline, which is
-                pinned to the month window. Area = volume, color = win rate. */}
-            {hasBattles && (
-                <BattleHistoryTreemaps
-                    byShip={payload.by_ship ?? []}
-                    selectedShipId={selectedShip?.ship_id ?? null}
-                    onShipClick={toggleShip}
-                />
-            )}
-            <div
-                className="w-full pb-5"
-                // The WR-line draw-reveal is the sparkline's longest entrance
-                // animation; its bubbled animationend (caught here at the painted
-                // wrapper, since the rect itself lives in <defs>) marks "the D3
-                // sparkline finished". Filter by name so the 30 bar-rise events
-                // don't trigger it. Idempotent for the caller.
-                onAnimationEnd={(e) => {
-                    if (e.animationName === 'sparkline-wr-reveal') {
-                        onSparklineAnimationEnd?.();
-                    }
-                }}
-            >
-                {sparkline}
-            </div>
-            <hr className="mb-5 border-[var(--accent-faint)]" />
+            {/* Card order (reordered 2026-07-13): overview block first —
+                header (window pills, the most-used control on the page, must
+                sit ABOVE the content it re-scopes), summary tiles (the
+                headline numbers), then the month-pinned sparkline as a thin
+                trend strip closing the overview — followed by the drill-down
+                surfaces (treemaps, then the per-ship table). */}
             <header className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex flex-wrap items-baseline gap-3">
                     <h2 className="whitespace-nowrap text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
@@ -1032,9 +1012,36 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     </div>
                 );
             })()}
-            {/* Combat profile for the ship selected in the table below. Sits
-                between the stats rollup and the ships table; toggled by row
-                clicks (a second click on the same ship hides it). */}
+            <div
+                className="mt-5 w-full pb-5"
+                // The WR-line draw-reveal is the sparkline's longest entrance
+                // animation; its bubbled animationend (caught here at the painted
+                // wrapper, since the rect itself lives in <defs>) marks "the D3
+                // sparkline finished". Filter by name so the 30 bar-rise events
+                // don't trigger it. Idempotent for the caller.
+                onAnimationEnd={(e) => {
+                    if (e.animationName === 'sparkline-wr-reveal') {
+                        onSparklineAnimationEnd?.();
+                    }
+                }}
+            >
+                {sparkline}
+            </div>
+            <hr className="mb-5 border-[var(--accent-faint)]" />
+            {/* Three mini-treemaps summarizing the SELECTED window+mode (the
+                same rows as the table below) — unlike the sparkline, which is
+                pinned to the month window. Area = volume, color = win rate. */}
+            {hasBattles && (
+                <BattleHistoryTreemaps
+                    byShip={payload.by_ship ?? []}
+                    selectedShipId={selectedShip?.ship_id ?? null}
+                    onShipClick={toggleShip}
+                />
+            )}
+            {/* Combat profile for the ship selected in the treemaps or the
+                table below. Sits between the treemaps and the ships table;
+                toggled by ship clicks (a second click on the same ship hides
+                it). */}
             {hasBattles && selectedShip ? (
                 <ShipStats
                     playerName={playerName}
