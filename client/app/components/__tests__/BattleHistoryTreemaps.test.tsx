@@ -96,11 +96,34 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         expect(screen.getByText('140k')).toBeInTheDocument();
         // Hover specifically a SHIPS-panel tile (the type/tier panels have
         // their own rects with WR tooltips).
-        const shipsSvg = screen.getByRole('img', { name: /Ships sized by total damage/ });
+        const shipsSvg = screen.getByRole('img', { name: /ships sized by total damage/i });
         const shipRect = shipsSvg.querySelector('rect');
         fireEvent.mouseMove(shipRect!, { clientX: 10, clientY: 10 });
         expect(screen.getByText(/\+48% vs ship avg/)).toBeInTheDocument();
         expect(screen.getByText(/ship 30d avg 94\.6k/)).toBeInTheDocument();
+    });
+
+    it('ships map defaults to Top 10 by damage; All shows everything and persists', () => {
+        window.localStorage.removeItem('bs-bh-ships-scope');
+        const many = Array.from({ length: 12 }, (_, i) => row({
+            ship_id: i + 1,
+            ship_name: `Ship${i + 1}`,
+            damage: 1_000_000 - i * 10_000,
+        }));
+        render(<BattleHistoryTreemaps byShip={many} />);
+
+        const shipsSvg = screen.getByRole('img', { name: /ships sized by total damage/i });
+        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(10);
+        // The two lowest-damage ships fall outside the top 10.
+        expect(screen.queryByText('Ship11')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'All' }));
+        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(12);
+        expect(window.localStorage.getItem('bs-bh-ships-scope')).toBe('all');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Top 10' }));
+        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(10);
+        expect(window.localStorage.getItem('bs-bh-ships-scope')).toBe('top10');
     });
 
     it('clicking a ship tile reports the row (ShipStats toggle contract)', () => {

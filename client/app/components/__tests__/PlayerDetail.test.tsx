@@ -663,8 +663,11 @@ describe('PlayerDetail ship-badge banner', () => {
 
         expect(screen.getByText('Shimakaze')).toBeInTheDocument();
         expect(screen.getByText('Zao')).toBeInTheDocument();
-        // Stat row: emphasized win rate · average damage (compact "dmg" label).
-        expect(screen.getByText(/62,431 dmg/)).toBeInTheDocument();
+        // Stat row: emphasized win rate · average damage (compact "dmg" label;
+        // the number lives in its own Courier span inside the label span).
+        expect(screen.getByText('62,431')).toBeInTheDocument();
+        expect(screen.getByText('62,431').closest('span[class*="Courier"]')?.parentElement?.textContent)
+            .toContain('dmg');
         expect(screen.getByText('64.0%')).toBeInTheDocument();
         expect(screen.getByText('58.5%')).toBeInTheDocument();
         // Links to the ship standings page.

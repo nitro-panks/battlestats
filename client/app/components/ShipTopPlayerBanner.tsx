@@ -92,11 +92,14 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
                                 <span>{weekLabel}</span>
                             </div>
                             {/* Stat: win rate (emphasized) · avg damage */}
-                            <div className="mt-0.5 flex items-center gap-1.5 text-xs tabular-nums text-[var(--text-secondary)]">
-                                <span className="font-semibold text-[var(--text-primary)]">{b.win_rate.toFixed(1)}%</span>
+                            {/* items-baseline (not center): the WR and damage
+                                numbers must share a bottom edge — mixed
+                                Courier/Inter line boxes center 0.5px apart. */}
+                            <div className="mt-0.5 flex items-baseline gap-1.5 text-xs tabular-nums text-[var(--text-secondary)]">
+                                <span className="font-['Courier_New',Courier,monospace] font-semibold text-[var(--text-primary)]">{b.win_rate.toFixed(1)}%</span>
                                 <span>WR</span>
                                 <span aria-hidden className="text-[var(--border)]">·</span>
-                                <span>{b.avg_damage.toLocaleString()} dmg</span>
+                                <span><span className="font-['Courier_New',Courier,monospace]">{b.avg_damage.toLocaleString()}</span> dmg</span>
                             </div>
                         </div>
                     </Link>
