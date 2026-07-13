@@ -907,7 +907,10 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     Random|Ranked|All pill (removed 2026-07-13: 35 sessions/90d
                     ever touched it; ranked history moved to the Ranked tab). */}
                 <span
-                    className="ml-auto rounded bg-[var(--accent-mid)] px-2 py-0.5 text-xs font-semibold text-[var(--bg-card)]"
+                    // Same bg/text pairing as the page-top stat boxes
+                    // (Win Rate / PvP Battles / …) so the caption reads as
+                    // part of that family rather than a bright action chip.
+                    className="ml-auto rounded bg-[var(--accent-faint)] px-2 py-0.5 text-xs font-semibold text-[var(--accent-dark)]"
                     title={MODE_TITLE[mode]}
                 >
                     {MODE_LABEL[mode]}
