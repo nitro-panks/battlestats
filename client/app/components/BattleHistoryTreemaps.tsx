@@ -4,13 +4,13 @@
 // per-ship table below them. AREA = volume everywhere; color differs by map:
 //   • Type — DD/CA/BB/CV/SS, sized by battles, colored by the type's
 //     aggregate WR (wins ÷ battles across its ships, `wrColor` scale).
-//   • Ships — one tile per ship, sized by TOTAL damage in the window
-//     (additive, so areas sum honestly), colored on a DIVERGING scale by the
-//     player's avg damage vs the ship's realm-wide 30d average
-//     (`ship_pop_avg_damage`, the ShipStats baseline) — red below expectation,
-//     neutral at it, green above. Ships with no usable population baseline
-//     render neutral gray. Clicking a ship tile toggles the same ShipStats
-//     combat panel a table-row click does.
+//   • Ships — one tile per ship, sized by BATTLES played (additive, so areas
+//     sum honestly and match the other two panels' volume semantics), colored
+//     on a DIVERGING scale by the player's avg damage vs the ship's
+//     realm-wide 30d average (`ship_pop_avg_damage`, the ShipStats baseline)
+//     — red below expectation, neutral at it, green above. Ships with no
+//     usable population baseline render neutral gray. Clicking a ship tile
+//     toggles the same ShipStats combat panel a table-row click does.
 //   • Tier — tiles per tier, sized by battles, colored by tier aggregate WR.
 //
 // Purely presentational: BattleHistoryCard owns the fetch and passes the
@@ -47,19 +47,19 @@ const shipTypeShort = (type: string | null | undefined): string => {
 // damage baseline). A solid gray so the contrast-aware labels still work.
 const NEUTRAL_TILE = '#6f7683';
 
-// The ships-by-damage map defaults to the top N ships by total window damage;
-// beyond that the tiles shred into unreadable slivers. The Top 10 | All filter
+// The ships map defaults to the top N ships by battles played;
+// beyond that the tiles shred into unreadable slivers. The Top 8 | All filter
 // lets the user opt into the full list, persisted per-browser.
-const SHIP_TILE_CAP = 10;
+const SHIP_TILE_CAP = 8;
 
-type ShipScope = 'top10' | 'all';
+type ShipScope = 'top8' | 'all';
 const SHIP_SCOPE_KEY = 'bs-bh-ships-scope';
 
 function readStoredShipScope(): ShipScope | null {
     if (typeof window === 'undefined') return null;
     try {
         const raw = window.localStorage.getItem(SHIP_SCOPE_KEY);
-        return raw === 'top10' || raw === 'all' ? raw : null;
+        return raw === 'top8' || raw === 'all' ? raw : null;
     } catch {
         return null;
     }
@@ -79,8 +79,9 @@ export const damageRatioColor: (ratio: number) => string = d3.scaleLinear()
 interface TreemapDatum {
     key: string;            // stable identity + default label
     label: string;          // text drawn on the tile
-    sub?: string | null;    // second label line (WR% or avg dmg)
-    size: number;           // area (battles or total damage)
+    sub?: string | null;    // second label line ("prior + new · WR%" / "prior + new · avg dmg")
+    subShort?: string | null; // value-only fallback when the full sub can't fit
+    size: number;           // area (battles)
     color: string;          // tile fill, computed by the parent per map
     tooltip: string[];      // lines for the hover overlay
     shipRow?: BattleHistoryByShip; // present only on the ships map (click target)
@@ -99,7 +100,7 @@ interface MiniTreemapProps {
     selectedKey?: string | null;
     onTileClick?: (d: TreemapDatum) => void;
     // Optional control rendered flush right of the title (e.g. the ships
-    // panel's Top 10 | All scope filter).
+    // panel's Top 8 | All scope filter).
     headerRight?: React.ReactNode;
 }
 
@@ -194,12 +195,23 @@ const MiniTreemap: React.FC<MiniTreemapProps> = ({
                 .attr('font-size', 10).attr('font-weight', 600).attr('fill', textColor)
                 .style('pointer-events', 'none')
                 .text(label);
-            if (h >= 32 && d.data.sub) {
-                node.append('text')
-                    .attr('x', 4).attr('y', 25)
-                    .attr('font-size', 9).attr('fill', textColor).attr('opacity', 0.85)
-                    .style('pointer-events', 'none')
-                    .text(d.data.sub);
+            // The sub line ("battles · value") is drawn only when it fits whole
+            // — a truncated number misleads. Narrow tiles fall back to the
+            // value alone; the tooltip always has the full data.
+            if (h >= 32) {
+                const maxSubChars = Math.floor((w - 6) / 5.4);
+                const sub = d.data.sub && d.data.sub.length <= maxSubChars
+                    ? d.data.sub
+                    : d.data.subShort && d.data.subShort.length <= maxSubChars
+                        ? d.data.subShort
+                        : null;
+                if (sub) {
+                    node.append('text')
+                        .attr('x', 4).attr('y', 25)
+                        .attr('font-size', 9).attr('fill', textColor).attr('opacity', 0.85)
+                        .style('pointer-events', 'none')
+                        .text(sub);
+                }
             }
         });
     }, [data, width, selectedKey]);
@@ -237,6 +249,16 @@ interface BattleHistoryTreemapsProps {
     onShipClick?: (row: BattleHistoryByShip) => void;
 }
 
+// Battles shown as "<career prior> + <window increment>" — the two visibly
+// sum to the ship's current career total (`lifetime_battles`, which already
+// includes the window). A row with no usable lifetime figure contributes its
+// window battles as the career floor, so a brand-new ship reads "0 + N".
+const priorBattles = (r: BattleHistoryByShip): number =>
+    Math.max(0, (r.lifetime_battles ?? r.battles) - r.battles);
+
+const fmtBattlesSplit = (prior: number, increment: number): string =>
+    `${prior.toLocaleString()} + ${increment.toLocaleString()}`;
+
 // Aggregate rows into one tile per group (type or tier); WR = wins ÷ battles
 // over the whole group, not an average of per-ship rates.
 const aggregateTiles = (
@@ -244,15 +266,16 @@ const aggregateTiles = (
     groupKey: (r: BattleHistoryByShip) => string | null,
     labelFor: (key: string) => string,
 ): TreemapDatum[] => {
-    const groups = new Map<string, { battles: number; wins: number; damage: number; ships: number }>();
+    const groups = new Map<string, { battles: number; wins: number; damage: number; ships: number; prior: number }>();
     rows.forEach((r) => {
         const key = groupKey(r);
         if (key == null) return;
-        const cur = groups.get(key) ?? { battles: 0, wins: 0, damage: 0, ships: 0 };
+        const cur = groups.get(key) ?? { battles: 0, wins: 0, damage: 0, ships: 0, prior: 0 };
         cur.battles += r.battles;
         cur.wins += r.wins;
         cur.damage += r.damage;
         cur.ships += 1;
+        cur.prior += priorBattles(r);
         groups.set(key, cur);
     });
     return Array.from(groups.entries())
@@ -262,7 +285,8 @@ const aggregateTiles = (
             return {
                 key,
                 label: labelFor(key),
-                sub: `${wr.toFixed(1)}%`,
+                sub: `${fmtBattlesSplit(v.prior, v.battles)} · ${wr.toFixed(1)}%`,
+                subShort: `${wr.toFixed(1)}%`,
                 size: v.battles,
                 color: wrColor(wr),
                 tooltip: [
@@ -294,7 +318,7 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
     // SSR-safe persisted scope: render the default first, then adopt the
     // stored choice post-hydration (same pattern as the landing Map/Plot
     // toggle's bs-landing-ship-view).
-    const [shipScope, setShipScopeState] = useState<ShipScope>('top10');
+    const [shipScope, setShipScopeState] = useState<ShipScope>('top8');
     useEffect(() => {
         const stored = readStoredShipScope();
         if (stored) setShipScopeState(stored);
@@ -311,9 +335,9 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
 
     const shipTiles = useMemo(
         () => byShip
-            .filter((r) => r.damage > 0)
-            .sort((a, b) => b.damage - a.damage)
-            .slice(0, shipScope === 'top10' ? SHIP_TILE_CAP : byShip.length)
+            .filter((r) => r.battles > 0)
+            .sort((a, b) => b.battles - a.battles)
+            .slice(0, shipScope === 'top8' ? SHIP_TILE_CAP : byShip.length)
             .map((r): TreemapDatum => {
                 const popAvg = r.ship_pop_avg_damage ?? null;
                 const ratio = popAvg != null && popAvg > 0
@@ -325,8 +349,9 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                 return {
                     key: String(r.ship_id),
                     label: r.ship_name || `Ship ${r.ship_id}`,
-                    sub: fmtDamage(r.avg_damage),
-                    size: r.damage,
+                    sub: `${fmtBattlesSplit(priorBattles(r), r.battles)} · ${fmtDamage(r.avg_damage)}`,
+                    subShort: fmtDamage(r.avg_damage),
+                    size: r.battles,
                     color: ratio != null ? damageRatioColor(ratio) : NEUTRAL_TILE,
                     tooltip: [
                         r.ship_name || `Ship ${r.ship_id}`,
@@ -349,24 +374,19 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
     return (
         <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <MiniTreemap
-                title="By type"
-                ariaLabel="Battles by ship type, colored by win rate"
-                data={typeTiles}
-            />
-            <MiniTreemap
-                title="Ships by damage"
-                ariaLabel="Ships sized by total damage, colored by the player's average damage versus the ship's realm average"
+                title="battles × dmg"
+                ariaLabel="Ships sized by battles played, colored by the player's average damage versus the ship's realm average"
                 headerRight={(
                     <span className="flex items-center gap-1 normal-case tracking-normal">
                         <button
                             type="button"
-                            onClick={() => setShipScope('top10')}
-                            aria-pressed={shipScope === 'top10'}
-                            className={shipScope === 'top10'
+                            onClick={() => setShipScope('top8')}
+                            aria-pressed={shipScope === 'top8'}
+                            className={shipScope === 'top8'
                                 ? 'font-semibold text-[var(--text-primary)]'
                                 : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}
                         >
-                            Top 10
+                            Top 8
                         </button>
                         <span aria-hidden className="text-[var(--border)]">|</span>
                         <button
@@ -388,7 +408,12 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                     : undefined}
             />
             <MiniTreemap
-                title="By tier"
+                title="Type × WR"
+                ariaLabel="Battles by ship type, colored by win rate"
+                data={typeTiles}
+            />
+            <MiniTreemap
+                title="Tier × WR"
                 ariaLabel="Battles by ship tier, colored by win rate"
                 data={tierTiles}
             />

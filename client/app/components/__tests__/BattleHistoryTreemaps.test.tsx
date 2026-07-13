@@ -40,6 +40,8 @@ const row = (over: Partial<BattleHistoryByShip>): BattleHistoryByShip => ({
     xp: 15_000,
     planes_killed: 3,
     survived_battles: 5,
+    lifetime_battles: 510,
+    lifetime_win_rate: 50,
     ship_pop_avg_damage: 94_631,
     ...over,
 });
@@ -60,9 +62,9 @@ describe('BattleHistoryTreemaps (presentational)', () => {
                 ]}
             />,
         );
-        expect(screen.getByText('By type')).toBeInTheDocument();
-        expect(screen.getByText('Ships by damage')).toBeInTheDocument();
-        expect(screen.getByText('By tier')).toBeInTheDocument();
+        expect(screen.getByText('battles × dmg')).toBeInTheDocument();
+        expect(screen.getByText('Type × WR')).toBeInTheDocument();
+        expect(screen.getByText('Tier × WR')).toBeInTheDocument();
         // Type panel aggregates to short class labels; ships panel draws one
         // tile per ship; tier panel groups both T10 ships into one tile.
         expect(screen.getByText('BB')).toBeInTheDocument();
@@ -97,40 +99,43 @@ describe('BattleHistoryTreemaps (presentational)', () => {
 
     it('avg damage (not WR) is the damage tile sub-label, and tooltips carry the vs-average detail on hover', () => {
         render(<BattleHistoryTreemaps byShip={[row({})]} />);
-        // 140_000 → "140k" at 3 significant digits.
-        expect(screen.getByText('140k')).toBeInTheDocument();
+        // Sub line splits battles into career-prior + window increment (they
+        // sum to lifetime_battles: 510 = 500 + 10), then the tile's value.
+        expect(screen.getByText('500 + 10 · 140k')).toBeInTheDocument();
         // Hover specifically a SHIPS-panel tile (the type/tier panels have
         // their own rects with WR tooltips).
-        const shipsSvg = screen.getByRole('img', { name: /ships sized by total damage/i });
+        const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
         const shipRect = shipsSvg.querySelector('rect');
         fireEvent.mouseMove(shipRect!, { clientX: 10, clientY: 10 });
         expect(screen.getByText(/\+48% vs ship avg/)).toBeInTheDocument();
         expect(screen.getByText(/ship 30d avg 94\.6k/)).toBeInTheDocument();
     });
 
-    it('ships map defaults to Top 10 by damage; All shows everything and persists', () => {
+    it('ships map defaults to Top 8 by battles; All shows everything and persists', () => {
         window.localStorage.removeItem('bs-bh-ships-scope');
         const many = Array.from({ length: 12 }, (_, i) => row({
             ship_id: i + 1,
             ship_name: `Ship${i + 1}`,
+            battles: 100 - i * 5,
             damage: 1_000_000 - i * 10_000,
+            avg_damage: 100_000 - i * 1_000,
         }));
         render(<BattleHistoryTreemaps byShip={many} />);
 
-        const shipsSvg = screen.getByRole('img', { name: /ships sized by total damage/i });
-        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(10);
-        // The two lowest-damage ships fall outside the top 10.
-        expect(screen.queryByText('Ship11')).not.toBeInTheDocument();
+        const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
+        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(8);
+        // Ships past the play-volume cutoff fall outside the top 8.
+        expect(screen.queryByText('Ship9')).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'All' }));
         expect(shipsSvg.querySelectorAll('rect')).toHaveLength(12);
         expect(window.localStorage.getItem('bs-bh-ships-scope')).toBe('all');
         expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'all' });
 
-        fireEvent.click(screen.getByRole('button', { name: 'Top 10' }));
-        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(10);
-        expect(window.localStorage.getItem('bs-bh-ships-scope')).toBe('top10');
-        expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'top10' });
+        fireEvent.click(screen.getByRole('button', { name: 'Top 8' }));
+        expect(shipsSvg.querySelectorAll('rect')).toHaveLength(8);
+        expect(window.localStorage.getItem('bs-bh-ships-scope')).toBe('top8');
+        expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'top8' });
     });
 
     it('clicking a ship tile reports the row (ShipStats toggle contract)', () => {
