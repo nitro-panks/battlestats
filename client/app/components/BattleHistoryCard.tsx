@@ -992,13 +992,20 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
                             <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
                         </div>
+                        {/* One per-battle frag tile — the old "Frags" total
+                            (low-signal) and "Avg KDR" (which was already
+                            frags ÷ battles under a misleading name) collapsed
+                            into it, 2026-07-13. The raw total lives in the
+                            tooltip; the table's Avg KDR column is this same
+                            metric per ship. */}
                         <div className="sm:text-right">
-                            <div className="text-xs text-[var(--text-muted)]">Frags</div>
-                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.frags)}</div>
-                        </div>
-                        <div className="sm:text-right">
-                            <div className="text-xs text-[var(--text-muted)]">Avg KDR</div>
-                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{kdr.toFixed(2)}</div>
+                            <div className="text-xs text-[var(--text-muted)]">Frags / battle</div>
+                            <div
+                                className="text-2xl font-semibold text-[var(--text-strong)]"
+                                title={`${formatInt(totals!.frags)} frags over ${formatInt(totals!.battles)} battles this window`}
+                            >
+                                {kdr.toFixed(2)}
+                            </div>
                         </div>
                         </div>
                     </div>
