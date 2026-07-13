@@ -144,9 +144,10 @@ describe('BattleHistoryCard', () => {
         expect(rows.length).toBe(3);
         expect(rows[1].textContent).toContain('Yamato');
         expect(rows[2].textContent).toContain('Dalian');
-        // Win-rate cell renders the percentage with one decimal.
-        expect(screen.getByText('66.7%')).toBeInTheDocument();
-        expect(screen.getByText('50.0%')).toBeInTheDocument();
+        // Win-rate cell renders the bare value with one decimal (the % lives
+        // in the "WR %" header).
+        expect(screen.getByText('66.7')).toBeInTheDocument();
+        expect(screen.getByText('50.0')).toBeInTheDocument();
         expect(screen.getByLabelText(/30-day battle activity/i)).toBeInTheDocument();
     });
 
@@ -169,9 +170,9 @@ describe('BattleHistoryCard', () => {
         const neutral = screen.getByTitle(/No ship-average damage baseline/);
         expect(neutral).toHaveTextContent('47,500');
 
-        // F/B is fixed two decimals: 12 frags / 6 battles → "2.00", 3/2 → "1.50".
-        expect(screen.getByText('2.00')).toBeInTheDocument();
-        expect(screen.getByText('1.50')).toBeInTheDocument();
+        // F/B is fixed one decimal: 12 frags / 6 battles → "2.0", 3/2 → "1.5".
+        expect(screen.getByText('2.0')).toBeInTheDocument();
+        expect(screen.getByText('1.5')).toBeInTheDocument();
     });
 
     test('caps sparkline bars at 50 battles/day: over-cap days pin to full height + note it in the tooltip', async () => {
@@ -252,27 +253,28 @@ describe('BattleHistoryCard', () => {
         // The single "Win Rate" column is now two distinct sortable columns.
         // ("Overall WR" also appears in the totals bar, so scope these to the
         // table via the columnheader role rather than getByText.)
-        expect(screen.getByRole('columnheader', { name: 'WR' })).toBeInTheDocument();
-        expect(screen.getByRole('columnheader', { name: 'Overall WR' })).toBeInTheDocument();
+        expect(screen.getByRole('columnheader', { name: 'WR %' })).toBeInTheDocument();
+        expect(screen.getByRole('columnheader', { name: 'Overall WR %' })).toBeInTheDocument();
         expect(screen.queryByRole('columnheader', { name: /^Win Rate$/i })).not.toBeInTheDocument();
 
-        // Session WR (WR/S), overall WR (WR/O), and the delta all render.
-        expect(screen.getByText('66.7%')).toBeInTheDocument();   // Yamato session
-        expect(screen.getByText('55.0%')).toBeInTheDocument();   // Yamato overall
-        expect(screen.getByText('Δ+11.7%')).toBeInTheDocument();
-        expect(screen.getByText('Δ-10.0%')).toBeInTheDocument();
+        // Session WR (WR/S), overall WR (WR/O), and the delta all render —
+        // bare values; the % sign lives in the column headers.
+        expect(screen.getByText('66.7')).toBeInTheDocument();   // Yamato session
+        expect(screen.getByText('55.0')).toBeInTheDocument();   // Yamato overall
+        expect(screen.getByText('Δ+11.7')).toBeInTheDocument();
+        expect(screen.getByText('Δ-10.0')).toBeInTheDocument();
 
         // Default sort is battles desc → Yamato (6) before Dalian (2).
         expect(screen.getAllByRole('row')[1].textContent).toContain('Yamato');
 
         // Sort by overall WR, desc → Dalian (60.0) above Yamato (55.0).
-        fireEvent.click(screen.getByRole('columnheader', { name: 'Overall WR' }));
+        fireEvent.click(screen.getByRole('columnheader', { name: 'Overall WR %' }));
         let rows = screen.getAllByRole('row');
         expect(rows[1].textContent).toContain('Dalian');
         expect(rows[2].textContent).toContain('Yamato');
 
         // Window WR sorts independently, desc → Yamato (66.7) above Dalian (50.0).
-        fireEvent.click(screen.getByRole('columnheader', { name: 'WR' }));
+        fireEvent.click(screen.getByRole('columnheader', { name: 'WR %' }));
         rows = screen.getAllByRole('row');
         expect(rows[1].textContent).toContain('Yamato');
         expect(rows[2].textContent).toContain('Dalian');
@@ -456,7 +458,9 @@ describe('BattleHistoryCard', () => {
         });
         expect(screen.queryByRole('group', { name: /battle mode/i })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^Ranked$/ })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /^All$/ })).not.toBeInTheDocument();
+        // (An "All" button DOES exist now — it's the ships-treemap scope
+        // filter, not a mode pill; the group + Ranked checks above prove the
+        // pill stayed dead.)
         expect(screen.getByText('Random Battles')).toBeInTheDocument();
         // No combined fetch ever fires.
         expect(mainFetchCalls('combined').length).toBe(0);

@@ -46,6 +46,24 @@ const shipTypeShort = (type: string | null | undefined): string => {
 // damage baseline). A solid gray so the contrast-aware labels still work.
 const NEUTRAL_TILE = '#6f7683';
 
+// The ships-by-damage map defaults to the top N ships by total window damage;
+// beyond that the tiles shred into unreadable slivers. The Top 10 | All filter
+// lets the user opt into the full list, persisted per-browser.
+const SHIP_TILE_CAP = 10;
+
+type ShipScope = 'top10' | 'all';
+const SHIP_SCOPE_KEY = 'bs-bh-ships-scope';
+
+function readStoredShipScope(): ShipScope | null {
+    if (typeof window === 'undefined') return null;
+    try {
+        const raw = window.localStorage.getItem(SHIP_SCOPE_KEY);
+        return raw === 'top10' || raw === 'all' ? raw : null;
+    } catch {
+        return null;
+    }
+}
+
 // Diverging fill for the damage map: the ratio of the player's avg damage to
 // the ship's realm 30d average. 1.0 = at expectation (neutral gray); the ends
 // clamp at 40% below / 50% above. Lab interpolation keeps the red→gray→green
@@ -79,10 +97,13 @@ interface MiniTreemapProps {
     data: TreemapDatum[];
     selectedKey?: string | null;
     onTileClick?: (d: TreemapDatum) => void;
+    // Optional control rendered flush right of the title (e.g. the ships
+    // panel's Top 10 | All scope filter).
+    headerRight?: React.ReactNode;
 }
 
 const MiniTreemap: React.FC<MiniTreemapProps> = ({
-    title, ariaLabel, data, selectedKey = null, onTileClick,
+    title, ariaLabel, data, selectedKey = null, onTileClick, headerRight,
 }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const svgRef = useRef<SVGSVGElement | null>(null);
@@ -184,8 +205,9 @@ const MiniTreemap: React.FC<MiniTreemapProps> = ({
 
     return (
         <div>
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                {title}
+            <div className="mb-1 flex items-baseline justify-between text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                <span>{title}</span>
+                {headerRight}
             </div>
             <div ref={containerRef} className="relative w-full" style={{ height: PANEL_HEIGHT }}>
                 <svg ref={svgRef} role="img" aria-label={ariaLabel} />
@@ -268,9 +290,28 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
         ),
         [byShip],
     );
+    // SSR-safe persisted scope: render the default first, then adopt the
+    // stored choice post-hydration (same pattern as the landing Map/Plot
+    // toggle's bs-landing-ship-view).
+    const [shipScope, setShipScopeState] = useState<ShipScope>('top10');
+    useEffect(() => {
+        const stored = readStoredShipScope();
+        if (stored) setShipScopeState(stored);
+    }, []);
+    const setShipScope = (next: ShipScope) => {
+        setShipScopeState(next);
+        try {
+            window.localStorage.setItem(SHIP_SCOPE_KEY, next);
+        } catch {
+            // Ignore storage failures (private mode / quota) — the scope still switches.
+        }
+    };
+
     const shipTiles = useMemo(
         () => byShip
             .filter((r) => r.damage > 0)
+            .sort((a, b) => b.damage - a.damage)
+            .slice(0, shipScope === 'top10' ? SHIP_TILE_CAP : byShip.length)
             .map((r): TreemapDatum => {
                 const popAvg = r.ship_pop_avg_damage ?? null;
                 const ratio = popAvg != null && popAvg > 0
@@ -296,7 +337,7 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                     shipRow: r,
                 };
             }),
-        [byShip],
+        [byShip, shipScope],
     );
 
     if (typeTiles.length === 0 && shipTiles.length === 0 && tierTiles.length === 0) {
@@ -313,6 +354,31 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
             <MiniTreemap
                 title="Ships by damage"
                 ariaLabel="Ships sized by total damage, colored by the player's average damage versus the ship's realm average"
+                headerRight={(
+                    <span className="flex items-center gap-1 normal-case tracking-normal">
+                        <button
+                            type="button"
+                            onClick={() => setShipScope('top10')}
+                            aria-pressed={shipScope === 'top10'}
+                            className={shipScope === 'top10'
+                                ? 'font-semibold text-[var(--text-primary)]'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}
+                        >
+                            Top 10
+                        </button>
+                        <span aria-hidden className="text-[var(--border)]">|</span>
+                        <button
+                            type="button"
+                            onClick={() => setShipScope('all')}
+                            aria-pressed={shipScope === 'all'}
+                            className={shipScope === 'all'
+                                ? 'font-semibold text-[var(--text-primary)]'
+                                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}
+                        >
+                            All
+                        </button>
+                    </span>
+                )}
                 data={shipTiles}
                 selectedKey={selectedShipId != null ? String(selectedShipId) : null}
                 onTileClick={onShipClick
