@@ -937,7 +937,9 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 // the `contents` wrappers collapse so all seven tiles flow
                 // into it; at sm they become flex clusters.
                 return (
-                    <div className="mt-4 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4">
+                    // Subtle theme-aware wash (the row-hover token) sets the
+                    // summary band off from the chart surfaces around it.
+                    <div className="mt-4 rounded-md bg-[var(--accent-faint)] px-4 py-3 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
                             <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
@@ -959,8 +961,11 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">WR Δ</div>
                             {deltaWr != null ? (
+                                // A step smaller than the primary stats — the
+                                // delta qualifies Window WR rather than
+                                // standing on its own.
                                 <div
-                                    className="text-2xl font-semibold tabular-nums"
+                                    className="text-lg font-semibold tabular-nums"
                                     style={{ color: deltaTone }}
                                     title={`Session win rate ${deltaWr > 0 ? 'above' : deltaWr < 0 ? 'below' : 'even with'} lifetime by ${Math.abs(deltaWr).toFixed(1)}%`}
                                 >
@@ -968,7 +973,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 </div>
                             ) : (
                                 <div
-                                    className="text-2xl font-semibold text-[var(--text-muted)]"
+                                    className="text-lg font-semibold text-[var(--text-muted)]"
                                     title="No lifetime baseline to compare against"
                                 >
                                     —
