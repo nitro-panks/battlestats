@@ -86,18 +86,8 @@ check "page:clan" \
     512
 
 # ── API: landing / discovery ─────────────────────────────────────────────────
-
-for realm in "${REALMS[@]}"; do
-    check "api:landing-players-best:${realm}" \
-        "$BASE/api/landing/players?mode=best&limit=5&sort=overall&realm=${realm}" \
-        '"name"|"pvp_ratio"' \
-        128
-
-    check "api:landing-clans-best:${realm}" \
-        "$BASE/api/landing/clans?mode=best&limit=5&sort=overall&realm=${realm}" \
-        '"clan_id"|"tag"' \
-        128
-done
+# (The Best/Popular landing boards — /api/landing/players|clans?mode=best —
+# were decommissioned in 3.0; their probes were removed with the endpoints.)
 
 check "api:landing-player-suggestions" \
     "$BASE/api/landing/player-suggestions?q=lil" \
