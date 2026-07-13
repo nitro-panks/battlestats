@@ -2001,6 +2001,71 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(body["by_ship"], [])
         self.assertEqual(body["by_day"], [])
 
+    def test_by_ship_ship_pop_avg_damage_warm_then_hydrate(self):
+        """The damage-treemap baseline is never computed on the request
+        thread: a cold cache serves None + `X-Ship-Pop-Pending`, the
+        background warm fills the per-(realm, ship, day) cache, and the next
+        request hydrates real values — None below the population floor, and
+        other realms' rows never leak into the baseline."""
+        from warships.tasks import warm_ship_pop_avg_damage_task
+
+        today = django_timezone.now().date()
+        self._seed_daily_rows({
+            42: {"battles": 6, "wins": 4, "damage": 287_400,
+                 "ship_name": "Yamato"},
+            43: {"battles": 2, "wins": 1, "damage": 95_000,
+                 "ship_name": "Dalian"},
+        })
+        # Same-realm population on ship 42: pushes it over the 20-battle
+        # floor (6 + 20 = 26 total) with a known damage sum.
+        pop_na = Player.objects.create(
+            name="pop_na", player_id=44445, realm="na")
+        PlayerDailyShipStats.objects.create(
+            player=pop_na, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=20, wins=10, damage=1_000_000,
+        )
+        # Cross-realm rows must not contaminate the na baseline.
+        pop_eu = Player.objects.create(
+            name="pop_eu", player_id=44446, realm="eu")
+        PlayerDailyShipStats.objects.create(
+            player=pop_eu, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM,
+            battles=50, wins=25, damage=50_000_000,
+        )
+        env = {"BATTLE_HISTORY_API_ENABLED": "1"}
+        # Cold cache: baselines are None and the pending header is set (the
+        # broker is unavailable in tests, so the enqueue itself no-ops — the
+        # contract under test is "never compute inline").
+        with mock.patch.dict("os.environ", env, clear=False):
+            first = self.client.get(
+                "/api/player/api_test/battle-history/?days=7")
+        self.assertEqual(first.status_code, 200)
+        by_ship = {s["ship_id"]: s for s in first.json()["by_ship"]}
+        self.assertIsNone(by_ship[42]["ship_pop_avg_damage"])
+        self.assertIsNone(by_ship[43]["ship_pop_avg_damage"])
+        self.assertEqual(first.headers.get("X-Ship-Pop-Pending"), "true")
+
+        # Run the warm inline (what the queued task does in production).
+        warm_ship_pop_avg_damage_task.apply(
+            kwargs={"realm": "na", "ship_ids": [42, 43]})
+
+        # Warm cache: real values attach — even though the payload body was
+        # cached by the first request (baselines attach per-request, after
+        # the payload cache).
+        with mock.patch.dict("os.environ", env, clear=False):
+            second = self.client.get(
+                "/api/player/api_test/battle-history/?days=7")
+        self.assertEqual(second.status_code, 200)
+        by_ship = {s["ship_id"]: s for s in second.json()["by_ship"]}
+        # (287_400 + 1_000_000) / (6 + 20) = 49_515.38… → 49_515
+        self.assertEqual(by_ship[42]["ship_pop_avg_damage"], 49_515)
+        # Ship 43 has only the viewer's 2 battles — below the 20-battle
+        # population floor, so no baseline is exposed (and the 0-sentinel
+        # counts as computed: no pending header on a fully-probed set).
+        self.assertIsNone(by_ship[43]["ship_pop_avg_damage"])
+        self.assertIsNone(second.headers.get("X-Ship-Pop-Pending"))
+
     def test_returns_404_when_player_unknown(self):
         with mock.patch.dict(
             "os.environ",

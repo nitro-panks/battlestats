@@ -459,6 +459,63 @@ def queue_realm_ships_pct_warm(realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "enqueue-failed"}
 
 
+@app.task(bind=True, **TASK_OPTS)
+def warm_ship_pop_avg_damage_task(self, realm, ship_ids):
+    """Compute + cache the realm-wide 30d avg-damage baseline for each ship.
+
+    Request-driven lazy warm behind the battle-history damage treemap: the
+    per-ship population aggregate takes SECONDS on popular ships (a realm-wide
+    PlayerDailyShipStats scan — a full set blew straight through the gunicorn
+    worker timeout when computed inline), so the view attaches cached
+    baselines only and queues this for the misses. One small aggregate per
+    ship, each cached per (realm, ship, day) so all viewers share them;
+    skip-if-cached makes overlapping dispatches cheap."""
+    from warships.data import (
+        compute_ship_pop_avg_damage, get_cached_ship_pop_avg_damage,
+    )
+
+    _, missing = get_cached_ship_pop_avg_damage(realm, ship_ids)
+    computed = 0
+    for ship_id in missing:
+        compute_ship_pop_avg_damage(realm, ship_id)
+        computed += 1
+    return {"status": "completed", "realm": realm,
+            "requested": len(ship_ids), "computed": computed}
+
+
+# Dispatch dedup so a burst of battle-history requests (or several players
+# sharing popular ships) enqueues each ship's baseline compute at most once
+# per window. Day-scoped like the value cache it fills.
+_SHIP_POP_AVG_DISPATCH_TIMEOUT = 15 * 60
+
+
+def queue_ship_pop_avg_damage_warm(realm, ship_ids):
+    """Enqueue the avg-damage baseline warm for the ships not already queued.
+    Called from the battle-history read path for cache misses; per-ship
+    cache.add dedup keeps repeat views from piling up tasks."""
+    day = django_timezone.now().date().isoformat()
+    to_queue = [
+        sid for sid in sorted({int(s) for s in ship_ids})
+        if cache.add(
+            f"ship_pop_avgdmg:dispatch:{realm}:{sid}:{day}",
+            "queued", timeout=_SHIP_POP_AVG_DISPATCH_TIMEOUT,
+        )
+    ]
+    if not to_queue:
+        return {"status": "skipped", "reason": "already-queued"}
+    try:
+        warm_ship_pop_avg_damage_task.delay(realm=realm, ship_ids=to_queue)
+        return {"status": "queued", "ships": len(to_queue)}
+    except Exception as error:
+        for sid in to_queue:
+            cache.delete(f"ship_pop_avgdmg:dispatch:{realm}:{sid}:{day}")
+        logger.warning(
+            "Skipping ship pop-avg-damage warm enqueue because broker "
+            "dispatch failed: %s", error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
 def queue_warm_player_correlations(realm: str = DEFAULT_REALM):
     # Lock-aware gate for the cold-cache user-traffic dispatch path
     # (server/warships/data.py:3400 fetch_player_tier_type_correlation).

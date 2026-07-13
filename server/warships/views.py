@@ -640,6 +640,31 @@ def _has_recent_24h_activity(player) -> bool:
 # zero-prior rows and surface a NEW badge instead.
 _MIN_PRIOR_BATTLES_FOR_DELTA = 3
 
+def _attach_ship_pop_avg_damage(by_ship: list, realm: str) -> bool:
+    """Attach `ship_pop_avg_damage` (the realm-wide 30d random avg damage —
+    the ShipStats baseline convention) to every by_ship row, from CACHE ONLY.
+    The per-ship population aggregate takes seconds on popular ships, so
+    misses are never computed here: they attach None (the treemap renders
+    those tiles neutral) and a background warm is queued for them. Returns
+    True when a warm was queued so the response can signal
+    `X-Ship-Pop-Pending` and the client can poll for the colored payload.
+    Called per-request AFTER the payload cache, so warmed baselines appear
+    without waiting out the payload TTL. The baseline is always the
+    random-mode population regardless of the view's mode — it is an
+    expectation anchor, not a mode-scoped stat."""
+    from warships.data import get_cached_ship_pop_avg_damage
+    from warships.tasks import queue_ship_pop_avg_damage_warm
+
+    hits, missing = get_cached_ship_pop_avg_damage(
+        realm, [s["ship_id"] for s in by_ship if s.get("battles")])
+    for s in by_ship:
+        # 0 is the "computed, below the population floor" sentinel → None.
+        s["ship_pop_avg_damage"] = hits.get(s["ship_id"]) or None
+    if missing:
+        queue_ship_pop_avg_damage_warm(realm, missing)
+        return True
+    return False
+
 
 def _current_ranked_season_context(player) -> dict:
     """Resolve the player's CURRENT ranked season for the `mode=ranked`
@@ -1397,7 +1422,7 @@ def battle_history(request, player_name: str) -> Response:
     )
     cached = cache.get(cache_key)
     if cached is not None:
-        response = Response(cached)
+        payload = cached
     else:
         if is_24h_window:
             payload = _build_battle_history_payload_24h(player, mode)
@@ -1405,7 +1430,16 @@ def battle_history(request, player_name: str) -> Response:
             payload = _build_battle_history_payload(
                 player, period, windows, mode)
         cache.set(cache_key, payload, BATTLE_HISTORY_CACHE_TTL)
-        response = Response(payload)
+    # Damage-treemap baselines attach per-request (cache-only, never
+    # computed inline) so they hydrate as the background warm fills them,
+    # without waiting out the payload cache above. The payload cache never
+    # stores them (attach mutates a fresh copy from cache.get / a fresh
+    # build; the cache.set above ran before attach).
+    pop_pending = _attach_ship_pop_avg_damage(
+        payload.get("by_ship") or [], realm)
+    response = Response(payload)
+    if pop_pending:
+        response["X-Ship-Pop-Pending"] = "true"
 
     # On-render ranked-observation refresh signal: when a fresh ranked
     # observation is in flight (dispatched by fetch_player_summary on the

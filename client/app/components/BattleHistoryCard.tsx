@@ -9,8 +9,9 @@ import { chartColors } from '../lib/chartTheme';
 import { useTheme } from '../context/ThemeContext';
 import { trackEvent } from '../lib/umami';
 import ShipStats from './ShipStats';
+import BattleHistoryTreemaps from './BattleHistoryTreemaps';
 
-interface BattleHistoryByShip {
+export interface BattleHistoryByShip {
     ship_id: number;
     ship_name: string;
     ship_tier: number | null;
@@ -30,6 +31,10 @@ interface BattleHistoryByShip {
     delta_win_rate?: number | null;
     is_new_ship?: boolean;
     is_ranked_only_period?: boolean;
+    // Realm-wide average damage on this ship over the trailing 30d random
+    // window (the ShipStats baseline convention). Null when the ship's
+    // population sample is too thin. Colors the damage treemap.
+    ship_pop_avg_damage?: number | null;
 }
 
 export interface BattleHistoryByDay {
@@ -87,6 +92,14 @@ const MODES: Mode[] = ['random', 'ranked', 'combined'];
 const RANKED_PENDING_RETRY_DELAY_MS = 2000;
 const RANKED_PENDING_RETRY_LIMIT = 6;
 
+// On-render ship-population baseline warm: `X-Ship-Pop-Pending: true` means
+// some damage-treemap baselines (`ship_pop_avg_damage`) were cache-misses and
+// a background per-ship warm is running. Poll a bit slower and longer than
+// the ranked refresh — each retry hydrates whatever baselines have landed so
+// far (tiles colorize progressively); stragglers just stay neutral.
+const SHIP_POP_PENDING_RETRY_DELAY_MS = 3000;
+const SHIP_POP_PENDING_RETRY_LIMIT = 10;
+
 // Canonical battle-history fetch URL + cache key. Shared by the card's own
 // fetch and PlayerRouteView's parallel prefetch so they dedupe onto the same
 // in-flight request (sharedJsonFetch keys on cacheKey). Keep these in lockstep —
@@ -123,7 +136,7 @@ export const prefetchBattleHistory = (playerName: string, realm: string, signal?
         label: 'BattleHistoryCard:month:random',
         ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
         cacheKey: battleHistoryCacheKey(playerName, realm),
-        responseHeaders: ['X-Ranked-Observation-Pending'],
+        responseHeaders: ['X-Ranked-Observation-Pending', 'X-Ship-Pop-Pending'],
         signal,
     }).catch(() => { /* the card re-fetches + surfaces errors on mount */ });
 };
@@ -601,23 +614,28 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 label: `BattleHistoryCard:${window}:${mode}`,
                 ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
                 cacheKey: battleHistoryCacheKey(playerName, realm, window, mode, cacheBust, refreshNonce),
-                responseHeaders: ['X-Ranked-Observation-Pending'],
+                responseHeaders: ['X-Ranked-Observation-Pending', 'X-Ship-Pop-Pending'],
                 signal: requestSignal,
             })
                 .then(({ data, headers }) => {
                     if (cancelled) return;
                     setPayload(data);
                     setError(null);
-                    const pending = headers['X-Ranked-Observation-Pending'] === 'true';
-                    if (
-                        pending
-                        && (mode === 'ranked' || mode === 'combined')
-                        && pendingAttempts < RANKED_PENDING_RETRY_LIMIT
-                    ) {
+                    const rankedPending = headers['X-Ranked-Observation-Pending'] === 'true'
+                        && (mode === 'ranked' || mode === 'combined');
+                    const shipPopPending = headers['X-Ship-Pop-Pending'] === 'true';
+                    // Ranked pending keeps its original tighter cadence; the
+                    // ship-pop warm gets the slower/longer schedule. When both
+                    // are pending the ranked cadence wins (a retry serves both).
+                    const retryLimit = rankedPending
+                        ? RANKED_PENDING_RETRY_LIMIT : SHIP_POP_PENDING_RETRY_LIMIT;
+                    const retryDelay = rankedPending
+                        ? RANKED_PENDING_RETRY_DELAY_MS : SHIP_POP_PENDING_RETRY_DELAY_MS;
+                    if ((rankedPending || shipPopPending) && pendingAttempts < retryLimit) {
                         pendingAttempts += 1;
                         pollTimer = setTimeout(
                             () => fetchOnce(pendingAttempts),
-                            RANKED_PENDING_RETRY_DELAY_MS * degradationMonitor.getPollIntervalMultiplier(),
+                            retryDelay * degradationMonitor.getPollIntervalMultiplier(),
                         );
                     }
                 })
@@ -865,6 +883,16 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 : 'mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5'}
             aria-label="Recent battles"
         >
+            {/* Three mini-treemaps summarizing the SELECTED window+mode (the
+                same rows as the table below) — unlike the sparkline, which is
+                pinned to the month window. Area = volume, color = win rate. */}
+            {hasBattles && (
+                <BattleHistoryTreemaps
+                    byShip={payload.by_ship ?? []}
+                    selectedShipId={selectedShip?.ship_id ?? null}
+                    onShipClick={toggleShip}
+                />
+            )}
             <div
                 className="w-full pb-5"
                 // The WR-line draw-reveal is the sparkline's longest entrance

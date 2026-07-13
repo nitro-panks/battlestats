@@ -6466,6 +6466,64 @@ _SHIP_COMBAT_METRICS = (
 )
 
 
+# --- Ship population avg-damage baseline (battle-history damage treemap) ---
+# Realm-wide per-ship average damage over the trailing SHIP_COMBAT_WINDOW_DAYS
+# of random battles — the same population/window convention as the ShipStats
+# panel above, reduced to the one number the damage treemap colors against.
+# The per-ship aggregate takes SECONDS on popular ships (realm-wide PDSS scan),
+# so it is NEVER computed on the request thread: the battle-history view
+# attaches from this cache only and queues warm_ship_pop_avg_damage_task for
+# misses (tasks.py). Ships below the population floor cache 0 (a "computed,
+# no usable baseline" sentinel — attach translates it to None and does NOT
+# re-queue).
+SHIP_POP_AVG_MIN_BATTLES = 20
+_SHIP_POP_AVG_CACHE_TTL = 26 * 3600  # day-scoped key; TTL is just a backstop
+
+
+def _ship_pop_avg_damage_cache_key(realm: str, ship_id: int) -> str:
+    day = django_timezone.now().date().isoformat()
+    return f"ship_pop_avgdmg:v1:{realm}:{int(ship_id)}:{day}"
+
+
+def compute_ship_pop_avg_damage(realm: str, ship_id: int) -> int:
+    """Compute + cache one ship's realm-wide 30d random avg damage. Returns
+    the cached value (0 when the population is below the floor). Task-side
+    only — seconds per popular ship."""
+    from warships.models import PlayerDailyShipStats as _PDSS
+
+    cutoff = django_timezone.now().date() - timedelta(
+        days=SHIP_COMBAT_WINDOW_DAYS)
+    with transaction.atomic(), _elevated_work_mem():
+        row = (
+            _PDSS.objects
+            .filter(ship_id=int(ship_id), mode=_PDSS.MODE_RANDOM,
+                    date__gte=cutoff, player__realm=realm)
+            .aggregate(b=Sum('battles'), d=Sum('damage'))
+        )
+    battles = int(row['b'] or 0)
+    value = (
+        int(round((row['d'] or 0) / battles))
+        if battles >= SHIP_POP_AVG_MIN_BATTLES else 0
+    )
+    cache.set(_ship_pop_avg_damage_cache_key(realm, ship_id), value,
+              _SHIP_POP_AVG_CACHE_TTL)
+    return value
+
+
+def get_cached_ship_pop_avg_damage(realm: str, ship_ids) -> tuple[dict, list]:
+    """Read-only bulk cache probe. Returns ({ship_id: cached value}, [missing
+    ship_ids]) — 0-sentinel values are 'hits' (computed, below floor) so the
+    caller never re-queues them."""
+    ids = sorted({int(s) for s in ship_ids})
+    if not ids:
+        return {}, []
+    keys = {sid: _ship_pop_avg_damage_cache_key(realm, sid) for sid in ids}
+    cached = cache.get_many(list(keys.values()))
+    hits = {sid: cached[k] for sid, k in keys.items() if k in cached}
+    missing = [sid for sid in ids if sid not in hits]
+    return hits, missing
+
+
 # Skill brackets, ranked by overall account random win rate (Player.pvp_ratio).
 # `all` is the whole window population; `top50`/`top25` are the better-skilled
 # halves/quarters of it (relative percentiles of THIS ship's players, not fixed
