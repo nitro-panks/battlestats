@@ -20,6 +20,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import wrColor from '../lib/wrColor';
+import { trackEvent } from '../lib/umami';
 import type { BattleHistoryByShip } from './BattleHistoryCard';
 
 // Damage figures on tiles/tooltips: 3 significant digits ("60.3k", "1.2M") —
@@ -300,6 +301,7 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
     }, []);
     const setShipScope = (next: ShipScope) => {
         setShipScopeState(next);
+        trackEvent('battle-history-ships-scope', { scope: next });
         try {
             window.localStorage.setItem(SHIP_SCOPE_KEY, next);
         } catch {
