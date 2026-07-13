@@ -79,11 +79,17 @@ export interface BattleHistoryPayload {
     by_day: BattleHistoryByDay[];
 }
 
-type Mode = 'random' | 'ranked' | 'combined';
-const MODE_LABEL: Record<Mode, string> = {
-    random: 'Random', ranked: 'Ranked', combined: 'All',
+export type BattleHistoryMode = 'random' | 'ranked';
+const MODE_LABEL: Record<BattleHistoryMode, string> = {
+    random: 'Random Battles', ranked: 'Ranked',
 };
-const MODES: Mode[] = ['random', 'ranked', 'combined'];
+const MODE_TITLE: Record<BattleHistoryMode, string> = {
+    random: 'Random battles only',
+    ranked: 'Ranked battles only (sums across active seasons)',
+};
+const MODE_NOUN: Record<BattleHistoryMode, string> = {
+    random: 'random', ranked: 'ranked',
+};
 
 // On-render ranked-observation refresh: when the API responds with
 // `X-Ranked-Observation-Pending: true`, a 3-WG-call refresh is in
@@ -141,17 +147,20 @@ export const prefetchBattleHistory = (playerName: string, realm: string, signal?
     }).catch(() => { /* the card re-fetches + surfaces errors on mount */ });
 };
 
-// Single source of truth for "does this payload represent activity worth
-// lighting the Activity tab for?" Shared by the card's own one-shot
-// availability report and PlayerDetailInsightsTabs' re-probe (which re-lights a
-// previously-dark tab when a visit-driven WG fetch backfills battle history).
-// Ranked-only players have 0 random battles at the default window but still
-// have activity (the card auto-switches to Ranked), so a ranked mode counts as
-// available even when the random totals are empty.
-export const battleHistoryIndicatesActivity = (payload: BattleHistoryPayload): boolean => {
+// Single source of truth for "does this payload light the tab that hosts this
+// card?" Mode-scoped since the pill was removed (2026-07-13): the Activity tab
+// (random) lights only on in-window random battles; the Ranked tab's section
+// (ranked) also accepts recent ranked rows (available_modes) so a season-edge
+// zero-window doesn't hide a genuinely ranked-active player.
+export const battleHistoryIndicatesActivity = (
+    payload: BattleHistoryPayload,
+    mode: BattleHistoryMode = 'random',
+): boolean => {
     const hasBattles = !!(payload.totals && payload.totals.battles > 0);
-    const modes = payload.available_modes ?? ['random'];
-    return hasBattles || modes.includes('ranked');
+    if (mode === 'ranked') {
+        return hasBattles || (payload.available_modes ?? []).includes('ranked');
+    }
+    return hasBattles;
 };
 
 interface BattleHistoryCardProps {
@@ -169,12 +178,21 @@ interface BattleHistoryCardProps {
     // (error / no payload) is reserved for the no-content states the parent
     // handles by switching tabs.
     embedded?: boolean;
+    // Fixed battle mode for this instance — the card no longer switches modes
+    // itself (the Random|Ranked|All pill was removed 2026-07-13; the Ranked
+    // tab hosts its own mode="ranked" instance).
+    mode?: BattleHistoryMode;
     // Reports whether the card has any activity worth surfacing, so the parent
     // can pick the default tab and dark-out the Activity tab when there's
-    // nothing to show. Fired once per (player, realm) from the first resolved
-    // payload — never re-fired on user window/mode switches, so toggling to an
-    // empty window can't retroactively disable the tab the user is on.
-    onAvailabilityChange?: (available: boolean) => void;
+    // nothing to show. The second arg surfaces the payload's available modes so
+    // a ranked-only player can be routed to the Ranked tab. Fired once per
+    // (player, realm) from the first resolved payload — never re-fired on user
+    // window switches, so toggling to an empty window can't retroactively
+    // disable the tab the user is on.
+    onAvailabilityChange?: (
+        available: boolean,
+        availableModes: ReadonlyArray<'random' | 'ranked'>,
+    ) => void;
     // Fired when the sparkline's D3 entrance (the WR-line draw-reveal) finishes,
     // so a parent can sequence its own animation after the chart settles. Fires
     // once when the populated reveal completes; not fired when the player has no
@@ -564,6 +582,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     days = 7,
     refreshNonce = 0,
     embedded = false,
+    mode = 'random',
     onAvailabilityChange,
     onSparklineAnimationEnd,
 }) => {
@@ -579,8 +598,6 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const [loading, setLoading] = useState(true);
     const [window, setWindow] = useState<BattleHistoryWindow>('month');
     const [userPickedWindow, setUserPickedWindow] = useState(false);
-    const [mode, setMode] = useState<Mode>('random');
-    const [userPickedMode, setUserPickedMode] = useState(false);
     // Ship selected in the table → its combat profile (ShipStats) shows below
     // the rollup separator. Clicking the same row again clears it (toggle).
     const [selectedShip, setSelectedShip] = useState<{
@@ -622,7 +639,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     setPayload(data);
                     setError(null);
                     const rankedPending = headers['X-Ranked-Observation-Pending'] === 'true'
-                        && (mode === 'ranked' || mode === 'combined');
+                        && mode === 'ranked';
                     const shipPopPending = headers['X-Ship-Pop-Pending'] === 'true';
                     // Ranked pending keeps its original tighter cadence; the
                     // ship-pop warm gets the slower/longer schedule. When both
@@ -685,70 +702,29 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         return () => { cancelled = true; };
     }, [playerName, realm, mode, refreshNonce]);
 
-    // Auto-select the right default mode based on what the player actually
-    // has recent data in. `available_modes` is the set of modes with rows in
-    // PlayerDailyShipStats (pruned to ~32d), i.e. "played in the last month or
-    // so" — not a lifetime signal. Decided ONCE off the first resolved (random)
-    // payload per (player, realm), then latched: this is an initial-default
-    // chooser, not a live reaction to the visible window, so a user toggling to
-    // an empty window later can't yank their mode out from under them. Skipped
-    // once the user has explicitly clicked a pill.
-    //   - only one mode available → switch to it (the ranked-only player, who
-    //     has no random data to show, lands on Ranked).
-    //   - both modes available but the default month window has zero random
-    //     battles while ranked is in play → open on Ranked. This catches the
-    //     player who has stopped playing Random but is active in Ranked: their
-    //     stale Random row keeps 'random' in available_modes, so the length-1
-    //     branch never fires and the card would otherwise open on an empty
-    //     Random window. (We switch on "recent ranked rows exist", a proxy — if
-    //     ranked is also empty in-window it's an empty-vs-empty wash.)
-    //   - otherwise keep the initial 'random' default (Ranked/All pills remain
-    //     reachable). Initial state is 'random' so the first fetch dedupes onto
-    //     PlayerRouteView's parallel prefetch; any switch fires one refetch.
-    const initialModeResolvedRef = useRef(false);
-    useEffect(() => {
-        if (userPickedMode || initialModeResolvedRef.current) return;
-        const available = payload?.available_modes;
-        if (!available) return;
-        initialModeResolvedRef.current = true;
-        if (available.length === 1) {
-            if (available[0] !== mode) setMode(available[0]);
-            return;
-        }
-        if (
-            mode === 'random'
-            && available.includes('ranked')
-            && (payload?.totals?.battles ?? 0) === 0
-        ) {
-            setMode('ranked');
-        }
-    }, [payload, mode, userPickedMode]);
-
     // Availability is a one-shot, stable signal: report it from the FIRST
     // resolved payload (or error) per (player, realm), then latch. Basing it on
-    // the live `window`/`mode` would let a user toggling to an empty window flip
-    // the signal false and disable the Activity tab they're actively reading.
+    // the live `window` would let a user toggling to an empty window flip
+    // the signal false and disable the tab they're actively reading.
     const availabilityReportedRef = useRef(false);
     useEffect(() => {
         availabilityReportedRef.current = false;
-        // The default-mode decision is also one-shot per (player, realm): a
-        // realm switch keeps this card mounted (only a player soft-nav remounts
-        // it, via PlayerRouteView's key={playerName}), so reset the latch here
-        // or a realm switch would freeze the prior realm's mode choice.
-        initialModeResolvedRef.current = false;
     }, [playerName, realm]);
 
     useEffect(() => {
         if (!onAvailabilityChange || availabilityReportedRef.current) return;
         if (error) {
             availabilityReportedRef.current = true;
-            onAvailabilityChange(false);
+            onAvailabilityChange(false, []);
             return;
         }
         if (!payload) return;
         availabilityReportedRef.current = true;
-        onAvailabilityChange(battleHistoryIndicatesActivity(payload));
-    }, [payload, error, onAvailabilityChange]);
+        onAvailabilityChange(
+            battleHistoryIndicatesActivity(payload, mode),
+            payload.available_modes ?? ['random'],
+        );
+    }, [payload, error, mode, onAvailabilityChange]);
 
     const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
         key: 'battles', direction: 'desc',
@@ -832,36 +808,23 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 className="flex animate-pulse items-center justify-center rounded-md border border-[var(--accent-faint)] bg-[var(--bg-surface)] text-sm text-[var(--text-muted)]"
                 style={{ minHeight: 360 }}
             >
-                Loading activity…
+                Loading battles…
             </div>
         ) : null;
     }
     const totals = payload?.totals;
     const hasBattles = !!(totals && typeof totals.battles === 'number'
         && totals.battles > 0);
-    // Pill visibility derives from `available_modes`:
-    //   only random → no pills (single mode is implicit)
-    //   only ranked → just Ranked (no Random, no All)
-    //   both        → Random | Ranked | All
-    const availableModes = payload?.available_modes ?? ['random'];
-    const hasRandom = availableModes.includes('random');
-    const hasRanked = availableModes.includes('ranked');
-    const visibleModes: Mode[] = hasRandom && hasRanked
-        ? ['random', 'ranked', 'combined']
-        : hasRanked
-            ? ['ranked']
-            : [];
-    // Standalone: hide the card when the user is at the implicit defaults
-    // (mode=random, window=month — matching the always-month sparkline) AND
-    // there's no data — the card never appears for players with no random
-    // battles in the default 30d window. Any explicit user pick (different mode
-    // or window) keeps the card visible so the pill row stays reachable.
-    // Embedded: never collapse to null here — the Activity tab is already active,
+    // Standalone: hide the card when the user is at the implicit default
+    // (window=month — matching the always-month sparkline) AND there's no
+    // data — the card never appears for players with no battles in the default
+    // 30d window. An explicit window pick keeps the card visible so the pill
+    // row stays reachable.
+    // Embedded: never collapse to null here — the hosting tab is already active,
     // so render the chrome (sparkline/header/pills/"no battles") instead. The
     // parent dark-outs the tab and switches away when availability is false.
     if (!embedded && (
         !hasBattles
-        && mode === 'random' && !userPickedMode
         && window === 'month' && !userPickedWindow
     )) {
         return null;
@@ -959,61 +922,22 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         })}
                     </div>
                 </div>
-                {/* A single non-random mode (e.g. a player who only plays
-                    ranked this season) gets a static label instead of a toggle:
-                    with nothing to switch to the pill row is otherwise
-                    suppressed, leaving the card silently reading as Random —
-                    its conventional default — when it's actually Ranked. */}
-                {visibleModes.length === 1 && visibleModes[0] !== 'random' && (
-                    <span
-                        className="ml-auto rounded bg-[var(--accent-mid)] px-2 py-0.5 text-xs font-semibold text-[var(--bg-card)]"
-                        title={visibleModes[0] === 'ranked'
-                            ? 'Ranked battles only (sums across active seasons)'
-                            : 'Random + ranked combined (lifetime delta unavailable)'}
-                    >
-                        {MODE_LABEL[visibleModes[0]]}
-                    </span>
-                )}
-                {visibleModes.length >= 2 && (
-                    <div
-                        className="flex items-center gap-1 text-xs ml-auto"
-                        role="group"
-                        aria-label="Battle mode"
-                    >
-                        {visibleModes.map((m) => (
-                            <button
-                                key={m}
-                                type="button"
-                                onClick={() => {
-                                    if (m !== mode) {
-                                        trackEvent('battle-history-mode', { mode: m, window, realm });
-                                    }
-                                    setMode(m);
-                                    setUserPickedMode(true);
-                                }}
-                                className={`rounded px-2 py-0.5 transition-colors ${
-                                    mode === m
-                                        ? 'bg-[var(--accent-mid)] text-[var(--bg-card)] font-semibold'
-                                        : 'text-[var(--text-muted)] hover:text-[var(--text-strong)]'
-                                }`}
-                                aria-pressed={mode === m}
-                                title={m === 'random'
-                                    ? 'Random battles only'
-                                    : m === 'ranked'
-                                        ? 'Ranked battles only (sums across active seasons)'
-                                        : 'Random + ranked combined (lifetime delta unavailable)'}
-                            >
-                                {MODE_LABEL[m]}
-                            </button>
-                        ))}
-                    </div>
-                )}
+                {/* Static caption naming the card's fixed mode — Random Battles
+                    on the Activity tab, Ranked on the Ranked tab. Replaced the
+                    Random|Ranked|All pill (removed 2026-07-13: 35 sessions/90d
+                    ever touched it; ranked history moved to the Ranked tab). */}
+                <span
+                    className="ml-auto rounded bg-[var(--accent-mid)] px-2 py-0.5 text-xs font-semibold text-[var(--bg-card)]"
+                    title={MODE_TITLE[mode]}
+                >
+                    {MODE_LABEL[mode]}
+                </span>
                 {/* Header summary text removed — duplicates the totals tile
                     cells (Battles, Win rate, Avg damage) directly below. */}
             </header>
             {!hasBattles && (
                 <p className="mt-4 text-sm text-[var(--text-muted)]">
-                    No {MODE_LABEL[mode].toLowerCase()} battles in this window.
+                    No {MODE_NOUN[mode]} battles in this window.
                 </p>
             )}
             {hasBattles && (() => {

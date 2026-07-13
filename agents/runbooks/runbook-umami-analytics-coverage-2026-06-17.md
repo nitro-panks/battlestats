@@ -69,9 +69,9 @@ Notable reads:
 | `landing-player-click` | landing player grid/chart → player detail | `PlayerSearch.tsx` `handleSelectLandingPlayer` (distinct from the shared `handleSelectMember`) |
 | `landing-clan-click` | landing clan grid/chart → clan detail | `PlayerSearch.tsx` `handleSelectClan` |
 | `clan-member-click` | clan-roster member → player detail (clan page **and** player-page clan section) | `ClanMembers.tsx` (leaf; one attach point covers both rosters, no double-count) |
-| `battle-history-mode` `{mode,window,realm}` | Random / Ranked / All pill in battle history | `BattleHistoryCard.tsx` mode-pill click |
+| `battle-history-mode` `{mode,window,realm}` | Random / Ranked / All pill in battle history | `BattleHistoryCard.tsx` mode-pill click — **retired 2026-07-13** (pill removed) |
 
-`battle-history-mode` directly serves the product's "prioritize Random over Ranked" capture decision (see `feedback_prioritize_random_over_ranked`) — it measures which battle mode users actually look at.
+`battle-history-mode` directly served the product's "prioritize Random over Ranked" capture decision (see `feedback_prioritize_random_over_ranked`) — it measured which battle mode users actually look at. **It answered the question and was retired 2026-07-13**: 90d volume was 136 clicks / 35 sessions (~1.7% of player sessions), so the pill was removed, the Activity card fixed to Random (static "Random Battles" caption), and ranked battle history relocated to the Ranked insights tab (`mode="ranked"` card instance; `combined` is no longer reachable from the UI, API unchanged).
 
 **Tier 2 — secondary (added where an interaction exists).**
 

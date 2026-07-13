@@ -180,6 +180,128 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'false');
     });
 
+    it('falls back to the Ranked tab (not Ships) when the player is ranked-only', async () => {
+        // Zero random battles but ranked rows exist → Activity darks out and
+        // focus lands on Ranked, where the ranked battle history lives now.
+        mockFetchSharedJson.mockImplementation((url) => {
+            if (url.includes('/api/fetch/player_correlation/tier_type/')) {
+                return new Promise(() => { });
+            }
+            if (url.includes('/battle-history/')) {
+                return Promise.resolve({
+                    data: {
+                        as_of: '2026-06-06T00:00:00Z',
+                        available_modes: ['ranked'],
+                        totals: {
+                            battles: 0, wins: 0, losses: 0, win_rate: 0,
+                            damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                            planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                        },
+                        by_ship: [],
+                        by_day: [],
+                    },
+                    headers: {},
+                });
+            }
+            return Promise.resolve({ data: [], headers: {} });
+        });
+
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="RankedOnlyCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan
+                efficiencyRows={[]}
+            />,
+        );
+
+        await waitFor(() => {
+            expect(screen.getByRole('tab', { name: 'Ranked' })).toHaveAttribute('aria-selected', 'true');
+        });
+        expect(screen.getByRole('tab', { name: 'Activity' })).toBeDisabled();
+        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'false');
+    });
+
+    it('renders the Recent Ranked Battles history card on the Ranked tab', async () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan
+                efficiencyRows={[]}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
+        await waitFor(() => {
+            expect(screen.getByText('Recent Ranked Battles')).toBeInTheDocument();
+        });
+        // The embedded battle-history card mounts inside the section (the
+        // default beforeEach mock answers every battle-history URL with battles).
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+    });
+
+    it('hides Recent Ranked Battles when the player has no ranked history', async () => {
+        mockFetchSharedJson.mockImplementation((url) => {
+            if (url.includes('/api/fetch/player_correlation/tier_type/')) {
+                return new Promise(() => { });
+            }
+            if (url.includes('/battle-history/')) {
+                const rankedRequest = url.includes('mode=ranked');
+                return Promise.resolve({
+                    data: {
+                        as_of: '2026-06-06T00:00:00Z',
+                        available_modes: ['random'],
+                        totals: {
+                            battles: rankedRequest ? 0 : 42,
+                            wins: rankedRequest ? 0 : 24,
+                            losses: rankedRequest ? 0 : 18,
+                            win_rate: rankedRequest ? 0 : 57.1,
+                            damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                            planes_killed: 0, survived_battles: 0,
+                            survival_rate: 0,
+                        },
+                        by_ship: [],
+                        by_day: [],
+                    },
+                    headers: {},
+                });
+            }
+            return Promise.resolve({ data: [], headers: {} });
+        });
+
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="RandomsCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan
+                efficiencyRows={[]}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
+        // The ranked card mounts, reports no ranked availability, and the
+        // section unmounts; the rest of the Ranked tab stays.
+        await waitFor(() => {
+            expect(screen.queryByText('Recent Ranked Battles')).not.toBeInTheDocument();
+        });
+        expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
+    });
+
     it('re-lights a dark Activity tab when a refresh backfills battle history, without stealing focus', async () => {
         // First load: zero battles → Activity darks out, focus falls to Ships.
         // A later visit-driven WG fetch (refreshNonce bump) backfills battles.

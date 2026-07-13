@@ -114,7 +114,7 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; 
     { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 920 },
     { id: 'population', label: 'Population', panelLabel: 'Population insights', minHeight: 720 },
     { id: 'badges', label: 'Efficiency', panelLabel: 'Efficiency insights', minHeight: 360 },
-    { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 620 },
+    { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 900 },
     { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
 ];
 
@@ -173,6 +173,9 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     // null = unknown (still resolving); true/false once the Activity card's first
     // payload lands. Drives the default-tab choice and the dark Activity tab.
     const [activityAvailable, setActivityAvailable] = useState<boolean | null>(null);
+    // null = unknown; set by the Ranked tab's battle-history card. false hides
+    // the "Recent Ranked Battles" section for players with no ranked history.
+    const [rankedHistoryAvailable, setRankedHistoryAvailable] = useState<boolean | null>(null);
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
     const [profileChartPayload, setProfileChartPayload] = useState<TierTypePayload | null>(null);
     const [profileChartState, setProfileChartState] = useState<'idle' | 'loading' | 'ready' | 'warming' | 'error'>('idle');
@@ -188,6 +191,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     useEffect(() => {
         setActiveTab('activity');
         setActivityAvailable(null);
+        setRankedHistoryAvailable(null);
         setGlowArmed(false);
     }, [playerId]);
 
@@ -209,12 +213,17 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
         // activityAvailable === null → still resolving; keep waiting.
     }, [glowArmed, activeTab, activityAvailable]);
 
-    const handleActivityAvailability = useCallback((available: boolean) => {
+    const handleActivityAvailability = useCallback((
+        available: boolean,
+        availableModes: ReadonlyArray<'random' | 'ranked'> = [],
+    ) => {
         setActivityAvailable(available);
         if (!available) {
-            // Nothing to show — fall back to Ships (the tab to the right) and
-            // dark-out Activity.
-            setActiveTab((current) => (current === 'activity' ? 'ships' : current));
+            // Nothing random to show — dark out Activity. A ranked-only player
+            // lands on Ranked (their history lives there now); otherwise Ships
+            // (the tab to the right).
+            const fallback: InsightsTabId = availableModes.includes('ranked') ? 'ranked' : 'ships';
+            setActiveTab((current) => (current === 'activity' ? fallback : current));
         }
     }, []);
 
@@ -248,9 +257,9 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
         )
             .then(({ data }) => {
                 if (cancelled) return;
-                if (battleHistoryIndicatesActivity(data)) {
+                if (battleHistoryIndicatesActivity(data, 'random')) {
                     // Light up only — never switches focus to Activity.
-                    handleActivityAvailability(true);
+                    handleActivityAvailability(true, data.available_modes ?? ['random']);
                 }
             })
             .catch(() => { /* leave the tab dark on error; next cycle retries */ });
@@ -512,6 +521,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     ) : (
                         <BattleHistoryCard
                             embedded
+                            mode="random"
                             playerName={playerName}
                             realm={realm}
                             refreshNonce={refreshNonce}
@@ -567,6 +577,27 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
 
                 {activeTab === 'ranked' ? (
                     <div>
+                        {/* Ranked battle history relocated here from the Activity
+                            tab's mode pill (2026-07-13) — the same card, fixed to
+                            mode="ranked", sparkline included. Hidden once the card
+                            reports the player has no ranked history. */}
+                        {rankedHistoryAvailable !== false ? (
+                            <div className="mb-6">
+                                <SectionHeadingWithTooltip
+                                    title="Recent Ranked Battles"
+                                    description="Battle history scoped to Ranked — daily activity over the last 30 days, per-ship results, and totals for the player's current ranked season. The same view the Activity tab gives for Random battles."
+                                    className="mb-2"
+                                />
+                                <BattleHistoryCard
+                                    embedded
+                                    mode="ranked"
+                                    playerName={playerName}
+                                    realm={realm}
+                                    refreshNonce={refreshNonce}
+                                    onAvailabilityChange={setRankedHistoryAvailable}
+                                />
+                            </div>
+                        ) : null}
                         {!showRankedHeatmap ? (
                             <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--accent-mid)]">
                                 No ranked history is visible for this player yet.

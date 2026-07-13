@@ -80,7 +80,7 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | `player-insights-efficiency` | `{realm}` | Click the "Badges" (efficiency) insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 310 (186) |
 | `player-insights-population` | `{realm}` | Click the "Population" insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 349 (180) |
 | `player-history-{window}` | `{realm}` | Click a battle-history window pill — emits `player-history-day` / `-week` / `-month` | `BattleHistoryCard.tsx:947` | ✅ day 590 / week 588 / month 292 |
-| `battle-history-mode` | `{mode:'random'\|'ranked'\|'all', window, realm}` | Click a Random/Ranked/All mode pill in battle history | `BattleHistoryCard.tsx:997` | ✅ 2 (1) — newly live |
+| `battle-history-mode` | `{mode:'random'\|'ranked'\|'all', window, realm}` | ~~Click a Random/Ranked/All mode pill in battle history~~ | — | ❌ **retired 2026-07-13** (pill removed — 136 clicks / 35 sessions in 90d; mode is now a fixed per-instance prop, ranked history lives on the Ranked tab) |
 | `battle-history-sort` | `{key, direction, mode, window}` | Click a battle-history table column header | `BattleHistoryCard.tsx:796` | ✅ 214 (58) |
 | `ship-stats-open` | `{ship_id, source:'row', mode, window, realm}` | Click a ship row in battle history to open its combat-stats panel | `BattleHistoryCard.tsx:813` | ✅ live-verified 2026-06-18 (the long zero was discoverability, not a bug) |
 | `ship-stats-close` | `{ship_id, source:'button'\|'row', mode, window, realm}` | Close the ship-stats panel (X button, or click another row) | `BattleHistoryCard.tsx:821,813` | ✅ live-verified 2026-06-18 |

@@ -342,7 +342,7 @@ describe('BattleHistoryCard', () => {
             />,
         );
         await waitFor(() => {
-            expect(onAvailabilityChange).toHaveBeenCalledWith(false);
+            expect(onAvailabilityChange).toHaveBeenCalledWith(false, ['random']);
         });
     });
 
@@ -358,16 +358,16 @@ describe('BattleHistoryCard', () => {
             />,
         );
         await waitFor(() => {
-            expect(onAvailabilityChange).toHaveBeenCalledWith(true);
+            expect(onAvailabilityChange).toHaveBeenCalledWith(true, ['random']);
         });
     });
 
-    test('embedded: reports availability true for a ranked-only player with zero random battles', async () => {
+    test('embedded: reports availability false + surfaces available modes for a ranked-only player', async () => {
         const onAvailabilityChange = jest.fn();
-        // First (default random) fetch reports ranked availability with no random
-        // battles — the player still has activity (the card auto-switches mode).
+        // Activity availability is now random-scoped: a ranked-only player darks
+        // the Activity tab, and the second callback arg lets the parent fall
+        // back to the Ranked tab (where their history lives now).
         mockByMode({ available_modes: ['ranked'] }, {
-            ranked: {},
             random: {
                 totals: {
                     battles: 0, wins: 0, losses: 0, win_rate: 0,
@@ -387,7 +387,7 @@ describe('BattleHistoryCard', () => {
             />,
         );
         await waitFor(() => {
-            expect(onAvailabilityChange).toHaveBeenCalledWith(true);
+            expect(onAvailabilityChange).toHaveBeenCalledWith(false, ['ranked']);
         });
     });
 
@@ -422,44 +422,32 @@ describe('BattleHistoryCard', () => {
         expect(url).toContain('mode=random');
     });
 
-    test('hides mode pills when player has only random data', async () => {
-        resolveWith(buildPayload({ available_modes: ['random'] }));
+    test('never renders a mode pill row; a static caption labels the fixed mode', async () => {
+        // Even a dual-mode player gets no toggle — the mode is fixed by prop
+        // now (pill removed 2026-07-13; ranked history lives on the Ranked tab).
+        mockByMode({ available_modes: ['random', 'ranked'] });
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        // No mode pill row at all — single available mode is implicit.
         expect(screen.queryByRole('group', { name: /battle mode/i })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^Ranked$/ })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^All$/ })).not.toBeInTheDocument();
+        expect(screen.getByText('Random Battles')).toBeInTheDocument();
+        // No combined fetch ever fires.
+        expect(mainFetchCalls('combined').length).toBe(0);
     });
 
-    test('defaults to Ranked + hides Random/All when player has only ranked data', async () => {
-        // Ranked-only player: every response reports available_modes=['ranked'],
-        // so the initial mode=random fetch triggers an auto-switch + refetch to
-        // mode=ranked.
-        mockByMode({ available_modes: ['ranked'] }, {
-            ranked: {
-                totals: {
-                    battles: 12, wins: 8, losses: 4, win_rate: 66.7,
-                    damage: 480_000, avg_damage: 40_000, frags: 18,
-                    xp: 7_200, planes_killed: 0, survived_battles: 8,
-                    survival_rate: 66.7,
-                },
-            },
-        });
-        render(<BattleHistoryCard playerName="ranked_only" realm="na" />);
-        // The auto-mode-switch refetches the main window with mode=ranked.
+    test('mode="ranked" drives both fetches with mode=ranked and shows the static Ranked caption', async () => {
+        mockByMode({ available_modes: ['random', 'ranked'] });
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" mode="ranked" />);
         await waitFor(() => {
-            expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        // No interactive pill row (nothing to switch to), but a static
-        // "Ranked" label so the card isn't silently misread as Random.
-        expect(screen.queryByRole('group', { name: /battle mode/i })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /^Random$/ })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /^All$/ })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /^Ranked$/ })).not.toBeInTheDocument();
-        expect(screen.getByText(/^Ranked$/)).toBeInTheDocument();
+        expect(mainFetchCalls('ranked').length).toBeGreaterThan(0);
+        expect(mainFetchCalls('random').length).toBe(0);
+        expect(screen.getByText('Ranked')).toBeInTheDocument();
+        expect(screen.queryByText('Random Battles')).not.toBeInTheDocument();
     });
 
     test('labels the ranked header with the season name when provided', async () => {
@@ -476,7 +464,7 @@ describe('BattleHistoryCard', () => {
                 },
             },
         });
-        render(<BattleHistoryCard playerName="ranked_only" realm="na" />);
+        render(<BattleHistoryCard playerName="ranked_only" realm="na" mode="ranked" />);
         await waitFor(() => {
             expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
         });
@@ -487,93 +475,6 @@ describe('BattleHistoryCard', () => {
         expect(
             screen.queryByRole('heading', { name: /last 30 days/i }),
         ).not.toBeInTheDocument();
-    });
-
-    test('renders mode pill row with three options + defaults to Random when both modes available', async () => {
-        // Dual-mode availability → the card keeps its initial 'random' default
-        // (no auto-switch); Ranked/All pills remain reachable.
-        mockByMode({ available_modes: ['random', 'ranked'] });
-        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
-        await waitFor(() => {
-            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
-        });
-        // The main window fetch stays mode=random and no combined auto-switch fires.
-        await waitFor(() => {
-            expect(mainFetchCalls('random').length).toBeGreaterThanOrEqual(1);
-        });
-        expect(mainFetchCalls('combined').length).toBe(0);
-        const group = screen.getByRole('group', { name: /battle mode/i });
-        expect(group).toBeInTheDocument();
-        const random = screen.getByRole('button', { name: /^Random$/ });
-        const ranked = screen.getByRole('button', { name: /^Ranked$/ });
-        const all = screen.getByRole('button', { name: /^All$/ });
-        // Default: Random is pressed when both modes are available.
-        expect(random).toHaveAttribute('aria-pressed', 'true');
-        expect(ranked).toHaveAttribute('aria-pressed', 'false');
-        expect(all).toHaveAttribute('aria-pressed', 'false');
-    });
-
-    test('opens on Ranked when both modes available but the default window has zero random battles', async () => {
-        // The reported case: a player who has stopped playing Random but is
-        // active in Ranked. A stale Random PDSS row keeps 'random' in
-        // available_modes, so the length-1 auto-switch never fires — but the
-        // default month window has 0 random battles, so the card should open on
-        // Ranked rather than an empty Random view.
-        mockByMode(
-            { available_modes: ['random', 'ranked'] },
-            {
-                random: {
-                    totals: {
-                        battles: 0, wins: 0, losses: 0, win_rate: 0,
-                        damage: 0, avg_damage: 0, frags: 0, xp: 0,
-                        planes_killed: 0, survived_battles: 0, survival_rate: 0,
-                    },
-                    by_ship: [],
-                    by_day: [],
-                },
-                ranked: {
-                    totals: {
-                        battles: 5, wins: 3, losses: 2, win_rate: 60.0,
-                        damage: 200_000, avg_damage: 40_000, frags: 7,
-                        xp: 3_000, planes_killed: 0, survived_battles: 3,
-                        survival_rate: 60.0,
-                    },
-                },
-            },
-        );
-        render(<BattleHistoryCard playerName="ranked_active" realm="eu" />);
-        // The auto-switch refetches the main window with mode=ranked.
-        await waitFor(() => {
-            expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
-        });
-        // Both pills stay reachable (dual-mode), but Ranked is the live default.
-        const ranked = screen.getByRole('button', { name: /^Ranked$/ });
-        const random = screen.getByRole('button', { name: /^Random$/ });
-        await waitFor(() => {
-            expect(ranked).toHaveAttribute('aria-pressed', 'true');
-        });
-        expect(random).toHaveAttribute('aria-pressed', 'false');
-    });
-
-    test('clicking ranked pill refetches with mode=ranked', async () => {
-        // Dual-mode payload → default stays random (no auto-switch).
-        mockByMode({ available_modes: ['random', 'ranked'] });
-        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
-        await waitFor(() => {
-            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
-        });
-        await waitFor(() => {
-            expect(mainFetchCalls('random').length).toBeGreaterThanOrEqual(1);
-        });
-        await act(async () => {
-            screen.getByRole('button', { name: /^Ranked$/ }).click();
-        });
-        await waitFor(() => {
-            expect(mainFetchCalls('ranked').length).toBeGreaterThanOrEqual(1);
-        });
-        // Picking a different mode emits a battle-history-mode umami event.
-        expect(mockTrackEvent).toHaveBeenCalledWith(
-            'battle-history-mode', expect.objectContaining({ mode: 'ranked', realm: 'na' }));
     });
 
     test('clicking each visible window pill refetches with the matching ?window= param', async () => {
@@ -644,29 +545,21 @@ describe('BattleHistoryCard', () => {
     test('polls when X-Ranked-Observation-Pending is true on a ranked-mode response', async () => {
         jest.useFakeTimers();
         try {
-            // Dual-mode availability; the FIRST main ranked fetch returns the
-            // pending header so the card schedules a poll, the next does not.
-            let rankedMainSeen = 0;
+            // The FIRST main ranked fetch returns the pending header so the
+            // card schedules a poll, the next does not. (The always-month
+            // sparkline fetch shares the same URL but fires second — the main
+            // fetch effect is declared first — so it never sees the header.)
+            let rankedSeen = 0;
             mockByMode({ available_modes: ['random', 'ranked'] }, {}, (params) => {
                 if (params.get('mode') === 'ranked' && params.get('window') === 'month') {
-                    rankedMainSeen += 1;
-                    if (rankedMainSeen === 1) {
+                    rankedSeen += 1;
+                    if (rankedSeen === 1) {
                         return { 'X-Ranked-Observation-Pending': 'true' };
                     }
                 }
                 return {};
             });
-            render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
-            await waitFor(() => {
-                expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
-            });
-            await waitFor(() => {
-                expect(mainFetchCalls('random').length).toBeGreaterThanOrEqual(1);
-            });
-
-            await act(async () => {
-                screen.getByRole('button', { name: /^Ranked$/ }).click();
-            });
+            render(<BattleHistoryCard playerName="lil_boots" realm="na" mode="ranked" />);
             // First ranked main fetch landed (pending header set).
             await waitFor(() => {
                 expect(mainFetchCalls('ranked').length).toBe(1);
@@ -683,9 +576,7 @@ describe('BattleHistoryCard', () => {
         }
     });
 
-    test('renders empty state with pill row when ranked mode has zero data', async () => {
-        // Dual-mode availability; ranked mode has zero battles so the card stays
-        // visible with the pill row (user can switch back).
+    test('embedded ranked card renders the empty state with the Ranked caption when the season has zero data', async () => {
         mockByMode({ available_modes: ['random', 'ranked'] }, {
             ranked: {
                 totals: {
@@ -697,21 +588,15 @@ describe('BattleHistoryCard', () => {
                 by_day: [],
             },
         });
-        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        render(<BattleHistoryCard embedded playerName="lil_boots" realm="na" mode="ranked" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
         await waitFor(() => {
-            expect(mainFetchCalls('random').length).toBeGreaterThanOrEqual(1);
-        });
-        await act(async () => {
-            screen.getByRole('button', { name: /^Ranked$/ }).click();
-        });
-        await waitFor(() => {
             expect(screen.getByText(/No ranked battles in this window/i)).toBeInTheDocument();
         });
-        // Pills still reachable.
-        expect(screen.getByRole('button', { name: /^Random$/ })).toBeInTheDocument();
+        // The static caption still names the mode on the empty state.
+        expect(screen.getByText('Ranked')).toBeInTheDocument();
     });
 });
 
