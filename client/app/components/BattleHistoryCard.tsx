@@ -937,9 +937,11 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 // the `contents` wrappers collapse so all seven tiles flow
                 // into it; at sm they become flex clusters.
                 return (
-                    // Subtle theme-aware wash (the row-hover token) sets the
-                    // summary band off from the chart surfaces around it.
-                    <div className="mt-4 rounded-md bg-[var(--accent-faint)] px-4 py-3 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4">
+                    // Subtle neutral-gray wash (the sparkline bars' neutral,
+                    // lighter) sets the summary band off from the chart
+                    // surfaces around it — deliberately gray, not the blue
+                    // accent-faint tint, so it stays quiet in both themes.
+                    <div className="mt-4 rounded-md bg-[rgba(120,120,120,0.12)] px-4 py-3 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
                             <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
