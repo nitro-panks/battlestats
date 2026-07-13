@@ -257,28 +257,39 @@ function useTableSort<T>(
 // localStorage key for the inline ship-list column sort (persisted per browser).
 const SHIP_LIST_SORT_STORAGE_KEY = 'battlestats:ship-list:sort';
 
-const SortButton: React.FC<{ label: string; active: boolean; dir: SortDir; onClick: () => void }> = ({
-    label,
-    active,
-    dir,
-    onClick,
-}) => (
-    <button
-        type="button"
-        onClick={onClick}
-        className={`group inline-flex items-center gap-1 font-medium uppercase tracking-wide transition-colors hover:text-[var(--accent-mid)] ${
-            active ? 'text-[var(--accent-mid)]' : ''
-        }`}
-    >
-        <span>{label}</span>
+// `align` must match the column's text alignment. The arrow slot always
+// occupies width (opacity-0 when inactive), so it has to sit on the side AWAY
+// from the data edge — after the label in left-aligned columns, before it in
+// right-aligned ones — or the header label drifts ~13px off the numbers below.
+const SortButton: React.FC<{
+    label: string;
+    active: boolean;
+    dir: SortDir;
+    onClick: () => void;
+    align?: 'left' | 'right';
+}> = ({ label, active, dir, onClick, align = 'left' }) => {
+    const arrow = (
         <span
             aria-hidden
             className={`text-[9px] leading-none ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'}`}
         >
             {active && dir === 'asc' ? '▲' : '▼'}
         </span>
-    </button>
-);
+    );
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`group inline-flex items-center gap-1 font-medium uppercase tracking-wide transition-colors hover:text-[var(--accent-mid)] ${
+                active ? 'text-[var(--accent-mid)]' : ''
+            }`}
+        >
+            {align === 'right' && arrow}
+            <span>{label}</span>
+            {align === 'left' && arrow}
+        </button>
+    );
+};
 
 const ariaSort = (active: boolean, dir: SortDir): 'ascending' | 'descending' | 'none' =>
     active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none';
@@ -740,16 +751,16 @@ const ShipList: React.FC<{
                             <SortButton label="Ship" {...colSort('ship_name')} />
                         </th>
                         <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'battles', colSort('battles').dir)}>
-                            <SortButton label="Battles" {...colSort('battles')} />
+                            <SortButton label="Battles" align="right" {...colSort('battles')} />
                         </th>
                         <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'avg_damage', colSort('avg_damage').dir)}>
-                            <SortButton label="Avg dmg" {...colSort('avg_damage')} />
+                            <SortButton label="Avg dmg" align="right" {...colSort('avg_damage')} />
                         </th>
                         <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'kills_per_battle', colSort('kills_per_battle').dir)}>
-                            <SortButton label="Kills/battle" {...colSort('kills_per_battle')} />
+                            <SortButton label="Kills/battle" align="right" {...colSort('kills_per_battle')} />
                         </th>
                         <th className="py-2 text-right" aria-sort={ariaSort(sort?.key === 'win_rate', colSort('win_rate').dir)}>
-                            <SortButton label="Win rate" {...colSort('win_rate')} />
+                            <SortButton label="Win rate" align="right" {...colSort('win_rate')} />
                         </th>
                     </tr>
                 </thead>
@@ -883,16 +894,16 @@ const ShipBoard: React.FC<{
                                         <SortButton label="Player" {...colSort('player_name')} />
                                     </th>
                                     <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'win_rate', colSort('win_rate').dir)}>
-                                        <SortButton label="Win rate" {...colSort('win_rate')} />
+                                        <SortButton label="Win rate" align="right" {...colSort('win_rate')} />
                                     </th>
                                     <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'battles', colSort('battles').dir)}>
-                                        <SortButton label="Battles" {...colSort('battles')} />
+                                        <SortButton label="Battles" align="right" {...colSort('battles')} />
                                     </th>
                                     <th className="py-2 pr-8 text-right" aria-sort={ariaSort(sort?.key === 'avg_damage', colSort('avg_damage').dir)}>
-                                        <SortButton label="Avg dmg" {...colSort('avg_damage')} />
+                                        <SortButton label="Avg dmg" align="right" {...colSort('avg_damage')} />
                                     </th>
                                     <th className="py-2 text-right" aria-sort={ariaSort(sort?.key === 'kills_per_battle', colSort('kills_per_battle').dir)}>
-                                        <SortButton label="Kills/battle" {...colSort('kills_per_battle')} />
+                                        <SortButton label="Kills/battle" align="right" {...colSort('kills_per_battle')} />
                                     </th>
                                 </tr>
                             </thead>
