@@ -3402,6 +3402,34 @@
             "archive_on": [
                 "hidden-profile-handling-superseded"
             ]
+        },
+        "agents/runbooks/runbook-battle-history-treemaps-2026-07-13.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "product",
+            "aliases": [
+                "battle history treemaps",
+                "player page treemaps",
+                "ship pop avg damage baseline",
+                "damage vs ship average coloring",
+                "X-Ship-Pop-Pending"
+            ],
+            "tags": [
+                "battle-history",
+                "player-page",
+                "treemap",
+                "frontend",
+                "d3",
+                "lazy-warm",
+                "celery",
+                "api-contract"
+            ],
+            "archive_on": [
+                "battle-history-treemaps-removed-or-redesigned",
+                "ship-pop-baseline-strategy-superseded"
+            ]
         }
     }
 }
