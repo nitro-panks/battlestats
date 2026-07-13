@@ -6570,6 +6570,39 @@ def compute_ship_pop_avg_damage(realm: str, ship_id: int) -> int:
     return value
 
 
+def compute_all_ship_pop_avg_damage(realm: str) -> dict:
+    """Bulk variant of compute_ship_pop_avg_damage: ONE grouped scan of the
+    trailing window computes + caches EVERY ship's realm-wide 30d random avg
+    damage, including the 0 below-floor sentinels. ~34s/realm measured on the
+    prod-size dataset (2026-07-13, ~900 ships) vs seconds *per ship* for the
+    per-ship shape — so the nightly pre-warm uses this, and the per-ship
+    request-driven warm survives only as the gap fallback (day-key rotation
+    at UTC midnight → first viewers before the snapshot chain fires).
+    Task-side only."""
+    from warships.models import PlayerDailyShipStats as _PDSS
+
+    cutoff = django_timezone.now().date() - timedelta(
+        days=SHIP_COMBAT_WINDOW_DAYS)
+    with transaction.atomic(), _elevated_work_mem():
+        rows = list(
+            _PDSS.objects
+            .filter(mode=_PDSS.MODE_RANDOM, date__gte=cutoff,
+                    player__realm=realm)
+            .values('ship_id')
+            .annotate(b=Sum('battles'), d=Sum('damage'))
+        )
+    payload = {}
+    for row in rows:
+        battles = int(row['b'] or 0)
+        payload[_ship_pop_avg_damage_cache_key(realm, row['ship_id'])] = (
+            int(round((row['d'] or 0) / battles))
+            if battles >= SHIP_POP_AVG_MIN_BATTLES else 0
+        )
+    if payload:
+        cache.set_many(payload, _SHIP_POP_AVG_CACHE_TTL)
+    return {"ships": len(payload)}
+
+
 def get_cached_ship_pop_avg_damage(realm: str, ship_ids) -> tuple[dict, list]:
     """Read-only bulk cache probe. Returns ({ship_id: cached value}, [missing
     ship_ids]) — 0-sentinel values are 'hits' (computed, below floor) so the

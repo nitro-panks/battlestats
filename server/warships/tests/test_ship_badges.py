@@ -611,6 +611,26 @@ class ShipBadgeSnapshotTests(TestCase):
 
         warm.assert_called_once_with("na")
 
+    def test_completion_dispatches_ship_pop_bulk_warm(self):
+        # A real snapshot run also chains the bulk avg-damage baseline warm —
+        # the day-scoped baseline keys rotated cold at UTC midnight, and the
+        # snapshot (02:00+ UTC) is the first post-rotation hook, so one
+        # grouped scan re-warms every ship's damage-treemap baseline for the
+        # day (the per-ship lazy warm stays as the gap fallback).
+        for i in range(3):
+            self._event(self._player(f"P{i}"), SHIMA, battles=20, wins=10 + i)
+
+        env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "1"}
+        with mock.patch.dict("os.environ", env, clear=False), \
+                mock.patch("warships.tasks.queue_realm_top_ships_warm"), \
+                mock.patch(
+                    "warships.tasks.warm_all_ship_pop_avg_damage_task"
+                ) as bulk:
+            snapshot_ship_top_players_task.apply(kwargs={"realm": "na"}).get()
+
+        bulk.apply_async.assert_called_once_with(
+            args=["na"], queue="background")
+
     def test_disabled_run_does_not_dispatch_treemap_warm(self):
         env = {**BADGE_ENV, "SHIP_BADGE_SNAPSHOT_ENABLED": "0"}
         with mock.patch.dict("os.environ", env, clear=False), \

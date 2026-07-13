@@ -91,6 +91,7 @@ def test_ship_standings_warm_chain_routes_to_background():
         "warships.tasks.snapshot_ship_top_players_task",
         "warships.tasks.warm_realm_top_ships_task",
         "warships.tasks.warm_ship_pop_avg_damage_task",
+        "warships.tasks.warm_all_ship_pop_avg_damage_task",
     }
 
     for task_name in expected_tasks:
