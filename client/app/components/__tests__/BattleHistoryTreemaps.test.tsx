@@ -3,6 +3,11 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import BattleHistoryTreemaps from '../BattleHistoryTreemaps';
 import type { BattleHistoryByShip } from '../BattleHistoryCard';
 
+const mockTrackEvent = jest.fn();
+jest.mock('../../lib/umami', () => ({
+    trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}));
+
 // The treemaps size themselves off a ResizeObserver; jest's default stub
 // reports no width so d3 draws nothing. Give it a real width so tiles +
 // labels render and the click handler is exercised (same shim as the
@@ -120,10 +125,12 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'All' }));
         expect(shipsSvg.querySelectorAll('rect')).toHaveLength(12);
         expect(window.localStorage.getItem('bs-bh-ships-scope')).toBe('all');
+        expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'all' });
 
         fireEvent.click(screen.getByRole('button', { name: 'Top 10' }));
         expect(shipsSvg.querySelectorAll('rect')).toHaveLength(10);
         expect(window.localStorage.getItem('bs-bh-ships-scope')).toBe('top10');
+        expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-scope', { scope: 'top10' });
     });
 
     it('clicking a ship tile reports the row (ShipStats toggle contract)', () => {
