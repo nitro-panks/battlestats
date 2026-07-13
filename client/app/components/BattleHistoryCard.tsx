@@ -9,7 +9,7 @@ import { chartColors } from '../lib/chartTheme';
 import { useTheme } from '../context/ThemeContext';
 import { trackEvent } from '../lib/umami';
 import ShipStats from './ShipStats';
-import BattleHistoryTreemaps from './BattleHistoryTreemaps';
+import BattleHistoryTreemaps, { damageRatioColor } from './BattleHistoryTreemaps';
 
 export interface BattleHistoryByShip {
     ship_id: number;
@@ -226,7 +226,7 @@ const computeKdr = (frags: number, battles: number): number => {
 
 // Format KDR for the per-ship table: trim trailing zeros so 1.50 → "1.5"
 // and 1.00 → "1". The totals tile keeps full toFixed(2) for column alignment.
-const formatTableKdr = (v: number): string => v.toFixed(2).replace(/\.?0+$/, '');
+const formatTableKdr = (v: number): string => v.toFixed(2);
 
 const SHIP_TYPE_LABEL: Record<string, string> = {
     Destroyer: 'DD',
@@ -278,6 +278,38 @@ const SortableTh: React.FC<SortableThProps> = ({
 
 // Session (period) win rate — the left of the two split WR columns. Sortable
 // by `win_rate`. Just the period %, colored by the WG community thresholds.
+// Avg-damage cell colored on the same diverging player-vs-population scale as
+// the ships treemap (red below the ship's realm 30d average, neutral at it,
+// green above). Falls back to the plain strong text when no baseline exists.
+const AvgDamageCell: React.FC<{
+    avgDamage: number;
+    popAvgDamage: number | null | undefined;
+}> = ({ avgDamage, popAvgDamage }) => {
+    const ratio = popAvgDamage != null && popAvgDamage > 0
+        ? avgDamage / popAvgDamage
+        : null;
+    if (ratio == null) {
+        return (
+            <span
+                className="text-[var(--text-strong)]"
+                title="No ship-average damage baseline to compare against"
+            >
+                {formatInt(avgDamage)}
+            </span>
+        );
+    }
+    const signedPct = `${ratio >= 1 ? '+' : ''}${((ratio - 1) * 100).toFixed(0)}%`;
+    return (
+        <span
+            className="font-semibold"
+            style={{ color: damageRatioColor(ratio) }}
+            title={`${signedPct} vs this ship's realm 30d average (${formatInt(popAvgDamage!)}). Color scales with that gap: red below the ship average, gray at it, green above.`}
+        >
+            {formatInt(avgDamage)}
+        </span>
+    );
+};
+
 const SessionWrCell: React.FC<{ periodWinRate: number }> = ({ periodWinRate }) => (
     <span
         className="tabular-nums font-semibold"
@@ -947,7 +979,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     <div className="mt-4 rounded-md bg-[rgba(120,120,120,0.12)] px-4 py-3 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
-                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
+                            <div className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
                         </div>
                         {/* Hairline section rules: flex items, centered in the
                             justify-between gaps. Hidden on the mobile grid. */}
@@ -956,7 +988,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Window WR</div>
                             <div
-                                className="text-2xl font-semibold tabular-nums"
+                                className="font-['Courier_New',Courier,monospace] text-2xl font-semibold tabular-nums"
                                 style={{ color: wrColor(totals!.win_rate) }}
                                 title={`Win rate over this window — ${formatPercent(totals!.win_rate)}`}
                             >
@@ -970,7 +1002,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 // delta qualifies Window WR rather than
                                 // standing on its own.
                                 <div
-                                    className="text-lg font-semibold tabular-nums"
+                                    className="font-['Courier_New',Courier,monospace] text-lg font-semibold tabular-nums"
                                     style={{ color: deltaTone }}
                                     title={`Session win rate ${deltaWr > 0 ? 'above' : deltaWr < 0 ? 'below' : 'even with'} lifetime by ${Math.abs(deltaWr).toFixed(1)}%`}
                                 >
@@ -978,7 +1010,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 </div>
                             ) : (
                                 <div
-                                    className="text-lg font-semibold text-[var(--text-muted)]"
+                                    className="font-['Courier_New',Courier,monospace] text-lg font-semibold text-[var(--text-muted)]"
                                     title="No lifetime baseline to compare against"
                                 >
                                     —
@@ -990,7 +1022,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         <div className="contents sm:flex sm:items-end sm:gap-x-4">
                         <div className="sm:text-right">
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
-                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
+                            <div className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
                         </div>
                         {/* One per-battle frag tile — the old "Frags" total
                             (low-signal) and "Avg KDR" (which was already
@@ -1001,7 +1033,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         <div className="sm:text-right">
                             <div className="text-xs text-[var(--text-muted)]">Frags/Battle</div>
                             <div
-                                className="text-2xl font-semibold text-[var(--text-strong)]"
+                                className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]"
                                 title={`${formatInt(totals!.frags)} frags over ${formatInt(totals!.battles)} battles this window`}
                             >
                                 {kdr.toFixed(2)}
@@ -1056,7 +1088,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 Standalone keeps the compact 60vh. */}
             {hasBattles && (
             <div className={`mt-5 overflow-auto border-t border-[var(--accent-faint)] pt-4 ${embedded ? 'max-h-[800px]' : 'max-h-[60vh]'}`}>
-                <table className="w-full min-w-[34rem] text-left text-sm">
+                <table className="w-full min-w-[34rem] text-left text-base">
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
                             <SortableTh sortKey="ship_name" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship played in the period. Click to sort A–Z.">Ship</SortableTh>
@@ -1065,7 +1097,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             <SortableTh sortKey="battles" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Battles played on this ship in the selected period. Click to sort by volume.">#</SortableTh>
                             <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Win rate over the selected window on this ship. Color codes use Wargaming community thresholds. Click to sort by window WR.">WR</SortableTh>
                             <SortableTh sortKey="lifetime_win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Overall (lifetime) win rate and its delta (Δ) vs this window. Click to sort by overall WR.">Overall WR</SortableTh>
-                            <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average damage dealt per battle on this ship in the selected period. Click to sort.">Avg dmg</SortableTh>
+                            <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average damage dealt per battle on this ship in the selected period, colored against the ship's realm-wide 30-day average — red below it, gray at it, green above. Click to sort.">Avg dmg</SortableTh>
                             <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Frags/Battle — average kills per battle this period (frags ÷ battles). Hover a row to see raw frag + battle counts. Click to sort.">F/B</SortableTh>
                         </tr>
                     </thead>
@@ -1089,21 +1121,21 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                         {row.ship_name || `Ship ${row.ship_id}`}
                                     </button>
                                 </td>
-                                <td className="py-1.5 px-2 text-center tabular-nums text-[var(--text-muted)]">
+                                <td className="py-1.5 px-2 text-center font-['Courier_New',Courier,monospace] tabular-nums text-[var(--text-strong)]">
                                     {row.ship_tier ?? '—'}
                                 </td>
                                 <td
-                                    className="py-1.5 px-2 text-center font-semibold"
+                                    className="py-1.5 px-2 text-center text-sm font-semibold"
                                     style={{ color: shipTypeColor(row.ship_type) }}
                                     title={row.ship_type ?? ''}
                                 >
                                     {shipTypeShort(row.ship_type)}
                                 </td>
-                                <td className="py-1.5 px-2 text-center tabular-nums text-[var(--text-strong)]">{formatInt(row.battles)}</td>
-                                <td className="py-1.5 px-2 text-right">
+                                <td className="py-1.5 px-2 text-center font-['Courier_New',Courier,monospace] tabular-nums text-[var(--text-strong)]">{formatInt(row.battles)}</td>
+                                <td className="py-1.5 px-2 text-right font-['Courier_New',Courier,monospace]">
                                     <SessionWrCell periodWinRate={row.win_rate} />
                                 </td>
-                                <td className="py-1.5 pr-2 text-right">
+                                <td className="py-1.5 pr-2 text-right font-['Courier_New',Courier,monospace]">
                                     <OverallWrCell
                                         periodWinRate={row.win_rate}
                                         lifetimeWinRate={row.lifetime_win_rate}
@@ -1112,9 +1144,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                         isRankedOnlyPeriod={row.is_ranked_only_period}
                                     />
                                 </td>
-                                <td className="py-1.5 pr-2 text-right tabular-nums text-[var(--text-strong)]">{formatInt(row.avg_damage)}</td>
+                                <td className="py-1.5 pr-2 text-right font-['Courier_New',Courier,monospace] tabular-nums">
+                                    <AvgDamageCell
+                                        avgDamage={row.avg_damage}
+                                        popAvgDamage={row.ship_pop_avg_damage}
+                                    />
+                                </td>
                                 <td
-                                    className="py-1.5 px-2 text-center tabular-nums text-[var(--text-strong)]"
+                                    className="py-1.5 px-2 text-center font-['Courier_New',Courier,monospace] tabular-nums text-[var(--text-strong)]"
                                     title={`${row.frags} frags / ${row.battles} battles`}
                                 >
                                     {formatTableKdr(row.kdr)}
