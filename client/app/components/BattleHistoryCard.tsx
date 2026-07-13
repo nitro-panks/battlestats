@@ -922,11 +922,10 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             )}
             {hasBattles && (() => {
                 const kdr = totals!.battles > 0 ? totals!.frags / totals!.battles : 0;
-                // Split the old single "Win rate" tile into two clearly-headed
-                // columns — Session WR (this window) and Overall WR (lifetime) —
-                // mirroring the table's WR and Overall WR columns so the totals row
-                // reads the same way as the rows it summarizes.
-                const lifetimeWr = totals!.lifetime_win_rate;
+                // The WR cluster is Window WR + WR Δ only — the lifetime
+                // "Overall WR" tile was dropped 2026-07-13 as a duplicate of
+                // the page-top Win Rate card; the Δ tile keeps the lifetime
+                // comparison (window minus lifetime) without restating it.
                 const deltaWr = totals!.delta_win_rate;
                 const deltaTone = deltaWr == null
                     ? 'var(--text-muted)'
@@ -941,7 +940,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     <div className="mt-4 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
-                            <div className="text-3xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
+                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
                         </div>
                         {/* Hairline section rules: flex items, centered in the
                             justify-between gaps. Hidden on the mobile grid. */}
@@ -950,7 +949,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Window WR</div>
                             <div
-                                className="text-3xl font-semibold tabular-nums"
+                                className="text-2xl font-semibold tabular-nums"
                                 style={{ color: wrColor(totals!.win_rate) }}
                                 title={`Win rate over this window — ${formatPercent(totals!.win_rate)}`}
                             >
@@ -958,29 +957,10 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             </div>
                         </div>
                         <div>
-                            <div className="text-xs text-[var(--text-muted)]">Overall WR</div>
-                            {lifetimeWr != null ? (
-                                <div
-                                    className="text-3xl font-semibold tabular-nums"
-                                    style={{ color: wrColor(lifetimeWr) }}
-                                    title={`Lifetime win rate ${formatPercent(lifetimeWr)}`}
-                                >
-                                    {formatPercent(lifetimeWr)}
-                                </div>
-                            ) : (
-                                <div
-                                    className="text-3xl font-semibold text-[var(--text-muted)]"
-                                    title="No lifetime baseline for this mode"
-                                >
-                                    N/A
-                                </div>
-                            )}
-                        </div>
-                        <div>
                             <div className="text-xs text-[var(--text-muted)]">WR Δ</div>
                             {deltaWr != null ? (
                                 <div
-                                    className="text-3xl font-semibold tabular-nums"
+                                    className="text-2xl font-semibold tabular-nums"
                                     style={{ color: deltaTone }}
                                     title={`Session win rate ${deltaWr > 0 ? 'above' : deltaWr < 0 ? 'below' : 'even with'} lifetime by ${Math.abs(deltaWr).toFixed(1)}%`}
                                 >
@@ -988,7 +968,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 </div>
                             ) : (
                                 <div
-                                    className="text-3xl font-semibold text-[var(--text-muted)]"
+                                    className="text-2xl font-semibold text-[var(--text-muted)]"
                                     title="No lifetime baseline to compare against"
                                 >
                                     —
@@ -1000,15 +980,15 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         <div className="contents sm:flex sm:items-end sm:gap-x-4">
                         <div className="sm:text-right">
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
-                            <div className="text-3xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
+                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
                         </div>
                         <div className="sm:text-right">
                             <div className="text-xs text-[var(--text-muted)]">Frags</div>
-                            <div className="text-3xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.frags)}</div>
+                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.frags)}</div>
                         </div>
                         <div className="sm:text-right">
                             <div className="text-xs text-[var(--text-muted)]">Avg KDR</div>
-                            <div className="text-3xl font-semibold text-[var(--text-strong)]">{kdr.toFixed(2)}</div>
+                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{kdr.toFixed(2)}</div>
                         </div>
                         </div>
                     </div>
