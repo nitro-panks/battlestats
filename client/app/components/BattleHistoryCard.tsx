@@ -846,32 +846,12 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 : 'mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5'}
             aria-label="Recent battles"
         >
-            {/* Three mini-treemaps summarizing the SELECTED window+mode (the
-                same rows as the table below) — unlike the sparkline, which is
-                pinned to the month window. Area = volume, color = win rate. */}
-            {hasBattles && (
-                <BattleHistoryTreemaps
-                    byShip={payload.by_ship ?? []}
-                    selectedShipId={selectedShip?.ship_id ?? null}
-                    onShipClick={toggleShip}
-                />
-            )}
-            <div
-                className="w-full pb-5"
-                // The WR-line draw-reveal is the sparkline's longest entrance
-                // animation; its bubbled animationend (caught here at the painted
-                // wrapper, since the rect itself lives in <defs>) marks "the D3
-                // sparkline finished". Filter by name so the 30 bar-rise events
-                // don't trigger it. Idempotent for the caller.
-                onAnimationEnd={(e) => {
-                    if (e.animationName === 'sparkline-wr-reveal') {
-                        onSparklineAnimationEnd?.();
-                    }
-                }}
-            >
-                {sparkline}
-            </div>
-            <hr className="mb-5 border-[var(--accent-faint)]" />
+            {/* Card order (reordered 2026-07-13): overview block first —
+                header (window pills, the most-used control on the page, must
+                sit ABOVE the content it re-scopes), summary tiles (the
+                headline numbers), then the month-pinned sparkline as a thin
+                trend strip closing the overview — followed by the drill-down
+                surfaces (treemaps, then the per-ship table). */}
             <header className="flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex flex-wrap items-baseline gap-3">
                     <h2 className="whitespace-nowrap text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
@@ -927,7 +907,10 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     Random|Ranked|All pill (removed 2026-07-13: 35 sessions/90d
                     ever touched it; ranked history moved to the Ranked tab). */}
                 <span
-                    className="ml-auto rounded bg-[var(--accent-mid)] px-2 py-0.5 text-xs font-semibold text-[var(--bg-card)]"
+                    // Same bg/text pairing as the page-top stat boxes
+                    // (Win Rate / PvP Battles / …) so the caption reads as
+                    // part of that family rather than a bright action chip.
+                    className="ml-auto rounded bg-[var(--accent-faint)] px-2 py-0.5 text-xs font-semibold text-[var(--accent-dark)]"
                     title={MODE_TITLE[mode]}
                 >
                     {MODE_LABEL[mode]}
@@ -942,33 +925,38 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             )}
             {hasBattles && (() => {
                 const kdr = totals!.battles > 0 ? totals!.frags / totals!.battles : 0;
-                // Split the old single "Win rate" tile into two clearly-headed
-                // columns — Session WR (this window) and Overall WR (lifetime) —
-                // mirroring the table's WR and Overall WR columns so the totals row
-                // reads the same way as the rows it summarizes.
-                const lifetimeWr = totals!.lifetime_win_rate;
+                // The WR cluster is Window WR + WR Δ only — the lifetime
+                // "Overall WR" tile was dropped 2026-07-13 as a duplicate of
+                // the page-top Win Rate card; the Δ tile keeps the lifetime
+                // comparison (window minus lifetime) without restating it.
                 const deltaWr = totals!.delta_win_rate;
                 const deltaTone = deltaWr == null
                     ? 'var(--text-muted)'
                     : deltaWr > 0 ? '#74c476' : deltaWr < 0 ? '#a50f15' : 'var(--text-muted)';
-                // Three logical groups, snug within each and gutter-separated from
-                // the next: count (Battles) · the WR cluster · the combat cluster.
-                // Mobile keeps a flat 2-col grid — the `contents` wrappers collapse so
-                // all seven tiles flow into it; at sm they become flex clusters.
+                // Three logical groups spanning the full card width (matching
+                // the sparkline below): count (Battles) left, the WR cluster
+                // centered by justify-between, the combat cluster flush right
+                // with right-aligned tiles. Mobile keeps a flat 2-col grid —
+                // the `contents` wrappers collapse so all seven tiles flow
+                // into it; at sm they become flex clusters.
                 return (
-                    <div className="mt-4 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:gap-x-4 xl:gap-x-[37px]">
+                    // Subtle neutral-gray wash (the sparkline bars' neutral,
+                    // lighter) sets the summary band off from the chart
+                    // surfaces around it — deliberately gray, not the blue
+                    // accent-faint tint, so it stays quiet in both themes.
+                    <div className="mt-4 rounded-md bg-[rgba(120,120,120,0.12)] px-4 py-3 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
+                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
                         </div>
-                        {/* Hairline section rules: flex items, so the 37px gap falls on
-                            each side → ~75px between groups. Hidden on the mobile grid. */}
+                        {/* Hairline section rules: flex items, centered in the
+                            justify-between gaps. Hidden on the mobile grid. */}
                         <div className="hidden w-px self-stretch bg-[var(--accent-faint)] sm:block" aria-hidden="true" />
                         <div className="contents sm:flex sm:items-end sm:gap-x-4">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Window WR</div>
                             <div
-                                className="text-lg font-semibold tabular-nums"
+                                className="text-2xl font-semibold tabular-nums"
                                 style={{ color: wrColor(totals!.win_rate) }}
                                 title={`Win rate over this window — ${formatPercent(totals!.win_rate)}`}
                             >
@@ -976,27 +964,11 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             </div>
                         </div>
                         <div>
-                            <div className="text-xs text-[var(--text-muted)]">Overall WR</div>
-                            {lifetimeWr != null ? (
-                                <div
-                                    className="text-lg font-semibold tabular-nums"
-                                    style={{ color: wrColor(lifetimeWr) }}
-                                    title={`Lifetime win rate ${formatPercent(lifetimeWr)}`}
-                                >
-                                    {formatPercent(lifetimeWr)}
-                                </div>
-                            ) : (
-                                <div
-                                    className="text-lg font-semibold text-[var(--text-muted)]"
-                                    title="No lifetime baseline for this mode"
-                                >
-                                    N/A
-                                </div>
-                            )}
-                        </div>
-                        <div>
                             <div className="text-xs text-[var(--text-muted)]">WR Δ</div>
                             {deltaWr != null ? (
+                                // A step smaller than the primary stats — the
+                                // delta qualifies Window WR rather than
+                                // standing on its own.
                                 <div
                                     className="text-lg font-semibold tabular-nums"
                                     style={{ color: deltaTone }}
@@ -1016,25 +988,59 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         </div>
                         <div className="hidden w-px self-stretch bg-[var(--accent-faint)] sm:block" aria-hidden="true" />
                         <div className="contents sm:flex sm:items-end sm:gap-x-4">
-                        <div>
+                        <div className="sm:text-right">
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
+                            <div className="text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
                         </div>
-                        <div>
-                            <div className="text-xs text-[var(--text-muted)]">Frags</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.frags)}</div>
-                        </div>
-                        <div>
-                            <div className="text-xs text-[var(--text-muted)]">Avg KDR</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{kdr.toFixed(2)}</div>
+                        {/* One per-battle frag tile — the old "Frags" total
+                            (low-signal) and "Avg KDR" (which was already
+                            frags ÷ battles under a misleading name) collapsed
+                            into it, 2026-07-13. The raw total lives in the
+                            tooltip; the table's F/B column is this same
+                            metric per ship. */}
+                        <div className="sm:text-right">
+                            <div className="text-xs text-[var(--text-muted)]">Frags/Battle</div>
+                            <div
+                                className="text-2xl font-semibold text-[var(--text-strong)]"
+                                title={`${formatInt(totals!.frags)} frags over ${formatInt(totals!.battles)} battles this window`}
+                            >
+                                {kdr.toFixed(2)}
+                            </div>
                         </div>
                         </div>
                     </div>
                 );
             })()}
-            {/* Combat profile for the ship selected in the table below. Sits
-                between the stats rollup and the ships table; toggled by row
-                clicks (a second click on the same ship hides it). */}
+            <div
+                className="mt-5 w-full pb-5"
+                // The WR-line draw-reveal is the sparkline's longest entrance
+                // animation; its bubbled animationend (caught here at the painted
+                // wrapper, since the rect itself lives in <defs>) marks "the D3
+                // sparkline finished". Filter by name so the 30 bar-rise events
+                // don't trigger it. Idempotent for the caller.
+                onAnimationEnd={(e) => {
+                    if (e.animationName === 'sparkline-wr-reveal') {
+                        onSparklineAnimationEnd?.();
+                    }
+                }}
+            >
+                {sparkline}
+            </div>
+            <hr className="mb-5 border-[var(--accent-faint)]" />
+            {/* Three mini-treemaps summarizing the SELECTED window+mode (the
+                same rows as the table below) — unlike the sparkline, which is
+                pinned to the month window. Area = volume, color = win rate. */}
+            {hasBattles && (
+                <BattleHistoryTreemaps
+                    byShip={payload.by_ship ?? []}
+                    selectedShipId={selectedShip?.ship_id ?? null}
+                    onShipClick={toggleShip}
+                />
+            )}
+            {/* Combat profile for the ship selected in the treemaps or the
+                table below. Sits between the treemaps and the ships table;
+                toggled by ship clicks (a second click on the same ship hides
+                it). */}
             {hasBattles && selectedShip ? (
                 <ShipStats
                     playerName={playerName}
@@ -1060,7 +1066,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Win rate over the selected window on this ship. Color codes use Wargaming community thresholds. Click to sort by window WR.">WR</SortableTh>
                             <SortableTh sortKey="lifetime_win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Overall (lifetime) win rate and its delta (Δ) vs this window. Click to sort by overall WR.">Overall WR</SortableTh>
                             <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average damage dealt per battle on this ship in the selected period. Click to sort.">Avg dmg</SortableTh>
-                            <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average kills per battle this period (frags ÷ battles). Hover a row to see raw frag + battle counts. Click to sort.">Avg KDR</SortableTh>
+                            <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Frags/Battle — average kills per battle this period (frags ÷ battles). Hover a row to see raw frag + battle counts. Click to sort.">F/B</SortableTh>
                         </tr>
                     </thead>
                     <tbody>
