@@ -931,24 +931,26 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 const deltaTone = deltaWr == null
                     ? 'var(--text-muted)'
                     : deltaWr > 0 ? '#74c476' : deltaWr < 0 ? '#a50f15' : 'var(--text-muted)';
-                // Three logical groups, snug within each and gutter-separated from
-                // the next: count (Battles) · the WR cluster · the combat cluster.
-                // Mobile keeps a flat 2-col grid — the `contents` wrappers collapse so
-                // all seven tiles flow into it; at sm they become flex clusters.
+                // Three logical groups spanning the full card width (matching
+                // the sparkline below): count (Battles) left, the WR cluster
+                // centered by justify-between, the combat cluster flush right
+                // with right-aligned tiles. Mobile keeps a flat 2-col grid —
+                // the `contents` wrappers collapse so all seven tiles flow
+                // into it; at sm they become flex clusters.
                 return (
-                    <div className="mt-4 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:gap-x-4 xl:gap-x-[37px]">
+                    <div className="mt-4 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
+                            <div className="text-3xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
                         </div>
-                        {/* Hairline section rules: flex items, so the 37px gap falls on
-                            each side → ~75px between groups. Hidden on the mobile grid. */}
+                        {/* Hairline section rules: flex items, centered in the
+                            justify-between gaps. Hidden on the mobile grid. */}
                         <div className="hidden w-px self-stretch bg-[var(--accent-faint)] sm:block" aria-hidden="true" />
                         <div className="contents sm:flex sm:items-end sm:gap-x-4">
                         <div>
                             <div className="text-xs text-[var(--text-muted)]">Window WR</div>
                             <div
-                                className="text-lg font-semibold tabular-nums"
+                                className="text-3xl font-semibold tabular-nums"
                                 style={{ color: wrColor(totals!.win_rate) }}
                                 title={`Win rate over this window — ${formatPercent(totals!.win_rate)}`}
                             >
@@ -959,7 +961,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             <div className="text-xs text-[var(--text-muted)]">Overall WR</div>
                             {lifetimeWr != null ? (
                                 <div
-                                    className="text-lg font-semibold tabular-nums"
+                                    className="text-3xl font-semibold tabular-nums"
                                     style={{ color: wrColor(lifetimeWr) }}
                                     title={`Lifetime win rate ${formatPercent(lifetimeWr)}`}
                                 >
@@ -967,7 +969,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 </div>
                             ) : (
                                 <div
-                                    className="text-lg font-semibold text-[var(--text-muted)]"
+                                    className="text-3xl font-semibold text-[var(--text-muted)]"
                                     title="No lifetime baseline for this mode"
                                 >
                                     N/A
@@ -978,7 +980,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             <div className="text-xs text-[var(--text-muted)]">WR Δ</div>
                             {deltaWr != null ? (
                                 <div
-                                    className="text-lg font-semibold tabular-nums"
+                                    className="text-3xl font-semibold tabular-nums"
                                     style={{ color: deltaTone }}
                                     title={`Session win rate ${deltaWr > 0 ? 'above' : deltaWr < 0 ? 'below' : 'even with'} lifetime by ${Math.abs(deltaWr).toFixed(1)}%`}
                                 >
@@ -986,7 +988,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 </div>
                             ) : (
                                 <div
-                                    className="text-lg font-semibold text-[var(--text-muted)]"
+                                    className="text-3xl font-semibold text-[var(--text-muted)]"
                                     title="No lifetime baseline to compare against"
                                 >
                                     —
@@ -996,17 +998,17 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         </div>
                         <div className="hidden w-px self-stretch bg-[var(--accent-faint)] sm:block" aria-hidden="true" />
                         <div className="contents sm:flex sm:items-end sm:gap-x-4">
-                        <div>
+                        <div className="sm:text-right">
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
+                            <div className="text-3xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
                         </div>
-                        <div>
+                        <div className="sm:text-right">
                             <div className="text-xs text-[var(--text-muted)]">Frags</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{formatInt(totals!.frags)}</div>
+                            <div className="text-3xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.frags)}</div>
                         </div>
-                        <div>
+                        <div className="sm:text-right">
                             <div className="text-xs text-[var(--text-muted)]">Avg KDR</div>
-                            <div className="text-lg font-semibold text-[var(--text-strong)]">{kdr.toFixed(2)}</div>
+                            <div className="text-3xl font-semibold text-[var(--text-strong)]">{kdr.toFixed(2)}</div>
                         </div>
                         </div>
                     </div>
