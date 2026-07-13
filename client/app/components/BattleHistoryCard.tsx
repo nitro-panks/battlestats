@@ -1108,7 +1108,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 onClick={() => toggleShip(row)}
                                 className={`cursor-pointer border-b border-[var(--accent-faint)] transition-colors last:border-b-0 hover:bg-[var(--accent-faint)] ${selectedShip?.ship_id === row.ship_id ? 'bg-[var(--accent-faint)]' : ''}`}
                             >
-                                <td className="py-1.5 pr-2 text-[var(--text-strong)]">
+                                <td className="py-1.5 align-middle pr-2 text-[var(--text-strong)]">
                                     {/* Real button on the name keeps the row keyboard-
                                         accessible without overriding the <tr> row role. */}
                                     <button
@@ -1121,21 +1121,21 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                         {row.ship_name || `Ship ${row.ship_id}`}
                                     </button>
                                 </td>
-                                <td className="py-1.5 px-2 text-center font-['Courier_New',Courier,monospace] tabular-nums text-[var(--text-strong)]">
+                                <td className="py-1.5 align-middle px-2 text-center font-['Courier_New',Courier,monospace] tabular-nums text-[var(--text-strong)]">
                                     {row.ship_tier ?? '—'}
                                 </td>
                                 <td
-                                    className="py-1.5 px-2 text-center text-sm font-semibold"
+                                    className="py-1.5 align-middle px-2 text-center text-sm font-semibold"
                                     style={{ color: shipTypeColor(row.ship_type) }}
                                     title={row.ship_type ?? ''}
                                 >
                                     {shipTypeShort(row.ship_type)}
                                 </td>
-                                <td className="py-1.5 px-2 text-center font-['Courier_New',Courier,monospace] tabular-nums text-[var(--text-strong)]">{formatInt(row.battles)}</td>
-                                <td className="py-1.5 px-2 text-right font-['Courier_New',Courier,monospace]">
+                                <td className="py-1.5 align-middle px-2 text-center font-['Courier_New',Courier,monospace] tabular-nums text-[var(--text-strong)]">{formatInt(row.battles)}</td>
+                                <td className="py-1.5 align-middle px-2 text-right font-['Courier_New',Courier,monospace]">
                                     <SessionWrCell periodWinRate={row.win_rate} />
                                 </td>
-                                <td className="py-1.5 pr-2 text-right font-['Courier_New',Courier,monospace]">
+                                <td className="py-1.5 align-middle pr-2 text-right font-['Courier_New',Courier,monospace]">
                                     <OverallWrCell
                                         periodWinRate={row.win_rate}
                                         lifetimeWinRate={row.lifetime_win_rate}
@@ -1144,14 +1144,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                         isRankedOnlyPeriod={row.is_ranked_only_period}
                                     />
                                 </td>
-                                <td className="py-1.5 pr-2 text-right font-['Courier_New',Courier,monospace] tabular-nums">
+                                <td className="py-1.5 align-middle pr-2 text-right font-['Courier_New',Courier,monospace] tabular-nums">
                                     <AvgDamageCell
                                         avgDamage={row.avg_damage}
                                         popAvgDamage={row.ship_pop_avg_damage}
                                     />
                                 </td>
                                 <td
-                                    className="py-1.5 px-2 text-center font-['Courier_New',Courier,monospace] tabular-nums text-[var(--text-strong)]"
+                                    className="py-1.5 align-middle px-2 text-center font-['Courier_New',Courier,monospace] tabular-nums text-[var(--text-strong)]"
                                     title={`${row.frags} frags / ${row.battles} battles`}
                                 >
                                     {formatTableKdr(row.kdr)}
