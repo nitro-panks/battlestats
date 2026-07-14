@@ -272,6 +272,39 @@ def register_periodic_schedules(sender, **kwargs):
             },
         )
 
+    # -- Ship-pop damage-baseline bulk warm (per realm, striped, daily) --
+    # The battle-history damage-treemap baselines (ship_pop_avg_damage) are
+    # day-keyed and rotate cold at UTC midnight. This standalone warm fires
+    # just after the rotation (00:10/00:30/00:50, one realm's ~34s grouped
+    # scan at a time) so tiles colorize from the first view of the day. The
+    # snapshot-chained warm (02:30+) stays as the second trigger — both paths
+    # rewrite the same day keys, so double-running is a cheap no-op — and
+    # this one exists because the chain only fires when the snapshot
+    # completes, which deploy timing or a lock-skip can push past a whole
+    # day's traffic (observed 2026-07-13/14).
+    ship_pop_warm_minutes = {"na": "10", "eu": "30", "asia": "50"}
+    for realm in sorted(VALID_REALMS):
+        ship_pop_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute=ship_pop_warm_minutes.get(realm, "10"),
+            hour="0",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"ship-pop-bulk-warm-{realm}",
+            defaults={
+                "task": "warships.tasks.warm_all_ship_pop_avg_damage_task",
+                "crontab": ship_pop_schedule,
+                "interval": None,
+                "enabled": True,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm}),
+                "description": f"Daily post-midnight bulk warm of the damage-treemap ship_pop_avg_damage baselines ({realm.upper()}) — one grouped scan; closes the UTC-midnight → snapshot-chain gap.",
+            },
+        )
+
     # -- Player Distribution Warmer (split from landing warmer) --
     # 2026-06-20: 360 -> 1440 (daily). Population histograms move slowly; 12h cache TTL
     # + :published fallback serve between warms. Cuts the MV refresh + 4-bin rebuild from

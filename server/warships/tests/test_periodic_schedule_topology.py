@@ -17,6 +17,7 @@ when transitioning a row from interval → crontab, and forgetting to
 add an old name to `_RETIRED_SCHEDULE_NAMES` after a rename.
 """
 from __future__ import annotations
+import json
 
 import os
 from unittest import mock
@@ -220,6 +221,23 @@ class ShipSnapshotFiresTwiceADayTests(TestCase):
                 f"ship-top-player-snapshot-{realm} firings should be 12h apart, "
                 f"got hour='{row.crontab.hour}'",
             )
+
+    def test_ship_pop_bulk_warm_daily_just_after_midnight(self):
+        # The damage-treemap baselines are day-keyed and rotate cold at UTC
+        # midnight. This standalone daily warm fires shortly after the
+        # rotation (00:10/00:30/00:50 striped) so tiles are colorized without
+        # depending on the 02:30+ snapshot chain or its deploy timing.
+        minutes = []
+        for realm in VALID_REALMS:
+            row = PeriodicTask.objects.get(name=f"ship-pop-bulk-warm-{realm}")
+            self.assertEqual(
+                row.task, "warships.tasks.warm_all_ship_pop_avg_damage_task")
+            self.assertEqual(row.crontab.hour, "0")
+            self.assertEqual(json.loads(row.kwargs), {"realm": realm})
+            self.assertTrue(row.enabled)
+            minutes.append(int(row.crontab.minute))
+        # Striped: one realm's grouped scan at a time on the shared PG.
+        self.assertEqual(len(minutes), len(set(minutes)))
 
     def test_ship_snapshot_firings_dont_collide_across_realms(self):
         # Compare the *set* of firing hours, not the raw "h1,h2" string: under
