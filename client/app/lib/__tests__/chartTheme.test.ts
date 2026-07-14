@@ -47,10 +47,10 @@ describe('resolveContainerChartWidth', () => {
 
 describe('barChartDataRightX', () => {
     it('matches shipBarPlot data edge at full-width panel sizes', () => {
-        // 68 + (svgWidth - 68 - 96) - 148 — bars are scaled to end a fixed 148px
+        // 68 + (svgWidth - 68 - 46) - 148 — bars are scaled to end a fixed 148px
         // label gutter short of the plot edge, so the longest bar ends here.
-        expect(barChartDataRightX(788)).toBeCloseTo(68 + (788 - 68 - 96) - 148, 5);
-        expect(barChartDataRightX(586)).toBeCloseTo(68 + (586 - 68 - 96) - 148, 5);
+        expect(barChartDataRightX(788)).toBeCloseTo(68 + (788 - 68 - 46) - 148, 5);
+        expect(barChartDataRightX(586)).toBeCloseTo(68 + (586 - 68 - 46) - 148, 5);
     });
 
     it('uses shipBarPlot compact margins + gutter below its 420px threshold', () => {
@@ -58,7 +58,7 @@ describe('barChartDataRightX', () => {
     });
 
     it('uses full margins between 420 and 480 (population compact, bars not)', () => {
-        expect(barChartDataRightX(440)).toBeCloseTo(68 + (440 - 68 - 96) - 148, 5);
+        expect(barChartDataRightX(440)).toBeCloseTo(68 + (440 - 68 - 46) - 148, 5);
     });
 });
 
@@ -69,7 +69,7 @@ describe('alignedChartRightMargin', () => {
     });
 
     it('never shrinks below the annotation floor', () => {
-        // Computed margin (right + gutter = 96 + 148 = 244) is below this floor,
+        // Computed margin (right + gutter = 46 + 148 = 194) is below this floor,
         // so the floor wins.
         expect(alignedChartRightMargin(600, 300)).toBe(300);
     });

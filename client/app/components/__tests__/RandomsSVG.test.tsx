@@ -191,10 +191,11 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         global.fetch = mockFetch as unknown as typeof fetch;
     });
 
-    // Two eligible ships (both >= the default cutoff of 25) so the chart is
-    // non-empty by default; the tier/type filter buttons are derived from the
-    // full ship set, so the observable proof of the new filters is the
-    // empty-state text (chartData → 0) and the slider's clamped value label.
+    // Two eligible ships. With fewer than the top-N (35) threshold the dormant
+    // default cutoff is 0 (show all), so the chart is non-empty by default; the
+    // tier/type filter buttons are derived from the full ship set, so the
+    // observable proof of the new filters is the empty-state text (chartData → 0)
+    // and the slider's clamped value label.
     const RANDOMS_ROWS = [
         { ship_id: 1, ship_name: 'Grind Ship', ship_chart_name: 'Grind Ship', ship_tier: 8, ship_type: 'Cruiser', pvp_battles: 120, wins: 66, win_ratio: 0.55 },
         { ship_id: 2, ship_name: 'Dabble Ship', ship_chart_name: 'Dabble Ship', ship_tier: 7, ship_type: 'Destroyer', pvp_battles: 60, wins: 33, win_ratio: 0.55 },
@@ -209,8 +210,8 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         // the grindiest ship (120) rather than the pre-data floor.
         await screen.findByRole('button', { name: 'T8' });
         const slider = screen.getByLabelText('Minimum lifetime random battles to show a ship');
-        // Default cutoff (no-window-activity default).
-        expect(screen.getByText(/≥\s*25/)).toBeInTheDocument();
+        // Dormant default with fewer than 30 ships → cutoff 0 (show all).
+        expect(screen.getByText(/≥\s*0$/)).toBeInTheDocument();
 
         // A mid-range value below the ceiling passes through unchanged.
         fireEvent.change(slider, { target: { value: '50' } });
@@ -225,7 +226,33 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
     });
 
-    it('empties the chart when window-only is on and no ships were played in the window', async () => {
+    it('adds a Min WR slider that defaults to 0 and filters ships below the cutoff', async () => {
+        // Best ship sits at 54.6% (its whole-% ceiling rounds up to 55); the
+        // other at 42%. A 55% cutoff therefore clears both.
+        mockFetch.mockImplementation(buildUrlRoutedFetch([
+            { ship_id: 1, ship_name: 'Low WR', ship_chart_name: 'Low WR', ship_tier: 8, ship_type: 'Cruiser', pvp_battles: 200, wins: 84, win_ratio: 0.42 },
+            { ship_id: 2, ship_name: 'Best WR', ship_chart_name: 'Best WR', ship_tier: 8, ship_type: 'Cruiser', pvp_battles: 200, wins: 109, win_ratio: 0.546 },
+        ], []));
+
+        render(<RandomsSVG playerId={556} playerName="TesterWR" />);
+
+        // Wait for the payload so the slider's ceiling reflects the best ship WR.
+        await screen.findByRole('button', { name: 'T8' });
+        const wrSlider = screen.getByLabelText('Minimum win rate to show a ship');
+        // Defaults to 0 (no WR filtering); ceiling is the best ship's rounded WR.
+        expect(screen.getByText(/≥\s*0%/)).toBeInTheDocument();
+        expect(wrSlider).toHaveAttribute('min', '0');
+        expect(wrSlider).toHaveAttribute('max', '55');
+        expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
+
+        // A 55% cutoff drops both ships (best is 54.6%) → chart empties.
+        fireEvent.change(wrSlider, { target: { value: '55' } });
+        await waitFor(() => {
+            expect(screen.getByText('No ships match the selected filters.')).toBeInTheDocument();
+        });
+    });
+
+    it('locks the Activity filter to All when no ships were played in the window', async () => {
         // Empty 30d window payload: neither ship was played recently.
         mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, []));
 
@@ -235,13 +262,17 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         await screen.findByLabelText('Minimum lifetime random battles to show a ship');
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
 
-        // Window Only → nothing in the window → chart empties.
+        // No window activity → All stays selected; Recent and Window Only lock.
+        expect(screen.getByRole('radio', { name: 'All' })).toHaveAttribute('aria-checked', 'true');
+        expect(screen.getByRole('radio', { name: 'Recent' })).toBeDisabled();
         const windowOnly = screen.getByRole('radio', { name: 'Window Only' });
-        fireEvent.click(windowOnly);
+        expect(windowOnly).toBeDisabled();
 
-        await waitFor(() => {
-            expect(screen.getByText('No ships match the selected filters.')).toBeInTheDocument();
-        });
+        // Clicking the locked Window Only is a no-op: the chart stays populated
+        // (never routed to the empty Window-Only view).
+        fireEvent.click(windowOnly);
+        expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
+        expect(screen.getByRole('radio', { name: 'All' })).toHaveAttribute('aria-checked', 'true');
     });
 
     it('defaults to recent with no min-battles floor when the window has battles', async () => {
@@ -257,14 +288,15 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         const recent = await screen.findByRole('radio', { name: 'Recent' });
         // Window join lands → default applied: Recent selected, cutoff 0.
         await waitFor(() => expect(recent).toBeChecked());
-        expect(screen.getByText(/≥\s*0/)).toBeInTheDocument();
+        expect(screen.getByText(/≥\s*0$/)).toBeInTheDocument();
         // The in-window ship keeps the chart populated.
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
     });
 
-    it('keeps the all-ships / min-25 default when the window has no battles', async () => {
-        // Empty window payload: the default filters stay put (Activity: All,
-        // cutoff 25) so a player with no recent activity still sees their ships.
+    it('keeps the all-ships default (cutoff 0 for a small roster) when the window has no battles', async () => {
+        // Empty window payload: the default filters stay put (Activity: All). With
+        // fewer than 30 ships the dormant default cutoff is 0, so a player with no
+        // recent activity still sees all their ships.
         mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, []));
 
         render(<RandomsSVG playerId={204} playerName="TesterD" />);
@@ -272,7 +304,34 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         const all = await screen.findByRole('radio', { name: 'All' });
         await screen.findByRole('button', { name: 'T8' });
         expect(all).toBeChecked();
-        expect(screen.getByText(/≥\s*25/)).toBeInTheDocument();
+        expect(screen.getByText(/≥\s*0$/)).toBeInTheDocument();
+        expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
+    });
+
+    it('defaults a dormant player to the top-35 ships (cutoff = 35th ship battles)', async () => {
+        // 38 ships, descending battle counts, none played in the window. The
+        // dormant default surfaces the top 35 by using the 35th-ranked ship's
+        // battle count as the cutoff: pvp_battles = 380 - i*10, so the 35th ship
+        // (index 34) has 40 battles.
+        const manyRows = Array.from({ length: 38 }, (_, i) => ({
+            ship_id: i + 1,
+            ship_name: `Ship ${i + 1}`,
+            ship_chart_name: `Ship ${i + 1}`,
+            ship_tier: 8,
+            ship_type: 'Cruiser',
+            pvp_battles: 380 - i * 10,
+            wins: Math.round((380 - i * 10) * 0.5),
+            win_ratio: 0.5,
+        }));
+        mockFetch.mockImplementation(buildUrlRoutedFetch(manyRows, []));
+
+        render(<RandomsSVG playerId={205} playerName="TesterE" />);
+
+        await screen.findByRole('button', { name: 'T8' });
+        // Cutoff lands on the 35th ship's battle count (40), not the pre-data floor.
+        await waitFor(() => {
+            expect(screen.getByText(/≥\s*40/)).toBeInTheDocument();
+        });
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
     });
 });

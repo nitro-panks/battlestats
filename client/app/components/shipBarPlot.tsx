@@ -70,10 +70,10 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
         const totalSvgHeight = compact ? Math.min(svgHeight, config.compactHeightCap) : svgHeight;
         const margin = compact
             ? { top: 8, right: 14, bottom: 42, left: config.compactLeftMargin }
-            : { top: 8, right: 96, bottom: 48, left: 68 };
+            : { top: 8, right: 46, bottom: 48, left: 100 };
         const width = totalSvgWidth - margin.left - margin.right;
         const height = totalSvgHeight - margin.top - margin.bottom;
-        const axisFontSize = compact ? '9px' : '10px';
+        const axisFontSize = compact ? '9px' : '12px';
 
         const svgRoot = d3.select(container)
             .append('svg')

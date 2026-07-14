@@ -241,7 +241,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-3">
                             <p className="text-sm text-[var(--accent-light)]">
-                                Last played {player.days_since_last_battle} days ago
+                                {player.days_since_last_battle === 0
+                                    ? 'Last played today'
+                                    : `Last played ${player.days_since_last_battle} days ago`}
                             </p>
                             {/* Right group: refresh status floats left of the streamer link
                                 (which stays right-most); refresh alone is right-justified. */}
@@ -299,7 +301,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                         <>
                             <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4" data-perf-section="summary-cards">
                                 <div
-                                    className="flex min-h-[108px] flex-col rounded-md bg-[var(--accent-faint)] p-3"
+                                    className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3"
                                     style={{ border: `3px solid ${wrColor(player.pvp_ratio)}` }}
                                 >
                                     <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Win Rate</p>
@@ -307,19 +309,19 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                         <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{player.pvp_ratio}%</p>
                                     </div>
                                 </div>
-                                <div className="flex min-h-[108px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
+                                <div className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
                                     <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">PvP Battles</p>
                                     <div className="flex flex-1 items-center justify-center">
                                         <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{player.pvp_battles.toLocaleString()}</p>
                                     </div>
                                 </div>
-                                <div className="flex min-h-[108px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
+                                <div className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
                                     <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Survival</p>
                                     <div className="flex flex-1 items-center justify-center">
                                         <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{player.pvp_survival_rate}%</p>
                                     </div>
                                 </div>
-                                <div className="flex min-h-[108px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
+                                <div className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
                                     <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">KDR</p>
                                     <div className="flex flex-1 items-center justify-center">
                                         <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{formatKillRatio(player.actual_kdr ?? null)}</p>
@@ -327,18 +329,18 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 </div>
                             </div>
 
-                            {/* Label/value grid columns (not inline text) so every
-                                value starts at a shared edge, table-style — the
-                                label columns size to their widest label. */}
-                            <div className="mt-4 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-sm text-[var(--accent-light)] sm:grid-cols-[max-content_1fr_max-content_1fr] sm:gap-x-4">
-                                <p>Total Battles:</p>
-                                <p className="font-['Courier_New',Courier,monospace] font-medium text-[var(--accent-mid)]">{player.total_battles.toLocaleString()}</p>
-                                <p>PvP Wins:</p>
-                                <p className="font-['Courier_New',Courier,monospace] font-medium text-[var(--accent-mid)]">{player.pvp_wins.toLocaleString()}</p>
-                                <p>Last Battle Date:</p>
-                                <p className="font-['Courier_New',Courier,monospace] font-medium text-[var(--accent-mid)]">{player.last_battle_date}</p>
-                                <p>PvE Battles:</p>
-                                <p className="font-['Courier_New',Courier,monospace] font-medium text-[var(--accent-mid)]">{pveBattles.toLocaleString()}</p>
+                            {/* Total and PvE battle counts, left-aligned with a
+                                little breathing room between them (Last Battle Date
+                                moved up next to "Last played"; PvP Wins removed). */}
+                            <div className="mt-4 flex flex-wrap gap-x-8 gap-y-1 text-sm text-[var(--accent-light)]">
+                                <div className="flex items-baseline gap-2">
+                                    <span>Total Battles:</span>
+                                    <span className="font-['Courier_New',Courier,monospace] font-medium text-[var(--accent-mid)]">{player.total_battles.toLocaleString()}</span>
+                                </div>
+                                <div className="flex items-baseline gap-2">
+                                    <span>PvE Battles:</span>
+                                    <span className="font-['Courier_New',Courier,monospace] font-medium text-[var(--accent-mid)]">{pveBattles.toLocaleString()}</span>
+                                </div>
                             </div>
 
                             {!player.is_hidden ? (

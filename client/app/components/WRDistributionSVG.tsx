@@ -4,7 +4,7 @@ import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { getCorrelationTileBounds, getCorrelationTrendX } from './wrDistributionPayload';
-import { alignedChartRightMargin, chartColors, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -177,11 +177,12 @@ const drawChart = (
     colors: typeof chartColors['light'],
 ) => {
     const compact = svgWidth < 480;
-    // Data fills the whole plot area [0, width], so the right margin is derived
-    // to land the plot edge on the profile bar charts' shared data-right x.
+    // Symmetric left/right margins center the plot within the canvas. (This chart
+    // only appears on the Population tab, standalone, so it no longer aligns its
+    // data-right edge to the Profile-tab bar charts.)
     const margin = compact
-        ? { top: 38, right: alignedChartRightMargin(svgWidth, 8), bottom: 28, left: 32 }
-        : { top: 38, right: alignedChartRightMargin(svgWidth, 18), bottom: 34, left: 44 };
+        ? { top: 38, right: 32, bottom: 28, left: 32 }
+        : { top: 38, right: 44, bottom: 34, left: 44 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;

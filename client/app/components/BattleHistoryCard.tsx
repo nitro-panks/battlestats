@@ -178,6 +178,12 @@ interface BattleHistoryCardProps {
     // (error / no payload) is reserved for the no-content states the parent
     // handles by switching tabs.
     embedded?: boolean;
+    // Locks the embedded card to its parent panel's height: the card becomes a
+    // flex column filling 100% height and the per-ship table flex-fills the space
+    // left below the overview, scrolling within it (instead of the fixed 800px
+    // cap). Also compacts the table's font. Used by the height-locked Activity
+    // tab; the Ranked tab (not height-locked) leaves it off and keeps the cap.
+    fillHeight?: boolean;
     // Fixed battle mode for this instance — the card no longer switches modes
     // itself (the Random|Ranked|All pill was removed 2026-07-13; the Ranked
     // tab hosts its own mode="ranked" instance).
@@ -614,6 +620,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     days = 7,
     refreshNonce = 0,
     embedded = false,
+    fillHeight = false,
     mode = 'random',
     onAvailabilityChange,
     onSparklineAnimationEnd,
@@ -874,7 +881,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         <section
             data-testid="battle-history-card"
             className={embedded
-                ? 'w-full'
+                ? (fillHeight ? 'flex h-full w-full flex-col' : 'w-full')
                 : 'mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5'}
             aria-label="Recent battles"
         >
@@ -1090,13 +1097,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     onClose={closeShipStats}
                 />
             ) : null}
-            {/* Embedded in the Activity tab the card has the whole panel to grow
-                into, so give the table a tall cap (800px) instead of the short
-                60vh box — more ship rows show before the inner scroll kicks in.
-                Standalone keeps the compact 60vh. */}
+            {/* Height-locked Activity tab (fillHeight): the table flex-fills the
+                space left below the overview and scrolls within it, so the card
+                exactly fills the locked panel. Other embedded uses (Ranked) keep
+                the tall 800px cap; standalone keeps the compact 60vh. */}
             {hasBattles && (
-            <div className={`mt-5 overflow-auto border-t border-[var(--accent-faint)] pt-4 ${embedded ? 'max-h-[800px]' : 'max-h-[60vh]'}`}>
-                <table className="w-full min-w-[34rem] text-left text-base">
+            <div className={`mt-5 overflow-auto border-t border-[var(--accent-faint)] pt-4 ${fillHeight ? 'min-h-0 flex-1' : embedded ? 'max-h-[800px]' : 'max-h-[60vh]'}`}>
+                <table className={`w-full min-w-[34rem] text-left ${fillHeight ? 'text-sm' : 'text-base'}`}>
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
                             <SortableTh sortKey="ship_name" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship played in the period. Click to sort A–Z.">Ship</SortableTh>

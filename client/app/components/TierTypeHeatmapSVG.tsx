@@ -72,13 +72,14 @@ const drawChart = (
     const resolvedTiles = resolveTierTypeTiles(payload);
 
     const compact = svgWidth < 480;
-    // left mirrors shipBarPlot's y-axis inset (68 non-compact) so the heatmap's
-    // y-axis lines up vertically with the two bar charts below it. top is a small
-    // pad now that the summary header above the grid is gone.
+    // left mirrors shipBarPlot's y-axis inset (100 non-compact) so the heatmap's
+    // y-axis lines up vertically with the two bar charts below it, and leaves room
+    // for the longest Performance-by-Type label ("Aircraft Carrier") at the 12px
+    // axis font. top is a small pad now that the summary header above the grid is gone.
     const margin = compact
         ? { top: 14, right: 6, bottom: 42, left: 28 }
-        : { top: 16, right: 18, bottom: 42, left: 68 };
-    const axisFontSize = compact ? '9px' : '10px';
+        : { top: 16, right: 18, bottom: 42, left: 100 };
+    const axisFontSize = compact ? '9px' : '12px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
 

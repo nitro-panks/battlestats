@@ -33,10 +33,11 @@ interface RandomsWindowStat {
 }
 type RandomsWindowMap = Map<string, RandomsWindowStat>;
 
-// Default minimum-battles cutoff for the slider (task 3), used for players with
-// no recent window activity. Ships with fewer than this many lifetime random
-// battles are hidden until the user lowers it. (Players WITH window activity
-// default to window-only + a 0 cutoff instead — see the window fetch effect.)
+// Pre-load fallback for the min-battles slider, shown only until the ship list
+// arrives. Once ships load, a player with no recent window activity defaults to
+// their top-N most-played ships instead (see RANDOMS_DEFAULT_TOP_SHIPS); a
+// player WITH window activity defaults to window-only + a 0 cutoff (see the
+// window fetch effect).
 const RANDOMS_DEFAULT_MIN_BATTLES = 25;
 
 interface RandomsRow {
@@ -52,6 +53,21 @@ interface RandomsRow {
     // but draws no bar/label.
     isGap?: boolean;
 }
+
+// Dormant-player default: open the chart on the player's N most-played ships
+// rather than a fixed battle floor. We do this by reading the battle count of
+// the Nth-ranked ship (by lifetime random battles) and using it as the
+// min-battles cutoff, so ships at or above that count — the top N (a few more
+// on ties) — stay visible. Fewer than N ships → 0 (show them all).
+const RANDOMS_DEFAULT_TOP_SHIPS = 35;
+
+const topShipsMinBattles = (rows: RandomsRow[], topN = RANDOMS_DEFAULT_TOP_SHIPS): number => {
+    if (rows.length < topN) {
+        return 0;
+    }
+    const sortedBattles = rows.map((row) => row.pvp_battles).sort((left, right) => right - left);
+    return sortedBattles[topN - 1];
+};
 
 // Activity filter mode (task 4): All shows every ship; Window Only hides ships
 // not played in the trailing 30-day window; Recent shows every ship but floats
@@ -88,9 +104,9 @@ const normalizeRandomsRows = (data: unknown): RandomsRow[] => {
 // at roughly the same density the old fixed-height (top-20) chart rendered at.
 const RANDOMS_ROW_HEIGHT_PX = 22;
 // Visible height of the scroll viewport; taller ship lists scroll within this.
-// Matches the Activity-tab battle-history table cap (800px) so the Ships chart
+// Roughly matches the Activity-tab battle-history table cap so the Ships chart
 // uses the same vertical room instead of being pinned to a shorter box.
-const RANDOMS_CHART_MAX_VIEWPORT_PX = 800;
+const RANDOMS_CHART_MAX_VIEWPORT_PX = 825;
 // Floor for the battles bar so low-volume tail ships stay visible rather than
 // collapsing to a 1px sliver on the linear scale. The wins overlay stays a true
 // fraction of this (possibly floored) width, so win rate reads correctly.
@@ -128,11 +144,19 @@ const drawBattlePlotDesign1 = (
     const compact = containerWidth < 580;
     const totalSvgWidth = Math.max(containerWidth || 0, 280) + RANDOMS_CHART_RIGHT_EXTENSION_PX;
     // Right margin reserves room for the WR% label AND, to its right, the
-    // win-rate delta pill (task 4); widened so neither is clipped.
+    // win-rate delta pill (task 4). Narrowed by 100px vs the old 176 to extend the
+    // bars' reach (the max line) that much further right into the formerly-empty
+    // gutter; still leaves room for the WR% label + a pill on all but the very
+    // longest pill-bearing bars.
+    // left is widened to fit the longer ship names at the larger axis font below.
     const margin = compact
-        ? { top: 8, right: 88, bottom: 48, left: 52 }
-        : { top: 8, right: 176, bottom: 48, left: 68 + RANDOMS_CHART_SHIFT_RIGHT_PX };
-    const axisFontSize = compact ? '9px' : '10px';
+        ? { top: 8, right: 88, bottom: 48, left: 60 }
+        // right is 86 (not 76) so the end-of-row labels pull 10px left of the
+        // plot edge, clearing the vertical scroll bar (the +10 RIGHT_EXTENSION
+        // that keeps the chart width stable when the scroll bar appears would
+        // otherwise slide those labels under it).
+        : { top: 8, right: 86, bottom: 48, left: 85 + RANDOMS_CHART_SHIFT_RIGHT_PX };
+    const axisFontSize = compact ? '11px' : '12px';
     const width = totalSvgWidth - margin.left - margin.right;
     // Height grows with the number of ships so the full list renders at a
     // consistent per-row density; the React container scrolls past the viewport.
@@ -419,11 +443,21 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(() => seeded?.updatedAt ?? null);
     const [hoveredShip, setHoveredShip] = useState<RandomsRow | null>(null);
     // Minimum lifetime-battles cutoff (task 3) + "played this window" toggle
-    // (task 5) + the trailing-30d window join (tasks 4 & 5).
-    const [minBattles, setMinBattles] = useState<number>(RANDOMS_DEFAULT_MIN_BATTLES);
+    // (task 5) + the trailing-30d window join (tasks 4 & 5). Seed the dormant
+    // default (top-N ships) from the cached rows when we have them so a
+    // tab-switch return repaints at the right cutoff without a flash.
+    const [minBattles, setMinBattles] = useState<number>(
+        () => (seeded?.rows ? topShipsMinBattles(seeded.rows) : RANDOMS_DEFAULT_MIN_BATTLES),
+    );
+    // Minimum win-rate cutoff (whole %). Always starts at 0 (no filtering) and
+    // resets to 0 on player/realm change; scaled 0..the player's best ship WR.
+    const [minWR, setMinWR] = useState<number>(0);
     const [activityMode, setActivityMode] = useState<ActivityMode>('all');
     const [windowStats, setWindowStats] = useState<RandomsWindowMap>(() => new Map());
     const containerRef = useRef<HTMLDivElement>(null);
+    // Guards the one-time dormant default (top-N ships) so a later re-read of the
+    // ship list (rehydrate) never clobbers a cutoff the user has since adjusted.
+    const dormantDefaultAppliedRef = useRef(false);
 
     // Fetch ALL ships, then re-fetch if stale until the backend delivers fresh data.
     useEffect(() => {
@@ -549,8 +583,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 // window, default the filters to surface that recent activity:
                 // only in-window ships, no min-battles floor. Runs once per
                 // player/realm (this effect re-runs on those) before the user
-                // has touched the filters; a no-window player keeps the
-                // all-ships / min-15 defaults.
+                // has touched the filters; a no-window player instead defaults to
+                // their top-N ships (see the dormant-default effect below).
                 if (map.size > 0) {
                     setActivityMode('recent');
                     setMinBattles(0);
@@ -572,6 +606,41 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         [allShips],
     );
 
+    // Highest per-ship win rate (whole %) — the Min WR slider's ceiling.
+    const maxWR = useMemo(
+        () => Math.round(allShips.reduce((max, row) => Math.max(max, row.win_ratio), 0) * 100),
+        [allShips],
+    );
+
+    // Battle count of the player's Nth most-played ship — the dormant default
+    // cutoff (surfaces their top ~N ships).
+    const dormantDefaultMinBattles = useMemo(() => topShipsMinBattles(allShips), [allShips]);
+
+    // Re-arm the one-time dormant default whenever we switch player/realm.
+    useEffect(() => {
+        dormantDefaultAppliedRef.current = false;
+    }, [playerId, realm]);
+
+    // Min WR always resets to 0 on player/realm change (never carries over).
+    useEffect(() => {
+        setMinWR(0);
+    }, [playerId, realm]);
+
+    // Apply the dormant default (top-N ships) once the ship list is loaded, for
+    // players with no trailing-window activity. Window-active players instead get
+    // their default (Recent / min 0) from the window fetch effect; if that effect
+    // resolves after this one, its setMinBattles(0) simply overrides. Applied at
+    // most once per player/realm so a manual slider change is never clobbered.
+    useEffect(() => {
+        if (dormantDefaultAppliedRef.current || allShips.length === 0) {
+            return;
+        }
+        dormantDefaultAppliedRef.current = true;
+        if (windowStats.size === 0) {
+            setMinBattles(dormantDefaultMinBattles);
+        }
+    }, [allShips.length, windowStats, dormantDefaultMinBattles]);
+
     // Keep the cutoff within reach: if the player's grindiest ship has fewer
     // battles than the current cutoff, the chart would empty out silently. Pull
     // the cutoff down to the ceiling so at least the top ship stays visible.
@@ -581,18 +650,26 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         }
     }, [maxBattles, minBattles]);
 
+    // With no ships played in the trailing window, Recent has nothing to float
+    // and Window Only would empty the chart, so lock the Activity filter to All:
+    // the other two options are disabled in the UI and the mode falls back to
+    // 'all' regardless of any stored value.
+    const hasWindowActivity = windowStats.size > 0;
+    const effectiveActivityMode: ActivityMode = hasWindowActivity ? activityMode : 'all';
+
     // Filter and sort every matching ship; the chart container scrolls to fit.
     const chartData = useMemo(() => {
         const base = allShips.filter((row) => (
             selectedTypes.includes(row.ship_type)
             && selectedTiers.includes(row.ship_tier)
             && row.pvp_battles >= minBattles
+            && row.win_ratio * 100 >= minWR
             // Window Only hides ships not played in the trailing window; All and
             // Recent keep every matching ship.
-            && (activityMode !== 'window' || windowStats.has(row.ship_name))
+            && (effectiveActivityMode !== 'window' || windowStats.has(row.ship_name))
         ));
         const byBattles = (a: RandomsRow, b: RandomsRow) => b.pvp_battles - a.pvp_battles;
-        if (activityMode !== 'recent') {
+        if (effectiveActivityMode !== 'recent') {
             return base.slice().sort(byBattles);
         }
         // Recent: ships that moved in the window float to the top (sorted by
@@ -604,7 +681,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             return [...recent, ...rest];
         }
         return [...recent, makeRandomsGapRow(), ...rest];
-    }, [allShips, selectedTypes, selectedTiers, minBattles, activityMode, windowStats]);
+    }, [allShips, selectedTypes, selectedTiers, minBattles, minWR, effectiveActivityMode, windowStats]);
 
     // Draw chart when data (or the window join) changes.
     useEffect(() => {
@@ -711,7 +788,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             </div>
             <div className="mt-2.5 space-y-3 text-sm">
                 <div className="flex flex-wrap items-start gap-3">
-                    <div className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">Ship Type</div>
+                    <div className="w-[103px] shrink-0 font-semibold text-[var(--text-primary)]">Ship Type</div>
                     <div className="flex flex-1 flex-wrap justify-start gap-1">
                         <button
                             key="all-types"
@@ -736,7 +813,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     </div>
                 </div>
                 <div className="flex flex-wrap items-start gap-3">
-                    <div className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">Tier</div>
+                    <div className="w-[103px] shrink-0 font-semibold text-[var(--text-primary)]">Tier</div>
                     <div className="flex flex-1 flex-wrap justify-start gap-1">
                         <button
                             key="all-tiers"
@@ -760,11 +837,32 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                         ))}
                     </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
-                    <label htmlFor="randoms-min-battles" className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">
-                        Min battles
-                    </label>
-                    <div className="flex flex-1 items-center gap-3">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                    <div className="flex items-center gap-3">
+                        <label htmlFor="randoms-min-wr" className="w-[103px] shrink-0 font-semibold text-[var(--text-primary)]">
+                            Min WR
+                        </label>
+                        <input
+                            id="randoms-min-wr"
+                            type="range"
+                            min={0}
+                            max={Math.max(maxWR, 1)}
+                            step={1}
+                            value={Math.min(minWR, Math.max(maxWR, 1))}
+                            onChange={(event) => setMinWR(Number(event.target.value))}
+                            onMouseUp={() => trackEvent('randoms-filter', { realm, control: 'min_wr', value: minWR })}
+                            onTouchEnd={() => trackEvent('randoms-filter', { realm, control: 'min_wr', value: minWR })}
+                            className="bh-scope-slider w-44 max-w-full cursor-pointer"
+                            aria-label="Minimum win rate to show a ship"
+                        />
+                        <span className="min-w-[3.5rem] tabular-nums text-xs text-[var(--text-secondary)]">
+                            &ge; {minWR}%
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <label htmlFor="randoms-min-battles" className="shrink-0 font-semibold text-[var(--text-primary)]">
+                            Min battles
+                        </label>
                         <input
                             id="randoms-min-battles"
                             type="range"
@@ -775,7 +873,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                             onChange={(event) => setMinBattles(Number(event.target.value))}
                             onMouseUp={() => trackEvent('randoms-filter', { realm, control: 'min_battles', value: minBattles })}
                             onTouchEnd={() => trackEvent('randoms-filter', { realm, control: 'min_battles', value: minBattles })}
-                            className="bh-scope-slider w-56 max-w-full cursor-pointer"
+                            className="bh-scope-slider w-44 max-w-full cursor-pointer"
                             aria-label="Minimum lifetime random battles to show a ship"
                         />
                         <span className="min-w-[3.5rem] tabular-nums text-xs text-[var(--text-secondary)]">
@@ -784,23 +882,31 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3" role="radiogroup" aria-label="Activity filter">
-                    <div className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">Activity</div>
+                    <div className="w-[103px] shrink-0 font-semibold text-[var(--text-primary)]">Activity</div>
                     <div className="flex flex-1 flex-wrap items-center gap-1">
-                        {ACTIVITY_MODE_OPTIONS.map((option) => (
-                            <button
-                                key={option.value}
-                                type="button"
-                                role="radio"
-                                aria-checked={activityMode === option.value}
-                                className={filterButtonClass(activityMode === option.value)}
-                                onClick={() => {
-                                    setActivityMode(option.value);
-                                    trackEvent('randoms-filter', { realm, control: 'activity_mode', value: option.value });
-                                }}
-                            >
-                                {option.label}
-                            </button>
-                        ))}
+                        {ACTIVITY_MODE_OPTIONS.map((option) => {
+                            // No window activity → lock to All: disable the other
+                            // two so the user can't switch to an empty view.
+                            const locked = !hasWindowActivity && option.value !== 'all';
+                            return (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={effectiveActivityMode === option.value}
+                                    disabled={locked}
+                                    title={locked ? 'No activity in the trailing window' : undefined}
+                                    className={`${filterButtonClass(effectiveActivityMode === option.value)}${locked ? ' cursor-not-allowed opacity-40' : ''}`}
+                                    onClick={() => {
+                                        if (locked) return;
+                                        setActivityMode(option.value);
+                                        trackEvent('randoms-filter', { realm, control: 'activity_mode', value: option.value });
+                                    }}
+                                >
+                                    {option.label}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
             </div>

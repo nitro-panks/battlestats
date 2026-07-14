@@ -118,6 +118,24 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; 
     { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
 ];
 
+// Locked height (px) for the Ships / Profile / Population insight panels so the
+// shell (the gray bounding box) stays a constant height across those three tabs.
+// Derived from the Ships tab's natural height with the 825px chart scroll
+// viewport (RANDOMS_CHART_MAX_VIEWPORT_PX), measured at the ~1000px desktop
+// insights column: panel ≈ 1057px. Ships takes it as a minHeight (its filter
+// row can wrap on narrow widths and must not clip the scroll box); Profile and
+// Population take it as a fixed height and grow their charts to fill down to it.
+// Re-measure if the production insights column width changes.
+const LOCKED_PANEL_HEIGHT_PX = 1057;
+
+// Height (px) of the Profile "Performance by Tier" bar chart. Grown from the
+// original 280 so the two Profile bar charts fill down to the locked panel
+// bottom; TypeSVG's per-row step derives from this same value so its bars keep
+// the tier chart's thickness. Tuned against the max-content player at the 1000px
+// desktop column (11 tier rows + 5 type rows + the 286px heatmap ≈ the locked
+// height); sparser players simply leave whitespace inside the fixed box.
+const PROFILE_TIER_CHART_HEIGHT = 374;
+
 const panelSectionIdByTab: Record<InsightsTabId, string> = {
     activity: 'insights-activity',
     population: 'insights-population',
@@ -455,10 +473,12 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     const derivedTierRows = profileChartPayload ? deriveTierRowsFromTierTypePayload(profileChartPayload) : [];
     // TypeSVG (Performance by Ship Type) has fewer, data-dependent rows than the
     // fixed 11-row Tier chart. Size its height so each row uses the SAME step as
-    // TierSVG (svgHeight 280, shipBarPlot non-compact top=8/bottom=48, y padding
-    // 0.18 over 11 rows) — so its bars match the tier chart's bar thickness
-    // rather than stretching thicker to fill a taller fixed height.
-    const TIER_CHART_ROW_STEP = (280 - 8 - 48) / (11 + 0.18);
+    // TierSVG (shipBarPlot non-compact top=8/bottom=48, y padding 0.18 over 11
+    // rows) — so its bars match the tier chart's bar thickness rather than
+    // stretching thicker to fill a taller fixed height. Both the TierSVG height
+    // and this row step derive from PROFILE_TIER_CHART_HEIGHT so the two bar
+    // charts stay harmonized as we grow them to fill the locked panel.
+    const TIER_CHART_ROW_STEP = (PROFILE_TIER_CHART_HEIGHT - 8 - 48) / (11 + 0.18);
     const typeChartHeight = Math.round(TIER_CHART_ROW_STEP * (Math.max(derivedTypeRows.length, 1) + 0.18)) + 8 + 48;
 
     const activeConfig = TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
@@ -468,48 +488,51 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
             {/* The tab strip is the section header now — the standalone "Insights"
                 title is gone and Activity sits in its place (left-most). Scrolls
                 horizontally on narrow viewports instead of stacking into rows. */}
-            <div className="mb-4 border-b border-[var(--border)] pb-3">
-                <div
-                    role="tablist"
-                    aria-label="Player insight tabs"
-                    className="-mx-1 flex flex-nowrap gap-2 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0"
-                >
-                    {TAB_CONFIG.map((tab) => {
-                        const isActive = tab.id === activeTab;
-                        // Activity dark-outs (disabled) once we know the player has
-                        // no battle activity to show.
-                        const isDisabled = tab.id === 'activity' && activityAvailable === false;
-                        const base = 'inline-flex min-h-[44px] shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium transition-colors';
-                        const stateClass = isDisabled
-                            ? 'cursor-not-allowed border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-muted)] opacity-40'
-                            : isActive
-                                ? 'border-[var(--accent-mid)] bg-[var(--accent-faint)] text-[var(--accent-mid)]'
-                                : 'border-[var(--border)] bg-[var(--bg-surface)] text-[var(--text-secondary)] hover:border-[var(--accent-light)] hover:text-[var(--accent-mid)]';
-                        return (
-                            <button
-                                key={tab.id}
-                                id={`player-insights-tab-${tab.id}`}
-                                role="tab"
-                                type="button"
-                                aria-selected={isActive}
-                                aria-controls={`player-insights-panel-${tab.id}`}
-                                aria-disabled={isDisabled}
-                                disabled={isDisabled}
-                                tabIndex={isActive ? 0 : -1}
-                                onClick={() => {
-                                    if (isDisabled) return;
-                                    if (tab.id !== activeTab) {
-                                        trackEvent(insightsTabEventByTab[tab.id], { realm });
-                                    }
-                                    setActiveTab(tab.id);
-                                }}
-                                className={`${base} ${stateClass}${isDisabled ? '' : ` tab-attention-glow${glowArmed ? ' tab-attention-glow--armed' : ''}`}`}
-                            >
-                                {tab.label}
-                            </button>
-                        );
-                    })}
-                </div>
+            {/* Compact rectangular tab strip flush to the section's top/left/right
+                edges (negative margins cancel the section's p-4). No standalone
+                divider rule — the active tab is marked by an accent-colored bottom
+                border; on desktop the tabs stretch to fill the width, on narrow
+                viewports they scroll horizontally. */}
+            <div
+                role="tablist"
+                aria-label="Player insight tabs"
+                className="-mx-4 -mt-4 mb-4 flex flex-nowrap gap-0 overflow-x-auto rounded-t-lg sm:overflow-visible"
+            >
+                {TAB_CONFIG.map((tab) => {
+                    const isActive = tab.id === activeTab;
+                    // Activity dark-outs (disabled) once we know the player has
+                    // no battle activity to show.
+                    const isDisabled = tab.id === 'activity' && activityAvailable === false;
+                    const base = 'inline-flex shrink-0 items-center justify-center whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors sm:flex-1';
+                    const stateClass = isDisabled
+                        ? 'cursor-not-allowed border-transparent text-[var(--text-muted)] opacity-40'
+                        : isActive
+                            ? 'border-[var(--accent-mid)] text-[var(--accent-mid)]'
+                            : 'border-transparent text-[var(--text-secondary)] hover:border-[var(--accent-light)] hover:text-[var(--accent-mid)]';
+                    return (
+                        <button
+                            key={tab.id}
+                            id={`player-insights-tab-${tab.id}`}
+                            role="tab"
+                            type="button"
+                            aria-selected={isActive}
+                            aria-controls={`player-insights-panel-${tab.id}`}
+                            aria-disabled={isDisabled}
+                            disabled={isDisabled}
+                            tabIndex={isActive ? 0 : -1}
+                            onClick={() => {
+                                if (isDisabled) return;
+                                if (tab.id !== activeTab) {
+                                    trackEvent(insightsTabEventByTab[tab.id], { realm });
+                                }
+                                setActiveTab(tab.id);
+                            }}
+                            className={`${base} ${stateClass}${isDisabled ? '' : ` tab-attention-glow${glowArmed ? ' tab-attention-glow--armed' : ''}`}`}
+                        >
+                            {tab.label}
+                        </button>
+                    );
+                })}
             </div>
 
             <div
@@ -521,7 +544,19 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 // and thin out on wide viewports.
                 className={activeTab === 'activity' ? 'min-w-0' : 'min-w-0 max-w-[1200px]'}
                 data-perf-section={panelSectionIdByTab[activeTab]}
-                style={{ minHeight: activeConfig.minHeight, contain: 'layout style' }}
+                style={{
+                    // Activity/Ships/Profile/Population share one locked height so
+                    // the shell stays put when switching among them; Ships uses
+                    // minHeight (filters may wrap on narrow widths) while Activity /
+                    // Profile / Population are fixed and fill it (Activity's table
+                    // flex-fills the remaining space; the charts grow to fill).
+                    ...(activeTab === 'ships'
+                        ? { minHeight: LOCKED_PANEL_HEIGHT_PX }
+                        : activeTab === 'profile' || activeTab === 'population' || activeTab === 'activity'
+                            ? { height: LOCKED_PANEL_HEIGHT_PX }
+                            : { minHeight: activeConfig.minHeight }),
+                    contain: 'layout style',
+                }}
             >
                 {activeTab === 'activity' ? (
                     isLoading ? (
@@ -529,6 +564,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     ) : (
                         <BattleHistoryCard
                             embedded
+                            fillHeight
                             mode="random"
                             playerName={playerName}
                             realm={realm}
@@ -540,13 +576,16 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 ) : null}
 
                 {activeTab === 'population' ? (
-                    <div>
+                    // Inset the population charts by 50px on each side (100px
+                    // narrower) on sm+; mobile stays full-width so the charts
+                    // don't overflow their narrow container.
+                    <div className="sm:px-[50px]">
                         <SectionHeadingWithTooltip
                             title="Win Rate vs Survival"
                             description="This scatter plot shows how this player's win rate and survival rate compare to the broader tracked player base. Each dot represents a player, positioned by PvP win rate on the x-axis and PvP survival rate on the y-axis. Darker areas indicate denser player clusters, and the outlined marker shows where this player sits in that field."
                             className="mb-2"
                         />
-                        <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={348} theme={theme} />
+                        <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={400} theme={theme} />
 
                         {pvpBattles >= 150 ? (
                             <div className="mt-6">
@@ -555,7 +594,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
                                     className="mb-2"
                                 />
-                                <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={284} theme={theme} />
+                                <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={262} theme={theme} />
                             </div>
                         ) : null}
 
@@ -566,7 +605,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     description="Player score blends win rate, kill ratio, survival, and battle volume into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
                                     className="mb-2"
                                 />
-                                <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={284} theme={theme} />
+                                <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={262} theme={theme} />
                             </div>
                         ) : null}
                     </div>
@@ -671,7 +710,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                         description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
                                         className="mb-2"
                                     />
-                                    <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={280} theme={theme} />
+                                    <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={PROFILE_TIER_CHART_HEIGHT} theme={theme} />
                                 </div>
                             </>
                         ) : (

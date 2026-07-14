@@ -221,7 +221,7 @@ export const barChartLabelGutter = (svgWidth: number): number => (svgWidth < 420
 // result slightly). Full-container-width charts on other tabs use this shared x
 // so their data ends flush with the profile bars.
 export const barChartDataRightX = (svgWidth: number): number => {
-    const barMargin = svgWidth < 420 ? { left: 62, right: 14 } : { left: 68, right: 96 };
+    const barMargin = svgWidth < 420 ? { left: 62, right: 14 } : { left: 68, right: 46 };
     return barMargin.left + (svgWidth - barMargin.left - barMargin.right) - barChartLabelGutter(svgWidth);
 };
 
