@@ -48,22 +48,10 @@ const shipTypeShort = (type: string | null | undefined): string => {
 const NEUTRAL_TILE = '#6f7683';
 
 // A range slider (1 → played-ship count) zooms the ships map into the top-N
-// most-played ships live — the treemap re-lays-out on every tick. Defaults to
-// 25 (or the player's max when they played fewer); the chosen value persists
-// per-browser as a plain number and is clamped to each player's max on read,
-// so a stored value past a smaller roster simply shows everything.
+// most-played ships live — the treemap re-lays-out on every tick. It resets to
+// 25 (or the player's max when they played fewer) on every load; the choice is
+// deliberately NOT persisted, so each visit starts from the same default view.
 const DEFAULT_TOP_N = 25;
-const SHIP_SLIDER_KEY = 'bs-bh-ships-slider';
-
-function readStoredShipSliderValue(): number | null {
-    if (typeof window === 'undefined') return null;
-    try {
-        const n = Number(window.localStorage.getItem(SHIP_SLIDER_KEY));
-        return Number.isInteger(n) && n >= 1 ? n : null;
-    } catch {
-        return null;
-    }
-}
 
 // Diverging fill for the damage map: the ratio of the player's avg damage to
 // the ship's realm 30d average. 1.0 = at expectation (neutral gray); the ends
@@ -298,27 +286,16 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
         [byShip],
     );
     // Slider zoom over the ships map: null = no explicit choice yet (use the
-    // default). Kept as the raw slider number, clamped against the current
-    // window's ship count so a window/mode/player switch that shrinks the
-    // list can't strand an oversized N. Stored choice adopted post-hydration
-    // (same SSR-safe pattern the old scope toggle used).
+    // default min(25, roster)). Kept as the raw slider number, clamped against
+    // the current window's ship count so a window/mode/player switch that
+    // shrinks the list can't strand an oversized N. Not persisted — every load
+    // starts from the default.
     const playedShipCount = useMemo(
         () => byShip.filter((r) => r.battles > 0).length,
         [byShip],
     );
     const [topN, setTopN] = useState<number | null>(null);
-    useEffect(() => {
-        const stored = readStoredShipSliderValue();
-        if (stored != null) setTopN(stored);
-    }, []);
-    const chooseTopN = (v: number) => {
-        setTopN(v);
-        try {
-            window.localStorage.setItem(SHIP_SLIDER_KEY, String(v));
-        } catch {
-            // Ignore storage failures (private mode / quota) — the zoom still applies.
-        }
-    };
+    const chooseTopN = (v: number) => setTopN(v);
     const effectiveN = Math.max(1, Math.min(topN ?? DEFAULT_TOP_N, playedShipCount));
     // One analytics event per RELEASE (not per tick — a drag emits dozens).
     const trackScopeRelease = () => trackEvent('battle-history-ships-scope', {

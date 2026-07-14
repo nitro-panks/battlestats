@@ -18,6 +18,7 @@ import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useRealm } from '../context/RealmContext';
 import { shipClass } from '../lib/shipIdentity';
+import NationFlag from './NationFlag';
 import ShipToolLink from './ShipToolLink';
 import TopShipIcon from './TopShipIcon';
 import { buildPlayerPath } from '../lib/entityRoutes';
@@ -585,6 +586,10 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
 
     return (
         <section ref={sectionRef} className="mt-2 pt-8" aria-label="Ship leaderboard">
+            {/* Filter bar + results share one centered column, narrower than the
+                treemap above and sized to the filter bar's fixed control row, so
+                the table lines up under the filter bar rather than stretching wide. */}
+            <div className="mx-auto max-w-[830px]">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                 <h3 className={HEADING_CLASS}>Ships</h3>
                 <div className="flex flex-wrap items-center gap-2">
@@ -681,6 +686,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                     />
                 )}
             </div>
+            </div>
         </section>
     );
 });
@@ -743,7 +749,7 @@ const ShipList: React.FC<{
             )}
             {/* Desktop: dense table, win rate the only color, ship name the action.
                 Viewport caps to ~15 rows; the rest scroll under a sticky header. */}
-            <div className="hidden max-h-[580px] max-w-[900px] overflow-y-auto sm:block">
+            <div className="hidden max-h-[580px] overflow-y-auto sm:block">
             <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-[var(--bg-page)]">
                     <tr className="border-b border-[var(--border)] text-left text-xs uppercase tracking-wide text-[var(--text-muted)]">
@@ -768,7 +774,8 @@ const ShipList: React.FC<{
                     {sortedShips.map((s) => (
                         <tr key={s.ship_id} className="transition-colors hover:bg-[var(--bg-hover)]">
                             <td className="py-2 pl-2 pr-8">
-                                <button type="button" className={SHIP_NAME_LINK} onClick={() => onOpen(s)}>
+                                <button type="button" className={`${SHIP_NAME_LINK} inline-flex items-center gap-2`} onClick={() => onOpen(s)}>
+                                    <NationFlag nation={s.nation} />
                                     {s.ship_name}
                                 </button>
                             </td>
@@ -795,8 +802,9 @@ const ShipList: React.FC<{
                 {sortedShips.map((s) => (
                     <li key={s.ship_id} className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] p-3">
                         <div className="flex items-center justify-between gap-2">
-                            <button type="button" className={`${SHIP_NAME_LINK} truncate`} onClick={() => onOpen(s)}>
-                                {s.ship_name}
+                            <button type="button" className={`${SHIP_NAME_LINK} inline-flex min-w-0 items-center gap-2`} onClick={() => onOpen(s)}>
+                                <NationFlag nation={s.nation} />
+                                <span className="truncate">{s.ship_name}</span>
                             </button>
                             <span className="shrink-0 tabular-nums font-semibold" style={{ color: wrColor(s.win_rate) }}>
                                 {s.win_rate.toFixed(1)}%

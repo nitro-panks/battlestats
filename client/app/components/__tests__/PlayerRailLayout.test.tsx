@@ -11,7 +11,7 @@ import PlayerRailLayout from '../PlayerRailLayout';
 // component contract that rides on it.
 const mockSegment = { value: 'Player%20A' };
 const mockPush = jest.fn();
-const mockClanSvg = { mounts: 0 };
+const mockRail = { clanMembersMounts: 0 };
 const mockUseClanMembers = jest.fn();
 
 // player name -> clan payload. A & B share clan 100 (same-clan swap); C is in
@@ -52,25 +52,6 @@ jest.mock('../../lib/sharedJsonFetch', () => ({
     isAbortError: () => false,
 }));
 
-// ClanSVG records a module-scoped mount count so we can assert the rail never
-// remounts across a swap; it surfaces clanId + the marker as data-attributes.
-jest.mock('../ClanSVG', () => ({
-    __esModule: true,
-    default: function MockClanSvg(props: { clanId: number; highlightedPlayerName?: string }) {
-        const ReactLocal = require('react');
-        ReactLocal.useEffect(() => {
-            mockClanSvg.mounts += 1;
-        }, []);
-        return (
-            <div
-                data-testid="clan-svg"
-                data-clan-id={String(props.clanId)}
-                data-highlight={props.highlightedPlayerName ?? ''}
-            />
-        );
-    },
-}));
-
 jest.mock('../DeferredSection', () => {
     return function MockDeferredSection({ children }: { children: React.ReactNode }) {
         return <>{children}</>;
@@ -78,11 +59,18 @@ jest.mock('../DeferredSection', () => {
 });
 
 // ClanMembers is code-split via next/dynamic; mock the loader to a component
-// that surfaces the marker prop and a clickable member row.
+// that surfaces the marker prop and a clickable member row. It also records a
+// module-scoped mount count so we can assert the rail never remounts across a
+// swap (the roster is the rail's persistent child now that the scatterplot is
+// gone). clanId is asserted via the useClanMembers spy instead.
 jest.mock('next/dynamic', () => () => function MockClanMembers(props: {
     highlightedPlayerName?: string;
     onSelectMember?: (name: string) => void;
 }) {
+    const ReactLocal = require('react');
+    ReactLocal.useEffect(() => {
+        mockRail.clanMembersMounts += 1;
+    }, []);
     return (
         <div data-testid="clan-members" data-highlight={props.highlightedPlayerName ?? ''}>
             <button type="button" onClick={() => props.onSelectMember?.('Player B')}>
@@ -98,7 +86,7 @@ describe('PlayerRailLayout', () => {
     beforeEach(() => {
         mockSegment.value = 'Player%20A';
         mockPush.mockReset();
-        mockClanSvg.mounts = 0;
+        mockRail.clanMembersMounts = 0;
         mockUseClanMembers.mockReset();
         mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: '' });
         consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -118,11 +106,11 @@ describe('PlayerRailLayout', () => {
     it('does not remount the rail on a same-clan member swap; only the marker moves', async () => {
         const { rerender } = renderRail();
 
-        // Initial player resolves to clan 100, rail mounts once.
-        const initial = await screen.findByTestId('clan-svg');
-        expect(initial).toHaveAttribute('data-clan-id', '100');
+        // Initial player resolves to clan 100; the roster mounts once.
+        const initial = await screen.findByTestId('clan-members');
         expect(initial).toHaveAttribute('data-highlight', 'Player A');
-        expect(mockClanSvg.mounts).toBe(1);
+        expect(mockUseClanMembers).toHaveBeenLastCalledWith(100);
+        expect(mockRail.clanMembersMounts).toBe(1);
 
         // Click another member of the SAME clan: segment changes, layout stays.
         mockSegment.value = 'Player%20B';
@@ -134,19 +122,19 @@ describe('PlayerRailLayout', () => {
 
         // Marker follows the segment synchronously...
         await waitFor(() => {
-            expect(screen.getByTestId('clan-svg')).toHaveAttribute('data-highlight', 'Player B');
+            expect(screen.getByTestId('clan-members')).toHaveAttribute('data-highlight', 'Player B');
         });
         // ...clan is unchanged and the rail never remounted.
-        expect(screen.getByTestId('clan-svg')).toHaveAttribute('data-clan-id', '100');
-        expect(screen.getByTestId('clan-members')).toHaveAttribute('data-highlight', 'Player B');
-        expect(mockClanSvg.mounts).toBe(1);
+        expect(mockUseClanMembers).toHaveBeenLastCalledWith(100);
+        expect(mockRail.clanMembersMounts).toBe(1);
     });
 
     it('redraws the rail (new clanId) on a cross-clan swap without remounting', async () => {
         const { rerender } = renderRail();
 
+        await screen.findByTestId('clan-members');
         await waitFor(() => {
-            expect(screen.getByTestId('clan-svg')).toHaveAttribute('data-clan-id', '100');
+            expect(mockUseClanMembers).toHaveBeenLastCalledWith(100);
         });
 
         // Swap to a player in a DIFFERENT clan.
@@ -157,14 +145,13 @@ describe('PlayerRailLayout', () => {
             </PlayerRailLayout>,
         );
 
+        // The clanId-keyed roster hook saw the new clan...
         await waitFor(() => {
-            expect(screen.getByTestId('clan-svg')).toHaveAttribute('data-clan-id', '200');
+            expect(mockUseClanMembers).toHaveBeenLastCalledWith(200);
         });
-        expect(screen.getByTestId('clan-svg')).toHaveAttribute('data-highlight', 'Player C');
-        // The rail re-rendered with a new clanId but did not remount.
-        expect(mockClanSvg.mounts).toBe(1);
-        // The clanId-keyed roster hook saw the new clan.
-        expect(mockUseClanMembers).toHaveBeenCalledWith(200);
+        expect(screen.getByTestId('clan-members')).toHaveAttribute('data-highlight', 'Player C');
+        // ...and the rail re-rendered with the new clan without remounting.
+        expect(mockRail.clanMembersMounts).toBe(1);
     });
 
     it('renders the well (children) alongside the rail', async () => {
@@ -174,7 +161,7 @@ describe('PlayerRailLayout', () => {
 
     it('navigates to the canonical player route on a member click', async () => {
         renderRail();
-        await screen.findByTestId('clan-svg');
+        await screen.findByTestId('clan-members');
         expect(mockPush).not.toHaveBeenCalled();
 
         screen.getByRole('button', { name: 'pick Player B' }).click();

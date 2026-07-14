@@ -23,7 +23,11 @@ export default function Page() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
-      <div className="mx-auto w-full max-w-5xl text-[var(--text-primary)]">
+      {/* Match the player page's content bounds: on lg the content spans from the
+          content-column left edge (container content + rail p-6 24px) to the
+          main-well right edge (container content − 24px), the same band the
+          header, footer, and player page use. */}
+      <div className="w-full text-[var(--text-primary)] lg:pl-6 lg:pr-6">
         <PlayerSearch />
       </div>
     </div>

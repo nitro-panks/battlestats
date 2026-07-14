@@ -34,6 +34,41 @@ const COLUMN_SPECS: ActivityColumnSpec[] = [
     { key: 'dark', label: 'Gone dark', iconBuckets: ['inactive_180d_plus'], memberBuckets: ['inactive_180d_plus'], showMemberIcons: false },
 ];
 
+// Stacked rail: one bounding box per distinct activity status, in recency
+// order. `key` is the box's legend icon; `buckets` are the member states routed
+// into it (the cooling box also absorbs any unknown recency, as the columns
+// layout does). Boxes are gathered into two supergroups — recently-active
+// (active + warm) and lapsed (cooling / dormant / gone-dark) — rendered snug
+// within a supergroup and spaced apart between them. Empty boxes and empty
+// supergroups are skipped at render.
+interface StatusBoxSpec {
+    key: Exclude<ActivityBucketKey, 'unknown'>;
+    buckets: ActivityBucketKey[];
+}
+
+interface StatusSupergroupSpec {
+    key: string;
+    boxes: StatusBoxSpec[];
+}
+
+const STATUS_SUPERGROUPS: StatusSupergroupSpec[] = [
+    {
+        key: 'active',
+        boxes: [
+            { key: 'active_7d', buckets: ['active_7d'] },
+            { key: 'active_30d', buckets: ['active_30d'] },
+        ],
+    },
+    {
+        key: 'lapsed',
+        boxes: [
+            { key: 'cooling_90d', buckets: ['cooling_90d', 'unknown'] },
+            { key: 'dormant_180d', buckets: ['dormant_180d'] },
+            { key: 'inactive_180d_plus', buckets: ['inactive_180d_plus'] },
+        ],
+    },
+];
+
 interface ClanMembersProps {
     members: ClanMemberData[];
     onSelectMember: (memberName: string) => void;
@@ -72,9 +107,11 @@ const MemberContent: React.FC<MemberContentProps> = ({ member, layout, isCurrent
     // "Nd idle" text and subsumes the separate gone-dark bed badge.
     const rowBody = (
         <>
-            <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"◆"}</span>
+            <span className="shrink-0" style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"◆"}</span>
             {showActivity && <ActivityIcon bucket={member.activity_bucket} size="inline" />}
-            {member.name}
+            {/* In the fixed-width rail (stacked) a long name truncates so the
+                trailing classification icons keep their space; elsewhere it flows. */}
+            <span className={layout === 'stacked' ? 'min-w-0 truncate' : undefined}>{member.name}</span>
             {member.is_hidden && <HiddenAccountIcon className="text-[11px] text-[var(--accent-light)]" />}
             {member.is_leader && <LeaderCrownIcon size="inline" />}
             {member.is_streamer && <TwitchStreamerIcon size="inline" />}
@@ -86,7 +123,7 @@ const MemberContent: React.FC<MemberContentProps> = ({ member, layout, isCurrent
         </>
     );
 
-    const baseLayout = layout === 'stacked' ? 'flex items-center gap-1' : 'mr-3 inline-flex items-center gap-1';
+    const baseLayout = layout === 'stacked' ? 'flex w-full min-w-0 items-center gap-1' : 'mr-3 inline-flex items-center gap-1';
 
     // Current player: the page you're already on. Render a non-interactive
     // "you are here" marker (no self-link) in the same gold the clan activity
@@ -94,7 +131,7 @@ const MemberContent: React.FC<MemberContentProps> = ({ member, layout, isCurrent
     // stacked rail it reads as a full-width active band with a gold edge.
     if (isCurrentPlayer) {
         const markerLayout = layout === 'stacked'
-            ? 'flex w-full items-center gap-1 overflow-hidden rounded-r-md border-l-2 border-[var(--champion-edge)] bg-[var(--champion-tint)] py-0.5 pl-2 pr-2'
+            ? 'flex w-full min-w-0 items-center gap-1 overflow-hidden rounded-r-md border-l-2 border-[var(--champion-edge)] bg-[var(--champion-tint)] py-0.5 pl-2 pr-2'
             : 'mr-3 inline-flex items-center gap-1 rounded-md border border-[var(--champion-edge)] bg-[var(--champion-tint)] px-1.5 py-0.5';
         return (
             <span
@@ -163,9 +200,32 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
         }))
         .filter((column) => column.members.length > 0);
 
+    // Stacked rail (player page): group the roster into outlined per-status
+    // boxes carrying a top-right status-icon legend (so the per-row activity
+    // icon is dropped). Boxes are bundled into two supergroups — active and
+    // lapsed — snug within, spaced between. Empty boxes/supergroups drop out;
+    // 'unknown' recency folds into the cooling box, matching the columns layout.
+    const statusSupergroups = (layout === 'stacked' ? STATUS_SUPERGROUPS : [])
+        .map((supergroup) => ({
+            key: supergroup.key,
+            boxes: supergroup.boxes
+                .map((box) => ({
+                    ...box,
+                    members: members.filter((member) => box.buckets.includes(member.activity_bucket)),
+                }))
+                .filter((box) => box.members.length > 0),
+        }))
+        .filter((supergroup) => supergroup.boxes.length > 0);
+    // The boxes render as one continuous stack: adjacent borders overlap into a
+    // single hairline (see the render), so the supergroups collapse to a flat,
+    // recency-ordered sequence.
+    const statusBoxesFlat = statusSupergroups.flatMap((supergroup) => supergroup.boxes);
+
     return (
         <div>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Clan Members</h3>
+            {/* The player rail drops the label; its clan name above already
+                identifies the roster. The clan page keeps it. */}
+            {layout !== 'stacked' && <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Clan Members</h3>}
             {loading && <p className="text-sm text-[var(--text-secondary)]">Syncing clan members...</p>}
             {!loading && error ? <p className="text-sm text-[var(--text-secondary)]">{error}</p> : null}
             {!loading && !error && isWarmingEfficiencyRanks ? (
@@ -201,16 +261,43 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                     ))}
                 </div>
             )}
-            {!loading && members.length > 0 && layout !== 'columns' && (
-                <div className={layout === 'stacked' ? 'scrollbar-always mt-2 max-h-[700px] space-y-1 overflow-y-auto pr-2 text-sm text-[var(--accent-light)]' : 'mt-2 text-sm leading-7 text-[var(--accent-light)]'}>
+            {!loading && members.length > 0 && layout === 'stacked' && (
+                <div>
+                    {statusBoxesFlat.map((box, boxIndex) => {
+                        // Horizontal rules only: a divider under every box (plus a top rule
+                        // on the first) separates the status groups, with no vertical side
+                        // borders — a ruled list rather than outlined boxes.
+                        const isFirst = boxIndex === 0;
+                        return (
+                            <div key={box.key} className={`relative w-full border-b border-[var(--border)] p-2 pb-[11px]${isFirst ? ' border-t' : ''}`}>
+                                {/* Status legend: the box's activity icon, pinned to the
+                                    top-right corner so it stands in for the per-row icons
+                                    below without consuming a row of vertical space. */}
+                                <div className="absolute right-2 top-2">
+                                    <ActivityIcon bucket={box.key} size="header" />
+                                </div>
+                                <div className="space-y-1 text-sm text-[var(--accent-light)]">
+                                    {box.members.map((member) => {
+                                        const isCurrentPlayer = normalizedCurrentPlayer != null
+                                            && member.name.trim().toLowerCase() === normalizedCurrentPlayer;
+                                        return (
+                                            <div key={member.name} ref={makeRowRef(member.name)} className="will-change-transform">
+                                                <MemberContent member={member} layout="stacked" isCurrentPlayer={isCurrentPlayer} showActivity={false} onSelectMember={handleSelectMember} />
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+            {!loading && members.length > 0 && layout === 'inline' && (
+                <div className="mt-2 text-sm leading-7 text-[var(--accent-light)]">
                     {members.map((member) => {
                         const isCurrentPlayer = normalizedCurrentPlayer != null
                             && member.name.trim().toLowerCase() === normalizedCurrentPlayer;
-                        return layout === 'stacked' ? (
-                            <div key={member.name} ref={makeRowRef(member.name)} className="will-change-transform">
-                                <MemberContent member={member} layout="stacked" isCurrentPlayer={isCurrentPlayer} showActivity onSelectMember={handleSelectMember} />
-                            </div>
-                        ) : (
+                        return (
                             <React.Fragment key={member.name}>
                                 <MemberContent member={member} layout="inline" isCurrentPlayer={isCurrentPlayer} showActivity onSelectMember={handleSelectMember} />
                             </React.Fragment>

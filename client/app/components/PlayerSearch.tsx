@@ -36,11 +36,10 @@ const PlayerSearch: React.FC = () => {
     }, [router, realm]);
 
     return (
-        <div className="p-4">
-            {/* Realm most-played-ships treemap. Stays within the landing's
-                max-w-5xl column (the xl+ full-bleed breakout was reverted —
-                it glued the strip to the viewport's left edge; see
-                runbook-audience-device-optimization). */}
+        <div className="p-4 lg:px-0">
+            {/* Realm most-played-ships treemap. On lg the horizontal padding is
+                dropped so the landing content aligns to the same [248,1252] band
+                as the player page + header/footer (page.tsx supplies the inset). */}
             <div className="mt-2 pt-6">
                 <RealmTopShipsTreemapSVG
                     ships={bucket?.ships ?? []}

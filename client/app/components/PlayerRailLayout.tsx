@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import { useRouter, useSelectedLayoutSegment } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import ClanSVG from './ClanSVG';
 import DeferredSection from './DeferredSection';
 import LoadingPanel from './LoadingPanel';
 import { resilientDynamicImport } from './resilientDynamicImport';
@@ -14,7 +13,6 @@ import type { PlayerData } from './entityTypes';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
 import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { PLAYER_NEXT_REFRESH_HEADER, PLAYER_REFRESH_PENDING_HEADER } from './usePlayerLiveRefresh';
-import { useTheme } from '../context/ThemeContext';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -41,7 +39,6 @@ interface ClanIdentity {
 const PlayerRailLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const router = useRouter();
     const { realm } = useRealm();
-    const { theme } = useTheme();
 
     // The active player is the child route segment (raw/URL-encoded). Decoding
     // it gives the marker name; it updates synchronously on navigation, so the
@@ -111,7 +108,7 @@ const PlayerRailLayout: React.FC<{ children: React.ReactNode }> = ({ children })
 
     return (
         <div className="relative bg-[var(--bg-page)] p-6">
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[350px_1fr]">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[250px_1fr]">
                 {/* Left rail: clan info (below player info on mobile) */}
                 <div className="order-2 lg:order-1">
                     {clanIdentity === null ? (
@@ -119,35 +116,34 @@ const PlayerRailLayout: React.FC<{ children: React.ReactNode }> = ({ children })
                         // Avoids a flash of "No Clan" while the clan_id is unknown.
                         <LoadingPanel label="Loading clan..." minHeight={280} />
                     ) : clanId && clanIdentity ? (
-                        <>
-                            <div className="mb-4 pb-1">
+                        // Clan section fills the 250px rail column (left-aligned against
+                        // the page's content edge), so the clan-name header, the members
+                        // heading, and the status boxes all share one left edge with the
+                        // header/footer, and sits snug beside the main well on its right.
+                        <div className="lg:w-[250px]">
+                            {/* Nudge the clan tag/name down so it sits toward the player
+                                name's baseline in the well, visually deferring to it. The
+                                min-height reserves space so the roster's first rule lines up
+                                with the header rule under "Last played" in the well; a name
+                                long enough to overflow it just pushes the rule down. */}
+                            <div className="min-h-[73px] pb-1 pt-[12px]">
                                 <Link
                                     href={buildClanPath(clanId, clanIdentity.clanName || 'Clan', realm)}
-                                    className="mt-1 text-xl font-semibold text-[var(--accent-mid)] underline-offset-4 hover:underline"
+                                    className="font-semibold text-[var(--accent-mid)] underline-offset-4 hover:underline"
                                     aria-label={`Open clan page for ${clanIdentity.clanName || 'clan'}`}
                                 >
-                                    {clanIdentity.clanTag ? `[${clanIdentity.clanTag}] ` : ''}{clanIdentity.clanName || 'Clan'}
+                                    {clanIdentity.clanTag ? <span className="text-xl">{`[${clanIdentity.clanTag}] `}</span> : null}
+                                    <span className="text-sm">{clanIdentity.clanName || 'Clan'}</span>
                                 </Link>
                             </div>
-                            <div id="clan_plot_container" className="mb-5 min-h-[280px]" data-perf-section="clan-plot">
-                                <ClanSVG
-                                    clanId={clanId}
-                                    onSelectMember={handleSelectMember}
-                                    highlightedPlayerName={activePlayerName ?? undefined}
-                                    svgHeight={280}
-                                    membersData={clanMembers}
-                                    theme={theme}
-                                />
-                            </div>
                             <DeferredSection
-                                className="pt-5"
                                 minHeight={clanMembers.length > 0 ? Math.min(700, Math.max(96, clanMembers.length * 26 + 48)) : 96}
                                 placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
                                 playerId={clanIdentity.playerId}
                                 rootMargin="80px 0px"
                                 sectionId="clan-members"
                             >
-                                <div id="clan_members_container" className="pl-8">
+                                <div id="clan_members_container">
                                     <ClanMembers
                                         members={clanMembers}
                                         loading={clanMembersLoading}
@@ -159,7 +155,7 @@ const PlayerRailLayout: React.FC<{ children: React.ReactNode }> = ({ children })
                                     />
                                 </div>
                             </DeferredSection>
-                        </>
+                        </div>
                     ) : (
                         <>
                             <div className="mb-4 pb-1">

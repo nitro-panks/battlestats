@@ -382,10 +382,10 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
 
     return (
         <section
-            className="w-full"
+            className="mx-auto w-full max-w-[830px]"
             aria-label="Realm ship chart"
         >
-            <div className="mb-2 flex max-w-[900px] flex-wrap items-baseline justify-between gap-2">
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex items-center gap-3">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                         {displayRealm.toUpperCase()} most-played{bucketLabel ? ` ${bucketLabel}` : ' ships'}{wrPct ? ` · top ${wrPct}%` : ''}{windowLabel ? ` · ${windowLabel}` : ''}
@@ -434,7 +434,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                     ))}
                 </div>
             </div>
-            <div ref={containerRef} className="relative w-full max-w-[900px]">
+            <div ref={containerRef} className="relative w-full">
                 <svg
                     ref={svgRef}
                     role="img"

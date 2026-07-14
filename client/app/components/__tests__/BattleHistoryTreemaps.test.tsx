@@ -111,7 +111,7 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         expect(screen.getByText(/ship 30d avg 94\.6k/)).toBeInTheDocument();
     });
 
-    it('small roster shows everything by default; the slider zooms and persists', () => {
+    it('small roster shows everything by default; the slider zooms but does not persist', () => {
         window.localStorage.removeItem('bs-bh-ships-slider');
         const many = Array.from({ length: 12 }, (_, i) => row({
             ship_id: i + 1,
@@ -136,8 +136,8 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         // Ships past the play-volume cutoff fall outside the top 5.
         expect(screen.queryByText('Ship6')).not.toBeInTheDocument();
         expect(screen.getByText('5')).toBeInTheDocument();
-        // The choice persists per-browser as the raw number.
-        expect(window.localStorage.getItem('bs-bh-ships-slider')).toBe('5');
+        // The choice is NOT persisted — no browser storage is written.
+        expect(window.localStorage.getItem('bs-bh-ships-slider')).toBeNull();
         // Analytics fire once, on release — not on every drag tick.
         expect(mockTrackEvent).not.toHaveBeenCalled();
         fireEvent.pointerUp(slider);
@@ -159,8 +159,7 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         expect(screen.getByText('12')).toBeInTheDocument();
     });
 
-    it('large roster defaults to Top 25; a stored slider value is adopted on load', () => {
-        window.localStorage.removeItem('bs-bh-ships-slider');
+    it('large roster defaults to Top 25 on every load; a stored slider value is ignored', () => {
         const many = Array.from({ length: 30 }, (_, i) => row({
             ship_id: i + 1,
             ship_name: `Ship${i + 1}`,
@@ -172,11 +171,13 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         ).toHaveLength(25);
         unmount();
 
+        // A stale value from an older build must NOT be adopted — the slider is no
+        // longer persisted, so every fresh mount resets to the default 25.
         window.localStorage.setItem('bs-bh-ships-slider', '8');
         render(<BattleHistoryTreemaps byShip={many} />);
         expect(
             screen.getByRole('img', { name: /ships sized by battles/i }).querySelectorAll('rect'),
-        ).toHaveLength(8);
+        ).toHaveLength(25);
     });
 
     it('clicking a ship tile reports the row (ShipStats toggle contract)', () => {
