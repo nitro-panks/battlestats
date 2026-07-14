@@ -572,7 +572,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             description="This chart highlights the player's most-played random-battle ships, pairing battle volume with wins so you can see which ships dominate their recent visible mix."
                             className="mb-2"
                         />
-                        <RandomsSVG playerId={playerId} isLoading={isLoading} theme={theme} />
+                        <RandomsSVG playerId={playerId} playerName={playerName} isLoading={isLoading} theme={theme} />
                     </div>
                 ) : null}
 

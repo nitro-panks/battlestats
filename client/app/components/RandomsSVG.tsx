@@ -7,12 +7,37 @@ import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
+import {
+    battleHistoryFetchUrl,
+    battleHistoryCacheKey,
+    BATTLE_HISTORY_FETCH_TTL_MS,
+    type BattleHistoryPayload,
+} from './BattleHistoryCard';
 
 interface RandomsSVGProps {
     playerId: number;
+    playerName: string;
     isLoading?: boolean;
     theme?: ChartTheme;
 }
+
+// Per-ship stats over the trailing 30-day random-battle window, joined into the
+// (otherwise lifetime) randoms chart by ship name. `deltaWinRate` is the
+// window's percentage-point shift in the ship's cumulative win rate (backend
+// `views.py`); null when there is no computable prior-to-window sample (a
+// brand-new ship, or a baseline too thin for a delta). Membership in the map
+// means the ship was played in the last 30 days.
+interface RandomsWindowStat {
+    deltaWinRate: number | null;
+    battles: number;
+}
+type RandomsWindowMap = Map<string, RandomsWindowStat>;
+
+// Default minimum-battles cutoff for the slider (task 3), used for players with
+// no recent window activity. Ships with fewer than this many lifetime random
+// battles are hidden until the user lowers it. (Players WITH window activity
+// default to window-only + a 0 cutoff instead — see the window fetch effect.)
+const RANDOMS_DEFAULT_MIN_BATTLES = 25;
 
 interface RandomsRow {
     pvp_battles: number;
@@ -64,6 +89,7 @@ const drawBattlePlotDesign1 = (
     containerElement: HTMLDivElement,
     data: RandomsRow[],
     theme: ChartTheme,
+    windowMap: RandomsWindowMap,
     onHover?: (datum: RandomsRow | null) => void,
 ) => {
     const colors = chartColors[theme];
@@ -75,9 +101,11 @@ const drawBattlePlotDesign1 = (
     const containerWidth = containerElement.clientWidth;
     const compact = containerWidth < 580;
     const totalSvgWidth = Math.max(containerWidth || 0, 280) + RANDOMS_CHART_RIGHT_EXTENSION_PX;
+    // Right margin reserves room for the WR% label AND, to its right, the
+    // win-rate delta pill (task 4); widened so neither is clipped.
     const margin = compact
-        ? { top: 28, right: 14, bottom: 48, left: 52 }
-        : { top: 28, right: 96, bottom: 48, left: 68 + RANDOMS_CHART_SHIFT_RIGHT_PX };
+        ? { top: 8, right: 88, bottom: 48, left: 52 }
+        : { top: 8, right: 176, bottom: 48, left: 68 + RANDOMS_CHART_SHIFT_RIGHT_PX };
     const axisFontSize = compact ? '9px' : '10px';
     const width = totalSvgWidth - margin.left - margin.right;
     // Height grows with the number of ships so the full list renders at a
@@ -208,7 +236,11 @@ const drawBattlePlotDesign1 = (
         .style('stroke-width', 0.5)
         .attr('fill', (datum: RandomsChartRow) => selectRandomsColorByWr(datum.win_ratio, theme));
 
-    nodes.append('text')
+    // WR% label right edge per row, recorded so the delta pill can sit just to
+    // its right (rather than over the loss region).
+    const wrLabelEndByRow = new Map<string, number>();
+    const wrLabels = nodes.append('text')
+        .classed('randoms-wr-label', true)
         .attr('x', (datum: RandomsChartRow) => {
             const labelX = barWidth(datum) + 6;
             return labelX > width - 4 ? width - 4 : labelX;
@@ -218,6 +250,74 @@ const drawBattlePlotDesign1 = (
         .style('fill', colors.labelMuted)
         .attr('text-anchor', (datum: RandomsChartRow) => (barWidth(datum) + 6 > width - 4 ? 'end' : 'start'))
         .text((datum: RandomsChartRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
+
+    wrLabels.each(function (this: SVGTextElement, datum: RandomsChartRow) {
+        const bbox = this.getBBox();
+        wrLabelEndByRow.set(datum.rowKey, bbox.x + bbox.width);
+    });
+
+    // Win-rate delta pill (task 4): for each ship played in the trailing 30-day
+    // window with a computable delta, a small backgrounded badge sits just to
+    // the right of the ship's overall WR% label. Non-interactive
+    // (pointer-events:none) so the row hover beneath still fires. Ships not
+    // played in the window — or played but with no computable delta — get none.
+    const deltaRows = rows.filter((row) => {
+        const stat = windowMap.get(row.ship_name);
+        return stat != null && stat.deltaWinRate != null;
+    });
+
+    const deltaGroups = svg.selectAll('.randoms-delta')
+        .data(deltaRows)
+        .enter()
+        .append('g')
+        .classed('randoms-delta', true)
+        .style('pointer-events', 'none');
+
+    const deltaGap = 6;
+    deltaGroups.each(function (this: SVGGElement, datum: RandomsChartRow) {
+        const group = d3.select(this);
+        const stat = windowMap.get(datum.ship_name);
+        const delta = stat?.deltaWinRate ?? 0;
+        const battles = stat?.battles ?? 0;
+        // "+<games> <±delta>%": the window games-played count in a neutral tone,
+        // the WR delta kept green/red.
+        const gamesLabel = `+${battles}`;
+        const deltaLabel = `${delta > 0 ? '+' : ''}${delta.toFixed(1)}%`;
+        const baselineY = (y(datum.rowKey) ?? 0) + foregroundBarOffset + (foregroundBarHeight / 2) + 3;
+        const deltaColor = delta > 0 ? colors.wrVeryGood : delta < 0 ? colors.wrBad : colors.labelMuted;
+        // Sit immediately right of this row's WR% label; fall back to the bar
+        // end if (defensively) no WR label width was recorded.
+        const leftX = (wrLabelEndByRow.get(datum.rowKey) ?? (barWidth(datum) + 6)) + deltaGap;
+
+        const text = group.append('text')
+            .attr('x', leftX)
+            .attr('y', baselineY)
+            .attr('text-anchor', 'start')
+            .style('font-size', axisFontSize)
+            .style('font-weight', '600');
+        text.append('tspan')
+            .style('fill', colors.labelMuted)
+            .text(gamesLabel);
+        text.append('tspan')
+            .attr('dx', 4)
+            .style('fill', deltaColor)
+            .text(deltaLabel);
+
+        const bbox = (text.node() as SVGTextElement).getBBox();
+        const padX = 4;
+        const padY = 1.5;
+
+        group.insert('rect', 'text')
+            .attr('x', bbox.x - padX)
+            .attr('y', bbox.y - padY)
+            .attr('width', bbox.width + padX * 2)
+            .attr('height', bbox.height + padY * 2)
+            .attr('rx', 3)
+            .attr('fill', colors.surface)
+            .attr('fill-opacity', 0.9)
+            .style('stroke', colors.axisLine)
+            .style('stroke-width', 0.5);
+    });
 
     // Hovering a ship-name label on the left axis triggers the same readout (and
     // highlights its bar) — useful for tail ships whose bars are short.
@@ -275,6 +375,7 @@ const deriveRandomsSelections = (rows: RandomsRow[]): { types: string[]; tiers: 
 
 const RandomsSVG: React.FC<RandomsSVGProps> = ({
     playerId,
+    playerName,
     isLoading = false,
     theme = 'light',
 }) => {
@@ -291,6 +392,11 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const [isChartLoading, setIsChartLoading] = useState(() => seeded === null);
     const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(() => seeded?.updatedAt ?? null);
     const [hoveredShip, setHoveredShip] = useState<RandomsRow | null>(null);
+    // Minimum lifetime-battles cutoff (task 3) + "played this window" toggle
+    // (task 5) + the trailing-30d window join (tasks 4 & 5).
+    const [minBattles, setMinBattles] = useState<number>(RANDOMS_DEFAULT_MIN_BATTLES);
+    const [showWindowOnly, setShowWindowOnly] = useState<boolean>(false);
+    const [windowStats, setWindowStats] = useState<RandomsWindowMap>(() => new Map());
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Fetch ALL ships, then re-fetch if stale until the backend delivers fresh data.
@@ -376,24 +482,100 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         };
     }, [playerId, realm, requestSignal]);
 
+    // Join the trailing-30d random window (delta_win_rate + played-in-window) by
+    // ship name. Dedupes onto the battle-history month/random request the
+    // Activity tab + PlayerRouteView prefetch already fire (same cacheKey), so
+    // it costs no extra round-trip. Window deltas are pure enrichment: if this
+    // fetch is slow or fails, the pills + "played this window" filter simply
+    // stay inactive until it lands.
+    useEffect(() => {
+        if (!playerName) return;
+        let cancelled = false;
+
+        void (async () => {
+            try {
+                const { data } = await fetchSharedJson<BattleHistoryPayload>(
+                    battleHistoryFetchUrl(playerName, realm),
+                    {
+                        label: `Randoms window ${playerName}`,
+                        ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
+                        cacheKey: battleHistoryCacheKey(playerName, realm),
+                        responseHeaders: ['X-Ranked-Observation-Pending', 'X-Ship-Pop-Pending'],
+                        signal: requestSignal,
+                    },
+                );
+
+                if (cancelled || !data || !Array.isArray(data.by_ship)) {
+                    return;
+                }
+
+                const map: RandomsWindowMap = new Map();
+                for (const ship of data.by_ship) {
+                    if (!ship.ship_name) continue;
+                    map.set(ship.ship_name, {
+                        deltaWinRate: ship.delta_win_rate ?? null,
+                        battles: ship.battles ?? 0,
+                    });
+                }
+                setWindowStats(map);
+
+                // On load, if the player has any random battles in the trailing
+                // window, default the filters to surface that recent activity:
+                // only in-window ships, no min-battles floor. Runs once per
+                // player/realm (this effect re-runs on those) before the user
+                // has touched the filters; a no-window player keeps the
+                // all-ships / min-15 defaults.
+                if (map.size > 0) {
+                    setShowWindowOnly(true);
+                    setMinBattles(0);
+                }
+            } catch (error) {
+                if (isAbortError(error)) return;
+                // Enrichment-only; leave deltas/checkbox absent on failure.
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [playerName, realm, requestSignal]);
+
+    // Largest per-ship lifetime battle count — the min-battles slider's ceiling.
+    const maxBattles = useMemo(
+        () => allShips.reduce((max, row) => Math.max(max, row.pvp_battles), 0),
+        [allShips],
+    );
+
+    // Keep the cutoff within reach: if the player's grindiest ship has fewer
+    // battles than the current cutoff, the chart would empty out silently. Pull
+    // the cutoff down to the ceiling so at least the top ship stays visible.
+    useEffect(() => {
+        if (maxBattles > 0 && minBattles > maxBattles) {
+            setMinBattles(maxBattles);
+        }
+    }, [maxBattles, minBattles]);
+
     // Filter and sort every matching ship; the chart container scrolls to fit.
     const chartData = useMemo(() => {
-        const filtered = allShips.filter(
-            (row) => selectedTypes.includes(row.ship_type) && selectedTiers.includes(row.ship_tier)
-        );
+        const filtered = allShips.filter((row) => (
+            selectedTypes.includes(row.ship_type)
+            && selectedTiers.includes(row.ship_tier)
+            && row.pvp_battles >= minBattles
+            && (!showWindowOnly || windowStats.has(row.ship_name))
+        ));
         return filtered
             .sort((a, b) => b.pvp_battles - a.pvp_battles);
-    }, [allShips, selectedTypes, selectedTiers]);
+    }, [allShips, selectedTypes, selectedTiers, minBattles, showWindowOnly, windowStats]);
 
-    // Draw chart when data changes
+    // Draw chart when data (or the window join) changes.
     useEffect(() => {
         if (!containerRef.current) return;
         d3.select(containerRef.current).selectAll("*").remove();
         setHoveredShip(null);
         if (chartData.length > 0) {
-            drawBattlePlotDesign1(containerRef.current, chartData, theme, setHoveredShip);
+            drawBattlePlotDesign1(containerRef.current, chartData, theme, windowStats, setHoveredShip);
         }
-    }, [chartData, theme]);
+    }, [chartData, theme, windowStats]);
 
     const availableTypes = Array.from(new Set(allShips.map((row) => row.ship_type)));
     const availableTiers = Array.from(new Set(allShips.map((row) => row.ship_tier)))
@@ -488,8 +670,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     {randomsFreshness === 'fresh' ? 'fresh' : randomsFreshness === 'stale' ? 'stale' : 'unknown'}
                 </span>
             </div>
-            <div className="mb-3 text-sm">
-                <div className="mb-3 flex flex-wrap items-start gap-3">
+            <div className="mt-2.5 space-y-3 text-sm">
+                <div className="flex flex-wrap items-start gap-3">
                     <div className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">Ship Type</div>
                     <div className="flex flex-1 flex-wrap justify-start gap-1">
                         <button
@@ -514,7 +696,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                         ))}
                     </div>
                 </div>
-                <div className="mb-1 flex flex-wrap items-start gap-3">
+                <div className="flex flex-wrap items-start gap-3">
                     <div className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">Tier</div>
                     <div className="flex flex-1 flex-wrap justify-start gap-1">
                         <button
@@ -539,14 +721,57 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                         ))}
                     </div>
                 </div>
+                <div className="flex flex-wrap items-center gap-3">
+                    <label htmlFor="randoms-min-battles" className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">
+                        Min battles
+                    </label>
+                    <div className="flex flex-1 items-center gap-3">
+                        <input
+                            id="randoms-min-battles"
+                            type="range"
+                            min={0}
+                            max={Math.max(maxBattles, 1)}
+                            step={1}
+                            value={Math.min(minBattles, Math.max(maxBattles, 1))}
+                            onChange={(event) => setMinBattles(Number(event.target.value))}
+                            onMouseUp={() => trackEvent('randoms-filter', { realm, control: 'min_battles', value: minBattles })}
+                            onTouchEnd={() => trackEvent('randoms-filter', { realm, control: 'min_battles', value: minBattles })}
+                            className="bh-scope-slider w-56 max-w-full cursor-pointer"
+                            aria-label="Minimum lifetime random battles to show a ship"
+                        />
+                        <span className="min-w-[3.5rem] tabular-nums text-xs text-[var(--text-secondary)]">
+                            &ge; {minBattles}
+                        </span>
+                    </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                    <div className="w-20 shrink-0" aria-hidden="true" />
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--text-secondary)]">
+                        <input
+                            type="checkbox"
+                            checked={showWindowOnly}
+                            onChange={(event) => {
+                                setShowWindowOnly(event.target.checked);
+                                trackEvent('randoms-filter', { realm, control: 'window_only', value: event.target.checked ? 'on' : 'off' });
+                            }}
+                            className="accent-[var(--accent-mid)]"
+                        />
+                        Only ships played in the last 30 days
+                    </label>
+                </div>
             </div>
 
             {shouldShowEmptyState ? (
-                <p className="text-sm text-[var(--text-secondary)]">No ships match the selected filters.</p>
+                // Matches the hover-details line's slot (mt-5 / min-h / text-sm)
+                // so the message starts at the same x,y whether the chart is
+                // populated or empty.
+                <div className="mb-0 mt-5 min-h-[1.5rem] text-sm">
+                    <span className="text-[var(--text-secondary)]">No ships match the selected filters.</span>
+                </div>
             ) : null}
 
             {!shouldShowEmptyState ? (
-                <div className="mb-1 min-h-[1.25rem] text-xs">
+                <div className="mb-0 mt-5 min-h-[1.5rem] text-sm">
                     {hoveredShip ? (
                         <span>
                             <span className="font-bold text-[var(--accent-dark)]">{hoveredShip.ship_name}</span>
@@ -570,8 +795,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 >
                     <div
                         ref={containerRef}
-                        className="overflow-y-auto overflow-x-hidden"
-                        style={{ maxHeight: `${RANDOMS_CHART_MAX_VIEWPORT_PX}px` }}
+                        className="mx-auto overflow-y-auto overflow-x-hidden"
+                        style={{ maxHeight: `${RANDOMS_CHART_MAX_VIEWPORT_PX}px`, width: 'calc(100% - 30px)' }}
                     ></div>
                 </div>
                 {shouldGrayOut ? (
