@@ -330,11 +330,14 @@ const drawBattlePlotDesign1 = (
         const delta = stat?.deltaWinRate ?? 0;
         const battles = stat?.battles ?? 0;
         // "+<games> <±delta>%": the window games-played count in a neutral tone,
-        // the WR delta kept green/red.
+        // the WR delta kept green/red. A delta that rounds to zero shows a
+        // high-contrast "--%" (labelStrong: white in dark, near-black in light)
+        // instead of a muted "0.0%" that washed out gray-on-gray on the pill.
+        const isZeroDelta = Math.abs(delta) < 0.05;
         const gamesLabel = `+${battles}`;
-        const deltaLabel = `${delta > 0 ? '+' : ''}${delta.toFixed(1)}%`;
+        const deltaLabel = isZeroDelta ? '--%' : `${delta > 0 ? '+' : ''}${delta.toFixed(1)}%`;
         const baselineY = (y(datum.rowKey) ?? 0) + foregroundBarOffset + (foregroundBarHeight / 2) + 3;
-        const deltaColor = delta > 0 ? colors.wrVeryGood : delta < 0 ? colors.wrBad : colors.labelMuted;
+        const deltaColor = isZeroDelta ? colors.labelStrong : delta > 0 ? colors.wrVeryGood : colors.wrBad;
         // Sit immediately right of this row's WR% label; fall back to the bar
         // end if (defensively) no WR label width was recorded.
         const leftX = (wrLabelEndByRow.get(datum.rowKey) ?? (barWidth(datum) + 6)) + deltaGap;
