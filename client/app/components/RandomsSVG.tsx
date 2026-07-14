@@ -47,7 +47,33 @@ interface RandomsRow {
     ship_tier: number;
     win_ratio: number;
     wins: number;
+    // Sentinel spacer inserted in "Recent" mode between the recent-activity
+    // group and the rest; occupies a y-band slot (a bar's worth of blank space)
+    // but draws no bar/label.
+    isGap?: boolean;
 }
+
+// Activity filter mode (task 4): All shows every ship; Window Only hides ships
+// not played in the trailing 30-day window; Recent shows every ship but floats
+// the window-active ones to the top, separated from the rest by a gap.
+type ActivityMode = 'all' | 'recent' | 'window';
+const ACTIVITY_MODE_OPTIONS: Array<{ value: ActivityMode; label: string }> = [
+    { value: 'all', label: 'All' },
+    { value: 'recent', label: 'Recent' },
+    { value: 'window', label: 'Window Only' },
+];
+
+const RANDOMS_GAP_SHIP_NAME = '__randoms_gap__';
+const makeRandomsGapRow = (): RandomsRow => ({
+    pvp_battles: 0,
+    ship_name: RANDOMS_GAP_SHIP_NAME,
+    ship_chart_name: '',
+    ship_type: '',
+    ship_tier: 0,
+    win_ratio: 0,
+    wins: 0,
+    isGap: true,
+});
 
 const normalizeRandomsRows = (data: unknown): RandomsRow[] => {
     if (Array.isArray(data)) {
@@ -190,7 +216,7 @@ const drawBattlePlotDesign1 = (
     const barWidth = (datum: RandomsChartRow) => Math.max(x(datum.pvp_battles), RANDOMS_MIN_BAR_PX);
 
     const nodes = svg.selectAll('.randoms-row')
-        .data(rows)
+        .data(rows.filter((row) => !row.isGap))
         .enter()
         .append('g')
         .classed('randoms-row', true)
@@ -395,7 +421,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     // Minimum lifetime-battles cutoff (task 3) + "played this window" toggle
     // (task 5) + the trailing-30d window join (tasks 4 & 5).
     const [minBattles, setMinBattles] = useState<number>(RANDOMS_DEFAULT_MIN_BATTLES);
-    const [showWindowOnly, setShowWindowOnly] = useState<boolean>(false);
+    const [activityMode, setActivityMode] = useState<ActivityMode>('all');
     const [windowStats, setWindowStats] = useState<RandomsWindowMap>(() => new Map());
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -526,7 +552,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 // has touched the filters; a no-window player keeps the
                 // all-ships / min-15 defaults.
                 if (map.size > 0) {
-                    setShowWindowOnly(true);
+                    setActivityMode('recent');
                     setMinBattles(0);
                 }
             } catch (error) {
@@ -557,15 +583,28 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
 
     // Filter and sort every matching ship; the chart container scrolls to fit.
     const chartData = useMemo(() => {
-        const filtered = allShips.filter((row) => (
+        const base = allShips.filter((row) => (
             selectedTypes.includes(row.ship_type)
             && selectedTiers.includes(row.ship_tier)
             && row.pvp_battles >= minBattles
-            && (!showWindowOnly || windowStats.has(row.ship_name))
+            // Window Only hides ships not played in the trailing window; All and
+            // Recent keep every matching ship.
+            && (activityMode !== 'window' || windowStats.has(row.ship_name))
         ));
-        return filtered
-            .sort((a, b) => b.pvp_battles - a.pvp_battles);
-    }, [allShips, selectedTypes, selectedTiers, minBattles, showWindowOnly, windowStats]);
+        const byBattles = (a: RandomsRow, b: RandomsRow) => b.pvp_battles - a.pvp_battles;
+        if (activityMode !== 'recent') {
+            return base.slice().sort(byBattles);
+        }
+        // Recent: ships that moved in the window float to the top (sorted by
+        // volume); the rest follow below, separated by one bar's worth of blank
+        // space (a spacer row — see makeRandomsGapRow / the draw filter).
+        const recent = base.filter((row) => windowStats.has(row.ship_name)).sort(byBattles);
+        const rest = base.filter((row) => !windowStats.has(row.ship_name)).sort(byBattles);
+        if (recent.length === 0 || rest.length === 0) {
+            return [...recent, ...rest];
+        }
+        return [...recent, makeRandomsGapRow(), ...rest];
+    }, [allShips, selectedTypes, selectedTiers, minBattles, activityMode, windowStats]);
 
     // Draw chart when data (or the window join) changes.
     useEffect(() => {
@@ -744,20 +783,25 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                         </span>
                     </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
-                    <div className="w-20 shrink-0" aria-hidden="true" />
-                    <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--text-secondary)]">
-                        <input
-                            type="checkbox"
-                            checked={showWindowOnly}
-                            onChange={(event) => {
-                                setShowWindowOnly(event.target.checked);
-                                trackEvent('randoms-filter', { realm, control: 'window_only', value: event.target.checked ? 'on' : 'off' });
-                            }}
-                            className="accent-[var(--accent-mid)]"
-                        />
-                        Only ships played in the last 30 days
-                    </label>
+                <div className="flex flex-wrap items-center gap-3" role="radiogroup" aria-label="Activity filter">
+                    <div className="w-20 shrink-0 font-semibold text-[var(--text-primary)]">Activity</div>
+                    <div className="flex flex-1 flex-wrap items-center gap-1">
+                        {ACTIVITY_MODE_OPTIONS.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                role="radio"
+                                aria-checked={activityMode === option.value}
+                                className={filterButtonClass(activityMode === option.value)}
+                                onClick={() => {
+                                    setActivityMode(option.value);
+                                    trackEvent('randoms-filter', { realm, control: 'activity_mode', value: option.value });
+                                }}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
 
@@ -782,9 +826,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                             <span className="text-[var(--text-secondary)]">{'  •  '}</span>
                             <span className="font-semibold text-[var(--text-primary)]">{(hoveredShip.win_ratio * 100).toFixed(1)}% win rate</span>
                         </span>
-                    ) : (
-                        <span className="text-[var(--text-secondary)]">Hover a bar or ship name for ship details.</span>
-                    )}
+                    ) : null}
                 </div>
             ) : null}
 

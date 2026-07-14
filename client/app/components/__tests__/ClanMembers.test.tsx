@@ -32,7 +32,7 @@ const baseMember: ClanMemberData = {
 };
 
 describe('ClanMembers efficiency-rank icon', () => {
-    it('shows a hydration status while efficiency ranks are still warming', () => {
+    it('stays silent while efficiency ranks are still warming', () => {
         render(
             <ClanMembers
                 members={[
@@ -50,7 +50,7 @@ describe('ClanMembers efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByText('Updating: 2 members.')).toBeInTheDocument();
+        expect(screen.queryByText(/Updating:/i)).not.toBeInTheDocument();
     });
 
     it('does not show a hydration status once efficiency warming is complete', () => {
@@ -154,11 +154,11 @@ describe('ClanMembers activity icon', () => {
             />,
         );
 
-        expect(screen.getByLabelText(/Active now/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/Still warm/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/Cooling/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/Dormant/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/Gone dark/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Active —/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Warm —/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Cooling —/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Cold —/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Asleep —/i)).toBeInTheDocument();
     });
 
     it('drops the old "Nd idle" / "played today" recency text', () => {
@@ -181,7 +181,7 @@ describe('ClanMembers activity icon', () => {
             />,
         );
 
-        expect(screen.queryByLabelText(/Active now|Still warm|Cooling|Dormant|Gone dark/i)).not.toBeInTheDocument();
+        expect(screen.queryByLabelText(/Active —|Warm —|Cooling —|Cold —|Asleep —/i)).not.toBeInTheDocument();
     });
 });
 

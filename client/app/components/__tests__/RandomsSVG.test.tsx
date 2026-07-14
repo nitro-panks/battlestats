@@ -231,22 +231,22 @@ describe('RandomsSVG min-battles slider + window filter', () => {
 
         render(<RandomsSVG playerId={202} playerName="TesterB" />);
 
-        // Default (checkbox off): both ships eligible → chart shown.
+        // Default (Activity: All): both ships eligible → chart shown.
         await screen.findByLabelText('Minimum lifetime random battles to show a ship');
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
 
-        // Window-only on → nothing in the window → chart empties.
-        const checkbox = screen.getByRole('checkbox', { name: /played in the last 30 days/i });
-        fireEvent.click(checkbox);
+        // Window Only → nothing in the window → chart empties.
+        const windowOnly = screen.getByRole('radio', { name: 'Window Only' });
+        fireEvent.click(windowOnly);
 
         await waitFor(() => {
             expect(screen.getByText('No ships match the selected filters.')).toBeInTheDocument();
         });
     });
 
-    it('defaults to window-only with no min-battles floor when the window has battles', async () => {
-        // Grind Ship is in the 30d window: the on-load default should flip the
-        // "played this window" checkbox on and drop the min-battles cutoff to 0.
+    it('defaults to recent with no min-battles floor when the window has battles', async () => {
+        // Grind Ship is in the 30d window: the on-load default should select the
+        // Recent activity mode and drop the min-battles cutoff to 0.
         mockFetch.mockImplementation(buildUrlRoutedFetch(
             RANDOMS_ROWS,
             [{ ship_id: 1, ship_name: 'Grind Ship', ship_tier: 8, ship_type: 'Cruiser', battles: 12, wins: 7, delta_win_rate: 2.1 }],
@@ -254,24 +254,24 @@ describe('RandomsSVG min-battles slider + window filter', () => {
 
         render(<RandomsSVG playerId={203} playerName="TesterC" />);
 
-        const checkbox = await screen.findByRole('checkbox', { name: /played in the last 30 days/i });
-        // Window join lands → default applied: checkbox on, cutoff 0.
-        await waitFor(() => expect(checkbox).toBeChecked());
+        const recent = await screen.findByRole('radio', { name: 'Recent' });
+        // Window join lands → default applied: Recent selected, cutoff 0.
+        await waitFor(() => expect(recent).toBeChecked());
         expect(screen.getByText(/≥\s*0/)).toBeInTheDocument();
         // The in-window ship keeps the chart populated.
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
     });
 
     it('keeps the all-ships / min-25 default when the window has no battles', async () => {
-        // Empty window payload: the default filters stay put (checkbox off,
+        // Empty window payload: the default filters stay put (Activity: All,
         // cutoff 25) so a player with no recent activity still sees their ships.
         mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, []));
 
         render(<RandomsSVG playerId={204} playerName="TesterD" />);
 
-        const checkbox = await screen.findByRole('checkbox', { name: /played in the last 30 days/i });
+        const all = await screen.findByRole('radio', { name: 'All' });
         await screen.findByRole('button', { name: 'T8' });
-        expect(checkbox).not.toBeChecked();
+        expect(all).toBeChecked();
         expect(screen.getByText(/≥\s*25/)).toBeInTheDocument();
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
     });

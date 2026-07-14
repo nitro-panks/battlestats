@@ -47,18 +47,18 @@ describe('resolveContainerChartWidth', () => {
 
 describe('barChartDataRightX', () => {
     it('matches shipBarPlot data edge at full-width panel sizes', () => {
-        // 68 + (svgWidth - 68 - 96) / 1.08 — the 8% x-scale headroom means the
-        // longest bar always ends here.
-        expect(barChartDataRightX(788)).toBeCloseTo(645.78, 1);
-        expect(barChartDataRightX(586)).toBeCloseTo(458.7, 1);
+        // 68 + (svgWidth - 68 - 96) - 148 — bars are scaled to end a fixed 148px
+        // label gutter short of the plot edge, so the longest bar ends here.
+        expect(barChartDataRightX(788)).toBeCloseTo(68 + (788 - 68 - 96) - 148, 5);
+        expect(barChartDataRightX(586)).toBeCloseTo(68 + (586 - 68 - 96) - 148, 5);
     });
 
-    it('uses shipBarPlot compact margins below its 420px threshold', () => {
-        expect(barChartDataRightX(380)).toBeCloseTo(62 + (380 - 62 - 14) / 1.08, 5);
+    it('uses shipBarPlot compact margins + gutter below its 420px threshold', () => {
+        expect(barChartDataRightX(380)).toBeCloseTo(62 + (380 - 62 - 14) - 100, 5);
     });
 
     it('uses full margins between 420 and 480 (population compact, bars not)', () => {
-        expect(barChartDataRightX(440)).toBeCloseTo(68 + (440 - 68 - 96) / 1.08, 5);
+        expect(barChartDataRightX(440)).toBeCloseTo(68 + (440 - 68 - 96) - 148, 5);
     });
 });
 
@@ -69,6 +69,8 @@ describe('alignedChartRightMargin', () => {
     });
 
     it('never shrinks below the annotation floor', () => {
-        expect(alignedChartRightMargin(600, 200)).toBe(200);
+        // Computed margin (right + gutter = 96 + 148 = 244) is below this floor,
+        // so the floor wins.
+        expect(alignedChartRightMargin(600, 300)).toBe(300);
     });
 });

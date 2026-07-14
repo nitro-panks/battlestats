@@ -6,9 +6,7 @@ import { barChartDataRightX, chartColors, wrColorByRatio, type ChartTheme } from
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import type { TierTypePayload, TierTypePlayerCell } from './playerProfileChartData';
-import { getTierTypeShipTypes, getTierTypeTiers, getTierTypeTileKey, resolveTierTypeTiles, type ResolvedTierTypeTile } from './tierTypeHeatmapPayload';
-
-type SvgGroupSelection = ReturnType<typeof d3.select>;
+import { getTierTypeShipTypes, getTierTypeTiers, resolveTierTypeTiles, type ResolvedTierTypeTile } from './tierTypeHeatmapPayload';
 
 interface TierTypeHeatmapSVGProps {
     playerId: number;
@@ -17,8 +15,6 @@ interface TierTypeHeatmapSVGProps {
     svgHeight?: number;
     theme?: ChartTheme;
 }
-
-const SHIP_TYPE_ORDER = ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'];
 
 const SHIP_TYPE_ABBREV: Record<string, string> = {
     'Destroyer': 'DD',
@@ -46,62 +42,6 @@ const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth
         .style('fill', colors.labelText)
         .style('font-size', '12px')
         .text(message);
-};
-
-const renderSummaryCard = (
-    summaryGroup: SvgGroupSelection,
-    tile: ResolvedTierTypeTile,
-    playerCell: TierTypePlayerCell | undefined,
-    colors: Colors,
-    chartWidth?: number,
-) => {
-    const compact = chartWidth != null && chartWidth < 480;
-    const availableWidth = compact ? Math.max(chartWidth - 40, 240) : 400;
-    const columns = [0, availableWidth * 0.33, availableWidth * 0.66];
-    const headers = ['Type', 'Population', 'Player'];
-    const values = [
-        {
-            text: `${SHIP_TYPE_ABBREV[tile.ship_type] ?? tile.ship_type} T${tile.ship_tier}`,
-            fill: colors.accentLink,
-            weight: '700',
-        },
-        {
-            text: tile.count.toLocaleString(),
-            fill: colors.axisText,
-            weight: '600',
-        },
-        {
-            text: playerCell
-                ? `${playerCell.pvp_battles.toLocaleString()} @ ${(playerCell.win_ratio * 100).toFixed(1)}%`
-                : 'No battles in cell',
-            fill: playerCell ? wrColorByRatio(playerCell.win_ratio) : colors.heatmapUnavailable,
-            weight: playerCell ? '700' : '400',
-        },
-    ];
-
-    headers.forEach((header, index) => {
-        summaryGroup.append('text')
-            .attr('x', columns[index])
-            .attr('y', 0)
-            .attr('text-anchor', 'start')
-            .attr('dominant-baseline', 'hanging')
-            .style('font-size', '9px')
-            .style('font-weight', '600')
-            .style('fill', colors.labelMuted)
-            .text(header);
-    });
-
-    values.forEach((value, index) => {
-        summaryGroup.append('text')
-            .attr('x', columns[index])
-            .attr('y', 14)
-            .attr('text-anchor', 'start')
-            .attr('dominant-baseline', 'hanging')
-            .style('font-size', '10px')
-            .style('font-weight', value.weight)
-            .style('fill', value.fill)
-            .text(value.text);
-    });
 };
 
 const drawChart = (
@@ -133,10 +73,11 @@ const drawChart = (
 
     const compact = svgWidth < 480;
     // left mirrors shipBarPlot's y-axis inset (68 non-compact) so the heatmap's
-    // y-axis lines up vertically with the two bar charts below it.
+    // y-axis lines up vertically with the two bar charts below it. top is a small
+    // pad now that the summary header above the grid is gone.
     const margin = compact
-        ? { top: 48, right: 6, bottom: 42, left: 28 }
-        : { top: 62, right: 18, bottom: 42, left: 68 };
+        ? { top: 14, right: 6, bottom: 42, left: 28 }
+        : { top: 16, right: 18, bottom: 42, left: 68 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -180,16 +121,11 @@ const drawChart = (
         .range([0, yBandExtent])
         .padding(rowPadding);
 
-    const tileByKey = new Map(resolvedTiles.map((row: ResolvedTierTypeTile) => [getTierTypeTileKey(row.ship_type, row.ship_tier), row]));
-    const playerCellByKey = new Map(payload.player_cells.map((row: TierTypePlayerCell) => [getTierTypeTileKey(row.ship_type, row.ship_tier), row]));
     const maxTileCount = d3.max(resolvedTiles, (row: ResolvedTierTypeTile) => row.count) || 1;
     const maxPlayerBattles = d3.max(payload.player_cells, (row: TierTypePlayerCell) => row.pvp_battles) || 1;
     const tileColor = theme === 'dark'
         ? d3.scaleSequential(d3.interpolateRgb('#1c2d3f', '#79c0ff')).domain([0, maxTileCount])
         : d3.scaleSequential(d3.interpolateBlues).domain([0, maxTileCount]);
-    const playerRadius = d3.scaleSqrt()
-        .domain([0, maxPlayerBattles])
-        .range([0, 14]);
 
     svg.append('g')
         .attr('class', 'tier-type-grid')
@@ -231,70 +167,39 @@ const drawChart = (
         .style('font-size', axisFontSize)
         .text(payload.x_label);
 
-    const summaryGroup = svgRoot.append('g')
-        .attr('transform', `translate(${margin.left + 6}, 28)`);
-
-    const renderSummary = (tile: ResolvedTierTypeTile) => {
-        summaryGroup.selectAll('*').remove();
-
-        const playerCell = playerCellByKey.get(getTierTypeTileKey(tile.ship_type, tile.ship_tier));
-
-        renderSummaryCard(summaryGroup, tile, playerCell, colors, svgWidth);
+    // Player markers are pills overlaid on (centered within) the population pills.
+    // Width encodes how much this captain plays that tier/type: the most-played
+    // cell fills 50% of the population pill's width, and the rest scale down
+    // linearly by battle count (floored so a rarely-played cell stays visible).
+    // Height is a fixed slice of the cell so they read as pills, not squares.
+    const PLAYER_PILL_MAX_WIDTH_FRAC = 0.8;
+    const playerPillHeight = Math.max(6, y.bandwidth() * 0.9);
+    const playerPillWidth = (row: TierTypePlayerCell) => {
+        const frac = maxPlayerBattles > 0 ? row.pvp_battles / maxPlayerBattles : 0;
+        return Math.max(4, frac * PLAYER_PILL_MAX_WIDTH_FRAC * x.bandwidth());
     };
-
-    const tileNodes = svg.selectAll('.tier-type-tile')
-        .data(resolvedTiles)
-        .enter()
-        .append('rect')
-        .attr('class', 'tier-type-tile')
-        .attr('x', (row: ResolvedTierTypeTile) => x(row.ship_type) ?? 0)
-        .attr('y', (row: ResolvedTierTypeTile) => y(String(row.ship_tier)) ?? 0)
-        .attr('width', x.bandwidth())
-        .attr('height', y.bandwidth())
-        .attr('rx', 4)
-        .attr('fill', 'transparent')
-        .attr('stroke', 'transparent')
-        .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, row: ResolvedTierTypeTile) {
-            renderSummary(row);
-            d3.select(this)
-                .attr('stroke', colors.labelStrong)
-                .attr('stroke-width', 1.2);
-        })
-        .on('mouseout', function (this: SVGRectElement) {
-            d3.select(this)
-                .attr('stroke', 'transparent')
-                .attr('stroke-width', 0);
-        });
 
     svg.selectAll('.player-cell')
         .data(payload.player_cells)
         .enter()
-        .append('circle')
+        .append('rect')
         .attr('class', 'player-cell')
-        .attr('cx', (row: TierTypePlayerCell) => (x(row.ship_type) ?? 0) + (x.bandwidth() / 2))
-        .attr('cy', (row: TierTypePlayerCell) => (y(String(row.ship_tier)) ?? 0) + (y.bandwidth() / 2))
-        .attr('r', (row: TierTypePlayerCell) => Math.max(4, playerRadius(row.pvp_battles)))
+        .attr('width', (row: TierTypePlayerCell) => playerPillWidth(row))
+        .attr('height', playerPillHeight)
+        .attr('x', (row: TierTypePlayerCell) => (x(row.ship_type) ?? 0) + (x.bandwidth() - playerPillWidth(row)) / 2)
+        .attr('y', (row: TierTypePlayerCell) => (y(String(row.ship_tier)) ?? 0) + (y.bandwidth() - playerPillHeight) / 2)
+        .attr('rx', (row: TierTypePlayerCell) => Math.min(playerPillHeight, playerPillWidth(row)) / 2)
         .attr('fill', (row: TierTypePlayerCell) => wrColorByRatio(row.win_ratio))
         .attr('fill-opacity', 0.92)
         .attr('stroke', colors.barStroke)
         .attr('stroke-width', 1.6);
-
-    const defaultTile = payload.player_cells.length
-        ? tileByKey.get(getTierTypeTileKey(payload.player_cells[0].ship_type, payload.player_cells[0].ship_tier))
-        : resolvedTiles[0];
-
-    if (defaultTile) {
-        renderSummary(defaultTile);
-    }
-
-    tileNodes.raise();
 };
 
 const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
     playerId,
     data,
     svgWidth = 570,
-    svgHeight = 332,
+    svgHeight = 286,
     theme = 'light',
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);

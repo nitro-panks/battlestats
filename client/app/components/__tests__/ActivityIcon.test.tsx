@@ -21,12 +21,12 @@ describe('activityBucketFromDays', () => {
 describe('ActivityIcon', () => {
     it('labels an explicit bucket with the matching rise-to-bed phase', () => {
         render(<ActivityIcon bucket="active_7d" />);
-        expect(screen.getByLabelText(/Active now/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Active —/i)).toBeInTheDocument();
     });
 
     it('derives the phase from a day count when no bucket is given', () => {
         render(<ActivityIcon daysSinceLastBattle={120} />);
-        expect(screen.getByLabelText(/Dormant/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Cold —/i)).toBeInTheDocument();
     });
 
     it('renders nothing for unknown / missing recency', () => {

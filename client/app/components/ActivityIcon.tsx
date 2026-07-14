@@ -27,6 +27,21 @@ const ACTIVITY_STYLES: Record<Exclude<ActivityBucketKey, 'unknown'>, ActivitySty
     inactive_180d_plus: { icon: faBed, color: '#94a3b8', label: 'Gone dark', detail: 'inactive 180+ days' },
 };
 
+// Short one-word status labels for compact surfaces (the stacked rail's box
+// header row). Kept separate from ACTIVITY_STYLES.label — that long label is
+// used elsewhere (tooltips, clan chart legend) and must not change.
+export const ACTIVITY_SHORT_LABEL: Record<Exclude<ActivityBucketKey, 'unknown'>, string> = {
+    active_7d: 'Active',
+    active_30d: 'Warm',
+    cooling_90d: 'Cooling',
+    dormant_180d: 'Cold',
+    inactive_180d_plus: 'Asleep',
+};
+
+// Expose the per-bucket activity color so callers can tint their own text/marks
+// to match the icon without duplicating the palette.
+export const activityColor = (bucket: Exclude<ActivityBucketKey, 'unknown'>): string => ACTIVITY_STYLES[bucket].color;
+
 const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]', search: 'text-xs' } as const;
 
 // Same thresholds as the backend classifier, so a surface that only carries
@@ -52,7 +67,7 @@ const ActivityIcon: React.FC<ActivityIconProps> = ({ bucket, daysSinceLastBattle
     const resolved = bucket ?? activityBucketFromDays(daysSinceLastBattle);
     if (resolved === 'unknown') return null;
     const style = ACTIVITY_STYLES[resolved];
-    const title = `${style.label} — ${style.detail}`;
+    const title = `${ACTIVITY_SHORT_LABEL[resolved]} — ${style.detail}`;
 
     return (
         <span title={title} aria-label={title} className="inline-flex items-center cursor-help">

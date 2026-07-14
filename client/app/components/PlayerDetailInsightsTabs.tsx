@@ -87,7 +87,7 @@ const TypeSVG = dynamic(() => resilientDynamicImport(() => import('./TypeSVG'), 
 
 const TierTypeHeatmapSVG = dynamic(() => resilientDynamicImport(() => import('./TierTypeHeatmapSVG'), 'PlayerDetailInsightsTabs-TierTypeHeatmapSVG'), {
     ssr: false,
-    loading: () => <LoadingPanel label="Loading tier vs type heatmap..." minHeight={332} />,
+    loading: () => <LoadingPanel label="Loading tier vs type heatmap..." minHeight={286} />,
 });
 
 const WRDistributionSVG = dynamic(() => resilientDynamicImport(() => import('./WRDistributionSVG'), 'PlayerDetailInsightsTabs-WRDistributionSVG'), {
@@ -650,7 +650,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         ) : profileChartPayload ? (
                             <>
                                 <SectionHeadingWithTooltip
-                                    title="Tier vs Type Profile"
+                                    title="Tier vs Type Profile (Random Battles)"
                                     description="This heatmap shows where the tracked player base clusters by ship tier and type. The player markers show where this captain spends most of their battles, so you can compare their ship mix with the broader population trend."
                                     className="mb-2"
                                 />

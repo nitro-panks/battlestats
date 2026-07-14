@@ -224,8 +224,8 @@ const computeKdr = (frags: number, battles: number): number => {
     return frags / battles;
 };
 
-// Format KDR for the per-ship table: trim trailing zeros so 1.50 → "1.5"
-// and 1.00 → "1". The totals tile keeps full toFixed(2) for column alignment.
+// Format frags/battle to one decimal (e.g. 1.5, 0.0) for the per-ship table;
+// the totals-band Frags/Battle tile matches this precision.
 const formatTableKdr = (v: number): string => v.toFixed(1);
 
 const SHIP_TYPE_LABEL: Record<string, string> = {
@@ -957,6 +957,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             )}
             {hasBattles && (() => {
                 const kdr = totals!.battles > 0 ? totals!.frags / totals!.battles : 0;
+                // Distinct ships played in the window — one per by_ship row.
+                const distinctShips = payload?.by_ship?.length ?? 0;
                 // The WR cluster is Window WR + WR Δ only — the lifetime
                 // "Overall WR" tile was dropped 2026-07-13 as a duplicate of
                 // the page-top Win Rate card; the Δ tile keeps the lifetime
@@ -976,16 +978,23 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     // lighter) sets the summary band off from the chart
                     // surfaces around it — deliberately gray, not the blue
                     // accent-faint tint, so it stays quiet in both themes.
-                    <div className="mt-4 rounded-md bg-[rgba(120,120,120,0.12)] px-4 py-3 grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-4">
-                        <div>
+                    // Three bordered cells — one per column — inside a bordered
+                    // gray "background" box. Cells overlap the shared edge into a
+                    // single 1px rule (border-t stacked on mobile, border-l in the
+                    // sm row); content is centered in each cell.
+                    <div className="mt-4 flex flex-col overflow-hidden rounded-md border border-[var(--border)] bg-[rgba(120,120,120,0.12)] sm:flex-row">
+                        <div className="flex flex-1 items-end px-4 py-3">
+                        <div className="flex-1 text-center">
                             <div className="text-xs text-[var(--text-muted)]">Battles</div>
                             <div className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
                         </div>
-                        {/* Hairline section rules: flex items, centered in the
-                            justify-between gaps. Hidden on the mobile grid. */}
-                        <div className="hidden w-px self-stretch bg-[var(--accent-faint)] sm:block" aria-hidden="true" />
-                        <div className="contents sm:flex sm:items-end sm:gap-x-4">
-                        <div>
+                        <div className="flex-1 text-center">
+                            <div className="text-xs text-[var(--text-muted)]">Ships</div>
+                            <div className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]">{formatInt(distinctShips)}</div>
+                        </div>
+                        </div>
+                        <div className="flex flex-1 items-end border-t border-[var(--border)] px-4 py-3 sm:border-l sm:border-t-0">
+                        <div className="flex-1 text-center">
                             <div className="text-xs text-[var(--text-muted)]">Window WR</div>
                             <div
                                 className="font-['Courier_New',Courier,monospace] text-2xl font-semibold tabular-nums"
@@ -995,7 +1004,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                 {formatPercent(totals!.win_rate)}
                             </div>
                         </div>
-                        <div>
+                        <div className="flex-1 text-center">
                             <div className="text-xs text-[var(--text-muted)]">WR Δ</div>
                             {deltaWr != null ? (
                                 // A step smaller than the primary stats — the
@@ -1018,9 +1027,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             )}
                         </div>
                         </div>
-                        <div className="hidden w-px self-stretch bg-[var(--accent-faint)] sm:block" aria-hidden="true" />
-                        <div className="contents sm:flex sm:items-end sm:gap-x-4">
-                        <div className="sm:text-right">
+                        <div className="flex flex-1 items-end border-t border-[var(--border)] px-4 py-3 sm:border-l sm:border-t-0">
+                        <div className="flex-1 text-center">
                             <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
                             <div className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
                         </div>
@@ -1030,13 +1038,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             into it, 2026-07-13. The raw total lives in the
                             tooltip; the table's F/B column is this same
                             metric per ship. */}
-                        <div className="sm:text-right">
+                        <div className="flex-1 text-center">
                             <div className="text-xs text-[var(--text-muted)]">Frags/Battle</div>
                             <div
                                 className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]"
                                 title={`${formatInt(totals!.frags)} frags over ${formatInt(totals!.battles)} battles this window`}
                             >
-                                {kdr.toFixed(2)}
+                                {kdr.toFixed(1)}
                             </div>
                         </div>
                         </div>

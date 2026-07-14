@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { chartColors, wrColorByRatio, type ChartTheme } from '../lib/chartTheme';
+import { barChartLabelGutter, chartColors, wrColorByRatio, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -93,9 +93,14 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
                 }
 
                 const maxBattles = Math.max(d3.max(rows, (datum: Row) => datum.pvp_battles) || 0, 10);
+                // Scale the bars to end short of the plot's right edge by a fixed
+                // label gutter, so the end-of-bar "wins · battles · WR%" labels sit
+                // beside the bars instead of over them. The gutter matches
+                // barChartDataRightX so the heatmap/population charts stay aligned.
+                const barAreaWidth = Math.max(width - barChartLabelGutter(totalSvgWidth), width * 0.35);
                 const x = d3.scaleLinear()
-                    .domain([0, maxBattles * 1.08])
-                    .range([0, width]);
+                    .domain([0, maxBattles])
+                    .range([0, barAreaWidth]);
 
                 const y = d3.scaleBand()
                     .range([0, height])
@@ -127,14 +132,6 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
                     .style('font-weight', '500');
 
                 svg.selectAll('.domain').style('stroke', colors.axisLine);
-
-                svg.append('text')
-                    .attr('x', width)
-                    .attr('y', height + (compact ? 32 : 38))
-                    .attr('text-anchor', 'end')
-                    .style('font-size', axisFontSize)
-                    .style('fill', colors.labelMuted)
-                    .text('Random battles');
 
                 const rowNodes = svg.selectAll(`.${config.cssPrefix}-row`)
                     .data(rows)
@@ -177,15 +174,19 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
                     });
 
                 rowNodes.append('text')
-                    .attr('x', (datum: Row) => {
-                        const labelX = x(datum.pvp_battles) + 6;
-                        return labelX > width - 4 ? width - 4 : labelX;
-                    })
                     .attr('y', (datum: Row) => (y(config.rowKey(datum)) ?? 0) + (y.bandwidth() / 2) + 3)
                     .style('font-size', axisFontSize)
                     .style('fill', colors.labelMuted)
-                    .attr('text-anchor', (datum: Row) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
-                    .text((datum: Row) => `${datum.wins.toLocaleString()} · ${datum.pvp_battles.toLocaleString()} · ${(datum.win_ratio * 100).toFixed(1)}%`);
+                    .text((datum: Row) => `${datum.wins.toLocaleString()} · ${datum.pvp_battles.toLocaleString()} · ${(datum.win_ratio * 100).toFixed(1)}%`)
+                    .each(function (this: SVGTextElement, datum: Row) {
+                        const startX = x(datum.pvp_battles) + 6;
+                        const textLength = this.getComputedTextLength();
+                        if (startX + textLength <= width) {
+                            d3.select(this).attr('text-anchor', 'start').attr('x', startX);
+                        } else {
+                            d3.select(this).attr('text-anchor', 'end').attr('x', width);
+                        }
+                    });
             };
 
         if (data) {

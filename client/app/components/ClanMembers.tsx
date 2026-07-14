@@ -5,7 +5,7 @@ import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankI
 import LeaderCrownIcon from './LeaderCrownIcon';
 import TwitchStreamerIcon from './TwitchStreamerIcon';
 import PveEnjoyerIcon from './PveEnjoyerIcon';
-import ActivityIcon from './ActivityIcon';
+import ActivityIcon, { ACTIVITY_SHORT_LABEL, activityColor } from './ActivityIcon';
 import type { ActivityBucketKey } from './clanMembersShared';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
@@ -176,8 +176,6 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
         trackEvent('clan-member-click', { realm, source });
         onSelectMember(memberName);
     }, [onSelectMember, realm, source]);
-    const pendingEfficiencyCount = members.filter((member) => member.efficiency_hydration_pending).length;
-    const isWarmingEfficiencyRanks = pendingEfficiencyCount > 0;
 
     // FLIP animation: only meaningful in stacked layout where rows have a
     // vertical position. Inline layout flows horizontally and rewrap is
@@ -228,11 +226,6 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
             {layout !== 'stacked' && <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Clan Members</h3>}
             {loading && <p className="text-sm text-[var(--text-secondary)]">Syncing clan members...</p>}
             {!loading && error ? <p className="text-sm text-[var(--text-secondary)]">{error}</p> : null}
-            {!loading && !error && isWarmingEfficiencyRanks ? (
-                <p className="shimmer-green text-sm font-medium">
-                    {`Updating: ${pendingEfficiencyCount} member${pendingEfficiencyCount === 1 ? '' : 's'}.`}
-                </p>
-            ) : null}
             {!loading && members.length === 0 && <p className="text-sm text-[var(--text-secondary)]">No clan members found.</p>}
             {!loading && members.length > 0 && layout === 'columns' && (
                 <div
@@ -269,12 +262,13 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                         // borders — a ruled list rather than outlined boxes.
                         const isFirst = boxIndex === 0;
                         return (
-                            <div key={box.key} className={`relative w-full border-b border-[var(--border)] p-2 pb-[11px]${isFirst ? ' border-t' : ''}`}>
-                                {/* Status legend: the box's activity icon, pinned to the
-                                    top-right corner so it stands in for the per-row icons
-                                    below without consuming a row of vertical space. */}
-                                <div className="absolute right-2 top-2">
+                            <div key={box.key} className={`w-full border-b border-[var(--border)] p-2 pb-[11px]${isFirst ? ' border-t' : ''}`}>
+                                {/* Status legend: a left-aligned header row — the box's
+                                    activity icon followed by a short status word in the
+                                    status color — standing in for the per-row icons below. */}
+                                <div className="mb-1 flex items-center gap-1.5">
                                     <ActivityIcon bucket={box.key} size="header" />
+                                    <span className="text-xs font-semibold" style={{ color: activityColor(box.key) }}>{ACTIVITY_SHORT_LABEL[box.key]}</span>
                                 </div>
                                 <div className="space-y-1 text-sm text-[var(--accent-light)]">
                                     {box.members.map((member) => {

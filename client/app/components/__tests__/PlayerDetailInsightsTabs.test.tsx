@@ -702,7 +702,7 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            expect(screen.getByText('Tier vs Type Profile')).toBeInTheDocument();
+            expect(screen.getByText(/Tier vs Type Profile/)).toBeInTheDocument();
         });
 
         expect(screen.getByText('Performance by Ship Type')).toBeInTheDocument();
@@ -778,7 +778,7 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            expect(screen.getByText('Tier vs Type Profile')).toBeInTheDocument();
+            expect(screen.getByText(/Tier vs Type Profile/)).toBeInTheDocument();
         });
     });
 });

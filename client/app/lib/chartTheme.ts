@@ -206,16 +206,23 @@ export const resolveContainerChartWidth = (
     minWidth = 280,
 ): number => Math.max(clientWidth || fallbackWidth, minWidth);
 
-// Canvas x where the player-profile bar charts' visible DATA ends. shipBarPlot
-// gives its x-scale 8% headroom inside fixed margins, so the longest bar always
-// ends at this x for a given svgWidth — independent of the player's data. Its
-// compact branch flips at 420px with left margins of 42/62 per chart; 62 is used
-// as the representative value (left only shifts the result by ~0.074×, so the
-// 42-vs-62 spread lands within ~1.5px). Full-container-width charts on other
-// tabs use this shared x so their data ends flush with the profile bars.
+// Fixed right-side gutter (px) shipBarPlot reserves inside its plot for the
+// end-of-bar "wins · battles · WR%" data labels: the longest bar is scaled to
+// end this far short of the plot's right edge so its label sits beside it rather
+// than over the bar. A constant (not data-derived) keeps barChartDataRightX a
+// pure function of width; sized for the widest realistic label at each font.
+export const barChartLabelGutter = (svgWidth: number): number => (svgWidth < 420 ? 100 : 148);
+
+// Canvas x where the player-profile bar charts' visible DATA (longest bar) ends.
+// shipBarPlot scales its x-range to leave barChartLabelGutter px for the labels,
+// so the longest bar always ends at this x for a given svgWidth — independent of
+// the player's data. Its compact branch flips at 420px with left margins of
+// 42/62 per chart; 62 is used as the representative value (left only shifts the
+// result slightly). Full-container-width charts on other tabs use this shared x
+// so their data ends flush with the profile bars.
 export const barChartDataRightX = (svgWidth: number): number => {
     const barMargin = svgWidth < 420 ? { left: 62, right: 14 } : { left: 68, right: 96 };
-    return barMargin.left + (svgWidth - barMargin.left - barMargin.right) / 1.08;
+    return barMargin.left + (svgWidth - barMargin.left - barMargin.right) - barChartLabelGutter(svgWidth);
 };
 
 // Right margin that lands a fill-to-plot-edge chart's data on barChartDataRightX;
