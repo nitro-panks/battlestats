@@ -69,12 +69,10 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
         const totalSvgWidth = containerWidth;
         const totalSvgHeight = compact ? Math.min(svgHeight, config.compactHeightCap) : svgHeight;
         const margin = compact
-            ? { top: 28, right: 14, bottom: 42, left: config.compactLeftMargin }
-            : { top: 28, right: 96, bottom: 48, left: 68 };
+            ? { top: 8, right: 14, bottom: 42, left: config.compactLeftMargin }
+            : { top: 8, right: 96, bottom: 48, left: 68 };
         const width = totalSvgWidth - margin.left - margin.right;
         const height = totalSvgHeight - margin.top - margin.bottom;
-        const detailFontSize = compact ? '9px' : '10px';
-        const detailTitleSize = compact ? '10px' : '11px';
         const axisFontSize = compact ? '9px' : '10px';
 
         const svgRoot = d3.select(container)
@@ -138,64 +136,6 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
                     .style('fill', colors.labelMuted)
                     .text('Random battles');
 
-                const detailGroup = svgRoot.append('g').attr('transform', `translate(${margin.left + width - 4}, 12)`);
-
-                const renderDetails = (datum: Row | null) => {
-                    detailGroup.selectAll('*').remove();
-                    if (!datum) {
-                        return;
-                    }
-
-                    const detailText = detailGroup.append('text')
-                        .attr('x', 0)
-                        .attr('y', 0)
-                        .attr('text-anchor', 'end')
-                        .attr('dominant-baseline', 'hanging')
-                        .style('display', compact ? 'none' : null);
-
-                    detailText.append('tspan')
-                        .style('font-size', detailTitleSize)
-                        .style('font-weight', '700')
-                        .style('fill', colors.accentLink)
-                        .text(config.detailTitle(datum));
-
-                    detailText.append('tspan')
-                        .style('font-size', detailFontSize)
-                        .style('font-weight', '400')
-                        .style('fill', colors.separator)
-                        .text('  •  ');
-
-                    detailText.append('tspan')
-                        .style('font-size', detailFontSize)
-                        .style('font-weight', '400')
-                        .style('fill', colors.axisText)
-                        .text(`${datum.pvp_battles.toLocaleString()} battles`);
-
-                    detailText.append('tspan')
-                        .style('font-size', detailFontSize)
-                        .style('font-weight', '400')
-                        .style('fill', colors.separator)
-                        .text('  •  ');
-
-                    detailText.append('tspan')
-                        .style('font-size', detailFontSize)
-                        .style('font-weight', '400')
-                        .style('fill', colors.axisText)
-                        .text(`${datum.wins.toLocaleString()} wins`);
-
-                    detailText.append('tspan')
-                        .style('font-size', detailFontSize)
-                        .style('font-weight', '400')
-                        .style('fill', colors.separator)
-                        .text('  •  ');
-
-                    detailText.append('tspan')
-                        .style('font-size', detailFontSize)
-                        .style('font-weight', '700')
-                        .style('fill', colors.axisText)
-                        .text(`${(datum.win_ratio * 100).toFixed(1)}% win rate`);
-                };
-
                 const rowNodes = svg.selectAll(`.${config.cssPrefix}-row`)
                     .data(rows)
                     .enter()
@@ -223,8 +163,7 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
                     .style('stroke', colors.axisLine)
                     .style('stroke-width', 0.5)
                     .attr('fill', (datum: Row) => wrColorByRatio(datum.win_ratio))
-                    .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, datum: Row) {
-                        renderDetails(datum);
+                    .on('mouseover', function (this: SVGRectElement) {
                         d3.select(this)
                             .transition()
                             .duration(70)
@@ -246,9 +185,7 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
                     .style('font-size', axisFontSize)
                     .style('fill', colors.labelMuted)
                     .attr('text-anchor', (datum: Row) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
-                    .text((datum: Row) => `${(datum.win_ratio * 100).toFixed(1)}%`);
-
-                renderDetails(rows[0]);
+                    .text((datum: Row) => `${datum.wins.toLocaleString()} · ${datum.pvp_battles.toLocaleString()} · ${(datum.win_ratio * 100).toFixed(1)}%`);
             };
 
         if (data) {

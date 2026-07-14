@@ -132,9 +132,11 @@ const drawChart = (
     const resolvedTiles = resolveTierTypeTiles(payload);
 
     const compact = svgWidth < 480;
+    // left mirrors shipBarPlot's y-axis inset (68 non-compact) so the heatmap's
+    // y-axis lines up vertically with the two bar charts below it.
     const margin = compact
         ? { top: 48, right: 6, bottom: 42, left: 28 }
-        : { top: 62, right: 18, bottom: 42, left: 42 };
+        : { top: 62, right: 18, bottom: 42, left: 68 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -164,12 +166,19 @@ const drawChart = (
         .range([0, bandRangeEnd])
         .padding(0.12);
 
-    // End the tile grid 3px above the x-axis (which stays at `height`) for a bit
-    // more breathing room between the Tier-1 row and the axis line/labels.
+    // Harmonize row height with the Performance-by-Tier bar chart: give each
+    // heatmap tier row the same thickness (step) as a bar there. TierSVG renders
+    // at svgHeight=280 with shipBarPlot's non-compact top=8/bottom=48 margins and
+    // y padding 0.18 over 11 tier rows — a fixed, data-independent row height. We
+    // reproduce that step here (d3 scaleBand: step = extent / (n + padding)), so
+    // the tiles fill `yBandExtent` and sit just above the x-axis at `height`.
+    const rowPadding = 0.18;
+    const tierBarRowStep = (280 - 8 - 48) / (11 + rowPadding);
+    const yBandExtent = Math.min(height, tierBarRowStep * (tiers.length + rowPadding));
     const y = d3.scaleBand()
         .domain(tiers.map((value) => String(value)))
-        .range([0, height - 3])
-        .padding(0.12);
+        .range([0, yBandExtent])
+        .padding(rowPadding);
 
     const tileByKey = new Map(resolvedTiles.map((row: ResolvedTierTypeTile) => [getTierTypeTileKey(row.ship_type, row.ship_tier), row]));
     const playerCellByKey = new Map(payload.player_cells.map((row: TierTypePlayerCell) => [getTierTypeTileKey(row.ship_type, row.ship_tier), row]));

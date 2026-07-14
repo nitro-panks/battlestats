@@ -453,6 +453,13 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
 
     const derivedTypeRows = profileChartPayload ? deriveTypeRowsFromTierTypePayload(profileChartPayload) : [];
     const derivedTierRows = profileChartPayload ? deriveTierRowsFromTierTypePayload(profileChartPayload) : [];
+    // TypeSVG (Performance by Ship Type) has fewer, data-dependent rows than the
+    // fixed 11-row Tier chart. Size its height so each row uses the SAME step as
+    // TierSVG (svgHeight 280, shipBarPlot non-compact top=8/bottom=48, y padding
+    // 0.18 over 11 rows) — so its bars match the tier chart's bar thickness
+    // rather than stretching thicker to fill a taller fixed height.
+    const TIER_CHART_ROW_STEP = (280 - 8 - 48) / (11 + 0.18);
+    const typeChartHeight = Math.round(TIER_CHART_ROW_STEP * (Math.max(derivedTypeRows.length, 1) + 0.18)) + 8 + 48;
 
     const activeConfig = TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
 
@@ -655,7 +662,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                         description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
                                         className="mb-2"
                                     />
-                                    <TypeSVG playerId={playerId} data={derivedTypeRows} svgHeight={192} theme={theme} />
+                                    <TypeSVG playerId={playerId} data={derivedTypeRows} svgHeight={typeChartHeight} theme={theme} />
                                 </div>
 
                                 <div className="mt-5">
@@ -664,7 +671,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                         description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
                                         className="mb-2"
                                     />
-                                    <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={300} theme={theme} />
+                                    <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={280} theme={theme} />
                                 </div>
                             </>
                         ) : (
