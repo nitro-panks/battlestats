@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { chartColors, resolveChartWidth, wrColorByRatio, type ChartTheme } from '../lib/chartTheme';
+import { barChartDataRightX, chartColors, wrColorByRatio, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import type { TierTypePayload, TierTypePlayerCell } from './playerProfileChartData';
@@ -138,6 +138,17 @@ const drawChart = (
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
+
+    // Align the heatmap's rightmost tile with where the bar charts' *data* ends
+    // (not the plot frame). Both SVGs share the same full container width, so
+    // the shared helper reproduces that canvas x here.
+    const barDataRight = barChartDataRightX(svgWidth);
+    // Solve the band range whose last tile ends at barDataRight (in plot coords),
+    // preserving the band's inner/outer padding: probe a unit-range band for the
+    // fraction of the range at which the last tile ends, then scale up.
+    const bandProbe = d3.scaleBand().domain(shipTypes).range([0, 1]).padding(0.12);
+    const lastTileFrac = (bandProbe(shipTypes[shipTypes.length - 1]) ?? 0) + bandProbe.bandwidth();
+    const bandRangeEnd = lastTileFrac > 0 ? (barDataRight - margin.left) / lastTileFrac : width;
     const container = d3.select(containerElement);
     container.selectAll('*').remove();
 
@@ -150,12 +161,14 @@ const drawChart = (
 
     const x = d3.scaleBand()
         .domain(shipTypes)
-        .range([0, width])
+        .range([0, bandRangeEnd])
         .padding(0.12);
 
+    // End the tile grid 3px above the x-axis (which stays at `height`) for a bit
+    // more breathing room between the Tier-1 row and the axis line/labels.
     const y = d3.scaleBand()
         .domain(tiers.map((value) => String(value)))
-        .range([0, height])
+        .range([0, height - 3])
         .padding(0.12);
 
     const tileByKey = new Map(resolvedTiles.map((row: ResolvedTierTypeTile) => [getTierTypeTileKey(row.ship_type, row.ship_tier), row]));
@@ -202,7 +215,7 @@ const drawChart = (
     svg.selectAll('.domain').style('stroke', colors.axisLine);
 
     svg.append('text')
-        .attr('x', width / 2)
+        .attr('x', bandRangeEnd / 2)
         .attr('y', height + 34)
         .attr('text-anchor', 'middle')
         .style('fill', colors.labelMuted)
@@ -290,7 +303,10 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
         let cachedPayload: TierTypePayload | null = null;
         let resizeFrame: number | null = null;
 
-        const resolveWidth = () => resolveChartWidth(containerElement.clientWidth, svgWidth, 320);
+        // Flow to the full container width (floored for narrow screens) so the
+        // heatmap's right edge aligns with the full-width bar charts below it,
+        // rather than capping at svgWidth. Falls back to svgWidth pre-layout.
+        const resolveWidth = () => Math.max(containerElement.clientWidth || svgWidth, 320);
 
         const redraw = () => {
             if (cachedPayload && containerElement) {

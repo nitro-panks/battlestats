@@ -2,7 +2,7 @@ import React, { useEffect, useId, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { ChartTheme, chartColors, formatCompactCount, resolveChartWidth } from '../lib/chartTheme';
+import { ChartTheme, alignedChartRightMargin, chartColors, formatCompactCount, resolveContainerChartWidth } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -337,9 +337,11 @@ const drawDistribution = (
 ) => {
     const c = chartColors[theme];
     const compact = svgWidth < 480;
+    // Data fills the whole plot area [0, width], so the right margin is derived
+    // to land the plot edge on the profile bar charts' shared data-right x.
     const margin = compact
-        ? { top: 22, right: 6, bottom: 40, left: 30 }
-        : { top: 22, right: 14, bottom: 44, left: 42 };
+        ? { top: 22, right: alignedChartRightMargin(svgWidth, 6), bottom: 40, left: 30 }
+        : { top: 22, right: alignedChartRightMargin(svgWidth, 14), bottom: 44, left: 42 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -680,7 +682,7 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
 
         const draw = () => {
             if (!cachedPrimary) return;
-            const resolvedWidth = resolveChartWidth(containerElement.clientWidth, svgWidth);
+            const resolvedWidth = resolveContainerChartWidth(containerElement.clientWidth, svgWidth);
             drawDistribution(
                 containerElement,
                 cachedPrimary,

@@ -197,3 +197,28 @@ export const resolveChartWidth = (
     svgWidth: number,
     minWidth = 280,
 ): number => Math.min(svgWidth, Math.max(clientWidth || svgWidth, minWidth));
+
+// Uncapped variant: fill the container's measured width (above minWidth),
+// falling back to fallbackWidth when the container has not laid out yet.
+export const resolveContainerChartWidth = (
+    clientWidth: number | null | undefined,
+    fallbackWidth: number,
+    minWidth = 280,
+): number => Math.max(clientWidth || fallbackWidth, minWidth);
+
+// Canvas x where the player-profile bar charts' visible DATA ends. shipBarPlot
+// gives its x-scale 8% headroom inside fixed margins, so the longest bar always
+// ends at this x for a given svgWidth — independent of the player's data. Its
+// compact branch flips at 420px with left margins of 42/62 per chart; 62 is used
+// as the representative value (left only shifts the result by ~0.074×, so the
+// 42-vs-62 spread lands within ~1.5px). Full-container-width charts on other
+// tabs use this shared x so their data ends flush with the profile bars.
+export const barChartDataRightX = (svgWidth: number): number => {
+    const barMargin = svgWidth < 420 ? { left: 62, right: 14 } : { left: 68, right: 96 };
+    return barMargin.left + (svgWidth - barMargin.left - barMargin.right) / 1.08;
+};
+
+// Right margin that lands a fill-to-plot-edge chart's data on barChartDataRightX;
+// minRight preserves the chart's own annotation gutter as a safety floor.
+export const alignedChartRightMargin = (svgWidth: number, minRight: number): number =>
+    Math.max(minRight, svgWidth - barChartDataRightX(svgWidth));

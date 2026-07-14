@@ -578,7 +578,7 @@ describe('BattleHistoryCard', () => {
             // sparkline fetch shares the same URL but fires second — the main
             // fetch effect is declared first — so it never sees the header.)
             let rankedSeen = 0;
-            mockByMode({ available_modes: ['random', 'ranked'] }, {}, (params) => {
+            mockByMode({ available_modes: ['random', 'ranked'] }, {}, (params): Record<string, string> => {
                 if (params.get('mode') === 'ranked' && params.get('window') === 'month') {
                     rankedSeen += 1;
                     if (rankedSeen === 1) {

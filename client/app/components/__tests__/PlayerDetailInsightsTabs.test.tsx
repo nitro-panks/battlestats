@@ -117,6 +117,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -166,6 +167,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -214,6 +216,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -235,6 +238,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -288,6 +292,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -409,6 +414,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -449,6 +455,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -469,6 +476,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -484,6 +492,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={56}
                 pvpSurvivalRate={41}
                 pvpBattles={820}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -502,6 +511,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan={false}
                 efficiencyRows={[]}
@@ -523,6 +533,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -545,6 +556,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -566,6 +578,7 @@ describe('PlayerDetailInsightsTabs', () => {
                     pvpRatio={55}
                     pvpSurvivalRate={40}
                     pvpBattles={800}
+                    playerScore={null}
                     hasKnownRankedGames
                     hasClan
                     efficiencyRows={[]}
@@ -604,6 +617,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan={false}
                 efficiencyRows={[]}
@@ -661,6 +675,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 efficiencyRows={[]}
@@ -725,6 +740,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
+                playerScore={null}
                 hasKnownRankedGames
                 hasClan={false}
                 efficiencyRows={[]}
