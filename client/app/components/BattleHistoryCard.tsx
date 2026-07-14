@@ -706,7 +706,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             cancelled = true;
             if (pollTimer !== null) clearTimeout(pollTimer);
         };
-    }, [playerName, realm, window, mode, refreshNonce]);
+    }, [playerName, realm, window, mode, refreshNonce, requestSignal]);
 
     // Separate fetch that always retrieves the month window for the sparkline,
     // independent of whichever window the user has selected. fetchSharedJson
@@ -732,7 +732,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             })
             .catch(() => { /* sparkline stays empty on error */ });
         return () => { cancelled = true; };
-    }, [playerName, realm, mode, refreshNonce]);
+    }, [playerName, realm, mode, refreshNonce, requestSignal]);
 
     // Availability is a one-shot, stable signal: report it from the FIRST
     // resolved payload (or error) per (player, realm), then latch. Basing it on

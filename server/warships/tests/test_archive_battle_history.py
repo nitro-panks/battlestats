@@ -129,8 +129,9 @@ class ArchiveBattleHistoryTests(TestCase):
             gz = os.path.join(result["run_dir"], f"{table}.csv.gz")
             self.assertTrue(os.path.exists(gz))
             # manifest sha256 matches the archive on disk
-            manifest = json.load(open(
-                os.path.join(result["run_dir"], f"{table}.manifest.json")))
+            with open(os.path.join(
+                    result["run_dir"], f"{table}.manifest.json")) as fh:
+                manifest = json.load(fh)
             self.assertEqual(manifest["sha256"], _sha256_file(gz))
             self.assertEqual(manifest["exported"], len(old_ids))
             # archive contains exactly the old ids (column 0)

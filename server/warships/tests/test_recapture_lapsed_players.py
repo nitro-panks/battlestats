@@ -122,7 +122,8 @@ class RecaptureLapsedPlayersTests(TestCase):
             files = os.listdir(d)
             self.assertEqual(len(files), 1)
             self.assertTrue(files[0].endswith("_na.json"))
-            snap = json.loads(open(os.path.join(d, files[0])).read())
+            with open(os.path.join(d, files[0])) as fh:
+                snap = json.load(fh)
         self.assertEqual(snap["mode"], "apply")
         self.assertEqual(snap["advanced"], 1)
         self.assertEqual(snap["into7d"], 1)

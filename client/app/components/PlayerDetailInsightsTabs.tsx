@@ -265,7 +265,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
             })
             .catch(() => { /* leave the tab dark on error; next cycle retries */ });
         return () => { cancelled = true; };
-    }, [activityAvailable, refreshNonce, isLoading, playerName, realm, handleActivityAvailability]);
+    }, [activityAvailable, refreshNonce, isLoading, playerName, realm, requestSignal, handleActivityAvailability]);
 
     useEffect(() => {
         setProfileChartPayload(null);
@@ -353,7 +353,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 window.clearTimeout(timeoutId);
             }
         };
-    }, [hasClan, isLoading, onWarmupSettled, playerId, realm, refreshNonce]);
+    }, [hasClan, isLoading, onWarmupSettled, playerId, realm, requestSignal, refreshNonce]);
 
     useEffect(() => {
         if (isLoading || activeTab !== 'profile' || profileChartPayload || profileChartState === 'error' || profileChartState === 'warming') {
@@ -437,7 +437,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 clearTimeout(timeoutId);
             }
         };
-    }, [activeTab, isLoading, playerId, profileChartPayload, profileChartState, realm, refreshNonce]);
+    }, [activeTab, isLoading, playerId, profileChartPayload, profileChartState, realm, requestSignal, refreshNonce]);
 
     useEffect(() => {
         if (profileChartState !== 'warming') {

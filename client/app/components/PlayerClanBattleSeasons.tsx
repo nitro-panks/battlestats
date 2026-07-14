@@ -123,7 +123,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                 clearTimeout(timeoutId);
             }
         };
-    }, [playerId, realm]);
+    }, [playerId, realm, requestSignal]);
 
     const summary = useMemo<PlayerClanBattleSummary>(() => {
         const totalBattles = seasons.reduce((sum, season) => sum + season.battles, 0);

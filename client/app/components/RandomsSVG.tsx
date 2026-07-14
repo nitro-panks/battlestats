@@ -374,7 +374,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 clearTimeout(rehydrateTimeout);
             }
         };
-    }, [playerId, realm]);
+    }, [playerId, realm, requestSignal]);
 
     // Filter and sort every matching ship; the chart container scrolls to fit.
     const chartData = useMemo(() => {

@@ -115,7 +115,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
         return () => {
             cancelled = true;
         };
-    }, [playerName, realm]);
+    }, [playerName, realm, requestSignal]);
 
     useEffect(() => {
         if (!playerData) {

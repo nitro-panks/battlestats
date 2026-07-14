@@ -215,7 +215,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 clearTimeout(timeoutId);
             }
         };
-    }, [playerId, realm]);
+    }, [playerId, realm, requestSignal]);
 
     const shouldGrayOut = isLoading || isChartLoading;
     const sortedSeasons = seasons.slice().sort((left, right) => {
