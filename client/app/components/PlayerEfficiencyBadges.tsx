@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
 import EfficiencyStripPlotSVG, { badgeClassColor, type EfficiencyBadgeDot } from './EfficiencyStripPlotSVG';
 import { chartColors } from '../lib/chartTheme';
@@ -102,7 +102,9 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
 }) => {
     const { theme } = useTheme();
     const colors = chartColors[theme];
-    const dots = normalizeBadgeDots(efficiencyRows);
+    // Memoized so parent re-renders don't hand the chart a fresh array and
+    // relaunch its force simulation from the center.
+    const dots = useMemo(() => normalizeBadgeDots(efficiencyRows), [efficiencyRows]);
     const badgeCounts = [1, 2, 3, 4].map((badgeClass) => ({
         badgeClass,
         label: BADGE_LABELS[badgeClass],

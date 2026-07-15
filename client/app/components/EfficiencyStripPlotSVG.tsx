@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import * as d3 from 'd3';
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 
@@ -371,6 +371,21 @@ const EfficiencyStripPlotSVG: React.FC<EfficiencyStripPlotSVGProps> = ({
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
 
+    // The draw effect keys on the dots' CONTENT, not the array identity —
+    // parent re-renders (polls, context updates) must not relaunch the
+    // simulation and make the chart spring from the center again. The ref
+    // carries the latest array to the draw effect without being a dependency;
+    // it is assigned in its own effect (before the draw effect, in-order) so
+    // no ref is touched during render.
+    const dotsRef = useRef(dots);
+    useEffect(() => {
+        dotsRef.current = dots;
+    });
+    const dotsKey = useMemo(
+        () => dots.map((dot) => `${dot.shipId}:${dot.badgeClass}`).join(','),
+        [dots],
+    );
+
     useEffect(() => {
         const containerElement = containerRef.current;
         if (!containerElement) {
@@ -385,7 +400,7 @@ const EfficiencyStripPlotSVG: React.FC<EfficiencyStripPlotSVGProps> = ({
 
         const redraw = () => {
             simulation?.stop();
-            simulation = drawChart(containerElement, dots, resolveWidth(), minSvgHeight, colors);
+            simulation = drawChart(containerElement, dotsRef.current, resolveWidth(), minSvgHeight, colors);
         };
 
         const onResize = () => {
@@ -400,7 +415,7 @@ const EfficiencyStripPlotSVG: React.FC<EfficiencyStripPlotSVGProps> = ({
             window.removeEventListener('resize', onResize);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
-    }, [dots, minSvgHeight, svgWidth, theme]);
+    }, [dotsKey, minSvgHeight, svgWidth, theme]);
 
     return <div ref={containerRef} className="w-full" />;
 };
