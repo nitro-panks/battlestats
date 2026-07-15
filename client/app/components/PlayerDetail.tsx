@@ -5,7 +5,7 @@ import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import LeaderCrownIcon from './LeaderCrownIcon';
 import TwitchStreamerIcon from './TwitchStreamerIcon';
-import PveEnjoyerIcon from './PveEnjoyerIcon';
+import PveEnjoyerIcon, { PVE_ENJOYER_ICON_ENABLED } from './PveEnjoyerIcon';
 import ActivityIcon from './ActivityIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
@@ -179,7 +179,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     refreshNonce = 0,
 }) => {
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
-    const isPveEnjoyer = Boolean(player.is_pve_player);
+    const isPveEnjoyer = PVE_ENJOYER_ICON_ENABLED && Boolean(player.is_pve_player);
     // Payload-driven: the server scopes both the flag and the league to the
     // current ranked season (no client-side career derivation — the clan-member
     // rows use the same server helpers, keeping the two surfaces in agreement).

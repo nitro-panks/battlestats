@@ -386,7 +386,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.queryByText('Σ')).not.toBeInTheDocument();
     });
 
-    it('renders the PvE robot from the shared backend flag even when PvE does not exceed PvP', () => {
+    it('hides the PvE robot even when the backend flag is true (PVE_ENJOYER_ICON_ENABLED kill switch)', () => {
         render(
             <PlayerDetail
                 player={{
@@ -398,7 +398,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByLabelText(/pve enjoyer/i)).toBeInTheDocument();
+        expect(screen.queryByLabelText(/pve enjoyer/i)).not.toBeInTheDocument();
     });
 
     it('does not render the PvE robot when the shared backend flag is false', () => {

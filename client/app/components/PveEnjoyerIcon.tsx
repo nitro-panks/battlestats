@@ -2,6 +2,10 @@ import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faRobot } from '@fortawesome/free-solid-svg-icons';
 
+// Deprecation-candidate kill switch (2026-07-15): the icon is hidden everywhere
+// but kept on hand. Flip to true to restore it at every former render site.
+export const PVE_ENJOYER_ICON_ENABLED = false;
+
 const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]', search: 'text-xs' } as const;
 
 interface PveEnjoyerIconProps {

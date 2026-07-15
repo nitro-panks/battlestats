@@ -4,7 +4,7 @@ import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import LeaderCrownIcon from './LeaderCrownIcon';
 import TwitchStreamerIcon from './TwitchStreamerIcon';
-import PveEnjoyerIcon from './PveEnjoyerIcon';
+import PveEnjoyerIcon, { PVE_ENJOYER_ICON_ENABLED } from './PveEnjoyerIcon';
 import ActivityIcon, { ACTIVITY_SHORT_LABEL, activityColor } from './ActivityIcon';
 import type { ActivityBucketKey, CollapsedActivityBucketKey } from './clanMembersShared';
 import RankedPlayerIcon from './RankedPlayerIcon';
@@ -94,7 +94,7 @@ const MemberContent: React.FC<MemberContentProps> = ({ member, layout, isCurrent
             {member.is_hidden && <HiddenAccountIcon className="text-[11px] text-[var(--accent-light)]" />}
             {member.is_leader && <LeaderCrownIcon size="inline" />}
             {member.is_streamer && <TwitchStreamerIcon size="inline" />}
-            {member.is_pve_player && <PveEnjoyerIcon size="inline" />}
+            {PVE_ENJOYER_ICON_ENABLED && member.is_pve_player && <PveEnjoyerIcon size="inline" />}
             {member.is_ranked_player && <RankedPlayerIcon league={member.highest_ranked_league} size="inline" />}
             {member.is_clan_battle_player && <ClanBattleShieldIcon winRate={member.clan_battle_win_rate} size="inline" />}
             {efficiencyRankTier === 'E' ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={member.efficiency_rank_percentile} populationSize={member.efficiency_rank_population_size} size="inline" /> : null}
