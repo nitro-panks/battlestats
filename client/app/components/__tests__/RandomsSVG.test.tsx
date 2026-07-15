@@ -262,9 +262,9 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         await screen.findByLabelText('Minimum lifetime random battles to show a ship');
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
 
-        // No window activity → All stays selected; Recent and Window Only lock.
+        // No window activity → All stays selected; Window Only locks.
         expect(screen.getByRole('radio', { name: 'All' })).toHaveAttribute('aria-checked', 'true');
-        expect(screen.getByRole('radio', { name: 'Recent' })).toBeDisabled();
+        expect(screen.queryByRole('radio', { name: 'Recent' })).not.toBeInTheDocument();
         const windowOnly = screen.getByRole('radio', { name: 'Window Only' });
         expect(windowOnly).toBeDisabled();
 
@@ -275,9 +275,10 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         expect(screen.getByRole('radio', { name: 'All' })).toHaveAttribute('aria-checked', 'true');
     });
 
-    it('defaults to recent with no min-battles floor when the window has battles', async () => {
-        // Grind Ship is in the 30d window: the on-load default should select the
-        // Recent activity mode and drop the min-battles cutoff to 0.
+    it('stays on the All default (no auto-Recent) when the window has battles', async () => {
+        // Grind Ship is in the 30d window: on load the min-battles cutoff drops to
+        // 0 (full recent mix visible) while Activity stays on the All default.
+        // Recent mode was removed, so the window no longer auto-switches the mode.
         mockFetch.mockImplementation(buildUrlRoutedFetch(
             RANDOMS_ROWS,
             [{ ship_id: 1, ship_name: 'Grind Ship', ship_tier: 8, ship_type: 'Cruiser', battles: 12, wins: 7, delta_win_rate: 2.1 }],
@@ -285,9 +286,10 @@ describe('RandomsSVG min-battles slider + window filter', () => {
 
         render(<RandomsSVG playerId={203} playerName="TesterC" />);
 
-        const recent = await screen.findByRole('radio', { name: 'Recent' });
-        // Window join lands → default applied: Recent selected, cutoff 0.
-        await waitFor(() => expect(recent).toBeChecked());
+        const all = await screen.findByRole('radio', { name: 'All' });
+        await screen.findByRole('button', { name: 'T8' });
+        expect(all).toBeChecked();
+        expect(screen.queryByRole('radio', { name: 'Recent' })).not.toBeInTheDocument();
         expect(screen.getByText(/≥\s*0$/)).toBeInTheDocument();
         // The in-window ship keeps the chart populated.
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();

@@ -48,10 +48,6 @@ interface RandomsRow {
     ship_tier: number;
     win_ratio: number;
     wins: number;
-    // Sentinel spacer inserted in "Recent" mode between the recent-activity
-    // group and the rest; occupies a y-band slot (a bar's worth of blank space)
-    // but draws no bar/label.
-    isGap?: boolean;
 }
 
 // Dormant-player default: open the chart on the player's N most-played ships
@@ -69,27 +65,13 @@ const topShipsMinBattles = (rows: RandomsRow[], topN = RANDOMS_DEFAULT_TOP_SHIPS
     return sortedBattles[topN - 1];
 };
 
-// Activity filter mode (task 4): All shows every ship; Window Only hides ships
-// not played in the trailing 30-day window; Recent shows every ship but floats
-// the window-active ones to the top, separated from the rest by a gap.
-type ActivityMode = 'all' | 'recent' | 'window';
+// Activity filter mode: All shows every ship; Window Only hides ships not
+// played in the trailing 30-day window.
+type ActivityMode = 'all' | 'window';
 const ACTIVITY_MODE_OPTIONS: Array<{ value: ActivityMode; label: string }> = [
     { value: 'all', label: 'All' },
-    { value: 'recent', label: 'Recent' },
     { value: 'window', label: 'Window Only' },
 ];
-
-const RANDOMS_GAP_SHIP_NAME = '__randoms_gap__';
-const makeRandomsGapRow = (): RandomsRow => ({
-    pvp_battles: 0,
-    ship_name: RANDOMS_GAP_SHIP_NAME,
-    ship_chart_name: '',
-    ship_type: '',
-    ship_tier: 0,
-    win_ratio: 0,
-    wins: 0,
-    isGap: true,
-});
 
 const normalizeRandomsRows = (data: unknown): RandomsRow[] => {
     if (Array.isArray(data)) {
@@ -240,7 +222,7 @@ const drawBattlePlotDesign1 = (
     const barWidth = (datum: RandomsChartRow) => Math.max(x(datum.pvp_battles), RANDOMS_MIN_BAR_PX);
 
     const nodes = svg.selectAll('.randoms-row')
-        .data(rows.filter((row) => !row.isGap))
+        .data(rows)
         .enter()
         .append('g')
         .classed('randoms-row', true)
@@ -583,13 +565,12 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 setWindowStats(map);
 
                 // On load, if the player has any random battles in the trailing
-                // window, default the filters to surface that recent activity:
-                // only in-window ships, no min-battles floor. Runs once per
-                // player/realm (this effect re-runs on those) before the user
-                // has touched the filters; a no-window player instead defaults to
-                // their top-N ships (see the dormant-default effect below).
+                // window, drop the min-battles floor so their full recent mix is
+                // visible (Activity stays on the All default). Runs once per
+                // player/realm before the user touches the filters; a no-window
+                // player instead defaults to their top-N ships (dormant-default
+                // effect below).
                 if (map.size > 0) {
-                    setActivityMode('recent');
                     setMinBattles(0);
                 }
             } catch (error) {
@@ -631,9 +612,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
 
     // Apply the dormant default (top-N ships) once the ship list is loaded, for
     // players with no trailing-window activity. Window-active players instead get
-    // their default (Recent / min 0) from the window fetch effect; if that effect
-    // resolves after this one, its setMinBattles(0) simply overrides. Applied at
-    // most once per player/realm so a manual slider change is never clobbered.
+    // their min-0 default from the window fetch effect; if that effect resolves
+    // after this one, its setMinBattles(0) simply overrides. Applied at most once
+    // per player/realm so a manual slider change is never clobbered.
     useEffect(() => {
         if (dormantDefaultAppliedRef.current || allShips.length === 0) {
             return;
@@ -653,10 +634,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         }
     }, [maxBattles, minBattles]);
 
-    // With no ships played in the trailing window, Recent has nothing to float
-    // and Window Only would empty the chart, so lock the Activity filter to All:
-    // the other two options are disabled in the UI and the mode falls back to
-    // 'all' regardless of any stored value.
+    // With no ships played in the trailing window, Window Only would empty the
+    // chart, so lock the Activity filter to All: Window Only is disabled in the
+    // UI and the mode falls back to 'all' regardless of any stored value.
     const hasWindowActivity = windowStats.size > 0;
     const effectiveActivityMode: ActivityMode = hasWindowActivity ? activityMode : 'all';
 
@@ -667,23 +647,11 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             && selectedTiers.includes(row.ship_tier)
             && row.pvp_battles >= minBattles
             && row.win_ratio * 100 >= minWR
-            // Window Only hides ships not played in the trailing window; All and
-            // Recent keep every matching ship.
+            // Window Only hides ships not played in the trailing window; All
+            // keeps every matching ship.
             && (effectiveActivityMode !== 'window' || windowStats.has(row.ship_name))
         ));
-        const byBattles = (a: RandomsRow, b: RandomsRow) => b.pvp_battles - a.pvp_battles;
-        if (effectiveActivityMode !== 'recent') {
-            return base.slice().sort(byBattles);
-        }
-        // Recent: ships that moved in the window float to the top (sorted by
-        // volume); the rest follow below, separated by one bar's worth of blank
-        // space (a spacer row — see makeRandomsGapRow / the draw filter).
-        const recent = base.filter((row) => windowStats.has(row.ship_name)).sort(byBattles);
-        const rest = base.filter((row) => !windowStats.has(row.ship_name)).sort(byBattles);
-        if (recent.length === 0 || rest.length === 0) {
-            return [...recent, ...rest];
-        }
-        return [...recent, makeRandomsGapRow(), ...rest];
+        return base.slice().sort((a, b) => b.pvp_battles - a.pvp_battles);
     }, [allShips, selectedTypes, selectedTiers, minBattles, minWR, effectiveActivityMode, windowStats]);
 
     // Draw chart when data (or the window join) changes.
@@ -888,8 +856,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     <div className="w-[103px] shrink-0 font-semibold text-[var(--text-primary)]">Activity</div>
                     <div className="flex flex-1 flex-wrap items-center gap-1">
                         {ACTIVITY_MODE_OPTIONS.map((option) => {
-                            // No window activity → lock to All: disable the other
-                            // two so the user can't switch to an empty view.
+                            // No window activity → lock to All: disable Window
+                            // Only so the user can't switch to an empty view.
                             const locked = !hasWindowActivity && option.value !== 'all';
                             return (
                                 <button
