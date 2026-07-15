@@ -47,9 +47,10 @@ const SHIP_TYPE_LABELS: Record<string, string> = {
 
 // Fill the Efficiency panel's LOCKED_PANEL_HEIGHT_PX (1057) shell: the plot
 // grows to this SVG height so the tab shell matches the Activity / Ships /
-// Profile / Population tabs. 1057 minus the heading row (~28px) and its 12px
-// margin, with a small cushion. Re-tune if the locked panel height changes.
-const STRIP_PLOT_MIN_SVG_HEIGHT = 1010;
+// Profile / Population tabs. 1057 minus the heading row (~28px + 12px margin)
+// and the bottom badge-count legend (~24px + 12px margin), with a small
+// cushion. Re-tune if the locked panel height changes.
+const STRIP_PLOT_MIN_SVG_HEIGHT = 970;
 
 const getShipTypeLabel = (shipType: string | null | undefined): string => {
     if (!shipType) {
@@ -117,10 +118,17 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
             <div className="mb-3 flex items-center gap-3">
                 <SectionHeadingWithTooltip
                     title="Efficiency Badges"
-                    description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. Each dot is one badged ship, placed by tier and ship type and colored by badge class, so you can see at a glance where a player's peak performances cluster."
+                    description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. Each dot is one badged ship, clustered by ship type, sized by tier, and colored by badge class, so you can see at a glance where a player's peak performances cluster."
                 />
-                {dots.length > 0 ? (
-                    <div className="ml-auto flex items-center gap-3 text-xs" aria-label="Badge counts by class">
+            </div>
+            {dots.length === 0 ? (
+                <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--accent-light)]">
+                    No Efficiency Badge data is stored for this player yet, or no qualifying ships have earned a badge.
+                </div>
+            ) : (
+                <>
+                    <EfficiencyStripPlotSVG dots={dots} theme={theme} minSvgHeight={STRIP_PLOT_MIN_SVG_HEIGHT} />
+                    <div className="mt-2 flex items-center justify-center gap-4 text-xs" aria-label="Badge counts by class">
                         {badgeCounts.map((entry) => (
                             <span
                                 key={entry.badgeClass}
@@ -137,14 +145,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                             </span>
                         ))}
                     </div>
-                ) : null}
-            </div>
-            {dots.length === 0 ? (
-                <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--accent-light)]">
-                    No Efficiency Badge data is stored for this player yet, or no qualifying ships have earned a badge.
-                </div>
-            ) : (
-                <EfficiencyStripPlotSVG dots={dots} theme={theme} minSvgHeight={STRIP_PLOT_MIN_SVG_HEIGHT} />
+                </>
             )}
         </div>
     );

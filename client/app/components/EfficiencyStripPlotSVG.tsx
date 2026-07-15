@@ -48,7 +48,7 @@ const SUMMARY_FONT_SIZE = '14px';
 // quadrant so dragged dots rubber-band home.
 const INTRA_LINK_STRENGTH = 0.35;
 const INTER_LINK_STRENGTH = 0.02;
-const INTER_LINK_DISTANCE = 280;
+const INTER_LINK_DISTANCE = 200;
 // Strong enough that the type clusters actually separate into their quadrants
 // before the simulation cools (at 0.05 they congealed into one central blob).
 const QUADRANT_ANCHOR_STRENGTH = 0.2;
@@ -82,6 +82,45 @@ interface SimLink {
     kind: 'intra' | 'inter';
 }
 
+// Visual-only connection webs: every pair of circles sharing a ship type, a
+// tier, or an award class is joined by a faint line. They carry no force —
+// the layout stays type-clustered — but the three overlapping meshes (class
+// edges tinted in their badge color) give the graph its sense of depth.
+type MeshKind = 'type' | 'tier' | 'class';
+
+interface MeshLink {
+    source: SimNode;
+    target: SimNode;
+    kind: MeshKind;
+    badgeClass: number;
+}
+
+const MESH_OPACITY: Record<MeshKind, number> = { type: 0.1, tier: 0.07, class: 0.16 };
+const MESH_WIDTH: Record<MeshKind, number> = { type: 0.7, tier: 0.6, class: 0.8 };
+
+const buildMeshLinks = (nodes: SimNode[], kind: MeshKind, keyOf: (node: SimNode) => string | number): MeshLink[] => {
+    const groups = new Map<string | number, SimNode[]>();
+    nodes.forEach((node) => {
+        const key = keyOf(node);
+        const group = groups.get(key);
+        if (group) {
+            group.push(node);
+        } else {
+            groups.set(key, [node]);
+        }
+    });
+
+    const links: MeshLink[] = [];
+    groups.forEach((members) => {
+        for (let i = 0; i < members.length; i += 1) {
+            for (let j = i + 1; j < members.length; j += 1) {
+                links.push({ source: members[i], target: members[j], kind, badgeClass: members[i].dot.badgeClass });
+            }
+        }
+    });
+    return links;
+};
+
 // Minimal shape of the d3 force simulation we hold on to (the repo types d3
 // as an untyped module; see d3.d.ts).
 interface BadgeSimulation {
@@ -97,13 +136,14 @@ const compareDots = (left: EfficiencyBadgeDot, right: EfficiencyBadgeDot): numbe
     return left.shipName.localeCompare(right.shipName);
 };
 
-// Quadrant anchor fractions of the plot area, by number of type clusters.
+// Quadrant anchor fractions of the plot area, by number of type clusters —
+// pulled toward the center so the cluster constellation reads as one system.
 const anchorLayout = (count: number): Array<[number, number]> => {
     if (count <= 1) return [[0.5, 0.5]];
-    if (count === 2) return [[0.3, 0.5], [0.7, 0.5]];
-    if (count === 3) return [[0.5, 0.27], [0.27, 0.73], [0.73, 0.73]];
-    if (count === 4) return [[0.28, 0.27], [0.72, 0.27], [0.28, 0.73], [0.72, 0.73]];
-    return [[0.28, 0.25], [0.72, 0.25], [0.28, 0.75], [0.72, 0.75], [0.5, 0.5]];
+    if (count === 2) return [[0.36, 0.5], [0.64, 0.5]];
+    if (count === 3) return [[0.5, 0.34], [0.36, 0.66], [0.64, 0.66]];
+    if (count === 4) return [[0.35, 0.34], [0.65, 0.34], [0.35, 0.66], [0.65, 0.66]];
+    return [[0.35, 0.32], [0.65, 0.32], [0.35, 0.7], [0.65, 0.7], [0.5, 0.5]];
 };
 
 const drawChart = (
@@ -246,16 +286,24 @@ const drawChart = (
             .text(`  ·  ${dot.shipType}  ·  Tier ${romanTier(dot.shipTier)}`);
     };
 
-    const linkNodes = svg.append('g')
+    // The three connection webs, layered type → tier → class beneath the dots.
+    // The hub-spoke/inter-hub force links are physics-only and not drawn.
+    const meshLinks: MeshLink[] = [
+        ...buildMeshLinks(nodes, 'type', (node) => node.dot.shipType),
+        ...buildMeshLinks(nodes, 'tier', (node) => node.dot.shipTier),
+        ...buildMeshLinks(nodes, 'class', (node) => node.dot.badgeClass),
+    ];
+    const meshNodes = svg.append('g')
         .selectAll('line')
-        .data(links)
+        .data(meshLinks)
         .enter()
         .append('line')
-        .attr('class', (link: SimLink) => `badge-link badge-link-${link.kind}`)
-        .attr('stroke', colors.gridLine)
-        .attr('stroke-opacity', (link: SimLink) => (link.kind === 'intra' ? 0.7 : 0.45))
-        .attr('stroke-width', (link: SimLink) => (link.kind === 'intra' ? 1.2 : 1))
-        .attr('stroke-dasharray', (link: SimLink) => (link.kind === 'inter' ? '4 4' : null));
+        .attr('class', (link: MeshLink) => `badge-mesh badge-mesh-${link.kind}`)
+        .attr('stroke', (link: MeshLink) => (link.kind === 'class'
+            ? badgeClassColor(colors, link.badgeClass)
+            : link.kind === 'tier' ? colors.accentMid : colors.labelMuted))
+        .attr('stroke-opacity', (link: MeshLink) => MESH_OPACITY[link.kind])
+        .attr('stroke-width', (link: MeshLink) => MESH_WIDTH[link.kind]);
 
     const dotStrokeWidth = 2;
     const dotNodes = svg.append('g')
@@ -290,11 +338,11 @@ const drawChart = (
 
     const renderPositions = () => {
         clampNodes();
-        linkNodes
-            .attr('x1', (link: SimLink) => link.source.x)
-            .attr('y1', (link: SimLink) => link.source.y)
-            .attr('x2', (link: SimLink) => link.target.x)
-            .attr('y2', (link: SimLink) => link.target.y);
+        meshNodes
+            .attr('x1', (link: MeshLink) => link.source.x)
+            .attr('y1', (link: MeshLink) => link.source.y)
+            .attr('x2', (link: MeshLink) => link.target.x)
+            .attr('y2', (link: MeshLink) => link.target.y);
         dotNodes
             .attr('cx', (node: SimNode) => node.x)
             .attr('cy', (node: SimNode) => node.y);

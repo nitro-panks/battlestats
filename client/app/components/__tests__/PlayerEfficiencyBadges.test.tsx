@@ -77,19 +77,21 @@ describe('PlayerEfficiencyBadges', () => {
         expect(shownShips).toHaveLength(1);
     });
 
-    it('labels each ship-type cluster and bonds same-type ships to their hub', () => {
+    it('labels each ship-type cluster and webs circles sharing a tier', () => {
         const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
         ['BB', 'CA', 'DD', 'Sub'].forEach((typeLabel) => {
             expect(screen.getByText(typeLabel)).toBeInTheDocument();
         });
 
-        // Four single-ship types: no intra-type bonds, three weak hub-to-hub bonds.
-        expect(container.querySelectorAll('line.badge-link-intra')).toHaveLength(0);
-        expect(container.querySelectorAll('line.badge-link-inter')).toHaveLength(3);
+        // Four single-ship types with distinct classes: no type/class mesh
+        // lines, one pair per Tier-X duo among the three Tier-X ships.
+        expect(container.querySelectorAll('line.badge-mesh-type')).toHaveLength(0);
+        expect(container.querySelectorAll('line.badge-mesh-tier')).toHaveLength(3);
+        expect(container.querySelectorAll('line.badge-mesh-class')).toHaveLength(0);
     });
 
-    it('bonds ships of the same type to that type\'s hub', () => {
+    it('webs all circle pairs sharing a type, tier, or award class', () => {
         const { container } = render(
             <PlayerEfficiencyBadges
                 efficiencyRows={[
@@ -100,8 +102,10 @@ describe('PlayerEfficiencyBadges', () => {
             />,
         );
 
-        // Three cruisers: two spokes to the cruiser hub; hub chain unchanged.
-        expect(container.querySelectorAll('line.badge-link-intra')).toHaveLength(2);
-        expect(container.querySelectorAll('line.badge-link-inter')).toHaveLength(3);
+        // Three cruisers -> C(3,2)=3 type lines; five Tier-X ships -> C(5,2)=10
+        // tier lines; class II and class III each have one pair -> 2 class lines.
+        expect(container.querySelectorAll('line.badge-mesh-type')).toHaveLength(3);
+        expect(container.querySelectorAll('line.badge-mesh-tier')).toHaveLength(10);
+        expect(container.querySelectorAll('line.badge-mesh-class')).toHaveLength(2);
     });
 });
