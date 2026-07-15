@@ -880,7 +880,11 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                     </button>
                 ))}
             </div>
-            <div ref={containerRef} style={{ minHeight: svgHeight }}></div>
+            {/* The svg reserves an empty top band (the hover-detail slot above the
+                activity bar); pull the chart up so that band overlaps the toggle
+                row instead of reading as dead space. The band is unpainted, so the
+                buttons stay clickable through it. */}
+            <div ref={containerRef} className="-mt-5" style={{ minHeight: svgHeight }}></div>
         </div>
     );
 };

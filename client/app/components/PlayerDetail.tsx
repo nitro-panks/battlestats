@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { type RankedLeagueName } from './rankedLeague';
 import PlayerDetailInsightsTabs from './PlayerDetailInsightsTabs';
+import PlayerClanSection from './PlayerClanSection';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import LeaderCrownIcon from './LeaderCrownIcon';
@@ -310,7 +311,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                         </div>
                     ) : (
                         <>
-                            <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4" data-perf-section="summary-cards">
+                            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4" data-perf-section="summary-cards">
                                 <div
                                     className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3"
                                     style={{ border: `3px solid ${wrColor(player.pvp_ratio)}` }}
@@ -375,6 +376,16 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             />
                         </>
                     )}
+
+                    {player.clan_id ? (
+                        <PlayerClanSection
+                            clanId={player.clan_id}
+                            clanName={player.clan_name}
+                            clanTag={player.clan_tag}
+                            playerId={player.player_id}
+                            playerName={player.name}
+                        />
+                    ) : null}
         </>
     );
 
