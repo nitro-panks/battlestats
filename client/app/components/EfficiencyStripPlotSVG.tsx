@@ -15,8 +15,8 @@ interface EfficiencyStripPlotSVGProps {
     dots: EfficiencyBadgeDot[];
     theme?: ChartTheme;
     svgWidth?: number;
-    // Grow the plot to fill at least this SVG height (bands stretch, dots and
-    // pitch scale up capped). 0 = intrinsic height only.
+    // Grow the plot to fill at least this SVG height (bands stretch, dots scale
+    // up capped). 0 = intrinsic height only.
     minSvgHeight?: number;
 }
 
@@ -35,25 +35,34 @@ export const badgeClassColor = (colors: Colors, badgeClass: number): string => {
     return colors.badgeIII;
 };
 
-const BASE_DOT_RADIUS = 6;
-const BASE_DOT_PITCH = 15;
-// Sparse charts grow their dots with the square root of the leftover vertical
-// space so a stretched plot reads as deliberately larger marks, not small dots
-// adrift in whitespace; the cap keeps dense multi-row cells from ballooning.
-const DOT_SIZE_FACTOR_CAP = 2.0;
-const HIT_PAD = 5;
-const CELL_PAD_X = 8;
-const BAND_PAD_Y = 9;
-const MIN_BAND_HEIGHT = 40;
+const MIN_DOT_RADIUS = 5;
+const MAX_DOT_RADIUS = 14;
+const HIT_PAD = 4;
+const CELL_PAD_X = 10;
+const BAND_PAD_Y = 10;
+const MIN_BAND_HEIGHT = 44;
 const MARGIN = { top: 50, right: 12, bottom: 46, left: 56 };
 const AXIS_FONT_SIZE = '13px';
 const CAPTION_FONT_SIZE = '12px';
 const SUMMARY_FONT_SIZE = '14px';
+// Static force layout: anchor forces pull each dot to its (tier, type) cell
+// center, collision packs neighbours into an organic blob. The x-anchor is
+// stronger than the y-anchor so crowded cells elongate vertically into their
+// band instead of bleeding into the next tier column.
+const FORCE_X_STRENGTH = 0.4;
+const FORCE_Y_STRENGTH = 0.12;
+const COLLIDE_PAD = 2;
+const SIMULATION_TICKS = 300;
 
-interface PositionedDot {
+interface SimNode {
     dot: EfficiencyBadgeDot;
-    cx: number;
-    cy: number;
+    targetX: number;
+    targetY: number;
+    x: number;
+    y: number;
+    vx?: number;
+    vy?: number;
+    index?: number;
 }
 
 const compareDots = (left: EfficiencyBadgeDot, right: EfficiencyBadgeDot): number => {
@@ -62,6 +71,10 @@ const compareDots = (left: EfficiencyBadgeDot, right: EfficiencyBadgeDot): numbe
     }
     return left.shipName.localeCompare(right.shipName);
 };
+
+// Approximate diameter of n unit-radius circles packed into a round blob.
+const blobDiameter = (count: number, radius: number): number =>
+    2 * radius * (1 + Math.sqrt(count));
 
 const drawChart = (
     containerElement: HTMLDivElement,
@@ -104,42 +117,35 @@ const drawChart = (
             cellDots.set(key, [dot]);
         }
     }
-    cellDots.forEach((cell) => cell.sort(compareDots));
 
-    // Band heights at a given dot pitch: each type band is as tall as its
-    // densest cell needs.
-    const computeBandHeights = (pitch: number, padY: number, minBand: number): number[] => {
-        const perRow = Math.max(1, Math.floor((colWidth - 2 * CELL_PAD_X) / pitch));
-        return shipTypes.map((shipType) => {
-            const maxCellCount = Math.max(
-                1,
-                ...tiers.map((tier: number) => cellDots.get(`${shipType}|${tier}`)?.length ?? 0),
-            );
-            const rowsNeeded = Math.ceil(maxCellCount / perRow);
-            return Math.max(minBand, rowsNeeded * pitch + 2 * padY);
-        });
-    };
+    // Dot radius: the densest cell's blob must fit its column; the panel-fill
+    // stretch below reclaims any leftover vertical room as breathing space.
+    const cellCounts = [...cellDots.values()].map((cell) => cell.length);
+    let dotRadius = Math.min(
+        MAX_DOT_RADIUS,
+        ...cellCounts.map((count) => (colWidth - 2 * CELL_PAD_X) / (2 * (1 + Math.sqrt(count)))),
+    );
+    dotRadius = Math.max(MIN_DOT_RADIUS, dotRadius);
 
-    // Two-pass fill-to-height sizing. Pass 1 measures the intrinsic height at
-    // the base dot size; the leftover space picks a capped dot growth factor.
-    // Pass 2 re-measures at the grown pitch (rows re-wrap) and stretches the
-    // bands linearly so the plot lands exactly on the requested height.
+    // Each type band is as tall as its densest blob needs.
+    const computeBandHeights = (radius: number): number[] => shipTypes.map((shipType) => {
+        const maxCellCount = Math.max(
+            1,
+            ...tiers.map((tier: number) => cellDots.get(`${shipType}|${tier}`)?.length ?? 0),
+        );
+        return Math.max(MIN_BAND_HEIGHT, blobDiameter(maxCellCount, radius) + 2 * BAND_PAD_Y);
+    });
+
     const availablePlot = Math.max(0, minSvgHeight - MARGIN.top - MARGIN.bottom);
-    const intrinsicTotal = computeBandHeights(BASE_DOT_PITCH, BAND_PAD_Y, MIN_BAND_HEIGHT)
-        .reduce((sum, height) => sum + height, 0);
-    const growth = availablePlot > intrinsicTotal ? availablePlot / intrinsicTotal : 1;
-    const sizeFactor = Math.min(Math.sqrt(growth), DOT_SIZE_FACTOR_CAP);
-
-    const dotRadius = BASE_DOT_RADIUS * sizeFactor;
-    const dotPitch = BASE_DOT_PITCH * sizeFactor;
-    const hitRadius = dotRadius + HIT_PAD;
-    const dotStrokeWidth = sizeFactor > 1.4 ? 2 : 1.5;
-    const dotsPerRow = Math.max(1, Math.floor((colWidth - 2 * CELL_PAD_X) / dotPitch));
-
-    const grownBandHeights = computeBandHeights(dotPitch, BAND_PAD_Y * sizeFactor, MIN_BAND_HEIGHT * sizeFactor);
-    const grownTotal = grownBandHeights.reduce((sum, height) => sum + height, 0);
-    const bandStretch = availablePlot > grownTotal ? availablePlot / grownTotal : 1;
-    const bandHeights = grownBandHeights.map((height) => height * bandStretch);
+    let bandBase = computeBandHeights(dotRadius);
+    let bandTotal = bandBase.reduce((sum, height) => sum + height, 0);
+    if (availablePlot > 0 && bandTotal > availablePlot) {
+        dotRadius = Math.max(MIN_DOT_RADIUS, dotRadius * (availablePlot / bandTotal));
+        bandBase = computeBandHeights(dotRadius);
+        bandTotal = bandBase.reduce((sum, height) => sum + height, 0);
+    }
+    const bandStretch = availablePlot > bandTotal ? availablePlot / bandTotal : 1;
+    const bandHeights = bandBase.map((height) => height * bandStretch);
 
     const bandTops = bandHeights.reduce<number[]>((tops, _height, index) => {
         tops.push(index === 0 ? 0 : tops[index - 1] + bandHeights[index - 1]);
@@ -148,6 +154,47 @@ const drawChart = (
     const plotHeight = bandHeights.reduce((sum, height) => sum + height, 0);
     const svgHeight = MARGIN.top + plotHeight + MARGIN.bottom;
 
+    // Force-cluster the dots around their (tier, type) cell centers. Seeded
+    // deterministic start positions near each anchor keep the static layout
+    // stable across renders; the collision force packs each cell into a blob.
+    const nodes: SimNode[] = [];
+    shipTypes.forEach((shipType, typeIndex) => {
+        tiers.forEach((tier: number, tierIndex: number) => {
+            const cell = cellDots.get(`${shipType}|${tier}`);
+            if (!cell) {
+                return;
+            }
+
+            const targetX = tierIndex * colWidth + colWidth / 2;
+            const targetY = bandTops[typeIndex] + bandHeights[typeIndex] / 2;
+            [...cell].sort(compareDots).forEach((dot, dotIndex) => {
+                nodes.push({
+                    dot,
+                    targetX,
+                    targetY,
+                    x: targetX + ((dotIndex * 37) % 17) - 8,
+                    y: targetY + ((dotIndex * 23) % 13) - 6,
+                });
+            });
+        });
+    });
+
+    d3.forceSimulation(nodes)
+        .force('x', d3.forceX((node: SimNode) => node.targetX).strength(FORCE_X_STRENGTH))
+        .force('y', d3.forceY((node: SimNode) => node.targetY).strength(FORCE_Y_STRENGTH))
+        .force('collide', d3.forceCollide(dotRadius + COLLIDE_PAD).iterations(3))
+        .stop()
+        .tick(SIMULATION_TICKS);
+
+    // Keep settled dots inside the plot frame and their own type band.
+    nodes.forEach((node) => {
+        const typeIndex = shipTypes.indexOf(node.dot.shipType);
+        const bandTop = bandTops[typeIndex] ?? 0;
+        const bandHeight = bandHeights[typeIndex] ?? plotHeight;
+        node.x = Math.max(dotRadius + 1, Math.min(plotWidth - dotRadius - 1, node.x));
+        node.y = Math.max(bandTop + dotRadius + 1, Math.min(bandTop + bandHeight - dotRadius - 1, node.y));
+    });
+
     const svgRoot = container.append('svg')
         .attr('width', svgWidth)
         .attr('height', svgHeight);
@@ -155,25 +202,8 @@ const drawChart = (
     const svg = svgRoot.append('g')
         .attr('transform', `translate(${MARGIN.left}, ${MARGIN.top})`);
 
-    // Recessive cell scaffolding: tier column separators + type band separators.
-    for (let index = 1; index < tiers.length; index += 1) {
-        svg.append('line')
-            .attr('x1', index * colWidth)
-            .attr('x2', index * colWidth)
-            .attr('y1', 0)
-            .attr('y2', plotHeight)
-            .attr('stroke', colors.gridLine)
-            .attr('stroke-width', 1);
-    }
-    for (let index = 1; index < shipTypes.length; index += 1) {
-        svg.append('line')
-            .attr('x1', 0)
-            .attr('x2', plotWidth)
-            .attr('y1', bandTops[index])
-            .attr('y2', bandTops[index])
-            .attr('stroke', colors.gridLine)
-            .attr('stroke-width', 1);
-    }
+    // No grid — the clusters themselves carry the lattice; a single baseline
+    // anchors the tier labels.
     svg.append('line')
         .attr('x1', 0)
         .attr('x2', plotWidth)
@@ -213,30 +243,6 @@ const drawChart = (
         .style('fill', colors.labelMuted)
         .text('Ship Tier');
 
-    // Left-aligned packed rows per cell, vertically centered in the band.
-    const positioned: PositionedDot[] = [];
-    shipTypes.forEach((shipType, typeIndex) => {
-        tiers.forEach((tier: number, tierIndex: number) => {
-            const cell = cellDots.get(`${shipType}|${tier}`);
-            if (!cell) {
-                return;
-            }
-
-            const rowsUsed = Math.ceil(cell.length / dotsPerRow);
-            const blockHeight = rowsUsed * dotPitch;
-            const startX = tierIndex * colWidth + CELL_PAD_X + dotPitch / 2;
-            const startY = bandTops[typeIndex] + (bandHeights[typeIndex] - blockHeight) / 2 + dotPitch / 2;
-
-            cell.forEach((dot, dotIndex) => {
-                positioned.push({
-                    dot,
-                    cx: startX + (dotIndex % dotsPerRow) * dotPitch,
-                    cy: startY + Math.floor(dotIndex / dotsPerRow) * dotPitch,
-                });
-            });
-        });
-    });
-
     const summaryGroup = svgRoot.append('g')
         .attr('transform', `translate(${MARGIN.left}, 18)`);
 
@@ -268,16 +274,17 @@ const drawChart = (
             .text(`  ·  ${dot.shipType}  ·  Tier ${romanTier(dot.shipTier)}`);
     };
 
+    const dotStrokeWidth = dotRadius > 8 ? 2 : 1.5;
     const dotNodes = svg.append('g')
         .selectAll('circle')
-        .data(positioned)
+        .data(nodes)
         .enter()
         .append('circle')
         .attr('class', 'badge-dot')
-        .attr('cx', (entry: PositionedDot) => entry.cx)
-        .attr('cy', (entry: PositionedDot) => entry.cy)
+        .attr('cx', (node: SimNode) => node.x)
+        .attr('cy', (node: SimNode) => node.y)
         .attr('r', dotRadius)
-        .attr('fill', (entry: PositionedDot) => badgeClassColor(colors, entry.dot.badgeClass))
+        .attr('fill', (node: SimNode) => badgeClassColor(colors, node.dot.badgeClass))
         .attr('stroke', colors.barStroke)
         .attr('stroke-width', dotStrokeWidth)
         .nodes();
@@ -285,26 +292,26 @@ const drawChart = (
     // Oversized invisible hit targets so hovering small dots is forgiving.
     svg.append('g')
         .selectAll('circle')
-        .data(positioned)
+        .data(nodes)
         .enter()
         .append('circle')
         .attr('class', 'badge-dot-hit')
-        .attr('cx', (entry: PositionedDot) => entry.cx)
-        .attr('cy', (entry: PositionedDot) => entry.cy)
-        .attr('r', hitRadius)
+        .attr('cx', (node: SimNode) => node.x)
+        .attr('cy', (node: SimNode) => node.y)
+        .attr('r', dotRadius + HIT_PAD)
         .attr('fill', 'transparent')
         .style('cursor', 'default')
-        .on('mouseover', function (_event: MouseEvent, entry: PositionedDot) {
-            const index = positioned.indexOf(entry);
+        .on('mouseover', function (_event: MouseEvent, node: SimNode) {
+            const index = nodes.indexOf(node);
             if (index >= 0) {
                 d3.select(dotNodes[index])
                     .attr('stroke', colors.labelStrong)
                     .attr('stroke-width', dotStrokeWidth + 0.5);
             }
-            renderSummary(entry.dot);
+            renderSummary(node.dot);
         })
-        .on('mouseout', function (_event: MouseEvent, entry: PositionedDot) {
-            const index = positioned.indexOf(entry);
+        .on('mouseout', function (_event: MouseEvent, node: SimNode) {
+            const index = nodes.indexOf(node);
             if (index >= 0) {
                 d3.select(dotNodes[index])
                     .attr('stroke', colors.barStroke)
