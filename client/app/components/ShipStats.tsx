@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { withRealm } from '../lib/realmParams';
+import { trackEvent } from '../lib/umami';
 
 // ShipStats — the per-ship combat panel shown in the Activity tab when a row in
 // the Battle History table is clicked (toggled; a second click on the same ship
@@ -203,7 +204,12 @@ const ShipStats: React.FC<ShipStatsProps> = ({
                                     <button
                                         key={opt.id}
                                         type="button"
-                                        onClick={() => setBracket(opt.id)}
+                                        onClick={() => {
+                                            if (bracket !== opt.id) {
+                                                setBracket(opt.id);
+                                                trackEvent('ship-stats-bracket', { bracket: opt.id, ship_id: shipId, realm });
+                                            }
+                                        }}
                                         aria-pressed={isActive}
                                         className={`px-2.5 py-1 transition-colors ${
                                             isActive
