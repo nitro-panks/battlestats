@@ -118,8 +118,9 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; 
     { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
 ];
 
-// Locked height (px) for the Ships / Profile / Population insight panels so the
-// shell (the gray bounding box) stays a constant height across those three tabs.
+// Locked height (px) for the Ships / Profile / Population / Efficiency insight
+// panels so the shell (the gray bounding box) stays a constant height across
+// those tabs.
 // Derived from the Ships tab's natural height with the 825px chart scroll
 // viewport (RANDOMS_CHART_MAX_VIEWPORT_PX), measured at the ~1000px desktop
 // insights column: panel ≈ 1057px. Ships takes it as a minHeight (its filter
@@ -545,12 +546,14 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 className={activeTab === 'activity' ? 'min-w-0' : 'min-w-0 max-w-[1200px]'}
                 data-perf-section={panelSectionIdByTab[activeTab]}
                 style={{
-                    // Activity/Ships/Profile/Population share one locked height so
-                    // the shell stays put when switching among them; Ships uses
-                    // minHeight (filters may wrap on narrow widths) while Activity /
-                    // Profile / Population are fixed and fill it (Activity's table
-                    // flex-fills the remaining space; the charts grow to fill).
-                    ...(activeTab === 'ships'
+                    // Activity/Ships/Profile/Population/Efficiency share one locked
+                    // height so the shell stays put when switching among them; Ships
+                    // and Efficiency use minHeight (Ships' filters may wrap on narrow
+                    // widths; an ultra-dense badge plot may outgrow the box) while
+                    // Activity / Profile / Population are fixed and fill it
+                    // (Activity's table flex-fills the remaining space; the charts
+                    // grow to fill).
+                    ...(activeTab === 'ships' || activeTab === 'badges'
                         ? { minHeight: LOCKED_PANEL_HEIGHT_PX }
                         : activeTab === 'profile' || activeTab === 'population' || activeTab === 'activity'
                             ? { height: LOCKED_PANEL_HEIGHT_PX }
