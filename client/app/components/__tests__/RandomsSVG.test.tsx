@@ -191,11 +191,11 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         global.fetch = mockFetch as unknown as typeof fetch;
     });
 
-    // Two eligible ships. With fewer than the top-N (35) threshold the dormant
-    // default cutoff is 0 (show all), so the chart is non-empty by default; the
-    // tier/type filter buttons are derived from the full ship set, so the
-    // observable proof of the new filters is the empty-state text (chartData → 0)
-    // and the slider's clamped value label.
+    // Two eligible ships. The min-battles cutoff always defaults to 0 (show
+    // all), so the chart is non-empty by default; the tier/type filter buttons
+    // are derived from the full ship set, so the observable proof of the new
+    // filters is the empty-state text (chartData → 0) and the slider's clamped
+    // value label.
     const RANDOMS_ROWS = [
         { ship_id: 1, ship_name: 'Grind Ship', ship_chart_name: 'Grind Ship', ship_tier: 8, ship_type: 'Cruiser', pvp_battles: 120, wins: 66, win_ratio: 0.55 },
         { ship_id: 2, ship_name: 'Dabble Ship', ship_chart_name: 'Dabble Ship', ship_tier: 7, ship_type: 'Destroyer', pvp_battles: 60, wins: 33, win_ratio: 0.55 },
@@ -210,7 +210,7 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         // the grindiest ship (120) rather than the pre-data floor.
         await screen.findByRole('button', { name: 'T8' });
         const slider = screen.getByLabelText('Minimum lifetime random battles to show a ship');
-        // Dormant default with fewer than 30 ships → cutoff 0 (show all).
+        // The cutoff always defaults to 0 (show all).
         expect(screen.getByText(/≥\s*0$/)).toBeInTheDocument();
 
         // A mid-range value below the ceiling passes through unchanged.
@@ -276,9 +276,10 @@ describe('RandomsSVG min-battles slider + window filter', () => {
     });
 
     it('stays on the All default (no auto-Recent) when the window has battles', async () => {
-        // Grind Ship is in the 30d window: on load the min-battles cutoff drops to
-        // 0 (full recent mix visible) while Activity stays on the All default.
-        // Recent mode was removed, so the window no longer auto-switches the mode.
+        // Grind Ship is in the 30d window: the min-battles cutoff stays at its
+        // 0 default (full recent mix visible) while Activity stays on the All
+        // default. Recent mode was removed, so the window no longer auto-switches
+        // the mode.
         mockFetch.mockImplementation(buildUrlRoutedFetch(
             RANDOMS_ROWS,
             [{ ship_id: 1, ship_name: 'Grind Ship', ship_tier: 8, ship_type: 'Cruiser', battles: 12, wins: 7, delta_win_rate: 2.1 }],
@@ -295,10 +296,10 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
     });
 
-    it('keeps the all-ships default (cutoff 0 for a small roster) when the window has no battles', async () => {
-        // Empty window payload: the default filters stay put (Activity: All). With
-        // fewer than 30 ships the dormant default cutoff is 0, so a player with no
-        // recent activity still sees all their ships.
+    it('keeps the all-ships default (cutoff 0) when the window has no battles', async () => {
+        // Empty window payload: the default filters stay put (Activity: All,
+        // cutoff 0), so a player with no recent activity still sees all their
+        // ships.
         mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, []));
 
         render(<RandomsSVG playerId={204} playerName="TesterD" />);
@@ -310,11 +311,10 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
     });
 
-    it('defaults a dormant player to the top-35 ships (cutoff = 35th ship battles)', async () => {
-        // 38 ships, descending battle counts, none played in the window. The
-        // dormant default surfaces the top 35 by using the 35th-ranked ship's
-        // battle count as the cutoff: pvp_battles = 380 - i*10, so the 35th ship
-        // (index 34) has 40 battles.
+    it('keeps the cutoff at 0 even for a large dormant roster', async () => {
+        // 38 ships, descending battle counts, none played in the window. The old
+        // dormant default (top-35 cutoff) is gone: the cutoff stays at 0 and
+        // every ship is shown.
         const manyRows = Array.from({ length: 38 }, (_, i) => ({
             ship_id: i + 1,
             ship_name: `Ship ${i + 1}`,
@@ -330,9 +330,8 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         render(<RandomsSVG playerId={205} playerName="TesterE" />);
 
         await screen.findByRole('button', { name: 'T8' });
-        // Cutoff lands on the 35th ship's battle count (40), not the pre-data floor.
         await waitFor(() => {
-            expect(screen.getByText(/≥\s*40/)).toBeInTheDocument();
+            expect(screen.getByText(/≥\s*0$/)).toBeInTheDocument();
         });
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
     });
