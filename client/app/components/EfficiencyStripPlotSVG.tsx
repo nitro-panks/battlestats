@@ -58,10 +58,12 @@ const DRAG_ALPHA_TARGET = 0.3;
 // The center-spring start is bistable: a pure center launch can lock into a
 // single collide-pressure blob instead of separating. Seeding each node a
 // fraction of the way toward its quadrant breaks that symmetry decisively
-// while still reading as "springs from the middle"; the slower cooling gives
-// the anchors time to finish the separation.
-const ANCHOR_SEED_BIAS = 0.2;
-const ALPHA_DECAY = 0.015;
+// while still reading as "springs from the middle". Cooling is fast and
+// friction high so the load animation is one smooth exhale — settled in a
+// couple of seconds, no lingering jostle.
+const ANCHOR_SEED_BIAS = 0.3;
+const ALPHA_DECAY = 0.05;
+const VELOCITY_DECAY = 0.55;
 
 interface SimNode {
     dot: EfficiencyBadgeDot;
@@ -396,6 +398,7 @@ const drawChart = (
         .force('y', d3.forceY((node: SimNode) => node.anchorY).strength(QUADRANT_ANCHOR_STRENGTH))
         .force('collide', d3.forceCollide((node: SimNode) => radiusFor(node) + COLLIDE_PAD).iterations(2))
         .alphaDecay(ALPHA_DECAY)
+        .velocityDecay(VELOCITY_DECAY)
         .on('tick', renderPositions);
 
     // Drag with rubber-band: the node is pinned to the pointer while dragging;
