@@ -438,7 +438,9 @@ const drawDistribution = (
 
     svg.append('g')
         .style('color', c.axisText)
-        .call(d3.axisLeft(y).ticks(3).tickFormat((value: number) => d3.format(',')(Number(value))).tickSizeOuter(0))
+        // Compact counts (30k, 1.2M) — the full comma form ("30,000") clips
+        // against the left margin at the Population tab's half-column width.
+        .call(d3.axisLeft(y).ticks(3).tickFormat((value: number) => formatCompactCount(Number(value))).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', axisFontSize);
 

@@ -63,7 +63,6 @@ const Footer: React.FC = () => {
                         Add a streamer!
                     </button>
                 </p>
-                <p>Data sourced from the Wargaming API. Not affiliated with Wargaming.net.</p>
                 <p>
                     World of Warships data is sourced from the official Wargaming API. Battlestats is an independent fan project and is not affiliated with, endorsed by, or sponsored by Wargaming.
                 </p>

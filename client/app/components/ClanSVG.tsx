@@ -17,6 +17,11 @@ interface ClanProps {
     svgHeight?: number;
     membersData?: ClanMemberData[];
     theme?: ChartTheme;
+    // Overrides the log/linear toggle row's layout classes. Default keeps the
+    // toggle in flow, right-aligned above the chart; a caller can pass e.g.
+    // absolute-positioning classes to lift it into its own header row (the
+    // player-page clan section puts it on the clan-heading line).
+    scaleToggleClassName?: string;
 }
 
 interface ClanData {
@@ -651,7 +656,7 @@ const drawClanPlot = (
 // localStorage.
 const CLAN_SCALE_PREF_KEY = 'bs:clan-scale';
 
-const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [], theme = 'light' }) => {
+const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [], theme = 'light', scaleToggleClassName }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const { realm } = useRealm();
     // null = follow the per-clan auto default; otherwise the user's stored pick.
@@ -862,7 +867,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
 
     return (
         <div>
-            <div className="mb-0.5 flex items-center justify-end gap-1 text-[10px] lowercase tracking-wide text-[var(--text-secondary)]">
+            <div className={`flex items-center gap-1 text-[10px] lowercase tracking-wide text-[var(--text-secondary)] ${scaleToggleClassName ?? 'mb-0.5 justify-end'}`}>
                 {(['log', 'linear'] as const).map((scale) => (
                     <button
                         key={scale}
@@ -895,6 +900,7 @@ const areClanSvgPropsEqual = (previousProps: ClanProps, nextProps: ClanProps): b
         && (previousProps.svgWidth ?? 320) === (nextProps.svgWidth ?? 320)
         && (previousProps.svgHeight ?? 280) === (nextProps.svgHeight ?? 280)
         && (previousProps.theme ?? 'light') === (nextProps.theme ?? 'light')
+        && previousProps.scaleToggleClassName === nextProps.scaleToggleClassName
         && buildClanChartMemberActivitySignature(previousProps.membersData ?? []) === buildClanChartMemberActivitySignature(nextProps.membersData ?? []);
 };
 

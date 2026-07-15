@@ -36,10 +36,7 @@ const ClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./C
     loading: () => <LoadingPanel tone="muted" label="Loading clan battle seasons..." minHeight={240} />,
 });
 
-const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMembers'), 'ClanDetail-ClanMembers'), {
-    ssr: false,
-    loading: () => <LoadingPanel tone="muted" label="Loading clan members..." minHeight={96} />,
-});
+import ClanActivityRoster from './ClanActivityRoster';
 
 const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onSelectMember }) => {
     const { theme } = useTheme();
@@ -151,7 +148,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onSelectMember }) => {
                 placeholder={<LoadingPanel tone="muted" label="Preparing clan members..." minHeight={96} />}
             >
                 <div>
-                    <ClanMembers members={members} loading={membersLoading} error={membersError} onSelectMember={onSelectMember} layout="columns" source="clan" />
+                    <ClanActivityRoster members={members} loading={membersLoading} error={membersError} source="clan" />
                 </div>
             </DeferredSection>
 
