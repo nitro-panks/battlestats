@@ -33,13 +33,6 @@ interface RandomsWindowStat {
 }
 type RandomsWindowMap = Map<string, RandomsWindowStat>;
 
-// Pre-load fallback for the min-battles slider, shown only until the ship list
-// arrives. Once ships load, a player with no recent window activity defaults to
-// their top-N most-played ships instead (see RANDOMS_DEFAULT_TOP_SHIPS); a
-// player WITH window activity defaults to window-only + a 0 cutoff (see the
-// window fetch effect).
-const RANDOMS_DEFAULT_MIN_BATTLES = 25;
-
 interface RandomsRow {
     pvp_battles: number;
     ship_name: string;
@@ -49,21 +42,6 @@ interface RandomsRow {
     win_ratio: number;
     wins: number;
 }
-
-// Dormant-player default: open the chart on the player's N most-played ships
-// rather than a fixed battle floor. We do this by reading the battle count of
-// the Nth-ranked ship (by lifetime random battles) and using it as the
-// min-battles cutoff, so ships at or above that count — the top N (a few more
-// on ties) — stay visible. Fewer than N ships → 0 (show them all).
-const RANDOMS_DEFAULT_TOP_SHIPS = 35;
-
-const topShipsMinBattles = (rows: RandomsRow[], topN = RANDOMS_DEFAULT_TOP_SHIPS): number => {
-    if (rows.length < topN) {
-        return 0;
-    }
-    const sortedBattles = rows.map((row) => row.pvp_battles).sort((left, right) => right - left);
-    return sortedBattles[topN - 1];
-};
 
 // Activity filter mode: All shows every ship; Window Only hides ships not
 // played in the trailing 30-day window.
@@ -427,22 +405,14 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const [isChartLoading, setIsChartLoading] = useState(() => seeded === null);
     const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(() => seeded?.updatedAt ?? null);
     const [hoveredShip, setHoveredShip] = useState<RandomsRow | null>(null);
-    // Minimum lifetime-battles cutoff (task 3) + "played this window" toggle
-    // (task 5) + the trailing-30d window join (tasks 4 & 5). Seed the dormant
-    // default (top-N ships) from the cached rows when we have them so a
-    // tab-switch return repaints at the right cutoff without a flash.
-    const [minBattles, setMinBattles] = useState<number>(
-        () => (seeded?.rows ? topShipsMinBattles(seeded.rows) : RANDOMS_DEFAULT_MIN_BATTLES),
-    );
+    // Minimum lifetime-battles cutoff. Always starts at 0 (no filtering).
+    const [minBattles, setMinBattles] = useState<number>(0);
     // Minimum win-rate cutoff (whole %). Always starts at 0 (no filtering) and
     // resets to 0 on player/realm change; scaled 0..the player's best ship WR.
     const [minWR, setMinWR] = useState<number>(0);
     const [activityMode, setActivityMode] = useState<ActivityMode>('all');
     const [windowStats, setWindowStats] = useState<RandomsWindowMap>(() => new Map());
     const containerRef = useRef<HTMLDivElement>(null);
-    // Guards the one-time dormant default (top-N ships) so a later re-read of the
-    // ship list (rehydrate) never clobbers a cutoff the user has since adjusted.
-    const dormantDefaultAppliedRef = useRef(false);
 
     // Fetch ALL ships, then re-fetch if stale until the backend delivers fresh data.
     useEffect(() => {
@@ -563,16 +533,6 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     });
                 }
                 setWindowStats(map);
-
-                // On load, if the player has any random battles in the trailing
-                // window, drop the min-battles floor so their full recent mix is
-                // visible (Activity stays on the All default). Runs once per
-                // player/realm before the user touches the filters; a no-window
-                // player instead defaults to their top-N ships (dormant-default
-                // effect below).
-                if (map.size > 0) {
-                    setMinBattles(0);
-                }
             } catch (error) {
                 if (isAbortError(error)) return;
                 // Enrichment-only; leave deltas/checkbox absent on failure.
@@ -596,34 +556,11 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         [allShips],
     );
 
-    // Battle count of the player's Nth most-played ship — the dormant default
-    // cutoff (surfaces their top ~N ships).
-    const dormantDefaultMinBattles = useMemo(() => topShipsMinBattles(allShips), [allShips]);
-
-    // Re-arm the one-time dormant default whenever we switch player/realm.
+    // Both cutoffs always reset to 0 on player/realm change (never carry over).
     useEffect(() => {
-        dormantDefaultAppliedRef.current = false;
-    }, [playerId, realm]);
-
-    // Min WR always resets to 0 on player/realm change (never carries over).
-    useEffect(() => {
+        setMinBattles(0);
         setMinWR(0);
     }, [playerId, realm]);
-
-    // Apply the dormant default (top-N ships) once the ship list is loaded, for
-    // players with no trailing-window activity. Window-active players instead get
-    // their min-0 default from the window fetch effect; if that effect resolves
-    // after this one, its setMinBattles(0) simply overrides. Applied at most once
-    // per player/realm so a manual slider change is never clobbered.
-    useEffect(() => {
-        if (dormantDefaultAppliedRef.current || allShips.length === 0) {
-            return;
-        }
-        dormantDefaultAppliedRef.current = true;
-        if (windowStats.size === 0) {
-            setMinBattles(dormantDefaultMinBattles);
-        }
-    }, [allShips.length, windowStats, dormantDefaultMinBattles]);
 
     // Keep the cutoff within reach: if the player's grindiest ship has fewer
     // battles than the current cutoff, the chart would empty out silently. Pull
