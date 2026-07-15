@@ -55,6 +55,14 @@ const QUADRANT_ANCHOR_STRENGTH = 0.25;
 const CHARGE_STRENGTH = -40;
 const COLLIDE_PAD = 2.5;
 const DRAG_ALPHA_TARGET = 0.3;
+// Hover gravity: circles that share a hover effect with the hovered circle
+// (its tier, its medal) are slowly pulled toward it — twice as hard when they
+// share both — shouldering unrelated circles aside via the collision force.
+// The hovered circle itself is pinned. Releasing the hover lets the quadrant
+// anchors carry everyone home. The pull keeps tracking the circle while it
+// is dragged around.
+const HOVER_PULL_STRENGTH = 0.08;
+const HOVER_ALPHA_TARGET = 0.12;
 // The center-spring start is bistable: a pure center launch can lock into a
 // single collide-pressure blob instead of separating. Seeding each node a
 // fraction of the way toward its quadrant breaks that symmetry decisively
@@ -137,6 +145,11 @@ const compareDots = (left: EfficiencyBadgeDot, right: EfficiencyBadgeDot): numbe
     }
     return left.shipName.localeCompare(right.shipName);
 };
+
+// How many hover effects two circles share: same tier (throb) and/or same
+// medal (ring). Doubles the hover gravity when both apply.
+const sharedHoverEffects = (a: SimNode, b: SimNode): number =>
+    (a.dot.shipTier === b.dot.shipTier ? 1 : 0) + (a.dot.badgeClass === b.dot.badgeClass ? 1 : 0);
 
 // Quadrant anchor fractions of the plot area, by number of type clusters —
 // pulled toward the center so the cluster constellation reads as one system.
@@ -401,11 +414,39 @@ const drawChart = (
         .velocityDecay(VELOCITY_DECAY)
         .on('tick', renderPositions);
 
+    // Hover gravity: while a circle is hovered (or dragged), every circle
+    // sharing one of its hover effects drifts toward its live position —
+    // twice the pull when both effects are shared. Collision does the gentle
+    // shoving of unrelated circles along the way.
+    let activeNode: SimNode | null = null;
+    let draggingNode: SimNode | null = null;
+    simulation.force('hover-pull', (alpha: number) => {
+        const target = activeNode;
+        if (!target) {
+            return;
+        }
+        nodes.forEach((node) => {
+            if (node === target) {
+                return;
+            }
+            const shares = sharedHoverEffects(target, node);
+            if (!shares) {
+                return;
+            }
+            const pull = HOVER_PULL_STRENGTH * shares * alpha;
+            node.vx = (node.vx ?? 0) + (target.x - node.x) * pull;
+            node.vy = (node.vy ?? 0) + (target.y - node.y) * pull;
+        });
+    });
+
     // Drag with rubber-band: the node is pinned to the pointer while dragging;
-    // on release the anchor/link forces pull it back toward its quadrant.
+    // on release the anchor/link forces pull it back toward its quadrant. The
+    // hover gravity stays engaged for the dragged node.
     const drag = d3.drag()
         .on('start', (event: { active: number }, node: SimNode) => {
             if (!event.active) simulation.alphaTarget(DRAG_ALPHA_TARGET).restart();
+            draggingNode = node;
+            activeNode = node;
             node.fx = node.x;
             node.fy = node.y;
         })
@@ -414,7 +455,8 @@ const drawChart = (
             node.fy = event.y;
         })
         .on('end', (event: { active: number }, node: SimNode) => {
-            if (!event.active) simulation.alphaTarget(0);
+            if (!event.active) simulation.alphaTarget(activeNode ? HOVER_ALPHA_TARGET : 0);
+            draggingNode = null;
             node.fx = null;
             node.fy = null;
         });
@@ -443,8 +485,28 @@ const drawChart = (
                 .filter((other: SimNode) => other.dot.badgeClass === node.dot.badgeClass)
                 .style('opacity', 1);
             renderSummary(node.dot);
+
+            // Engage the hover gravity: pin the hovered circle where it sits
+            // and let its tier/medal mates start their slow pull toward it.
+            activeNode = node;
+            if (draggingNode !== node) {
+                node.fx = node.x;
+                node.fy = node.y;
+            }
+            simulation.alphaTarget(HOVER_ALPHA_TARGET).restart();
         })
-        .on('mouseout', clearHoverHighlights);
+        .on('mouseout', function (_event: MouseEvent, node: SimNode) {
+            // A fast drag can outrun its hit circle and fire mouseout — keep
+            // the gravity engaged for the dragged node.
+            if (draggingNode === node) {
+                return;
+            }
+            clearHoverHighlights();
+            activeNode = null;
+            node.fx = null;
+            node.fy = null;
+            simulation.alphaTarget(0);
+        });
 
     // Default the summary to the player's best badge (class asc, then name) so
     // the panel never starts blank.

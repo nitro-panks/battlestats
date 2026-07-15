@@ -382,9 +382,9 @@ body {
    tier throb their border grey -> very white -> grey. Animating stroke
    (opacity would fight the fill fade that same-medal dots run). */
 @keyframes badge-dot-throb {
-  0%, 100% { stroke: #9ca3af; }
-  50% { stroke: #ffffff; }
+  0%, 100% { stroke: #6b7280; stroke-width: 2px; }
+  50% { stroke: #ffffff; stroke-width: 6px; }
 }
 .badge-dot-throb {
-  animation: badge-dot-throb 1.1s ease-in-out infinite;
+  animation: badge-dot-throb 0.9s ease-in-out infinite;
 }
