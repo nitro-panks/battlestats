@@ -3,6 +3,18 @@ import type { ShipBadge } from './ShipTopPlayerBanner';
 
 export type ActivityBucketKey = 'active_7d' | 'active_30d' | 'cooling_90d' | 'dormant_180d' | 'inactive_180d_plus' | 'unknown';
 
+// The UI presents three activity phases; the backend payload still carries the
+// finer five-way `activity_bucket` (contract unchanged). Every surface collapses
+// the raw bucket through this map before styling: Active (≤30d), Cooling
+// (31–180d), Gone dark (181d+).
+export type CollapsedActivityBucketKey = 'active_7d' | 'cooling_90d' | 'inactive_180d_plus';
+
+export const collapseActivityBucket = (bucket: ActivityBucketKey): CollapsedActivityBucketKey | 'unknown' => {
+    if (bucket === 'active_30d') return 'active_7d';
+    if (bucket === 'dormant_180d') return 'cooling_90d';
+    return bucket;
+};
+
 export interface ClanMemberData {
     name: string;
     is_hidden: boolean;

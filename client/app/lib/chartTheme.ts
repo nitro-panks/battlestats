@@ -30,9 +30,7 @@ export const chartColors: Record<ChartTheme, {
     wrBad: string;
     // Activity bar palette
     activityActive: string;
-    activityRecent: string;
     activityCooling: string;
-    activityDormant: string;
     activityInactive: string;
     activityUnknown: string;
     // Heatmap / trend colors
@@ -93,9 +91,7 @@ export const chartColors: Record<ChartTheme, {
         wrBad: '#a50f15',
         // Activity bar palette
         activityActive: '#08519c',
-        activityRecent: '#3182bd',
         activityCooling: '#6baed6',
-        activityDormant: '#9ecae1',
         activityInactive: '#d9e2ec',
         activityUnknown: '#e5e7eb',
         // Heatmap / trend colors
@@ -153,9 +149,7 @@ export const chartColors: Record<ChartTheme, {
         wrBad: '#a50f15',
         // Activity bar palette
         activityActive: '#4292c6',
-        activityRecent: '#6baed6',
         activityCooling: '#9ecae1',
-        activityDormant: '#4b5563',
         activityInactive: '#2d3748',
         activityUnknown: '#1f2937',
         // Heatmap / trend colors

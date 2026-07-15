@@ -98,7 +98,7 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | `clan-chart-3d` | `{realm}` | Click the "3D" chart toggle (desktop, when 3D data present) | `ClanDetail.tsx:158` | ✅ 38 (23) |
 | `clan-chart-linear` | `{realm}` | Switch the clan efficiency chart to linear scale | `ClanSVG.tsx:629` | ✅ 136 (78) |
 | `clan-chart-log` | `{realm}` | Switch the clan efficiency chart to log scale | `ClanSVG.tsx:629` | ✅ 134 (82) |
-| `clan-chart-activity-filter` | `{realm, bucket}` | Click an activity-bar segment to **pin** that recency cohort (radio; re-click releases). Fires only when a bucket becomes pinned. `bucket` ∈ `active_7d\|active_30d\|cooling_90d\|dormant_180d\|inactive_180d_plus\|unknown` | `ClanSVG.tsx` (segment click) | ✅ live-verified 2026-06-18 |
+| `clan-chart-activity-filter` | `{realm, bucket}` | Click an activity-bar segment to **pin** that recency cohort (radio; re-click releases). Fires only when a bucket becomes pinned. `bucket` ∈ `active_7d\|cooling_90d\|inactive_180d_plus\|unknown` (collapsed 3-phase keys since v3.7.1; older rows may carry the retired `active_30d`/`dormant_180d`) | `ClanSVG.tsx` (segment click) | ✅ live-verified 2026-06-18 |
 
 ### Ship leaderboard (landing section) & `/ship/<id>` page
 

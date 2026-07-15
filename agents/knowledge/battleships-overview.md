@@ -211,6 +211,7 @@ Future agent sessions need one high-density bootstrap file that explains the liv
   - `dormant_180d`
   - `inactive_180d_plus`
   - `unknown`
+- the frontend collapses the five raw buckets into three presented phases via `collapseActivityBucket` (`client/app/components/clanMembersShared.ts`): Active ≤30d (`active_7d`+`active_30d`), Cooling 31–180d (`cooling_90d`+`dormant_180d`), Gone dark 181d+ (`inactive_180d_plus`); the payload contract keeps the five-way values.
 - clan PvE marker rule is runtime-derived:
   - `pve_battles = max(total_battles - pvp_battles, 0)`
   - marker only if `total_battles > 500`, `pve_battles >= 1500`, and `pve_battles / total_battles >= 0.30`

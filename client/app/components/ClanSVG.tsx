@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
+import { collapseActivityBucket } from './clanMembersShared';
 import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
 import { fetchSharedJson, incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
 import { chartColors, resolveChartWidth, type ChartTheme } from '../lib/chartTheme';
@@ -38,13 +39,14 @@ interface ActivitySegment {
     share: number;
 }
 
+// Segments follow the three presented activity phases; plot points collapse
+// their raw five-way bucket at ingestion so segment matching stays a simple
+// key equality (see collapseActivityBucket in clanMembersShared).
 const getActivityBuckets = (theme: ChartTheme): Array<{ key: ActivityBucketKey; label: string; shortLabel: string; color: string }> => {
     const colors = chartColors[theme];
     return [
-        { key: 'active_7d', label: 'Active now', shortLabel: '0-7d', color: colors.activityActive },
-        { key: 'active_30d', label: 'Still warm', shortLabel: '8-30d', color: colors.activityRecent },
-        { key: 'cooling_90d', label: 'Cooling', shortLabel: '31-90d', color: colors.activityCooling },
-        { key: 'dormant_180d', label: 'Dormant', shortLabel: '91-180d', color: colors.activityDormant },
+        { key: 'active_7d', label: 'Active now', shortLabel: '0-30d', color: colors.activityActive },
+        { key: 'cooling_90d', label: 'Cooling', shortLabel: '31-180d', color: colors.activityCooling },
         { key: 'inactive_180d_plus', label: 'Gone dark', shortLabel: '181d+', color: colors.activityInactive },
         { key: 'unknown', label: 'No recency', shortLabel: 'Unknown', color: colors.activityUnknown },
     ];
@@ -276,7 +278,7 @@ const drawClanPlot = (
         const member = membersByName.get(datum.player_name.trim().toLowerCase());
         return {
             ...datum,
-            activity_bucket: member?.activity_bucket || 'unknown',
+            activity_bucket: collapseActivityBucket(member?.activity_bucket || 'unknown'),
             days_since_last_battle: member?.days_since_last_battle ?? null,
         };
     });

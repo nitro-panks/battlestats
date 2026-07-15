@@ -6,7 +6,7 @@ import LeaderCrownIcon from './LeaderCrownIcon';
 import TwitchStreamerIcon from './TwitchStreamerIcon';
 import PveEnjoyerIcon from './PveEnjoyerIcon';
 import ActivityIcon, { ACTIVITY_SHORT_LABEL, activityColor } from './ActivityIcon';
-import type { ActivityBucketKey } from './clanMembersShared';
+import type { ActivityBucketKey, CollapsedActivityBucketKey } from './clanMembersShared';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import TopShipBadges from './TopShipBadges';
@@ -15,58 +15,37 @@ import { useFlipAnimation } from './useFlipAnimation';
 import { trackEvent } from '../lib/umami';
 import { useRealm } from '../context/RealmContext';
 
-// The clan-page activity table collapses the five activity states into three
-// columns. `iconBuckets` are the phase icons shown in the column header (a
-// range cluster for the middle band); `memberBuckets` are the states routed
-// into that column. `showMemberIcons` keeps per-row phase icons in the middle
-// column only, where members span more than one state.
+// The clan-page activity table shows one column per presented activity phase.
+// The backend's five raw states route into the three phases (Active ≤30d,
+// Cooling 31–180d, Gone dark 181d+); `icon` is the phase icon shown in the
+// column header. Per-row phase icons are redundant with the header now that
+// every column is a single phase, so none are rendered.
 interface ActivityColumnSpec {
     key: string;
     label: string;
-    iconBuckets: Array<Exclude<ActivityBucketKey, 'unknown'>>;
+    icon: CollapsedActivityBucketKey;
     memberBuckets: ActivityBucketKey[];
-    showMemberIcons: boolean;
 }
 
 const COLUMN_SPECS: ActivityColumnSpec[] = [
-    { key: 'active', label: 'Active now', iconBuckets: ['active_7d'], memberBuckets: ['active_7d'], showMemberIcons: false },
-    { key: 'cooling', label: 'Cooling off', iconBuckets: ['active_30d', 'cooling_90d', 'dormant_180d'], memberBuckets: ['active_30d', 'cooling_90d', 'dormant_180d', 'unknown'], showMemberIcons: true },
-    { key: 'dark', label: 'Gone dark', iconBuckets: ['inactive_180d_plus'], memberBuckets: ['inactive_180d_plus'], showMemberIcons: false },
+    { key: 'active', label: 'Active now', icon: 'active_7d', memberBuckets: ['active_7d', 'active_30d'] },
+    { key: 'cooling', label: 'Cooling off', icon: 'cooling_90d', memberBuckets: ['cooling_90d', 'dormant_180d', 'unknown'] },
+    { key: 'dark', label: 'Gone dark', icon: 'inactive_180d_plus', memberBuckets: ['inactive_180d_plus'] },
 ];
 
-// Stacked rail: one bounding box per distinct activity status, in recency
-// order. `key` is the box's legend icon; `buckets` are the member states routed
-// into it (the cooling box also absorbs any unknown recency, as the columns
-// layout does). Boxes are gathered into two supergroups — recently-active
-// (active + warm) and lapsed (cooling / dormant / gone-dark) — rendered snug
-// within a supergroup and spaced apart between them. Empty boxes and empty
-// supergroups are skipped at render.
+// Stacked rail: one bounding box per presented activity phase, in recency
+// order. `key` is the box's legend icon; `buckets` are the raw member states
+// routed into it (the cooling box also absorbs any unknown recency, as the
+// columns layout does). Empty boxes are skipped at render.
 interface StatusBoxSpec {
-    key: Exclude<ActivityBucketKey, 'unknown'>;
+    key: CollapsedActivityBucketKey;
     buckets: ActivityBucketKey[];
 }
 
-interface StatusSupergroupSpec {
-    key: string;
-    boxes: StatusBoxSpec[];
-}
-
-const STATUS_SUPERGROUPS: StatusSupergroupSpec[] = [
-    {
-        key: 'active',
-        boxes: [
-            { key: 'active_7d', buckets: ['active_7d'] },
-            { key: 'active_30d', buckets: ['active_30d'] },
-        ],
-    },
-    {
-        key: 'lapsed',
-        boxes: [
-            { key: 'cooling_90d', buckets: ['cooling_90d', 'unknown'] },
-            { key: 'dormant_180d', buckets: ['dormant_180d'] },
-            { key: 'inactive_180d_plus', buckets: ['inactive_180d_plus'] },
-        ],
-    },
+const STATUS_BOXES: StatusBoxSpec[] = [
+    { key: 'active_7d', buckets: ['active_7d', 'active_30d'] },
+    { key: 'cooling_90d', buckets: ['cooling_90d', 'dormant_180d', 'unknown'] },
+    { key: 'inactive_180d_plus', buckets: ['inactive_180d_plus'] },
 ];
 
 interface ClanMembersProps {
@@ -186,11 +165,9 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
         register(name, el);
     }, [register]);
 
-    // Columns layout: three columns — fresh (active now), a middle band that
-    // folds warm/cooling/dormant (and any unknown recency) together, and gone
-    // dark. The middle keeps its per-member phase icons so the warm→dormant
-    // gradient stays legible; the single-state columns don't repeat the icon.
-    // Empty columns are skipped, and members keep the backend's activity sort.
+    // Columns layout: one column per phase — active (≤30d), cooling (31–180d,
+    // plus any unknown recency), and gone dark. Empty columns are skipped, and
+    // members keep the backend's activity sort.
     const activityColumns = (layout === 'columns' ? COLUMN_SPECS : [])
         .map((spec) => ({
             ...spec,
@@ -198,26 +175,16 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
         }))
         .filter((column) => column.members.length > 0);
 
-    // Stacked rail (player page): group the roster into outlined per-status
-    // boxes carrying a top-right status-icon legend (so the per-row activity
-    // icon is dropped). Boxes are bundled into two supergroups — active and
-    // lapsed — snug within, spaced between. Empty boxes/supergroups drop out;
-    // 'unknown' recency folds into the cooling box, matching the columns layout.
-    const statusSupergroups = (layout === 'stacked' ? STATUS_SUPERGROUPS : [])
-        .map((supergroup) => ({
-            key: supergroup.key,
-            boxes: supergroup.boxes
-                .map((box) => ({
-                    ...box,
-                    members: members.filter((member) => box.buckets.includes(member.activity_bucket)),
-                }))
-                .filter((box) => box.members.length > 0),
+    // Stacked rail (player page): group the roster into ruled per-phase boxes
+    // carrying a header status-icon legend (so the per-row activity icon is
+    // dropped). Empty boxes drop out; 'unknown' recency folds into the cooling
+    // box, matching the columns layout.
+    const statusBoxesFlat = (layout === 'stacked' ? STATUS_BOXES : [])
+        .map((box) => ({
+            ...box,
+            members: members.filter((member) => box.buckets.includes(member.activity_bucket)),
         }))
-        .filter((supergroup) => supergroup.boxes.length > 0);
-    // The boxes render as one continuous stack: adjacent borders overlap into a
-    // single hairline (see the render), so the supergroups collapse to a flat,
-    // recency-ordered sequence.
-    const statusBoxesFlat = statusSupergroups.flatMap((supergroup) => supergroup.boxes);
+        .filter((box) => box.members.length > 0);
 
     return (
         <div>
@@ -235,18 +202,14 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                     {activityColumns.map((column) => (
                         <div key={column.key} className="min-w-0">
                             <div className="mb-1.5 flex items-center gap-1.5 border-b border-[var(--border)] pb-1">
-                                <span className="inline-flex items-center gap-0.5">
-                                    {column.iconBuckets.map((bucket) => (
-                                        <ActivityIcon key={bucket} bucket={bucket} size="header" />
-                                    ))}
-                                </span>
+                                <ActivityIcon bucket={column.icon} size="header" />
                                 <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">{column.label}</span>
                                 <span className="text-xs font-normal text-[var(--text-secondary)]">{column.members.length}</span>
                             </div>
                             <div className="space-y-0.5">
                                 {column.members.map((member) => (
                                     <div key={member.name}>
-                                        <MemberContent member={member} layout="stacked" isCurrentPlayer={false} showActivity={column.showMemberIcons} onSelectMember={handleSelectMember} />
+                                        <MemberContent member={member} layout="stacked" isCurrentPlayer={false} showActivity={false} onSelectMember={handleSelectMember} />
                                     </div>
                                 ))}
                             </div>

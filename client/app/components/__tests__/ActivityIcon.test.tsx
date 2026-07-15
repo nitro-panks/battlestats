@@ -26,7 +26,13 @@ describe('ActivityIcon', () => {
 
     it('derives the phase from a day count when no bucket is given', () => {
         render(<ActivityIcon daysSinceLastBattle={120} />);
-        expect(screen.getByLabelText(/Cold —/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/Cooling —/i)).toBeInTheDocument();
+    });
+
+    it('collapses the raw buckets into three phases', () => {
+        render(<ActivityIcon bucket="active_30d" />);
+        expect(screen.getByLabelText(/Active —/i)).toBeInTheDocument();
+        expect(screen.queryByLabelText(/Warm —/i)).not.toBeInTheDocument();
     });
 
     it('renders nothing for unknown / missing recency', () => {

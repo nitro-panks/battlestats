@@ -140,7 +140,7 @@ describe('ClanMembers efficiency-rank icon', () => {
 });
 
 describe('ClanMembers activity icon', () => {
-    it('renders a graded activity icon per bucket instead of raw idle text', () => {
+    it('collapses the five raw buckets into the three presented phases', () => {
         render(
             <ClanMembers
                 members={[
@@ -154,11 +154,11 @@ describe('ClanMembers activity icon', () => {
             />,
         );
 
-        expect(screen.getByLabelText(/Active —/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/Warm —/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/Cooling —/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/Cold —/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/Asleep —/i)).toBeInTheDocument();
+        // active_30d folds into Active; dormant_180d folds into Cooling.
+        expect(screen.getAllByLabelText(/Active —/i)).toHaveLength(2);
+        expect(screen.getAllByLabelText(/Cooling —/i)).toHaveLength(2);
+        expect(screen.getAllByLabelText(/Asleep —/i)).toHaveLength(1);
+        expect(screen.queryByLabelText(/Warm —|Cold —/i)).not.toBeInTheDocument();
     });
 
     it('drops the old "Nd idle" / "played today" recency text', () => {

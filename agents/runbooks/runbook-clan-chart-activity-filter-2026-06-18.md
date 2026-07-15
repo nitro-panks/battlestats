@@ -100,3 +100,13 @@ console.log(`\n${results.length - f.length}/${results.length} passed`); if (f.le
 - `runbook-umami-event-reference-2026-06-18.md` — the `clan-chart-activity-filter` event catalog row
 - `reference_frontend_visual_verify_recipe` (memory) — worktree + prod-data Playwright recipe
 - `project_activity_rise_to_bed_icons_shipped` (memory) — the `activity_bucket` / `ActivityIcon` taxonomy this bar shares
+
+## Update 2026-07-15 (v3.7.1): collapsed 3-phase taxonomy
+
+The presented activity taxonomy collapsed from five buckets to three phases —
+Active ≤30d (`active_7d`+`active_30d`), Cooling 31–180d (`cooling_90d`+`dormant_180d`),
+Gone dark 181d+ — via `collapseActivityBucket` (`clanMembersShared.ts`). `ClanSVG`
+now collapses each plot point's raw bucket at ingestion, so segments, pins, and
+the `data-bucket` attribute only carry `active_7d|cooling_90d|inactive_180d_plus|unknown`.
+The harness's per-bucket selectors still resolve; `dormant_180d` simply never matches.
+The backend classifier and payload contract are unchanged (still five-way).
