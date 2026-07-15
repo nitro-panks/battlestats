@@ -53,10 +53,10 @@ export const chartColors: Record<ChartTheme, {
     metricBattles: string;
     metricSurvival: string;
     metricScore: string;
-    // Efficiency badge classes (E, I, II, III) — gold / steel / copper / verdigris.
-    // Each mode's four steps are validated as a set (all-pairs CVD separation,
-    // chroma floor, contrast) against that mode's chartBg; do not restep one
-    // color without re-validating the set for both modes.
+    // Efficiency badge levels (Expert, I, II, III) — platinum / gold / silver /
+    // bronze, per the in-game medal metaphor (product decision over palette
+    // validation; identity is carried by the legend labels, hover summary, and
+    // per-level hover highlighting, not color alone).
     badgeE: string;
     badgeI: string;
     badgeII: string;
@@ -116,11 +116,11 @@ export const chartColors: Record<ChartTheme, {
         metricBattles: '#2171b5',
         metricSurvival: '#0f766e',
         metricScore: '#2171b5',
-        // Efficiency badge classes
-        badgeE: '#cc8600',
-        badgeI: '#2a78d6',
-        badgeII: '#c9376b',
-        badgeIII: '#00782c',
+        // Efficiency badge levels: platinum / gold / silver / bronze
+        badgeE: '#b6bfc9',
+        badgeI: '#d4af37',
+        badgeII: '#8f9aa5',
+        badgeIII: '#b0713a',
 // Accent / UI colors used inside SVG
         accentLink: '#084594',
         accentMid: '#2171b5',
@@ -176,11 +176,11 @@ export const chartColors: Record<ChartTheme, {
         metricBattles: '#58a6ff',
         metricSurvival: '#2dd4bf',
         metricScore: '#58a6ff',
-        // Efficiency badge classes
-        badgeE: '#c98500',
-        badgeI: '#3987e5',
-        badgeII: '#e0507a',
-        badgeIII: '#0a8a57',
+        // Efficiency badge levels: platinum / gold / silver / bronze
+        badgeE: '#e6e9ed',
+        badgeI: '#e0b93f',
+        badgeII: '#9aa4ae',
+        badgeIII: '#c07a3d',
 // Accent / UI colors used inside SVG
         accentLink: '#79c0ff',
         accentMid: '#58a6ff',

@@ -20,8 +20,9 @@ interface PlayerEfficiencyBadgesProps {
     efficiencyRows?: EfficiencyRowInput[] | null;
 }
 
+// Badge level names as the game presents them: Expert, I, II, III.
 const BADGE_LABELS: Record<number, string> = {
-    1: 'E',
+    1: 'Expert',
     2: 'I',
     3: 'II',
     4: 'III',
@@ -29,9 +30,9 @@ const BADGE_LABELS: Record<number, string> = {
 
 const BADGE_CLASS_NAMES: Record<number, string> = {
     1: 'Expert',
-    2: 'Grade I',
-    3: 'Grade II',
-    4: 'Grade III',
+    2: 'Badge I',
+    3: 'Badge II',
+    4: 'Badge III',
 };
 
 const SHIP_TYPE_LABELS: Record<string, string> = {
@@ -48,9 +49,9 @@ const SHIP_TYPE_LABELS: Record<string, string> = {
 // Fill the Efficiency panel's LOCKED_PANEL_HEIGHT_PX (1057) shell: the plot
 // grows to this SVG height so the tab shell matches the Activity / Ships /
 // Profile / Population tabs. 1057 minus the heading row (~28px + 12px margin)
-// and the bottom badge-count legend (~24px + 12px margin), with a small
-// cushion. Re-tune if the locked panel height changes.
-const STRIP_PLOT_MIN_SVG_HEIGHT = 970;
+// and the bottom badge-count legend (2x scale, ~40px + 8px margin), with a
+// small cushion. Re-tune if the locked panel height changes.
+const STRIP_PLOT_MIN_SVG_HEIGHT = 950;
 
 const getShipTypeLabel = (shipType: string | null | undefined): string => {
     if (!shipType) {
@@ -128,16 +129,16 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
             ) : (
                 <>
                     <EfficiencyStripPlotSVG dots={dots} theme={theme} minSvgHeight={STRIP_PLOT_MIN_SVG_HEIGHT} />
-                    <div className="mt-2 flex items-center justify-center gap-4 text-xs" aria-label="Badge counts by class">
+                    <div className="mt-2 flex items-center justify-center gap-8 text-2xl" aria-label="Badge counts by class">
                         {badgeCounts.map((entry) => (
                             <span
                                 key={entry.badgeClass}
-                                className={`inline-flex items-center gap-1.5 ${entry.count === 0 ? 'opacity-50' : ''}`}
-                                title={`${entry.name} badges: ${entry.count}`}
+                                className={`inline-flex items-center gap-3 ${entry.count === 0 ? 'opacity-50' : ''}`}
+                                title={`${entry.name}: ${entry.count}`}
                             >
                                 <span
                                     aria-hidden="true"
-                                    className="inline-block h-2.5 w-2.5 rounded-full"
+                                    className="inline-block h-5 w-5 rounded-full"
                                     style={{ backgroundColor: badgeClassColor(colors, entry.badgeClass) }}
                                 />
                                 <span className="font-semibold text-[var(--text-secondary)]">{entry.label}</span>

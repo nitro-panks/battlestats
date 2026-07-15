@@ -24,13 +24,13 @@ describe('PlayerEfficiencyBadges', () => {
         expect(screen.getByText(/No Efficiency Badge data is stored/i)).toBeInTheDocument();
     });
 
-    it('renders legend counts per badge class', () => {
+    it('renders legend counts per badge level', () => {
         render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
-        expect(screen.getByTitle('Expert badges: 1')).toBeInTheDocument();
-        expect(screen.getByTitle('Grade I badges: 1')).toBeInTheDocument();
-        expect(screen.getByTitle('Grade II badges: 1')).toBeInTheDocument();
-        expect(screen.getByTitle('Grade III badges: 1')).toBeInTheDocument();
+        expect(screen.getByTitle('Expert: 1')).toBeInTheDocument();
+        expect(screen.getByTitle('Badge I: 1')).toBeInTheDocument();
+        expect(screen.getByTitle('Badge II: 1')).toBeInTheDocument();
+        expect(screen.getByTitle('Badge III: 1')).toBeInTheDocument();
     });
 
     it('renders one strip-plot dot per badged ship, colored by badge class', () => {
@@ -56,15 +56,16 @@ describe('PlayerEfficiencyBadges', () => {
         );
 
         expect(container.querySelectorAll('circle.badge-dot')).toHaveLength(sampleRows.length);
-        expect(screen.getByTitle('Expert badges: 1')).toBeInTheDocument();
+        expect(screen.getByTitle('Expert: 1')).toBeInTheDocument();
     });
 
     it('defaults the summary line to the best badge and updates it on hover', () => {
         const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
-        // Des Moines holds the class-1 (E) badge, so it leads the summary.
+        // Des Moines holds the Expert badge, so it leads the summary; 'Expert'
+        // appears both there and in the legend.
         expect(screen.getByText('Des Moines')).toBeInTheDocument();
-        expect(screen.getByText('Badge E')).toBeInTheDocument();
+        expect(screen.getAllByText('Expert').length).toBeGreaterThanOrEqual(2);
 
         const hitTargets = container.querySelectorAll('circle.badge-dot-hit');
         expect(hitTargets.length).toBe(sampleRows.length);

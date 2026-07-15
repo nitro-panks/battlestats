@@ -287,7 +287,7 @@ const drawChart = (
         line.append('tspan')
             .style('font-weight', '700')
             .style('fill', badgeClassColor(colors, dot.badgeClass))
-            .text(`Badge ${dot.badgeLabel}`);
+            .text(dot.badgeClass === 1 ? 'Expert' : `Badge ${dot.badgeLabel}`);
 
         line.append('tspan')
             .style('fill', colors.labelMid)
@@ -324,7 +324,25 @@ const drawChart = (
         .attr('r', (node: SimNode) => radiusFor(node))
         .attr('fill', (node: SimNode) => badgeClassColor(colors, node.dot.badgeClass))
         .attr('stroke', colors.barStroke)
-        .attr('stroke-width', dotStrokeWidth);
+        .attr('stroke-width', dotStrokeWidth)
+        .style('transition', 'fill-opacity 250ms ease');
+
+    // Hover rings: a 3px inner border in the dot's own medal color, faded in
+    // for every circle sharing the hovered dot's badge level while its fill
+    // fades out. Pre-built and position-synced so hover only toggles opacity.
+    const ringNodes = svg.append('g')
+        .selectAll('circle')
+        .data(nodes)
+        .enter()
+        .append('circle')
+        .attr('class', 'badge-dot-ring')
+        .attr('r', (node: SimNode) => Math.max(2, radiusFor(node) - 2))
+        .attr('fill', 'none')
+        .attr('stroke', (node: SimNode) => badgeClassColor(colors, node.dot.badgeClass))
+        .attr('stroke-width', 3)
+        .style('opacity', 0)
+        .style('pointer-events', 'none')
+        .style('transition', 'opacity 250ms ease');
 
     const hitNodes = svg.append('g')
         .selectAll('circle')
@@ -356,6 +374,9 @@ const drawChart = (
             .attr('x2', (link: MeshLink) => link.target.x)
             .attr('y2', (link: MeshLink) => link.target.y);
         dotNodes
+            .attr('cx', (node: SimNode) => node.x)
+            .attr('cy', (node: SimNode) => node.y);
+        ringNodes
             .attr('cx', (node: SimNode) => node.x)
             .attr('cy', (node: SimNode) => node.y);
         hitNodes
@@ -396,24 +417,31 @@ const drawChart = (
         });
     hitNodes.call(drag);
 
+    // Hover semantics: every dot sharing the hovered dot's TIER throbs its
+    // border grey -> very white -> grey (CSS class); every dot sharing its
+    // MEDAL fades its fill and fades in the 3px inner ring in the fill color.
+    const clearHoverHighlights = () => {
+        dotNodes
+            .classed('badge-dot-throb', false)
+            .style('fill-opacity', 1);
+        ringNodes.style('opacity', 0);
+    };
+
     hitNodes
         .on('mouseover', function (_event: MouseEvent, node: SimNode) {
-            const index = nodes.indexOf(node);
-            if (index >= 0) {
-                d3.select(dotNodes.nodes()[index])
-                    .attr('stroke', colors.labelStrong)
-                    .attr('stroke-width', dotStrokeWidth + 0.5);
-            }
+            clearHoverHighlights();
+            dotNodes
+                .filter((other: SimNode) => other.dot.shipTier === node.dot.shipTier)
+                .classed('badge-dot-throb', true);
+            dotNodes
+                .filter((other: SimNode) => other.dot.badgeClass === node.dot.badgeClass)
+                .style('fill-opacity', 0.15);
+            ringNodes
+                .filter((other: SimNode) => other.dot.badgeClass === node.dot.badgeClass)
+                .style('opacity', 1);
             renderSummary(node.dot);
         })
-        .on('mouseout', function (_event: MouseEvent, node: SimNode) {
-            const index = nodes.indexOf(node);
-            if (index >= 0) {
-                d3.select(dotNodes.nodes()[index])
-                    .attr('stroke', colors.barStroke)
-                    .attr('stroke-width', dotStrokeWidth);
-            }
-        });
+        .on('mouseout', clearHoverHighlights);
 
     // Default the summary to the player's best badge (class asc, then name) so
     // the panel never starts blank.
