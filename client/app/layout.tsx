@@ -59,7 +59,7 @@ export default function RootLayout({
                   two-column layout's 768px fold, so it stacks only under sm
                   (640px) — the search input shrinks (min-w-0) to absorb the
                   squeeze in between. */}
-              <header className="flex flex-col gap-4 bg-[var(--bg-page)] py-5 sm:flex-row sm:items-center sm:justify-between sm:py-6">
+              <header className="flex flex-col gap-4 bg-[var(--bg-page)] pt-5 pb-[14px] sm:flex-row sm:items-center sm:justify-between sm:pt-6 sm:pb-[18px]">
                 <Logo />
                 <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-3 sm:w-auto sm:flex-1 sm:flex-nowrap">
                   <ThemeToggle />
@@ -69,7 +69,7 @@ export default function RootLayout({
                   </Suspense>
                 </div>
               </header>
-              <main className="pt-6 pb-8">
+              <main className="pb-8">
                 <ConnectionHint />
                 {children}
               </main>

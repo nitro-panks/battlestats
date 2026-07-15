@@ -717,15 +717,14 @@ describe('PlayerDetail ship-badge banner', () => {
 
         expect(screen.getByText('Shimakaze')).toBeInTheDocument();
         expect(screen.getByText('Zao')).toBeInTheDocument();
-        // Stat row: emphasized win rate · average damage (compact "dmg" label;
-        // the number lives in its own Courier span inside the label span).
+        // Stat row: emphasized win rate · average damage (the number gets the
+        // WR treatment inside its "N dmg" span on the all-Courier stat line).
         expect(screen.getByText('62,431')).toBeInTheDocument();
-        expect(screen.getByText('62,431').closest('span[class*="Courier"]')?.parentElement?.textContent)
-            .toContain('dmg');
+        expect(screen.getByText('62,431').parentElement?.textContent).toContain('dmg');
         expect(screen.getByText('64.0%')).toBeInTheDocument();
         expect(screen.getByText('58.5%')).toBeInTheDocument();
         // Links to the ship standings page.
-        const link = screen.getByTitle(/#1 in Shimakaze last 14d/);
+        const link = screen.getByTitle(/#1 in Shimakaze — 64\.0% win rate over the 14 day window/);
         expect(link).toHaveAttribute('href', expect.stringContaining('/ship/10-shimakaze'));
     });
 
@@ -751,7 +750,7 @@ describe('PlayerDetail ship-badge banner', () => {
 
         const banner = screen.getByLabelText('Top ship rankings');
         expect(within(banner).getByText('NA')).toBeInTheDocument();
-        expect(screen.getByTitle(/#1 in Shimakaze on NA last 14d/)).toBeInTheDocument();
+        expect(screen.getByTitle(/#1 in Shimakaze on NA — 64\.0% win rate over the 14 day window/)).toBeInTheDocument();
     });
 
     it('stacks multiple badges (no overflow cap — backend already limits to top 3)', () => {

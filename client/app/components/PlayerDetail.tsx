@@ -356,7 +356,12 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             </div>
 
                             {!player.is_hidden ? (
-                                <ShipTopPlayerBanner badges={player.ship_badges ?? []} realm={player.realm} />
+                                <ShipTopPlayerBanner
+                                    badges={player.ship_badges ?? []}
+                                    realm={player.realm}
+                                    playerName={player.name}
+                                    clanTag={player.clan_tag}
+                                />
                             ) : null}
                             <div className="mt-6" />
                             <PlayerDetailInsightsTabs

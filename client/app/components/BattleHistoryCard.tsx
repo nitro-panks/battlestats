@@ -887,7 +887,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         <section
             data-testid="battle-history-card"
             className={embedded
-                ? (fillHeight ? 'flex h-full w-full flex-col' : 'w-full')
+                ? (fillHeight ? 'flex h-full min-h-0 w-full flex-col' : 'w-full')
                 : 'mt-6 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-card)] p-5'}
             aria-label="Recent battles"
         >
@@ -1083,7 +1083,9 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             >
                 {sparkline}
             </div>
-            <hr className="mb-5 border-[var(--accent-faint)]" />
+            {/* Spacer where the sparkline/treemap rule used to be — the rule is
+                gone but its 20px slot stays so the rhythm is unchanged. */}
+            <div className="h-5" aria-hidden />
             {/* Three mini-treemaps summarizing the SELECTED window+mode (the
                 same rows as the table below) — unlike the sparkline, which is
                 pinned to the month window. Area = volume, color = win rate. */}
@@ -1112,8 +1114,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 exactly fills the locked panel. Other embedded uses (Ranked) keep
                 the tall 800px cap; standalone keeps the compact 60vh. */}
             {hasBattles && (
-            <div className={`mt-5 overflow-auto border-t border-[var(--accent-faint)] pt-4 ${fillHeight ? 'min-h-0 flex-1' : embedded ? 'max-h-[800px]' : 'max-h-[60vh]'}`}>
-                <table className={`w-full min-w-[34rem] text-left ${fillHeight ? 'text-sm' : 'text-base'}`}>
+            <div className={`mt-2 overflow-auto ${fillHeight ? 'min-h-0 flex-1' : embedded ? 'max-h-[800px]' : 'max-h-[60vh]'}`}>
+                <table className="w-full min-w-[34rem] text-left text-base">
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
                             <SortableTh sortKey="ship_name" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship played in the period. Click to sort A–Z.">Ship</SortableTh>

@@ -20,16 +20,14 @@ jest.mock('next/dynamic', () => {
             return <div data-testid="clan-battle-seasons" />;
         }
 
-        if (Array.isArray(props.members)) {
+        if (typeof props.svgWidth === 'number') {
+            // The clan chart — expose a member-select control so the test can
+            // assert the dot-click → onSelectMember wiring.
             return (
-                <div data-testid="clan-members">
+                <div data-testid="clan-svg">
                     <button type="button" onClick={() => props.onSelectMember?.('DeckBoss')}>Select member</button>
                 </div>
             );
-        }
-
-        if (typeof props.svgWidth === 'number') {
-            return <div data-testid="clan-svg" />;
         }
 
         return null;
@@ -108,7 +106,7 @@ describe('ClanDetail clan roster hydration wiring', () => {
             />,
         );
 
-        const clanMembers = screen.getByTestId('clan-members');
+        const clanMembers = screen.getByTestId('clan-activity-roster');
         const clanBattleSeasons = screen.getByTestId('clan-battle-seasons');
 
         expect(clanMembers.compareDocumentPosition(clanBattleSeasons) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

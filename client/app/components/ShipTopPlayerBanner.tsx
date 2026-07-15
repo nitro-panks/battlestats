@@ -36,42 +36,64 @@ export interface ShipBadge {
 interface ShipTopPlayerBannerProps {
     badges: ShipBadge[];
     realm?: string;
+    // Award holder identity for the tile's top banner ("[TAG] Name").
+    playerName?: string;
+    clanTag?: string | null;
 }
 
 // Per-rank award accents: the medal-ribbon left edge (one step softer than the
-// MedalIcon disc) and the colorblind-safe ordinal. Default covers rank > 3,
-// which the top-3 feed never emits, but keeps the lookup total.
-const RANK_META: Record<number, { borderL: string; ordinal: string }> = {
-    1: { borderL: 'border-l-amber-400', ordinal: '1st' },
-    2: { borderL: 'border-l-zinc-400', ordinal: '2nd' },
-    3: { borderL: 'border-l-orange-600', ordinal: '3rd' },
+// MedalIcon disc), the matching top-banner fill, and the colorblind-safe
+// ordinal. Default covers rank > 3, which the top-3 feed never emits, but
+// keeps the lookup total.
+const RANK_META: Record<number, { borderL: string; banner: string; ordinal: string }> = {
+    1: { borderL: 'border-l-amber-400', banner: 'bg-amber-400 text-amber-950', ordinal: '1st' },
+    2: { borderL: 'border-l-zinc-400', banner: 'bg-zinc-400 text-zinc-950', ordinal: '2nd' },
+    3: { borderL: 'border-l-orange-600', banner: 'bg-orange-600 text-black', ordinal: '3rd' },
 };
 
-const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm }) => {
+const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm, playerName, clanTag }) => {
     if (!badges || badges.length === 0) return null;
 
+    const holderLabel = playerName ? `${clanTag ? `[${clanTag}] ` : ''}${playerName}` : null;
+
     return (
-        <div className="mt-6 flex flex-wrap gap-2.5" aria-label="Top ship rankings">
+        <div className="mt-6 grid grid-cols-1 gap-2.5 sm:grid-cols-2 md:grid-cols-3" aria-label="Top ship rankings">
             {badges.map((b) => {
                 const rankColor = RANK_COLOR[b.rank] ?? 'text-amber-500';
-                const meta = RANK_META[b.rank] ?? { borderL: 'border-l-amber-400', ordinal: `#${b.rank}` };
-                const weekLabel = `last ${b.window_days}d`;
+                const meta = RANK_META[b.rank] ?? { borderL: 'border-l-amber-400', banner: 'bg-amber-400 text-amber-950', ordinal: `#${b.rank}` };
+                const windowLabel = `${b.window_days} day window`;
                 return (
                     <Link
                         key={`${b.ship_id}-${b.rank}`}
                         href={buildShipPath(b.ship_id, b.ship_name, realm)}
                         onClick={() => trackEvent('ship-banner-click', { ship_id: b.ship_id, ship_name: b.ship_name, rank: b.rank, realm: realm ?? '' })}
-                        title={`#${b.rank} in ${b.ship_name}${realm ? ` on ${realm.toUpperCase()}` : ''} ${weekLabel} — ${b.win_rate.toFixed(1)}% win rate`}
-                        className={`group flex w-full items-center gap-3.5 rounded-md border border-[var(--border)] border-l-4 ${meta.borderL} bg-[var(--bg-surface)] px-4 py-2.5 shadow-sm transition-all hover:bg-[var(--bg-hover)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)] sm:w-[18rem]`}
+                        title={`#${b.rank} in ${b.ship_name}${realm ? ` on ${realm.toUpperCase()}` : ''} — ${b.win_rate.toFixed(1)}% win rate over the ${windowLabel}`}
+                        className={`group flex flex-col overflow-hidden rounded-md border border-[var(--border)] border-l-4 ${meta.borderL} bg-[var(--bg-surface)] shadow-sm transition-all hover:bg-[var(--bg-hover)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)]`}
                     >
-                        {/* Medal + ordinal anchor — fixed width so every card aligns */}
+                        {/* Holder banner: the ribbon color carried across the top,
+                            naming the award holder. */}
+                        {holderLabel ? (
+                            <div className={`${meta.banner} w-[calc(100%-10px)] truncate rounded-br-md px-3 py-[1px] text-[11px] font-semibold tracking-wide`}>
+                                {holderLabel}
+                            </div>
+                        ) : null}
+                        {/* pr matches the banner's 10px right inset so the
+                            right-aligned games/dmg figures line up with the
+                            banner's right edge. */}
+                        <div className="flex items-center gap-3 py-2.5 pl-3 pr-[10px]">
+                        {/* Medal + ordinal + realm anchor — fixed width so every card aligns */}
                         <div className="flex w-12 shrink-0 flex-col items-center gap-1">
                             <MedalIcon rank={b.rank} className="text-[1.75rem]" />
                             <span className={`text-[10px] font-bold uppercase tracking-wider ${rankColor}`}>
                                 {meta.ordinal}
                             </span>
+                            {realm ? (
+                                <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+                                    {realm.toUpperCase()}
+                                </span>
+                            ) : null}
                         </div>
-                        <div className="flex min-w-0 flex-col gap-0.5">
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                             {/* Hero: ship name (+ tier pill) */}
                             <div className="flex min-w-0 items-center gap-2">
                                 <span className="truncate text-base font-bold tracking-tight text-[var(--text-primary)]">
@@ -83,26 +105,20 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
                                     </span>
                                 ) : null}
                             </div>
-                            {/* Meta: realm · season week */}
-                            <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-secondary)]">
-                                {realm ? (
-                                    <>
-                                        <span className="uppercase tracking-wide">{realm.toUpperCase()}</span>
-                                        <span aria-hidden className="text-[var(--border)]">·</span>
-                                    </>
-                                ) : null}
-                                <span>{weekLabel}</span>
+                            {/* Meta: window on the left, games right-aligned to the
+                                stat line's damage figure below. */}
+                            <div className="flex items-baseline justify-between gap-1.5 font-['Courier_New',Courier,monospace] text-[11px] font-medium text-[var(--text-secondary)]">
+                                <span>{windowLabel}</span>
+                                <span><span className="font-semibold text-[var(--text-primary)]">{b.battles.toLocaleString()}</span> games</span>
                             </div>
-                            {/* Stat: win rate (emphasized) · avg damage */}
-                            {/* items-baseline (not center): the WR and damage
-                                numbers must share a bottom edge — mixed
-                                Courier/Inter line boxes center 0.5px apart. */}
-                            <div className="mt-0.5 flex items-baseline gap-1.5 text-xs tabular-nums text-[var(--text-secondary)]">
-                                <span className="font-['Courier_New',Courier,monospace] font-semibold text-[var(--text-primary)]">{b.win_rate.toFixed(1)}%</span>
-                                <span>WR</span>
-                                <span aria-hidden className="text-[var(--border)]">·</span>
-                                <span><span className="font-['Courier_New',Courier,monospace]">{b.avg_damage.toLocaleString()}</span> dmg</span>
+                            {/* Stat: win rate left, avg damage right — the games and
+                                dmg segments share one right edge. items-baseline (not
+                                center): mixed emphasis line boxes center 0.5px apart. */}
+                            <div className="mt-0.5 flex items-baseline justify-between gap-1.5 font-['Courier_New',Courier,monospace] text-xs tabular-nums text-[var(--text-secondary)]">
+                                <span><span className="font-semibold text-[var(--text-primary)]">{b.win_rate.toFixed(1)}%</span> WR</span>
+                                <span><span className="font-semibold text-[var(--text-primary)]">{b.avg_damage.toLocaleString()}</span> dmg</span>
                             </div>
+                        </div>
                         </div>
                     </Link>
                 );

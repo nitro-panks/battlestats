@@ -110,26 +110,25 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; 
     // Order reflects measured Umami tab-click demand (90d, 2026-07-08): Activity
     // stays first as the default landing tab; the remaining tabs are ranked by
     // click volume — Ships > Profile > Population > Efficiency > Ranked > Clan Battles.
+    // minHeight is only a loading-stability floor (roughly the tab's
+    // LoadingPanel stack) — panels size to content since 2026-07-15, so a
+    // large floor just recreates the dead space the content-sizing removed.
     { id: 'activity', label: 'Activity', panelLabel: 'Recent battle activity', minHeight: 420 },
     { id: 'ships', label: 'Ships', panelLabel: 'Ship insights', minHeight: 560 },
-    { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 920 },
-    { id: 'population', label: 'Population', panelLabel: 'Population insights', minHeight: 720 },
+    { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 360 },
+    { id: 'population', label: 'Population', panelLabel: 'Population insights', minHeight: 360 },
     { id: 'badges', label: 'Efficiency', panelLabel: 'Efficiency insights', minHeight: 360 },
-    { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 900 },
+    { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 280 },
     { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
 ];
 
-// Locked height (px) for all insight panels — Activity / Ships / Profile /
-// Population / Efficiency / Ranked / Clan Battles — so the shell (the gray
-// bounding box) stays a constant height across every tab. Derived from the Ships
-// tab's natural height with the 825px chart scroll viewport
-// (RANDOMS_CHART_MAX_VIEWPORT_PX), measured at the ~1000px desktop insights
-// column: panel ≈ 1057px. Ships, Efficiency, Ranked, and Clan Battles take it as
-// a minHeight (Ships' filter row can wrap on narrow widths and must not clip the
-// scroll box; an ultra-dense badge plot, Ranked's heatmap + seasons stack, and
-// the Clan Battles seasons table can run taller); Activity, Profile, and
-// Population take it as a fixed height and grow their charts to fill down to it.
-// Re-measure if the production insights column width changes.
+// Height CAP (px) for the battle-table insight views — the Activity tab and
+// Ranked's activity sub-view take it as maxHeight: their table flex-shrinks
+// and scrolls inside the clamp when dense, and the panel collapses toward the
+// per-tab minHeight when a player has little data (panels stopped being one
+// shared locked height on 2026-07-15). Derived from the Ships tab's natural
+// height with the 825px chart scroll viewport (RANDOMS_CHART_MAX_VIEWPORT_PX)
+// at the desktop insights column: ≈ 1057px.
 const LOCKED_PANEL_HEIGHT_PX = 1057;
 
 // Height (px) of the Profile "Performance by Tier" bar chart. Grown from the
@@ -594,30 +593,24 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 // the Activity tab and the Ranked tab's activity sub-view (a ranked
                 // copy of it); the chart lanes are capped at 1200px so they don't
                 // stretch and thin out on wide viewports.
-                className={activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity') ? 'min-w-0' : 'min-w-0 max-w-[1200px]'}
+                className={activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity') ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0 max-w-[1200px]'}
                 data-perf-section={panelSectionIdByTab[activeTab]}
                 style={{
-                    // Activity/Ships/Profile/Population/Efficiency/Ranked/Clan
-                    // Battles share one locked height so the shell stays put when
-                    // switching among them. Ships, Efficiency, and Clan Battles use
-                    // minHeight (Ships' filters may wrap on narrow widths; an
-                    // ultra-dense badge plot and the Clan Battles seasons table can
-                    // exceed the locked height and must not clip). Ranked splits by
-                    // sub-view: its activity view is a fixed-height fill (a copy of
-                    // the Activity page) while its history view (heatmap + seasons
-                    // stack) takes minHeight so it can run taller without clipping.
-                    // Activity / Profile / Population are fixed and fill it
-                    // (Activity's table flex-fills the remaining space; the charts
-                    // grow to fill).
-                    ...(activeTab === 'ranked'
-                        ? (rankedView === 'activity'
-                            ? { height: LOCKED_PANEL_HEIGHT_PX }
-                            : { minHeight: LOCKED_PANEL_HEIGHT_PX })
-                        : activeTab === 'ships' || activeTab === 'badges' || activeTab === 'career'
-                            ? { minHeight: LOCKED_PANEL_HEIGHT_PX }
-                            : activeTab === 'profile' || activeTab === 'population' || activeTab === 'activity'
-                                ? { height: LOCKED_PANEL_HEIGHT_PX }
-                                : { minHeight: activeConfig.minHeight }),
+                    // Panels size to their content instead of a shared locked
+                    // height, so sparse players don't get a tall empty box. The
+                    // old lock survives as a CAP on the two battle-table views
+                    // (Activity and Ranked's activity sub-view): their table
+                    // flex-shrinks and scrolls inside the clamp when dense,
+                    // while short content lets the panel collapse toward the
+                    // per-tab minHeight floor (kept so tab switches don't flash
+                    // a zero-height shell while data loads). Every other tab
+                    // grows naturally — Ships' filters can wrap, and a dense
+                    // badge plot or Clan Battles seasons table can run taller
+                    // than the cap and must not clip.
+                    ...(activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity')
+                        ? { maxHeight: LOCKED_PANEL_HEIGHT_PX }
+                        : {}),
+                    minHeight: activeConfig.minHeight,
                     contain: 'layout style',
                 }}
             >
@@ -650,27 +643,33 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         />
                         <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={400} theme={theme} />
 
-                        {pvpBattles >= 150 ? (
-                            <div className="mt-6">
-                                <SectionHeadingWithTooltip
-                                    title="Battles Played Distribution"
-                                    description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
-                                    className="mb-2"
-                                />
-                                <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={262} theme={theme} />
-                            </div>
-                        ) : null}
+                        {/* The two distribution histograms sit side by side on sm+,
+                            each roughly square: the chart fills its half-column
+                            (~340px at the desktop insights width) and the height
+                            matches. Mobile stacks them full-width. */}
+                        <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
+                            {pvpBattles >= 150 ? (
+                                <div className="min-w-0">
+                                    <SectionHeadingWithTooltip
+                                        title="Battles Played Distribution"
+                                        description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
+                                        className="mb-2"
+                                    />
+                                    <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={340} theme={theme} />
+                                </div>
+                            ) : null}
 
-                        {playerScore != null && playerScore >= 2.0 ? (
-                            <div className="mt-6">
-                                <SectionHeadingWithTooltip
-                                    title="Player Score Distribution"
-                                    description="Player score blends win rate, kill ratio, survival, and battle volume into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
-                                    className="mb-2"
-                                />
-                                <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={262} theme={theme} />
-                            </div>
-                        ) : null}
+                            {playerScore != null && playerScore >= 2.0 ? (
+                                <div className="min-w-0">
+                                    <SectionHeadingWithTooltip
+                                        title="Player Score Distribution"
+                                        description="Player score blends win rate, kill ratio, survival, and battle volume into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
+                                        className="mb-2"
+                                    />
+                                    <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={340} theme={theme} />
+                                </div>
+                            ) : null}
+                        </div>
                     </div>
                 ) : null}
 
