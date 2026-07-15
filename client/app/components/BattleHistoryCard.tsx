@@ -789,7 +789,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // selected ship hides it; clicking a different ship switches to it.
     const toggleShip = (row: {
         ship_id: number; ship_name: string; ship_tier?: number | null; ship_type?: string | null;
-    }) => {
+    }, source: 'row' | 'treemap' = 'row') => {
         const isOpening = !selectedShip || selectedShip.ship_id !== row.ship_id;
         setSelectedShip(isOpening
             ? {
@@ -800,7 +800,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             }
             : null);
         trackEvent(isOpening ? 'ship-stats-open' : 'ship-stats-close', {
-            ship_id: row.ship_id, source: 'row', mode, window, realm,
+            ship_id: row.ship_id, source, mode, window, realm,
         });
     };
 
@@ -1091,7 +1091,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 <BattleHistoryTreemaps
                     byShip={payload.by_ship ?? []}
                     selectedShipId={selectedShip?.ship_id ?? null}
-                    onShipClick={toggleShip}
+                    onShipClick={(row) => toggleShip(row, 'treemap')}
                 />
             )}
             {/* Combat profile for the ship selected in the treemaps or the

@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import MedalIcon, { RANK_COLOR } from './MedalIcon';
 import { buildShipPath } from '../lib/entityRoutes';
+import { trackEvent } from '../lib/umami';
 
 // Profile banner for a player's current top-3 finishes in a Tier-10 ship
 // (rolling trailing window, recomputed nightly; the badge tracks the current
@@ -59,6 +60,7 @@ const ShipTopPlayerBanner: React.FC<ShipTopPlayerBannerProps> = ({ badges, realm
                     <Link
                         key={`${b.ship_id}-${b.rank}`}
                         href={buildShipPath(b.ship_id, b.ship_name, realm)}
+                        onClick={() => trackEvent('ship-banner-click', { ship_id: b.ship_id, ship_name: b.ship_name, rank: b.rank, realm: realm ?? '' })}
                         title={`#${b.rank} in ${b.ship_name}${realm ? ` on ${realm.toUpperCase()}` : ''} ${weekLabel} — ${b.win_rate.toFixed(1)}% win rate`}
                         className={`group flex w-full items-center gap-3.5 rounded-md border border-[var(--border)] border-l-4 ${meta.borderL} bg-[var(--bg-surface)] px-4 py-2.5 shadow-sm transition-all hover:bg-[var(--bg-hover)] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-mid)] sm:w-[18rem]`}
                     >

@@ -6,6 +6,7 @@ import { fetchSharedJson, incrementChartFetches, decrementChartFetches } from '.
 import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
+import { trackEvent } from '../lib/umami';
 import type { ClanMemberTier } from './useClanMemberTiers';
 
 interface Clan3DProps {
@@ -543,6 +544,7 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
                         rotYRef.current = 0.6;
                         rotXRef.current = 0.3;
                         autoRotateRef.current = true;
+                        trackEvent('clan-chart-3d-reset', { realm });
                     }}
                     className="mt-1 rounded border border-[var(--border)] px-2 py-0.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                 >

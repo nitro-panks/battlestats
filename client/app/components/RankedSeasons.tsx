@@ -5,6 +5,7 @@ import { degradationMonitor } from '../lib/degradationMonitor';
 import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
+import { trackEvent } from '../lib/umami';
 
 interface RankedSeasonsProps {
     playerId: number;
@@ -239,12 +240,16 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
 
     const handleSort = (nextKey: SortKey): void => {
         if (sortKey === nextKey) {
-            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+            const flipped = sortDirection === 'asc' ? 'desc' : 'asc';
+            setSortDirection(flipped);
+            trackEvent('ranked-seasons-sort', { realm, key: nextKey, direction: flipped });
             return;
         }
 
+        const direction = nextKey === 'season' ? 'desc' : 'asc';
         setSortKey(nextKey);
-        setSortDirection(nextKey === 'season' ? 'desc' : 'asc');
+        setSortDirection(direction);
+        trackEvent('ranked-seasons-sort', { realm, key: nextKey, direction });
     };
 
     const getSortMarker = (columnKey: SortKey): string => {

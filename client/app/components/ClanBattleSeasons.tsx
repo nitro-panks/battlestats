@@ -5,6 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 import { withRealm } from '../lib/realmParams';
 import { fetchSharedJson, getChartFetchesInFlight, isAbortError } from '../lib/sharedJsonFetch';
 import { degradationMonitor } from '../lib/degradationMonitor';
+import { trackEvent } from '../lib/umami';
 import ClanBattleSeasonsSVG from './ClanBattleSeasonsSVG';
 
 // Cold-cache poll: a cold clan serves [] + X-Clan-Battles-Pending while a
@@ -147,13 +148,16 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
 
     const handleSort = (nextSortKey: SortKey) => {
         if (sortKey === nextSortKey) {
-            setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc');
+            const flipped = sortDirection === 'desc' ? 'asc' : 'desc';
+            setSortDirection(flipped);
+            trackEvent('clan-battle-seasons-sort', { realm, key: nextSortKey, direction: flipped });
             return;
         }
 
         setSortKey(nextSortKey);
         // Every sort key defaults to descending on first click.
         setSortDirection('desc');
+        trackEvent('clan-battle-seasons-sort', { realm, key: nextSortKey, direction: 'desc' });
     };
 
     const sortedSeasons = [...seasons].sort((left, right) => {

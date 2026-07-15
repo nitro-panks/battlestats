@@ -83,9 +83,12 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | `battle-history-mode` | `{mode:'random'\|'ranked'\|'all', window, realm}` | ~~Click a Random/Ranked/All mode pill in battle history~~ | — | ❌ **retired 2026-07-13** (pill removed — 136 clicks / 35 sessions in 90d; mode is now a fixed per-instance prop, ranked history lives on the Ranked tab) |
 | `battle-history-sort` | `{key, direction, mode, window}` | Click a battle-history table column header | `BattleHistoryCard.tsx:796` | ✅ 214 (58) |
 | `battle-history-ships-scope` | `{scope:'all'\|'slider', count:<N>}` (3.3.0 slider; `top8`/`top10` strings in 3.2.5–3.2.8 captures) | Release the battles×dmg ships treemap zoom slider — pointer or keyboard (once per release, not per drag tick; keyboard coverage added 3.3.1) | `BattleHistoryTreemaps.tsx` (trackScopeRelease) | 🟡 deployed v3.3.0, awaiting captures |
-| `ship-stats-open` | `{ship_id, source:'row', mode, window, realm}` | Click a ship row in battle history to open its combat-stats panel | `BattleHistoryCard.tsx:813` | ✅ live-verified 2026-06-18 (the long zero was discoverability, not a bug) |
-| `ship-stats-close` | `{ship_id, source:'button'\|'row', mode, window, realm}` | Close the ship-stats panel (X button, or click another row) | `BattleHistoryCard.tsx:821,813` | ✅ live-verified 2026-06-18 |
-| `randoms-filter` | `{realm, control:'type'\|'tier', value}` | Toggle a ship-type / tier filter pill (or "All") in the "Ships" insights tab. `value` is the type name, tier number, or `'all'` | `RandomsSVG.tsx` (toggleType/toggleTier/selectAll*) | 🟡 deployed v2.5.0, 0 captures |
+| `ship-stats-open` | `{ship_id, source:'row'\|'treemap', mode, window, realm}` | Click a ship row (`row`) or a battles×dmg treemap tile (`treemap`) to open its combat-stats panel. `source:'treemap'` split out 2026-07-15 — earlier treemap opens were logged as `'row'` | `BattleHistoryCard.tsx` (toggleShip) | ✅ live-verified 2026-06-18; `treemap` source 🟡 pending captures |
+| `ship-stats-close` | `{ship_id, source:'button'\|'row'\|'treemap', mode, window, realm}` | Close the ship-stats panel (X button, re-click the same row, or re-click the same treemap tile) | `BattleHistoryCard.tsx` (toggleShip/closeShipStats) | ✅ live-verified 2026-06-18 |
+| `ship-stats-bracket` | `{bracket:'all'\|'top50'\|'top25', ship_id, realm}` | Click a "Compare vs" skill-bracket pill in the ship-stats panel (fires only on an actual change) | `ShipStats.tsx` (bracket buttons) | 🟡 added 2026-07-15, pending deploy+captures |
+| `randoms-filter` | `{realm, control:'type'\|'tier'\|'min_wr'\|'min_battles'\|'activity_mode', value}` | "Ships" insights tab controls: type/tier pills (or "All"; `value` = type name, tier number, or `'all'`), the Min WR / min-battles sliders (fire on release, `value` = the released number), and the Activity radio (`value` ∈ `all\|recent\|window`) | `RandomsSVG.tsx` | ✅ working (slider/radio controls added v3.5.x) |
+| `ranked-seasons-sort` | `{realm, key, direction}` | Click a column header in the ranked-seasons table (Ranked tab). `key` ∈ `season\|highestRank\|battles\|wins\|winRate` | `RankedSeasons.tsx` (handleSort) | 🟡 added 2026-07-15, pending deploy+captures |
+| `ship-banner-click` | `{ship_id, ship_name, rank, realm}` | Click a top-3 ship card in the profile banner above Battle History → `/ship/<id>` | `ShipTopPlayerBanner.tsx` | 🟡 added 2026-07-15, pending deploy+captures (previously only visible as a `ship-page-view`) |
 | `player-share` | `{realm}` | ~~Click "Share" on a player detail page~~ | — | ❌ **removed v2.15.0** (Share button deleted globally 2026-06-24) |
 
 ### Clan detail
@@ -99,6 +102,8 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | `clan-chart-linear` | `{realm}` | Switch the clan efficiency chart to linear scale | `ClanSVG.tsx:629` | ✅ 136 (78) |
 | `clan-chart-log` | `{realm}` | Switch the clan efficiency chart to log scale | `ClanSVG.tsx:629` | ✅ 134 (82) |
 | `clan-chart-activity-filter` | `{realm, bucket}` | Click an activity-bar segment to **pin** that recency cohort (radio; re-click releases). Fires only when a bucket becomes pinned. `bucket` ∈ `active_7d\|cooling_90d\|inactive_180d_plus\|unknown` (collapsed 3-phase keys since v3.7.1; older rows may carry the retired `active_30d`/`dormant_180d`) | `ClanSVG.tsx` (segment click) | ✅ live-verified 2026-06-18 |
+| `clan-chart-3d-reset` | `{realm}` | Click "Reset view" under the 3D clan chart (restores default rotation + auto-rotate) | `Clan3DSVG.tsx` | 🟡 added 2026-07-15, pending deploy+captures |
+| `clan-battle-seasons-sort` | `{realm, key, direction}` | Click a column header in the clan-page Clan Battles seasons table. `key` ∈ `season\|start_date\|ships\|participants\|active_rate\|roster_win_rate` | `ClanBattleSeasons.tsx` (handleSort) | 🟡 added 2026-07-15, pending deploy+captures |
 
 ### Ship leaderboard (landing section) & `/ship/<id>` page
 
@@ -124,6 +129,9 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 
 ## Not exposed (by design)
 
+- **Logo → home click** (`Logo.tsx`) — intentionally untracked; the resulting `/` pageview already captures the navigation, and a same-page logo click is a no-op.
+- **Efficiency medal force graph** (`EfficiencyStripPlotSVG.tsx`, v3.6.0) — hover-only; it has no click controls, so there is nothing to track. Tab entry is captured by `player-insights-efficiency`.
+- **`SearchModeToggle.tsx`** — the component is presentational; its `search-mode-toggle` event fires in the parent (`HeaderSearch.tsx`). Not a gap.
 - **`player-history-year`** — `ABSENT` from the bundle on purpose. `year` is excluded from `VISIBLE_WINDOWS` (`BattleHistoryCard.tsx:604–610`) because battle-history capture only started 2026-04-28, so a 365-day view carries no extra signal yet. The backend still accepts `?window=year`; re-add the pill (and the event will then fire) once >180 days of capture accumulate. Its absence is **not** a tracking gap.
 
 ## Legacy / orphaned events (historical discontinuity, ~June 6–11)
