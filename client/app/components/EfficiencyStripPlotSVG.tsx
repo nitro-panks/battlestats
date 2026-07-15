@@ -63,6 +63,8 @@ const DRAG_ALPHA_TARGET = 0.3;
 // is dragged around.
 const HOVER_PULL_STRENGTH = 0.08;
 const HOVER_ALPHA_TARGET = 0.12;
+// Fills are translucent at rest; the hovered medal group goes fully opaque.
+const REST_FILL_OPACITY = 0.35;
 // The center-spring start is bistable: a pure center launch can lock into a
 // single collide-pressure blob instead of separating. Seeding each node a
 // fraction of the way toward its quadrant breaks that symmetry decisively
@@ -340,6 +342,7 @@ const drawChart = (
         .attr('fill', (node: SimNode) => badgeClassColor(colors, node.dot.badgeClass))
         .attr('stroke', colors.barStroke)
         .attr('stroke-width', dotStrokeWidth)
+        .style('fill-opacity', REST_FILL_OPACITY)
         .style('transition', 'fill-opacity 250ms ease');
 
     // Hover rings: a 3px inner border in the dot's own medal color, faded in
@@ -464,11 +467,12 @@ const drawChart = (
 
     // Hover semantics: every dot sharing the hovered dot's TIER throbs its
     // border grey -> very white -> grey (CSS class); every dot sharing its
-    // MEDAL fades its fill and fades in the 3px inner ring in the fill color.
+    // MEDAL goes from the translucent rest fill to fully opaque and fades in
+    // the 3px inner ring in its medal color.
     const clearHoverHighlights = () => {
         dotNodes
             .classed('badge-dot-throb', false)
-            .style('fill-opacity', 1);
+            .style('fill-opacity', REST_FILL_OPACITY);
         ringNodes.style('opacity', 0);
     };
 
@@ -480,7 +484,7 @@ const drawChart = (
                 .classed('badge-dot-throb', true);
             dotNodes
                 .filter((other: SimNode) => other.dot.badgeClass === node.dot.badgeClass)
-                .style('fill-opacity', 0.15);
+                .style('fill-opacity', 1);
             ringNodes
                 .filter((other: SimNode) => other.dot.badgeClass === node.dot.badgeClass)
                 .style('opacity', 1);
