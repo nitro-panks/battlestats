@@ -2,6 +2,16 @@
 
 _Drafted: 2026-03-15_
 
+> **Status update (2026-07-15):** the v1 summary-plus-table surface described
+> below shipped and was later superseded. The Efficiency tab now renders a
+> categorical strip plot (`EfficiencyStripPlotSVG.tsx`: x = tier, y = ship
+> type, one dot per badged ship, color = badge class E/I/II/III) with a
+> legend-with-counts and a hover summary line; the sortable table, the four
+> header count chips, and the three summary cards were removed. Badge-class
+> colors are theme-aware `chartTheme.ts` tokens (`badgeE`..`badgeIII`),
+> CVD/contrast-validated per mode. The data contract, empty-state copy, and
+> "no new WG traffic" constraint below still hold.
+
 ## Goal
 
 Turn ship-level Efficiency Badges into a player-story surface on the existing player detail page so a visitor can quickly answer questions like:

@@ -1,6 +1,7 @@
 import React from 'react';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import PlayerEfficiencyBadges from '../PlayerEfficiencyBadges';
+import { chartColors } from '../../lib/chartTheme';
 
 jest.mock('../SectionHeadingWithTooltip', () => {
     return function MockSectionHeadingWithTooltip({ title }: { title: string }) {
@@ -23,48 +24,65 @@ describe('PlayerEfficiencyBadges', () => {
         expect(screen.getByText(/No Efficiency Badge data is stored/i)).toBeInTheDocument();
     });
 
-    it('renders header totals, summary cards, and compact ship metadata labels', () => {
+    it('renders legend counts per badge class', () => {
         render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
-        expect(screen.getByText('Efficiency Badges')).toBeInTheDocument();
         expect(screen.getByTitle('Expert badges: 1')).toBeInTheDocument();
         expect(screen.getByTitle('Grade I badges: 1')).toBeInTheDocument();
         expect(screen.getByTitle('Grade II badges: 1')).toBeInTheDocument();
         expect(screen.getByTitle('Grade III badges: 1')).toBeInTheDocument();
-
-        expect(screen.getByText('Highest Badge')).toBeInTheDocument();
-        expect(screen.getByText('Strongest Class')).toBeInTheDocument();
-        expect(screen.getByText('Strongest Tier Band')).toBeInTheDocument();
-
-        const highestBadgeCard = screen.getByText('Highest Badge').closest('div');
-        const strongestClassCard = screen.getByText('Strongest Class').closest('div');
-        const strongestTierBandCard = screen.getByText('Strongest Tier Band').closest('div');
-
-        expect(highestBadgeCard).not.toBeNull();
-        expect(strongestClassCard).not.toBeNull();
-        expect(strongestTierBandCard).not.toBeNull();
-
-        expect(within(highestBadgeCard as HTMLElement).getByText('E')).toBeInTheDocument();
-        expect(within(strongestClassCard as HTMLElement).getByText('CA')).toBeInTheDocument();
-        expect(within(strongestTierBandCard as HTMLElement).getByText('IX-X')).toBeInTheDocument();
-
-        expect(screen.getByText('BB')).toBeInTheDocument();
-        expect(screen.getByText('Sub')).toBeInTheDocument();
     });
 
-    it('sorts by ship name when the Ship header is clicked', () => {
+    it('renders one strip-plot dot per badged ship, colored by badge class', () => {
+        const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        const dots = container.querySelectorAll('circle.badge-dot');
+        expect(dots).toHaveLength(sampleRows.length);
+
+        // The site theme defaults to dark (ThemeContext), so the dots wear the
+        // dark-mode badge palette.
+        const fills = Array.from(dots).map((dot) => dot.getAttribute('fill'));
+        expect(fills).toContain(chartColors.dark.badgeE);
+        expect(fills).toContain(chartColors.dark.badgeI);
+        expect(fills).toContain(chartColors.dark.badgeII);
+        expect(fills).toContain(chartColors.dark.badgeIII);
+    });
+
+    it('drops rows without a tier from both the plot and the legend counts', () => {
+        const { container } = render(
+            <PlayerEfficiencyBadges
+                efficiencyRows={[...sampleRows, { ship_id: 5, top_grade_class: 1, ship_name: 'Ghost', ship_type: 'cruiser', ship_tier: null }]}
+            />,
+        );
+
+        expect(container.querySelectorAll('circle.badge-dot')).toHaveLength(sampleRows.length);
+        expect(screen.getByTitle('Expert badges: 1')).toBeInTheDocument();
+    });
+
+    it('defaults the summary line to the best badge and updates it on hover', () => {
+        const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        // Des Moines holds the class-1 (E) badge, so it leads the summary.
+        expect(screen.getByText('Des Moines')).toBeInTheDocument();
+        expect(screen.getByText('Badge E')).toBeInTheDocument();
+
+        const hitTargets = container.querySelectorAll('circle.badge-dot-hit');
+        expect(hitTargets.length).toBe(sampleRows.length);
+        hitTargets.forEach((hit) => fireEvent.mouseOver(hit));
+
+        // After hovering every dot the summary shows exactly one ship —
+        // the last-hovered one.
+        const shownShips = ['Bismarck', 'Des Moines', 'Shimakaze', 'Gato']
+            .filter((name) => screen.queryByText(name) !== null);
+        expect(shownShips).toHaveLength(1);
+    });
+
+    it('labels the tier axis with roman numerals spanning at least V–X', () => {
         render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
-        fireEvent.click(screen.getByRole('button', { name: /Ship/i }));
-
-        const rows = screen.getAllByRole('row').slice(1);
-        const firstRow = rows[0];
-        expect(within(firstRow).getByText('Bismarck')).toBeInTheDocument();
-
-        fireEvent.click(screen.getByRole('button', { name: /Ship/i }));
-
-        const resortedRows = screen.getAllByRole('row').slice(1);
-        const firstResortedRow = resortedRows[0];
-        expect(within(firstResortedRow).getByText('Shimakaze')).toBeInTheDocument();
+        ['V', 'VI', 'VII', 'IX'].forEach((numeral) => {
+            expect(screen.getByText(numeral)).toBeInTheDocument();
+        });
+        expect(screen.getByText('Ship Tier')).toBeInTheDocument();
     });
 });

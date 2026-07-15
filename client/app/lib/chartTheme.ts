@@ -53,6 +53,14 @@ export const chartColors: Record<ChartTheme, {
     metricBattles: string;
     metricSurvival: string;
     metricScore: string;
+    // Efficiency badge classes (E, I, II, III) — gold / steel / copper / verdigris.
+    // Each mode's four steps are validated as a set (all-pairs CVD separation,
+    // chroma floor, contrast) against that mode's chartBg; do not restep one
+    // color without re-validating the set for both modes.
+    badgeE: string;
+    badgeI: string;
+    badgeII: string;
+    badgeIII: string;
 // Accent / UI colors used inside SVG
     accentLink: string;
     accentMid: string;
@@ -108,6 +116,11 @@ export const chartColors: Record<ChartTheme, {
         metricBattles: '#2171b5',
         metricSurvival: '#0f766e',
         metricScore: '#2171b5',
+        // Efficiency badge classes
+        badgeE: '#cc8600',
+        badgeI: '#2a78d6',
+        badgeII: '#c9376b',
+        badgeIII: '#00782c',
 // Accent / UI colors used inside SVG
         accentLink: '#084594',
         accentMid: '#2171b5',
@@ -163,6 +176,11 @@ export const chartColors: Record<ChartTheme, {
         metricBattles: '#58a6ff',
         metricSurvival: '#2dd4bf',
         metricScore: '#58a6ff',
+        // Efficiency badge classes
+        badgeE: '#c98500',
+        badgeI: '#3987e5',
+        badgeII: '#e0507a',
+        badgeIII: '#0a8a57',
 // Accent / UI colors used inside SVG
         accentLink: '#79c0ff',
         accentMid: '#58a6ff',
