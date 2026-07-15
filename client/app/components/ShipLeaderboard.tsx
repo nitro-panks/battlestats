@@ -174,8 +174,10 @@ const BOARD_FETCH_TTL_MS = 900_000; // 15 min, matching the /ship page.
 
 const HEADING_CLASS =
     'mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]';
+// Compact enough that the full filter row (Ships · Tier ×3 · Type ×5 · WR ≥ ×3
+// · info hint) fits on one line inside the 850px site column's content box.
 const PILL_BASE =
-    'inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors';
+    'inline-flex items-center rounded-md border px-2 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors';
 const PILL_ON = 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white';
 const PILL_OFF =
     'border-[var(--border)] bg-[var(--bg-page)] text-[var(--accent-mid)] hover:bg-[var(--accent-faint)]';
@@ -588,7 +590,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
         <section ref={sectionRef} className="mt-2 pt-8" aria-label="Ship leaderboard">
             {/* Filter bar + results fill the site column (layout.tsx owns the width). */}
             <div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <h3 className={HEADING_CLASS}>Ships</h3>
                 <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Tier</span>
