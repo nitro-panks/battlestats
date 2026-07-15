@@ -34,8 +34,8 @@ export const badgeClassColor = (colors: Colors, badgeClass: number): string => {
     return colors.badgeIII;
 };
 
-const MIN_DOT_RADIUS = 7;
-const MAX_DOT_RADIUS = 17;
+const MIN_DOT_RADIUS = 14;
+const MAX_DOT_RADIUS = 34;
 const HIT_PAD = 4;
 const DEFAULT_SVG_HEIGHT = 460;
 const MARGIN = { top: 50, right: 16, bottom: 16, left: 16 };
@@ -48,10 +48,10 @@ const SUMMARY_FONT_SIZE = '14px';
 // quadrant so dragged dots rubber-band home.
 const INTRA_LINK_STRENGTH = 0.35;
 const INTER_LINK_STRENGTH = 0.02;
-const INTER_LINK_DISTANCE = 200;
+const INTER_LINK_DISTANCE = 150;
 // Strong enough that the type clusters actually separate into their quadrants
 // before the simulation cools (at 0.05 they congealed into one central blob).
-const QUADRANT_ANCHOR_STRENGTH = 0.2;
+const QUADRANT_ANCHOR_STRENGTH = 0.25;
 const CHARGE_STRENGTH = -40;
 const COLLIDE_PAD = 2.5;
 const DRAG_ALPHA_TARGET = 0.3;
@@ -140,10 +140,10 @@ const compareDots = (left: EfficiencyBadgeDot, right: EfficiencyBadgeDot): numbe
 // pulled toward the center so the cluster constellation reads as one system.
 const anchorLayout = (count: number): Array<[number, number]> => {
     if (count <= 1) return [[0.5, 0.5]];
-    if (count === 2) return [[0.36, 0.5], [0.64, 0.5]];
-    if (count === 3) return [[0.5, 0.34], [0.36, 0.66], [0.64, 0.66]];
-    if (count === 4) return [[0.35, 0.34], [0.65, 0.34], [0.35, 0.66], [0.65, 0.66]];
-    return [[0.35, 0.32], [0.65, 0.32], [0.35, 0.7], [0.65, 0.7], [0.5, 0.5]];
+    if (count === 2) return [[0.4, 0.5], [0.6, 0.5]];
+    if (count === 3) return [[0.5, 0.38], [0.4, 0.62], [0.6, 0.62]];
+    if (count === 4) return [[0.4, 0.38], [0.6, 0.38], [0.4, 0.62], [0.6, 0.62]];
+    return [[0.4, 0.36], [0.6, 0.36], [0.4, 0.66], [0.6, 0.66], [0.5, 0.5]];
 };
 
 const drawChart = (
@@ -231,13 +231,21 @@ const drawChart = (
 
     // Type labels ride above their cluster — positions update every tick so a
     // label follows its blob wherever the simulation (or a drag) takes it.
+    // They are re-raised over the dots after the dot layers mount, and wear a
+    // chart-background halo, so they stay readable when the big circles press
+    // together into one mass.
+    const typeLabelLayer = svg.append('g')
+        .style('pointer-events', 'none');
     const typeLabels = new Map<string, ReturnType<typeof svg.append>>();
     shipTypes.forEach((shipType) => {
-        typeLabels.set(shipType, svg.append('text')
+        typeLabels.set(shipType, typeLabelLayer.append('text')
             .attr('text-anchor', 'middle')
+            .attr('stroke', colors.chartBg)
+            .attr('stroke-width', 3.5)
+            .attr('paint-order', 'stroke')
             .style('font-size', AXIS_FONT_SIZE)
-            .style('font-weight', '600')
-            .style('fill', colors.axisText)
+            .style('font-weight', '700')
+            .style('fill', colors.labelStrong)
             .text(shipType));
     });
 
@@ -327,6 +335,10 @@ const drawChart = (
         .attr('r', (node: SimNode) => radiusFor(node) + HIT_PAD)
         .attr('fill', 'transparent')
         .style('cursor', 'grab');
+
+    // Labels read over the dot mass (they ignore pointer events, so hovers
+    // and drags pass through to the hit circles beneath).
+    typeLabelLayer.raise();
 
     const clampNodes = () => {
         nodes.forEach((node) => {
