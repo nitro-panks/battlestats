@@ -53,14 +53,15 @@ export default function RootLayout({
         <ThemeProvider>
           <RealmProvider>
             <DegradationProvider>
-            <div className="mx-auto max-w-[1200px] px-4 md:px-6">
-              {/* On lg (two-column content), the header content is bounded to the
-                  same edges as the page content: left at the content column
-                  (container content + rail p-6 24px), right at the main well
-                  (container content − 24px rail p-6). */}
-              <header className="flex flex-col gap-4 bg-[var(--bg-page)] py-5 pl-5 md:flex-row md:items-center md:justify-between md:py-6 lg:pl-6 lg:pr-6">
+            {/* One 850px column bounds the header, page content, and footer. */}
+            <div className="mx-auto max-w-[850px] px-4 md:px-6">
+              {/* The nav row fits within the 850px column well below the old
+                  two-column layout's 768px fold, so it stacks only under sm
+                  (640px) — the search input shrinks (min-w-0) to absorb the
+                  squeeze in between. */}
+              <header className="flex flex-col gap-4 bg-[var(--bg-page)] py-5 sm:flex-row sm:items-center sm:justify-between sm:py-6">
                 <Logo />
-                <div className="flex w-full flex-wrap items-center justify-end gap-3 pr-2 md:w-auto md:flex-nowrap lg:pr-0">
+                <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-3 sm:w-auto sm:flex-1 sm:flex-nowrap">
                   <ThemeToggle />
                   <RealmSelector />
                   <Suspense fallback={null}>

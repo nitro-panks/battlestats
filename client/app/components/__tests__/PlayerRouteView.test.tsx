@@ -111,10 +111,6 @@ describe('PlayerRouteView', () => {
             entityName: 'Player One',
             entitySlug: 'Player One',
         });
-
-        // Member/back navigation now lives in the parent rail layout
-        // (app/player/layout.tsx → PlayerRailLayout), not in PlayerRouteView;
-        // that wiring is covered by PlayerRailLayout.test.tsx.
     });
 
     it('shows a not found state on a 404, with NO retry', async () => {

@@ -244,10 +244,10 @@ const HeaderSearch: React.FC = () => {
     const placeholderText = searchMode === "clan" ? "Search Clans" : "Search Players";
 
     return (
-        <form onSubmit={handleSubmit} className="flex w-full max-w-md items-center gap-2">
+        <form onSubmit={handleSubmit} className="flex w-full min-w-0 max-w-md items-center gap-2">
             <SearchModeToggle mode={searchMode} onToggle={handleToggle} />
             <div
-                className="relative w-full"
+                className="relative w-full min-w-0"
                 role="combobox"
                 aria-expanded={isSuggestionListOpen && suggestions.length > 0}
                 aria-controls={SEARCH_SUGGESTIONS_ID}

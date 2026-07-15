@@ -14,6 +14,14 @@ jest.mock('../../lib/umami', () => ({
     trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }));
 
+const mockRouterPush = jest.fn();
+
+jest.mock('next/navigation', () => ({
+    useRouter: () => ({
+        push: mockRouterPush,
+    }),
+}));
+
 const mockUseClanMembers = jest.fn();
 const mockClipboardWriteText = jest.fn();
 const mockTrackEvent = jest.fn();
