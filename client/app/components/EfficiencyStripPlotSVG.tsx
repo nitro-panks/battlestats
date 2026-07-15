@@ -15,8 +15,7 @@ interface EfficiencyStripPlotSVGProps {
     dots: EfficiencyBadgeDot[];
     theme?: ChartTheme;
     svgWidth?: number;
-    // Grow the plot to fill at least this SVG height (bands stretch, dots scale
-    // up capped). 0 = intrinsic height only.
+    // Target SVG height so the chart fills its locked panel. 0 = default height.
     minSvgHeight?: number;
 }
 
@@ -35,34 +34,60 @@ export const badgeClassColor = (colors: Colors, badgeClass: number): string => {
     return colors.badgeIII;
 };
 
-const MIN_DOT_RADIUS = 5;
-const MAX_DOT_RADIUS = 14;
+const MIN_DOT_RADIUS = 7;
+const MAX_DOT_RADIUS = 17;
 const HIT_PAD = 4;
-const CELL_PAD_X = 10;
-const BAND_PAD_Y = 10;
-const MIN_BAND_HEIGHT = 44;
-const MARGIN = { top: 50, right: 12, bottom: 46, left: 56 };
+const DEFAULT_SVG_HEIGHT = 460;
+const MARGIN = { top: 50, right: 16, bottom: 16, left: 16 };
 const AXIS_FONT_SIZE = '13px';
-const CAPTION_FONT_SIZE = '12px';
 const SUMMARY_FONT_SIZE = '14px';
-// Static force layout: anchor forces pull each dot to its (tier, type) cell
-// center, collision packs neighbours into an organic blob. The x-anchor is
-// stronger than the y-anchor so crowded cells elongate vertically into their
-// band instead of bleeding into the next tier column.
-const FORCE_X_STRENGTH = 0.4;
-const FORCE_Y_STRENGTH = 0.12;
-const COLLIDE_PAD = 2;
-const SIMULATION_TICKS = 300;
+// Live force layout, per the classic d3 force-directed-graph shape: ships of a
+// type bond to their type hub (strong, short links) and hubs bond weakly to
+// each other (long links); every node carries a weak many-body repulsion so
+// clusters shoulder apart, and a gentle anchor pulls each type toward its own
+// quadrant so dragged dots rubber-band home.
+const INTRA_LINK_STRENGTH = 0.35;
+const INTER_LINK_STRENGTH = 0.02;
+const INTER_LINK_DISTANCE = 280;
+// Strong enough that the type clusters actually separate into their quadrants
+// before the simulation cools (at 0.05 they congealed into one central blob).
+const QUADRANT_ANCHOR_STRENGTH = 0.2;
+const CHARGE_STRENGTH = -40;
+const COLLIDE_PAD = 2.5;
+const DRAG_ALPHA_TARGET = 0.3;
+// The center-spring start is bistable: a pure center launch can lock into a
+// single collide-pressure blob instead of separating. Seeding each node a
+// fraction of the way toward its quadrant breaks that symmetry decisively
+// while still reading as "springs from the middle"; the slower cooling gives
+// the anchors time to finish the separation.
+const ANCHOR_SEED_BIAS = 0.2;
+const ALPHA_DECAY = 0.015;
 
 interface SimNode {
     dot: EfficiencyBadgeDot;
-    targetX: number;
-    targetY: number;
+    anchorX: number;
+    anchorY: number;
     x: number;
     y: number;
     vx?: number;
     vy?: number;
+    fx?: number | null;
+    fy?: number | null;
     index?: number;
+}
+
+interface SimLink {
+    source: SimNode;
+    target: SimNode;
+    kind: 'intra' | 'inter';
+}
+
+// Minimal shape of the d3 force simulation we hold on to (the repo types d3
+// as an untyped module; see d3.d.ts).
+interface BadgeSimulation {
+    stop: () => BadgeSimulation;
+    restart: () => BadgeSimulation;
+    alphaTarget: (value: number) => BadgeSimulation;
 }
 
 const compareDots = (left: EfficiencyBadgeDot, right: EfficiencyBadgeDot): number => {
@@ -72,9 +97,14 @@ const compareDots = (left: EfficiencyBadgeDot, right: EfficiencyBadgeDot): numbe
     return left.shipName.localeCompare(right.shipName);
 };
 
-// Approximate diameter of n unit-radius circles packed into a round blob.
-const blobDiameter = (count: number, radius: number): number =>
-    2 * radius * (1 + Math.sqrt(count));
+// Quadrant anchor fractions of the plot area, by number of type clusters.
+const anchorLayout = (count: number): Array<[number, number]> => {
+    if (count <= 1) return [[0.5, 0.5]];
+    if (count === 2) return [[0.3, 0.5], [0.7, 0.5]];
+    if (count === 3) return [[0.5, 0.27], [0.27, 0.73], [0.73, 0.73]];
+    if (count === 4) return [[0.28, 0.27], [0.72, 0.27], [0.28, 0.73], [0.72, 0.73]];
+    return [[0.28, 0.25], [0.72, 0.25], [0.28, 0.75], [0.72, 0.75], [0.5, 0.5]];
+};
 
 const drawChart = (
     containerElement: HTMLDivElement,
@@ -82,117 +112,74 @@ const drawChart = (
     svgWidth: number,
     minSvgHeight: number,
     colors: Colors,
-) => {
+): BadgeSimulation | null => {
     const container = d3.select(containerElement);
     container.selectAll('*').remove();
 
     if (!dots.length) {
-        return;
+        return null;
     }
 
-    // Tier columns always span at least V–X; extend to any outlier tier present
-    // (superships at XI, legacy low-tier badges) so no dot falls off the plot.
-    const dataMinTier = d3.min(dots, (dot: EfficiencyBadgeDot) => dot.shipTier) ?? 5;
-    const dataMaxTier = d3.max(dots, (dot: EfficiencyBadgeDot) => dot.shipTier) ?? 10;
-    const minTier = Math.min(5, dataMinTier);
-    const maxTier = Math.max(10, dataMaxTier);
-    const tiers = d3.range(minTier, maxTier + 1);
+    const svgHeight = Math.max(minSvgHeight, DEFAULT_SVG_HEIGHT);
+    const plotWidth = svgWidth - MARGIN.left - MARGIN.right;
+    const plotHeight = svgHeight - MARGIN.top - MARGIN.bottom;
 
     const presentTypes = new Set(dots.map((dot) => dot.shipType));
     const shipTypes = [
         ...SHIP_TYPE_ORDER.filter((shipType) => presentTypes.has(shipType)),
         ...[...presentTypes].filter((shipType) => !SHIP_TYPE_ORDER.includes(shipType)).sort(),
     ];
+    const anchors = anchorLayout(shipTypes.length);
+    const anchorFor = (shipType: string): [number, number] => {
+        const index = Math.min(shipTypes.indexOf(shipType), anchors.length - 1);
+        const [fx, fy] = anchors[Math.max(0, index)];
+        return [fx * plotWidth, fy * plotHeight];
+    };
 
-    const plotWidth = svgWidth - MARGIN.left - MARGIN.right;
-    const colWidth = plotWidth / tiers.length;
+    // Circle size encodes ship tier: Tier V reads smallest, Tier X/XI largest.
+    const dataMinTier = d3.min(dots, (dot: EfficiencyBadgeDot) => dot.shipTier) ?? 5;
+    const dataMaxTier = d3.max(dots, (dot: EfficiencyBadgeDot) => dot.shipTier) ?? 10;
+    const tierSpan = Math.max(1, dataMaxTier - dataMinTier);
+    const radiusForTier = (tier: number): number =>
+        MIN_DOT_RADIUS + ((tier - dataMinTier) / tierSpan) * (MAX_DOT_RADIUS - MIN_DOT_RADIUS);
+    const radiusFor = (node: SimNode): number => radiusForTier(node.dot.shipTier);
 
-    const cellDots = new Map<string, EfficiencyBadgeDot[]>();
-    for (const dot of dots) {
-        const key = `${dot.shipType}|${dot.shipTier}`;
-        const cell = cellDots.get(key);
-        if (cell) {
-            cell.push(dot);
-        } else {
-            cellDots.set(key, [dot]);
-        }
-    }
-
-    // Dot radius: the densest cell's blob must fit its column; the panel-fill
-    // stretch below reclaims any leftover vertical room as breathing space.
-    const cellCounts = [...cellDots.values()].map((cell) => cell.length);
-    let dotRadius = Math.min(
-        MAX_DOT_RADIUS,
-        ...cellCounts.map((count) => (colWidth - 2 * CELL_PAD_X) / (2 * (1 + Math.sqrt(count)))),
-    );
-    dotRadius = Math.max(MIN_DOT_RADIUS, dotRadius);
-
-    // Each type band is as tall as its densest blob needs.
-    const computeBandHeights = (radius: number): number[] => shipTypes.map((shipType) => {
-        const maxCellCount = Math.max(
-            1,
-            ...tiers.map((tier: number) => cellDots.get(`${shipType}|${tier}`)?.length ?? 0),
-        );
-        return Math.max(MIN_BAND_HEIGHT, blobDiameter(maxCellCount, radius) + 2 * BAND_PAD_Y);
+    // Every node springs from the plot center on load (tiny deterministic
+    // spiral offsets keep the collision force from dividing by zero).
+    const nodes: SimNode[] = [...dots].sort(compareDots).map((dot, index) => {
+        const [anchorX, anchorY] = anchorFor(dot.shipType);
+        const angle = index * 0.7;
+        return {
+            dot,
+            anchorX,
+            anchorY,
+            x: plotWidth / 2 + (anchorX - plotWidth / 2) * ANCHOR_SEED_BIAS + Math.cos(angle) * (2 + index * 0.4),
+            y: plotHeight / 2 + (anchorY - plotHeight / 2) * ANCHOR_SEED_BIAS + Math.sin(angle) * (2 + index * 0.4),
+        };
     });
 
-    const availablePlot = Math.max(0, minSvgHeight - MARGIN.top - MARGIN.bottom);
-    let bandBase = computeBandHeights(dotRadius);
-    let bandTotal = bandBase.reduce((sum, height) => sum + height, 0);
-    if (availablePlot > 0 && bandTotal > availablePlot) {
-        dotRadius = Math.max(MIN_DOT_RADIUS, dotRadius * (availablePlot / bandTotal));
-        bandBase = computeBandHeights(dotRadius);
-        bandTotal = bandBase.reduce((sum, height) => sum + height, 0);
-    }
-    const bandStretch = availablePlot > bandTotal ? availablePlot / bandTotal : 1;
-    const bandHeights = bandBase.map((height) => height * bandStretch);
-
-    const bandTops = bandHeights.reduce<number[]>((tops, _height, index) => {
-        tops.push(index === 0 ? 0 : tops[index - 1] + bandHeights[index - 1]);
-        return tops;
-    }, []);
-    const plotHeight = bandHeights.reduce((sum, height) => sum + height, 0);
-    const svgHeight = MARGIN.top + plotHeight + MARGIN.bottom;
-
-    // Force-cluster the dots around their (tier, type) cell centers. Seeded
-    // deterministic start positions near each anchor keep the static layout
-    // stable across renders; the collision force packs each cell into a blob.
-    const nodes: SimNode[] = [];
-    shipTypes.forEach((shipType, typeIndex) => {
-        tiers.forEach((tier: number, tierIndex: number) => {
-            const cell = cellDots.get(`${shipType}|${tier}`);
-            if (!cell) {
-                return;
-            }
-
-            const targetX = tierIndex * colWidth + colWidth / 2;
-            const targetY = bandTops[typeIndex] + bandHeights[typeIndex] / 2;
-            [...cell].sort(compareDots).forEach((dot, dotIndex) => {
-                nodes.push({
-                    dot,
-                    targetX,
-                    targetY,
-                    x: targetX + ((dotIndex * 37) % 17) - 8,
-                    y: targetY + ((dotIndex * 23) % 13) - 6,
-                });
-            });
-        });
-    });
-
-    d3.forceSimulation(nodes)
-        .force('x', d3.forceX((node: SimNode) => node.targetX).strength(FORCE_X_STRENGTH))
-        .force('y', d3.forceY((node: SimNode) => node.targetY).strength(FORCE_Y_STRENGTH))
-        .force('collide', d3.forceCollide(dotRadius + COLLIDE_PAD).iterations(3))
-        .stop()
-        .tick(SIMULATION_TICKS);
-
-    // Keep settled dots inside the plot frame and their own type band.
+    // Bonds: each type's best badge is the hub; members bond strongly to their
+    // hub, hubs bond weakly to the next type's hub.
+    const hubs = new Map<string, SimNode>();
     nodes.forEach((node) => {
-        const typeIndex = shipTypes.indexOf(node.dot.shipType);
-        const bandTop = bandTops[typeIndex] ?? 0;
-        const bandHeight = bandHeights[typeIndex] ?? plotHeight;
-        node.x = Math.max(dotRadius + 1, Math.min(plotWidth - dotRadius - 1, node.x));
-        node.y = Math.max(bandTop + dotRadius + 1, Math.min(bandTop + bandHeight - dotRadius - 1, node.y));
+        if (!hubs.has(node.dot.shipType)) {
+            hubs.set(node.dot.shipType, node);
+        }
+    });
+    const links: SimLink[] = [];
+    nodes.forEach((node) => {
+        const hub = hubs.get(node.dot.shipType);
+        if (hub && hub !== node) {
+            links.push({ source: hub, target: node, kind: 'intra' });
+        }
+    });
+    shipTypes.forEach((shipType, index) => {
+        if (index === 0) return;
+        const previousHub = hubs.get(shipTypes[index - 1]);
+        const hub = hubs.get(shipType);
+        if (previousHub && hub) {
+            links.push({ source: previousHub, target: hub, kind: 'inter' });
+        }
     });
 
     const svgRoot = container.append('svg')
@@ -202,49 +189,34 @@ const drawChart = (
     const svg = svgRoot.append('g')
         .attr('transform', `translate(${MARGIN.left}, ${MARGIN.top})`);
 
-    // No grid — the clusters themselves carry the lattice; a single baseline
-    // anchors the tier labels.
-    svg.append('line')
-        .attr('x1', 0)
-        .attr('x2', plotWidth)
-        .attr('y1', plotHeight)
-        .attr('y2', plotHeight)
-        .attr('stroke', colors.axisLine)
-        .attr('stroke-width', 1);
-
-    shipTypes.forEach((shipType, index) => {
-        svg.append('text')
-            .attr('x', -12)
-            .attr('y', bandTops[index] + bandHeights[index] / 2)
-            .attr('text-anchor', 'end')
-            .attr('dominant-baseline', 'middle')
-            .style('font-size', AXIS_FONT_SIZE)
-            .style('font-weight', '500')
-            .style('fill', colors.axisText)
-            .text(shipType);
-    });
-
-    tiers.forEach((tier: number, index: number) => {
-        svg.append('text')
-            .attr('x', index * colWidth + colWidth / 2)
-            .attr('y', plotHeight + 20)
+    // Type labels ride above their cluster — positions update every tick so a
+    // label follows its blob wherever the simulation (or a drag) takes it.
+    const typeLabels = new Map<string, ReturnType<typeof svg.append>>();
+    shipTypes.forEach((shipType) => {
+        typeLabels.set(shipType, svg.append('text')
             .attr('text-anchor', 'middle')
             .style('font-size', AXIS_FONT_SIZE)
-            .style('font-weight', '500')
-            .style('fill', colors.labelMuted)
-            .text(romanTier(tier));
+            .style('font-weight', '600')
+            .style('fill', colors.axisText)
+            .text(shipType));
     });
 
-    svg.append('text')
-        .attr('x', plotWidth / 2)
-        .attr('y', plotHeight + 40)
-        .attr('text-anchor', 'middle')
-        .style('font-size', CAPTION_FONT_SIZE)
-        .style('fill', colors.labelMuted)
-        .text('Ship Tier');
+    const renderTypeLabels = () => {
+        shipTypes.forEach((shipType) => {
+            const members = nodes.filter((node) => node.dot.shipType === shipType);
+            if (!members.length) {
+                return;
+            }
+            const centroidX = members.reduce((sum, node) => sum + node.x, 0) / members.length;
+            const top = Math.min(...members.map((node) => node.y - radiusFor(node)));
+            typeLabels.get(shipType)
+                ?.attr('x', Math.max(16, Math.min(plotWidth - 16, centroidX)))
+                .attr('y', Math.max(12, top - 12));
+        });
+    };
 
     const summaryGroup = svgRoot.append('g')
-        .attr('transform', `translate(${MARGIN.left}, 18)`);
+        .attr('transform', `translate(${MARGIN.left + 4}, 18)`);
 
     const renderSummary = (dot: EfficiencyBadgeDot) => {
         summaryGroup.selectAll('*').remove();
@@ -274,37 +246,101 @@ const drawChart = (
             .text(`  ·  ${dot.shipType}  ·  Tier ${romanTier(dot.shipTier)}`);
     };
 
-    const dotStrokeWidth = dotRadius > 8 ? 2 : 1.5;
+    const linkNodes = svg.append('g')
+        .selectAll('line')
+        .data(links)
+        .enter()
+        .append('line')
+        .attr('class', (link: SimLink) => `badge-link badge-link-${link.kind}`)
+        .attr('stroke', colors.gridLine)
+        .attr('stroke-opacity', (link: SimLink) => (link.kind === 'intra' ? 0.7 : 0.45))
+        .attr('stroke-width', (link: SimLink) => (link.kind === 'intra' ? 1.2 : 1))
+        .attr('stroke-dasharray', (link: SimLink) => (link.kind === 'inter' ? '4 4' : null));
+
+    const dotStrokeWidth = 2;
     const dotNodes = svg.append('g')
         .selectAll('circle')
         .data(nodes)
         .enter()
         .append('circle')
         .attr('class', 'badge-dot')
-        .attr('cx', (node: SimNode) => node.x)
-        .attr('cy', (node: SimNode) => node.y)
-        .attr('r', dotRadius)
+        .attr('data-ship-type', (node: SimNode) => node.dot.shipType)
+        .attr('r', (node: SimNode) => radiusFor(node))
         .attr('fill', (node: SimNode) => badgeClassColor(colors, node.dot.badgeClass))
         .attr('stroke', colors.barStroke)
-        .attr('stroke-width', dotStrokeWidth)
-        .nodes();
+        .attr('stroke-width', dotStrokeWidth);
 
-    // Oversized invisible hit targets so hovering small dots is forgiving.
-    svg.append('g')
+    const hitNodes = svg.append('g')
         .selectAll('circle')
         .data(nodes)
         .enter()
         .append('circle')
         .attr('class', 'badge-dot-hit')
-        .attr('cx', (node: SimNode) => node.x)
-        .attr('cy', (node: SimNode) => node.y)
-        .attr('r', dotRadius + HIT_PAD)
+        .attr('r', (node: SimNode) => radiusFor(node) + HIT_PAD)
         .attr('fill', 'transparent')
-        .style('cursor', 'default')
+        .style('cursor', 'grab');
+
+    const clampNodes = () => {
+        nodes.forEach((node) => {
+            const radius = radiusFor(node);
+            node.x = Math.max(radius + 1, Math.min(plotWidth - radius - 1, node.x));
+            node.y = Math.max(radius + 1, Math.min(plotHeight - radius - 1, node.y));
+        });
+    };
+
+    const renderPositions = () => {
+        clampNodes();
+        linkNodes
+            .attr('x1', (link: SimLink) => link.source.x)
+            .attr('y1', (link: SimLink) => link.source.y)
+            .attr('x2', (link: SimLink) => link.target.x)
+            .attr('y2', (link: SimLink) => link.target.y);
+        dotNodes
+            .attr('cx', (node: SimNode) => node.x)
+            .attr('cy', (node: SimNode) => node.y);
+        hitNodes
+            .attr('cx', (node: SimNode) => node.x)
+            .attr('cy', (node: SimNode) => node.y);
+        renderTypeLabels();
+    };
+
+    const simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links)
+            .distance((link: SimLink) => (link.kind === 'intra'
+                ? radiusFor(link.source) + radiusFor(link.target) + 8
+                : INTER_LINK_DISTANCE))
+            .strength((link: SimLink) => (link.kind === 'intra' ? INTRA_LINK_STRENGTH : INTER_LINK_STRENGTH)))
+        .force('charge', d3.forceManyBody().strength(CHARGE_STRENGTH))
+        .force('x', d3.forceX((node: SimNode) => node.anchorX).strength(QUADRANT_ANCHOR_STRENGTH))
+        .force('y', d3.forceY((node: SimNode) => node.anchorY).strength(QUADRANT_ANCHOR_STRENGTH))
+        .force('collide', d3.forceCollide((node: SimNode) => radiusFor(node) + COLLIDE_PAD).iterations(2))
+        .alphaDecay(ALPHA_DECAY)
+        .on('tick', renderPositions);
+
+    // Drag with rubber-band: the node is pinned to the pointer while dragging;
+    // on release the anchor/link forces pull it back toward its quadrant.
+    const drag = d3.drag()
+        .on('start', (event: { active: number }, node: SimNode) => {
+            if (!event.active) simulation.alphaTarget(DRAG_ALPHA_TARGET).restart();
+            node.fx = node.x;
+            node.fy = node.y;
+        })
+        .on('drag', (event: { x: number; y: number }, node: SimNode) => {
+            node.fx = event.x;
+            node.fy = event.y;
+        })
+        .on('end', (event: { active: number }, node: SimNode) => {
+            if (!event.active) simulation.alphaTarget(0);
+            node.fx = null;
+            node.fy = null;
+        });
+    hitNodes.call(drag);
+
+    hitNodes
         .on('mouseover', function (_event: MouseEvent, node: SimNode) {
             const index = nodes.indexOf(node);
             if (index >= 0) {
-                d3.select(dotNodes[index])
+                d3.select(dotNodes.nodes()[index])
                     .attr('stroke', colors.labelStrong)
                     .attr('stroke-width', dotStrokeWidth + 0.5);
             }
@@ -313,16 +349,18 @@ const drawChart = (
         .on('mouseout', function (_event: MouseEvent, node: SimNode) {
             const index = nodes.indexOf(node);
             if (index >= 0) {
-                d3.select(dotNodes[index])
+                d3.select(dotNodes.nodes()[index])
                     .attr('stroke', colors.barStroke)
                     .attr('stroke-width', dotStrokeWidth);
             }
         });
 
     // Default the summary to the player's best badge (class asc, then name) so
-    // the strip never starts blank.
-    const bestDot = [...dots].sort(compareDots)[0];
-    renderSummary(bestDot);
+    // the panel never starts blank.
+    renderSummary(nodes[0].dot);
+    renderPositions();
+
+    return simulation;
 };
 
 const EfficiencyStripPlotSVG: React.FC<EfficiencyStripPlotSVGProps> = ({
@@ -340,12 +378,14 @@ const EfficiencyStripPlotSVG: React.FC<EfficiencyStripPlotSVGProps> = ({
         }
 
         const colors = chartColors[theme];
+        let simulation: BadgeSimulation | null = null;
         let resizeFrame: number | null = null;
 
         const resolveWidth = () => Math.max(containerElement.clientWidth || svgWidth, 320);
 
         const redraw = () => {
-            drawChart(containerElement, dots, resolveWidth(), minSvgHeight, colors);
+            simulation?.stop();
+            simulation = drawChart(containerElement, dots, resolveWidth(), minSvgHeight, colors);
         };
 
         const onResize = () => {
@@ -356,6 +396,7 @@ const EfficiencyStripPlotSVG: React.FC<EfficiencyStripPlotSVGProps> = ({
         redraw();
         window.addEventListener('resize', onResize);
         return () => {
+            simulation?.stop();
             window.removeEventListener('resize', onResize);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };

@@ -77,12 +77,31 @@ describe('PlayerEfficiencyBadges', () => {
         expect(shownShips).toHaveLength(1);
     });
 
-    it('labels the tier axis with roman numerals spanning at least V–X', () => {
-        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+    it('labels each ship-type cluster and bonds same-type ships to their hub', () => {
+        const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
-        ['V', 'VI', 'VII', 'IX'].forEach((numeral) => {
-            expect(screen.getByText(numeral)).toBeInTheDocument();
+        ['BB', 'CA', 'DD', 'Sub'].forEach((typeLabel) => {
+            expect(screen.getByText(typeLabel)).toBeInTheDocument();
         });
-        expect(screen.getByText('Ship Tier')).toBeInTheDocument();
+
+        // Four single-ship types: no intra-type bonds, three weak hub-to-hub bonds.
+        expect(container.querySelectorAll('line.badge-link-intra')).toHaveLength(0);
+        expect(container.querySelectorAll('line.badge-link-inter')).toHaveLength(3);
+    });
+
+    it('bonds ships of the same type to that type\'s hub', () => {
+        const { container } = render(
+            <PlayerEfficiencyBadges
+                efficiencyRows={[
+                    ...sampleRows,
+                    { ship_id: 6, top_grade_class: 2, ship_name: 'Hindenburg', ship_type: 'cruiser', ship_tier: 10 },
+                    { ship_id: 7, top_grade_class: 3, ship_name: 'Zao', ship_type: 'cruiser', ship_tier: 10 },
+                ]}
+            />,
+        );
+
+        // Three cruisers: two spokes to the cruiser hub; hub chain unchanged.
+        expect(container.querySelectorAll('line.badge-link-intra')).toHaveLength(2);
+        expect(container.querySelectorAll('line.badge-link-inter')).toHaveLength(3);
     });
 });
