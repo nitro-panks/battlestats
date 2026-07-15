@@ -9,6 +9,14 @@ import LoadingPanel from './LoadingPanel';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { useClanMembers } from './useClanMembers';
 import ActivityIcon, { activityColor } from './ActivityIcon';
+import HiddenAccountIcon from './HiddenAccountIcon';
+import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
+import LeaderCrownIcon from './LeaderCrownIcon';
+import TwitchStreamerIcon from './TwitchStreamerIcon';
+import PveEnjoyerIcon, { PVE_ENJOYER_ICON_ENABLED } from './PveEnjoyerIcon';
+import RankedPlayerIcon from './RankedPlayerIcon';
+import ClanBattleShieldIcon from './ClanBattleShieldIcon';
+import TopShipBadges from './TopShipBadges';
 import { collapseActivityBucket, type ClanMemberData, type CollapsedActivityBucketKey } from './clanMembersShared';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
 import { useRealm } from '../context/RealmContext';
@@ -37,7 +45,7 @@ type PhaseKey = CollapsedActivityBucketKey | 'unknown';
 
 const PHASES: Array<{ key: PhaseKey; label: string }> = [
     { key: 'active_7d', label: 'Active now' },
-    { key: 'cooling_90d', label: 'Cooling' },
+    { key: 'cooling_90d', label: 'Cooling Off' },
     { key: 'inactive_180d_plus', label: 'Gone dark' },
     { key: 'unknown', label: 'No recency' },
 ];
@@ -118,29 +126,65 @@ const PlayerClanSection: React.FC<PlayerClanSectionProps> = ({ clanId, clanName,
                             return (
                                 <div key={key} data-testid={`clan-phase-${key}`}>
                                     <h3
-                                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide"
+                                        className="flex items-center gap-2 text-base font-semibold uppercase tracking-wide"
                                         style={{ color: key === 'unknown' ? 'var(--text-secondary)' : activityColor(key) }}
                                     >
                                         {key !== 'unknown' ? <ActivityIcon bucket={key} size="header" /> : null}
                                         <span>{label} ({phaseMembers.length})</span>
                                     </h3>
-                                    <p className="mt-1 text-sm leading-6">
-                                    {phaseMembers.map((member, index) => (
-                                        <React.Fragment key={member.name}>
-                                            {index > 0 ? <span className="text-[var(--text-secondary)]">, </span> : null}
-                                            {member.name === playerName ? (
-                                                <span className="font-semibold text-[var(--text-primary)]">{member.name}</span>
-                                            ) : (
-                                                <Link
-                                                    href={buildPlayerPath(member.name, realm)}
-                                                    onClick={handleMemberClick}
-                                                    className="text-[var(--accent-mid)] underline-offset-2 hover:underline"
-                                                >
-                                                    {member.name}
-                                                </Link>
-                                            )}
-                                        </React.Fragment>
-                                    ))}
+                                    <p className="mt-2.5 text-sm leading-6">
+                                    {phaseMembers.map((member, index) => {
+                                        const efficiencyRankTier = !member.is_hidden
+                                            ? resolveEfficiencyRankTier(member.efficiency_rank_tier, member.has_efficiency_rank_icon)
+                                            : null;
+                                        // Same classification-badge dispatch as the ClanMembers
+                                        // rows (badge dispatch is intentionally per-surface); the
+                                        // activity icon is omitted — the paragraph header carries
+                                        // the phase.
+                                        const badges = (
+                                            <>
+                                                {member.is_hidden && <HiddenAccountIcon className="text-[11px] text-[var(--accent-light)]" />}
+                                                {member.is_leader && <LeaderCrownIcon size="inline" />}
+                                                {member.is_streamer && <TwitchStreamerIcon size="inline" />}
+                                                {PVE_ENJOYER_ICON_ENABLED && member.is_pve_player && <PveEnjoyerIcon size="inline" />}
+                                                {member.is_ranked_player && <RankedPlayerIcon league={member.highest_ranked_league} size="inline" />}
+                                                {member.is_clan_battle_player && <ClanBattleShieldIcon winRate={member.clan_battle_win_rate} size="inline" />}
+                                                {efficiencyRankTier === 'E' ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={member.efficiency_rank_percentile} populationSize={member.efficiency_rank_population_size} size="inline" /> : null}
+                                                <TopShipBadges badges={member.ship_badges} realm={member.realm} size="inline" />
+                                            </>
+                                        );
+                                        return (
+                                            <React.Fragment key={member.name}>
+                                                {index > 0 ? (
+                                                    <span className="mx-1.5 text-xs text-[var(--text-secondary)]" aria-hidden="true">✦</span>
+                                                ) : null}
+                                                {member.name === playerName ? (
+                                                    <span className="inline-flex items-center gap-1 font-semibold text-[var(--text-primary)]">
+                                                        <span>{member.name}</span>
+                                                        {badges}
+                                                    </span>
+                                                ) : member.is_hidden ? (
+                                                    // Hidden accounts are not clickable, matching the
+                                                    // clan-page roster.
+                                                    <span className="inline-flex items-center gap-1 text-[var(--text-secondary)]">
+                                                        <span>{member.name}</span>
+                                                        {badges}
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1">
+                                                        <Link
+                                                            href={buildPlayerPath(member.name, realm)}
+                                                            onClick={handleMemberClick}
+                                                            className="text-[var(--accent-mid)] underline-offset-2 hover:underline"
+                                                        >
+                                                            {member.name}
+                                                        </Link>
+                                                        {badges}
+                                                    </span>
+                                                )}
+                                            </React.Fragment>
+                                        );
+                                    })}
                                     </p>
                                 </div>
                             );

@@ -96,7 +96,7 @@ describe('PlayerClanSection', () => {
         expect(within(active).getByText('Bravo')).toBeInTheDocument();
 
         const cooling = screen.getByTestId('clan-phase-cooling_90d');
-        expect(cooling).toHaveTextContent('Cooling (2)');
+        expect(cooling).toHaveTextContent('Cooling Off (2)');
         expect(within(cooling).getByText('Charlie')).toBeInTheDocument();
         expect(within(cooling).getByText('Delta')).toBeInTheDocument();
 
@@ -119,6 +119,30 @@ describe('PlayerClanSection', () => {
         expect(alphaLink.getAttribute('href')).toContain('/player/Alpha');
         expect(within(active).getByText('Current Player')).toBeInTheDocument();
         expect(within(active).queryByRole('link', { name: 'Current Player' })).not.toBeInTheDocument();
+    });
+
+    it('renders hidden members as plain text with the hidden icon, never as links', () => {
+        renderSection([
+            makeMember('Alpha', 'active_7d'),
+            { ...makeMember('Ghost', 'active_7d'), is_hidden: true },
+        ]);
+
+        const active = screen.getByTestId('clan-phase-active_7d');
+        expect(within(active).getByText('Ghost')).toBeInTheDocument();
+        expect(within(active).queryByRole('link', { name: /ghost/i })).not.toBeInTheDocument();
+        expect(within(active).getByLabelText('Hidden account')).toBeInTheDocument();
+    });
+
+    it('appends classification badges to member names', () => {
+        renderSection([
+            { ...makeMember('Captain', 'active_7d'), is_leader: true },
+            { ...makeMember('Ladder', 'active_7d'), is_ranked_player: true, highest_ranked_league: 'gold' as never },
+        ]);
+
+        const active = screen.getByTestId('clan-phase-active_7d');
+        expect(within(active).getByLabelText('Clan leader')).toBeInTheDocument();
+        // Ranked icon renders with the member's league; presence is enough here.
+        expect(within(active).getByRole('link', { name: /captain/i })).toBeInTheDocument();
     });
 
     it('feeds the roster to the clan chart and highlights the viewed player', () => {
