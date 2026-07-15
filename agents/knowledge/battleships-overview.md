@@ -171,11 +171,14 @@ Future agent sessions need one high-density bootstrap file that explains the liv
   - obtained from WG ranked `seasons/shipstats/`
   - nullable, resilient when unavailable
   - fresh caches may be backfilled when older rows are missing `top_ship_name`
-- highest ranked league semantics:
-  - use best historical league across non-empty ranked seasons
+- highest ranked league semantics (payload `highest_ranked_league`, changed 2026-07-15):
+  - the league reached in the **current** ranked season only (the Ranked Enjoyer star's color)
   - ignore zero-battle ranked rows for league selection
-- ranked enjoyer badge rule:
-  - true only when aggregate ranked battles `> 100`
+  - career-best league remains derivable per-season from `ranked_json`
+- ranked enjoyer badge rule (changed 2026-07-15):
+  - true when the player has any ranked battles (`> 0`) in the **current** ranked season
+  - current season = newest started season in the durable `RankedSeason` reference ("latest season persists" through off-season gaps); unknown reference → badge hidden
+  - spec: `agents/work-items/ranked-enjoyer-current-season-spec.md`
 - correlation semantics:
   - ranked WR vs battles population excludes hidden players
   - excludes players below minimum total ranked battle threshold

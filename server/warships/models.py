@@ -843,3 +843,25 @@ class ShipTopPlayerSnapshot(models.Model):
 # period writer/reader code was deleted, and all four UI windows
 # (day/week/month/year) resolve to the daily layer. See
 # agents/runbooks/runbook-db-growth-analysis-2026-06-15.md.
+
+
+class RankedSeason(models.Model):
+    """Durable reference of WG ranked-season metadata (dates drive the
+    "current season" resolution behind the Ranked Enjoyer icon).
+
+    Upserted from WG `seasons/info/` whenever `_get_ranked_seasons_metadata`
+    does a fresh fetch, and read back as the fallback when Redis is cold and
+    the WG fetch fails — prod Redis is `allkeys-lru`, so even no-TTL keys can
+    evict, and season dates must survive that. Season ids are global across
+    realms (WG numbers ranked seasons once, 1000-offset), so no realm column.
+    Spec: `agents/work-items/ranked-enjoyer-current-season-spec.md`.
+    """
+    season_id = models.IntegerField(primary_key=True)
+    name = models.CharField(max_length=200, blank=True, default='')
+    label = models.CharField(max_length=20, blank=True, default='')
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"RankedSeason({self.season_id} {self.label} {self.start_date}..{self.end_date})"

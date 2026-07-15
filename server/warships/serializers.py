@@ -3,7 +3,7 @@ import time
 
 from rest_framework import serializers
 from .models import Player, Clan, Ship, StreamerSubmission
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_current_ranked_season_id, get_current_season_ranked_league, is_current_season_ranked_player, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges
 
 
 TWITCH_URL_RE = re.compile(
@@ -84,6 +84,7 @@ class PlayerSerializer(serializers.ModelSerializer):
     clan_tag = serializers.SerializerMethodField()
     is_clan_leader = serializers.SerializerMethodField()
     highest_ranked_league = serializers.SerializerMethodField()
+    is_ranked_player = serializers.SerializerMethodField()
     kill_ratio = serializers.SerializerMethodField()
     player_score = serializers.SerializerMethodField()
     efficiency_rank_percentile = serializers.SerializerMethodField()
@@ -133,8 +134,24 @@ class PlayerSerializer(serializers.ModelSerializer):
     def get_is_clan_leader(self, obj):
         return bool(obj.clan and obj.clan.leader_id is not None and obj.player_id == obj.clan.leader_id)
 
+    def _current_ranked_season_id(self):
+        # One durable-reference read per serializer instance (list payloads
+        # reuse it across rows).
+        if not hasattr(self, '_current_ranked_season_id_cache'):
+            self._current_ranked_season_id_cache = get_current_ranked_season_id()
+        return self._current_ranked_season_id_cache
+
     def get_highest_ranked_league(self, obj):
-        return get_highest_ranked_league_name(obj.ranked_json)
+        # Current-season scope: this is the Ranked Enjoyer star's color, not a
+        # career-best. Per-season leagues remain available inside ranked_json.
+        return get_current_season_ranked_league(
+            obj.ranked_json, self._current_ranked_season_id())
+
+    def get_is_ranked_player(self, obj):
+        # Ranked Enjoyer icon gate: any battles recorded in the current ranked
+        # season (agents/work-items/ranked-enjoyer-current-season-spec.md).
+        return is_current_season_ranked_player(
+            obj.ranked_json, self._current_ranked_season_id())
 
     def get_kill_ratio(self, obj):
         explorer_summary = getattr(obj, 'explorer_summary', None)

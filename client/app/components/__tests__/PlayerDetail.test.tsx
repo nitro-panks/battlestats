@@ -581,6 +581,9 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     ...basePlayer,
                     is_clan_leader: true,
                     days_since_last_battle: 500,
+                    // Current-season semantics: the icon renders from these two
+                    // server-computed fields alone; ranked_json no longer drives it.
+                    is_ranked_player: true,
                     highest_ranked_league: 'Gold',
                     ranked_json: [{ total_battles: 120, total_wins: 70, highest_league_name: 'Gold' }],
                     verdict: 'Warrior',
@@ -590,9 +593,26 @@ describe('PlayerDetail efficiency-rank icon', () => {
 
         expect(screen.getByLabelText('Clan leader')).toBeInTheDocument();
         expect(screen.getByLabelText(/Asleep —/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/ranked enjoyer/i)).toBeInTheDocument();
+        expect(screen.getByLabelText('ranked this season (Gold)')).toBeInTheDocument();
         expect(screen.queryByText('Playstyle:')).not.toBeInTheDocument();
         expect(screen.queryByText('Warrior')).not.toBeInTheDocument();
+    });
+
+    it('hides the ranked star when the payload flag is off, even with a large career ranked history', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    is_ranked_player: false,
+                    highest_ranked_league: null,
+                    // Career volume alone no longer qualifies — the server scopes
+                    // the flag to the current ranked season.
+                    ranked_json: [{ total_battles: 900, total_wins: 500, highest_league_name: 'Gold' }],
+                }}
+            />,
+        );
+
+        expect(screen.queryByLabelText(/ranked this season/i)).not.toBeInTheDocument();
     });
 
     it('defaults to Activity, then falls back to Ships when the player has no battle activity', async () => {

@@ -40,12 +40,13 @@ from warships.data import (
     fetch_tier_data,
     fetch_type_data,
     fetch_wr_distribution,
-    get_highest_ranked_league_name,
+    get_current_ranked_season_id,
+    get_current_season_ranked_league,
     get_published_efficiency_rank_payload,
     has_clan_battle_summary_cache,
     is_clan_battle_enjoyer,
+    is_current_season_ranked_player,
     is_pve_player,
-    is_ranked_player,
     is_sleepy_player,
     player_battle_data_needs_refresh,
     player_detail_needs_refresh,
@@ -1662,6 +1663,11 @@ def clan_members(request, clan_id: str) -> Response:
     # hydration poll loop doesn't re-run the bulk fetch on every poll.
     member_badges = _clan_member_badges_cached(clan_id, realm, [m.pk for m in members])
 
+    # One durable-reference read for the whole roster: the Ranked Enjoyer flag
+    # and star color are scoped to the current ranked season (see
+    # agents/work-items/ranked-enjoyer-current-season-spec.md).
+    current_ranked_season_id = get_current_ranked_season_id()
+
     member_rows = []
     for member in members:
         days_since = _days_since_last_battle(member)
@@ -1679,7 +1685,8 @@ def clan_members(request, clan_id: str) -> Response:
             ),
             'is_pve_player': is_pve_player(member.total_battles, member.pvp_battles),
             'is_sleepy_player': is_sleepy_player(days_since),
-            'is_ranked_player': is_ranked_player(member.ranked_json),
+            'is_ranked_player': is_current_season_ranked_player(
+                member.ranked_json, current_ranked_season_id),
             'is_clan_battle_player': is_clan_battle_enjoyer(
                 getattr(getattr(member, 'explorer_summary', None),
                         'clan_battle_total_battles', None),
@@ -1688,7 +1695,8 @@ def clan_members(request, clan_id: str) -> Response:
             ),
             'clan_battle_win_rate': getattr(getattr(member, 'explorer_summary', None), 'clan_battle_overall_win_rate', None),
             'efficiency_hydration_pending': member.player_id in pending_efficiency_player_ids,
-            'highest_ranked_league': get_highest_ranked_league_name(member.ranked_json),
+            'highest_ranked_league': get_current_season_ranked_league(
+                member.ranked_json, current_ranked_season_id),
             'ranked_hydration_pending': member.player_id in pending_player_ids,
             'ranked_updated_at': member.ranked_updated_at,
             **get_published_efficiency_rank_payload(member),

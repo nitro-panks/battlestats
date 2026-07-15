@@ -1446,6 +1446,26 @@ def is_clan_battle_enjoyer(
     return int(total_battles or 0) >= minimum_battles and int(seasons_participated or 0) >= minimum_seasons
 
 
+def _ranked_row_league(row: dict) -> Optional[int]:
+    """Normalize a ranked_json row's league to 1..3 (1=Gold), or None."""
+    league_value = row.get('highest_league')
+    try:
+        league = int(league_value)
+    except (TypeError, ValueError):
+        league_name = str(row.get('highest_league_name')
+                          or '').strip().lower()
+        league = {
+            'gold': 1,
+            'silver': 2,
+            'bronze': 3,
+        }.get(league_name)
+
+    if league is None or league < 1 or league > 3:
+        return None
+
+    return league
+
+
 def get_highest_ranked_league_name(ranked_rows: Any) -> Optional[str]:
     normalized_rows = _coerce_ranked_rows(ranked_rows)
     best_league: Optional[int] = None
@@ -1454,19 +1474,8 @@ def get_highest_ranked_league_name(ranked_rows: Any) -> Optional[str]:
         if int(row.get('total_battles', 0) or 0) <= 0:
             continue
 
-        league_value = row.get('highest_league')
-        try:
-            league = int(league_value)
-        except (TypeError, ValueError):
-            league_name = str(row.get('highest_league_name')
-                              or '').strip().lower()
-            league = {
-                'gold': 1,
-                'silver': 2,
-                'bronze': 3,
-            }.get(league_name)
-
-        if league is None or league < 1 or league > 3:
+        league = _ranked_row_league(row)
+        if league is None:
             continue
 
         if best_league is None or league < best_league:
@@ -1476,6 +1485,47 @@ def get_highest_ranked_league_name(ranked_rows: Any) -> Optional[str]:
         return None
 
     return LEAGUE_NAMES.get(best_league)
+
+
+def _current_season_ranked_row(ranked_rows: Any, current_season_id: Optional[int]) -> Optional[dict]:
+    """The player's ranked_json row for the current season with battles, or None."""
+    if current_season_id is None:
+        return None
+
+    for row in _coerce_ranked_rows(ranked_rows):
+        try:
+            season_id = int(row.get('season_id'))
+        except (TypeError, ValueError):
+            continue
+
+        if season_id == int(current_season_id) and int(row.get('total_battles', 0) or 0) > 0:
+            return row
+
+    return None
+
+
+def is_current_season_ranked_player(ranked_rows: Any, current_season_id: Optional[int]) -> bool:
+    """Ranked Enjoyer icon gate: any battles recorded in the current season.
+
+    Replaces the career `is_ranked_player` (>100 lifetime battles) in the icon
+    path — the star now marks active participation in the current ranked
+    window, colored by `get_current_season_ranked_league`. Spec:
+    `agents/work-items/ranked-enjoyer-current-season-spec.md`.
+    """
+    return _current_season_ranked_row(ranked_rows, current_season_id) is not None
+
+
+def get_current_season_ranked_league(ranked_rows: Any, current_season_id: Optional[int]) -> Optional[str]:
+    """League name ('Gold'/'Silver'/'Bronze') reached in the current season, or None."""
+    row = _current_season_ranked_row(ranked_rows, current_season_id)
+    if row is None:
+        return None
+
+    league = _ranked_row_league(row)
+    if league is None:
+        return None
+
+    return LEAGUE_NAMES.get(league)
 
 
 def _summary_has_battle_data(player: Player, battle_rows: list[dict]) -> bool:
@@ -3497,17 +3547,66 @@ def _clan_battle_season_sort_key(summary: dict) -> tuple:
     return parsed_start, parsed_end, summary.get('season_id', 0)
 
 
-def _get_ranked_seasons_metadata() -> dict:
-    """Return season_id → {name, label, start_date, end_date}. Cached for 24h in Redis."""
+def _upsert_ranked_seasons_reference(metadata: dict) -> None:
+    """Persist fetched season metadata into the durable RankedSeason table.
+
+    Prod Redis is `allkeys-lru` (even no-TTL keys can evict), so the season
+    dates behind the Ranked Enjoyer icon's current-season resolution need a DB
+    home that survives eviction and WG outages.
+    """
+    from warships.models import RankedSeason
+
+    for season_id, info in metadata.items():
+        try:
+            RankedSeason.objects.update_or_create(
+                season_id=int(season_id),
+                defaults={
+                    'name': info.get('name') or '',
+                    'label': info.get('label') or '',
+                    'start_date': info.get('start_date'),
+                    'end_date': info.get('end_date'),
+                },
+            )
+        except Exception:
+            logging.exception(
+                'Failed to upsert RankedSeason %s', season_id)
+
+
+def _ranked_seasons_metadata_from_db() -> dict:
+    """Rebuild the metadata dict from the durable RankedSeason reference."""
+    from warships.models import RankedSeason
+
+    return {
+        row.season_id: {
+            'name': row.name,
+            'label': row.label,
+            'start_date': row.start_date.strftime('%Y-%m-%d') if row.start_date else None,
+            'end_date': row.end_date.strftime('%Y-%m-%d') if row.end_date else None,
+        }
+        for row in RankedSeason.objects.all()
+    }
+
+
+def _get_ranked_seasons_metadata(force_refresh: bool = False) -> dict:
+    """Return season_id → {name, label, start_date, end_date}.
+
+    Resolution order: Redis fresh key (24h) → WG `seasons/info/` fetch (which
+    also upserts the durable RankedSeason table) → RankedSeason DB read when
+    the WG fetch fails (not re-cached, so the next call retries WG).
+    `force_refresh` skips the Redis read — the self-healing rollover in
+    `update_ranked_data` uses it when a player's rank_info names a season newer
+    than anything on record.
+    """
     from warships.api.players import _fetch_ranked_seasons_info
 
-    cached = cache.get(RANKED_SEASONS_CACHE_KEY)
-    if cached is not None:
-        return cached
+    if not force_refresh:
+        cached = cache.get(RANKED_SEASONS_CACHE_KEY)
+        if cached is not None:
+            return cached
 
     raw = _fetch_ranked_seasons_info()
     if not raw:
-        return {}  # nothing to cache
+        return _ranked_seasons_metadata_from_db()
 
     result = {}
     for sid, info in raw.items():
@@ -3523,8 +3622,29 @@ def _get_ranked_seasons_metadata() -> dict:
             'end_date': datetime.fromtimestamp(close_ts).strftime('%Y-%m-%d') if close_ts else None,
         }
 
+    _upsert_ranked_seasons_reference(result)
     cache.set(RANKED_SEASONS_CACHE_KEY, result, RANKED_SEASONS_CACHE_TTL)
     return result
+
+
+def get_current_ranked_season_id() -> Optional[int]:
+    """Newest ranked season that has started, or None when nothing is on record.
+
+    "Latest season persists" heuristic: the current season stays current
+    through the off-season gap until the next one starts; a season listed with
+    a future start_date is not yet current. Reads only the durable RankedSeason
+    table — never the WG API — so it is safe on the request thread
+    (clan_members, player serializer) and survives Redis eviction.
+    """
+    from warships.models import RankedSeason
+
+    today = date.today()
+    candidates = [
+        row.season_id
+        for row in RankedSeason.objects.only('season_id', 'start_date')
+        if row.start_date is None or row.start_date <= today
+    ]
+    return max(candidates) if candidates else None
 
 
 def _get_clan_battle_seasons_metadata() -> dict:
@@ -4006,6 +4126,14 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
         [int(season_id)
          for season_id in rank_info.keys() if str(season_id).isdigit()]
     )
+    # Self-healing rollover: a season id newer than anything in the (24h-cached)
+    # metadata means WG opened a new season since the last seasons/info fetch.
+    # Refetch once so the new season lands in the durable RankedSeason reference
+    # and the Ranked Enjoyer icon's current-season resolution rolls over without
+    # waiting out the cache TTL.
+    if requested_season_ids and (
+            not season_meta or max(requested_season_ids) > max(season_meta)):
+        season_meta = _get_ranked_seasons_metadata(force_refresh=True)
     ranked_ship_stats_rows = _fetch_ranked_ship_stats_for_player(
         int(player_id), season_ids=requested_season_ids, realm=realm)
     top_ship_names_by_season = _build_top_ranked_ship_names_by_season(

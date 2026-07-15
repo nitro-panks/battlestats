@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { getHighestRankedLeagueName, type RankedLeagueName } from './rankedLeague';
+import { type RankedLeagueName } from './rankedLeague';
 import PlayerDetailInsightsTabs from './PlayerDetailInsightsTabs';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
@@ -48,6 +48,11 @@ interface PlayerDetailProps {
         clan_id: number;
         is_clan_leader?: boolean;
         is_pve_player?: boolean;
+        // Current-season semantics (server-computed): true when the player has
+        // ranked battles recorded for the current ranked season, and the league
+        // reached in that season. Spec:
+        // agents/work-items/ranked-enjoyer-current-season-spec.md
+        is_ranked_player?: boolean;
         highest_ranked_league?: RankedLeagueName | null;
         efficiency_rank_percentile?: number | null;
         efficiency_rank_tier?: 'E' | 'I' | 'II' | 'III' | null;
@@ -173,11 +178,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 }) => {
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
     const isPveEnjoyer = Boolean(player.is_pve_player);
-    const rankedBattleCount = Array.isArray(player.ranked_json)
-        ? player.ranked_json.reduce((total, row) => total + Math.max(row?.total_battles || 0, 0), 0)
-        : 0;
-    const isRankedEnjoyer = rankedBattleCount > 100;
-    const highestRankedLeague = player.highest_ranked_league ?? getHighestRankedLeagueName(player.ranked_json);
+    // Payload-driven: the server scopes both the flag and the league to the
+    // current ranked season (no client-side career derivation — the clan-member
+    // rows use the same server helpers, keeping the two surfaces in agreement).
+    const isRankedEnjoyer = Boolean(player.is_ranked_player);
+    const highestRankedLeague = player.highest_ranked_league ?? null;
     const efficiencyRankTier = !player.is_hidden
         ? resolveEfficiencyRankTier(player.efficiency_rank_tier, player.has_efficiency_rank_icon)
         : null;

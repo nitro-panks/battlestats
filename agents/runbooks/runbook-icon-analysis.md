@@ -14,7 +14,7 @@ Battlestats renders 7 distinct icon types across 3 surfaces (player detail heade
 | Clan Leader | `faCrown` | Player header, clan members | `Clan.leader_id` / `Clan.leader_name` |
 | PvE Enjoyer | `faRobot` | Player header, clan members, landing | `is_pve_player(total_battles, pvp_battles)` |
 | Sleepy/Inactive | `faBed` | Player header, clan members, landing | `is_sleepy_player(days_since_last_battle)` |
-| Ranked Player | `faStar` | Player header, clan members, landing | `is_ranked_player(ranked_json)` |
+| Ranked Player | `faStar` | Player header, clan members, landing | `is_current_season_ranked_player(ranked_json, current_season_id)` |
 | Clan Battle | `faShieldHalved` | Player header, clan members, landing | `is_clan_battle_enjoyer(battles, seasons)` |
 
 ---
@@ -71,7 +71,7 @@ Battlestats renders 7 distinct icon types across 3 surfaces (player detail heade
 
 ### 6. Ranked Player (`faStar`)
 
-**Generation**: Computed from `is_ranked_player(ranked_json)` — checks if any ranked season data exists. League color derived from `get_highest_ranked_league_name(ranked_json)`.
+**Generation** (current-season semantics, 2026-07-15): Computed from `is_current_season_ranked_player(ranked_json, get_current_ranked_season_id())` — any battles recorded in the current ranked season. League color from `get_current_season_ranked_league(...)` (same season scope). The current season resolves from the durable `RankedSeason` table ("latest season persists" through off-season gaps); `update_ranked_data` self-heals the reference when a player's rank_info names a newer season. Spec: `agents/work-items/ranked-enjoyer-current-season-spec.md`.
 
 **Refresh cycle**: Ranked data stale after 24h (`player_ranked_data_needs_refresh()`). Incremental ranked crawl also refreshes periodically.
 

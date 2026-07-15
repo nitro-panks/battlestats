@@ -33,7 +33,7 @@ _Removed in 3.0 (landing featured-boards decommission): `/api/landing/clans/` (`
 | `/api/player/<name>/` | GET (404)    | `player_missing_404`     | Yes                                       |
 | `/api/player/`        | GET (list)   | —                        | Skipped (unpaginated, too slow for smoke) |
 
-**Key fields validated**: `name`, `pvp_ratio`, `pvp_survival_rate`, `verdict`, `kill_ratio`, `actual_kdr`, `player_score`, `is_clan_leader`, `highest_ranked_league`
+**Key fields validated**: `name`, `pvp_ratio`, `pvp_survival_rate`, `verdict`, `kill_ratio`, `actual_kdr`, `player_score`, `is_clan_leader`, `is_ranked_player`, `highest_ranked_league` (both ranked fields are current-season-scoped since 2026-07-15 — see `agents/work-items/ranked-enjoyer-current-season-spec.md`)
 
 **Behavior notes**:
 
@@ -76,7 +76,7 @@ _Removed in 3.0 (landing featured-boards decommission): `/api/landing/clans/` (`
 | `/api/fetch/clan_members/<clan_id>/`        | GET       | `clan_members_naumachia`  | Yes     |
 | `/api/fetch/clan_battle_seasons/<clan_id>/` | GET       | `clan_battles_naumachia`  | Yes     |
 
-**Key fields validated for clan members**: `name`, `is_hidden`, `pvp_ratio`, `days_since_last_battle`, `activity_bucket`, `is_leader`, `is_pve_player`, `is_ranked_player`, `highest_ranked_league`
+**Key fields validated for clan members**: `name`, `is_hidden`, `pvp_ratio`, `days_since_last_battle`, `activity_bucket`, `is_leader`, `is_pve_player`, `is_ranked_player`, `highest_ranked_league` (ranked fields current-season-scoped since 2026-07-15)
 
 **Behavior notes**:
 

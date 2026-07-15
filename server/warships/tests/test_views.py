@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.models import Player, Clan, PlayerExplorerSummary, realm_cache_key, Ship, ShipTopPlayerSnapshot, EntityVisitDaily
+from warships.models import Player, Clan, PlayerExplorerSummary, RankedSeason, realm_cache_key, Ship, ShipTopPlayerSnapshot, EntityVisitDaily
 from warships.views import PUBLIC_API_THROTTLES, _missing_player_lookup_cache_key
 
 
@@ -1586,31 +1586,47 @@ class ClanMembersEndpointTests(TestCase):
             },
         )
 
-    def test_clan_members_marks_ranked_players_with_over_100_ranked_battles(self):
+    def test_clan_members_marks_ranked_players_by_current_season_participation(self):
+        # Current season = newest started season (4 is future-dated, so 3).
+        today = timezone.now().date()
+        RankedSeason.objects.create(
+            season_id=2, label="S2",
+            start_date=today - timedelta(days=200),
+            end_date=today - timedelta(days=140))
+        RankedSeason.objects.create(
+            season_id=3, label="S3",
+            start_date=today - timedelta(days=30), end_date=None)
+        RankedSeason.objects.create(
+            season_id=4, label="S4",
+            start_date=today + timedelta(days=30), end_date=None)
+
         clan = Clan.objects.create(
             clan_id=81,
             name="Ranked Clan",
             members_count=3,
         )
+        # A handful of current-season battles qualifies; the color is the
+        # league reached THIS season (Silver), not the career-best Gold.
         Player.objects.create(
-            name="RankedMain",
+            name="CurrentSeason",
             player_id=8101,
             clan=clan,
             ranked_json=[
-                {"season_id": 1, "total_battles": 65,
-                    "total_wins": 35, "win_rate": 53.85, "highest_league": 1, "highest_league_name": "Gold"},
-                {"season_id": 2, "total_battles": 45,
-                    "total_wins": 20, "win_rate": 44.44, "highest_league": 2, "highest_league_name": "Silver"},
+                {"season_id": 2, "total_battles": 300,
+                    "total_wins": 170, "win_rate": 56.7, "highest_league": 1, "highest_league_name": "Gold"},
+                {"season_id": 3, "total_battles": 12,
+                    "total_wins": 6, "win_rate": 50.0, "highest_league": 2, "highest_league_name": "Silver"},
             ],
             last_battle_date=timezone.now().date(),
         )
+        # Career volume alone no longer qualifies.
         Player.objects.create(
-            name="RankedDabbler",
+            name="CareerOnly",
             player_id=8102,
             clan=clan,
             ranked_json=[
-                {"season_id": 3, "total_battles": 100,
-                    "total_wins": 55, "win_rate": 55.0, "highest_league": 2, "highest_league_name": "Silver"},
+                {"season_id": 2, "total_battles": 500,
+                    "total_wins": 280, "win_rate": 56.0, "highest_league": 1, "highest_league_name": "Gold"},
             ],
             last_battle_date=timezone.now().date(),
         )
@@ -1628,8 +1644,8 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(
             {row["name"]: row["is_ranked_player"] for row in response.json()},
             {
-                "RankedMain": True,
-                "RankedDabbler": False,
+                "CurrentSeason": True,
+                "CareerOnly": False,
                 "NoRanked": False,
             },
         )
@@ -1637,8 +1653,8 @@ class ClanMembersEndpointTests(TestCase):
             {row["name"]: row["highest_ranked_league"]
                 for row in response.json()},
             {
-                "RankedMain": "Gold",
-                "RankedDabbler": "Silver",
+                "CurrentSeason": "Silver",
+                "CareerOnly": None,
                 "NoRanked": None,
             },
         )
@@ -2072,8 +2088,19 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.json()["actual_kdr"], 2.25)
         self.assertEqual(response.json()["player_score"], 3.87)
 
-    def test_player_detail_exposes_highest_ranked_league_from_history(self):
+    def test_player_detail_exposes_current_season_ranked_fields(self):
         now = timezone.now()
+        today = now.date()
+        # Season 8 is the newest started season → current. The payload league is
+        # the season-8 Silver, not the career-best season-6 Gold, and the icon
+        # flag rides current-season participation.
+        RankedSeason.objects.create(
+            season_id=6, label="S6",
+            start_date=today - timedelta(days=300),
+            end_date=today - timedelta(days=240))
+        RankedSeason.objects.create(
+            season_id=8, label="S8",
+            start_date=today - timedelta(days=20), end_date=None)
         Player.objects.create(
             name="DetailRankedLeaguePlayer",
             player_id=8185,
@@ -2092,7 +2119,34 @@ class ApiContractTests(TestCase):
         response = self.client.get("/api/player/DetailRankedLeaguePlayer/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["highest_ranked_league"], "Gold")
+        self.assertEqual(response.json()["highest_ranked_league"], "Silver")
+        self.assertTrue(response.json()["is_ranked_player"])
+
+    def test_player_detail_ranked_fields_dark_without_current_season_battles(self):
+        now = timezone.now()
+        today = now.date()
+        RankedSeason.objects.create(
+            season_id=9, label="S9",
+            start_date=today - timedelta(days=10), end_date=None)
+        Player.objects.create(
+            name="DetailCareerRankedPlayer",
+            player_id=8186,
+            is_hidden=False,
+            pvp_ratio=51.0,
+            pvp_battles=300,
+            pvp_survival_rate=41.0,
+            creation_date=now - timedelta(days=400),
+            ranked_json=[
+                {"season_id": 6, "highest_league": 1,
+                    "highest_league_name": "Gold", "total_battles": 250},
+            ],
+        )
+
+        response = self.client.get("/api/player/DetailCareerRankedPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()["highest_ranked_league"])
+        self.assertFalse(response.json()["is_ranked_player"])
 
     def test_player_detail_backfills_missing_kill_ratio_from_stale_summary(self):
         now = timezone.now()
