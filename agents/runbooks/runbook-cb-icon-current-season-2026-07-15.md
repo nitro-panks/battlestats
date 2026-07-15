@@ -17,7 +17,7 @@ The shield (`ClanBattleShieldIcon`) now means: **this player has logged ≥1 cla
 2. **Color / metric**: the shield stays tinted by win rate via `wrColor`, but the WR is now the **current-season WR**, not career overall.
 3. **Tooltip**: "clan battles this season · NN.N% WR" (was "clan battle enjoyer · NN.N% WR").
 4. **Rank**: intentionally absent. WG's `clans/seasonstats/` returns only `battles/wins/losses` per season — there is **no per-player league/division/rank** in the official API (a clan's ladder league exists only on the unofficial clan-ladder API and is clan-scoped, not player-scoped). If a rank treatment is ever wanted, it must come from a different data source; out of scope here.
-5. Career criteria (`is_clan_battle_enjoyer`, 40 battles / 2 seasons) remain in place for the **Clan Battles tab enablement** (`clan_battle_header_eligible`) — only the icon's semantics change.
+5. Career criteria (`is_clan_battle_enjoyer`, 40 battles / 2 seasons) remain in place for the **Clan Battles tab enablement** (`clan_battle_header_eligible`) — only the icon's semantics change. **[Superseded same-day, 2026-07-15]**: the tab gate is now career 40/2 **OR** the icon's current-season criteria. Shipping the icon change alone produced a visible contradiction for first-season CB players (e.g. `IllllIll`, `a_sneaky_pete` on NA: shield purple, tab dark, 5–7 career battles / 1 season). `clan_battle_header_eligible` now ORs in `is_current_season_clan_battle_player` in `PlayerSerializer._get_clan_battle_header_payload`, so anyone wearing the shield also gets the tab; career-only veterans sitting out the current season keep the tab via the career arm.
 
 ## How we know when seasons begin and end
 
@@ -66,7 +66,7 @@ Written by `_persist_player_clan_battle_summary` whenever `fetch_player_clan_bat
 |---|---|---|
 | `data.py` helpers | `is_clan_battle_enjoyer` (career 40/2) gates the icon | + `get_current_clan_battle_season_id()`, `is_current_season_clan_battle_player(...)`, `get_current_season_clan_battle_win_rate(...)`; career helper remains for the tab gate |
 | `views.py` `clan_members` (~1690) | `is_clan_battle_player` = career gate; `clan_battle_win_rate` = career WR | current-season gate + current-season WR (null when not qualifying); one season-id resolution per request |
-| `PlayerSerializer` | icon driven by `clan_battle_header_eligible` (career) | **new** `is_clan_battle_player` bool + `clan_battle_current_season_win_rate`; `clan_battle_header_*` fields unchanged (tab gate + summary stay career-scoped) |
+| `PlayerSerializer` | icon driven by `clan_battle_header_eligible` (career) | **new** `is_clan_battle_player` bool + `clan_battle_current_season_win_rate`; `clan_battle_header_*` summary fields unchanged (career-scoped); `clan_battle_header_eligible` widened same-day to career OR current-season (see §Key decisions #5) |
 | `fetch_player_clan_battle_seasons` rows | no currency marker | each season row gains `is_current: bool` (server-computed) |
 | `PlayerDetail.tsx` | client-side 40/2 mirror (`buildClanBattleHeaderState`) + career header fields drive the icon | payload-driven `is_clan_battle_player` + `clan_battle_current_season_win_rate`; live CB-seasons fetch updates the icon via the row flagged `is_current` (threshold mirror deleted); tab enablement still `clan_battle_header_eligible` |
 | `ClanBattleShieldIcon.tsx` | tooltip "clan battle enjoyer" | tooltip/aria "clan battles this season" |

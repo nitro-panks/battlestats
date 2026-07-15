@@ -498,6 +498,41 @@ class PlayerViewSetTests(TestCase):
         # Career tab gate is untouched by the icon's season scoping.
         self.assertTrue(sitout_payload["clan_battle_header_eligible"])
 
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_current_season_cb_participation_unlocks_the_clan_battles_tab(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        # A first-season CB player earns the shield; the tab must line up
+        # (shield criteria widen the career 40/2 gate, they don't replace it).
+        now = timezone.now()
+        ClanBattleSeason.objects.create(
+            season_id=34, start_date=now.date() - timedelta(days=20))
+        newcomer = Player.objects.create(
+            name="CbSeasonNewcomer", player_id=9064, last_fetch=now,
+            is_hidden=False, pvp_battles=500)
+        PlayerExplorerSummary.objects.create(
+            player=newcomer,
+            clan_battle_seasons_participated=1,
+            clan_battle_total_battles=5,
+            clan_battle_overall_win_rate=60.0,
+            clan_battle_current_season_id=34,
+            clan_battle_current_season_battles=5,
+            clan_battle_current_season_win_rate=60.0,
+            clan_battle_summary_updated_at=now,
+        )
+
+        payload = self.client.get("/api/player/CbSeasonNewcomer/").json()
+
+        self.assertTrue(payload["is_clan_battle_player"])
+        self.assertTrue(payload["clan_battle_header_eligible"])
+        self.assertEqual(payload["clan_battle_header_total_battles"], 5)
+        self.assertEqual(payload["clan_battle_header_seasons_played"], 1)
+
     @patch("warships.data._fetch_clan_battle_season_stats")
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")

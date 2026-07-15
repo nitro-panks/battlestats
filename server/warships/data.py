@@ -1498,8 +1498,9 @@ def is_current_season_clan_battle_player(
     the icon path — the shield now marks active participation in the current
     clan-battle season. The stored season id is double-checked against the
     live current season, so a row persisted during a finished season stops
-    qualifying at rollover without a write. Career criteria still gate the
-    Clan Battles tab (`clan_battle_header_eligible`). Runbook:
+    qualifying at rollover without a write. The Clan Battles tab
+    (`clan_battle_header_eligible`) opens on career 40/2 OR this criteria,
+    so shield wearers always get the tab. Runbook:
     `agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md`.
     """
     if explorer_summary is None or current_season_id is None:

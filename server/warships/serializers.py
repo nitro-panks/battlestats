@@ -165,8 +165,8 @@ class PlayerSerializer(serializers.ModelSerializer):
 
     def get_is_clan_battle_player(self, obj):
         # ClanBattleShieldIcon gate: any battles recorded in the current CB
-        # season. Career criteria still gate the Clan Battles tab via
-        # clan_battle_header_eligible below. Runbook:
+        # season. The Clan Battles tab (clan_battle_header_eligible below)
+        # opens on career 40/2 OR this same shield criteria. Runbook:
         # agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md
         if obj.is_hidden:
             return False
@@ -250,9 +250,17 @@ class PlayerSerializer(serializers.ModelSerializer):
                     obj,
                 )
                 payload_cache[cache_key] = {
-                    'clan_battle_header_eligible': is_clan_battle_enjoyer(
-                        summary.get('total_battles'),
-                        summary.get('seasons_participated'),
+                    # Career 40/2 OR current-season participation: whoever
+                    # wears the shield must also get the tab.
+                    'clan_battle_header_eligible': (
+                        is_clan_battle_enjoyer(
+                            summary.get('total_battles'),
+                            summary.get('seasons_participated'),
+                        )
+                        or is_current_season_clan_battle_player(
+                            getattr(obj, 'explorer_summary', None),
+                            self._current_clan_battle_season_id(),
+                        )
                     ),
                     'clan_battle_header_total_battles': int(summary.get('total_battles') or 0),
                     'clan_battle_header_seasons_played': int(summary.get('seasons_participated') or 0),
