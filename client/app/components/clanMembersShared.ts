@@ -25,6 +25,9 @@ export interface ClanMemberData {
     is_pve_player: boolean;
     is_sleepy_player: boolean;
     is_ranked_player: boolean;
+    // Current-season semantics (server-computed): battles logged in the
+    // current CB season, and that season's WR for the shield tint (null when
+    // not qualifying). Runbook: runbook-cb-icon-current-season-2026-07-15.md
     is_clan_battle_player: boolean;
     clan_battle_win_rate: number | null;
     efficiency_hydration_pending?: boolean;

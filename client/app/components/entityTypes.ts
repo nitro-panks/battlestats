@@ -52,6 +52,10 @@ export interface PlayerData {
     has_efficiency_rank_icon?: boolean;
     efficiency_rank_population_size?: number | null;
     efficiency_rank_updated_at?: string | null;
+    // Current-season CB shield fields (server-computed; runbook
+    // runbook-cb-icon-current-season-2026-07-15.md). header_* stays career-scoped.
+    is_clan_battle_player?: boolean;
+    clan_battle_current_season_win_rate?: number | null;
     clan_battle_header_eligible?: boolean;
     clan_battle_header_total_battles?: number | null;
     clan_battle_header_seasons_played?: number | null;

@@ -21,8 +21,11 @@ const ClanBattleShieldIcon: React.FC<ClanBattleShieldIconProps> = ({
     color,
 }) => (
     <span
-        title={titleText ?? (winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer · ${winRate.toFixed(1)}% WR`)}
-        aria-label={ariaLabel ?? (winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer ${winRate.toFixed(1)} percent WR`)}
+        // Current-season semantics: the shield marks battles logged in the
+        // current CB season, tinted by the current-season WR (see
+        // agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md).
+        title={titleText ?? (winRate == null ? 'clan battles this season' : `clan battles this season · ${winRate.toFixed(1)}% WR`)}
+        aria-label={ariaLabel ?? (winRate == null ? 'clan battles this season' : `clan battles this season ${winRate.toFixed(1)} percent WR`)}
         className="inline-flex items-center cursor-help"
     >
         <FontAwesomeIcon

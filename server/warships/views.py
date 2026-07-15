@@ -40,11 +40,13 @@ from warships.data import (
     fetch_tier_data,
     fetch_type_data,
     fetch_wr_distribution,
+    get_current_clan_battle_season_id,
     get_current_ranked_season_id,
+    get_current_season_clan_battle_win_rate,
     get_current_season_ranked_league,
     get_published_efficiency_rank_payload,
     has_clan_battle_summary_cache,
-    is_clan_battle_enjoyer,
+    is_current_season_clan_battle_player,
     is_current_season_ranked_player,
     is_pve_player,
     is_sleepy_player,
@@ -1665,8 +1667,11 @@ def clan_members(request, clan_id: str) -> Response:
 
     # One durable-reference read for the whole roster: the Ranked Enjoyer flag
     # and star color are scoped to the current ranked season (see
-    # agents/work-items/ranked-enjoyer-current-season-spec.md).
+    # agents/work-items/ranked-enjoyer-current-season-spec.md), and the CB
+    # shield to the current clan-battle season (see
+    # agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md).
     current_ranked_season_id = get_current_ranked_season_id()
+    current_clan_battle_season_id = get_current_clan_battle_season_id()
 
     member_rows = []
     for member in members:
@@ -1687,13 +1692,14 @@ def clan_members(request, clan_id: str) -> Response:
             'is_sleepy_player': is_sleepy_player(days_since),
             'is_ranked_player': is_current_season_ranked_player(
                 member.ranked_json, current_ranked_season_id),
-            'is_clan_battle_player': is_clan_battle_enjoyer(
-                getattr(getattr(member, 'explorer_summary', None),
-                        'clan_battle_total_battles', None),
-                getattr(getattr(member, 'explorer_summary', None),
-                        'clan_battle_seasons_participated', None),
+            'is_clan_battle_player': is_current_season_clan_battle_player(
+                getattr(member, 'explorer_summary', None),
+                current_clan_battle_season_id,
             ),
-            'clan_battle_win_rate': getattr(getattr(member, 'explorer_summary', None), 'clan_battle_overall_win_rate', None),
+            'clan_battle_win_rate': get_current_season_clan_battle_win_rate(
+                getattr(member, 'explorer_summary', None),
+                current_clan_battle_season_id,
+            ),
             'efficiency_hydration_pending': member.player_id in pending_efficiency_player_ids,
             'highest_ranked_league': get_current_season_ranked_league(
                 member.ranked_json, current_ranked_season_id),

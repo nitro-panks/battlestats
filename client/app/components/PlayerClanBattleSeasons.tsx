@@ -19,6 +19,9 @@ interface PlayerClanBattleSeason {
     wins: number;
     losses: number;
     win_rate: number;
+    // Server-computed currency marker (current CB season resolution lives
+    // backend-side; see runbook-cb-icon-current-season-2026-07-15.md).
+    is_current?: boolean;
 }
 
 interface PlayerClanBattleSeasonsProps {
@@ -37,6 +40,11 @@ export interface PlayerClanBattleSummary {
     seasonsPlayed: number;
     totalBattles: number;
     overallWinRate: number;
+    // Current-season slice behind the header CB shield: battles logged in
+    // the row the server flagged `is_current` (0 when the player is sitting
+    // the season out), and that row's WR (null without battles).
+    currentSeasonBattles: number;
+    currentSeasonWinRate: number | null;
 }
 
 const formatTierRange = (minTier: number | null, maxTier: number | null): string => {
@@ -128,10 +136,14 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
     const summary = useMemo<PlayerClanBattleSummary>(() => {
         const totalBattles = seasons.reduce((sum, season) => sum + season.battles, 0);
         const totalWins = seasons.reduce((sum, season) => sum + season.wins, 0);
+        const currentSeason = seasons.find((season) => season.is_current);
+        const currentSeasonBattles = currentSeason?.battles ?? 0;
         return {
             seasonsPlayed: seasons.length,
             totalBattles,
             overallWinRate: totalBattles > 0 ? (totalWins / totalBattles) * 100 : 0,
+            currentSeasonBattles,
+            currentSeasonWinRate: currentSeasonBattles > 0 ? (currentSeason?.win_rate ?? null) : null,
         };
     }, [seasons]);
 

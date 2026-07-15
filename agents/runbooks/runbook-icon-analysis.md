@@ -15,7 +15,7 @@ Battlestats renders 7 distinct icon types across 3 surfaces (player detail heade
 | PvE Enjoyer | `faRobot` | Player header, clan members, landing | `is_pve_player(total_battles, pvp_battles)` |
 | Sleepy/Inactive | `faBed` | Player header, clan members, landing | `is_sleepy_player(days_since_last_battle)` |
 | Ranked Player | `faStar` | Player header, clan members, landing | `is_current_season_ranked_player(ranked_json, current_season_id)` |
-| Clan Battle | `faShieldHalved` | Player header, clan members, landing | `is_clan_battle_enjoyer(battles, seasons)` |
+| Clan Battle | `faShieldHalved` | Player header, clan members, landing | `is_current_season_clan_battle_player(explorer_summary, current_season_id)` |
 
 ---
 
@@ -79,11 +79,11 @@ Battlestats renders 7 distinct icon types across 3 surfaces (player detail heade
 
 ### 7. Clan Battle (`faShieldHalved`)
 
-**Generation**: Computed from `is_clan_battle_enjoyer(clan_battle_total_battles, clan_battle_seasons_participated)`. Requires 40+ battles and 2+ seasons. Win rate from `clan_battle_overall_win_rate`.
+**Generation** (current-season semantics, 2026-07-15): Computed from `is_current_season_clan_battle_player(explorer_summary, get_current_clan_battle_season_id())` — any battles recorded in the current CB season, read from `PlayerExplorerSummary.clan_battle_current_season_*` (written at persist time against the durable `ClanBattleSeason` table). Shield tint from `clan_battle_current_season_win_rate`. The current season resolves by max start_date among regular ids (< 100 — WG mixes 2018-2021 brawls at ids 101+ into the same id space), "latest season persists" through off-season gaps. The career gate `is_clan_battle_enjoyer` (40+ battles, 2+ seasons) now only enables the player-detail Clan Battles tab. Runbook: `agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md`.
 
-**Refresh cycle**: Stale after 7 days (`CLAN_BATTLE_SUMMARY_STALE_DAYS`). Refreshed via `maybe_refresh_clan_battle_data()` on clan member page visits.
+**Refresh cycle**: Stale after 7 days (`CLAN_BATTLE_SUMMARY_STALE_DAYS`), or immediately when the current-season fields were never computed (pre-migration rows). Refreshed via `maybe_refresh_clan_battle_data()` on clan member page visits.
 
-**Assessment**: **Adequate.** Clan battle data is seasonal and changes slowly. 7-day refresh is appropriate. Visit-triggered refresh ensures active clans stay current.
+**Assessment**: **Adequate.** Clan battle data is seasonal and changes slowly. 7-day refresh is appropriate. Visit-triggered refresh ensures active clans stay current; at season rollover the stored-season double-check hides stale shields without waiting for a refresh.
 
 ---
 

@@ -3430,6 +3430,30 @@
                 "battle-history-treemaps-removed-or-redesigned",
                 "ship-pop-baseline-strategy-superseded"
             ]
+        },
+        "agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "fullstack",
+            "aliases": [
+                "cb icon current season",
+                "clan battle shield current season",
+                "clan battle icon criteria"
+            ],
+            "tags": [
+                "icons",
+                "clan battles",
+                "seasons",
+                "player detail",
+                "clan members",
+                "ClanBattleSeason"
+            ],
+            "archive_on": [
+                "cb-icon-current-season-shipped",
+                "feature-superseded"
+            ]
         }
     }
 }

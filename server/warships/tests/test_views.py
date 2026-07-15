@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.models import Player, Clan, PlayerExplorerSummary, RankedSeason, realm_cache_key, Ship, ShipTopPlayerSnapshot, EntityVisitDaily
+from warships.models import Player, Clan, ClanBattleSeason, PlayerExplorerSummary, RankedSeason, realm_cache_key, Ship, ShipTopPlayerSnapshot, EntityVisitDaily
 from warships.views import PUBLIC_API_THROTTLES, _missing_player_lookup_cache_key
 
 
@@ -442,6 +442,61 @@ class PlayerViewSetTests(TestCase):
         self.assertEqual(payload["clan_battle_header_overall_win_rate"], 55.8)
         self.assertIsNotNone(payload["clan_battle_header_updated_at"])
         mock_fetch_clan_battle_season_stats.assert_not_called()
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_scopes_shield_fields_to_the_current_cb_season(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        # The CB shield is payload-driven and current-season scoped
+        # (runbook-cb-icon-current-season-2026-07-15.md): career volume alone
+        # (header_eligible) no longer implies the icon flag.
+        now = timezone.now()
+        ClanBattleSeason.objects.create(
+            season_id=34, start_date=now.date() - timedelta(days=20))
+        active = Player.objects.create(
+            name="CbSeasonActive", player_id=9061, last_fetch=now,
+            is_hidden=False, pvp_battles=500)
+        PlayerExplorerSummary.objects.create(
+            player=active,
+            clan_battle_seasons_participated=2,
+            clan_battle_total_battles=43,
+            clan_battle_overall_win_rate=55.8,
+            clan_battle_current_season_id=34,
+            clan_battle_current_season_battles=8,
+            clan_battle_current_season_win_rate=62.5,
+            clan_battle_summary_updated_at=now,
+        )
+        sitting_out = Player.objects.create(
+            name="CbSeasonSitout", player_id=9062, last_fetch=now,
+            is_hidden=False, pvp_battles=500)
+        PlayerExplorerSummary.objects.create(
+            player=sitting_out,
+            clan_battle_seasons_participated=9,
+            clan_battle_total_battles=400,
+            clan_battle_overall_win_rate=58.0,
+            clan_battle_current_season_id=34,
+            clan_battle_current_season_battles=0,
+            clan_battle_summary_updated_at=now,
+        )
+
+        active_payload = self.client.get(
+            "/api/player/CbSeasonActive/").json()
+        sitout_payload = self.client.get(
+            "/api/player/CbSeasonSitout/").json()
+
+        self.assertTrue(active_payload["is_clan_battle_player"])
+        self.assertEqual(
+            active_payload["clan_battle_current_season_win_rate"], 62.5)
+        self.assertFalse(sitout_payload["is_clan_battle_player"])
+        self.assertIsNone(
+            sitout_payload["clan_battle_current_season_win_rate"])
+        # Career tab gate is untouched by the icon's season scoping.
+        self.assertTrue(sitout_payload["clan_battle_header_eligible"])
 
     @patch("warships.data._fetch_clan_battle_season_stats")
     @patch("warships.views.update_clan_members_task.delay")
@@ -1659,8 +1714,16 @@ class ClanMembersEndpointTests(TestCase):
             },
         )
 
-    def test_clan_members_marks_clan_battle_players_from_cached_seasons(self):
+    def test_clan_members_marks_current_season_clan_battle_players(self):
+        # The shield is current-season participation, not career volume
+        # (runbook-cb-icon-current-season-2026-07-15.md): a career-heavy
+        # member sitting out the current season shows no shield, and the WR
+        # carried by the payload is the current-season WR.
         cache.clear()
+        ClanBattleSeason.objects.create(
+            season_id=34,
+            start_date=timezone.now().date() - timedelta(days=20),
+        )
         clan = Clan.objects.create(
             clan_id=82,
             name="Clan Battle Clan",
@@ -1672,8 +1735,8 @@ class ClanMembersEndpointTests(TestCase):
             clan=clan,
             last_battle_date=timezone.now().date(),
         )
-        dabbler = Player.objects.create(
-            name="ClanBattleDabbler",
+        veteran = Player.objects.create(
+            name="ClanBattleVeteran",
             player_id=8202,
             clan=clan,
             last_battle_date=timezone.now().date(),
@@ -1683,13 +1746,18 @@ class ClanMembersEndpointTests(TestCase):
             clan_battle_seasons_participated=2,
             clan_battle_total_battles=44,
             clan_battle_overall_win_rate=56.8,
+            clan_battle_current_season_id=34,
+            clan_battle_current_season_battles=8,
+            clan_battle_current_season_win_rate=62.5,
             clan_battle_summary_updated_at=timezone.now(),
         )
         PlayerExplorerSummary.objects.create(
-            player=dabbler,
-            clan_battle_seasons_participated=1,
-            clan_battle_total_battles=18,
-            clan_battle_overall_win_rate=50.0,
+            player=veteran,
+            clan_battle_seasons_participated=9,
+            clan_battle_total_battles=400,
+            clan_battle_overall_win_rate=58.0,
+            clan_battle_current_season_id=34,
+            clan_battle_current_season_battles=0,
             clan_battle_summary_updated_at=timezone.now(),
         )
 
@@ -1699,10 +1767,11 @@ class ClanMembersEndpointTests(TestCase):
         payload = {row["name"]: row for row in response.json()}
         self.assertTrue(payload["ClanBattleMain"]["is_clan_battle_player"])
         self.assertEqual(payload["ClanBattleMain"]
-                         ["clan_battle_win_rate"], 56.8)
-        self.assertFalse(payload["ClanBattleDabbler"]["is_clan_battle_player"])
-        self.assertEqual(payload["ClanBattleDabbler"]
-                         ["clan_battle_win_rate"], 50.0)
+                         ["clan_battle_win_rate"], 62.5)
+        self.assertFalse(
+            payload["ClanBattleVeteran"]["is_clan_battle_player"])
+        self.assertIsNone(payload["ClanBattleVeteran"]
+                          ["clan_battle_win_rate"])
 
     def test_clan_members_marks_sleepy_players_after_one_year(self):
         clan = Clan.objects.create(

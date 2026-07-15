@@ -19,7 +19,7 @@ const mockClipboardWriteText = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockClanSvg = jest.fn();
 let mockClanBattleSummary:
-    | { seasonsPlayed: number; totalBattles: number; overallWinRate: number; }
+    | { seasonsPlayed: number; totalBattles: number; overallWinRate: number; currentSeasonBattles: number; currentSeasonWinRate: number | null; }
     | null
     | undefined;
 let mockRankedHeatmapVisibility: boolean | undefined;
@@ -433,27 +433,46 @@ describe('PlayerDetail efficiency-rank icon', () => {
         ).toBeInTheDocument();
     });
 
-    it('renders the clan battle shield immediately from cached player payload state', () => {
+    it('renders the clan battle shield immediately from the current-season payload flags', () => {
         render(
             <PlayerDetail
                 player={{
                     ...basePlayer,
-                    clan_battle_header_eligible: true,
-                    clan_battle_header_total_battles: 48,
-                    clan_battle_header_seasons_played: 3,
-                    clan_battle_header_overall_win_rate: 56.3,
+                    is_clan_battle_player: true,
+                    clan_battle_current_season_win_rate: 56.3,
                 }}
             />,
         );
 
-        expect(screen.getByLabelText(/clan battle enjoyer 56\.3 percent WR/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/clan battles this season 56\.3 percent WR/i)).toBeInTheDocument();
     });
 
-    it('updates the clan battle shield when fetched summary changes the rendered state', () => {
+    it('does not render the shield for a career veteran sitting out the current season', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    // Career volume alone no longer earns the shield —
+                    // header_* only gates the Clan Battles tab.
+                    is_clan_battle_player: false,
+                    clan_battle_header_eligible: true,
+                    clan_battle_header_total_battles: 400,
+                    clan_battle_header_seasons_played: 9,
+                    clan_battle_header_overall_win_rate: 58.0,
+                }}
+            />,
+        );
+
+        expect(screen.queryByLabelText(/clan battles this season/i)).not.toBeInTheDocument();
+    });
+
+    it('updates the clan battle shield when the fetched summary reports current-season battles', () => {
         mockClanBattleSummary = {
             seasonsPlayed: 4,
             totalBattles: 67,
-            overallWinRate: 60.2,
+            overallWinRate: 55.0,
+            currentSeasonBattles: 12,
+            currentSeasonWinRate: 60.2,
         };
 
         render(
@@ -463,23 +482,24 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     clan_id: 4444,
                     clan_name: 'Fixture Clan',
                     clan_battle_header_eligible: true,
-                    clan_battle_header_total_battles: 48,
-                    clan_battle_header_seasons_played: 3,
-                    clan_battle_header_overall_win_rate: 56.3,
+                    is_clan_battle_player: true,
+                    clan_battle_current_season_win_rate: 56.3,
                 }}
             />,
         );
 
         fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
 
-        expect(screen.getByLabelText(/clan battle enjoyer 60\.2 percent WR/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/clan battles this season 60\.2 percent WR/i)).toBeInTheDocument();
     });
 
-    it('clears a cached clan battle shield when fetched summary is no longer eligible', () => {
+    it('clears a cached clan battle shield when the fetched summary shows no current-season battles', () => {
         mockClanBattleSummary = {
-            seasonsPlayed: 1,
-            totalBattles: 18,
-            overallWinRate: 60.2,
+            seasonsPlayed: 4,
+            totalBattles: 67,
+            overallWinRate: 55.0,
+            currentSeasonBattles: 0,
+            currentSeasonWinRate: null,
         };
 
         render(
@@ -489,16 +509,15 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     clan_id: 4444,
                     clan_name: 'Fixture Clan',
                     clan_battle_header_eligible: true,
-                    clan_battle_header_total_battles: 48,
-                    clan_battle_header_seasons_played: 3,
-                    clan_battle_header_overall_win_rate: 56.3,
+                    is_clan_battle_player: true,
+                    clan_battle_current_season_win_rate: 56.3,
                 }}
             />,
         );
 
         fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
 
-        expect(screen.queryByLabelText(/clan battle enjoyer/i)).not.toBeInTheDocument();
+        expect(screen.queryByLabelText(/clan battles this season/i)).not.toBeInTheDocument();
     });
 
     it('preserves cached clan battle shield state when the seasons component never reports a new summary', () => {
@@ -509,14 +528,13 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     clan_id: 4444,
                     clan_name: 'Fixture Clan',
                     clan_battle_header_eligible: true,
-                    clan_battle_header_total_battles: 48,
-                    clan_battle_header_seasons_played: 3,
-                    clan_battle_header_overall_win_rate: 56.3,
+                    is_clan_battle_player: true,
+                    clan_battle_current_season_win_rate: 56.3,
                 }}
             />,
         );
 
-        expect(screen.getByLabelText(/clan battle enjoyer 56\.3 percent WR/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/clan battles this season 56\.3 percent WR/i)).toBeInTheDocument();
     });
 
     it('renders hidden-player messaging and suppresses detail-only sections', () => {

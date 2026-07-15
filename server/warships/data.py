@@ -573,6 +573,13 @@ def clan_battle_summary_is_stale(player: Player) -> bool:
     updated_at = summary.clan_battle_summary_updated_at
     if updated_at is None:
         return True
+    if summary.clan_battle_current_season_id is None:
+        # Pre-0081 rows (or a persist that ran while the current season was
+        # unresolvable): the current-season fields behind the CB shield were
+        # never computed. Treating this as stale lets the existing clan-view
+        # hydration machinery backfill organically — bounded to
+        # CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT per view.
+        return True
     return (django_timezone.now() - updated_at).days >= CLAN_BATTLE_SUMMARY_STALE_DAYS
 
 
@@ -1404,6 +1411,41 @@ def summarize_clan_battle_seasons(season_rows: Any) -> dict[str, Any]:
     }
 
 
+def summarize_current_clan_battle_season(
+    season_rows: Any,
+    current_season_id: Optional[int],
+) -> dict[str, Any]:
+    """Extract the player's current-season CB row for persistence.
+
+    Returns all-None when the current season is unresolvable (empty
+    ClanBattleSeason reference) — the stale check treats that row as
+    never-computed so it retries once the reference is seeded. A resolvable
+    season the player sat out persists battles=0 / win_rate=None, which is a
+    real (non-stale) answer.
+    """
+    if current_season_id is None:
+        return {'season_id': None, 'battles': None, 'win_rate': None}
+
+    battles = 0
+    wins = 0
+    for row in season_rows or []:
+        try:
+            sid = int(row.get('season_id', 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if sid != int(current_season_id):
+            continue
+        battles = int(row.get('battles', 0) or 0)
+        wins = int(row.get('wins', 0) or 0)
+        break
+
+    return {
+        'season_id': int(current_season_id),
+        'battles': battles,
+        'win_rate': round((wins / battles) * 100, 1) if battles > 0 else None,
+    }
+
+
 def get_published_clan_battle_summary_payload(
     player: Optional[Player],
 ) -> dict[str, Any]:
@@ -1444,6 +1486,41 @@ def is_clan_battle_enjoyer(
     minimum_seasons: int = CLAN_BATTLE_ENJOYER_MIN_SEASONS,
 ) -> bool:
     return int(total_battles or 0) >= minimum_battles and int(seasons_participated or 0) >= minimum_seasons
+
+
+def is_current_season_clan_battle_player(
+    explorer_summary: Any,
+    current_season_id: Optional[int],
+) -> bool:
+    """ClanBattleShieldIcon gate: any battles recorded in the current CB season.
+
+    Replaces the career `is_clan_battle_enjoyer` (40 battles / 2 seasons) in
+    the icon path — the shield now marks active participation in the current
+    clan-battle season. The stored season id is double-checked against the
+    live current season, so a row persisted during a finished season stops
+    qualifying at rollover without a write. Career criteria still gate the
+    Clan Battles tab (`clan_battle_header_eligible`). Runbook:
+    `agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md`.
+    """
+    if explorer_summary is None or current_season_id is None:
+        return False
+
+    stored_season_id = explorer_summary.clan_battle_current_season_id
+    if stored_season_id is None or int(stored_season_id) != int(current_season_id):
+        return False
+
+    return int(explorer_summary.clan_battle_current_season_battles or 0) > 0
+
+
+def get_current_season_clan_battle_win_rate(
+    explorer_summary: Any,
+    current_season_id: Optional[int],
+) -> Optional[float]:
+    """Current-season CB win rate for the shield's tint, or None."""
+    if not is_current_season_clan_battle_player(explorer_summary, current_season_id):
+        return None
+
+    return explorer_summary.clan_battle_current_season_win_rate
 
 
 def _ranked_row_league(row: dict) -> Optional[int]:
@@ -3496,6 +3573,12 @@ RANKED_SEASONS_CACHE_KEY = 'ranked:seasons:metadata'
 RANKED_SEASONS_CACHE_TTL = 86400  # 24 hours in seconds
 CLAN_BATTLE_SEASONS_CACHE_KEY = 'clan_battles:seasons:metadata'
 CLAN_BATTLE_SEASONS_CACHE_TTL = 86400
+# WG's `clans/season/` id space: regular ladder seasons are 1..~34; ids 100+
+# are historical brawl/special events (101+/201+/301+, all 2018-2021 dates).
+# Current-season resolution and the rollover self-heal only consider regular
+# ids (verified against the live payload 2026-07-15; revisit if regular
+# seasons ever approach 100 — ~16 years away at 3/yr).
+CLAN_BATTLE_REGULAR_SEASON_MAX_ID = 99
 CLAN_BATTLE_PLAYER_STATS_CACHE_TTL = 21600
 CLAN_BATTLE_SUMMARY_CACHE_TTL = 3600
 # Short negative-cache TTL for a player's CB season stats when the upstream
@@ -3647,15 +3730,68 @@ def get_current_ranked_season_id() -> Optional[int]:
     return max(candidates) if candidates else None
 
 
-def _get_clan_battle_seasons_metadata() -> dict:
-    """Return season_id -> clan battle season metadata. Cached for 24h."""
-    cached = cache.get(CLAN_BATTLE_SEASONS_CACHE_KEY)
-    if cached is not None:
-        return cached
+def _upsert_clan_battle_seasons_reference(metadata: dict) -> None:
+    """Persist fetched CB season metadata into the durable ClanBattleSeason table.
+
+    Same durability rationale as `_upsert_ranked_seasons_reference`: prod Redis
+    is `allkeys-lru`, and the season dates behind the ClanBattleShieldIcon's
+    current-season resolution must survive eviction and WG outages.
+    """
+    from warships.models import ClanBattleSeason
+
+    for season_id, info in metadata.items():
+        try:
+            ClanBattleSeason.objects.update_or_create(
+                season_id=int(season_id),
+                defaults={
+                    'name': info.get('name') or '',
+                    'label': info.get('label') or '',
+                    'start_date': info.get('start_date'),
+                    'end_date': info.get('end_date'),
+                    'ship_tier_min': info.get('ship_tier_min'),
+                    'ship_tier_max': info.get('ship_tier_max'),
+                },
+            )
+        except Exception:
+            logging.exception(
+                'Failed to upsert ClanBattleSeason %s', season_id)
+
+
+def _clan_battle_seasons_metadata_from_db() -> dict:
+    """Rebuild the metadata dict from the durable ClanBattleSeason reference."""
+    from warships.models import ClanBattleSeason
+
+    return {
+        row.season_id: {
+            'name': row.name,
+            'label': row.label,
+            'start_date': row.start_date.strftime('%Y-%m-%d') if row.start_date else None,
+            'end_date': row.end_date.strftime('%Y-%m-%d') if row.end_date else None,
+            'ship_tier_min': row.ship_tier_min,
+            'ship_tier_max': row.ship_tier_max,
+        }
+        for row in ClanBattleSeason.objects.all()
+    }
+
+
+def _get_clan_battle_seasons_metadata(force_refresh: bool = False) -> dict:
+    """Return season_id -> clan battle season metadata. Cached for 24h.
+
+    Resolution order: Redis fresh key (24h) → WG `clans/season/` fetch (which
+    also upserts the durable ClanBattleSeason table) → ClanBattleSeason DB
+    read when the WG fetch fails (not re-cached, so the next call retries WG).
+    `force_refresh` skips the Redis read — the self-healing rollover in
+    `fetch_player_clan_battle_seasons` uses it when a player's season stats
+    name a regular season newer than anything on record.
+    """
+    if not force_refresh:
+        cached = cache.get(CLAN_BATTLE_SEASONS_CACHE_KEY)
+        if cached is not None:
+            return cached
 
     raw = _fetch_clan_battle_seasons_info()
     if not raw:
-        return {}
+        return _clan_battle_seasons_metadata_from_db()
 
     result = {}
     for sid, info in raw.items():
@@ -3671,9 +3807,40 @@ def _get_clan_battle_seasons_metadata() -> dict:
             'ship_tier_max': info.get('ship_tier_max'),
         }
 
+    _upsert_clan_battle_seasons_reference(result)
     cache.set(CLAN_BATTLE_SEASONS_CACHE_KEY,
               result, CLAN_BATTLE_SEASONS_CACHE_TTL)
     return result
+
+
+def get_current_clan_battle_season_id() -> Optional[int]:
+    """Newest started regular CB season, or None when nothing is on record.
+
+    Same "latest season persists" heuristic as `get_current_ranked_season_id`
+    — the current season stays current through the off-season gap until the
+    next one starts; a future-dated season is not yet current — but resolved
+    by max (start_date, season_id) instead of max id, and filtered to regular
+    ladder ids (< CLAN_BATTLE_REGULAR_SEASON_MAX_ID): WG's `clans/season/` id
+    space mixes regular seasons (1..~34) with 2018-2021 brawl/special events
+    at ids 101+/201+/301+, which max(season_id) would wrongly pick (verified
+    against the live payload 2026-07-15). Reads only the durable table —
+    never the WG API — so it is safe on the request thread and survives Redis
+    eviction. Runbook:
+    `agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md`.
+    """
+    from warships.models import ClanBattleSeason
+
+    today = date.today()
+    candidates = [
+        (row.start_date or date.min, row.season_id)
+        for row in ClanBattleSeason.objects.only('season_id', 'start_date')
+        if row.season_id <= CLAN_BATTLE_REGULAR_SEASON_MAX_ID
+        and (row.start_date is None or row.start_date <= today)
+    ]
+    if not candidates:
+        return None
+
+    return max(candidates)[1]
 
 
 def _player_clan_battle_season_cache_key(account_id: int, realm: str = DEFAULT_REALM) -> str:
@@ -3727,6 +3894,7 @@ def _persist_player_clan_battle_summary(
     account_id: int,
     summary: dict[str, Any],
     realm: str = DEFAULT_REALM,
+    current_season: Optional[dict[str, Any]] = None,
 ) -> None:
     player = Player.objects.filter(player_id=account_id, realm=realm).first()
     if player is None:
@@ -3748,12 +3916,27 @@ def _persist_player_clan_battle_summary(
     explorer_summary.clan_battle_total_battles = total_battles
     explorer_summary.clan_battle_seasons_participated = seasons_participated
     explorer_summary.clan_battle_overall_win_rate = win_rate
+    # Current-season participation behind the CB shield (all-None when the
+    # season was unresolvable — the stale check retries those). Resolution
+    # must stay DB-only here: persist also runs on the request thread when
+    # the player's Redis season cache is warm.
+    current_season = current_season or {
+        'season_id': None, 'battles': None, 'win_rate': None}
+    explorer_summary.clan_battle_current_season_id = current_season.get(
+        'season_id')
+    explorer_summary.clan_battle_current_season_battles = current_season.get(
+        'battles')
+    explorer_summary.clan_battle_current_season_win_rate = current_season.get(
+        'win_rate')
     explorer_summary.clan_battle_summary_updated_at = django_timezone.now()
     explorer_summary.save(update_fields=[
         'realm',
         'clan_battle_total_battles',
         'clan_battle_seasons_participated',
         'clan_battle_overall_win_rate',
+        'clan_battle_current_season_id',
+        'clan_battle_current_season_battles',
+        'clan_battle_current_season_win_rate',
         'clan_battle_summary_updated_at',
     ])
 
@@ -3780,12 +3963,34 @@ def fetch_player_clan_battle_seasons(
         # and without fetching season metadata (another cold WG call).
         return []
 
+    # Metadata before persist, so a fresh WG metadata fetch has upserted the
+    # durable ClanBattleSeason table that current-season resolution reads.
+    season_meta = _get_clan_battle_seasons_metadata()
+
+    # Self-healing rollover: the metadata key is 24h-cached, and WG lists new
+    # seasons on its own schedule. A regular-season row newer than anything on
+    # record means the reference is stale — refetch once before resolving.
+    known_regular_ids = [
+        sid for sid in season_meta
+        if int(sid) <= CLAN_BATTLE_REGULAR_SEASON_MAX_ID
+    ]
+    max_known_regular = max(known_regular_ids, default=0)
+    has_unknown_regular_season = any(
+        0 < int(season.get('season_id', 0) or 0) <= CLAN_BATTLE_REGULAR_SEASON_MAX_ID
+        and int(season.get('season_id', 0) or 0) > max_known_regular
+        for season in seasons
+    )
+    if has_unknown_regular_season:
+        season_meta = _get_clan_battle_seasons_metadata(force_refresh=True)
+
+    current_season_id = get_current_clan_battle_season_id()
     _persist_player_clan_battle_summary(
         int(account_id),
         summarize_clan_battle_seasons(seasons),
         realm=realm,
+        current_season=summarize_current_clan_battle_season(
+            seasons, current_season_id),
     )
-    season_meta = _get_clan_battle_seasons_metadata()
     result = []
 
     for season in seasons:
@@ -3812,6 +4017,9 @@ def fetch_player_clan_battle_seasons(
             'wins': wins,
             'losses': losses,
             'win_rate': round((wins / battles) * 100, 1) if battles > 0 else 0.0,
+            # Server-computed currency marker: lets the live frontend fetch
+            # update the CB shield without re-deriving season semantics.
+            'is_current': current_season_id is not None and sid == current_season_id,
         })
 
     return sorted(result, key=_clan_battle_season_sort_key, reverse=True)

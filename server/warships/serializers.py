@@ -3,7 +3,7 @@ import time
 
 from rest_framework import serializers
 from .models import Player, Clan, Ship, StreamerSubmission
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_current_ranked_season_id, get_current_season_ranked_league, is_current_season_ranked_player, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_current_clan_battle_season_id, get_current_ranked_season_id, get_current_season_clan_battle_win_rate, get_current_season_ranked_league, is_current_season_clan_battle_player, is_current_season_ranked_player, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges
 
 
 TWITCH_URL_RE = re.compile(
@@ -92,6 +92,8 @@ class PlayerSerializer(serializers.ModelSerializer):
     has_efficiency_rank_icon = serializers.SerializerMethodField()
     efficiency_rank_population_size = serializers.SerializerMethodField()
     efficiency_rank_updated_at = serializers.SerializerMethodField()
+    is_clan_battle_player = serializers.SerializerMethodField()
+    clan_battle_current_season_win_rate = serializers.SerializerMethodField()
     clan_battle_header_eligible = serializers.SerializerMethodField()
     clan_battle_header_total_battles = serializers.SerializerMethodField()
     clan_battle_header_seasons_played = serializers.SerializerMethodField()
@@ -152,6 +154,32 @@ class PlayerSerializer(serializers.ModelSerializer):
         # season (agents/work-items/ranked-enjoyer-current-season-spec.md).
         return is_current_season_ranked_player(
             obj.ranked_json, self._current_ranked_season_id())
+
+    def _current_clan_battle_season_id(self):
+        # One durable-reference read per serializer instance (list payloads
+        # reuse it across rows).
+        if not hasattr(self, '_current_clan_battle_season_id_cache'):
+            self._current_clan_battle_season_id_cache = (
+                get_current_clan_battle_season_id())
+        return self._current_clan_battle_season_id_cache
+
+    def get_is_clan_battle_player(self, obj):
+        # ClanBattleShieldIcon gate: any battles recorded in the current CB
+        # season. Career criteria still gate the Clan Battles tab via
+        # clan_battle_header_eligible below. Runbook:
+        # agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md
+        if obj.is_hidden:
+            return False
+        return is_current_season_clan_battle_player(
+            getattr(obj, 'explorer_summary', None),
+            self._current_clan_battle_season_id())
+
+    def get_clan_battle_current_season_win_rate(self, obj):
+        if obj.is_hidden:
+            return None
+        return get_current_season_clan_battle_win_rate(
+            getattr(obj, 'explorer_summary', None),
+            self._current_clan_battle_season_id())
 
     def get_kill_ratio(self, obj):
         explorer_summary = getattr(obj, 'explorer_summary', None)

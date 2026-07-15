@@ -271,6 +271,18 @@ class PlayerExplorerSummary(models.Model):
     clan_battle_overall_win_rate = models.FloatField(null=True, blank=True)
     clan_battle_summary_updated_at = models.DateTimeField(
         null=True, blank=True)
+    # Current-season CB participation (drives the ClanBattleShieldIcon):
+    # resolved against the durable ClanBattleSeason reference at persist time.
+    # `_id` records WHICH season the counts refer to — the read-side gate
+    # re-checks it against the live current season, so rows pointing at a
+    # finished season stop qualifying without a write. NULL id = never
+    # computed since migration 0081 (treated as stale → organic backfill).
+    # Runbook: agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md
+    clan_battle_current_season_id = models.IntegerField(null=True, blank=True)
+    clan_battle_current_season_battles = models.IntegerField(
+        null=True, blank=True)
+    clan_battle_current_season_win_rate = models.FloatField(
+        null=True, blank=True)
     refreshed_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -865,3 +877,29 @@ class RankedSeason(models.Model):
 
     def __str__(self):
         return f"RankedSeason({self.season_id} {self.label} {self.start_date}..{self.end_date})"
+
+
+class ClanBattleSeason(models.Model):
+    """Durable reference of WG clan-battle season metadata (dates drive the
+    "current season" resolution behind the ClanBattleShieldIcon).
+
+    Upserted from WG `clans/season/` whenever `_get_clan_battle_seasons_metadata`
+    does a fresh fetch, and read back as the fallback when Redis is cold and
+    the WG fetch fails — same durability rationale as RankedSeason. Unlike
+    ranked, the WG id space mixes regular ladder seasons (1..~34) with old
+    brawl/special events (101+, 201+, 301+), so current-season resolution
+    filters to ids < 100 and sorts by start_date, not max id. Season calendar
+    is global across realms, so no realm column.
+    Runbook: `agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md`.
+    """
+    season_id = models.IntegerField(primary_key=True)
+    name = models.CharField(max_length=200, blank=True, default='')
+    label = models.CharField(max_length=20, blank=True, default='')
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    ship_tier_min = models.IntegerField(null=True, blank=True)
+    ship_tier_max = models.IntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"ClanBattleSeason({self.season_id} {self.label} {self.start_date}..{self.end_date})"

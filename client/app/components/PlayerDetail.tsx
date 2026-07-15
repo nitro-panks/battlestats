@@ -54,6 +54,12 @@ interface PlayerDetailProps {
         // agents/work-items/ranked-enjoyer-current-season-spec.md
         is_ranked_player?: boolean;
         highest_ranked_league?: RankedLeagueName | null;
+        // Current-season semantics (server-computed): true when the player
+        // has clan battles recorded for the current CB season, plus that
+        // season's WR for the shield tint. Runbook:
+        // agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md
+        is_clan_battle_player?: boolean;
+        clan_battle_current_season_win_rate?: number | null;
         efficiency_rank_percentile?: number | null;
         efficiency_rank_tier?: 'E' | 'I' | 'II' | 'III' | null;
         has_efficiency_rank_icon?: boolean;
@@ -112,49 +118,45 @@ const formatKillRatio = (killRatio: number | null): string => {
 };
 
 
-const buildClanBattleHeaderState = (
-    summary: PlayerClanBattleSummary | null | undefined,
-): PlayerClanBattleSummary | null => {
-    if (!summary) {
-        return null;
-    }
+// Header CB shield state — current-season semantics (see
+// agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md): shown iff
+// the player has battles in the current CB season, tinted by that season's
+// WR. Qualification is server-computed (payload flag / `is_current` season
+// row); no client-side threshold mirror.
+interface ClanBattleShieldState {
+    winRate: number | null;
+}
 
-    if (summary.totalBattles < 40 || summary.seasonsPlayed < 2) {
+const buildClanBattleShieldState = (
+    summary: PlayerClanBattleSummary | null | undefined,
+): ClanBattleShieldState | null => {
+    if (!summary || summary.currentSeasonBattles <= 0) {
         return null;
     }
 
     return {
-        seasonsPlayed: summary.seasonsPlayed,
-        totalBattles: summary.totalBattles,
-        overallWinRate: Number(summary.overallWinRate.toFixed(1)),
+        winRate: summary.currentSeasonWinRate == null
+            ? null
+            : Number(summary.currentSeasonWinRate.toFixed(1)),
     };
 };
 
-const getInitialClanBattleHeaderState = (
+const getInitialClanBattleShieldState = (
     player: PlayerDetailProps['player'],
-): PlayerClanBattleSummary | null => {
-    if (!player.clan_battle_header_eligible) {
+): ClanBattleShieldState | null => {
+    if (!player.is_clan_battle_player) {
         return null;
     }
 
-    const totalBattles = Number(player.clan_battle_header_total_battles ?? 0);
-    const seasonsPlayed = Number(player.clan_battle_header_seasons_played ?? 0);
-    const overallWinRate = player.clan_battle_header_overall_win_rate;
-
-    if (!Number.isFinite(totalBattles) || !Number.isFinite(seasonsPlayed) || overallWinRate == null) {
-        return null;
-    }
-
-    return buildClanBattleHeaderState({
-        totalBattles,
-        seasonsPlayed,
-        overallWinRate,
-    });
+    const winRate = player.clan_battle_current_season_win_rate;
+    return {
+        winRate: winRate == null ? null : Number(winRate.toFixed(1)),
+    };
 };
 
-const areEquivalentClanBattleHeaderStates = (
-    current: PlayerClanBattleSummary | null,
-    incoming: PlayerClanBattleSummary | null,
+const areEquivalentClanBattleShieldStates = (
+    current: ClanBattleShieldState | null,
+    incoming: ClanBattleShieldState | null,
 ): boolean => {
     if (current === incoming) {
         return true;
@@ -165,8 +167,8 @@ const areEquivalentClanBattleHeaderStates = (
     }
 
     return (
-        current.overallWinRate === incoming.overallWinRate
-        && wrColor(current.overallWinRate) === wrColor(incoming.overallWinRate)
+        current.winRate === incoming.winRate
+        && wrColor(current.winRate) === wrColor(incoming.winRate)
     );
 };
 
@@ -191,25 +193,23 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         ? player.ranked_json.some((row) => (row?.total_battles || 0) > 0)
         : true;
     // Stable "player has clan-battle data" signal for the Clan Battles tab's
-    // enabled state — the same server-resolved flag that gates the header CB
-    // shield (shield shown ⟺ tab enabled). Derived from the immutable player
-    // payload (never the mutable clanBattleSummary), so the tab can't dark while
-    // the user is viewing it.
+    // enabled state — CAREER-scoped (server-resolved), intentionally decoupled
+    // from the current-season shield: a veteran sitting out the season keeps
+    // the tab but loses the shield. Derived from the immutable player payload
+    // (never the mutable shield state), so the tab can't dark while the user
+    // is viewing it.
     const hasClanBattleData = Boolean(player.clan_battle_header_eligible);
-    const [clanBattleSummary, setClanBattleSummary] = useState<PlayerClanBattleSummary | null>(() => getInitialClanBattleHeaderState(player));
-    const isClanBattleEnjoyer = clanBattleSummary !== null;
+    const [clanBattleShield, setClanBattleShield] = useState<ClanBattleShieldState | null>(() => getInitialClanBattleShieldState(player));
 
     usePlayerRouteDiagnostics(player.player_id, player.name);
 
     useEffect(() => {
-        setClanBattleSummary(getInitialClanBattleHeaderState(player));
+        setClanBattleShield(getInitialClanBattleShieldState(player));
     }, [
         player,
         player.player_id,
-        player.clan_battle_header_eligible,
-        player.clan_battle_header_total_battles,
-        player.clan_battle_header_seasons_played,
-        player.clan_battle_header_overall_win_rate,
+        player.is_clan_battle_player,
+        player.clan_battle_current_season_win_rate,
     ]);
 
     useEffect(() => {
@@ -221,14 +221,14 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     }, [player.is_hidden, player.player_id]);
 
     const handleClanBattleSummaryChange = (nextSummary: PlayerClanBattleSummary | null) => {
-        const nextHeaderState = buildClanBattleHeaderState(nextSummary);
+        const nextShieldState = buildClanBattleShieldState(nextSummary);
 
-        setClanBattleSummary((current) => {
-            if (areEquivalentClanBattleHeaderStates(current, nextHeaderState)) {
+        setClanBattleShield((current) => {
+            if (areEquivalentClanBattleShieldStates(current, nextShieldState)) {
                 return current;
             }
 
-            return nextHeaderState;
+            return nextShieldState;
         });
     };
 
@@ -245,7 +245,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {player.is_clan_leader ? <LeaderCrownIcon size="header" /> : null}
                                 {isPveEnjoyer ? <PveEnjoyerIcon size="header" /> : null}
                                 {isRankedEnjoyer ? <RankedPlayerIcon league={highestRankedLeague} size="header" /> : null}
-                                {isClanBattleEnjoyer && clanBattleSummary ? <ClanBattleShieldIcon winRate={clanBattleSummary.overallWinRate} size="header" /> : null}
+                                {clanBattleShield ? <ClanBattleShieldIcon winRate={clanBattleShield.winRate} size="header" /> : null}
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
                                 {!player.is_hidden && <TopShipBadges badges={player.ship_badges} realm={player.realm} size="header" />}
                             </div>
