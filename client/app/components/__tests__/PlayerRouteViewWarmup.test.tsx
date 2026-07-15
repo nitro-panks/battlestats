@@ -60,11 +60,13 @@ jest.mock('../DeferredSection', () => {
     };
 });
 
-jest.mock('../PlayerEfficiencyBadges', () => {
-    return function MockPlayerEfficiencyBadges() {
+jest.mock('../PlayerEfficiencyBadges', () => ({
+    __esModule: true,
+    default: function MockPlayerEfficiencyBadges() {
         return <div>Efficiency Badges</div>;
-    };
-});
+    },
+    hasEfficiencyBadges: (rows: unknown) => Array.isArray(rows) && rows.length > 0,
+}));
 
 jest.mock('../SectionHeadingWithTooltip', () => {
     return function MockSectionHeadingWithTooltip({ title }: { title: string }) {

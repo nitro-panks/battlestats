@@ -3,7 +3,7 @@ import wrColor from '../lib/wrColor';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { chartColors, formatCompactCount, resolveChartWidth, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, formatCompactCount, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { getRankedHeatmapTileBounds, getRankedHeatmapTrendX, getRankedHeatmapXDomain, type RankedHeatmapPayloadShape, type RankedHeatmapTile, type RankedHeatmapTrendPoint } from './rankedHeatmapPayload';
@@ -218,24 +218,26 @@ const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPay
         .style('font-size', axisFontSize)
         .text(payload.y_label);
 
-    const summaryX = Math.round(width * 0.4);
-    const summary = svgRoot.append('g').attr('transform', `translate(${margin.left}, ${compact ? 14 : 18})`);
-    summary.append('text')
-        .style('font-size', axisFontSize)
-        .style('font-weight', '600')
-        .style('fill', colors.axisText);
-
+    // Player summary headline (e.g. "807 games @ 50.1%"), left-aligned with the
+    // y-axis: the summary group's origin is already at margin.left, so x=0 (the
+    // default) starts the text flush with the axis. Sized up from the axis labels
+    // so it reads as a headline stat rather than a caption.
+    const summaryFontSize = compact ? '12px' : '14px';
+    const summary = svgRoot.append('g').attr('transform', `translate(${margin.left}, ${compact ? 16 : 20})`);
     if (payload.player_point) {
         summary.append('text')
-            .attr('x', summaryX)
-            .style('font-size', axisFontSize)
+            .style('font-size', summaryFontSize)
+            // Monospace + a neutral tone (not WR-colored): the games/WR headline
+            // matches the page's Courier numeric treatment and reads as a plain
+            // stat rather than a red/green judgement.
+            .style('font-family', "'Courier New', Courier, monospace")
             .style('font-weight', '600')
-            .style('fill', wrColor(payload.player_point.y))
+            .style('fill', colors.axisText)
             .text(`${Math.round(payload.player_point.x).toLocaleString()} games @ ${payload.player_point.y.toFixed(1)}%`);
     } else {
         summary.append('text')
-            .attr('x', summaryX)
-            .style('font-size', axisFontSize)
+            .style('font-size', summaryFontSize)
+            .style('font-family', "'Courier New', Courier, monospace")
             .style('fill', colors.labelMuted)
             .text('No ranked history for this player');
     }
@@ -262,7 +264,9 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
         let cachedPayload: RankedWRBattlesPayload | null = null;
         let resizeFrame: number | null = null;
 
-        const resolveWidth = () => resolveChartWidth(containerRef.current?.clientWidth, svgWidth);
+        // Fill the container's measured width (uncapped) so the plot + x-axis run
+        // out to the panel's right edge, instead of stopping at the 600px default.
+        const resolveWidth = () => resolveContainerChartWidth(containerRef.current?.clientWidth, svgWidth);
 
         const redraw = () => {
             if (cachedPayload && isMounted && containerRef.current) {
@@ -315,7 +319,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
         };
     }, [isLoading, onVisibilityChange, playerId, realm, svgHeight, svgWidth, theme]);
 
-    return <div ref={containerRef} className="w-full overflow-hidden rounded-md border border-[var(--border)] bg-[var(--bg-surface)]" />;
+    return <div ref={containerRef} className="w-full overflow-hidden rounded-md bg-[var(--bg-surface)]" />;
 };
 
 export default RankedWRBattlesHeatmapSVG;

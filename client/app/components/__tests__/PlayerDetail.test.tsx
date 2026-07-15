@@ -80,11 +80,13 @@ jest.mock('../DeferredSection', () => {
     };
 });
 
-jest.mock('../PlayerEfficiencyBadges', () => {
-    return function MockPlayerEfficiencyBadges() {
+jest.mock('../PlayerEfficiencyBadges', () => ({
+    __esModule: true,
+    default: function MockPlayerEfficiencyBadges() {
         return <div>Efficiency badges</div>;
-    };
-});
+    },
+    hasEfficiencyBadges: (rows: unknown) => Array.isArray(rows) && rows.length > 0,
+}));
 
 jest.mock('../SectionHeadingWithTooltip', () => {
     return function MockSectionHeadingWithTooltip({ title }: { title: string }) {
@@ -541,6 +543,12 @@ describe('PlayerDetail efficiency-rank icon', () => {
                     ...basePlayer,
                     clan_id: 4444,
                     clan_name: 'Fixture Clan',
+                    // Both tabs must be enabled to sit "behind focused tabs": CB
+                    // needs header eligibility; Efficiency needs at least one badge.
+                    clan_battle_header_eligible: true,
+                    efficiency_json: [
+                        { ship_id: 3863656144, top_grade_class: 1, ship_tier: 10, ship_name: 'Test Ship', ship_type: 'battleship' },
+                    ],
                 }}
             />,
         );

@@ -7,7 +7,7 @@ import BattleHistoryCard, {
     battleHistoryIndicatesActivity,
     type BattleHistoryPayload,
 } from './BattleHistoryCard';
-import PlayerEfficiencyBadges from './PlayerEfficiencyBadges';
+import PlayerEfficiencyBadges, { hasEfficiencyBadges } from './PlayerEfficiencyBadges';
 import LoadingPanel from './LoadingPanel';
 import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
 import { resilientDynamicImport } from './resilientDynamicImport';
@@ -35,6 +35,7 @@ interface PlayerDetailInsightsTabsProps {
     playerScore: number | null;
     hasKnownRankedGames: boolean;
     hasClan: boolean;
+    hasClanBattleData: boolean;
     efficiencyRows?: Array<{
         ship_id?: number | null;
         top_grade_class?: number | null;
@@ -118,13 +119,15 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; 
     { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
 ];
 
-// Locked height (px) for the Ships / Profile / Population / Efficiency insight
-// panels so the shell (the gray bounding box) stays a constant height across
-// those tabs.
-// Derived from the Ships tab's natural height with the 825px chart scroll
-// viewport (RANDOMS_CHART_MAX_VIEWPORT_PX), measured at the ~1000px desktop
-// insights column: panel ≈ 1057px. Ships takes it as a minHeight (its filter
-// row can wrap on narrow widths and must not clip the scroll box); Profile and
+// Locked height (px) for all insight panels — Activity / Ships / Profile /
+// Population / Efficiency / Ranked / Clan Battles — so the shell (the gray
+// bounding box) stays a constant height across every tab. Derived from the Ships
+// tab's natural height with the 825px chart scroll viewport
+// (RANDOMS_CHART_MAX_VIEWPORT_PX), measured at the ~1000px desktop insights
+// column: panel ≈ 1057px. Ships, Efficiency, Ranked, and Clan Battles take it as
+// a minHeight (Ships' filter row can wrap on narrow widths and must not clip the
+// scroll box; an ultra-dense badge plot, Ranked's heatmap + seasons stack, and
+// the Clan Battles seasons table can run taller); Activity, Profile, and
 // Population take it as a fixed height and grow their charts to fill down to it.
 // Re-measure if the production insights column width changes.
 const LOCKED_PANEL_HEIGHT_PX = 1057;
@@ -136,6 +139,14 @@ const LOCKED_PANEL_HEIGHT_PX = 1057;
 // desktop column (11 tier rows + 5 type rows + the 286px heatmap ≈ the locked
 // height); sparser players simply leave whitespace inside the fixed box.
 const PROFILE_TIER_CHART_HEIGHT = 374;
+
+// The Ranked tab's activity/history sub-view toggle chip. Sized to sit inline
+// beside the mode caption ("Ranked"): same text size + padding, bordered (vs the
+// caption's fill) so it reads as an action rather than a label.
+const RANKED_TOGGLE_CHIP_CLASS = 'inline-flex shrink-0 items-center rounded border border-[var(--border)] px-2 py-0.5 text-xs font-semibold text-[var(--accent-mid)] transition-colors hover:border-[var(--accent-light)] hover:text-[var(--accent-dark)]';
+// Mirrors BattleHistoryCard's mode-caption chip so the history sub-view carries
+// the same "Ranked" label the activity card shows in its header.
+const RANKED_MODE_CAPTION_CLASS = 'rounded bg-[var(--accent-faint)] px-2 py-0.5 text-xs font-semibold text-[var(--accent-dark)]';
 
 const panelSectionIdByTab: Record<InsightsTabId, string> = {
     activity: 'insights-activity',
@@ -179,6 +190,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     playerScore,
     hasKnownRankedGames,
     hasClan,
+    hasClanBattleData,
     efficiencyRows = null,
     onClanBattleSummaryChange,
     onWarmupSettled,
@@ -192,9 +204,17 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     // null = unknown (still resolving); true/false once the Activity card's first
     // payload lands. Drives the default-tab choice and the dark Activity tab.
     const [activityAvailable, setActivityAvailable] = useState<boolean | null>(null);
-    // null = unknown; set by the Ranked tab's battle-history card. false hides
-    // the "Recent Ranked Battles" section for players with no ranked history.
+    // null = unknown; set by the Ranked tab's battle-history card. false means
+    // the player has no recent ranked battle activity.
     const [rankedHistoryAvailable, setRankedHistoryAvailable] = useState<boolean | null>(null);
+    // The Ranked tab has two sub-views: 'activity' (a ranked copy of the Activity
+    // page — the battle-history card) and 'history' (the ranked heatmap + seasons,
+    // i.e. the view shown when there's no activity). Defaults to 'activity'; the
+    // auto-flip effect below drops it to 'history' once the card reports no ranked
+    // activity. No manual-pin flag is needed: the effect only fires on
+    // `=== false`, and the "Activity" toggle is hidden in that state, so a user can
+    // never be stranded on an empty activity view.
+    const [rankedView, setRankedView] = useState<'activity' | 'history'>('activity');
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
     const [profileChartPayload, setProfileChartPayload] = useState<TierTypePayload | null>(null);
     const [profileChartState, setProfileChartState] = useState<'idle' | 'loading' | 'ready' | 'warming' | 'error'>('idle');
@@ -211,8 +231,20 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
         setActiveTab('activity');
         setActivityAvailable(null);
         setRankedHistoryAvailable(null);
+        setRankedView('activity');
         setGlowArmed(false);
     }, [playerId]);
+
+    // Ranked tab defaults to its activity sub-view; fall back to the history view
+    // (heatmap + seasons) once the ranked battle-history card reports the player
+    // has no recent ranked activity. `rankedView` is intentionally NOT a dep — the
+    // effect only reacts to the availability verdict, so it can't loop or fight a
+    // user who manually toggled back to history.
+    useEffect(() => {
+        if (rankedHistoryAvailable === false) {
+            setRankedView('history');
+        }
+    }, [rankedHistoryAvailable]);
 
     // Arm the tab-strip glow. If there's no sparkline to wait for — the user isn't
     // on the Activity tab, or Activity has no data (unavailable) — proceed on load.
@@ -483,6 +515,9 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     const typeChartHeight = Math.round(TIER_CHART_ROW_STEP * (Math.max(derivedTypeRows.length, 1) + 0.18)) + 8 + 48;
 
     const activeConfig = TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
+    // Computed once (not per-tab inside the strip map): whether the player has any
+    // plottable efficiency badge, gating the Efficiency tab's enabled state.
+    const hasBadges = hasEfficiencyBadges(efficiencyRows);
 
     return (
         <section className="mt-5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4" data-perf-section="insights-tabs-shell">
@@ -505,8 +540,19 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 {TAB_CONFIG.map((tab) => {
                     const isActive = tab.id === activeTab;
                     // Activity dark-outs (disabled) once we know the player has
-                    // no battle activity to show.
-                    const isDisabled = tab.id === 'activity' && activityAvailable === false;
+                    // no battle activity to show; Ranked dark-outs when the player
+                    // has no known ranked games (ranked_json resolved with zero
+                    // battles — `hasKnownRankedGames` defaults true while pending,
+                    // so the tab only disables once we're sure it's empty); Clan
+                    // Battles dark-outs when the player has no clan-battle data
+                    // (`hasClanBattleData` is the same server-resolved flag that
+                    // gates the header CB shield, so shield-shown ⟺ tab-enabled);
+                    // Efficiency dark-outs when the player has no plottable badge
+                    // (shares the panel's own normalizeBadgeDots predicate).
+                    const isDisabled = (tab.id === 'activity' && activityAvailable === false)
+                        || (tab.id === 'ranked' && !hasKnownRankedGames)
+                        || (tab.id === 'career' && !hasClanBattleData)
+                        || (tab.id === 'badges' && !hasBadges);
                     const base = 'inline-flex shrink-0 items-center justify-center whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors sm:flex-1';
                     const stateClass = isDisabled
                         ? 'cursor-not-allowed border-transparent text-[var(--text-muted)] opacity-40'
@@ -544,24 +590,34 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 id={`player-insights-panel-${activeConfig.id}`}
                 role="tabpanel"
                 aria-labelledby={`player-insights-tab-${activeConfig.id}`}
-                // Activity (the dense battle-history table) takes the full panel
-                // width; the chart lanes are capped at 1200px so they don't stretch
-                // and thin out on wide viewports.
-                className={activeTab === 'activity' ? 'min-w-0' : 'min-w-0 max-w-[1200px]'}
+                // The dense battle-history table takes the full panel width — that's
+                // the Activity tab and the Ranked tab's activity sub-view (a ranked
+                // copy of it); the chart lanes are capped at 1200px so they don't
+                // stretch and thin out on wide viewports.
+                className={activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity') ? 'min-w-0' : 'min-w-0 max-w-[1200px]'}
                 data-perf-section={panelSectionIdByTab[activeTab]}
                 style={{
-                    // Activity/Ships/Profile/Population/Efficiency share one locked
-                    // height so the shell stays put when switching among them; Ships
-                    // and Efficiency use minHeight (Ships' filters may wrap on narrow
-                    // widths; an ultra-dense badge plot may outgrow the box) while
+                    // Activity/Ships/Profile/Population/Efficiency/Ranked/Clan
+                    // Battles share one locked height so the shell stays put when
+                    // switching among them. Ships, Efficiency, and Clan Battles use
+                    // minHeight (Ships' filters may wrap on narrow widths; an
+                    // ultra-dense badge plot and the Clan Battles seasons table can
+                    // exceed the locked height and must not clip). Ranked splits by
+                    // sub-view: its activity view is a fixed-height fill (a copy of
+                    // the Activity page) while its history view (heatmap + seasons
+                    // stack) takes minHeight so it can run taller without clipping.
                     // Activity / Profile / Population are fixed and fill it
                     // (Activity's table flex-fills the remaining space; the charts
                     // grow to fill).
-                    ...(activeTab === 'ships' || activeTab === 'badges'
-                        ? { minHeight: LOCKED_PANEL_HEIGHT_PX }
-                        : activeTab === 'profile' || activeTab === 'population' || activeTab === 'activity'
+                    ...(activeTab === 'ranked'
+                        ? (rankedView === 'activity'
                             ? { height: LOCKED_PANEL_HEIGHT_PX }
-                            : { minHeight: activeConfig.minHeight }),
+                            : { minHeight: LOCKED_PANEL_HEIGHT_PX })
+                        : activeTab === 'ships' || activeTab === 'badges' || activeTab === 'career'
+                            ? { minHeight: LOCKED_PANEL_HEIGHT_PX }
+                            : activeTab === 'profile' || activeTab === 'population' || activeTab === 'activity'
+                                ? { height: LOCKED_PANEL_HEIGHT_PX }
+                                : { minHeight: activeConfig.minHeight }),
                     contain: 'layout style',
                 }}
             >
@@ -630,57 +686,92 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 ) : null}
 
                 {activeTab === 'ranked' ? (
-                    <div>
-                        {/* Ranked battle history relocated here from the Activity
-                            tab's mode pill (2026-07-13) — the same card, fixed to
-                            mode="ranked", sparkline included. Hidden once the card
-                            reports the player has no ranked history. */}
-                        {rankedHistoryAvailable !== false ? (
-                            <div className="mb-6">
-                                <SectionHeadingWithTooltip
-                                    title="Recent Ranked Battles"
-                                    description="Battle history scoped to Ranked — daily activity over the last 30 days, per-ship results, and totals for the player's current ranked season. The same view the Activity tab gives for Random battles."
-                                    className="mb-2"
-                                />
-                                <BattleHistoryCard
-                                    embedded
-                                    mode="ranked"
-                                    playerName={playerName}
-                                    realm={realm}
-                                    refreshNonce={refreshNonce}
-                                    onAvailabilityChange={setRankedHistoryAvailable}
-                                />
+                    rankedView === 'activity' ? (
+                        // Activity sub-view: a ranked copy of the Activity page (the
+                        // battle-history card, mode="ranked", filling the locked
+                        // panel). The card is the availability oracle — it reports
+                        // via onAvailabilityChange, and the effect above drops us to
+                        // the history view when the player has no ranked activity.
+                        // The "History" toggle rides in the card header, inline to
+                        // the left of its "Ranked" caption (no separate button row).
+                        <BattleHistoryCard
+                            embedded
+                            fillHeight
+                            mode="ranked"
+                            playerName={playerName}
+                            realm={realm}
+                            refreshNonce={refreshNonce}
+                            onAvailabilityChange={setRankedHistoryAvailable}
+                            captionLeading={(
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setRankedView('history');
+                                        trackEvent('player-insights-ranked-view', { realm, view: 'history' });
+                                    }}
+                                    className={RANKED_TOGGLE_CHIP_CLASS}
+                                >
+                                    History
+                                </button>
+                            )}
+                        />
+                    ) : (
+                        // History sub-view: the ranked heatmap + seasons — the view
+                        // shown when there's no activity. The "Activity" toggle +
+                        // matching "Ranked" caption ride on the same line as the
+                        // "Ranked Games vs Win Rate" heading (right side). The toggle
+                        // only appears when the player actually has ranked activity
+                        // (rankedHistoryAvailable !== false), so an empty-activity
+                        // player is never offered a dead round-trip.
+                        <div>
+                            <div className={`mb-3 flex items-center gap-3 ${showRankedHeatmap ? 'justify-between' : 'justify-end'}`}>
+                                {showRankedHeatmap ? (
+                                    <SectionHeadingWithTooltip
+                                        title="Ranked Games vs Win Rate"
+                                        description="Each tile represents a pocket of ranked players grouped by total ranked games and overall ranked win rate. The outlined marker shows where this player lands inside that broader field."
+                                    />
+                                ) : null}
+                                <div className="flex shrink-0 items-center gap-1.5">
+                                    {rankedHistoryAvailable !== false ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setRankedView('activity');
+                                                trackEvent('player-insights-ranked-view', { realm, view: 'activity' });
+                                            }}
+                                            className={RANKED_TOGGLE_CHIP_CLASS}
+                                        >
+                                            Activity
+                                        </button>
+                                    ) : null}
+                                    <span className={RANKED_MODE_CAPTION_CLASS} title="Ranked battles only (sums across active seasons)">
+                                        Ranked
+                                    </span>
+                                </div>
                             </div>
-                        ) : null}
-                        {!showRankedHeatmap ? (
-                            <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--accent-mid)]">
-                                No ranked history is visible for this player yet.
-                            </p>
-                        ) : (
-                            <>
-                                <SectionHeadingWithTooltip
-                                    title="Ranked Games vs Win Rate"
-                                    description="Each tile represents a pocket of ranked players grouped by total ranked games and overall ranked win rate. The outlined marker shows where this player lands inside that broader field."
-                                    className="mb-3"
-                                />
+                            {!showRankedHeatmap ? (
+                                <p className="mb-3 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-2 text-sm text-[var(--accent-mid)]">
+                                    No ranked history is visible for this player yet.
+                                </p>
+                            ) : (
                                 <RankedWRBattlesHeatmapSVG
                                     playerId={playerId}
                                     isLoading={isLoading}
                                     onVisibilityChange={setShowRankedHeatmap}
                                     theme={theme}
                                 />
-                            </>
-                        )}
+                            )}
 
-                        <div className="mt-4">
-                            <SectionHeadingWithTooltip
-                                title="Ranked Seasons"
-                                description="This table summarizes the player's historical ranked-season results, including total battles, win rate, and the best league finish reached in each season."
-                                className="mb-3"
-                            />
-                            <RankedSeasons playerId={playerId} isLoading={isLoading} />
+                            <div className="mt-4">
+                                <SectionHeadingWithTooltip
+                                    title="Ranked Seasons"
+                                    description="This table summarizes the player's historical ranked-season results, including total battles, win rate, and the best league finish reached in each season."
+                                    className="mb-3"
+                                />
+                                <RankedSeasons playerId={playerId} isLoading={isLoading} />
+                            </div>
                         </div>
-                    </div>
+                    )
                 ) : null}
 
                 {activeTab === 'profile' ? (

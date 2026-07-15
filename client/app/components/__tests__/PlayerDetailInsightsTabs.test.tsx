@@ -18,6 +18,12 @@ jest.mock('../../lib/umami', () => ({
 let mockRankedHeatmapVisibility: boolean | undefined;
 const mockFetchSharedJson = fetchSharedJson as jest.MockedFunction<typeof fetchSharedJson>;
 
+// One plottable efficiency badge (ship_id + badge class 1-4 + finite tier), so
+// the Efficiency tab stays enabled — an empty efficiencyRows now darks the tab.
+const BADGED_EFFICIENCY_ROWS = [
+    { ship_id: 3863656144, top_grade_class: 1, ship_tier: 10, ship_name: 'Test Ship', ship_type: 'battleship' },
+];
+
 const readyTierTypePayload = {
     metric: 'tier_type' as const,
     label: 'Tier vs Ship Type',
@@ -120,6 +126,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
             />,
         );
@@ -170,6 +177,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
             />,
         );
@@ -219,6 +227,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
             />,
         );
@@ -230,7 +239,7 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.getByRole('tab', { name: 'Ranked' })).toHaveAttribute('aria-selected', 'false');
     });
 
-    it('renders the Recent Ranked Battles history card on the Ranked tab', async () => {
+    it('defaults the Ranked tab to its activity sub-view and toggles to history and back', async () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
@@ -241,22 +250,35 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
             />,
         );
 
         fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
-        await waitFor(() => {
-            expect(screen.getByText('Recent Ranked Battles')).toBeInTheDocument();
-        });
-        // The embedded battle-history card mounts inside the section (the
-        // default beforeEach mock answers every battle-history URL with battles).
+        // Default mock reports ranked activity, so the tab lands on its activity
+        // sub-view: the ranked battle-history card plus a "History" toggle.
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
+        expect(screen.getByRole('button', { name: 'History' })).toBeInTheDocument();
+        expect(screen.queryByText('Ranked Seasons')).not.toBeInTheDocument();
+
+        // History toggle → the heatmap + seasons view, with an "Activity" toggle back.
+        fireEvent.click(screen.getByRole('button', { name: 'History' }));
+        expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
+        expect(screen.queryByTestId('battle-history-card')).not.toBeInTheDocument();
+        expect(mockTrackEvent).toHaveBeenCalledWith('player-insights-ranked-view', expect.objectContaining({ view: 'history' }));
+
+        // Activity toggle → back to the battle-history card.
+        fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(mockTrackEvent).toHaveBeenCalledWith('player-insights-ranked-view', expect.objectContaining({ view: 'activity' }));
     });
 
-    it('hides Recent Ranked Battles when the player has no ranked history', async () => {
+    it('falls back to the ranked history sub-view when the player has no ranked activity', async () => {
         mockFetchSharedJson.mockImplementation((url) => {
             if (url.includes('/api/fetch/player_correlation/tier_type/')) {
                 return new Promise(() => { });
@@ -295,17 +317,20 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
             />,
         );
 
         fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
-        // The ranked card mounts, reports no ranked availability, and the
-        // section unmounts; the rest of the Ranked tab stays.
+        // The activity card mounts, reports no ranked activity, and the tab falls
+        // back to its history sub-view (heatmap + seasons). The card unmounts and
+        // no "Activity" toggle is offered (there's no activity to return to).
         await waitFor(() => {
-            expect(screen.queryByText('Recent Ranked Battles')).not.toBeInTheDocument();
+            expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
         });
-        expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
+        expect(screen.queryByTestId('battle-history-card')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Activity' })).not.toBeInTheDocument();
     });
 
     it('re-lights a dark Activity tab when a refresh backfills battle history, without stealing focus', async () => {
@@ -345,6 +370,7 @@ describe('PlayerDetailInsightsTabs', () => {
             playerScore: null,
             hasKnownRankedGames: true,
             hasClan: true,
+            hasClanBattleData: true,
             efficiencyRows: [],
         };
 
@@ -385,7 +411,8 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={1.8}
                 hasKnownRankedGames
                 hasClan
-                efficiencyRows={[]}
+                hasClanBattleData
+                efficiencyRows={BADGED_EFFICIENCY_ROWS}
             />,
         );
 
@@ -406,7 +433,7 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(mockTrackEvent).not.toHaveBeenCalled();
     });
 
-    it('switches across the insights tabs one at a time', () => {
+    it('switches across the insights tabs one at a time', async () => {
         render(
             <PlayerDetailInsightsTabs
                 playerId={101}
@@ -417,7 +444,8 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
-                efficiencyRows={[]}
+                hasClanBattleData
+                efficiencyRows={BADGED_EFFICIENCY_ROWS}
             />,
         );
 
@@ -426,6 +454,13 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.queryByText('Win Rate vs Survival')).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
+        // Ranked defaults to its activity sub-view; the History toggle rides in
+        // the card header (renders once the card loads). Switch to History for the
+        // heatmap + seasons.
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'History' })).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'History' }));
         expect(screen.getByText('Ranked Games vs Win Rate')).toBeInTheDocument();
         expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
         expect(screen.queryByText('Top Ships (Random Battles)')).not.toBeInTheDocument();
@@ -445,7 +480,7 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.queryByText('Tier vs Type Profile')).not.toBeInTheDocument();
     });
 
-    it('shows the compact ranked empty state when the heatmap says the player has no ranked history', () => {
+    it('shows the compact ranked empty state when the heatmap says the player has no ranked history', async () => {
         mockRankedHeatmapVisibility = false;
 
         render(
@@ -458,11 +493,19 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
             />,
         );
 
         fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
+        // Default mock reports ranked activity → activity sub-view; the History
+        // toggle rides in the card header (renders once the card loads). Switch to
+        // History, where an empty heatmap shows the compact "no ranked" message.
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'History' })).toBeInTheDocument();
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'History' }));
 
         expect(screen.getByText('No ranked history is visible for this player yet.')).toBeInTheDocument();
         expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
@@ -479,6 +522,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
             />,
         );
@@ -495,6 +539,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
             />,
         );
@@ -514,6 +559,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan={false}
+                hasClanBattleData={false}
                 efficiencyRows={[]}
             />,
         );
@@ -523,6 +569,92 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
         expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
+    });
+
+    it('darks out the Ranked tab when the player has no known ranked games', () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                playerScore={null}
+                hasKnownRankedGames={false}
+                hasClan
+                hasClanBattleData
+                efficiencyRows={[]}
+            />,
+        );
+
+        const rankedTab = screen.getByRole('tab', { name: 'Ranked' });
+        expect(rankedTab).toBeDisabled();
+        // A disabled tab must not activate on click (stays on the default Activity).
+        fireEvent.click(rankedTab);
+        expect(rankedTab).toHaveAttribute('aria-selected', 'false');
+        expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
+    });
+
+    it('keeps the Ranked tab enabled while ranked data is still pending (defaults on)', () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                playerScore={null}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData
+                efficiencyRows={[]}
+            />,
+        );
+
+        expect(screen.getByRole('tab', { name: 'Ranked' })).not.toBeDisabled();
+    });
+
+    it('darks out the Clan Battles tab when the player has no clan-battle data', () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                playerScore={null}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData={false}
+                efficiencyRows={[]}
+            />,
+        );
+
+        const careerTab = screen.getByRole('tab', { name: 'Clan Battles' });
+        expect(careerTab).toBeDisabled();
+        // Even for a clan member, no CB data means the tab never activates or renders.
+        fireEvent.click(careerTab);
+        expect(careerTab).toHaveAttribute('aria-selected', 'false');
+        expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+    });
+
+    it('enables the Clan Battles tab when the player has clan-battle data', () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                playerScore={null}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData
+                efficiencyRows={[]}
+            />,
+        );
+
+        expect(screen.getByRole('tab', { name: 'Clan Battles' })).not.toBeDisabled();
     });
 
     it('renders efficiency badges only inside the badges tab', () => {
@@ -536,7 +668,8 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
-                efficiencyRows={[]}
+                hasClanBattleData
+                efficiencyRows={BADGED_EFFICIENCY_ROWS}
             />,
         );
 
@@ -546,6 +679,49 @@ describe('PlayerDetailInsightsTabs', () => {
 
         expect(screen.getByText('Efficiency Badges')).toBeInTheDocument();
         expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+    });
+
+    it('darks out the Efficiency tab when the player has no efficiency badges', () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                playerScore={null}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData
+                efficiencyRows={[]}
+            />,
+        );
+
+        const badgesTab = screen.getByRole('tab', { name: 'Efficiency' });
+        expect(badgesTab).toBeDisabled();
+        // A disabled tab never activates or renders its panel.
+        fireEvent.click(badgesTab);
+        expect(badgesTab).toHaveAttribute('aria-selected', 'false');
+        expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
+    });
+
+    it('enables the Efficiency tab when the player has at least one badge', () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                playerScore={null}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData
+                efficiencyRows={BADGED_EFFICIENCY_ROWS}
+            />,
+        );
+
+        expect(screen.getByRole('tab', { name: 'Efficiency' })).not.toBeDisabled();
     });
 
     it('warms tab data only after the player shell finishes loading', async () => {
@@ -559,6 +735,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
                 isLoading
             />,
@@ -581,6 +758,7 @@ describe('PlayerDetailInsightsTabs', () => {
                     playerScore={null}
                     hasKnownRankedGames
                     hasClan
+                    hasClanBattleData
                     efficiencyRows={[]}
                     isLoading={false}
                 />,
@@ -620,6 +798,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan={false}
+                hasClanBattleData={false}
                 efficiencyRows={[]}
                 isLoading={false}
             />,
@@ -678,6 +857,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan
+                hasClanBattleData
                 efficiencyRows={[]}
                 isLoading={false}
             />,
@@ -743,6 +923,7 @@ describe('PlayerDetailInsightsTabs', () => {
                 playerScore={null}
                 hasKnownRankedGames
                 hasClan={false}
+                hasClanBattleData={false}
                 efficiencyRows={[]}
                 isLoading={false}
             />,

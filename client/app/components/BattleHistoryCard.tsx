@@ -204,6 +204,11 @@ interface BattleHistoryCardProps {
     // once when the populated reveal completes; not fired when the player has no
     // WR line to draw (no battles / pure-ranked with no lifetime baseline).
     onSparklineAnimationEnd?: () => void;
+    // Optional node rendered in the header immediately to the LEFT of the mode
+    // caption ("Ranked" / "Random Battles"), sized to sit inline beside it. The
+    // Ranked tab passes its History/Activity sub-view toggle here so the control
+    // shares the caption's line instead of taking its own row above the card.
+    captionLeading?: React.ReactNode;
 }
 
 const formatInt = (n: number): string => n.toLocaleString();
@@ -624,6 +629,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     mode = 'random',
     onAvailabilityChange,
     onSparklineAnimationEnd,
+    captionLeading,
 }) => {
     const requestSignal = usePlayerRequestSignal();
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
@@ -941,19 +947,23 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         })}
                     </div>
                 </div>
-                {/* Static caption naming the card's fixed mode — Random Battles
-                    on the Activity tab, Ranked on the Ranked tab. Replaced the
-                    Random|Ranked|All pill (removed 2026-07-13: 35 sessions/90d
-                    ever touched it; ranked history moved to the Ranked tab). */}
-                <span
-                    // Same bg/text pairing as the page-top stat boxes
-                    // (Win Rate / PvP Battles / …) so the caption reads as
-                    // part of that family rather than a bright action chip.
-                    className="ml-auto rounded bg-[var(--accent-faint)] px-2 py-0.5 text-xs font-semibold text-[var(--accent-dark)]"
-                    title={MODE_TITLE[mode]}
-                >
-                    {MODE_LABEL[mode]}
-                </span>
+                {/* Right group: an optional caption-leading control (the Ranked
+                    tab's sub-view toggle) sits inline to the LEFT of the static
+                    mode caption. Caption: Random Battles on the Activity tab,
+                    Ranked on the Ranked tab. Replaced the Random|Ranked|All pill
+                    (removed 2026-07-13: 35 sessions/90d ever touched it). */}
+                <div className="ml-auto flex items-center gap-1.5">
+                    {captionLeading}
+                    <span
+                        // Same bg/text pairing as the page-top stat boxes
+                        // (Win Rate / PvP Battles / …) so the caption reads as
+                        // part of that family rather than a bright action chip.
+                        className="rounded bg-[var(--accent-faint)] px-2 py-0.5 text-xs font-semibold text-[var(--accent-dark)]"
+                        title={MODE_TITLE[mode]}
+                    >
+                        {MODE_LABEL[mode]}
+                    </span>
+                </div>
                 {/* Header summary text removed — duplicates the totals tile
                     cells (Battles, Win rate, Avg damage) directly below. */}
             </header>

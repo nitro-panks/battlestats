@@ -99,6 +99,13 @@ const normalizeBadgeDots = (
     return dots;
 };
 
+// True when the player has at least one plottable efficiency badge. Shares
+// normalizeBadgeDots so the "dark the Efficiency tab" gate and the panel's own
+// empty state ("No Efficiency Badge data…") can never disagree.
+export const hasEfficiencyBadges = (
+    efficiencyRows?: EfficiencyRowInput[] | null,
+): boolean => normalizeBadgeDots(efficiencyRows).length > 0;
+
 const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
     efficiencyRows,
 }) => {

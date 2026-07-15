@@ -190,6 +190,12 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     const hasKnownRankedGames = Array.isArray(player.ranked_json)
         ? player.ranked_json.some((row) => (row?.total_battles || 0) > 0)
         : true;
+    // Stable "player has clan-battle data" signal for the Clan Battles tab's
+    // enabled state — the same server-resolved flag that gates the header CB
+    // shield (shield shown ⟺ tab enabled). Derived from the immutable player
+    // payload (never the mutable clanBattleSummary), so the tab can't dark while
+    // the user is viewing it.
+    const hasClanBattleData = Boolean(player.clan_battle_header_eligible);
     const [clanBattleSummary, setClanBattleSummary] = useState<PlayerClanBattleSummary | null>(() => getInitialClanBattleHeaderState(player));
     const isClanBattleEnjoyer = clanBattleSummary !== null;
 
@@ -362,6 +368,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 playerScore={player.player_score}
                                 hasKnownRankedGames={hasKnownRankedGames}
                                 hasClan={Boolean(player.clan_id)}
+                                hasClanBattleData={hasClanBattleData}
                                 efficiencyRows={player.efficiency_json}
                                 onClanBattleSummaryChange={handleClanBattleSummaryChange}
                                 isLoading={isLoading}
