@@ -490,15 +490,18 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 title is gone and Activity sits in its place (left-most). Scrolls
                 horizontally on narrow viewports instead of stacking into rows. */}
             {/* Compact rectangular tab strip flush to the section's top/left/right
-                edges (negative margins cancel the section's p-4). No standalone
-                divider rule — the active tab is marked by an accent-colored bottom
-                border; on desktop the tabs stretch to fill the width, on narrow
-                viewports they scroll horizontally. */}
-            <div
-                role="tablist"
-                aria-label="Player insight tabs"
-                className="-mx-4 -mt-4 mb-4 flex flex-nowrap gap-0 overflow-x-auto rounded-t-lg sm:overflow-visible"
-            >
+                edges (negative margins cancel the section's p-4). A 1px rule under
+                the strip runs edge-to-edge across the bounding box; the tablist's
+                -mb-px overlaps the buttons' 2px bottom border onto it, so the
+                active tab's accent indicator cuts through the rule. On desktop the
+                tabs stretch to fill the width, on narrow viewports they scroll
+                horizontally. */}
+            <div className="-mx-4 -mt-4 mb-4 rounded-t-lg border-b border-[var(--border)]">
+                <div
+                    role="tablist"
+                    aria-label="Player insight tabs"
+                    className="-mb-px flex flex-nowrap gap-0 overflow-x-auto sm:overflow-visible"
+                >
                 {TAB_CONFIG.map((tab) => {
                     const isActive = tab.id === activeTab;
                     // Activity dark-outs (disabled) once we know the player has
@@ -534,6 +537,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         </button>
                     );
                 })}
+                </div>
             </div>
 
             <div
