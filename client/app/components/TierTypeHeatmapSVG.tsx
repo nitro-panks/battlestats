@@ -143,13 +143,15 @@ const drawChart = (
         .attr('stroke', colors.gridLineBlue)
         .attr('stroke-width', 0.8);
 
-    svg.append('g')
+    const xAxisGroup = svg.append('g')
         .attr('transform', `translate(0, ${height})`)
         .style('color', colors.labelMuted)
-        .call(d3.axisBottom(x).tickSize(0).tickFormat((d: string) => SHIP_TYPE_ABBREV[d] ?? d))
-        .selectAll('text')
+        .call(d3.axisBottom(x).tickSize(0).tickFormat((d: string) => SHIP_TYPE_ABBREV[d] ?? d));
+    // No axis line along the x axis — the tile grid frames itself.
+    xAxisGroup.select('.domain').remove();
+    xAxisGroup.selectAll('text')
         .style('font-size', axisFontSize)
-        .style('font-weight', '500');
+        .style('font-weight', '700');
 
     svg.append('g')
         .style('color', colors.axisText)
@@ -167,6 +169,64 @@ const drawChart = (
         .style('fill', colors.labelMuted)
         .style('font-size', axisFontSize)
         .text(payload.x_label);
+
+    // Population legend in the right-side whitespace (the bar-chart label
+    // gutter): a vertical gradient of the tile scale so the background layer
+    // reads as "how populated is this tier/type cell".
+    if (!compact) {
+        const legendX = bandRangeEnd + 24;
+        const legendBarWidth = 12;
+        const legendBarTop = 20;
+        const legendBarHeight = Math.max(60, Math.min(140, yBandExtent - legendBarTop - 8));
+        const gradientId = `tier-type-pop-gradient-${theme}`;
+
+        const gradient = svgRoot.append('defs')
+            .append('linearGradient')
+            .attr('id', gradientId)
+            .attr('x1', 0)
+            .attr('y1', 0)
+            .attr('x2', 0)
+            .attr('y2', 1);
+        gradient.append('stop').attr('offset', '0%').attr('stop-color', tileColor(maxTileCount));
+        gradient.append('stop').attr('offset', '100%').attr('stop-color', tileColor(0));
+
+        const legend = svg.append('g')
+            .attr('transform', `translate(${legendX}, 4)`);
+
+        legend.append('text')
+            .attr('x', 0)
+            .attr('y', 0)
+            .attr('dominant-baseline', 'hanging')
+            .style('fill', colors.labelMid)
+            .style('font-size', '11px')
+            .style('font-weight', '700')
+            .text('Population');
+
+        legend.append('rect')
+            .attr('x', 0)
+            .attr('y', legendBarTop)
+            .attr('width', legendBarWidth)
+            .attr('height', legendBarHeight)
+            .attr('rx', 4)
+            .attr('fill', `url(#${gradientId})`)
+            .attr('stroke', colors.gridLineBlue)
+            .attr('stroke-width', 0.8);
+
+        legend.append('text')
+            .attr('x', legendBarWidth + 6)
+            .attr('y', legendBarTop + 2)
+            .attr('dominant-baseline', 'hanging')
+            .style('fill', colors.labelMuted)
+            .style('font-size', '10px')
+            .text('More battles');
+
+        legend.append('text')
+            .attr('x', legendBarWidth + 6)
+            .attr('y', legendBarTop + legendBarHeight)
+            .style('fill', colors.labelMuted)
+            .style('font-size', '10px')
+            .text('Fewer');
+    }
 
     // Player markers are pills overlaid on (centered within) the population pills.
     // Width encodes how much this captain plays that tier/type: the most-played
