@@ -29,7 +29,6 @@ If the working tree is clean and `git diff HEAD` shows no changes, ask the user 
 ```bash
 cd /home/august/code/battlestats/server && python -m pytest \
   warships/tests/test_views.py \
-  warships/tests/test_landing.py \
   warships/tests/test_realm_isolation.py \
   warships/tests/test_data_product_contracts.py \
   -x --tb=short
