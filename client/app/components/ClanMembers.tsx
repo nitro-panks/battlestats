@@ -201,7 +201,7 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
                 >
                     {activityColumns.map((column) => (
                         <div key={column.key} className="min-w-0">
-                            <div className="mb-1.5 flex items-center gap-1.5 border-b border-[var(--border)] pb-1">
+                            <div className="mb-1.5 flex items-center gap-1.5 border-b border-transparent pb-1">
                                 <ActivityIcon bucket={column.icon} size="header" />
                                 <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">{column.label}</span>
                                 <span className="text-xs font-normal text-[var(--text-secondary)]">{column.members.length}</span>
@@ -220,20 +220,20 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layo
             {!loading && members.length > 0 && layout === 'stacked' && (
                 <div>
                     {statusBoxesFlat.map((box, boxIndex) => {
-                        // Horizontal rules only: a divider under every box (plus a top rule
-                        // on the first) separates the status groups, with no vertical side
-                        // borders — a ruled list rather than outlined boxes.
+                        // The old horizontal rules are gone but their 1px slots remain
+                        // (transparent borders), so the group rhythm is unchanged.
                         const isFirst = boxIndex === 0;
                         return (
-                            <div key={box.key} className={`w-full border-b border-[var(--border)] p-2 pb-[11px]${isFirst ? ' border-t' : ''}`}>
-                                {/* Status legend: a left-aligned header row — the box's
-                                    activity icon followed by a short status word in the
-                                    status color — standing in for the per-row icons below. */}
+                            <div key={box.key} className={`w-full border-b border-transparent py-2 pb-[11px]${isFirst ? ' border-t' : ''}`}>
+                                {/* Status legend: a header row — the box's activity icon
+                                    followed by a short status word in the status color —
+                                    flush left with the rule above it, standing in for the
+                                    per-row icons below. */}
                                 <div className="mb-1 flex items-center gap-1.5">
                                     <ActivityIcon bucket={box.key} size="header" />
                                     <span className="text-xs font-semibold" style={{ color: activityColor(box.key) }}>{ACTIVITY_SHORT_LABEL[box.key]}</span>
                                 </div>
-                                <div className="space-y-1 text-sm text-[var(--accent-light)]">
+                                <div className="space-y-1 pl-[20px] text-sm text-[var(--accent-light)]">
                                     {box.members.map((member) => {
                                         const isCurrentPlayer = normalizedCurrentPlayer != null
                                             && member.name.trim().toLowerCase() === normalizedCurrentPlayer;
