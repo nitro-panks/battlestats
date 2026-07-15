@@ -78,6 +78,10 @@ rsync -az --delete \
   "${SERVER_DIR}/" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/server/"
 
 scp "${REPO_ROOT}/docker-compose.yml" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/docker-compose.yml"
+# Root VERSION lands at the release root (BASE_DIR/..) so server code that
+# stamps artifacts with the app version (e.g. archive_battle_history
+# manifests) resolves it instead of falling back to "unknown".
+scp "${REPO_ROOT}/VERSION" "${DEPLOY_USER}@${HOST}:${REMOTE_RELEASE}/VERSION"
 
 REMOTE_DEPLOY_SCRIPT="/tmp/battlestats-deploy-${RELEASE_ID}.sh"
 
