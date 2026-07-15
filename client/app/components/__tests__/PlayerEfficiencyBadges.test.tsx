@@ -78,6 +78,39 @@ describe('PlayerEfficiencyBadges', () => {
         expect(shownShips).toHaveLength(1);
     });
 
+    it('lights the hover cohorts: cyan same-type borders, roman-numeral tier labels, medal fill contrast', () => {
+        const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        // Nodes sort by badge class then name, so index 0 is Des Moines
+        // (Expert, cruiser, Tier X) and index 1 is Bismarck (I, BB, Tier VIII).
+        const hitTargets = container.querySelectorAll('circle.badge-dot-hit');
+        fireEvent.mouseOver(hitTargets[0]);
+
+        const dots = container.querySelectorAll<SVGCircleElement>('circle.badge-dot');
+        // Type cohort: only the hovered cruiser wears the cyan border.
+        expect(dots[0].getAttribute('stroke')).toBe('#06b6d4');
+        expect(dots[1].getAttribute('stroke')).toBe(chartColors.dark.barStroke);
+
+        // Tier cohort: Tier-X ships fade in their roman numeral; Bismarck's
+        // Tier-VIII label stays hidden.
+        const tierLabels = container.querySelectorAll<SVGTextElement>('text.badge-dot-tier-label');
+        expect(tierLabels[0].textContent).toBe('X');
+        expect(tierLabels[0].style.opacity).toBe('1');
+        expect(tierLabels[1].textContent).toBe('VIII');
+        expect(tierLabels[1].style.opacity).toBe('0');
+        expect(tierLabels[2].style.opacity).toBe('1');
+
+        // Medal contrast: the hovered Expert saturates; other classes empty.
+        expect(dots[0].style.fillOpacity).toBe('1');
+        expect(dots[1].style.fillOpacity).toBe('0');
+
+        // Mouseout restores the rest state.
+        fireEvent.mouseOut(hitTargets[0]);
+        expect(dots[0].getAttribute('stroke')).toBe(chartColors.dark.barStroke);
+        expect(tierLabels[0].style.opacity).toBe('0');
+        expect(dots[1].style.fillOpacity).toBe('0.35');
+    });
+
     it('labels each ship-type cluster and webs circles sharing a tier', () => {
         const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 

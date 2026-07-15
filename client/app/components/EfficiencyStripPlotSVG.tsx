@@ -40,7 +40,7 @@ const HIT_PAD = 4;
 const DEFAULT_SVG_HEIGHT = 460;
 const MARGIN = { top: 50, right: 16, bottom: 16, left: 16 };
 const AXIS_FONT_SIZE = '13px';
-const SUMMARY_FONT_SIZE = '14px';
+const SUMMARY_FONT_SIZE = '18px';
 // Live force layout, per the classic d3 force-directed-graph shape: ships of a
 // type bond to their type hub (strong, short links) and hubs bond weakly to
 // each other (long links); every node carries a weak many-body repulsion so
@@ -65,6 +65,9 @@ const HOVER_PULL_STRENGTH = 0.08;
 const HOVER_ALPHA_TARGET = 0.12;
 // Fills are translucent at rest; the hovered medal group goes fully opaque.
 const REST_FILL_OPACITY = 0.35;
+// Hover accent for the type cohort: borders of every same-type circle and
+// the cluster's type label turn this cyan while the hover holds.
+const HOVER_TYPE_ACCENT = '#06b6d4';
 // The center-spring start is bistable: a pure center launch can lock into a
 // single collide-pressure blob instead of separating. Seeding each node a
 // fraction of the way toward its quadrant breaks that symmetry decisively
@@ -74,6 +77,12 @@ const REST_FILL_OPACITY = 0.35;
 const ANCHOR_SEED_BIAS = 0.3;
 const ALPHA_DECAY = 0.05;
 const VELOCITY_DECAY = 0.55;
+// While a circle is being dragged or hovered the whole field runs at higher
+// friction, so displaced circles get shouldered aside and stop instead of
+// sloshing around, and the hover gravity's inward drift stays a crawl.
+// Restored to the rest value when the interaction ends.
+const DRAG_VELOCITY_DECAY = 0.8;
+const HOVER_VELOCITY_DECAY = 0.75;
 
 interface SimNode {
     dot: EfficiencyBadgeDot;
@@ -139,6 +148,7 @@ interface BadgeSimulation {
     stop: () => BadgeSimulation;
     restart: () => BadgeSimulation;
     alphaTarget: (value: number) => BadgeSimulation;
+    velocityDecay: (value: number) => BadgeSimulation;
 }
 
 const compareDots = (left: EfficiencyBadgeDot, right: EfficiencyBadgeDot): number => {
@@ -303,8 +313,9 @@ const drawChart = (
 
         line.append('tspan')
             .style('font-weight', '700')
+            .style('font-family', dot.badgeClass === 1 ? undefined : 'Georgia, "Times New Roman", serif')
             .style('fill', badgeClassColor(colors, dot.badgeClass))
-            .text(dot.badgeClass === 1 ? 'Expert' : `Badge ${dot.badgeLabel}`);
+            .text(dot.badgeClass === 1 ? 'Expert' : dot.badgeLabel);
 
         line.append('tspan')
             .style('fill', colors.labelMid)
@@ -343,7 +354,7 @@ const drawChart = (
         .attr('stroke', colors.barStroke)
         .attr('stroke-width', dotStrokeWidth)
         .style('fill-opacity', REST_FILL_OPACITY)
-        .style('transition', 'fill-opacity 250ms ease');
+        .style('transition', 'fill-opacity 250ms ease, stroke 250ms ease');
 
     // Hover rings: a 3px inner border in the dot's own medal color, faded in
     // for every circle sharing the hovered dot's badge level while its fill
@@ -361,6 +372,28 @@ const drawChart = (
         .style('opacity', 0)
         .style('pointer-events', 'none')
         .style('transition', 'opacity 250ms ease');
+
+    // Tier labels: each circle carries its tier's roman numeral, hidden at
+    // rest and faded in for every circle sharing the hovered dot's tier.
+    // Pre-built and position-synced so hover only toggles opacity.
+    const tierLabelNodes = svg.append('g')
+        .selectAll('text')
+        .data(nodes)
+        .enter()
+        .append('text')
+        .attr('class', 'badge-dot-tier-label')
+        .attr('text-anchor', 'middle')
+        .attr('dominant-baseline', 'central')
+        .attr('stroke', colors.chartBg)
+        .attr('stroke-width', 3)
+        .attr('paint-order', 'stroke')
+        .style('font-size', (node: SimNode) => `${Math.max(11, Math.round(radiusFor(node) * 0.62))}px`)
+        .style('font-weight', '700')
+        .style('fill', colors.labelStrong)
+        .style('opacity', 0)
+        .style('pointer-events', 'none')
+        .style('transition', 'opacity 250ms ease')
+        .text((node: SimNode) => romanTier(node.dot.shipTier));
 
     const hitNodes = svg.append('g')
         .selectAll('circle')
@@ -397,6 +430,9 @@ const drawChart = (
         ringNodes
             .attr('cx', (node: SimNode) => node.x)
             .attr('cy', (node: SimNode) => node.y);
+        tierLabelNodes
+            .attr('x', (node: SimNode) => node.x)
+            .attr('y', (node: SimNode) => node.y);
         hitNodes
             .attr('cx', (node: SimNode) => node.x)
             .attr('cy', (node: SimNode) => node.y);
@@ -423,6 +459,12 @@ const drawChart = (
     // shoving of unrelated circles along the way.
     let activeNode: SimNode | null = null;
     let draggingNode: SimNode | null = null;
+    // One place decides the field's friction: drag > hover > rest.
+    const syncVelocityDecay = () => {
+        simulation.velocityDecay(draggingNode
+            ? DRAG_VELOCITY_DECAY
+            : activeNode ? HOVER_VELOCITY_DECAY : VELOCITY_DECAY);
+    };
     simulation.force('hover-pull', (alpha: number) => {
         const target = activeNode;
         if (!target) {
@@ -450,6 +492,7 @@ const drawChart = (
             if (!event.active) simulation.alphaTarget(DRAG_ALPHA_TARGET).restart();
             draggingNode = node;
             activeNode = node;
+            syncVelocityDecay();
             node.fx = node.x;
             node.fy = node.y;
         })
@@ -460,31 +503,43 @@ const drawChart = (
         .on('end', (event: { active: number }, node: SimNode) => {
             if (!event.active) simulation.alphaTarget(activeNode ? HOVER_ALPHA_TARGET : 0);
             draggingNode = null;
+            syncVelocityDecay();
             node.fx = null;
             node.fy = null;
         });
     hitNodes.call(drag);
 
-    // Hover semantics: every dot sharing the hovered dot's TIER throbs its
-    // border grey -> very white -> grey (CSS class); every dot sharing its
-    // MEDAL goes from the translucent rest fill to fully opaque and fades in
-    // the 3px inner ring in its medal color.
+    // Hover semantics: every dot sharing the hovered dot's TYPE turns its
+    // border cyan (as does the cluster's type label); every dot sharing its
+    // TIER shows its tier's roman numeral; every dot sharing its MEDAL goes
+    // from the translucent rest fill to fully opaque and fades in the 3px
+    // inner ring in its medal color, while every other medal class empties
+    // its fill entirely (stroke-only) until the hover ends.
     const clearHoverHighlights = () => {
         dotNodes
-            .classed('badge-dot-throb', false)
+            .attr('stroke', colors.barStroke)
             .style('fill-opacity', REST_FILL_OPACITY);
         ringNodes.style('opacity', 0);
+        tierLabelNodes.style('opacity', 0);
+        typeLabels.forEach((label) => label.style('fill', colors.labelStrong));
     };
 
     hitNodes
         .on('mouseover', function (_event: MouseEvent, node: SimNode) {
             clearHoverHighlights();
             dotNodes
+                .filter((other: SimNode) => other.dot.shipType === node.dot.shipType)
+                .attr('stroke', HOVER_TYPE_ACCENT);
+            typeLabels.get(node.dot.shipType)?.style('fill', HOVER_TYPE_ACCENT);
+            tierLabelNodes
                 .filter((other: SimNode) => other.dot.shipTier === node.dot.shipTier)
-                .classed('badge-dot-throb', true);
+                .style('opacity', 1);
             dotNodes
                 .filter((other: SimNode) => other.dot.badgeClass === node.dot.badgeClass)
                 .style('fill-opacity', 1);
+            dotNodes
+                .filter((other: SimNode) => other.dot.badgeClass !== node.dot.badgeClass)
+                .style('fill-opacity', 0);
             ringNodes
                 .filter((other: SimNode) => other.dot.badgeClass === node.dot.badgeClass)
                 .style('opacity', 1);
@@ -497,6 +552,7 @@ const drawChart = (
                 node.fx = node.x;
                 node.fy = node.y;
             }
+            syncVelocityDecay();
             simulation.alphaTarget(HOVER_ALPHA_TARGET).restart();
         })
         .on('mouseout', function (_event: MouseEvent, node: SimNode) {
@@ -507,6 +563,7 @@ const drawChart = (
             }
             clearHoverHighlights();
             activeNode = null;
+            syncVelocityDecay();
             node.fx = null;
             node.fy = null;
             simulation.alphaTarget(0);

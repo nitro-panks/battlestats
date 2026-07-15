@@ -11,13 +11,20 @@ _Drafted: 2026-03-15_
 > `badgeE`..`badgeIII`). Circles spring from the center on load (settles
 > ~2.5s), are draggable with rubber-band return, and rest translucent
 > (fill-opacity 0.35). Visual-only meshes join every pair sharing a type /
-> tier / medal. Hover pins the circle, throbs same-tier borders, makes the
-> same-medal group opaque with a 3px medal ring, and engages a slow
-> "hover gravity" pulling effect-sharing circles toward it (2x when both
-> effects shared), including while dragged. A hover summary line and a
-> bottom badge-count legend replace the old table/chips/cards; the panel
-> shares the locked 1057px insights shell. The data contract, empty-state
-> copy, and "no new WG traffic" constraint below still hold.
+> tier / medal. Hover pins the circle and lights three cohorts (v3.8.3
+> revision — the earlier same-tier border throb was removed): same-TYPE
+> circles turn their borders cyan along with the cluster's type label;
+> same-TIER circles fade in their tier's roman numeral; the same-MEDAL
+> group goes opaque with a 3px medal ring while every other medal class
+> empties to stroke-only. A slow "hover gravity" pulls tier/medal-sharing
+> circles toward the hovered one (2x when both shared), including while
+> dragged; hover and drag raise the field's friction (velocityDecay
+> 0.55 rest → 0.75 hover → 0.8 drag) so displaced circles settle instead
+> of sloshing. A hover summary line (18px; badge level as a serif roman
+> numeral) and a bottom badge-count legend replace the old
+> table/chips/cards; the panel shares the locked 1057px insights shell.
+> The data contract, empty-state copy, and "no new WG traffic" constraint
+> below still hold.
 
 ## Goal
 
