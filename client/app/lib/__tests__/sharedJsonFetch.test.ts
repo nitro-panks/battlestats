@@ -219,4 +219,49 @@ describe('sharedJsonFetch', () => {
             expect(fetchMock).toHaveBeenCalledTimes(1);
         });
     });
+
+    describe('in-flight dedup and settled SWR cache', () => {
+        it('dedups two concurrent callers of the same url onto one fetch', async () => {
+            fetchMock.mockImplementation(() => new Promise((resolve) => {
+                setTimeout(() => resolve(jsonResponse({ value: 42 })), 5);
+            }));
+
+            const first = fetchSharedJson<{ value: number }>('/api/fetch/dedup_target/1', { label: 'a' });
+            const second = fetchSharedJson<{ value: number }>('/api/fetch/dedup_target/1', { label: 'b' });
+
+            await expect(first).resolves.toMatchObject({ data: { value: 42 } });
+            await expect(second).resolves.toMatchObject({ data: { value: 42 } });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+        });
+
+        it('serves a settled response from the cache within ttlMs without refetching', async () => {
+            // The settled cache is disabled under NODE_ENV=test (resolvedCacheEnabled),
+            // so load an isolated module instance with a production env to test it.
+            const previousEnv = process.env.NODE_ENV;
+            let isolated: typeof import('../sharedJsonFetch');
+            jest.isolateModules(() => {
+                (process.env as Record<string, string>).NODE_ENV = 'production';
+                isolated = require('../sharedJsonFetch');
+                (process.env as Record<string, string>).NODE_ENV = previousEnv as string;
+            });
+
+            const first = await isolated!.fetchSharedJson<{ ok: boolean }>('/api/fetch/swr_target/1', {
+                label: 'swr', ttlMs: 60_000,
+            });
+            const second = await isolated!.fetchSharedJson<{ ok: boolean }>('/api/fetch/swr_target/1', {
+                label: 'swr', ttlMs: 60_000,
+            });
+
+            expect(first.data).toEqual({ ok: true });
+            expect(second.data).toEqual(first.data);
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+        });
+
+        it('refetches on every call when ttlMs is 0 (polled freshness)', async () => {
+            await fetchSharedJson('/api/fetch/no_cache_target/1', { label: 'poll' });
+            await fetchSharedJson('/api/fetch/no_cache_target/1', { label: 'poll' });
+
+            expect(fetchMock).toHaveBeenCalledTimes(2);
+        });
+    });
 });

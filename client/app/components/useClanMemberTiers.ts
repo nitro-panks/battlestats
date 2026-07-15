@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
+import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
 
 export interface ClanMemberTier {
     player_id: number;
@@ -27,19 +28,15 @@ export const useClanMemberTiers = (clanId: number | null | undefined) => {
         const fetchData = async () => {
             setLoading(true);
             try {
-                const response = await fetch(
+                const { data: json } = await fetchSharedJson<ClanMemberTier[]>(
                     withRealm(`/api/fetch/clan_member_tiers/${clanId}`, realm),
-                    { signal: controller.signal },
+                    { label: `clan_member_tiers ${clanId}`, signal: controller.signal },
                 );
-                if (!response.ok) {
-                    throw new Error(`clan_member_tiers failed: ${response.status}`);
-                }
-                const json = await response.json() as ClanMemberTier[];
                 if (!cancelled) {
                     setData(Array.isArray(json) ? json : []);
                 }
             } catch (err) {
-                if (err instanceof DOMException && err.name === 'AbortError') return;
+                if (isAbortError(err)) return;
                 console.error('Error fetching clan member tiers:', err);
             } finally {
                 if (!cancelled) setLoading(false);

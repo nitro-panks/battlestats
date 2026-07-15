@@ -6,7 +6,7 @@ import { faRobot } from '@fortawesome/free-solid-svg-icons';
 // but kept on hand. Flip to true to restore it at every former render site.
 export const PVE_ENJOYER_ICON_ENABLED = false;
 
-const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]', search: 'text-xs' } as const;
+const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]' } as const;
 
 interface PveEnjoyerIconProps {
     size?: keyof typeof SIZE_CLASS;

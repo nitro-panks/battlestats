@@ -591,9 +591,8 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 aria-labelledby={`player-insights-tab-${activeConfig.id}`}
                 // The dense battle-history table takes the full panel width — that's
                 // the Activity tab and the Ranked tab's activity sub-view (a ranked
-                // copy of it); the chart lanes are capped at 1200px so they don't
-                // stretch and thin out on wide viewports.
-                className={activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity') ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0 max-w-[1200px]'}
+                // copy of it).
+                className={activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity') ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0'}
                 data-perf-section={panelSectionIdByTab[activeTab]}
                 style={{
                     // Panels size to their content instead of a shared locked

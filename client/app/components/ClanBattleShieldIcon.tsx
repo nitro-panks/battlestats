@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faShieldHalved } from '@fortawesome/free-solid-svg-icons';
 import wrColor from '../lib/wrColor';
 
-const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]', search: 'text-xs' } as const;
+const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]' } as const;
 
 interface ClanBattleShieldIconProps {
     winRate: number | null;

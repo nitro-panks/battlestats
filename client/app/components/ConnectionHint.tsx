@@ -14,11 +14,11 @@ export default function ConnectionHint() {
         <div
             role="status"
             aria-live="polite"
-            className="mb-3 flex items-center gap-2 rounded-md border border-[var(--accent-border,rgba(125,125,125,0.25))] bg-[var(--bg-elevated,rgba(125,125,125,0.08))] px-3 py-1.5 text-xs text-[var(--text-secondary,#9aa0a6)]"
+            className="mb-3 flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
         >
             <span
                 aria-hidden="true"
-                className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--text-secondary,#9aa0a6)]"
+                className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--text-secondary)]"
             />
             Connection is slow — updating in the background.
         </div>

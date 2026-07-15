@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { barChartLabelGutter, chartColors, wrColorByRatio, type ChartTheme } from '../lib/chartTheme';
+import { barChartLabelGutter, chartColors, wrColorByRatio, type ChartColors as Colors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -20,7 +20,6 @@ export interface ShipBarRow {
     win_ratio: number;
 }
 
-type Colors = typeof chartColors['light'];
 
 export interface ShipBarPlotConfig<Row extends ShipBarRow> {
     // Stable per-row key for the band scale (e.g. String(ship_tier), ship_type).

@@ -2,7 +2,8 @@ import React, { useEffect, useId, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { ChartTheme, chartColors, formatCompactCount, resolveContainerChartWidth } from '../lib/chartTheme';
+import { ChartTheme, chartColors, drawSvgMessage, formatCompactCount, resolveContainerChartWidth } from '../lib/chartTheme';
+import LoadingPanel from './LoadingPanel';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -628,25 +629,6 @@ const drawDistribution = (
     }
 };
 
-const drawErrorState = (containerElement: HTMLDivElement, message: string, theme: ChartTheme = 'light') => {
-    const container = d3.select(containerElement);
-    container.selectAll('*').remove();
-
-    const svg = container
-        .append('svg')
-        .attr('width', 600)
-        .attr('height', 120)
-        .append('g')
-        .attr('transform', 'translate(16, 24)');
-
-    svg.append('text')
-        .attr('x', 0)
-        .attr('y', 16)
-        .style('fill', chartColors[theme].labelText)
-        .style('font-size', '12px')
-        .text(message);
-};
-
 const fetchDistribution = async (metric: DistributionMetric, signal: AbortSignal, realm: string): Promise<DistributionPayload> => {
     const { data } = await fetchSharedJson<DistributionPayload>(withRealm(`/api/fetch/player_distribution/${metric}/`, realm), {
         label: `Player distribution ${metric}`,
@@ -718,7 +700,7 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
                 draw();
             } catch {
                 if (!abortController.signal.aborted) {
-                    drawErrorState(containerElement, 'Unable to load distribution chart.', theme);
+                    drawSvgMessage(containerElement, 'Unable to load distribution chart.', { color: chartColors[theme].labelText });
                 }
             }
         };
@@ -732,12 +714,7 @@ const PopulationDistributionSVG: React.FC<PopulationDistributionSVGProps> = ({
 
     return (
         <div ref={containerRef}>
-            <div
-                className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
-                style={{ minHeight: svgHeight }}
-            >
-                Loading distribution…
-            </div>
+            <LoadingPanel label="Loading distribution…" minHeight={svgHeight} />
         </div>
     );
 };

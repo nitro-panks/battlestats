@@ -161,8 +161,9 @@ const ShipStats: React.FC<ShipStatsProps> = ({
 
             {/* One centered, shrink-to-fit column so the title, subtitle, filters,
                 and table all share the table's left edge while the block stays
-                centered in the panel. */}
-            <div className="mx-auto w-fit">
+                centered in the panel. max-w-full + overflow keeps the fixed-width
+                metric columns from pushing page-level horizontal scroll on phones. */}
+            <div className="mx-auto w-fit max-w-full overflow-x-auto">
             <div>
                 <div className="flex items-baseline gap-2">
                     <h3 className="text-xl font-bold text-[var(--text-strong)]">{headerName}</h3>
@@ -230,8 +231,8 @@ const ShipStats: React.FC<ShipStatsProps> = ({
                         <thead>
                             <tr className="border-b border-[var(--accent-faint)] text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
                                 <th className="py-1.5 pr-8 text-left font-medium" />
-                                <th className="px-4 py-1.5 text-right font-semibold min-w-[10rem]" style={{ color: COLOR_AVERAGE }}>Average</th>
-                                <th className="px-4 py-1.5 text-right font-semibold min-w-[10rem]" style={{ color: COLOR_PLAYER }}>Player</th>
+                                <th className="px-4 py-1.5 text-right font-semibold min-w-[6rem] sm:min-w-[10rem]" style={{ color: COLOR_AVERAGE }}>Average</th>
+                                <th className="px-4 py-1.5 text-right font-semibold min-w-[6rem] sm:min-w-[10rem]" style={{ color: COLOR_PLAYER }}>Player</th>
                                 <th className="py-1.5 pl-4 text-right font-medium min-w-[4.75rem]">Delta</th>
                             </tr>
                         </thead>

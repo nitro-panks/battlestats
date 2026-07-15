@@ -1,9 +1,39 @@
 import {
-    alignedChartRightMargin,
     barChartDataRightX,
+    drawSvgMessage,
     resolveChartWidth,
     resolveContainerChartWidth,
 } from '../chartTheme';
+
+describe('drawSvgMessage', () => {
+    it('clears the container and renders the message into a sized svg', () => {
+        const container = document.createElement('div');
+        container.innerHTML = '<svg><circle /></svg>';
+
+        drawSvgMessage(container, 'No data available.', { color: '#8b949e', width: 700, height: 112 });
+
+        const svgs = container.querySelectorAll('svg');
+        expect(svgs).toHaveLength(1);
+        expect(svgs[0].getAttribute('width')).toBe('700');
+        expect(svgs[0].getAttribute('height')).toBe('112');
+        const text = container.querySelector('text');
+        expect(text?.textContent).toBe('No data available.');
+        // jsdom normalizes hex inline styles to rgb().
+        expect(text?.getAttribute('style')).toContain('fill: rgb(139, 148, 158)');
+        expect(text?.getAttribute('style')).toContain('font-size: 12px');
+    });
+
+    it('applies default dimensions and a custom font size', () => {
+        const container = document.createElement('div');
+
+        drawSvgMessage(container, 'Loading…', { color: '#e6edf3', fontSize: '14px' });
+
+        const svg = container.querySelector('svg');
+        expect(svg?.getAttribute('width')).toBe('600');
+        expect(svg?.getAttribute('height')).toBe('120');
+        expect(container.querySelector('text')?.style.fontSize).toBe('14px');
+    });
+});
 
 describe('resolveChartWidth', () => {
     it('caps at svgWidth when the container is wider', () => {
@@ -59,18 +89,5 @@ describe('barChartDataRightX', () => {
 
     it('uses full margins between 420 and 480 (population compact, bars not)', () => {
         expect(barChartDataRightX(440)).toBeCloseTo(68 + (440 - 68 - 46) - 148, 5);
-    });
-});
-
-describe('alignedChartRightMargin', () => {
-    it('lands the plot edge on barChartDataRightX', () => {
-        const svgWidth = 788;
-        expect(svgWidth - alignedChartRightMargin(svgWidth, 18)).toBeCloseTo(barChartDataRightX(svgWidth), 5);
-    });
-
-    it('never shrinks below the annotation floor', () => {
-        // Computed margin (right + gutter = 46 + 148 = 194) is below this floor,
-        // so the floor wins.
-        expect(alignedChartRightMargin(600, 300)).toBe(300);
     });
 });

@@ -10,3 +10,13 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
         disconnect() {}
     } as unknown as typeof ResizeObserver;
 }
+
+// jsdom doesn't implement SVG text measurement. The D3 charts call getBBox()
+// for label layout, which throws "not implemented" and kicks the chart into
+// its error state under Jest. A fixed-size stub keeps layout math finite.
+const svgPrototype = typeof SVGElement !== 'undefined'
+    ? (SVGElement.prototype as unknown as { getBBox?: () => { x: number; y: number; width: number; height: number } })
+    : null;
+if (svgPrototype && !svgPrototype.getBBox) {
+    svgPrototype.getBBox = () => ({ x: 0, y: 0, width: 24, height: 12 });
+}

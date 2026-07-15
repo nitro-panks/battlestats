@@ -36,10 +36,9 @@ const PlayerSearch: React.FC = () => {
     }, [router, realm]);
 
     return (
-        <div className="p-4 lg:px-0">
-            {/* Realm most-played-ships treemap. On lg the horizontal padding is
-                dropped so the landing content aligns to the same [248,1252] band
-                as the player page + header/footer (page.tsx supplies the inset). */}
+        <div className="py-4">
+            {/* Realm most-played-ships treemap. Horizontal inset comes from the
+                site column (layout.tsx); this component adds vertical spacing only. */}
             <div className="mt-2 pt-6">
                 <RealmTopShipsTreemapSVG
                     ships={bucket?.ships ?? []}

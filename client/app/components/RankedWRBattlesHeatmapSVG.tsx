@@ -3,7 +3,7 @@ import wrColor from '../lib/wrColor';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { chartColors, formatCompactCount, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, drawSvgMessage, formatCompactCount, resolveContainerChartWidth, type ChartColors as Colors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { getRankedHeatmapTileBounds, getRankedHeatmapTrendX, getRankedHeatmapXDomain, type RankedHeatmapPayloadShape, type RankedHeatmapTile, type RankedHeatmapTrendPoint } from './rankedHeatmapPayload';
@@ -49,27 +49,9 @@ interface RankedWRBattlesPayload {
 }
 
 
-type Colors = typeof chartColors['light'];
-
-const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth: number, svgHeight: number, colors: Colors) => {
-    const container = d3.select(containerElement);
-    container.selectAll('*').remove();
-
-    const svg = container.append('svg')
-        .attr('width', svgWidth)
-        .attr('height', svgHeight);
-
-    svg.append('text')
-        .attr('x', 16)
-        .attr('y', 24)
-        .style('fill', colors.labelMuted)
-        .style('font-size', '12px')
-        .text(message);
-};
-
 const drawChart = (containerElement: HTMLDivElement, payload: RankedWRBattlesPayload, svgWidth: number, svgHeight: number, colors: Colors, theme: ChartTheme) => {
     if (!payload.tiles.length) {
-        drawMessage(containerElement, 'No ranked population data available.', svgWidth, 120, colors);
+        drawSvgMessage(containerElement, 'No ranked population data available.', { width: svgWidth, height: 120, color: colors.labelMuted });
         return;
     }
 
@@ -305,7 +287,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
 
                 onVisibilityChange?.(true);
 
-                drawMessage(containerRef.current, 'Unable to load ranked heatmap.', resolveWidth(), 120, colors);
+                drawSvgMessage(containerRef.current, 'Unable to load ranked heatmap.', { width: resolveWidth(), height: 120, color: colors.labelMuted });
             }
         };
 

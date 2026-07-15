@@ -9,23 +9,7 @@ import { buildPlayerPath, parseClanIdFromRouteSegment } from '../lib/entityRoute
 import { trackEntityDetailView } from '../lib/visitAnalytics';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
-
-
-const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {
-    const contentType = response.headers.get('content-type') || '';
-
-    if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`${label} failed with ${response.status}: ${body.slice(0, 120)}`);
-    }
-
-    if (!contentType.toLowerCase().includes('application/json')) {
-        const body = await response.text();
-        throw new Error(`${label} returned non-JSON content: ${body.slice(0, 120)}`);
-    }
-
-    return response.json() as Promise<T>;
-};
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 
 const normalizeClanRoutePayload = (data: Partial<LandingClan> | null | undefined, fallbackClanId: number): LandingClan | null => {
@@ -79,8 +63,10 @@ const ClanRouteView: React.FC<ClanRouteViewProps> = ({ clanSlug }) => {
             setError('');
 
             try {
-                const response = await fetch(withRealm(`/api/clan/${clanId}`, realm));
-                const data = await readJsonOrThrow<Partial<LandingClan>>(response, `Clan ${clanId}`);
+                const { data } = await fetchSharedJson<Partial<LandingClan>>(withRealm(`/api/clan/${clanId}`, realm), {
+                    label: `Clan ${clanId}`,
+                    priority: 'critical',
+                });
                 const normalizedClan = normalizeClanRoutePayload(data, clanId);
                 if (!cancelled) {
                     setClanData(normalizedClan);

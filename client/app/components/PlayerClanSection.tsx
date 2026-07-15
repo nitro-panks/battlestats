@@ -68,7 +68,7 @@ const PlayerClanSection: React.FC<PlayerClanSectionProps> = ({ clanId, clanName,
                 <div className="mt-4 md:-ml-[38px]">
                     <ClanSVG
                         clanId={clanId}
-                        svgWidth={938}
+                        svgWidth={850}
                         svgHeight={440}
                         membersData={members}
                         theme={theme}

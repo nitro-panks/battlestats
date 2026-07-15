@@ -14,11 +14,11 @@ const SectionHeadingWithTooltip: React.FC<SectionHeadingWithTooltipProps> = ({
     className = '',
 }) => (
     <div className={`flex items-center gap-2 ${className}`.trim()}>
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">{title}</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">{title}</h3>
         <div className="group relative inline-flex items-center">
             <button
                 type="button"
-                className="inline-flex h-4 w-4 items-center justify-center text-[#6baed6] transition-colors hover:text-[#2171b5] focus:outline-none focus-visible:text-[#2171b5]"
+                className="inline-flex h-4 w-4 items-center justify-center text-[var(--accent-light)] transition-colors hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
                 aria-label={`More information about ${title}`}
             >
                 <FontAwesomeIcon icon={faCircleInfo} className="text-sm" aria-hidden="true" />

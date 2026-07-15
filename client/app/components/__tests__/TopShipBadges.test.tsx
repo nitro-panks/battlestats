@@ -39,7 +39,7 @@ describe('TopShipBadges', () => {
             <TopShipBadges
                 badges={[1, 2, 3, 4].map((n) => badge({ ship_id: n, ship_name: `Ship${n}`, rank: n }))}
                 realm="eu"
-                size="search"
+                size="inline"
             />,
         );
 

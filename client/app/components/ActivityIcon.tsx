@@ -40,7 +40,7 @@ export const ACTIVITY_SHORT_LABEL: Record<CollapsedActivityBucketKey, string> = 
 // to match the icon without duplicating the palette.
 export const activityColor = (bucket: CollapsedActivityBucketKey): string => ACTIVITY_STYLES[bucket].color;
 
-const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]', search: 'text-xs' } as const;
+const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]' } as const;
 
 // Same thresholds as the backend classifier, so a surface that only carries
 // days_since_last_battle (player detail, landing lists) lands in the same

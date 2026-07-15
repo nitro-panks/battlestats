@@ -1,6 +1,5 @@
 import {
     getTierTypeShipTypes,
-    getTierTypeTileKey,
     getTierTypeTiers,
     resolveTierTypeTiles,
 } from '../tierTypeHeatmapPayload';
@@ -33,7 +32,5 @@ describe('tierTypeHeatmapPayload', () => {
             { x_index: 0, y_index: 1, count: 40, ship_type: 'Destroyer', ship_tier: 10 },
             { x_index: 2, y_index: 2, count: 18, ship_type: 'Battleship', ship_tier: 9 },
         ]);
-
-        expect(getTierTypeTileKey('Destroyer', 10)).toBe('Destroyer:10');
     });
 });

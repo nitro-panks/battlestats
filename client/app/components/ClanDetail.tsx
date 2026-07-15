@@ -79,7 +79,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onSelectMember }) => {
 
     return (
         <div className="bg-[var(--bg-page)] p-6">
-            <div className="mx-auto mb-3 max-w-[900px] pb-3">
+            <div className="mb-3 pb-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <h1 className="text-3xl font-semibold tracking-tight text-[var(--text-primary)]">
                         [{clan.tag}] {clan.name}
@@ -90,8 +90,8 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onSelectMember }) => {
                 </p>
             </div>
 
-            {/* Body content is constrained to the 900px chart width, centered in the page */}
-            <div className="mx-auto max-w-[900px]">
+            {/* Body content fills the site column (layout.tsx owns the width). */}
+            <div>
             {/* 2D/3D toggle — desktop only */}
             <div className="hidden md:flex items-center gap-1 mb-3">
                 <div className="inline-flex rounded-md border border-[var(--border)] text-xs font-medium">
@@ -136,9 +136,9 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onSelectMember }) => {
                 with the body's left edge (full-bleed) instead of looking indented. */}
             <div className="mt-4 md:-ml-[38px]">
                 {chartMode === '2d' ? (
-                    <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={938} svgHeight={440} membersData={members} theme={theme} />
+                    <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={850} svgHeight={440} membersData={members} theme={theme} />
                 ) : (
-                    <Clan3DSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={938} svgHeight={480} membersData={members} memberTiers={memberTiers} theme={theme} />
+                    <Clan3DSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={850} svgHeight={480} membersData={members} memberTiers={memberTiers} theme={theme} />
                 )}
             </div>
 

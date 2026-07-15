@@ -3454,6 +3454,29 @@
                 "cb-icon-current-season-shipped",
                 "feature-superseded"
             ]
+        },
+        "agents/runbooks/runbook-frontend-final-shape-cleanup-2026-07-15.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "spec",
+            "owner": "frontend",
+            "aliases": [
+                "frontend cleanup pass",
+                "final-shape cleanup",
+                "850px column doctrine"
+            ],
+            "tags": [
+                "frontend",
+                "layout",
+                "breakpoints",
+                "mobile",
+                "dead-code",
+                "cleanup"
+            ],
+            "archive_on": [
+                "deferred touch-interaction follow-ups (C5-C8) land or are formally dropped"
+            ]
         }
     }
 }

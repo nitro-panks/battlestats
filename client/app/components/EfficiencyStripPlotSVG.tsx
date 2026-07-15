@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import * as d3 from 'd3';
-import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, resolveContainerChartWidth, type ChartColors as Colors, type ChartTheme } from '../lib/chartTheme';
 
 export interface EfficiencyBadgeDot {
     shipId: number;
@@ -19,7 +19,6 @@ interface EfficiencyStripPlotSVGProps {
     minSvgHeight?: number;
 }
 
-type Colors = typeof chartColors['light'];
 
 const SHIP_TYPE_ORDER = ['DD', 'CA', 'BB', 'CV', 'Sub'];
 
@@ -610,7 +609,7 @@ const EfficiencyStripPlotSVG: React.FC<EfficiencyStripPlotSVGProps> = ({
         let simulation: BadgeSimulation | null = null;
         let resizeFrame: number | null = null;
 
-        const resolveWidth = () => Math.max(containerElement.clientWidth || svgWidth, 320);
+        const resolveWidth = () => resolveContainerChartWidth(containerElement.clientWidth, svgWidth);
 
         const redraw = () => {
             simulation?.stop();

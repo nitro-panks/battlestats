@@ -2,7 +2,7 @@ import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCrown } from '@fortawesome/free-solid-svg-icons';
 
-const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]', search: 'text-xs' } as const;
+const SIZE_CLASS = { header: 'text-sm', inline: 'text-[11px]' } as const;
 
 interface LeaderCrownIconProps {
     size?: keyof typeof SIZE_CLASS;

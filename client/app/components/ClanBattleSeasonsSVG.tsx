@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import wrColor from '../lib/wrColor';
 import * as d3 from 'd3';
-import { chartColors, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, type ChartColors as Colors, type ChartTheme } from '../lib/chartTheme';
 
 interface ClanBattleSeasonPoint {
     season_id: number;
@@ -23,7 +23,6 @@ interface ClanBattleSeasonsSVGProps {
     theme?: ChartTheme;
 }
 
-type Colors = typeof chartColors['light'];
 
 
 interface SeasonRow {

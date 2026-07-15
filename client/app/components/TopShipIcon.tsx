@@ -10,7 +10,7 @@ import MedalIcon from './MedalIcon';
 // The medal glyph itself (white lanyard + rank-colored disc) lives in the shared
 // MedalIcon component; this wrapper adds the tray tooltip and size.
 
-const SIZE_CLASS = { podium: 'text-xl', header: 'text-sm', inline: 'text-[11px]', search: 'text-xs' } as const;
+const SIZE_CLASS = { podium: 'text-xl', header: 'text-sm', inline: 'text-[11px]' } as const;
 
 interface TopShipIconProps {
     rank: number;

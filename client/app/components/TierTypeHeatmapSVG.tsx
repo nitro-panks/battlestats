@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
-import { barChartDataRightX, chartColors, wrColorByRatio, type ChartTheme } from '../lib/chartTheme';
+import { barChartDataRightX, chartColors, drawSvgMessage, resolveContainerChartWidth, wrColorByRatio, type ChartColors as Colors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import type { TierTypePayload, TierTypePlayerCell } from './playerProfileChartData';
@@ -26,24 +26,6 @@ const SHIP_TYPE_ABBREV: Record<string, string> = {
     'Submarine': 'Sub',
 };
 
-type Colors = typeof chartColors['light'];
-
-const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth: number, svgHeight: number, colors: Colors) => {
-    const container = d3.select(containerElement);
-    container.selectAll('*').remove();
-
-    const svg = container.append('svg')
-        .attr('width', svgWidth)
-        .attr('height', svgHeight);
-
-    svg.append('text')
-        .attr('x', 16)
-        .attr('y', 24)
-        .style('fill', colors.labelText)
-        .style('font-size', '12px')
-        .text(message);
-};
-
 const drawChart = (
     containerElement: HTMLDivElement,
     payload: TierTypePayload,
@@ -53,19 +35,19 @@ const drawChart = (
     theme: ChartTheme,
 ) => {
     if (!payload.tiles.length) {
-        drawMessage(containerElement, 'No tier and ship-type population data available.', svgWidth, 112, colors);
+        drawSvgMessage(containerElement, 'No tier and ship-type population data available.', { width: svgWidth, height: 112, color: colors.labelText });
         return;
     }
 
     if (payload.player_cells.length < 2) {
-        drawMessage(containerElement, 'This captain does not have enough tier and ship-type variety yet to draw a useful heatmap.', svgWidth, 112, colors);
+        drawSvgMessage(containerElement, 'This captain does not have enough tier and ship-type variety yet to draw a useful heatmap.', { width: svgWidth, height: 112, color: colors.labelText });
         return;
     }
 
     const shipTypes = getTierTypeShipTypes(payload);
     const tiers = getTierTypeTiers(payload);
     if (!shipTypes.length || !tiers.length) {
-        drawMessage(containerElement, 'Unable to build tier and ship-type chart axes.', svgWidth, 112, colors);
+        drawSvgMessage(containerElement, 'Unable to build tier and ship-type chart axes.', { width: svgWidth, height: 112, color: colors.labelText });
         return;
     }
 
@@ -278,10 +260,10 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
         let cachedPayload: TierTypePayload | null = null;
         let resizeFrame: number | null = null;
 
-        // Flow to the full container width (floored for narrow screens) so the
-        // heatmap's right edge aligns with the full-width bar charts below it,
-        // rather than capping at svgWidth. Falls back to svgWidth pre-layout.
-        const resolveWidth = () => Math.max(containerElement.clientWidth || svgWidth, 320);
+        // Flow to the full container width so the heatmap's right edge aligns
+        // with the full-width bar charts below it, rather than capping at
+        // svgWidth. Falls back to svgWidth pre-layout.
+        const resolveWidth = () => resolveContainerChartWidth(containerElement.clientWidth, svgWidth);
 
         const redraw = () => {
             if (cachedPayload && containerElement) {
@@ -308,7 +290,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
                 drawChart(containerElement, payload, resolveWidth(), svgHeight, colors, theme);
             } catch {
                 if (!abortController.signal.aborted) {
-                    drawMessage(containerElement, 'Unable to load tier and ship-type heatmap.', resolveWidth(), 112, colors);
+                    drawSvgMessage(containerElement, 'Unable to load tier and ship-type heatmap.', { width: resolveWidth(), height: 112, color: colors.labelText });
                 }
             }
         };

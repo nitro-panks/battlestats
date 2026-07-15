@@ -9,8 +9,6 @@ export const getTierTypeShipTypes = (payload: TierTypePayload): string[] => payl
 
 export const getTierTypeTiers = (payload: TierTypePayload): number[] => payload.y_values;
 
-export const getTierTypeTileKey = (shipType: string, shipTier: number): string => `${shipType}:${shipTier}`;
-
 export const resolveTierTypeTile = (payload: TierTypePayload, tile: TierTypeTile): ResolvedTierTypeTile | null => {
     const shipType = payload.x_labels[tile.x_index];
     const shipTier = payload.y_values[tile.y_index];

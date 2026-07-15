@@ -4,7 +4,7 @@ import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
 import { collapseActivityBucket } from './clanMembersShared';
 import { buildClanChartMemberActivity, buildClanChartMemberActivitySignature, type ClanChartMemberActivity } from './clanChartActivity';
 import { fetchSharedJson, incrementChartFetches, decrementChartFetches } from '../lib/sharedJsonFetch';
-import { chartColors, resolveChartWidth, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, drawSvgMessage, resolveChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
@@ -114,29 +114,6 @@ const buildActivitySegments = (points: ClanPlotPoint[], theme: ChartTheme): Acti
             share: total > 0 ? (count / total) * 100 : 0,
         };
     });
-};
-
-const drawClanChartStatus = (
-    containerElement: HTMLDivElement,
-    message: string,
-    svgWidth: number,
-    svgHeight: number,
-    theme: ChartTheme,
-) => {
-    const colors = chartColors[theme];
-    const container = d3.select(containerElement);
-    container.selectAll('*').remove();
-
-    const svg = container.append('svg')
-        .attr('width', svgWidth)
-        .attr('height', svgHeight);
-
-    svg.append('text')
-        .attr('x', 16)
-        .attr('y', 24)
-        .attr('class', 'text-sm')
-        .style('fill', colors.labelText)
-        .text(message);
 };
 
 // Pick a default x-axis scale from the shape of the clan's battle distribution.
@@ -812,17 +789,17 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
         const resolvedWidth = resolveChartWidth(containerRef.current.clientWidth, svgWidth);
 
         if (plotData === null && !plotError) {
-            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', resolvedWidth, svgHeight, theme);
+            drawSvgMessage(containerRef.current, 'Loading clan chart data...', { width: resolvedWidth, height: svgHeight, color: chartColors[theme].labelText, fontSize: '14px' });
             return;
         }
 
         if (plotError) {
-            drawClanChartStatus(containerRef.current, 'Unable to load clan chart.', resolvedWidth, svgHeight, theme);
+            drawSvgMessage(containerRef.current, 'Unable to load clan chart.', { width: resolvedWidth, height: svgHeight, color: chartColors[theme].labelText, fontSize: '14px' });
             return;
         }
 
         if (plotData !== null && isPlotPendingRefresh && plotData.length === 0) {
-            drawClanChartStatus(containerRef.current, 'Loading clan chart data...', resolvedWidth, svgHeight, theme);
+            drawSvgMessage(containerRef.current, 'Loading clan chart data...', { width: resolvedWidth, height: svgHeight, color: chartColors[theme].labelText, fontSize: '14px' });
             return;
         }
 
@@ -867,7 +844,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
 
     return (
         <div>
-            <div className={`flex items-center gap-1 text-[10px] lowercase tracking-wide text-[var(--text-secondary)] ${scaleToggleClassName ?? 'mb-0.5 justify-end'}`}>
+            <div className={`flex items-center gap-1 text-xs lowercase tracking-wide text-[var(--text-secondary)] ${scaleToggleClassName ?? 'mb-0.5 justify-end'}`}>
                 {(['log', 'linear'] as const).map((scale) => (
                     <button
                         key={scale}

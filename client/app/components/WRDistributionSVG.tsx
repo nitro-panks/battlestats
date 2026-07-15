@@ -4,7 +4,8 @@ import * as d3 from 'd3';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { getCorrelationTileBounds, getCorrelationTrendX } from './wrDistributionPayload';
-import { chartColors, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
+import { chartColors, drawSvgMessage, resolveContainerChartWidth, type ChartColors as Colors, type ChartTheme } from '../lib/chartTheme';
+import LoadingPanel from './LoadingPanel';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
@@ -101,25 +102,6 @@ const formatDelta = (value: number | null): string => {
     return `${sign}${value.toFixed(1)} pts vs trend`;
 };
 
-const drawErrorState = (containerElement: HTMLDivElement, message: string, colors: typeof chartColors['light']) => {
-    const container = d3.select(containerElement);
-    container.selectAll('*').remove();
-
-    const svg = container
-        .append('svg')
-        .attr('width', 600)
-        .attr('height', 120)
-        .append('g')
-        .attr('transform', 'translate(16, 24)');
-
-    svg.append('text')
-        .attr('x', 0)
-        .attr('y', 16)
-        .style('fill', colors.labelText)
-        .style('font-size', '12px')
-        .text(message);
-};
-
 const appendSummaryBlock = (
     svgRoot: D3Selection,
     marginLeft: number,
@@ -127,7 +109,7 @@ const appendSummaryBlock = (
     payload: CorrelationPayload,
     expectedWR: number | null,
     wrDelta: number | null,
-    colors: typeof chartColors['light'],
+    colors: Colors,
 ) => {
     const header = svgRoot.append('g').attr('transform', `translate(${marginLeft + width - 6}, 10)`);
     const headerText = header.append('text')
@@ -174,7 +156,7 @@ const drawChart = (
     playerSurvivalRate: number,
     svgWidth: number,
     svgHeight: number,
-    colors: typeof chartColors['light'],
+    colors: Colors,
 ) => {
     const compact = svgWidth < 480;
     // Symmetric left/right margins center the plot within the canvas. (This chart
@@ -412,7 +394,7 @@ const WRDistributionSVG: React.FC<WRDistributionProps> = ({
                 draw();
             } catch {
                 if (!abortController.signal.aborted) {
-                    drawErrorState(containerElement, 'Unable to load win rate and survival chart.', colors);
+                    drawSvgMessage(containerElement, 'Unable to load win rate and survival chart.', { color: colors.labelText });
                 }
             }
         };
@@ -429,12 +411,7 @@ const WRDistributionSVG: React.FC<WRDistributionProps> = ({
 
     return (
         <div ref={containerRef}>
-            <div
-                className="flex animate-pulse items-center justify-center rounded-md border border-[var(--border)] bg-[var(--bg-surface)] text-sm text-[var(--accent-light)]"
-                style={{ minHeight: svgHeight }}
-            >
-                Loading win rate distribution…
-            </div>
+            <LoadingPanel label="Loading win rate distribution…" minHeight={svgHeight} />
         </div>
     );
 };

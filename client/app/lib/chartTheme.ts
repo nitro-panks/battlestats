@@ -237,7 +237,28 @@ export const barChartDataRightX = (svgWidth: number): number => {
     return barMargin.left + (svgWidth - barMargin.left - barMargin.right) - barChartLabelGutter(svgWidth);
 };
 
-// Right margin that lands a fill-to-plot-edge chart's data on barChartDataRightX;
-// minRight preserves the chart's own annotation gutter as a safety floor.
-export const alignedChartRightMargin = (svgWidth: number, minRight: number): number =>
-    Math.max(minRight, svgWidth - barChartDataRightX(svgWidth));
+// The resolved (theme-applied) chart palette shape shared by the D3 chart
+// components — both themes have identical keys, so 'light' is representative.
+export type ChartColors = typeof chartColors['light'];
+
+// Clear a chart container and render a single status/error message where the
+// chart would be. Shared by the D3 components' empty/pending/error states.
+export const drawSvgMessage = (
+    containerElement: HTMLElement,
+    message: string,
+    options: { color: string; width?: number; height?: number; fontSize?: string },
+): void => {
+    const { color, width = 600, height = 120, fontSize = '12px' } = options;
+    const container = d3.select(containerElement);
+    container.selectAll('*').remove();
+
+    container.append('svg')
+        .attr('width', width)
+        .attr('height', height)
+        .append('text')
+        .attr('x', 16)
+        .attr('y', 24)
+        .style('fill', color)
+        .style('font-size', fontSize)
+        .text(message);
+};

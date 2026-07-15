@@ -405,9 +405,13 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
         // Clear any previous SVG
         d3.select(container).selectAll('*').remove();
 
+        // viewBox (not a fixed width attr) so the svgWidth×svgHeight coordinate
+        // space scales down uniformly on narrow viewports instead of overflowing
+        // the page — the 3D projection math stays in fixed coordinates.
         const svg = d3.select(container).append('svg')
-            .attr('width', svgWidth)
-            .attr('height', svgHeight)
+            .attr('viewBox', `0 0 ${svgWidth} ${svgHeight}`)
+            .style('width', '100%')
+            .style('height', 'auto')
             .style('cursor', 'grab')
             .style('user-select', 'none');
 
@@ -535,7 +539,7 @@ const Clan3DSVG: React.FC<Clan3DProps> = ({
             )}
             <div
                 ref={containerRef}
-                style={{ width: svgWidth, maxWidth: '100%', touchAction: 'none' }}
+                style={{ maxWidth: svgWidth, touchAction: 'none' }}
             />
             {plotData && (
                 <button

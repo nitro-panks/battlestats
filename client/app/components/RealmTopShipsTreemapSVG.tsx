@@ -382,7 +382,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
 
     return (
         <section
-            className="mx-auto w-full max-w-[830px]"
+            className="w-full"
             aria-label="Realm ship chart"
         >
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
