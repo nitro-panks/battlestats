@@ -2,15 +2,22 @@
 
 _Drafted: 2026-03-15_
 
-> **Status update (2026-07-15):** the v1 summary-plus-table surface described
-> below shipped and was later superseded. The Efficiency tab now renders a
-> categorical strip plot (`EfficiencyStripPlotSVG.tsx`: x = tier, y = ship
-> type, one dot per badged ship, color = badge class E/I/II/III) with a
-> legend-with-counts and a hover summary line; the sortable table, the four
-> header count chips, and the three summary cards were removed. Badge-class
-> colors are theme-aware `chartTheme.ts` tokens (`badgeE`..`badgeIII`),
-> CVD/contrast-validated per mode. The data contract, empty-state copy, and
-> "no new WG traffic" constraint below still hold.
+> **Status update (2026-07-15, v3.6.0):** the v1 summary-plus-table surface
+> described below shipped and was later superseded. The Efficiency tab now
+> renders a live force-directed graph (`EfficiencyStripPlotSVG.tsx`): one
+> circle per badged ship, clustered by ship type into quadrant anchors,
+> sized by tier (14–34px), colored by badge level with the medal palette
+> (Expert=platinum, I=gold, II=silver, III=bronze; `chartTheme.ts` tokens
+> `badgeE`..`badgeIII`). Circles spring from the center on load (settles
+> ~2.5s), are draggable with rubber-band return, and rest translucent
+> (fill-opacity 0.35). Visual-only meshes join every pair sharing a type /
+> tier / medal. Hover pins the circle, throbs same-tier borders, makes the
+> same-medal group opaque with a 3px medal ring, and engages a slow
+> "hover gravity" pulling effect-sharing circles toward it (2x when both
+> effects shared), including while dragged. A hover summary line and a
+> bottom badge-count legend replace the old table/chips/cards; the panel
+> shares the locked 1057px insights shell. The data contract, empty-state
+> copy, and "no new WG traffic" constraint below still hold.
 
 ## Goal
 
