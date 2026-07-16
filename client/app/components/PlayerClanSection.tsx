@@ -15,10 +15,10 @@ import { useTheme } from '../context/ThemeContext';
 import { trackEvent } from '../lib/umami';
 
 // Player-page clan section (below the insights tabs): a compact version of the
-// clan page — the clan activity scatterplot, then the roster as one flowing
-// paragraph of names per collapsed activity phase (ClanActivityRoster, shared
-// with the clan page). Replaces the retired left clan rail as the player
-// page's clan surface.
+// clan page — the clan activity scatterplot, then the roster as one flat
+// alphabetical block of names (ClanActivityRoster phaseStyle="flat", shared
+// with the clan page which keeps the per-phase headers). Replaces the retired
+// left clan rail as the player page's clan surface.
 
 const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 'PlayerClanSection-ClanSVG'), {
     ssr: false,
@@ -87,10 +87,9 @@ const PlayerClanSection: React.FC<PlayerClanSectionProps> = ({ clanId, clanName,
                         error={error}
                         highlightedPlayerName={playerName}
                         source="player"
-                        // No phase headers under the scatterplot — the chart's
-                        // legend already names the phases; each paragraph leads
-                        // with its activity icon instead.
-                        phaseStyle="icon-lead"
+                        // One flat alphabetical block under the scatterplot —
+                        // the chart above already tells the activity story.
+                        phaseStyle="flat"
                     />
                 </div>
             </DeferredSection>

@@ -81,37 +81,27 @@ describe('PlayerClanSection', () => {
         expect(clanLink.getAttribute('href')).toContain('/clan/4444');
     });
 
-    it('groups member names into collapsed activity paragraphs', () => {
+    it('renders the whole roster as one flat alphabetical block — no phase grouping', () => {
         renderSection([
-            makeMember('Alpha', 'active_7d'),
-            makeMember('Bravo', 'active_30d'),
-            makeMember('Charlie', 'cooling_90d'),
-            makeMember('Delta', 'dormant_180d'),
             makeMember('Echo', 'inactive_180d_plus'),
+            makeMember('Charlie', 'cooling_90d'),
+            makeMember('Alpha', 'active_7d'),
+            makeMember('Delta', 'dormant_180d'),
+            makeMember('Bravo', 'active_30d'),
         ]);
 
-        // The player-page roster is icon-lead: no phase-header labels; each
-        // paragraph opens with the phase's activity icon (its tooltip carries
-        // the phase meaning).
-        const active = screen.getByTestId('clan-phase-active_7d');
-        expect(active).not.toHaveTextContent('Active now');
-        expect(within(active).getByLabelText('Active — battled within 30 days')).toBeInTheDocument();
-        expect(within(active).getByText('Alpha')).toBeInTheDocument();
-        expect(within(active).getByText('Bravo')).toBeInTheDocument();
+        // The player-page roster is flat: a single paragraph, no phase blocks,
+        // headers, or activity icons — the scatterplot above carries recency.
+        const roster = screen.getByTestId('clan-activity-roster');
+        expect(screen.queryByTestId('clan-phase-active_7d')).not.toBeInTheDocument();
+        expect(roster).not.toHaveTextContent('Active now');
+        expect(within(roster).queryByLabelText(/battled within|inactive 180/)).not.toBeInTheDocument();
 
-        const cooling = screen.getByTestId('clan-phase-cooling_90d');
-        expect(cooling).not.toHaveTextContent('Cooling Off');
-        expect(within(cooling).getByLabelText('Cooling — battled within 180 days')).toBeInTheDocument();
-        expect(within(cooling).getByText('Charlie')).toBeInTheDocument();
-        expect(within(cooling).getByText('Delta')).toBeInTheDocument();
-
-        const goneDark = screen.getByTestId('clan-phase-inactive_180d_plus');
-        expect(goneDark).not.toHaveTextContent('Gone dark');
-        expect(within(goneDark).getByLabelText('Asleep — inactive 180+ days')).toBeInTheDocument();
-        expect(within(goneDark).getByText('Echo')).toBeInTheDocument();
-
-        // No unknown-recency members: the fourth paragraph is omitted.
-        expect(screen.queryByTestId('clan-phase-unknown')).not.toBeInTheDocument();
+        // All members in one block, alphabetical regardless of activity phase.
+        const names = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo'];
+        names.forEach((name) => expect(within(roster).getByText(name)).toBeInTheDocument());
+        const positions = names.map((name) => roster.textContent!.indexOf(name));
+        expect([...positions].sort((a, b) => a - b)).toEqual(positions);
     });
 
     it('renders clanmates as player links but the viewed player as plain text', () => {
@@ -120,7 +110,7 @@ describe('PlayerClanSection', () => {
             makeMember('Current Player', 'active_7d'),
         ]);
 
-        const active = screen.getByTestId('clan-phase-active_7d');
+        const active = screen.getByTestId('clan-activity-roster');
         const alphaLink = within(active).getByRole('link', { name: 'Alpha' });
         expect(alphaLink.getAttribute('href')).toContain('/player/Alpha');
         expect(within(active).getByText('Current Player')).toBeInTheDocument();
@@ -133,7 +123,7 @@ describe('PlayerClanSection', () => {
             { ...makeMember('Ghost', 'active_7d'), is_hidden: true },
         ]);
 
-        const active = screen.getByTestId('clan-phase-active_7d');
+        const active = screen.getByTestId('clan-activity-roster');
         expect(within(active).getByText('Ghost')).toBeInTheDocument();
         expect(within(active).queryByRole('link', { name: /ghost/i })).not.toBeInTheDocument();
         expect(within(active).getByLabelText('Hidden account')).toBeInTheDocument();
@@ -145,7 +135,7 @@ describe('PlayerClanSection', () => {
             { ...makeMember('Ladder', 'active_7d'), is_ranked_player: true, highest_ranked_league: 'gold' as never },
         ]);
 
-        const active = screen.getByTestId('clan-phase-active_7d');
+        const active = screen.getByTestId('clan-activity-roster');
         expect(within(active).getByLabelText('Clan leader')).toBeInTheDocument();
         // Ranked icon renders with the member's league; presence is enough here.
         expect(within(active).getByRole('link', { name: /captain/i })).toBeInTheDocument();
