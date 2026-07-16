@@ -151,7 +151,11 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
                 {activeMembers.length > 0 ? (
                     <>
                         <h3
-                            className="flex items-center gap-2 text-base font-semibold uppercase tracking-wide"
+                            // pt-3 opens a little air between the scatterplot
+                            // above and the label (padding, not margin — a
+                            // margin here collapses into the section wrapper's
+                            // own mt and changes nothing).
+                            className="pt-3 flex items-center gap-2 text-base font-semibold uppercase tracking-wide"
                             style={{ color: activityColor('active_7d') }}
                         >
                             <ActivityIcon bucket="active_7d" size="header" />
