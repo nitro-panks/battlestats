@@ -151,6 +151,38 @@ describe('BattleHistoryCard', () => {
         expect(screen.getByLabelText(/30-day battle activity/i)).toBeInTheDocument();
     });
 
+    test('clicking a ship row opens the combat profile as a body-portaled modal; backdrop and Escape close it', async () => {
+        resolveWith(buildPayload());
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+
+        fireEvent.click(await screen.findByRole('button', { name: /Toggle combat profile for Yamato/i }));
+
+        const dialog = await screen.findByRole('dialog');
+        expect(dialog).toHaveAttribute('aria-modal', 'true');
+        // Portaled straight under <body> so the card's clamped/overflow ancestors
+        // can't clip the overlay (and the inline panel can't push the table out).
+        expect(dialog.parentElement).toBe(document.body);
+        expect(screen.getByTestId('ship-stats')).toBeInTheDocument();
+        // The ships table stays mounted underneath the overlay.
+        expect(screen.getByText('Dalian')).toBeInTheDocument();
+
+        // Backdrop click closes (only when the backdrop itself is the target).
+        fireEvent.click(dialog);
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(mockTrackEvent).toHaveBeenCalledWith(
+            'ship-stats-close', expect.objectContaining({ ship_id: 42, source: 'backdrop' }),
+        );
+
+        // Reopen, then Escape closes.
+        fireEvent.click(screen.getByRole('button', { name: /Toggle combat profile for Yamato/i }));
+        await screen.findByRole('dialog');
+        fireEvent.keyDown(document, { key: 'Escape' });
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(mockTrackEvent).toHaveBeenCalledWith(
+            'ship-stats-close', expect.objectContaining({ ship_id: 42, source: 'escape' }),
+        );
+    });
+
     test('Avg dmg colors against the ship population baseline; F/B pads to two decimals', async () => {
         const payload = buildPayload();
         payload.by_ship[0].ship_pop_avg_damage = 40_000; // 47,900 / 40,000 → +20%

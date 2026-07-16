@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
 import { degradationMonitor } from '../lib/degradationMonitor';
 import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
@@ -804,15 +805,33 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         });
     };
 
-    // Close from the panel's ✕ button (distinct source for analytics).
-    const closeShipStats = () => {
+    // Close from the modal's ✕ button, backdrop click, or Escape (distinct
+    // sources for analytics).
+    const closeShipStats = (source: 'button' | 'backdrop' | 'escape' = 'button') => {
         if (selectedShip) {
             trackEvent('ship-stats-close', {
-                ship_id: selectedShip.ship_id, source: 'button', mode, window, realm,
+                ship_id: selectedShip.ship_id, source, mode, window, realm,
             });
         }
         setSelectedShip(null);
     };
+
+    // Escape closes the combat-profile modal, matching the site's modal
+    // convention (StreamerSubmissionModal). Registered only while open.
+    const selectedShipId = selectedShip?.ship_id ?? null;
+    useEffect(() => {
+        if (selectedShipId == null) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                trackEvent('ship-stats-close', {
+                    ship_id: selectedShipId, source: 'escape', mode, window, realm,
+                });
+                setSelectedShip(null);
+            }
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [selectedShipId, mode, window, realm]);
 
     const visibleByShip = useMemo(() => {
         const rows = (payload?.by_ship ?? []).map((r) => ({
@@ -1104,19 +1123,33 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 </div>
             )}
             {/* Combat profile for the ship selected in the treemaps or the
-                table below. Sits between the treemaps and the ships table;
-                toggled by ship clicks (a second click on the same ship hides
-                it). */}
-            {hasBattles && selectedShip ? (
-                <div className="shrink-0">
-                    <ShipStats
-                        playerName={playerName}
-                        realm={realm}
-                        shipId={selectedShip.ship_id}
-                        shipName={selectedShip.ship_name}
-                        onClose={closeShipStats}
-                    />
-                </div>
+                table below — a modal overlay hovering above the card (an inline
+                panel here used to push the ships table out of the clamped tab
+                panel and into the content below it). Portaled to <body> so no
+                ancestor overflow/transform can clip or misanchor the fixed
+                overlay. Toggled by ship clicks; backdrop click, Escape, and the
+                panel's ✕ all close it. */}
+            {hasBattles && selectedShip ? createPortal(
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6"
+                    onClick={(e) => {
+                        if (e.target === e.currentTarget) closeShipStats('backdrop');
+                    }}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={`Combat profile for ${selectedShip.ship_name || `Ship ${selectedShip.ship_id}`}`}
+                >
+                    <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-md shadow-xl">
+                        <ShipStats
+                            playerName={playerName}
+                            realm={realm}
+                            shipId={selectedShip.ship_id}
+                            shipName={selectedShip.ship_name}
+                            onClose={closeShipStats}
+                        />
+                    </div>
+                </div>,
+                document.body,
             ) : null}
             {/* fillHeight (Activity / Ranked-activity): the table flex-fills the
                 space left below the overview and scrolls within the panel's

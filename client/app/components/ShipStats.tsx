@@ -4,9 +4,11 @@ import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
 
-// ShipStats — the per-ship combat panel shown in the Activity tab when a row in
-// the Battle History table is clicked (toggled; a second click on the same ship
-// hides it). It operationalizes the previously-unsurfaced ships_stats_json
+// ShipStats — the per-ship combat panel opened in a modal overlay when a row in
+// the Battle History table (or a treemap tile) is clicked. The host
+// (BattleHistoryCard) owns the overlay chrome — backdrop, Escape, scroll clamp;
+// this component is the panel itself, so its root carries no outer margin.
+// It operationalizes the previously-unsurfaced ships_stats_json
 // combat fields (gunnery / torpedo / secondary accuracy, spotting, objective
 // play, survival) documented in
 // runbook-battle-history-data-operationalization-2026-06-16.md.
@@ -146,7 +148,7 @@ const ShipStats: React.FC<ShipStatsProps> = ({
 
     return (
         <div
-            className="relative mt-5 rounded-md border border-[var(--accent-faint)] bg-[var(--bg-surface)] p-4"
+            className="relative rounded-md border border-[var(--accent-faint)] bg-[var(--bg-surface)] p-4"
             data-testid="ship-stats"
             aria-label={`Combat profile for ${headerName}`}
         >
