@@ -174,24 +174,24 @@ const MiniTreemap: React.FC<MiniTreemapProps> = ({
         g.each(function labelTile(this: SVGGElement, d: { x0: number; x1: number; y0: number; y1: number; data: TreemapDatum }) {
             const w = d.x1 - d.x0;
             const h = d.y1 - d.y0;
-            if (w < 34 || h < 18) return;
+            if (w < 40 || h < 22) return;
             const textColor = d3.hsl(d.data.color).l > 0.62 ? '#1a1a1a' : '#f5f5f5';
-            const maxChars = Math.max(2, Math.floor((w - 6) / 6.0));
+            const maxChars = Math.max(2, Math.floor((w - 6) / 7.2));
             const label = d.data.label.length > maxChars
                 ? `${d.data.label.slice(0, maxChars - 1)}…`
                 : d.data.label;
             const node = d3.select(this);
             node.append('text')
-                .attr('x', 4).attr('y', 13)
-                .attr('font-size', 10).attr('font-weight', 600).attr('fill', textColor)
+                .attr('x', 4).attr('y', 15)
+                .attr('font-size', 12).attr('font-weight', 600).attr('fill', textColor)
                 .style('pointer-events', 'none')
                 .text(label);
             // The sub line (avg dmg / WR%) is drawn only when it fits whole —
             // a truncated number misleads; the tooltip always has the full data.
-            if (h >= 32 && d.data.sub && d.data.sub.length <= Math.floor((w - 6) / 5.4)) {
+            if (h >= 38 && d.data.sub && d.data.sub.length <= Math.floor((w - 6) / 6.6)) {
                 node.append('text')
-                    .attr('x', 4).attr('y', 25)
-                    .attr('font-size', 9).attr('fill', textColor).attr('opacity', 0.85)
+                    .attr('x', 4).attr('y', 29)
+                    .attr('font-size', 11).attr('fill', textColor).attr('opacity', 0.85)
                     .style('pointer-events', 'none')
                     .text(d.data.sub);
             }

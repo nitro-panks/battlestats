@@ -51,7 +51,7 @@ const SHIP_TYPE_LABELS: Record<string, string> = {
 // Profile / Population tabs. 1057 minus the heading row (~28px + 12px margin)
 // and the bottom badge-count legend (2x scale, ~40px + 8px margin), with a
 // small cushion. Re-tune if the locked panel height changes.
-const STRIP_PLOT_MIN_SVG_HEIGHT = 950;
+const STRIP_PLOT_MIN_SVG_HEIGHT = 800;
 
 const getShipTypeLabel = (shipType: string | null | undefined): string => {
     if (!shipType) {
@@ -136,7 +136,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
             ) : (
                 <>
                     <EfficiencyStripPlotSVG dots={dots} theme={theme} minSvgHeight={STRIP_PLOT_MIN_SVG_HEIGHT} />
-                    <div className="mt-2 flex items-center justify-center gap-8 text-2xl" aria-label="Badge counts by class">
+                    <div className="mt-2 flex items-center justify-center gap-8 font-serif text-2xl" aria-label="Badge counts by class">
                         {badgeCounts.map((entry) => (
                             <span
                                 key={entry.badgeClass}
@@ -149,7 +149,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                                     style={{ backgroundColor: badgeClassColor(colors, entry.badgeClass) }}
                                 />
                                 <span className="font-semibold text-[var(--text-secondary)]">{entry.label}</span>
-                                <span className="font-['Courier_New',Courier,monospace] text-[var(--text-secondary)]">×{entry.count}</span>
+                                <span className="text-[var(--text-secondary)]">×{entry.count}</span>
                             </span>
                         ))}
                     </div>

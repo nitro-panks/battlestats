@@ -687,67 +687,64 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
 
     return (
         <div>
-            <div className="mb-2 text-xs text-[var(--text-secondary)]">
+            <div className="mb-2 pl-[15px] text-xs text-[var(--text-secondary)]">
                 Randoms data last refreshed: {formatTimestamp(randomsUpdatedAt)}
                 {' · '}
                 <span className={randomsFreshness === 'fresh' ? 'text-green-700' : randomsFreshness === 'stale' ? 'text-red-700' : 'text-[var(--text-secondary)]'}>
                     {randomsFreshness === 'fresh' ? 'fresh' : randomsFreshness === 'stale' ? 'stale' : 'unknown'}
                 </span>
             </div>
-            <div className="mt-2.5 space-y-3 text-sm">
-                <div className="flex flex-wrap items-start gap-3">
-                    <div className="w-[103px] shrink-0 font-semibold text-[var(--text-primary)]">Ship Type</div>
-                    <div className="flex flex-1 flex-wrap justify-start gap-1">
+            {/* pl mirrors the chart's margin.left below (60 compact / 85 +
+                RANDOMS_CHART_SHIFT_RIGHT_PX desktop) so the filter rows start
+                on the y-axis line. */}
+            <div className="mt-[40px] space-y-3 pl-[75px] text-sm sm:pl-[115px]">
+                <div className="flex flex-wrap justify-start gap-1">
+                    <button
+                        key="all-types"
+                        type="button"
+                        aria-pressed={allTypesSelected}
+                        className={filterButtonClass(allTypesSelected)}
+                        onClick={selectAllTypes}
+                    >
+                        All
+                    </button>
+                    {availableTypes.map((shipType) => (
                         <button
-                            key="all-types"
+                            key={shipType}
                             type="button"
-                            aria-pressed={allTypesSelected}
-                            className={filterButtonClass(allTypesSelected)}
-                            onClick={selectAllTypes}
+                            aria-pressed={selectedTypes.includes(shipType)}
+                            className={filterButtonClass(selectedTypes.includes(shipType))}
+                            onClick={() => toggleType(shipType)}
                         >
-                            All
+                            {shipType}
                         </button>
-                        {availableTypes.map((shipType) => (
-                            <button
-                                key={shipType}
-                                type="button"
-                                aria-pressed={selectedTypes.includes(shipType)}
-                                className={filterButtonClass(selectedTypes.includes(shipType))}
-                                onClick={() => toggleType(shipType)}
-                            >
-                                {shipType}
-                            </button>
-                        ))}
-                    </div>
+                    ))}
                 </div>
-                <div className="flex flex-wrap items-start gap-3">
-                    <div className="w-[103px] shrink-0 font-semibold text-[var(--text-primary)]">Tier</div>
-                    <div className="flex flex-1 flex-wrap justify-start gap-1">
+                <div className="flex flex-wrap justify-start gap-1">
+                    <button
+                        key="all-tiers"
+                        type="button"
+                        aria-pressed={allTiersSelected}
+                        className={filterButtonClass(allTiersSelected)}
+                        onClick={selectAllTiers}
+                    >
+                        All
+                    </button>
+                    {availableTiers.map((tier) => (
                         <button
-                            key="all-tiers"
+                            key={tier}
                             type="button"
-                            aria-pressed={allTiersSelected}
-                            className={filterButtonClass(allTiersSelected)}
-                            onClick={selectAllTiers}
+                            aria-pressed={selectedTiers.includes(tier)}
+                            className={filterButtonClass(selectedTiers.includes(tier))}
+                            onClick={() => toggleTier(tier)}
                         >
-                            All
+                            T{tier}
                         </button>
-                        {availableTiers.map((tier) => (
-                            <button
-                                key={tier}
-                                type="button"
-                                aria-pressed={selectedTiers.includes(tier)}
-                                className={filterButtonClass(selectedTiers.includes(tier))}
-                                onClick={() => toggleTier(tier)}
-                            >
-                                T{tier}
-                            </button>
-                        ))}
-                    </div>
+                    ))}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-                    <div className="flex items-center gap-3">
-                        <label htmlFor="randoms-min-wr" className="w-[103px] shrink-0 font-semibold text-[var(--text-primary)]">
+                    <div className="flex items-center gap-2">
+                        <label htmlFor="randoms-min-wr" className="shrink-0 font-semibold text-[var(--text-primary)]">
                             Min WR
                         </label>
                         <input
@@ -760,14 +757,14 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                             onChange={(event) => setMinWR(Number(event.target.value))}
                             onMouseUp={() => trackEvent('randoms-filter', { realm, control: 'min_wr', value: minWR })}
                             onTouchEnd={() => trackEvent('randoms-filter', { realm, control: 'min_wr', value: minWR })}
-                            className="bh-scope-slider w-44 max-w-full cursor-pointer"
+                            className="bh-scope-slider w-32 max-w-full cursor-pointer"
                             aria-label="Minimum win rate to show a ship"
                         />
                         <span className="min-w-[3.5rem] tabular-nums text-xs text-[var(--text-secondary)]">
                             &ge; {minWR}%
                         </span>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2">
                         <label htmlFor="randoms-min-battles" className="shrink-0 font-semibold text-[var(--text-primary)]">
                             Min battles
                         </label>
@@ -781,7 +778,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                             onChange={(event) => setMinBattles(Number(event.target.value))}
                             onMouseUp={() => trackEvent('randoms-filter', { realm, control: 'min_battles', value: minBattles })}
                             onTouchEnd={() => trackEvent('randoms-filter', { realm, control: 'min_battles', value: minBattles })}
-                            className="bh-scope-slider w-44 max-w-full cursor-pointer"
+                            className="bh-scope-slider w-32 max-w-full cursor-pointer"
                             aria-label="Minimum lifetime random battles to show a ship"
                         />
                         <span className="min-w-[3.5rem] tabular-nums text-xs text-[var(--text-secondary)]">
@@ -789,9 +786,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                         </span>
                     </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-3" role="radiogroup" aria-label="Activity filter">
-                    <div className="w-[103px] shrink-0 font-semibold text-[var(--text-primary)]">Activity</div>
-                    <div className="flex flex-1 flex-wrap items-center gap-1">
+                <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Activity filter">
+                    <div className="shrink-0 font-semibold text-[var(--text-primary)]">Activity</div>
+                    <div className="flex flex-wrap items-center gap-1">
                         {ACTIVITY_MODE_OPTIONS.map((option) => {
                             // No window activity → lock to All: disable Window
                             // Only so the user can't switch to an empty view.
@@ -820,16 +817,16 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             </div>
 
             {shouldShowEmptyState ? (
-                // Matches the hover-details line's slot (mt-5 / min-h / text-sm)
+                // Matches the hover-details line's slot (mt-0 / min-h / text-sm)
                 // so the message starts at the same x,y whether the chart is
                 // populated or empty.
-                <div className="mb-0 mt-5 min-h-[1.5rem] text-sm">
+                <div className="mb-0 mt-0 min-h-[1.5rem] text-sm">
                     <span className="text-[var(--text-secondary)]">No ships match the selected filters.</span>
                 </div>
             ) : null}
 
             {!shouldShowEmptyState ? (
-                <div className="mb-0 mt-5 min-h-[1.5rem] text-sm">
+                <div className="mb-0 mt-0 min-h-[1.5rem] text-sm">
                     {hoveredShip ? (
                         <span>
                             <span className="font-bold text-[var(--accent-dark)]">{hoveredShip.ship_name}</span>

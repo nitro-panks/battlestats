@@ -13,11 +13,13 @@ interface RankedSeasonsProps {
 }
 
 // Rows visible before the table scrolls. Sized so the scroll viewport fills the
-// Insights tab's ~800px of vertical room (2.5rem header + 13 * 3.5rem ≈ 768px),
+// Insights tab's ~800px of vertical room (2.5rem header + 14 * 3.25rem ≈ 768px),
 // matching the Activity table / Ships chart instead of a short pinned box.
-const RANKED_TABLE_VISIBLE_ROWS = 13;
+// Row = py-3 (1.5rem) + the league-badge pill (~1.65rem, the tallest cell
+// content now that the season cell is a single line) ≈ 3.25rem.
+const RANKED_TABLE_VISIBLE_ROWS = 14;
 const RANKED_TABLE_HEADER_HEIGHT_REM = 2.5;
-const RANKED_TABLE_ROW_HEIGHT_REM = 3.5;
+const RANKED_TABLE_ROW_HEIGHT_REM = 3.25;
 
 interface RankedSprint {
     sprint_number: number;
@@ -297,6 +299,9 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                                                 </button>
                                             </th>
                                             <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[var(--accent-mid)]">
+                                                Date
+                                            </th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold tracking-wide text-[var(--accent-mid)]">
                                                 <button type="button" className="inline-flex items-center gap-1" onClick={() => handleSort('highestRank')}>
                                                     Highest Rank <span aria-hidden="true">{getSortMarker('highestRank')}</span>
                                                 </button>
@@ -327,10 +332,8 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
 
                                             return (
                                                 <tr key={season.season_id} className="align-top">
-                                                    <td className="px-3 py-3 text-[var(--accent-dark)]">
-                                                        <p className="font-semibold">{season.season_label}</p>
-                                                        <p className="mt-1 text-xs text-[var(--text-secondary)]">{formatSeasonStartDate(season.start_date)}</p>
-                                                    </td>
+                                                    <td className="px-3 py-3 font-semibold text-[var(--accent-dark)]">{season.season_label}</td>
+                                                    <td className="px-3 py-3 text-[var(--text-secondary)]">{formatSeasonStartDate(season.start_date)}</td>
                                                     <td className="px-3 py-3">
                                                         <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badgeClassName}`}>
                                                             {season.highest_league_name}

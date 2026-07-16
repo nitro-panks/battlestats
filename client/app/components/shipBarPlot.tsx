@@ -38,6 +38,9 @@ export interface ShipBarPlotConfig<Row extends ShipBarRow> {
     unexpectedPayloadMessage: string;
     // Sort applied to a freshly-fetched payload before render.
     sortRows: (rows: Row[]) => Row[];
+    // Optional y-axis tick formatter (e.g. abbreviate ship types to their
+    // class tags); defaults to the raw row key.
+    axisTickLabel?: (key: string) => string;
     // Default chart height when the caller does not override svgHeight.
     defaultSvgHeight: number;
 }
@@ -93,7 +96,7 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
 
                 const maxBattles = Math.max(d3.max(rows, (datum: Row) => datum.pvp_battles) || 0, 10);
                 // Scale the bars to end short of the plot's right edge by a fixed
-                // label gutter, so the end-of-bar "wins · battles · WR%" labels sit
+                // label gutter, so the end-of-bar "battles · WR%" labels sit
                 // beside the bars instead of over them. The gutter matches
                 // barChartDataRightX so the heatmap/population charts stay aligned.
                 const barAreaWidth = Math.max(width - barChartLabelGutter(totalSvgWidth), width * 0.35);
@@ -125,7 +128,7 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
 
                 svg.append('g')
                     .style('color', colors.axisText)
-                    .call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+                    .call(d3.axisLeft(y).tickSize(0).tickPadding(6).tickFormat((key: string) => (config.axisTickLabel ? config.axisTickLabel(key) : key)))
                     .selectAll('text')
                     .style('font-size', axisFontSize)
                     .style('font-weight', '500');
@@ -176,7 +179,7 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
                     .attr('y', (datum: Row) => (y(config.rowKey(datum)) ?? 0) + (y.bandwidth() / 2) + 3)
                     .style('font-size', axisFontSize)
                     .style('fill', colors.labelMuted)
-                    .text((datum: Row) => `${datum.wins.toLocaleString()} · ${datum.pvp_battles.toLocaleString()} · ${(datum.win_ratio * 100).toFixed(1)}%`)
+                    .text((datum: Row) => `${datum.pvp_battles.toLocaleString()} · ${(datum.win_ratio * 100).toFixed(1)}%`)
                     .each(function (this: SVGTextElement, datum: Row) {
                         const startX = x(datum.pvp_battles) + 6;
                         const textLength = this.getComputedTextLength();

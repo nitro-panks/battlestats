@@ -136,7 +136,6 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'false');
         // The heavy chart lanes stay inactive until selected.
-        expect(screen.queryByText('Top Ships (Random Battles)')).not.toBeInTheDocument();
         expect(screen.queryByText('Loading profile charts...')).not.toBeInTheDocument();
         expect(screen.queryByText('Ranked Seasons')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
@@ -450,7 +449,7 @@ describe('PlayerDetailInsightsTabs', () => {
         );
 
         fireEvent.click(screen.getByRole('tab', { name: 'Ships' }));
-        expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.queryByText('Win Rate vs Survival')).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
@@ -463,7 +462,7 @@ describe('PlayerDetailInsightsTabs', () => {
         fireEvent.click(screen.getByRole('button', { name: 'History' }));
         expect(screen.getByText('Ranked Games vs Win Rate')).toBeInTheDocument();
         expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
-        expect(screen.queryByText('Top Ships (Random Battles)')).not.toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'false');
 
         fireEvent.click(screen.getByRole('tab', { name: 'Profile' }));
         expect(screen.getByText('Loading profile charts...')).toBeInTheDocument();
@@ -545,7 +544,6 @@ describe('PlayerDetailInsightsTabs', () => {
         );
 
         expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
     });
 
     it('keeps the career tab empty for clanless players', () => {

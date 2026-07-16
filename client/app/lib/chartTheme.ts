@@ -219,7 +219,7 @@ export const resolveContainerChartWidth = (
 ): number => Math.max(clientWidth || fallbackWidth, minWidth);
 
 // Fixed right-side gutter (px) shipBarPlot reserves inside its plot for the
-// end-of-bar "wins · battles · WR%" data labels: the longest bar is scaled to
+// end-of-bar "battles · WR%" data labels: the longest bar is scaled to
 // end this far short of the plot's right edge so its label sits beside it rather
 // than over the bar. A constant (not data-derived) keeps barChartDataRightX a
 // pure function of width; sized for the widest realistic label at each font.
