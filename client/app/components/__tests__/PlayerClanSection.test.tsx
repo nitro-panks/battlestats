@@ -81,7 +81,7 @@ describe('PlayerClanSection', () => {
         expect(clanLink.getAttribute('href')).toContain('/clan/4444');
     });
 
-    it('renders the whole roster as one flat alphabetical block — no phase grouping', () => {
+    it('splits the roster into a labeled Active block and one unlabeled block of everyone else', () => {
         renderSection([
             makeMember('Echo', 'inactive_180d_plus'),
             makeMember('Charlie', 'cooling_90d'),
@@ -90,18 +90,26 @@ describe('PlayerClanSection', () => {
             makeMember('Bravo', 'active_30d'),
         ]);
 
-        // The player-page roster is flat: a single paragraph, no phase blocks,
-        // headers, or activity icons — the scatterplot above carries recency.
         const roster = screen.getByTestId('clan-activity-roster');
-        expect(screen.queryByTestId('clan-phase-active_7d')).not.toBeInTheDocument();
-        expect(roster).not.toHaveTextContent('Active now');
-        expect(within(roster).queryByLabelText(/battled within|inactive 180/)).not.toBeInTheDocument();
 
-        // All members in one block, alphabetical regardless of activity phase.
-        const names = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo'];
-        names.forEach((name) => expect(within(roster).getByText(name)).toBeInTheDocument());
-        const positions = names.map((name) => roster.textContent!.indexOf(name));
+        // Top: the Active label + the active members (active_7d + active_30d).
+        expect(roster).toHaveTextContent('Active now (2)');
+        const active = screen.getByTestId('clan-roster-active');
+        expect(within(active).getByText('Alpha')).toBeInTheDocument();
+        expect(within(active).getByText('Bravo')).toBeInTheDocument();
+
+        // A rule separates the two blocks.
+        expect(roster.querySelector('hr')).toBeInTheDocument();
+
+        // Below: everyone else in one alphabetical block with NO second label.
+        const others = screen.getByTestId('clan-roster-others');
+        const names = ['Charlie', 'Delta', 'Echo'];
+        names.forEach((name) => expect(within(others).getByText(name)).toBeInTheDocument());
+        const positions = names.map((name) => others.textContent!.indexOf(name));
         expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+        expect(roster).not.toHaveTextContent('Cooling Off');
+        expect(roster).not.toHaveTextContent('Gone dark');
+        expect(screen.queryByTestId('clan-phase-cooling_90d')).not.toBeInTheDocument();
     });
 
     it('renders clanmates as player links but the viewed player as plain text', () => {

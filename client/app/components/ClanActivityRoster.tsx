@@ -20,9 +20,10 @@ import { trackEvent } from '../lib/umami';
 // name carrying the classification-badge tail. Presentation varies by surface
 // (`phaseStyle`): the clan page groups names into one paragraph per collapsed
 // activity phase (Active / Cooling Off / Gone dark) under an icon-and-color
-// header; the player page's clan section renders the whole roster as a single
-// alphabetical block with no phase grouping (the scatterplot above already
-// tells the activity story per member).
+// header; the player page's clan section splits the roster in two — the
+// active phase under its label, then a rule and one unlabeled alphabetical
+// block of everyone else (the scatterplot above tells the finer-grained
+// activity story per member).
 
 interface ClanActivityRosterProps {
     members: ClanMemberData[];
@@ -34,8 +35,9 @@ interface ClanActivityRosterProps {
     // Which surface drove a member click — clan page vs player-page section.
     source?: 'clan' | 'player';
     // 'headers' (default): one paragraph per activity phase, icon+label header.
-    // 'flat': the whole roster as a single alphabetical paragraph.
-    phaseStyle?: 'headers' | 'flat';
+    // 'split': active members under the Active label, an <hr>, then all other
+    // members as one unlabeled alphabetical paragraph.
+    phaseStyle?: 'headers' | 'split';
 }
 
 type PhaseKey = CollapsedActivityBucketKey | 'unknown';
@@ -68,8 +70,6 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
         });
         return groups;
     }, [members]);
-
-    const flatMembers = useMemo(() => [...members].sort(byName), [members]);
 
     const handleMemberClick = () => trackEvent('clan-member-click', { realm, source });
 
@@ -134,13 +134,43 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
         );
     };
 
-    if (phaseStyle === 'flat') {
+    if (phaseStyle === 'split') {
+        const activeMembers = membersByPhase.active_7d;
+        // Everyone not currently active — cooling, gone dark, and unknown —
+        // re-sorted into one alphabetical block; deliberately unlabeled (the
+        // rule is the whole distinction).
+        const otherMembers = [
+            ...membersByPhase.cooling_90d,
+            ...membersByPhase.inactive_180d_plus,
+            ...membersByPhase.unknown,
+        ].sort(byName);
         return (
-            // One step up from the phase-grouped text-sm — the flat block is
+            // One text step up from the phase-grouped text-sm — this roster is
             // the section's only text surface, so the names carry more size.
-            <p className="text-base leading-7" data-testid="clan-activity-roster">
-                {flatMembers.map(renderMember)}
-            </p>
+            <div data-testid="clan-activity-roster">
+                {activeMembers.length > 0 ? (
+                    <>
+                        <h3
+                            className="flex items-center gap-2 text-base font-semibold uppercase tracking-wide"
+                            style={{ color: activityColor('active_7d') }}
+                        >
+                            <ActivityIcon bucket="active_7d" size="header" />
+                            <span>Active now ({activeMembers.length})</span>
+                        </h3>
+                        <p className="mt-2.5 text-base leading-7" data-testid="clan-roster-active">
+                            {activeMembers.map(renderMember)}
+                        </p>
+                    </>
+                ) : null}
+                {activeMembers.length > 0 && otherMembers.length > 0 ? (
+                    <hr className="my-4 border-[var(--border)]" />
+                ) : null}
+                {otherMembers.length > 0 ? (
+                    <p className="text-base leading-7" data-testid="clan-roster-others">
+                        {otherMembers.map(renderMember)}
+                    </p>
+                ) : null}
+            </div>
         );
     }
 
