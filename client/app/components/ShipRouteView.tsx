@@ -187,7 +187,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                 once here — the old standalone class glyph was a duplicate) as a plain
                 bullet-separated line to the right, and the Ship Tool link right-
                 aligned. */}
-            <header className="mb-[30px] flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <header className="mb-[55px] flex flex-wrap items-center gap-x-2.5 gap-y-1">
                 <h1 className="break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)] sm:text-4xl">
                     {ship.name}
                 </h1>
