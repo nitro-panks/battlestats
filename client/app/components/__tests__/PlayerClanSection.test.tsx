@@ -93,7 +93,7 @@ describe('PlayerClanSection', () => {
         const roster = screen.getByTestId('clan-activity-roster');
 
         // Top: the Active label + the active members (active_7d + active_30d).
-        expect(roster).toHaveTextContent('Active now (2)');
+        expect(roster).toHaveTextContent('Active Members (2)');
         const active = screen.getByTestId('clan-roster-active');
         expect(within(active).getByText('Alpha')).toBeInTheDocument();
         expect(within(active).getByText('Bravo')).toBeInTheDocument();

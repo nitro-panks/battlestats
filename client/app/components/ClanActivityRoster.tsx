@@ -155,7 +155,7 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
                             style={{ color: activityColor('active_7d') }}
                         >
                             <ActivityIcon bucket="active_7d" size="header" />
-                            <span>Active now ({activeMembers.length})</span>
+                            <span>Active Members ({activeMembers.length})</span>
                         </h3>
                         <p className="mt-2.5 text-base leading-7" data-testid="clan-roster-active">
                             {activeMembers.map(renderMember)}
