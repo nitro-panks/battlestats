@@ -93,6 +93,44 @@ describe('ClanDetail clan roster hydration wiring', () => {
         expect(mockUseClanMembers).toHaveBeenCalledWith(5555);
     });
 
+    it('keeps the icon+label phase headers on the clan-page roster (headers mode)', () => {
+        // The player page's clan section drops these headers (icon-lead mode);
+        // the clan page must keep them — guard the default.
+        mockUseClanMembers.mockReturnValue({
+            members: [{
+                name: 'Alpha',
+                is_hidden: false,
+                pvp_ratio: 52,
+                days_since_last_battle: 3,
+                is_leader: false,
+                is_pve_player: false,
+                is_sleepy_player: false,
+                is_ranked_player: false,
+                is_clan_battle_player: false,
+                clan_battle_win_rate: null,
+                highest_ranked_league: null,
+                ranked_hydration_pending: false,
+                ranked_updated_at: null,
+                activity_bucket: 'active_7d',
+            }],
+            loading: false,
+            error: '',
+        });
+        render(
+            <ClanDetail
+                clan={{
+                    clan_id: 5555,
+                    name: 'Fixture Clan',
+                    tag: 'FX',
+                    members_count: 12,
+                }}
+                onSelectMember={onSelectMemberSpy}
+            />,
+        );
+
+        expect(screen.getByTestId('clan-phase-active_7d')).toHaveTextContent('Active now (1)');
+    });
+
     it('renders the clan members list before the clan battle seasons section', () => {
         render(
             <ClanDetail

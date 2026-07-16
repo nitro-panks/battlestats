@@ -90,18 +90,24 @@ describe('PlayerClanSection', () => {
             makeMember('Echo', 'inactive_180d_plus'),
         ]);
 
+        // The player-page roster is icon-lead: no phase-header labels; each
+        // paragraph opens with the phase's activity icon (its tooltip carries
+        // the phase meaning).
         const active = screen.getByTestId('clan-phase-active_7d');
-        expect(active).toHaveTextContent('Active now (2)');
+        expect(active).not.toHaveTextContent('Active now');
+        expect(within(active).getByLabelText('Active — battled within 30 days')).toBeInTheDocument();
         expect(within(active).getByText('Alpha')).toBeInTheDocument();
         expect(within(active).getByText('Bravo')).toBeInTheDocument();
 
         const cooling = screen.getByTestId('clan-phase-cooling_90d');
-        expect(cooling).toHaveTextContent('Cooling Off (2)');
+        expect(cooling).not.toHaveTextContent('Cooling Off');
+        expect(within(cooling).getByLabelText('Cooling — battled within 180 days')).toBeInTheDocument();
         expect(within(cooling).getByText('Charlie')).toBeInTheDocument();
         expect(within(cooling).getByText('Delta')).toBeInTheDocument();
 
         const goneDark = screen.getByTestId('clan-phase-inactive_180d_plus');
-        expect(goneDark).toHaveTextContent('Gone dark (1)');
+        expect(goneDark).not.toHaveTextContent('Gone dark');
+        expect(within(goneDark).getByLabelText('Asleep — inactive 180+ days')).toBeInTheDocument();
         expect(within(goneDark).getByText('Echo')).toBeInTheDocument();
 
         // No unknown-recency members: the fourth paragraph is omitted.

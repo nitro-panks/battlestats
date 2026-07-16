@@ -87,6 +87,10 @@ const PlayerClanSection: React.FC<PlayerClanSectionProps> = ({ clanId, clanName,
                         error={error}
                         highlightedPlayerName={playerName}
                         source="player"
+                        // No phase headers under the scatterplot — the chart's
+                        // legend already names the phases; each paragraph leads
+                        // with its activity icon instead.
+                        phaseStyle="icon-lead"
                     />
                 </div>
             </DeferredSection>

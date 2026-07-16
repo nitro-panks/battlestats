@@ -17,10 +17,13 @@ import { useRealm } from '../context/RealmContext';
 import { trackEvent } from '../lib/umami';
 
 // Shared clan roster: one flowing paragraph of member names per collapsed
-// activity phase (Active / Cooling Off / Gone dark), each under an
-// icon-and-color phase header, names separated by a ✦ divider and carrying the
-// classification-badge tail. Renders on the clan page and in the player page's
-// clan section (which passes the viewed player for the non-link highlight).
+// activity phase (Active / Cooling Off / Gone dark), names separated by a ✦
+// divider and carrying the classification-badge tail. Phase presentation
+// varies by surface (`phaseStyle`): the clan page keeps the icon-and-color
+// phase header above each paragraph; the player page's clan section drops the
+// headers and leads each paragraph with the phase's activity icon instead
+// (the icon's own tooltip carries the phase meaning; the scatterplot legend
+// above already names the phases).
 
 interface ClanActivityRosterProps {
     members: ClanMemberData[];
@@ -31,6 +34,9 @@ interface ClanActivityRosterProps {
     highlightedPlayerName?: string;
     // Which surface drove a member click — clan page vs player-page section.
     source?: 'clan' | 'player';
+    // 'headers' (default): icon+label header above each phase paragraph.
+    // 'icon-lead': no headers; the activity icon opens the paragraph itself.
+    phaseStyle?: 'headers' | 'icon-lead';
 }
 
 type PhaseKey = CollapsedActivityBucketKey | 'unknown';
@@ -42,7 +48,7 @@ const PHASES: Array<{ key: PhaseKey; label: string }> = [
     { key: 'unknown', label: 'No recency' },
 ];
 
-const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loading = false, error = '', highlightedPlayerName, source = 'clan' }) => {
+const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loading = false, error = '', highlightedPlayerName, source = 'clan', phaseStyle = 'headers' }) => {
     const { realm } = useRealm();
 
     const membersByPhase = useMemo(() => {
@@ -74,7 +80,7 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
     }
 
     return (
-        <div className="space-y-6" data-testid="clan-activity-roster">
+        <div className={phaseStyle === 'headers' ? 'space-y-6' : 'space-y-4'} data-testid="clan-activity-roster">
             {PHASES.map(({ key, label }) => {
                 const phaseMembers = membersByPhase[key];
                 if (phaseMembers.length === 0) {
@@ -82,21 +88,32 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
                 }
                 return (
                     <div key={key} data-testid={`clan-phase-${key}`}>
-                        <h3
-                            className="flex items-center gap-2 text-base font-semibold uppercase tracking-wide"
-                            style={{ color: key === 'unknown' ? 'var(--text-secondary)' : activityColor(key) }}
-                        >
-                            {key !== 'unknown' ? <ActivityIcon bucket={key} size="header" /> : null}
-                            <span>{label} ({phaseMembers.length})</span>
-                        </h3>
-                        <p className="mt-2.5 text-sm leading-6">
+                        {phaseStyle === 'headers' ? (
+                            <h3
+                                className="flex items-center gap-2 text-base font-semibold uppercase tracking-wide"
+                                style={{ color: key === 'unknown' ? 'var(--text-secondary)' : activityColor(key) }}
+                            >
+                                {key !== 'unknown' ? <ActivityIcon bucket={key} size="header" /> : null}
+                                <span>{label} ({phaseMembers.length})</span>
+                            </h3>
+                        ) : null}
+                        <p className={phaseStyle === 'headers' ? 'mt-2.5 text-sm leading-6' : 'text-sm leading-6'}>
+                        {phaseStyle === 'icon-lead' && key !== 'unknown' ? (
+                            // Lead element of the paragraph: the phase's icon in the
+                            // header size, tinted by ActivityIcon itself; its tooltip
+                            // ("Active — battled within 30 days") carries the phase
+                            // meaning the removed header used to spell out.
+                            <span className="mr-2">
+                                <ActivityIcon bucket={key} size="header" />
+                            </span>
+                        ) : null}
                         {phaseMembers.map((member, index) => {
                             const efficiencyRankTier = !member.is_hidden
                                 ? resolveEfficiencyRankTier(member.efficiency_rank_tier, member.has_efficiency_rank_icon)
                                 : null;
                             // Same classification-badge dispatch as the player-header
-                            // tray; the activity icon is omitted — the paragraph
-                            // header carries the phase.
+                            // tray; the per-member activity icon is omitted — the
+                            // phase header (or the paragraph's lead icon) carries it.
                             const badges = (
                                 <>
                                     {member.is_hidden && <HiddenAccountIcon className="text-[11px] text-[var(--accent-light)]" />}
