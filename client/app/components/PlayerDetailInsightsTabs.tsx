@@ -643,9 +643,9 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={400} theme={theme} />
 
                         {/* The two distribution histograms sit side by side on sm+,
-                            each roughly square: the chart fills its half-column
-                            (~340px at the desktop insights width) and the height
-                            matches. Mobile stacks them full-width. */}
+                            each a half-height landscape panel: the chart fills its
+                            half-column (~340px at the desktop insights width) at
+                            half that in height. Mobile stacks them full-width. */}
                         <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
                             {pvpBattles >= 150 ? (
                                 <div className="min-w-0">
@@ -654,7 +654,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                         description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
                                         className="mb-2"
                                     />
-                                    <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={340} theme={theme} />
+                                    <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={170} theme={theme} />
                                 </div>
                             ) : null}
 
@@ -665,7 +665,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                         description="Player score blends win rate, kill ratio, survival, and battle volume into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
                                         className="mb-2"
                                     />
-                                    <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={340} theme={theme} />
+                                    <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={170} theme={theme} />
                                 </div>
                             ) : null}
                         </div>
@@ -673,14 +673,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 ) : null}
 
                 {activeTab === 'ships' ? (
-                    <div>
-                        <SectionHeadingWithTooltip
-                            title="Top Ships (Random Battles)"
-                            description="This chart highlights the player's most-played random-battle ships, pairing battle volume with wins so you can see which ships dominate their recent visible mix."
-                            className="mb-2"
-                        />
-                        <RandomsSVG playerId={playerId} playerName={playerName} isLoading={isLoading} theme={theme} />
-                    </div>
+                    <RandomsSVG playerId={playerId} playerName={playerName} isLoading={isLoading} theme={theme} />
                 ) : null}
 
                 {activeTab === 'ranked' ? (
@@ -787,7 +780,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 <SectionHeadingWithTooltip
                                     title="Tier vs Type Profile (Random Battles)"
                                     description="This heatmap shows where the tracked player base clusters by ship tier and type. The player markers show where this captain spends most of their battles, so you can compare their ship mix with the broader population trend."
-                                    className="mb-2"
+                                    className="mb-2 pl-[15px]"
                                 />
                                 <TierTypeHeatmapSVG playerId={playerId} data={profileChartPayload} theme={theme} />
 
@@ -795,7 +788,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     <SectionHeadingWithTooltip
                                         title="Performance by Ship Type"
                                         description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
-                                        className="mb-2"
+                                        className="mb-2 pl-[15px]"
                                     />
                                     <TypeSVG playerId={playerId} data={derivedTypeRows} svgHeight={typeChartHeight} theme={theme} />
                                 </div>
@@ -804,7 +797,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     <SectionHeadingWithTooltip
                                         title="Performance by Tier"
                                         description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
-                                        className="mb-2"
+                                        className="mb-2 pl-[15px]"
                                     />
                                     <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={PROFILE_TIER_CHART_HEIGHT} theme={theme} />
                                 </div>

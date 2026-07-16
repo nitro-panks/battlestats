@@ -583,7 +583,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         // selection falls back to Ships; the profile/efficiency/clan panels stay
         // gated behind their tabs.
         await waitFor(() => {
-            expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
+            expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
         });
         expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
         expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
@@ -668,7 +668,6 @@ describe('PlayerDetail efficiency-rank icon', () => {
             expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
         });
         expect(screen.getByRole('tab', { name: 'Activity' })).toBeDisabled();
-        expect(screen.getByText('Top Ships (Random Battles)')).toBeInTheDocument();
         // Profile and Ranked lanes stay inactive until selected.
         expect(screen.queryByText('Tier vs Type Profile')).not.toBeInTheDocument();
         expect(screen.queryByText('Ranked Games vs Win Rate')).not.toBeInTheDocument();

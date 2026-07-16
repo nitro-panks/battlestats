@@ -30,13 +30,13 @@ interface PlayerClanBattleSeasonsProps {
 }
 
 // Rows visible before the table scrolls. Sized so the scroll viewport fills the
-// Insights tab's ~800px of vertical room (2.25rem header + 14 * 3.25rem ≈ 764px),
+// Insights tab's ~800px of vertical room (2.25rem header + 20 * 2.375rem ≈ 796px),
 // matching the Activity table / Ships chart instead of a short pinned box.
-const CLAN_BATTLE_TABLE_VISIBLE_ROWS = 14;
+const CLAN_BATTLE_TABLE_VISIBLE_ROWS = 20;
 const CLAN_BATTLE_TABLE_HEADER_HEIGHT_REM = 2.25;
-// Row = py-2 (1rem) + text-sm label line (1.25rem) + text-xs sub line (1rem)
-// + border ≈ 3.375rem; the visible-rows clamp derives from this.
-const CLAN_BATTLE_TABLE_ROW_HEIGHT_REM = 3.375;
+// Row = py-2 (1rem) + one text-sm line (1.25rem) + border ≈ 2.375rem; the
+// visible-rows clamp derives from this.
+const CLAN_BATTLE_TABLE_ROW_HEIGHT_REM = 2.375;
 
 export interface PlayerClanBattleSummary {
     seasonsPlayed: number;
@@ -201,6 +201,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                 <thead>
                                     <tr className="border-b border-[var(--border)] bg-[var(--bg-surface)] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Season</th>
+                                        <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Date</th>
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Ships</th>
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-right font-semibold">Battles</th>
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-right font-semibold">WR</th>
@@ -209,10 +210,8 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                 <tbody>
                                     {seasons.map((season) => (
                                         <tr key={season.season_id} className="border-b border-[var(--border)] align-top last:border-b-0">
-                                            <td className="py-2 pr-3 text-left text-[var(--accent-dark)]">
-                                                <div className="font-medium">{season.season_label}</div>
-                                                <div className="text-xs text-[var(--text-secondary)]">{season.start_date || season.season_name}</div>
-                                            </td>
+                                            <td className="py-2 pr-3 text-left font-medium text-[var(--accent-dark)]">{season.season_label}</td>
+                                            <td className="py-2 pr-3 text-left text-[var(--text-secondary)]">{season.start_date || season.season_name}</td>
                                             <td className="py-2 pr-3 text-left text-[var(--text-secondary)]">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
                                             <td className="py-2 pr-3 text-right">{season.battles.toLocaleString()}</td>
                                             <td className="py-2 pr-3 text-right font-medium" style={{ color: wrColor(season.win_rate) }}>

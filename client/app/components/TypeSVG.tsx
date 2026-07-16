@@ -1,9 +1,11 @@
 import { createShipBarChart } from './shipBarPlot';
+import { shipClass } from '../lib/shipIdentity';
 import type { TypeRow } from './playerProfileChartData';
 
 const TypeSVG = createShipBarChart<TypeRow>({
     rowKey: (row) => row.ship_type,
     detailTitle: (row) => row.ship_type,
+    axisTickLabel: (key) => shipClass(key)?.abbr ?? key,
     cssPrefix: 'type',
     compactHeightCap: 192,
     compactLeftMargin: 62,

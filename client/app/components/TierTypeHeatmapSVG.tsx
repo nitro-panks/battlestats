@@ -16,6 +16,14 @@ interface TierTypeHeatmapSVGProps {
     theme?: ChartTheme;
 }
 
+// Number of distinct population classes in the tile scale + legend.
+const POP_LEGEND_CLASSES = 5;
+
+// Approximate legend value: 3 significant figures with an SI suffix ("16M",
+// "132K") — precise counts would just be noise at legend size.
+const formatPopLegendValue = (value: number): string =>
+    d3.format('.3~s')(value).replace('G', 'B').replace('k', 'K');
+
 const SHIP_TYPE_ABBREV: Record<string, string> = {
     'Destroyer': 'DD',
     'Cruiser': 'CA',
@@ -23,7 +31,7 @@ const SHIP_TYPE_ABBREV: Record<string, string> = {
     'Aircraft Carrier': 'CV',
     'AirCarrier': 'CV',
     'Carrier': 'CV',
-    'Submarine': 'Sub',
+    'Submarine': 'SS',
 };
 
 const drawChart = (
@@ -106,9 +114,16 @@ const drawChart = (
 
     const maxTileCount = d3.max(resolvedTiles, (row: ResolvedTierTypeTile) => row.count) || 1;
     const maxPlayerBattles = d3.max(payload.player_cells, (row: TierTypePlayerCell) => row.pvp_battles) || 1;
-    const tileColor = theme === 'dark'
-        ? d3.scaleSequential(d3.interpolateRgb('#1c2d3f', '#79c0ff')).domain([0, maxTileCount])
-        : d3.scaleSequential(d3.interpolateBlues).domain([0, maxTileCount]);
+    // Five distinct population classes (ColorBrewer Blues; the dark ramp is the
+    // same five steps sampled from the theme's blue scale). Class breaks derive
+    // from the realm payload's max tile count, so they recompute per realm and
+    // whenever fresher data arrives.
+    const popClassColors: string[] = theme === 'dark'
+        ? d3.quantize(d3.interpolateRgb('#1c2d3f', '#79c0ff'), POP_LEGEND_CLASSES)
+        : [...d3.schemeBlues[POP_LEGEND_CLASSES]];
+    const tileColor = d3.scaleQuantize()
+        .domain([0, maxTileCount])
+        .range(popClassColors);
 
     svg.append('g')
         .attr('class', 'tier-type-grid')
@@ -144,33 +159,16 @@ const drawChart = (
 
     svg.selectAll('.domain').style('stroke', colors.axisLine);
 
-    svg.append('text')
-        .attr('x', bandRangeEnd / 2)
-        .attr('y', height + 34)
-        .attr('text-anchor', 'middle')
-        .style('fill', colors.labelMuted)
-        .style('font-size', axisFontSize)
-        .text(payload.x_label);
-
     // Population legend in the right-side whitespace (the bar-chart label
-    // gutter): a vertical gradient of the tile scale so the background layer
-    // reads as "how populated is this tier/type cell".
+    // gutter): five discrete class swatches of the tile scale, darkest (most
+    // battles) at the top, each labeled with the approximate upper bound of
+    // its class so the background layer reads as "how populated is this
+    // tier/type cell".
     if (!compact) {
         const legendX = bandRangeEnd + 24;
-        const legendBarWidth = 12;
-        const legendBarTop = 20;
-        const legendBarHeight = Math.max(60, Math.min(140, yBandExtent - legendBarTop - 8));
-        const gradientId = `tier-type-pop-gradient-${theme}`;
-
-        const gradient = svgRoot.append('defs')
-            .append('linearGradient')
-            .attr('id', gradientId)
-            .attr('x1', 0)
-            .attr('y1', 0)
-            .attr('x2', 0)
-            .attr('y2', 1);
-        gradient.append('stop').attr('offset', '0%').attr('stop-color', tileColor(maxTileCount));
-        gradient.append('stop').attr('offset', '100%').attr('stop-color', tileColor(0));
+        const swatchSize = 18;
+        const swatchGap = 2;
+        const legendBarTop = 24;
 
         const legend = svg.append('g')
             .attr('transform', `translate(${legendX}, 4)`);
@@ -180,34 +178,32 @@ const drawChart = (
             .attr('y', 0)
             .attr('dominant-baseline', 'hanging')
             .style('fill', colors.labelMid)
-            .style('font-size', '11px')
+            .style('font-size', '13px')
             .style('font-weight', '700')
             .text('Population');
 
-        legend.append('rect')
-            .attr('x', 0)
-            .attr('y', legendBarTop)
-            .attr('width', legendBarWidth)
-            .attr('height', legendBarHeight)
-            .attr('rx', 4)
-            .attr('fill', `url(#${gradientId})`)
-            .attr('stroke', colors.gridLineBlue)
-            .attr('stroke-width', 0.8);
+        popClassColors.slice().reverse().forEach((classColor: string, index: number) => {
+            const [, upperBound] = tileColor.invertExtent(classColor);
+            const rowY = legendBarTop + index * (swatchSize + swatchGap);
 
-        legend.append('text')
-            .attr('x', legendBarWidth + 6)
-            .attr('y', legendBarTop + 2)
-            .attr('dominant-baseline', 'hanging')
-            .style('fill', colors.labelMuted)
-            .style('font-size', '10px')
-            .text('More battles');
+            legend.append('rect')
+                .attr('x', 0)
+                .attr('y', rowY)
+                .attr('width', swatchSize)
+                .attr('height', swatchSize)
+                .attr('rx', 3)
+                .attr('fill', classColor)
+                .attr('stroke', colors.gridLineBlue)
+                .attr('stroke-width', 0.8);
 
-        legend.append('text')
-            .attr('x', legendBarWidth + 6)
-            .attr('y', legendBarTop + legendBarHeight)
-            .style('fill', colors.labelMuted)
-            .style('font-size', '10px')
-            .text('Fewer');
+            legend.append('text')
+                .attr('x', swatchSize + 6)
+                .attr('y', rowY + swatchSize / 2)
+                .attr('dominant-baseline', 'central')
+                .style('fill', colors.labelMuted)
+                .style('font-size', '12px')
+                .text(`≤ ${formatPopLegendValue(upperBound)}`);
+        });
     }
 
     // Player markers are pills overlaid on (centered within) the population pills.

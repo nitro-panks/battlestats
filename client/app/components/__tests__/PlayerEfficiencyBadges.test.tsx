@@ -59,13 +59,14 @@ describe('PlayerEfficiencyBadges', () => {
         expect(screen.getByTitle('Expert: 1')).toBeInTheDocument();
     });
 
-    it('defaults the summary line to the best badge and updates it on hover', () => {
+    it('shows no ship-name summary until hover, then only the hovered ship', () => {
         const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+        const shipNames = ['Bismarck', 'Des Moines', 'Shimakaze', 'Gato'];
 
-        // Des Moines holds the Expert badge, so it leads the summary; 'Expert'
-        // appears both there and in the legend.
-        expect(screen.getByText('Des Moines')).toBeInTheDocument();
-        expect(screen.getAllByText('Expert').length).toBeGreaterThanOrEqual(2);
+        // No summary before any hover.
+        shipNames.forEach((name) => {
+            expect(screen.queryByText(name)).toBeNull();
+        });
 
         const hitTargets = container.querySelectorAll('circle.badge-dot-hit');
         expect(hitTargets.length).toBe(sampleRows.length);
@@ -73,9 +74,14 @@ describe('PlayerEfficiencyBadges', () => {
 
         // After hovering every dot the summary shows exactly one ship —
         // the last-hovered one.
-        const shownShips = ['Bismarck', 'Des Moines', 'Shimakaze', 'Gato']
-            .filter((name) => screen.queryByText(name) !== null);
+        const shownShips = shipNames.filter((name) => screen.queryByText(name) !== null);
         expect(shownShips).toHaveLength(1);
+
+        // Mouseout clears the summary again.
+        fireEvent.mouseOut(hitTargets[hitTargets.length - 1]);
+        shipNames.forEach((name) => {
+            expect(screen.queryByText(name)).toBeNull();
+        });
     });
 
     it('lights the hover cohorts: cyan same-type borders, roman-numeral tier labels, medal fill contrast', () => {

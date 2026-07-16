@@ -33,13 +33,13 @@ export const badgeClassColor = (colors: Colors, badgeClass: number): string => {
     return colors.badgeIII;
 };
 
-const MIN_DOT_RADIUS = 14;
-const MAX_DOT_RADIUS = 34;
+const MIN_DOT_RADIUS = 10;
+const MAX_DOT_RADIUS = 24;
 const HIT_PAD = 4;
 const DEFAULT_SVG_HEIGHT = 460;
 const MARGIN = { top: 50, right: 16, bottom: 16, left: 16 };
 const AXIS_FONT_SIZE = '13px';
-const SUMMARY_FONT_SIZE = '18px';
+const SUMMARY_FONT_SIZE = '22px';
 // Live force layout, per the classic d3 force-directed-graph shape: ships of a
 // type bond to their type hub (strong, short links) and hubs bond weakly to
 // each other (long links); every node carries a weak many-body repulsion so
@@ -289,36 +289,22 @@ const drawChart = (
         });
     };
 
+    // Left-aligned to the SVG's (and thus the "Efficiency Badges" header's)
+    // left edge, not the plot margin.
     const summaryGroup = svgRoot.append('g')
-        .attr('transform', `translate(${MARGIN.left + 4}, 18)`);
+        .attr('transform', 'translate(0, 18)');
 
     const renderSummary = (dot: EfficiencyBadgeDot) => {
         summaryGroup.selectAll('*').remove();
 
-        const line = summaryGroup.append('text')
+        summaryGroup.append('text')
             .attr('x', 0)
             .attr('y', 0)
             .attr('dominant-baseline', 'middle')
-            .style('font-size', SUMMARY_FONT_SIZE);
-
-        line.append('tspan')
+            .style('font-size', SUMMARY_FONT_SIZE)
             .style('font-weight', '700')
             .style('fill', colors.labelStrong)
             .text(dot.shipName);
-
-        line.append('tspan')
-            .style('fill', colors.labelMuted)
-            .text('  ·  ');
-
-        line.append('tspan')
-            .style('font-weight', '700')
-            .style('font-family', dot.badgeClass === 1 ? undefined : 'Georgia, "Times New Roman", serif')
-            .style('fill', badgeClassColor(colors, dot.badgeClass))
-            .text(dot.badgeClass === 1 ? 'Expert' : dot.badgeLabel);
-
-        line.append('tspan')
-            .style('fill', colors.labelMid)
-            .text(`  ·  ${dot.shipType}  ·  Tier ${romanTier(dot.shipTier)}`);
     };
 
     // The three connection webs, layered type → tier → class beneath the dots.
@@ -521,6 +507,8 @@ const drawChart = (
         ringNodes.style('opacity', 0);
         tierLabelNodes.style('opacity', 0);
         typeLabels.forEach((label) => label.style('fill', colors.labelStrong));
+        // The ship-name summary only exists while a dot is hovered.
+        summaryGroup.selectAll('*').remove();
     };
 
     hitNodes
@@ -568,9 +556,6 @@ const drawChart = (
             simulation.alphaTarget(0);
         });
 
-    // Default the summary to the player's best badge (class asc, then name) so
-    // the panel never starts blank.
-    renderSummary(nodes[0].dot);
     renderPositions();
 
     return simulation;
