@@ -191,7 +191,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                 aligned. */}
             {/* mt separates the masthead from the site header above; mb sets
                 the (tighter) gap to the standings table below. */}
-            <header className="mt-[25px] mb-[30px] flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <header className="mt-[25px] mb-[15px] flex flex-wrap items-center gap-x-2.5 gap-y-1">
                 <h1 className="break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)] sm:text-4xl">
                     {ship.name}
                 </h1>
