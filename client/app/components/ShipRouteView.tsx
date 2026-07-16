@@ -56,7 +56,9 @@ const SkeletonBar: React.FC<{ className?: string }> = ({ className = '' }) => (
 // rather than a single grey box that reads as "broken".
 const ShipSkeleton: React.FC = () => (
     <section className="mx-auto max-w-3xl" aria-busy="true" aria-label="Loading ship standings">
-        <div className="mb-5">
+        {/* mt matches the real masthead's offset so the page doesn't jump
+            when the loaded content replaces the skeleton. */}
+        <div className="mt-[25px] mb-5">
             <div className="flex items-center gap-2.5">
                 <SkeletonBar className="h-6 w-9" />
                 <SkeletonBar className="h-9 w-52" />
@@ -153,7 +155,7 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
         return (
             <section className="mx-auto max-w-3xl">
                 {label && (
-                    <h1 className="mb-3 break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
+                    <h1 className="mt-[25px] mb-3 break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)]">
                         {label}
                     </h1>
                 )}
@@ -187,7 +189,9 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                 once here — the old standalone class glyph was a duplicate) as a plain
                 bullet-separated line to the right, and the Ship Tool link right-
                 aligned. */}
-            <header className="mb-[55px] flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            {/* mt separates the masthead from the site header above; mb sets
+                the (tighter) gap to the standings table below. */}
+            <header className="mt-[25px] mb-[30px] flex flex-wrap items-center gap-x-2.5 gap-y-1">
                 <h1 className="break-words text-3xl font-semibold tracking-tight text-[var(--accent-dark)] sm:text-4xl">
                     {ship.name}
                 </h1>
