@@ -50,6 +50,7 @@ describe('BattleHistoryTreemaps (presentational)', () => {
     const realRO = globalThis.ResizeObserver;
     beforeAll(() => { globalThis.ResizeObserver = WidthReportingResizeObserver as unknown as typeof ResizeObserver; });
     afterAll(() => { globalThis.ResizeObserver = realRO; });
+    beforeEach(() => { mockTrackEvent.mockClear(); });
 
     it('renders the three panels with aggregate tiles from by_ship rows', () => {
         render(
@@ -62,9 +63,14 @@ describe('BattleHistoryTreemaps (presentational)', () => {
                 ]}
             />,
         );
-        expect(screen.getByText('battles × dmg')).toBeInTheDocument();
-        expect(screen.getByText('Type × WR')).toBeInTheDocument();
-        expect(screen.getByText('Tier × WR')).toBeInTheDocument();
+        // Ships-panel header: "battles ×" + the shared color-metric pill row,
+        // WR% default; the type/tier titles echo the active metric.
+        expect(screen.getByText('battles ×')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'WR%' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'dmg' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByRole('button', { name: 'Kills' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByText('Type × WR%')).toBeInTheDocument();
+        expect(screen.getByText('Tier × WR%')).toBeInTheDocument();
         // Type panel aggregates to short class labels; ships panel draws one
         // tile per ship; tier panel groups both T10 ships into one tile.
         expect(screen.getByText('BB')).toBeInTheDocument();
@@ -75,7 +81,7 @@ describe('BattleHistoryTreemaps (presentational)', () => {
     });
 
     it('colors damage tiles by the player-vs-population ratio and falls back to neutral without a baseline', () => {
-        const { container } = render(
+        render(
             <BattleHistoryTreemaps
                 byShip={[
                     // +48% over the ship average → green side.
@@ -87,9 +93,11 @@ describe('BattleHistoryTreemaps (presentational)', () => {
                 ]}
             />,
         );
-        const fills = Array.from(container.querySelectorAll('rect'))
-            .map((r) => r.getAttribute('fill'))
-            .filter((f): f is string => !!f && f.startsWith('#') === false ? false : true);
+        // WR% is the default metric — the diverging damage fills need dmg.
+        fireEvent.click(screen.getByRole('button', { name: 'dmg' }));
+        const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
+        const fills = Array.from(shipsSvg.querySelectorAll('rect'))
+            .map((r) => r.getAttribute('fill'));
         // The neutral no-baseline fill is present verbatim; the diverging fills
         // are computed rgb() strings, so just assert we did NOT paint all three
         // ship tiles the same color.
@@ -99,9 +107,12 @@ describe('BattleHistoryTreemaps (presentational)', () => {
 
     it('avg damage (not WR) is the damage tile sub-label, and tooltips carry the vs-average detail on hover', () => {
         render(<BattleHistoryTreemaps byShip={[row({})]} />);
+        // WR% is the default metric — switch to dmg for this test.
+        fireEvent.click(screen.getByRole('button', { name: 'dmg' }));
         // 140_000 → "140k" at 3 significant digits — the sub line is the value
-        // alone (no battle counts on tiles).
-        expect(screen.getByText('140k')).toBeInTheDocument();
+        // alone (no battle counts on tiles). In dmg mode all three panels
+        // carry an avg-dmg sub-line (single-ship roster → same value on each).
+        expect(screen.getAllByText('140k').length).toBeGreaterThanOrEqual(1);
         // Hover specifically a SHIPS-panel tile (the type/tier panels have
         // their own rects with WR tooltips).
         const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
@@ -116,13 +127,39 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         // assert presence of an inline color rather than an exact endpoint).
         expect(delta.getAttribute('style')).toMatch(/color/);
         expect(screen.getByText('vs avg')).toBeInTheDocument();
-        // "140k" now appears twice: the tile sub-label and the tooltip value.
-        expect(screen.getAllByText('140k')).toHaveLength(2);
+        // "140k" appears on each panel's sub-label (ships/type/tier, single
+        // ship) plus the tooltip value.
+        expect(screen.getAllByText('140k')).toHaveLength(4);
         expect(screen.getByText('avg dmg')).toBeInTheDocument();
         expect(screen.getByText('battles')).toBeInTheDocument();
         expect(screen.getByText('WR')).toBeInTheDocument();
         expect(screen.queryByText(/30d avg/)).not.toBeInTheDocument();
         expect(screen.queryByText(/total/)).not.toBeInTheDocument();
+    });
+
+    it('color-metric pills switch the ships-map fill, sub-line, and tooltip rows', () => {
+        const { container } = render(<BattleHistoryTreemaps byShip={[row({})]} />);
+        const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
+
+        // WR%: sub-line becomes the WR, tile fill becomes the shared wrColor
+        // band (60% → '#D042F3'), and the tooltip WR value is tinted.
+        fireEvent.click(screen.getByRole('button', { name: 'WR%' }));
+        expect(screen.getByRole('button', { name: 'WR%' })).toHaveAttribute('aria-pressed', 'true');
+        // Each pill click emits one Umami event carrying the chosen metric.
+        expect(mockTrackEvent).toHaveBeenCalledWith('battle-history-ships-color', { metric: 'wr' });
+        expect(container.querySelector('svg rect')?.getAttribute('fill')).toBe('#D042F3');
+        fireEvent.mouseMove(shipsSvg.querySelector('rect')!, { clientX: 10, clientY: 10 });
+        const wrValues = screen.getAllByText('60.0%');
+        expect(wrValues.some((el) => el.getAttribute('style')?.includes('color'))).toBe(true);
+
+        // Kills: fixed-band fill (12 frags / 10 battles = 1.20 → '#3182bd'),
+        // and the tooltip gains a colored kills row.
+        fireEvent.click(screen.getByRole('button', { name: 'Kills' }));
+        expect(container.querySelector('svg rect')?.getAttribute('fill')).toBe('#3182bd');
+        fireEvent.mouseMove(shipsSvg.querySelector('rect')!, { clientX: 10, clientY: 10 });
+        expect(screen.getByText('kills / battle')).toBeInTheDocument();
+        // "1.20" appears twice: the tile sub-line and the tooltip value.
+        expect(screen.getAllByText('1.20').length).toBeGreaterThanOrEqual(1);
     });
 
     it('small roster shows everything by default; the slider zooms but does not persist', () => {

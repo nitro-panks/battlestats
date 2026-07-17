@@ -87,7 +87,7 @@ interface HoverState {
 }
 
 interface MiniTreemapProps {
-    title: string;
+    title: React.ReactNode;
     ariaLabel: string;
     data: TreemapDatum[];
     selectedKey?: string | null;
@@ -254,40 +254,125 @@ interface BattleHistoryTreemapsProps {
 }
 
 // Aggregate rows into one tile per group (type or tier); WR = wins ÷ battles
-// over the whole group, not an average of per-ship rates.
+// over the whole group, not an average of per-ship rates. The color (and the
+// tooltip's colored row) follows the shared color metric:
+//   dmg   — group actual ÷ expected damage, where expected = Σ(battles ×
+//           ship_pop_avg_damage) over the ships that HAVE a baseline (actual
+//           is summed over the same subset so the ratio is honest); no
+//           baselined ship in the group → neutral.
+//   kills — group frags ÷ battles on the fixed killsColor bands.
+//   wr    — group WR on the shared wrColor bands.
 const aggregateTiles = (
     rows: BattleHistoryByShip[],
     groupKey: (r: BattleHistoryByShip) => string | null,
     labelFor: (key: string) => string,
+    colorMetric: ShipsColorMetric,
 ): TreemapDatum[] => {
-    const groups = new Map<string, { battles: number; wins: number; ships: number }>();
+    const groups = new Map<string, {
+        battles: number; wins: number; ships: number; damage: number; frags: number;
+        expectedDamage: number; baselinedDamage: number;
+    }>();
     rows.forEach((r) => {
         const key = groupKey(r);
         if (key == null) return;
-        const cur = groups.get(key) ?? { battles: 0, wins: 0, ships: 0 };
+        const cur = groups.get(key) ?? {
+            battles: 0, wins: 0, ships: 0, damage: 0, frags: 0,
+            expectedDamage: 0, baselinedDamage: 0,
+        };
         cur.battles += r.battles;
         cur.wins += r.wins;
         cur.ships += 1;
+        cur.damage += r.damage;
+        cur.frags += r.frags;
+        const popAvg = r.ship_pop_avg_damage ?? null;
+        if (popAvg != null && popAvg > 0 && r.battles > 0) {
+            cur.expectedDamage += popAvg * r.battles;
+            cur.baselinedDamage += r.damage;
+        }
         groups.set(key, cur);
     });
     return Array.from(groups.entries())
         .filter(([, v]) => v.battles > 0)
         .map(([key, v]) => {
             const wr = (v.wins / v.battles) * 100;
+            const avgDmg = v.damage / v.battles;
+            const kpb = v.frags / v.battles;
+            const ratio = v.expectedDamage > 0 ? v.baselinedDamage / v.expectedDamage : null;
+            const color = colorMetric === 'wr'
+                ? wrColor(wr)
+                : colorMetric === 'kills'
+                    ? killsColor(kpb)
+                    : ratio != null ? damageRatioColor(ratio) : NEUTRAL_TILE;
+            const sub = colorMetric === 'wr'
+                ? `${wr.toFixed(1)}%`
+                : colorMetric === 'kills'
+                    ? kpb.toFixed(2)
+                    : fmtDamage(avgDmg);
             return {
                 key,
                 label: labelFor(key),
-                sub: `${wr.toFixed(1)}%`,
+                sub,
                 size: v.battles,
-                color: wrColor(wr),
+                color,
                 tooltip: [
                     labelFor(key),
+                    ...(colorMetric === 'dmg' ? [
+                        { value: fmtDamage(avgDmg), label: 'avg dmg' },
+                        ratio != null
+                            ? {
+                                value: `${ratio >= 1 ? '+' : ''}${((ratio - 1) * 100).toFixed(0)}%`,
+                                label: 'vs avg',
+                                color: damageRatioColor(ratio),
+                            }
+                            : 'no ship-average baseline',
+                    ] : []),
+                    ...(colorMetric === 'kills'
+                        ? [{ value: kpb.toFixed(2), label: 'kills / battle', color: killsColor(kpb) }]
+                        : []),
                     { value: v.battles.toLocaleString(), label: v.battles === 1 ? 'battle' : 'battles' },
-                    { value: `${wr.toFixed(1)}%`, label: 'WR', color: wrColor(wr) },
+                    {
+                        value: `${wr.toFixed(1)}%`,
+                        label: 'WR',
+                        ...(colorMetric === 'wr' ? { color: wrColor(wr) } : {}),
+                    },
                     { value: String(v.ships), label: v.ships === 1 ? 'ship' : 'ships' },
                 ],
             };
         });
+};
+
+// Color metric shared by all three maps. Size is always battles; this picks
+// what the tile fill (and the tooltip's colored row) encodes. Not persisted —
+// every load starts on 'wr', matching the slider's reset-to-default behavior.
+type ShipsColorMetric = 'dmg' | 'kills' | 'wr';
+
+// Pill order follows key order: WR% first (the default), then dmg, then Kills.
+const COLOR_METRIC_LABEL: Record<ShipsColorMetric, string> = {
+    wr: 'WR%',
+    dmg: 'dmg',
+    kills: 'Kills',
+};
+
+// Metric description used in the panels' aria-labels.
+const METRIC_ARIA: Record<ShipsColorMetric, string> = {
+    dmg: "average damage versus each ship's realm average",
+    kills: 'kills per battle',
+    wr: 'win rate',
+};
+
+// Fixed kills-per-battle bands using the wrColor hex ladder, so the ramp reads
+// the same everywhere (red = poor → green = solid → blue/purple = elite). The
+// anchors are absolute, not relative to the player: ~0.7 KPB is a typical
+// Randoms average, 1.0+ is strong, 1.5+ elite.
+export const killsColor = (kpb: number): string => {
+    if (kpb > 2.0) return '#810c9e';
+    if (kpb >= 1.5) return '#D042F3';
+    if (kpb >= 1.2) return '#3182bd';
+    if (kpb >= 1.0) return '#74c476';
+    if (kpb >= 0.8) return '#a1d99b';
+    if (kpb >= 0.6) return '#fed976';
+    if (kpb >= 0.4) return '#fd8d3c';
+    return '#a50f15';
 };
 
 const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
@@ -295,17 +380,26 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
     selectedShipId = null,
     onShipClick,
 }) => {
+    // Shared color metric (wr | dmg | kills) for ALL THREE maps — one pill row
+    // in the ships-panel header drives the ships, type, and tier fills alike.
+    // Not persisted; every load starts on 'wr'. One analytics event per switch.
+    const [colorMetric, setColorMetric] = useState<ShipsColorMetric>('wr');
+    const chooseColorMetric = (m: ShipsColorMetric) => {
+        setColorMetric(m);
+        trackEvent('battle-history-ships-color', { metric: m });
+    };
     const typeTiles = useMemo(
-        () => aggregateTiles(byShip, (r) => r.ship_type, shipTypeShort),
-        [byShip],
+        () => aggregateTiles(byShip, (r) => r.ship_type, shipTypeShort, colorMetric),
+        [byShip, colorMetric],
     );
     const tierTiles = useMemo(
         () => aggregateTiles(
             byShip,
             (r) => (r.ship_tier != null ? String(r.ship_tier) : null),
             (key) => `T${key}`,
+            colorMetric,
         ),
-        [byShip],
+        [byShip, colorMetric],
     );
     // Slider zoom over the ships map: null = no explicit choice yet (use the
     // default min(25, roster)). Kept as the raw slider number, clamped against
@@ -335,12 +429,24 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                 const ratio = popAvg != null && popAvg > 0
                     ? r.avg_damage / popAvg
                     : null;
+                const kpb = r.battles > 0 ? r.frags / r.battles : 0;
+                const kpbColor = killsColor(kpb);
+                const color = colorMetric === 'wr'
+                    ? wrColor(r.win_rate)
+                    : colorMetric === 'kills'
+                        ? kpbColor
+                        : ratio != null ? damageRatioColor(ratio) : NEUTRAL_TILE;
+                const sub = colorMetric === 'wr'
+                    ? `${r.win_rate.toFixed(1)}%`
+                    : colorMetric === 'kills'
+                        ? kpb.toFixed(2)
+                        : fmtDamage(r.avg_damage);
                 return {
                     key: String(r.ship_id),
                     label: r.ship_name || `Ship ${r.ship_id}`,
-                    sub: fmtDamage(r.avg_damage),
+                    sub,
                     size: r.battles,
-                    color: ratio != null ? damageRatioColor(ratio) : NEUTRAL_TILE,
+                    color,
                     tooltip: [
                         r.ship_name || `Ship ${r.ship_id}`,
                         { value: fmtDamage(r.avg_damage), label: 'avg dmg' },
@@ -351,13 +457,20 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                                 color: damageRatioColor(ratio),
                             }
                             : 'no ship-average baseline',
+                        ...(colorMetric === 'kills'
+                            ? [{ value: kpb.toFixed(2), label: 'kills / battle', color: kpbColor }]
+                            : []),
                         { value: r.battles.toLocaleString(), label: r.battles === 1 ? 'battle' : 'battles' },
-                        { value: `${r.win_rate.toFixed(1)}%`, label: 'WR' },
+                        {
+                            value: `${r.win_rate.toFixed(1)}%`,
+                            label: 'WR',
+                            ...(colorMetric === 'wr' ? { color: wrColor(r.win_rate) } : {}),
+                        },
                     ],
                     shipRow: r,
                 };
             }),
-        [byShip, effectiveN],
+        [byShip, effectiveN, colorMetric],
     );
 
     if (typeTiles.length === 0 && shipTiles.length === 0 && tierTiles.length === 0) {
@@ -370,8 +483,27 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
         // line at half width each.
         <div className="mb-5 space-y-4">
             <MiniTreemap
-                title="battles × dmg"
-                ariaLabel="Ships sized by battles played, colored by the player's average damage versus the ship's realm average"
+                title={(
+                    <span className="flex items-center gap-1">
+                        <span>battles ×</span>
+                        {(Object.keys(COLOR_METRIC_LABEL) as ShipsColorMetric[]).map((m) => (
+                            <button
+                                key={m}
+                                type="button"
+                                aria-pressed={colorMetric === m}
+                                onClick={() => chooseColorMetric(m)}
+                                className={`rounded px-1 py-0.5 uppercase tracking-wide transition-colors ${
+                                    colorMetric === m
+                                        ? 'bg-[var(--accent-faint)] text-[var(--text-strong)]'
+                                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                                }`}
+                            >
+                                {COLOR_METRIC_LABEL[m]}
+                            </button>
+                        ))}
+                    </span>
+                )}
+                ariaLabel={`Ships sized by battles played, colored by ${METRIC_ARIA[colorMetric]}`}
                 headerRight={playedShipCount > 1 ? (
                     <span className="flex items-center gap-1 normal-case tracking-normal">
                         <span className="tabular-nums text-[var(--text-muted)]">1</span>
@@ -410,14 +542,14 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
             />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <MiniTreemap
-                    title="Type × WR"
-                    ariaLabel="Battles by ship type, colored by win rate"
+                    title={`Type × ${COLOR_METRIC_LABEL[colorMetric]}`}
+                    ariaLabel={`Battles by ship type, colored by ${METRIC_ARIA[colorMetric]}`}
                     data={typeTiles}
                     height={PANEL_HEIGHT / 2}
                 />
                 <MiniTreemap
-                    title="Tier × WR"
-                    ariaLabel="Battles by ship tier, colored by win rate"
+                    title={`Tier × ${COLOR_METRIC_LABEL[colorMetric]}`}
+                    ariaLabel={`Battles by ship tier, colored by ${METRIC_ARIA[colorMetric]}`}
                     data={tierTiles}
                     height={PANEL_HEIGHT / 2}
                 />
