@@ -49,3 +49,5 @@ server/static/rest_framework/**/*.png
 # checked in to avoid Dependabot lock-file noise on transitive deps.)
 server/Pipfile
 server/Pipfile.lock
+
+meta/
