@@ -70,3 +70,15 @@ added calls).
   complemented for the active-7d set. (That sweep was retired 2026-06-15 — this floor
   `battles_json` refresh now covers the whole active-7d set for free, which was part of the
   rationale for removing it.)
+
+## Addendum 2026-07-17 — refresh moved after the observation/diff work
+
+`apply_battles_json` bumps `battles_updated_at`, which is the `X-Player-Refresh-Pending`
+anchor (`views._player_refresh_signals`). The refresh block used to run before the
+observation transaction, so a watching player page's poll could see "landed" before the
+BattleEvents committed and the battle-history cache was invalidated — rehydrating the
+charts from the pre-session payload. The refresh now runs via `_refresh_displayed_stats()`
+only on completed paths, after the observation (and, on the events path, after the commit +
+cache invalidations). Same kill switch (`FLOOR_REFRESH_BATTLES_JSON_ENABLED`), same
+empty-payload guard, same timing accumulator. See
+`runbook-live-update-cooldown-2026-05-27.md` Addendum 2026-07-17 for the full race analysis.

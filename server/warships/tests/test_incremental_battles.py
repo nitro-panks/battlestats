@@ -1387,6 +1387,64 @@ class UpdateBattleDataCaptureHookTests(TestCase):
             BattleObservation.objects.filter(player=self.player).count(), 0,
         )
 
+    def test_capture_runs_before_battles_updated_at_bump(self):
+        """`X-Player-Refresh-Pending` is anchored on `battles_updated_at`
+        (views._player_refresh_signals), so the bump must land only AFTER the
+        capture has committed its events and invalidated the battle-history
+        cache. If the bump lands first, the client's 2s poll can see "landed"
+        in the gap, fire its single nonce-bumped battle-history refetch, and
+        cache the pre-session payload — the charts then show stale data until
+        a manual reload (2026-07-17 investigation)."""
+        from warships.incremental_battles import (
+            record_observation_from_payloads as real_capture,
+        )
+        seen = {}
+
+        def spying_capture(player, **kwargs):
+            row = Player.objects.filter(pk=player.pk).values(
+                "battles_updated_at").first()
+            seen["bump_at_capture_time"] = row["battles_updated_at"]
+            return real_capture(player, **kwargs)
+
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_CAPTURE_ENABLED": "1"},
+            clear=False,
+        ), mock.patch(
+            "warships.incremental_battles.record_observation_from_payloads",
+            side_effect=spying_capture,
+        ):
+            self._run_update_battle_data()
+        self.assertIn("bump_at_capture_time", seen, "capture hook never ran")
+        self.assertIsNone(
+            seen["bump_at_capture_time"],
+            "battles_updated_at was bumped before the capture ran — the "
+            "pending header can clear before the battle-history payload "
+            "is refetchable",
+        )
+        self.player.refresh_from_db()
+        self.assertIsNotNone(
+            self.player.battles_updated_at,
+            "the bump must still land after the capture",
+        )
+
+    def test_capture_failure_still_bumps_battles_updated_at(self):
+        """Ordering parity for the failure path: a capture bug must not leave
+        battles_updated_at un-bumped (that would re-trigger the refresh on
+        every poll)."""
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_CAPTURE_ENABLED": "1"},
+            clear=False,
+        ), mock.patch(
+            "warships.incremental_battles.record_observation_from_payloads",
+            side_effect=RuntimeError("simulated capture bug"),
+        ):
+            self._run_update_battle_data()
+        self.player.refresh_from_db()
+        self.assertIsNotNone(self.player.battles_updated_at)
+        self.assertTrue(self.player.battles_json)
+
     def test_hook_emits_event_on_advance_across_two_visits(self):
         """End-to-end Phase 2 capture: two refreshes with pvp_battles
         advancing between them produces one BattleEvent row."""
@@ -3913,6 +3971,54 @@ class FloorBattlesJsonRefreshTests(TestCase):
             self.player, player_data={"hidden_profile": True},
             ship_data=self._full_ship_payload(), refresh_battles_json=True)
         m_apply.assert_not_called()
+
+    @mock.patch("warships.data.apply_battles_json")
+    def test_refresh_runs_after_observation_is_written(self, m_apply):
+        """Same race as the visit path: `apply_battles_json` bumps
+        `battles_updated_at` (the X-Player-Refresh-Pending anchor), so it must
+        run only after the observation/diff work — not before it."""
+        seen = {}
+
+        def record_state(*args, **kwargs):
+            seen["obs_count_at_refresh"] = BattleObservation.objects.filter(
+                player=self.player).count()
+
+        m_apply.side_effect = record_state
+        record_observation_from_payloads(
+            self.player, ship_data=self._full_ship_payload(),
+            refresh_battles_json=True)
+        m_apply.assert_called_once()
+        self.assertEqual(
+            seen["obs_count_at_refresh"], 1,
+            "battles_json refresh ran before the observation was written",
+        )
+
+    @mock.patch("warships.data.apply_battles_json")
+    def test_refresh_runs_after_events_on_advance(self, m_apply):
+        """On an advance, the refresh (and its battles_updated_at bump) must
+        follow the BattleEvent writes so the pending header can only clear
+        once the battle-history payload is rebuildable."""
+        record_observation_from_payloads(
+            self.player, ship_data=self._full_ship_payload())  # baseline
+        self.player.pvp_battles = 101
+        self.player.pvp_wins = 51
+        self.player.save()
+        payload = self._full_ship_payload(battles=101)
+        payload[0]["pvp"]["wins"] = 51
+        seen = {}
+
+        def record_state(*args, **kwargs):
+            seen["events_at_refresh"] = BattleEvent.objects.filter(
+                player=self.player).count()
+
+        m_apply.side_effect = record_state
+        record_observation_from_payloads(
+            self.player, ship_data=payload, refresh_battles_json=True)
+        m_apply.assert_called_once()
+        self.assertEqual(
+            seen["events_at_refresh"], 1,
+            "battles_json refresh ran before the BattleEvent write",
+        )
 
     def test_apply_battles_json_builds_and_advances_timestamp(self):
         from warships.data import apply_battles_json
