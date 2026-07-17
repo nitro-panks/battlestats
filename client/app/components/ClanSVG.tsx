@@ -175,9 +175,11 @@ const drawClanPlot = (
 ) => {
     const colors = chartColors[theme];
     const compact = svgWidth < 480;
+    // Non-compact right margin trimmed 16 -> 1: the plot's right edge extends
+    // 15px to line up with the tables/sections above it in the 850px column.
     const margin = compact
         ? { top: 48, right: 10, bottom: 28, left: 30 }
-        : { top: 64, right: 16, bottom: 32, left: 38 };
+        : { top: 64, right: 1, bottom: 32, left: 38 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -373,13 +375,23 @@ const drawClanPlot = (
     // compress everyone else near the origin; a log scale spreads the pack out.
     const battlesMin = d3.min(data, (datum: ClanData) => datum.pvp_battles) || 0;
     const xMinDomain = Math.max(1, battlesMin);
+    // ~15px of empty room between the highest-battle member's dot EDGE and the
+    // plot's right edge (20px center pad minus the largest dot radius, 5.25).
+    // The pad is domain-side (a stretch factor, applied as an exponent on the
+    // log scale so it is the same pixel width there) rather than a shortened
+    // range, so the axis and gridlines still span the full plot width.
+    const X_EDGE_PAD_PX = 20;
+    const xStretch = width / Math.max(1, width - X_EDGE_PAD_PX);
     const x = xScaleType === 'log'
         ? d3.scaleLog()
-            .domain([xMinDomain, Math.max(xMinDomain * 10, max)])
+            .domain([
+                xMinDomain,
+                xMinDomain * Math.pow(Math.max(xMinDomain * 10, max) / xMinDomain, xStretch),
+            ])
             .range([0, width])
             .clamp(true)
         : d3.scaleLinear()
-            .domain([0, max])
+            .domain([0, max * xStretch])
             .range([0, width]);
     // Guard against log(0)/log(negative) when placing points.
     const xVal = (battles: number): number => x(Math.max(1, battles));
