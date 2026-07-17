@@ -328,15 +328,15 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     </div>
                                 </div>
                                 <div className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
-                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Survival</p>
-                                    <div className="flex flex-1 items-center justify-center">
-                                        <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{player.pvp_survival_rate}%</p>
-                                    </div>
-                                </div>
-                                <div className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
                                     <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">KDR</p>
                                     <div className="flex flex-1 items-center justify-center">
                                         <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{formatKillRatio(player.actual_kdr ?? null)}</p>
+                                    </div>
+                                </div>
+                                <div className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
+                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Survival</p>
+                                    <div className="flex flex-1 items-center justify-center">
+                                        <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{player.pvp_survival_rate}%</p>
                                     </div>
                                 </div>
                             </div>
