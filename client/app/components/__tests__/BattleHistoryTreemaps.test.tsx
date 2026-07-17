@@ -107,8 +107,22 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
         const shipRect = shipsSvg.querySelector('rect');
         fireEvent.mouseMove(shipRect!, { clientX: 10, clientY: 10 });
-        expect(screen.getByText(/\+48% vs ship avg/)).toBeInTheDocument();
-        expect(screen.getByText(/ship 30d avg 94\.6k/)).toBeInTheDocument();
+        // The tooltip is value/label pairs on a shared grid: avg dmg, the
+        // colored "+48%" delta, then battles and WR each on their own row;
+        // the old "ship 30d avg … total" line is gone.
+        const delta = screen.getByText('+48%');
+        expect(delta).toBeInTheDocument();
+        // Tinted by the same diverging scale as the tile (interpolated, so
+        // assert presence of an inline color rather than an exact endpoint).
+        expect(delta.getAttribute('style')).toMatch(/color/);
+        expect(screen.getByText('vs avg')).toBeInTheDocument();
+        // "140k" now appears twice: the tile sub-label and the tooltip value.
+        expect(screen.getAllByText('140k')).toHaveLength(2);
+        expect(screen.getByText('avg dmg')).toBeInTheDocument();
+        expect(screen.getByText('battles')).toBeInTheDocument();
+        expect(screen.getByText('WR')).toBeInTheDocument();
+        expect(screen.queryByText(/30d avg/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/total/)).not.toBeInTheDocument();
     });
 
     it('small roster shows everything by default; the slider zooms but does not persist', () => {

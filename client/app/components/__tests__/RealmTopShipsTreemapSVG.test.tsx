@@ -84,6 +84,30 @@ describe('RealmTopShipsTreemapSVG (presentational)', () => {
         );
     });
 
+    it('tile sub-line is WR alone, and hover shows the value/label pair tooltip', () => {
+        const { container } = render(
+            <RealmTopShipsTreemapSVG
+                ships={[ship({ ship_id: 1, ship_name: 'Moskva', battles: 5000, win_rate: 58 })]}
+                tier={10}
+                type="Cruiser"
+                wrPct={null}
+            />,
+        );
+        // Tile sub-line: the WR% alone (the battles count was removed 2026-07-17).
+        const texts = Array.from(container.querySelectorAll('svg text')).map((t) => t.textContent);
+        expect(texts).toContain('58.0%');
+        expect(texts.some((t) => t?.includes('5,000'))).toBe(false);
+        // Tooltip: value/label pairs — battles, wrColor-tinted WR, bold class + tier.
+        fireEvent.mouseMove(container.querySelector('svg rect')!, { clientX: 10, clientY: 10 });
+        expect(screen.getByText('5,000')).toBeInTheDocument();
+        expect(screen.getByText('battles')).toBeInTheDocument();
+        const wr = screen.getByText('58.0%', { selector: 'span' });
+        expect(wr.getAttribute('style')).toMatch(/color/);
+        expect(screen.getByText('WR')).toBeInTheDocument();
+        expect(screen.getByText('CA')).toBeInTheDocument();
+        expect(screen.getByText('T10')).toHaveClass('font-semibold');
+    });
+
     it('renders a plain empty box (no ship tiles) for a shipless easter-egg bucket', () => {
         const { container } = render(
             <RealmTopShipsTreemapSVG
