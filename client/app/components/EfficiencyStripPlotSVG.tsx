@@ -289,22 +289,31 @@ const drawChart = (
         });
     };
 
-    // Left-aligned to the SVG's (and thus the "Efficiency Badges" header's)
-    // left edge, not the plot margin.
+    // Left-aligned with the "Efficiency Badges" header text above (the shared
+    // 15px tab-header inset — the SVG spans the uninset panel, so x=15 here
+    // lands on the header's x), not the plot margin.
     const summaryGroup = svgRoot.append('g')
-        .attr('transform', 'translate(0, 18)');
+        .attr('transform', 'translate(15, 18)');
 
     const renderSummary = (dot: EfficiencyBadgeDot) => {
         summaryGroup.selectAll('*').remove();
 
-        summaryGroup.append('text')
+        const summaryText = summaryGroup.append('text')
             .attr('x', 0)
             .attr('y', 0)
             .attr('dominant-baseline', 'middle')
             .style('font-size', SUMMARY_FONT_SIZE)
             .style('font-weight', '700')
-            .style('fill', colors.labelStrong)
-            .text(dot.shipName);
+            .style('fill', colors.labelStrong);
+
+        summaryText.append('tspan').text(dot.shipName);
+        summaryText.append('tspan')
+            .style('fill', colors.labelMuted)
+            .text(' · ');
+        // The award rank wears its medal color, mirroring the legend below.
+        summaryText.append('tspan')
+            .style('fill', badgeClassColor(colors, dot.badgeClass))
+            .text(dot.badgeLabel);
     };
 
     // The three connection webs, layered type → tier → class beneath the dots.
