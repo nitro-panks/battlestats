@@ -112,6 +112,28 @@ describe('PlayerClanSection', () => {
         expect(screen.queryByTestId('clan-phase-cooling_90d')).not.toBeInTheDocument();
     });
 
+    it('lays each block out as a column grid sized to its member count (max 4)', () => {
+        renderSection([
+            makeMember('Alpha', 'active_7d'),
+            makeMember('Bravo', 'active_7d'),
+            makeMember('Charlie', 'cooling_90d'),
+            makeMember('Delta', 'inactive_180d_plus'),
+            makeMember('Echo', 'inactive_180d_plus'),
+            makeMember('Foxtrot', 'inactive_180d_plus'),
+            makeMember('Golf', 'inactive_180d_plus'),
+            makeMember('Hotel', 'inactive_180d_plus'),
+        ]);
+
+        // 2 active members → a 2-column grid; 6 others → capped at 4 columns.
+        const active = screen.getByTestId('clan-roster-active');
+        expect(active.className).toContain('grid');
+        expect(active.className).toContain('sm:grid-cols-2');
+        const others = screen.getByTestId('clan-roster-others');
+        expect(others.className).toContain('sm:grid-cols-4');
+        // One grid cell per member.
+        expect(others.querySelectorAll('li')).toHaveLength(6);
+    });
+
     it('renders clanmates as player links but the viewed player as plain text', () => {
         renderSection([
             makeMember('Alpha', 'active_7d'),
