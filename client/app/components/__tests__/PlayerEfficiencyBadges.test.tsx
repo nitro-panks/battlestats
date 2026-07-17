@@ -1,13 +1,6 @@
-import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import PlayerEfficiencyBadges from '../PlayerEfficiencyBadges';
 import { chartColors } from '../../lib/chartTheme';
-
-jest.mock('../SectionHeadingWithTooltip', () => {
-    return function MockSectionHeadingWithTooltip({ title }: { title: string }) {
-        return <h3>{title}</h3>;
-    };
-});
 
 const sampleRows = [
     { ship_id: 1, top_grade_class: 2, ship_name: 'Bismarck', ship_type: 'battleship', ship_tier: 8 },
@@ -15,6 +8,10 @@ const sampleRows = [
     { ship_id: 3, top_grade_class: 3, ship_name: 'Shimakaze', ship_type: 'destroyer', ship_tier: 10 },
     { ship_id: 4, top_grade_class: 4, ship_name: 'Gato', ship_type: 'submarine', ship_tier: 10 },
 ];
+
+const svgTextContents = (container: HTMLElement): (string | null)[] => (
+    Array.from(container.querySelectorAll('svg text')).map((el) => el.textContent)
+);
 
 describe('PlayerEfficiencyBadges', () => {
     it('renders empty-state copy when there are no qualifying rows', () => {
@@ -120,8 +117,11 @@ describe('PlayerEfficiencyBadges', () => {
     it('labels each ship-type cluster and webs circles sharing a tier', () => {
         const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
+        // Cluster labels live inside the SVG (the header filter buttons carry
+        // the same short type labels, so scope the query to the plot).
+        const svgLabels = svgTextContents(container);
         ['BB', 'CA', 'DD', 'Sub'].forEach((typeLabel) => {
-            expect(screen.getByText(typeLabel)).toBeInTheDocument();
+            expect(svgLabels).toContain(typeLabel);
         });
 
         // Four single-ship types with distinct classes: no type/class mesh
@@ -147,5 +147,78 @@ describe('PlayerEfficiencyBadges', () => {
         expect(container.querySelectorAll('line.badge-mesh-type')).toHaveLength(3);
         expect(container.querySelectorAll('line.badge-mesh-tier')).toHaveLength(10);
         expect(container.querySelectorAll('line.badge-mesh-class')).toHaveLength(2);
+    });
+
+    describe('type/tier filters', () => {
+        it('renders both filter groups defaulted to All, with the info icon at the end', () => {
+            render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+            const allButtons = screen.getAllByRole('button', { name: 'All' });
+            expect(allButtons).toHaveLength(2);
+            allButtons.forEach((button) => expect(button).toHaveAttribute('aria-pressed', 'true'));
+
+            ['BB', 'CA', 'DD', 'Sub'].forEach((label) => {
+                expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+            });
+            expect(screen.getByRole('button', { name: 'T10' })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'T8' })).toBeInTheDocument();
+
+            expect(screen.getByRole('button', { name: 'More information about Efficiency Badges' })).toBeInTheDocument();
+        });
+
+        it('hides the filter groups when there are no qualifying rows', () => {
+            render(<PlayerEfficiencyBadges efficiencyRows={[]} />);
+
+            expect(screen.queryByRole('button', { name: 'All' })).toBeNull();
+        });
+
+        it('soloing a type narrows the plot and the legend counts to that type', () => {
+            const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+            fireEvent.click(screen.getByRole('button', { name: 'BB' }));
+
+            // Only Bismarck (Badge I) survives the filter.
+            expect(container.querySelectorAll('circle.badge-dot')).toHaveLength(1);
+            expect(screen.getByTitle('Badge I: 1')).toBeInTheDocument();
+            expect(screen.getByTitle('Expert: 0')).toBeInTheDocument();
+
+            // The types All button releases the solo.
+            const [typesAll] = screen.getAllByRole('button', { name: 'All' });
+            fireEvent.click(typesAll);
+            expect(container.querySelectorAll('circle.badge-dot')).toHaveLength(sampleRows.length);
+        });
+
+        it('soloing a tier narrows the plot to that tier', () => {
+            const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+            fireEvent.click(screen.getByRole('button', { name: 'T10' }));
+
+            expect(container.querySelectorAll('circle.badge-dot')).toHaveLength(3);
+            expect(screen.getByTitle('Badge I: 0')).toBeInTheDocument();
+        });
+
+        it('deselecting the last active value returns the group to All', () => {
+            const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+            const bbButton = screen.getByRole('button', { name: 'BB' });
+            fireEvent.click(bbButton);
+            expect(container.querySelectorAll('circle.badge-dot')).toHaveLength(1);
+
+            fireEvent.click(bbButton);
+            const [typesAll] = screen.getAllByRole('button', { name: 'All' });
+            expect(typesAll).toHaveAttribute('aria-pressed', 'true');
+            expect(container.querySelectorAll('circle.badge-dot')).toHaveLength(sampleRows.length);
+        });
+
+        it('shows a no-match message when the type and tier filters exclude every badge', () => {
+            const { container } = render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+            // BB (Tier 8 only) crossed with Tier 10 matches nothing.
+            fireEvent.click(screen.getByRole('button', { name: 'BB' }));
+            fireEvent.click(screen.getByRole('button', { name: 'T10' }));
+
+            expect(container.querySelectorAll('circle.badge-dot')).toHaveLength(0);
+            expect(screen.getByText(/No badges match the selected type and tier filters/i)).toBeInTheDocument();
+        });
     });
 });
