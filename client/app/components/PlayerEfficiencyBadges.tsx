@@ -123,12 +123,13 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
 
     return (
         <div>
-            <div className="mb-3 flex items-center gap-3">
-                <SectionHeadingWithTooltip
-                    title="Efficiency Badges"
-                    description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. Each dot is one badged ship, clustered by ship type, sized by tier, and colored by badge class, so you can see at a glance where a player's peak performances cluster."
-                />
-            </div>
+            {/* pt-2.5/pl-[15px] is the shared tab-top header spot across the
+                Profile/Population/Efficiency/Clan Battles insight tabs. */}
+            <SectionHeadingWithTooltip
+                title="Efficiency Badges"
+                description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. Each dot is one badged ship, clustered by ship type, sized by tier, and colored by badge class, so you can see at a glance where a player's peak performances cluster."
+                className="mb-2 pt-2.5 pl-[15px]"
+            />
             {dots.length === 0 ? (
                 <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--accent-light)]">
                     No Efficiency Badge data is stored for this player yet, or no qualifying ships have earned a badge.

@@ -94,4 +94,28 @@ describe('TierSVG', () => {
             });
         });
     });
+
+    it('renders vertical columns with tiers ascending on the x band', async () => {
+        mockFetchSharedJson.mockResolvedValueOnce({
+            data: [
+                { ship_tier: 10, pvp_battles: 50, wins: 28, win_ratio: 0.56 },
+                { ship_tier: 8, pvp_battles: 30, wins: 16, win_ratio: 0.533 },
+            ],
+            headers: {},
+        });
+
+        render(<TierSVG playerId={303} />);
+
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const d3 = require('d3');
+        await waitFor(() => {
+            // Vertical orientation puts the tier keys on the band scale in
+            // ascending order (the horizontal layout sorted them descending).
+            const bandDomains = (d3.scaleBand as jest.Mock).mock.results
+                .flatMap((result) => (result.value as { domain: jest.Mock }).domain.mock.calls)
+                .map((call: unknown[]) => call[0])
+                .filter(Array.isArray);
+            expect(bandDomains).toContainEqual(['8', '10']);
+        });
+    });
 });

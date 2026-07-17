@@ -131,13 +131,11 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; 
 // at the desktop insights column: ≈ 1057px.
 const LOCKED_PANEL_HEIGHT_PX = 1057;
 
-// Height (px) of the Profile "Performance by Tier" bar chart. Grown from the
-// original 280 so the two Profile bar charts fill down to the locked panel
-// bottom; TypeSVG's per-row step derives from this same value so its bars keep
-// the tier chart's thickness. Tuned against the max-content player at the 1000px
-// desktop column (11 tier rows + 5 type rows + the 286px heatmap ≈ the locked
-// height); sparser players simply leave whitespace inside the fixed box.
-const PROFILE_TIER_CHART_HEIGHT = 374;
+// Per-row step (px) of the Profile "Performance by Ship Type" horizontal bar
+// chart. Fixed (formerly derived from the stacked tier chart so the two
+// charts' bar thicknesses matched — moot now that the tier chart is vertical);
+// preserves the historical ~28px step so type bars keep their thickness.
+const PROFILE_TYPE_CHART_ROW_STEP = 28;
 
 // The Ranked tab's activity/history sub-view toggle chip. Sized to sit inline
 // beside the mode caption ("Ranked"): same text size + padding, bordered (vs the
@@ -502,16 +500,16 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     }, [profileChartState]);
 
     const derivedTypeRows = profileChartPayload ? deriveTypeRowsFromTierTypePayload(profileChartPayload) : [];
-    const derivedTierRows = profileChartPayload ? deriveTierRowsFromTierTypePayload(profileChartPayload) : [];
-    // TypeSVG (Performance by Ship Type) has fewer, data-dependent rows than the
-    // fixed 11-row Tier chart. Size its height so each row uses the SAME step as
-    // TierSVG (shipBarPlot non-compact top=8/bottom=48, y padding 0.18 over 11
-    // rows) — so its bars match the tier chart's bar thickness rather than
-    // stretching thicker to fill a taller fixed height. Both the TierSVG height
-    // and this row step derive from PROFILE_TIER_CHART_HEIGHT so the two bar
-    // charts stay harmonized as we grow them to fill the locked panel.
-    const TIER_CHART_ROW_STEP = (PROFILE_TIER_CHART_HEIGHT - 8 - 48) / (11 + 0.18);
-    const typeChartHeight = Math.round(TIER_CHART_ROW_STEP * (Math.max(derivedTypeRows.length, 1) + 0.18)) + 8 + 48;
+    // TierSVG renders vertical columns, so its x-axis order is the row order:
+    // the derive helper emits 11→1 (the old top-to-bottom row order); reverse
+    // so tiers ascend left→right.
+    const derivedTierRows = profileChartPayload ? deriveTierRowsFromTierTypePayload(profileChartPayload).reverse() : [];
+    // TypeSVG (Performance by Ship Type) has few, data-dependent rows; size its
+    // height from a fixed per-row step (shipBarPlot y padding 0.18, non-compact
+    // top=8/bottom=48) so bars keep a constant thickness instead of stretching
+    // to fill a fixed panel height. The tier column chart beside it reuses the
+    // same height so the side-by-side pair shares one bottom edge.
+    const typeChartHeight = Math.round(PROFILE_TYPE_CHART_ROW_STEP * (Math.max(derivedTypeRows.length, 1) + 0.18)) + 8 + 48;
 
     const activeConfig = TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
     // Computed once (not per-tab inside the strip map): whether the player has any
@@ -631,43 +629,48 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 ) : null}
 
                 {activeTab === 'population' ? (
-                    // Inset the population charts by 50px on each side (100px
-                    // narrower) on sm+; mobile stays full-width so the charts
-                    // don't overflow their narrow container.
-                    <div className="sm:px-[50px]">
+                    <div>
+                        {/* Tab-top header sits outside the chart inset below so it
+                            lands in the shared header spot (pt-2.5 / pl-[15px])
+                            used by the Profile/Efficiency/Clan Battles tabs. */}
                         <SectionHeadingWithTooltip
                             title="Win Rate vs Survival"
                             description="This scatter plot shows how this player's win rate and survival rate compare to the broader tracked player base. Each dot represents a player, positioned by PvP win rate on the x-axis and PvP survival rate on the y-axis. Darker areas indicate denser player clusters, and the outlined marker shows where this player sits in that field."
-                            className="mb-2"
+                            className="mb-2 pt-2.5 pl-[15px]"
                         />
-                        <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={400} theme={theme} />
+                        {/* Inset the population charts by 50px on each side (100px
+                            narrower) on sm+; mobile stays full-width so the charts
+                            don't overflow their narrow container. */}
+                        <div className="sm:px-[50px]">
+                            <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={400} theme={theme} />
 
-                        {/* The two distribution histograms sit side by side on sm+,
-                            each a half-height landscape panel: the chart fills its
-                            half-column (~340px at the desktop insights width) at
-                            half that in height. Mobile stacks them full-width. */}
-                        <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
-                            {pvpBattles >= 150 ? (
-                                <div className="min-w-0">
-                                    <SectionHeadingWithTooltip
-                                        title="Battles Played Distribution"
-                                        description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
-                                        className="mb-2"
-                                    />
-                                    <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={170} theme={theme} />
-                                </div>
-                            ) : null}
+                            {/* The two distribution histograms sit side by side on sm+,
+                                each a half-height landscape panel: the chart fills its
+                                half-column (~340px at the desktop insights width) at
+                                half that in height. Mobile stacks them full-width. */}
+                            <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
+                                {pvpBattles >= 150 ? (
+                                    <div className="min-w-0">
+                                        <SectionHeadingWithTooltip
+                                            title="Battles Played Distribution"
+                                            description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
+                                            className="mb-2"
+                                        />
+                                        <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={170} theme={theme} />
+                                    </div>
+                                ) : null}
 
-                            {playerScore != null && playerScore >= 2.0 ? (
-                                <div className="min-w-0">
-                                    <SectionHeadingWithTooltip
-                                        title="Player Score Distribution"
-                                        description="Player score blends win rate, kill ratio, survival, and battle volume into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
-                                        className="mb-2"
-                                    />
-                                    <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={170} theme={theme} />
-                                </div>
-                            ) : null}
+                                {playerScore != null && playerScore >= 2.0 ? (
+                                    <div className="min-w-0">
+                                        <SectionHeadingWithTooltip
+                                            title="Player Score Distribution"
+                                            description="Player score blends win rate, kill ratio, survival, and battle volume into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
+                                            className="mb-2"
+                                        />
+                                        <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={170} theme={theme} />
+                                    </div>
+                                ) : null}
+                            </div>
                         </div>
                     </div>
                 ) : null}
@@ -780,26 +783,33 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 <SectionHeadingWithTooltip
                                     title="Tier vs Type Profile (Random Battles)"
                                     description="This heatmap shows where the tracked player base clusters by ship tier and type. The player markers show where this captain spends most of their battles, so you can compare their ship mix with the broader population trend."
-                                    className="mb-2 pl-[15px]"
+                                    className="mb-2 pt-2.5 pl-[15px]"
                                 />
                                 <TierTypeHeatmapSVG playerId={playerId} data={profileChartPayload} theme={theme} />
 
-                                <div className="mt-4">
-                                    <SectionHeadingWithTooltip
-                                        title="Performance by Ship Type"
-                                        description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
-                                        className="mb-2 pl-[15px]"
-                                    />
-                                    <TypeSVG playerId={playerId} data={derivedTypeRows} svgHeight={typeChartHeight} theme={theme} />
-                                </div>
+                                {/* The two performance breakdowns share a row on desktop
+                                    (Type's horizontal bars left, Tier's vertical columns
+                                    right) and stack on narrow viewports. min-w-0 lets each
+                                    chart container measure the halved column instead of
+                                    forcing overflow. */}
+                                <div className="mt-4 flex flex-col gap-4 md:flex-row">
+                                    <div className="min-w-0 md:w-1/2">
+                                        <SectionHeadingWithTooltip
+                                            title="Performance by Ship Type"
+                                            description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
+                                            className="mb-2 pl-[15px]"
+                                        />
+                                        <TypeSVG playerId={playerId} data={derivedTypeRows} svgHeight={typeChartHeight} theme={theme} />
+                                    </div>
 
-                                <div className="mt-5">
-                                    <SectionHeadingWithTooltip
-                                        title="Performance by Tier"
-                                        description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
-                                        className="mb-2 pl-[15px]"
-                                    />
-                                    <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={PROFILE_TIER_CHART_HEIGHT} theme={theme} />
+                                    <div className="min-w-0 md:w-1/2">
+                                        <SectionHeadingWithTooltip
+                                            title="Performance by Tier"
+                                            description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
+                                            className="mb-2 pl-[15px]"
+                                        />
+                                        <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={typeChartHeight} theme={theme} />
+                                    </div>
                                 </div>
                             </>
                         ) : (
@@ -821,9 +831,13 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 <SectionHeadingWithTooltip
                                     title="Clan Battle Seasons"
                                     description="Player-specific clan battle participation by season, including battles played, ship tier bracket, and season win rate."
-                                    className="mb-2"
+                                    className="mb-[18px] pt-2.5 pl-[15px]"
                                 />
-                                <PlayerClanBattleSeasons playerId={playerId} onSummaryChange={onClanBattleSummaryChange} />
+                                {/* Content shares the header's 15px inset, mirrored
+                                    on the right so the table stays centered. */}
+                                <div className="px-[15px]">
+                                    <PlayerClanBattleSeasons playerId={playerId} onSummaryChange={onClanBattleSummaryChange} />
+                                </div>
                             </div>
                         ) : null}
                     </div>
