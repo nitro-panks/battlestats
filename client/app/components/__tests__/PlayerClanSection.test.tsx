@@ -112,6 +112,44 @@ describe('PlayerClanSection', () => {
         expect(screen.queryByTestId('clan-phase-cooling_90d')).not.toBeInTheDocument();
     });
 
+    it('lays each block out as a fixed four-column grid with a WR-colored mark per name', () => {
+        renderSection([
+            { ...makeMember('Alpha', 'active_7d'), pvp_ratio: 61 },
+            makeMember('Bravo', 'active_7d'),
+            makeMember('Charlie', 'cooling_90d'),
+            makeMember('Delta', 'inactive_180d_plus'),
+            makeMember('Echo', 'inactive_180d_plus'),
+            { ...makeMember('Foxtrot', 'inactive_180d_plus'), pvp_ratio: null },
+            makeMember('Golf', 'inactive_180d_plus'),
+            makeMember('Hotel', 'inactive_180d_plus'),
+        ]);
+
+        // Both blocks use the same fixed grid: 4 even columns (2 below sm).
+        const active = screen.getByTestId('clan-roster-active');
+        expect(active.className).toContain('grid');
+        expect(active.className).toContain('sm:grid-cols-4');
+        const others = screen.getByTestId('clan-roster-others');
+        expect(others.className).toContain('sm:grid-cols-4');
+        // One grid cell per member.
+        expect(others.querySelectorAll('li')).toHaveLength(6);
+
+        // Every name leads with a diamond on the shared WR color scale.
+        const marks = screen.getAllByTestId('roster-wr-mark');
+        expect(marks).toHaveLength(8);
+        const markFillFor = (name: string) => {
+            const cell = screen.getByText(name).closest('li')!;
+            return within(cell as HTMLElement)
+                .getByTestId('roster-wr-mark')
+                .querySelector('polygon')!
+                .getAttribute('fill');
+        };
+        // 61% → the unicum magenta band; 52% → the light-green band.
+        expect(markFillFor('Alpha')).toBe('#D042F3');
+        expect(markFillFor('Bravo')).toBe('#a1d99b');
+        // Null WR → the scale's pale no-data blue.
+        expect(markFillFor('Foxtrot')).toBe('#c6dbef');
+    });
+
     it('renders clanmates as player links but the viewed player as plain text', () => {
         renderSection([
             makeMember('Alpha', 'active_7d'),

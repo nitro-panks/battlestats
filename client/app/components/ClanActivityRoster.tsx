@@ -15,15 +15,17 @@ import { collapseActivityBucket, type ClanMemberData, type CollapsedActivityBuck
 import { buildPlayerPath } from '../lib/entityRoutes';
 import { useRealm } from '../context/RealmContext';
 import { trackEvent } from '../lib/umami';
+import wrColor from '../lib/wrColor';
 
-// Shared clan roster: flowing paragraph(s) of member names, ✦ dividers, each
-// name carrying the classification-badge tail. Presentation varies by surface
-// (`phaseStyle`): the clan page groups names into one paragraph per collapsed
-// activity phase (Active / Cooling Off / Gone dark) under an icon-and-color
-// header; the player page's clan section splits the roster in two — the
+// Shared clan roster: member names, each carrying the classification-badge
+// tail. Presentation varies by surface (`phaseStyle`): the clan page groups
+// names into one flowing paragraph (✦ dividers) per collapsed activity phase
+// (Active / Cooling Off / Gone dark) under an icon-and-color header; the
+// player page's clan section splits the roster in two four-column grids — the
 // active phase under its label, then a rule and one unlabeled alphabetical
 // block of everyone else (the scatterplot above tells the finer-grained
-// activity story per member).
+// activity story per member); each name in the grids leads with a diamond on
+// the shared win-rate color scale (member pvp_ratio through lib/wrColor).
 
 interface ClanActivityRosterProps {
     members: ClanMemberData[];
@@ -36,7 +38,8 @@ interface ClanActivityRosterProps {
     source?: 'clan' | 'player';
     // 'headers' (default): one paragraph per activity phase, icon+label header.
     // 'split': active members under the Active label, an <hr>, then all other
-    // members as one unlabeled alphabetical paragraph.
+    // members as one unlabeled alphabetical block; both blocks lay out as
+    // four-column grids with a WR-colored diamond per name.
     phaseStyle?: 'headers' | 'split';
 }
 
@@ -51,6 +54,10 @@ const PHASES: Array<{ key: PhaseKey; label: string }> = [
 
 const byName = (a: ClanMemberData, b: ClanMemberData): number =>
     a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+
+// Column grid for the split-style roster blocks: four even columns (two below
+// the sm breakpoint), regardless of block size.
+const ROSTER_GRID_CLASS = 'grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1';
 
 const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loading = false, error = '', highlightedPlayerName, source = 'clan', phaseStyle = 'headers' }) => {
     const { realm } = useRealm();
@@ -83,10 +90,38 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
         return <p className="text-sm text-[var(--text-secondary)]" data-testid="clan-activity-roster">No clan members found.</p>;
     }
 
-    const renderMember = (member: ClanMemberData, index: number) => {
+    // Name + classification-badge tail. `fit` constrains the label to its
+    // container (grid cell): the name truncates with an ellipsis instead of
+    // overflowing the column.
+    const renderMemberLabel = (member: ClanMemberData, fit = false) => {
         const efficiencyRankTier = !member.is_hidden
             ? resolveEfficiencyRankTier(member.efficiency_rank_tier, member.has_efficiency_rank_icon)
             : null;
+        const wrapFit = fit ? ' max-w-full' : '';
+        const nameFit = fit ? 'min-w-0 truncate' : undefined;
+        // Grid cells lead with a diamond on the shared WR color scale (the
+        // same mapping the player surfaces use); null WR gets the scale's
+        // pale no-data blue. SVG rather than a unicode ◆ — glyph size and
+        // baseline vary by platform font, and the faint edge keeps the pale
+        // bands legible on the light theme.
+        const wrMark = fit ? (
+            <span
+                className="shrink-0"
+                title={member.pvp_ratio != null ? `WR ${member.pvp_ratio.toFixed(1)}%` : 'WR unknown'}
+                data-testid="roster-wr-mark"
+                aria-hidden="true"
+            >
+                <svg width={10} height={10} viewBox="0 0 12 12" className="block">
+                    <polygon
+                        points="6,0.75 11.25,6 6,11.25 0.75,6"
+                        fill={wrColor(member.pvp_ratio)}
+                        stroke="rgba(0,0,0,0.25)"
+                        strokeWidth={1}
+                        strokeLinejoin="round"
+                    />
+                </svg>
+            </span>
+        ) : null;
         // Same classification-badge dispatch as the player-header tray; the
         // per-member activity icon is omitted — the phase header (clan page)
         // or the scatterplot (player page) carries recency.
@@ -102,37 +137,50 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
                 <TopShipBadges badges={member.ship_badges} realm={member.realm} size="inline" />
             </>
         );
+        if (member.name === highlightedPlayerName) {
+            return (
+                <span className={`inline-flex items-center gap-1${wrapFit} font-semibold text-[var(--text-primary)]`}>
+                    {wrMark}
+                    <span className={nameFit} title={fit ? member.name : undefined}>{member.name}</span>
+                    {badges}
+                </span>
+            );
+        }
+        if (member.is_hidden) {
+            // Hidden accounts are named but never clickable.
+            return (
+                <span className={`inline-flex items-center gap-1${wrapFit} text-[var(--text-secondary)]`}>
+                    {wrMark}
+                    <span className={nameFit} title={fit ? member.name : undefined}>{member.name}</span>
+                    {badges}
+                </span>
+            );
+        }
         return (
-            <React.Fragment key={member.name}>
-                {index > 0 ? (
-                    <span className="mx-1.5 text-xs text-[var(--text-secondary)]" aria-hidden="true">✦</span>
-                ) : null}
-                {member.name === highlightedPlayerName ? (
-                    <span className="inline-flex items-center gap-1 font-semibold text-[var(--text-primary)]">
-                        <span>{member.name}</span>
-                        {badges}
-                    </span>
-                ) : member.is_hidden ? (
-                    // Hidden accounts are named but never clickable.
-                    <span className="inline-flex items-center gap-1 text-[var(--text-secondary)]">
-                        <span>{member.name}</span>
-                        {badges}
-                    </span>
-                ) : (
-                    <span className="inline-flex items-center gap-1">
-                        <Link
-                            href={buildPlayerPath(member.name, realm)}
-                            onClick={handleMemberClick}
-                            className="text-[var(--accent-mid)] underline-offset-2 hover:underline"
-                        >
-                            {member.name}
-                        </Link>
-                        {badges}
-                    </span>
-                )}
-            </React.Fragment>
+            <span className={`inline-flex items-center gap-1${wrapFit}`}>
+                {wrMark}
+                <Link
+                    href={buildPlayerPath(member.name, realm)}
+                    onClick={handleMemberClick}
+                    className={`text-[var(--accent-mid)] underline-offset-2 hover:underline${nameFit ? ` ${nameFit}` : ''}`}
+                    title={fit ? member.name : undefined}
+                >
+                    {member.name}
+                </Link>
+                {badges}
+            </span>
         );
     };
+
+    // Flowing-paragraph form (clan page): ✦ divider between names.
+    const renderMember = (member: ClanMemberData, index: number) => (
+        <React.Fragment key={member.name}>
+            {index > 0 ? (
+                <span className="mx-1.5 text-xs text-[var(--text-secondary)]" aria-hidden="true">✦</span>
+            ) : null}
+            {renderMemberLabel(member)}
+        </React.Fragment>
+    );
 
     if (phaseStyle === 'split') {
         const activeMembers = membersByPhase.active_7d;
@@ -161,18 +209,26 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
                             <ActivityIcon bucket="active_7d" size="header" />
                             <span>Active Members ({activeMembers.length})</span>
                         </h3>
-                        <p className="mt-2.5 text-base leading-7" data-testid="clan-roster-active">
-                            {activeMembers.map(renderMember)}
-                        </p>
+                        <ul className={`mt-2.5 ${ROSTER_GRID_CLASS} text-base leading-7`} data-testid="clan-roster-active">
+                            {activeMembers.map((member) => (
+                                <li key={member.name} className="min-w-0">
+                                    {renderMemberLabel(member, true)}
+                                </li>
+                            ))}
+                        </ul>
                     </>
                 ) : null}
                 {activeMembers.length > 0 && otherMembers.length > 0 ? (
                     <hr className="my-4 border-[var(--border)]" />
                 ) : null}
                 {otherMembers.length > 0 ? (
-                    <p className="text-base leading-7" data-testid="clan-roster-others">
-                        {otherMembers.map(renderMember)}
-                    </p>
+                    <ul className={`${ROSTER_GRID_CLASS} text-base leading-7`} data-testid="clan-roster-others">
+                        {otherMembers.map((member) => (
+                            <li key={member.name} className="min-w-0">
+                                {renderMemberLabel(member, true)}
+                            </li>
+                        ))}
+                    </ul>
                 ) : null}
             </div>
         );
