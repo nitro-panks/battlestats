@@ -86,7 +86,12 @@ own ASCII sub/CV easter-egg animation below is unchanged.)
 - `client/app/components/RealmTopShipsTreemapSVG.tsx` — presentational rewrite:
   props-driven (`ships`, `tier`, `type`, `wrPct`, window bounds, `loading`,
   `pending`, `empty`, `onSelect`); WR-color tiles; removed self-fetch + mode
-  toggle; bucket-aware heading + tooltip copy.
+  toggle; bucket-aware heading + tooltip copy. Tile/tooltip refresh 2026-07-17
+  (4.1.4): tile sub-line is the WR% alone (battles count dropped), names at
+  12px; the hover tooltip (shared by Map and Plot views) is a bold title over
+  value/label pairs on a two-column grid — battles (pluralized), `wrColor`-tinted
+  WR, and a bold class+tier row — matching the player-page treemap tooltips
+  (see runbook-battle-history-treemaps-2026-07-13.md).
 - `client/app/components/ShipLeaderboard.tsx` — added `onBucket` prop + emit
   effect; exported `ListShip`. No other behavior change.
 - `client/app/components/PlayerSearch.tsx` — holds bucket state, passes it to the

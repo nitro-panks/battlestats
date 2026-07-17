@@ -360,14 +360,14 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
             if (w < 46 || h < 24) return;
             const fill = wrColor(d.data.win_rate);
             const textColor = d3.hsl(fill).l > 0.62 ? '#1a1a1a' : '#f5f5f5';
-            const maxChars = Math.max(3, Math.floor((w - 8) / 6.2));
+            const maxChars = Math.max(3, Math.floor((w - 8) / 6.8));
             const name = d.data.ship_name.length > maxChars
                 ? `${d.data.ship_name.slice(0, maxChars - 1)}…`
                 : d.data.ship_name;
             const node = d3.select(this);
             node.append('text')
                 .attr('x', 5).attr('y', 15)
-                .attr('font-size', 11).attr('font-weight', 600).attr('fill', textColor)
+                .attr('font-size', 12).attr('font-weight', 600).attr('fill', textColor)
                 .style('pointer-events', 'none')
                 .text(name);
             if (h >= 38) {
@@ -375,7 +375,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                     .attr('x', 5).attr('y', 29)
                     .attr('font-size', 10).attr('fill', textColor).attr('opacity', 0.85)
                     .style('pointer-events', 'none')
-                    .text(`${d.data.battles.toLocaleString()} · ${d.data.win_rate.toFixed(1)}%`);
+                    .text(`${d.data.win_rate.toFixed(1)}%`);
             }
         });
     }, [view, tiles, points, width, height, realm, router]);
@@ -466,9 +466,23 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                             top: Math.max(hover.y - 40, 0),
                         }}
                     >
-                        <div className="font-semibold text-[var(--text-strong)]">{hover.ship}</div>
-                        <div className="text-[var(--text-muted)]">
-                            {hover.battles.toLocaleString()} battles · {hover.winRate.toFixed(1)}% WR · {TYPE_LABEL[hover.type ?? ''] ?? hover.type ?? '—'} · T{hover.tier ?? '?'}
+                        <div className="pb-[3px] font-semibold text-[var(--text-strong)]">{hover.ship}</div>
+                        <div className="grid grid-cols-[auto_1fr] gap-x-2">
+                            <span className="text-right font-semibold tabular-nums text-[var(--text-strong)]">
+                                {hover.battles.toLocaleString()}
+                            </span>
+                            <span className="text-[var(--text-muted)]">{hover.battles === 1 ? 'battle' : 'battles'}</span>
+                            <span
+                                className="text-right font-semibold tabular-nums"
+                                style={{ color: wrColor(hover.winRate) }}
+                            >
+                                {hover.winRate.toFixed(1)}%
+                            </span>
+                            <span className="text-[var(--text-muted)]">WR</span>
+                            <span className="text-right font-semibold text-[var(--text-strong)]">
+                                {TYPE_LABEL[hover.type ?? ''] ?? hover.type ?? '—'}
+                            </span>
+                            <span className="font-semibold text-[var(--text-strong)]">T{hover.tier ?? '?'}</span>
                         </div>
                     </div>
                 )}
