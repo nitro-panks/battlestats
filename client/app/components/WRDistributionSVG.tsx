@@ -159,12 +159,13 @@ const drawChart = (
     colors: Colors,
 ) => {
     const compact = svgWidth < 480;
-    // Symmetric left/right margins center the plot within the canvas. (This chart
-    // only appears on the Population tab, standalone, so it no longer aligns its
-    // data-right edge to the Profile-tab bar charts.)
+    // Non-compact left pins to 30 — the compact left margin of the half-width
+    // PopulationDistributionSVG histograms below on the Population tab — so the
+    // two y axes share one vertical line; right trimmed to 28 (from the old
+    // symmetric 44/44) to widen the plot by 30px total.
     const margin = compact
         ? { top: 38, right: 32, bottom: 28, left: 32 }
-        : { top: 38, right: 44, bottom: 34, left: 44 };
+        : { top: 38, right: 28, bottom: 34, left: 30 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
