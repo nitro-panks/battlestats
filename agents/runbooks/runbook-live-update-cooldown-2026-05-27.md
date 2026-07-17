@@ -140,3 +140,33 @@ helper `_player_refresh_signals(player_id, realm) -> (pending: bool, next_refres
   `client/app/components/useIntervalRefresh.ts`, `client/app/components/BattleHistoryCard.tsx` (459-508),
   `client/app/components/PlayerDetailInsightsTabs.tsx` (177-190),
   `client/app/components/entityTypes.ts`, `client/app/lib/sharedJsonFetch.ts` (11-12,52-94).
+
+## Addendum 2026-07-17 — pending/capture ordering fix (stale-rehydrate race)
+
+Investigation trigger: after the 15-min pull, the battle-history treemaps appeared not to
+rehydrate. Root cause: `update_battle_data` ran `apply_battles_json` (which bumps
+`battles_updated_at`, the anchor `_player_refresh_signals` derives `X-Player-Refresh-Pending`
+from) BEFORE the battle-history capture hook committed its BattleEvents/PDSS rows and
+invalidated the server battle-history cache. A 2s-cadence poll landing in that gap saw
+"landed", fired the client's single nonce-bumped battle-history refetch, and cached the
+pre-session payload (client settled cache + server Redis 5-min TTL); nothing refetched again
+until a manual reload. Observed at biting distance in prod (EU `Stahlherpes_2005`,
+2026-07-17 01:44 UTC: rehydrate refetch and event commit in the same second).
+
+Fix: ordering contract — the pending anchor may only advance after the capture is durable.
+- `server/warships/data.py` `update_battle_data`: capture hook now runs BEFORE
+  `apply_battles_json`; capture failure is still swallowed so the refresh path stays whole.
+- `server/warships/incremental_battles.py` `record_observation_from_payloads`: the
+  `refresh_battles_json=True` (floor/poll) battles_json refresh moved from pre-transaction
+  to after the observation/diff work on every completed path (baseline, no-events, events —
+  the events path runs after the commit + cache invalidations).
+
+Tests: `UpdateBattleDataCaptureHookTests::test_capture_runs_before_battles_updated_at_bump`,
+`::test_capture_failure_still_bumps_battles_updated_at`,
+`FloorBattlesJsonRefreshTests::test_refresh_runs_after_observation_is_written`,
+`::test_refresh_runs_after_events_on_advance`. Full backend suite green (769 passed).
+
+Residual (accepted): the header contract itself is unchanged; a poll can still race the
+few-microsecond window between the capture transaction's commit and its `on_commit` cache
+deletes — negligible next to the former 0.3–3s gap (which included an optional ranked WG
+fetch on capture-enabled realms).

@@ -819,16 +819,18 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             </div>
 
             {shouldShowEmptyState ? (
-                // Matches the hover-details line's slot (mt-0 / min-h / text-sm)
+                // Matches the hover-details line's slot (my / min-h / pl / text-sm)
                 // so the message starts at the same x,y whether the chart is
-                // populated or empty.
-                <div className="mb-0 mt-0 min-h-[1.5rem] text-sm">
+                // populated or empty. pl mirrors the filter rows above so the
+                // text left-aligns with them; my-3 keeps the gap to the filters
+                // above equal to the gap to the chart below.
+                <div className="my-3 flex min-h-[1.5rem] items-center pl-[75px] text-sm sm:pl-[115px]">
                     <span className="text-[var(--text-secondary)]">No ships match the selected filters.</span>
                 </div>
             ) : null}
 
             {!shouldShowEmptyState ? (
-                <div className="mb-0 mt-0 min-h-[1.5rem] text-sm">
+                <div className="my-3 flex min-h-[1.5rem] items-center pl-[75px] text-sm sm:pl-[115px]">
                     {hoveredShip ? (
                         <span>
                             <span className="font-bold text-[var(--accent-dark)]">{hoveredShip.ship_name}</span>

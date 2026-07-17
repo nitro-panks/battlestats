@@ -1,8 +1,10 @@
-import React, { useMemo } from 'react';
-import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
+import React, { useEffect, useMemo, useState } from 'react';
+import InfoTooltip from './InfoTooltip';
 import EfficiencyStripPlotSVG, { badgeClassColor, type EfficiencyBadgeDot } from './EfficiencyStripPlotSVG';
 import { chartColors } from '../lib/chartTheme';
 import { useTheme } from '../context/ThemeContext';
+import { useRealm } from '../context/RealmContext';
+import { trackEvent } from '../lib/umami';
 
 interface EfficiencyRowInput {
     ship_id?: number | null;
@@ -45,6 +47,9 @@ const SHIP_TYPE_LABELS: Record<string, string> = {
     submarine: 'Sub',
     sub: 'Sub',
 };
+
+// Canonical filter-button order for the type row; unknown labels sort last.
+const SHIP_TYPE_ORDER = ['BB', 'CA', 'DD', 'CV', 'Sub'];
 
 // Fill the Efficiency panel's LOCKED_PANEL_HEIGHT_PX (1057) shell: the plot
 // grows to this SVG height so the tab shell matches the Activity / Ships /
@@ -106,37 +111,170 @@ export const hasEfficiencyBadges = (
     efficiencyRows?: EfficiencyRowInput[] | null,
 ): boolean => normalizeBadgeDots(efficiencyRows).length > 0;
 
+// null means "all selected" — the default, and what an emptied or completed
+// selection collapses back to. Same toggle semantics as the Ships tab: a click
+// while All is active solos that value.
+const toggleFilterValue = <T extends string | number>(
+    current: T[] | null,
+    value: T,
+    available: T[],
+): T[] | null => {
+    if (current === null) {
+        return [value];
+    }
+    if (current.includes(value)) {
+        const next = current.filter((entry) => entry !== value);
+        return next.length > 0 ? next : null;
+    }
+    const next = [...current, value];
+    return next.length === available.length ? null : next;
+};
+
 const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
     efficiencyRows,
 }) => {
     const { theme } = useTheme();
+    const { realm } = useRealm();
     const colors = chartColors[theme];
     // Memoized so parent re-renders don't hand the chart a fresh array and
     // relaunch its force simulation from the center.
     const dots = useMemo(() => normalizeBadgeDots(efficiencyRows), [efficiencyRows]);
+
+    const [selectedTypes, setSelectedTypes] = useState<string[] | null>(null);
+    const [selectedTiers, setSelectedTiers] = useState<number[] | null>(null);
+
+    // New badge data (player/realm change) resets both filters to All so a
+    // solo selection never carries over and blanks the next player's plot.
+    useEffect(() => {
+        setSelectedTypes(null);
+        setSelectedTiers(null);
+    }, [dots]);
+
+    const availableTypes = useMemo(() => {
+        const rank = (label: string) => {
+            const index = SHIP_TYPE_ORDER.indexOf(label);
+            return index === -1 ? SHIP_TYPE_ORDER.length : index;
+        };
+        return Array.from(new Set(dots.map((dot) => dot.shipType)))
+            .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    }, [dots]);
+    const availableTiers = useMemo(
+        () => Array.from(new Set(dots.map((dot) => dot.shipTier))).sort((a, b) => b - a),
+        [dots],
+    );
+
+    // Memoized for the same reason as `dots`: the chart must only receive a
+    // fresh array when the filter selection actually changes.
+    const visibleDots = useMemo(() => dots.filter((dot) => (
+        (selectedTypes === null || selectedTypes.includes(dot.shipType))
+        && (selectedTiers === null || selectedTiers.includes(dot.shipTier))
+    )), [dots, selectedTypes, selectedTiers]);
+
+    const toggleType = (shipType: string) => {
+        trackEvent('efficiency-filter', { realm, control: 'type', value: shipType });
+        setSelectedTypes((current) => toggleFilterValue(current, shipType, availableTypes));
+    };
+
+    const toggleTier = (tier: number) => {
+        trackEvent('efficiency-filter', { realm, control: 'tier', value: tier });
+        setSelectedTiers((current) => toggleFilterValue(current, tier, availableTiers));
+    };
+
+    const selectAllTypes = () => {
+        trackEvent('efficiency-filter', { realm, control: 'type', value: 'all' });
+        setSelectedTypes(null);
+    };
+
+    const selectAllTiers = () => {
+        trackEvent('efficiency-filter', { realm, control: 'tier', value: 'all' });
+        setSelectedTiers(null);
+    };
+
+    const filterButtonClass = (selected: boolean) => (selected
+        ? 'border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-2 py-1 text-xs font-medium text-[var(--accent-dark)]'
+        : 'border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]');
+
     const badgeCounts = [1, 2, 3, 4].map((badgeClass) => ({
         badgeClass,
         label: BADGE_LABELS[badgeClass],
         name: BADGE_CLASS_NAMES[badgeClass],
-        count: dots.filter((dot) => dot.badgeClass === badgeClass).length,
+        count: visibleDots.filter((dot) => dot.badgeClass === badgeClass).length,
     }));
 
     return (
         <div>
             {/* pt-2.5/pl-[15px] is the shared tab-top header spot across the
-                Profile/Population/Efficiency/Clan Battles insight tabs. */}
-            <SectionHeadingWithTooltip
-                title="Efficiency Badges"
-                description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. Each dot is one badged ship, clustered by ship type, sized by tier, and colored by badge class, so you can see at a glance where a player's peak performances cluster."
-                className="mb-2 pt-2.5 pl-[15px]"
-            />
+                Profile/Population/Efficiency/Clan Battles insight tabs; the
+                filter rows ride along in the same flex row. */}
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 pt-2.5 pl-[15px]">
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Efficiency Badges</h3>
+                {dots.length > 0 && (
+                    <>
+                        <div className="flex flex-wrap items-center gap-1" aria-label="Filter badges by ship type">
+                            <button
+                                key="all-types"
+                                type="button"
+                                aria-pressed={selectedTypes === null}
+                                className={filterButtonClass(selectedTypes === null)}
+                                onClick={selectAllTypes}
+                            >
+                                All
+                            </button>
+                            {availableTypes.map((shipType) => (
+                                <button
+                                    key={shipType}
+                                    type="button"
+                                    aria-pressed={selectedTypes !== null && selectedTypes.includes(shipType)}
+                                    className={filterButtonClass(selectedTypes !== null && selectedTypes.includes(shipType))}
+                                    onClick={() => toggleType(shipType)}
+                                >
+                                    {shipType}
+                                </button>
+                            ))}
+                        </div>
+                        <span aria-hidden="true" className="h-4 w-px bg-[var(--border)]" />
+                        <div className="flex flex-wrap items-center gap-1" aria-label="Filter badges by ship tier">
+                            <button
+                                key="all-tiers"
+                                type="button"
+                                aria-pressed={selectedTiers === null}
+                                className={filterButtonClass(selectedTiers === null)}
+                                onClick={selectAllTiers}
+                            >
+                                All
+                            </button>
+                            {availableTiers.map((tier) => (
+                                <button
+                                    key={tier}
+                                    type="button"
+                                    aria-pressed={selectedTiers !== null && selectedTiers.includes(tier)}
+                                    className={filterButtonClass(selectedTiers !== null && selectedTiers.includes(tier))}
+                                    onClick={() => toggleTier(tier)}
+                                >
+                                    T{tier}
+                                </button>
+                            ))}
+                        </div>
+                    </>
+                )}
+                <InfoTooltip
+                    label="Efficiency Badges"
+                    description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. Each dot is one badged ship, clustered by ship type, sized by tier, and colored by badge class, so you can see at a glance where a player's peak performances cluster. Use the type and tier filters to thin a crowded plot."
+                    align="right"
+                    className="ml-auto"
+                />
+            </div>
             {dots.length === 0 ? (
                 <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--accent-light)]">
                     No Efficiency Badge data is stored for this player yet, or no qualifying ships have earned a badge.
                 </div>
+            ) : visibleDots.length === 0 ? (
+                <div className="rounded-md border border-[var(--border)] bg-[var(--bg-surface)] px-4 py-3 text-sm text-[var(--accent-light)]">
+                    No badges match the selected type and tier filters.
+                </div>
             ) : (
                 <>
-                    <EfficiencyStripPlotSVG dots={dots} theme={theme} minSvgHeight={STRIP_PLOT_MIN_SVG_HEIGHT} />
+                    <EfficiencyStripPlotSVG dots={visibleDots} theme={theme} minSvgHeight={STRIP_PLOT_MIN_SVG_HEIGHT} />
                     <div className="mt-2 flex items-center justify-center gap-8 font-serif text-2xl" aria-label="Badge counts by class">
                         {badgeCounts.map((entry) => (
                             <span

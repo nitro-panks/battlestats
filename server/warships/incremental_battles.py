@@ -728,9 +728,20 @@ def record_observation_from_payloads(
     # Floor/poll callers opt in via `refresh_battles_json=True`; gated by a kill
     # switch and wrapped so it can NEVER break the observation write. Skipped on
     # empty `ship_data` so a transient empty fetch can't blank a player's stats.
-    if (refresh_battles_json
-            and ship_data
-            and os.getenv("FLOOR_REFRESH_BATTLES_JSON_ENABLED", "1") == "1"):
+    #
+    # ORDERING CONTRACT: called only AFTER the observation/diff work below —
+    # `apply_battles_json` bumps `battles_updated_at`, the anchor of
+    # `X-Player-Refresh-Pending` (views._player_refresh_signals). Refreshing
+    # first opens a gap where a watching page's poll sees "landed" before the
+    # BattleEvents commit + battle-history cache invalidation, refetches once,
+    # and caches the pre-session payload (2026-07-17 stale-rehydrate
+    # investigation; same contract as the visit path in update_battle_data).
+    def _refresh_displayed_stats() -> None:
+        if not (refresh_battles_json
+                and ship_data
+                and os.getenv(
+                    "FLOOR_REFRESH_BATTLES_JSON_ENABLED", "1") == "1"):
+            return
         _rebuild_t0 = time.perf_counter()
         try:
             from warships.data import apply_battles_json
@@ -781,6 +792,7 @@ def record_observation_from_payloads(
         )
 
         if previous is None:
+            _refresh_displayed_stats()
             return {
                 "status": "completed",
                 "observation_id": observation.id,
@@ -862,6 +874,7 @@ def record_observation_from_payloads(
             )
 
         if not events and not ranked_events:
+            _refresh_displayed_stats()
             return {
                 "status": "completed",
                 "observation_id": observation.id,
@@ -987,6 +1000,11 @@ def record_observation_from_payloads(
     total_created = created + ranked_created
     if total_created > 0:
         _invalidate_battle_history_cache(player)
+
+    # After the event commit + cache invalidations, so the pending anchor
+    # (battles_updated_at) can only advance once the fresh battle-history
+    # payload is servable.
+    _refresh_displayed_stats()
 
     return {
         "status": "completed",

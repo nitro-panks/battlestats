@@ -2246,12 +2246,18 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM,
         player.save(update_fields=update_fields)
         return
 
-    apply_battles_json(player, ship_data, realm=realm)
-    logging.info(f"Updated battles_json data: {player.name}")
-
     # Battle-history capture hook (Phase 2 of the playerbase rollout).
     # Runbook: agents/runbooks/runbook-battle-history-rollout-2026-04-28.md
     # Off in production until BATTLE_HISTORY_CAPTURE_ENABLED=1 is set.
+    #
+    # ORDERING CONTRACT: the capture must run BEFORE apply_battles_json.
+    # `X-Player-Refresh-Pending` is anchored on `battles_updated_at`
+    # (views._player_refresh_signals), which apply_battles_json bumps — so the
+    # bump must land only after the capture has committed its BattleEvents and
+    # invalidated the battle-history cache. Bumping first opens a gap where
+    # the client's 2s poll sees "landed", fires its single nonce-bumped
+    # battle-history refetch, and caches the pre-session payload until a
+    # manual reload (2026-07-17 stale-rehydrate investigation).
     #
     # Ranked extension (Phase 1, runbook-ranked-battle-history-rollout-2026-05-02.md):
     # When BATTLE_HISTORY_RANKED_CAPTURE_ENABLED=1 AND this realm is in the
@@ -2299,6 +2305,12 @@ def update_battle_data(player_id: str, realm: str = DEFAULT_REALM,
                 "battle-history capture failed for player_id=%s realm=%s",
                 player.player_id, realm,
             )
+
+    # Bump battles_updated_at (the pending-header anchor) LAST — see the
+    # ordering contract above. A capture failure is swallowed above, so the
+    # refresh path stays whole either way.
+    apply_battles_json(player, ship_data, realm=realm)
+    logging.info(f"Updated battles_json data: {player.name}")
 
 
 def fetch_tier_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
