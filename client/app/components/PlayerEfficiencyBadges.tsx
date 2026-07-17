@@ -203,7 +203,10 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
 
     return (
         <div>
-            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+            {/* pt-2.5/pl-[15px] is the shared tab-top header spot across the
+                Profile/Population/Efficiency/Clan Battles insight tabs; the
+                filter rows ride along in the same flex row. */}
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 pt-2.5 pl-[15px]">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Efficiency Badges</h3>
                 {dots.length > 0 && (
                     <>

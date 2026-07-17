@@ -687,7 +687,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
 
     return (
         <div>
-            <div className="mb-2 pl-[15px] text-xs text-[var(--text-secondary)]">
+            {/* pt-2.5/pl-[15px] is the shared tab-top header spot across the
+                player insight tabs. */}
+            <div className="mb-2 pt-2.5 pl-[15px] text-xs text-[var(--text-secondary)]">
                 Randoms data last refreshed: {formatTimestamp(randomsUpdatedAt)}
                 {' · '}
                 <span className={randomsFreshness === 'fresh' ? 'text-green-700' : randomsFreshness === 'stale' ? 'text-red-700' : 'text-[var(--text-secondary)]'}>

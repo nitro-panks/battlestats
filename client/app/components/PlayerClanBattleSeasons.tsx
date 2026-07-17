@@ -201,6 +201,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                 <thead>
                                     <tr className="border-b border-[var(--border)] bg-[var(--bg-surface)] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Season</th>
+                                        <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Name</th>
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Date</th>
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-left font-semibold">Ships</th>
                                         <th className="sticky top-0 bg-[var(--bg-surface)] py-2 pr-3 text-right font-semibold">Battles</th>
@@ -211,7 +212,8 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
                                     {seasons.map((season) => (
                                         <tr key={season.season_id} className="border-b border-[var(--border)] align-top last:border-b-0">
                                             <td className="py-2 pr-3 text-left font-medium text-[var(--accent-dark)]">{season.season_label}</td>
-                                            <td className="py-2 pr-3 text-left text-[var(--text-secondary)]">{season.start_date || season.season_name}</td>
+                                            <td className="py-2 pr-3 text-left text-[var(--text-secondary)]">{season.season_name || '—'}</td>
+                                            <td className="py-2 pr-3 text-left text-[var(--text-secondary)]">{season.start_date || '—'}</td>
                                             <td className="py-2 pr-3 text-left text-[var(--text-secondary)]">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
                                             <td className="py-2 pr-3 text-right">{season.battles.toLocaleString()}</td>
                                             <td className="py-2 pr-3 text-right font-medium" style={{ color: wrColor(season.win_rate) }}>

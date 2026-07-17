@@ -6,11 +6,11 @@ import { barChartLabelGutter, chartColors, wrColorByRatio, type ChartColors as C
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
-// Shared horizontal win-rate bar plot backing TierSVG and TypeSVG, which are
-// otherwise byte-identical. A chart is defined entirely by its config: the row
-// key + detail title accessors, the compact-mode dimensions, the fetch endpoint/
-// label, and the post-fetch sort. createShipBarChart() returns a thin React
-// component; TierSVG/TypeSVG are just two configs.
+// Shared win-rate bar plot backing TierSVG and TypeSVG, which are otherwise
+// byte-identical. A chart is defined entirely by its config: the row key +
+// detail title accessors, the bar orientation, the compact-mode dimensions,
+// the fetch endpoint/label, and the post-fetch sort. createShipBarChart()
+// returns a thin React component; TierSVG/TypeSVG are just two configs.
 
 // The minimum row shape every ship bar plot needs; concrete rows (TierRow,
 // TypeRow) extend it with their own key field.
@@ -28,6 +28,10 @@ export interface ShipBarPlotConfig<Row extends ShipBarRow> {
     detailTitle: (row: Row) => string;
     // CSS class prefix for the grid/row groups ('tier' | 'type').
     cssPrefix: string;
+    // Bar direction: 'horizontal' (default) puts the key on the y axis with
+    // battle volume growing rightward; 'vertical' puts the key on the x axis
+    // with battle volume growing upward (columns).
+    orientation?: 'horizontal' | 'vertical';
     // Compact-mode (narrow container) overrides; non-compact dims are shared.
     compactHeightCap: number;
     compactLeftMargin: number;
@@ -68,11 +72,18 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
 
         d3.select(container).selectAll('*').remove();
 
+        const vertical = config.orientation === 'vertical';
         const totalSvgWidth = containerWidth;
         const totalSvgHeight = compact ? Math.min(svgHeight, config.compactHeightCap) : svgHeight;
-        const margin = compact
-            ? { top: 8, right: 14, bottom: 42, left: config.compactLeftMargin }
-            : { top: 8, right: 46, bottom: 48, left: 100 };
+        // Vertical charts trade the wide key-label left margin for a slim
+        // battle-count axis, and reserve top headroom for the WR% column labels.
+        const margin = vertical
+            ? (compact
+                ? { top: 16, right: 8, bottom: 30, left: config.compactLeftMargin }
+                : { top: 18, right: 10, bottom: 34, left: 56 })
+            : (compact
+                ? { top: 8, right: 14, bottom: 42, left: config.compactLeftMargin }
+                : { top: 8, right: 46, bottom: 48, left: 100 });
         const width = totalSvgWidth - margin.left - margin.right;
         const height = totalSvgHeight - margin.top - margin.bottom;
         const axisFontSize = compact ? '9px' : '12px';
@@ -88,6 +99,102 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
         const svg = svgRoot
             .append('g')
             .attr('transform', `translate(${margin.left}, ${margin.top})`);
+
+        // Column variant: same visual grammar as the horizontal rows (thin
+        // battle-volume backdrop, full-thickness wins bar tinted by win rate)
+        // rotated 90° — key on the x band, battles on the y linear scale. The
+        // end-of-bar "battles · WR%" label has no room over a column, so each
+        // column carries a rounded WR% above its backdrop instead; battle
+        // volume reads off the y axis.
+        const renderColumns = (rows: Row[]) => {
+                if (rows.length === 0) {
+                    return;
+                }
+
+                const maxBattles = Math.max(d3.max(rows, (datum: Row) => datum.pvp_battles) || 0, 10);
+                const x = d3.scaleBand()
+                    .range([0, width])
+                    .domain(rows.map((datum: Row) => config.rowKey(datum)))
+                    .padding(0.18);
+
+                const y = d3.scaleLinear()
+                    .domain([0, maxBattles])
+                    .range([height, 0]);
+
+                svg.append('g')
+                    .attr('class', `${config.cssPrefix}-grid`)
+                    .call(d3.axisLeft(y).ticks(5).tickSize(-width).tickFormat(() => ''));
+
+                svg.select(`.${config.cssPrefix}-grid`)?.select('.domain')?.remove();
+                svg.selectAll(`.${config.cssPrefix}-grid line`)
+                    .style('stroke', colors.gridLine)
+                    .style('stroke-width', 1);
+
+                svg.append('g')
+                    .style('color', colors.labelMuted)
+                    .call(d3.axisLeft(y).ticks(5).tickFormat((value: number) => d3.format(',')(Number(value))).tickSizeOuter(0))
+                    .selectAll('text')
+                    .style('font-size', axisFontSize);
+
+                svg.append('g')
+                    .attr('transform', `translate(0, ${height})`)
+                    .style('color', colors.axisText)
+                    .call(d3.axisBottom(x).tickSize(0).tickPadding(6).tickFormat((key: string) => (config.axisTickLabel ? config.axisTickLabel(key) : key)))
+                    .selectAll('text')
+                    .style('font-size', axisFontSize)
+                    .style('font-weight', '500');
+
+                svg.selectAll('.domain').style('stroke', colors.axisLine);
+
+                const rowNodes = svg.selectAll(`.${config.cssPrefix}-row`)
+                    .data(rows)
+                    .enter()
+                    .append('g')
+                    .classed(`${config.cssPrefix}-row`, true);
+
+                const fgBarWidth = x.bandwidth();
+                const bgBarWidth = Math.max(3, Math.round(fgBarWidth * 0.5));
+                const bgBarOffset = (fgBarWidth - bgBarWidth) / 2;
+
+                rowNodes.append('rect')
+                    .attr('x', (datum: Row) => (x(config.rowKey(datum)) ?? 0) + bgBarOffset)
+                    .attr('y', (datum: Row) => y(datum.pvp_battles))
+                    .attr('width', bgBarWidth)
+                    .attr('height', (datum: Row) => height - y(datum.pvp_battles))
+                    .attr('rx', 3)
+                    .attr('fill', colors.barBg);
+
+                rowNodes.append('rect')
+                    .attr('x', (datum: Row) => x(config.rowKey(datum)) ?? 0)
+                    .attr('y', (datum: Row) => y(datum.wins))
+                    .attr('width', fgBarWidth)
+                    .attr('height', (datum: Row) => height - y(datum.wins))
+                    .attr('rx', 3)
+                    .style('stroke', colors.axisLine)
+                    .style('stroke-width', 0.5)
+                    .attr('fill', (datum: Row) => wrColorByRatio(datum.win_ratio))
+                    .on('mouseover', function (this: SVGRectElement) {
+                        d3.select(this)
+                            .transition()
+                            .duration(70)
+                            .attr('opacity', 0.82);
+                    })
+                    .on('mouseout', function (this: SVGRectElement) {
+                        d3.select(this)
+                            .transition()
+                            .duration(70)
+                            .attr('opacity', 1);
+                    });
+
+                rowNodes.filter((datum: Row) => datum.pvp_battles > 0)
+                    .append('text')
+                    .attr('x', (datum: Row) => (x(config.rowKey(datum)) ?? 0) + fgBarWidth / 2)
+                    .attr('y', (datum: Row) => y(datum.pvp_battles) - 5)
+                    .attr('text-anchor', 'middle')
+                    .style('font-size', axisFontSize)
+                    .style('fill', colors.labelMuted)
+                    .text((datum: Row) => `${Math.round(datum.win_ratio * 100)}%`);
+            };
 
         const renderRows = (rows: Row[]) => {
                 if (rows.length === 0) {
@@ -191,8 +298,10 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
                     });
             };
 
+        const render = vertical ? renderColumns : renderRows;
+
         if (data) {
-            renderRows(data);
+            render(data);
             return;
         }
 
@@ -201,7 +310,7 @@ export function createShipBarChart<Row extends ShipBarRow>(config: ShipBarPlotCo
             ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
         })
             .then(({ data: payload }) => {
-                renderRows(config.sortRows(normalizeRows(payload)));
+                render(config.sortRows(normalizeRows(payload)));
             })
             .catch((error) => {
                 console.error(config.fetchErrorMessage, error);

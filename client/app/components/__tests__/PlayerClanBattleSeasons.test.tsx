@@ -84,6 +84,35 @@ describe('PlayerClanBattleSeasons', () => {
         expect(onSummaryChange.mock.calls.at(-1)?.[0]?.overallWinRate).toBeCloseTo(55, 5);
     });
 
+    it('renders the season name as its own column beside the season label', async () => {
+        mockFetchSharedJson.mockResolvedValueOnce({
+            data: [
+                {
+                    season_id: 32,
+                    season_name: 'Typhoon Rising',
+                    season_label: 'S32',
+                    start_date: '2026-02-01',
+                    end_date: '2026-03-01',
+                    ship_tier_min: 8,
+                    ship_tier_max: 10,
+                    battles: 12,
+                    wins: 7,
+                    losses: 5,
+                    win_rate: 58.3,
+                },
+            ],
+            headers: {},
+        });
+
+        render(<PlayerClanBattleSeasons playerId={404} />);
+
+        // The name renders even when start_date is present — it is a column of
+        // its own now, not the Date column's fallback.
+        expect(await screen.findByText('Typhoon Rising')).toBeInTheDocument();
+        expect(screen.getByRole('columnheader', { name: 'Name' })).toBeInTheDocument();
+        expect(screen.getByText('2026-02-01')).toBeInTheDocument();
+    });
+
     it('reports the current-season slice from the server-flagged is_current row', async () => {
         const onSummaryChange = jest.fn();
 
