@@ -63,6 +63,12 @@ export const damageRatioColor: (ratio: number) => string = d3.scaleLinear()
     .interpolate(d3.interpolateLab as unknown as never)
     .clamp(true) as unknown as (ratio: number) => string;
 
+// A tooltip line: plain muted text (spans the full row), or a value/label data
+// pair laid out on a shared two-column grid so the values align vertically.
+// `color` tints the value (the damage-delta row, same diverging scale as the
+// tile).
+type TooltipLine = string | { value: string; label: string; color?: string };
+
 // One tile of a mini-treemap, already aggregated by the parent.
 interface TreemapDatum {
     key: string;            // stable identity + default label
@@ -70,12 +76,12 @@ interface TreemapDatum {
     sub?: string | null;    // second label line (avg dmg on the ships map, WR% on type/tier)
     size: number;           // area (battles)
     color: string;          // tile fill, computed by the parent per map
-    tooltip: string[];      // lines for the hover overlay
+    tooltip: TooltipLine[]; // lines for the hover overlay; first is always the title string
     shipRow?: BattleHistoryByShip; // present only on the ships map (click target)
 }
 
 interface HoverState {
-    lines: string[];
+    lines: TooltipLine[];
     x: number;
     y: number;
 }
@@ -214,10 +220,26 @@ const MiniTreemap: React.FC<MiniTreemapProps> = ({
                             top: Math.max(hover.y - 44, 0),
                         }}
                     >
-                        <div className="font-semibold text-[var(--text-strong)]">{hover.lines[0]}</div>
-                        {hover.lines.slice(1).map((line) => (
-                            <div key={line} className="text-[var(--text-muted)]">{line}</div>
-                        ))}
+                        <div className="pb-[3px] font-semibold text-[var(--text-strong)]">
+                            {typeof hover.lines[0] === 'string' ? hover.lines[0] : hover.lines[0].value}
+                        </div>
+                        <div className="grid grid-cols-[auto_1fr] gap-x-2">
+                            {hover.lines.slice(1).map((line, i) => (
+                                typeof line === 'string' ? (
+                                    <div key={i} className="col-span-2 text-[var(--text-muted)]">{line}</div>
+                                ) : (
+                                    <React.Fragment key={i}>
+                                        <span
+                                            className="text-right font-semibold tabular-nums text-[var(--text-strong)]"
+                                            style={line.color ? { color: line.color } : undefined}
+                                        >
+                                            {line.value}
+                                        </span>
+                                        <span className="text-[var(--text-muted)]">{line.label}</span>
+                                    </React.Fragment>
+                                )
+                            ))}
+                        </div>
                     </div>
                 )}
             </div>
@@ -238,14 +260,13 @@ const aggregateTiles = (
     groupKey: (r: BattleHistoryByShip) => string | null,
     labelFor: (key: string) => string,
 ): TreemapDatum[] => {
-    const groups = new Map<string, { battles: number; wins: number; damage: number; ships: number }>();
+    const groups = new Map<string, { battles: number; wins: number; ships: number }>();
     rows.forEach((r) => {
         const key = groupKey(r);
         if (key == null) return;
-        const cur = groups.get(key) ?? { battles: 0, wins: 0, damage: 0, ships: 0 };
+        const cur = groups.get(key) ?? { battles: 0, wins: 0, ships: 0 };
         cur.battles += r.battles;
         cur.wins += r.wins;
-        cur.damage += r.damage;
         cur.ships += 1;
         groups.set(key, cur);
     });
@@ -261,8 +282,9 @@ const aggregateTiles = (
                 color: wrColor(wr),
                 tooltip: [
                     labelFor(key),
-                    `${v.battles.toLocaleString()} battles · ${wr.toFixed(1)}% WR`,
-                    `${v.ships} ship${v.ships === 1 ? '' : 's'} · ${fmtDamage(v.damage)} dmg`,
+                    { value: v.battles.toLocaleString(), label: v.battles === 1 ? 'battle' : 'battles' },
+                    { value: `${wr.toFixed(1)}%`, label: 'WR', color: wrColor(wr) },
+                    { value: String(v.ships), label: v.ships === 1 ? 'ship' : 'ships' },
                 ],
             };
         });
@@ -313,9 +335,6 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                 const ratio = popAvg != null && popAvg > 0
                     ? r.avg_damage / popAvg
                     : null;
-                const vsAvg = ratio != null
-                    ? `${ratio >= 1 ? '+' : ''}${((ratio - 1) * 100).toFixed(0)}% vs ship avg`
-                    : 'no ship-average baseline';
                 return {
                     key: String(r.ship_id),
                     label: r.ship_name || `Ship ${r.ship_id}`,
@@ -324,11 +343,16 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                     color: ratio != null ? damageRatioColor(ratio) : NEUTRAL_TILE,
                     tooltip: [
                         r.ship_name || `Ship ${r.ship_id}`,
-                        `${fmtDamage(r.avg_damage)} avg dmg · ${vsAvg}`,
-                        popAvg != null
-                            ? `ship 30d avg ${fmtDamage(popAvg)} · ${fmtDamage(r.damage)} total`
-                            : `${fmtDamage(r.damage)} total dmg`,
-                        `${r.battles.toLocaleString()} battles · ${r.win_rate.toFixed(1)}% WR`,
+                        { value: fmtDamage(r.avg_damage), label: 'avg dmg' },
+                        ratio != null
+                            ? {
+                                value: `${ratio >= 1 ? '+' : ''}${((ratio - 1) * 100).toFixed(0)}%`,
+                                label: 'vs avg',
+                                color: damageRatioColor(ratio),
+                            }
+                            : 'no ship-average baseline',
+                        { value: r.battles.toLocaleString(), label: r.battles === 1 ? 'battle' : 'battles' },
+                        { value: `${r.win_rate.toFixed(1)}%`, label: 'WR' },
                     ],
                     shipRow: r,
                 };
