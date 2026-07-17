@@ -718,7 +718,11 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         // (rankedHistoryAvailable !== false), so an empty-activity
                         // player is never offered a dead round-trip.
                         <div>
-                            <div className={`mb-3 flex items-center gap-3 ${showRankedHeatmap ? 'justify-between' : 'justify-end'}`}>
+                            {/* pt-2.5/pl-[15px] is the shared tab-top header spot across
+                                the insight tabs; the view toggle + mode caption ride in
+                                the same flex row. items-start so the taller chips can't
+                                push the label below the shared y. */}
+                            <div className={`mb-3 flex items-start gap-3 pt-2.5 pl-[15px] ${showRankedHeatmap ? 'justify-between' : 'justify-end'}`}>
                                 {showRankedHeatmap ? (
                                     <SectionHeadingWithTooltip
                                         title="Ranked Games vs Win Rate"
@@ -757,12 +761,17 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             )}
 
                             <div className="mt-4">
+                                {/* Label + table share the tab's 15px left inset (same
+                                    x as the Ranked Games vs Win Rate header above); the
+                                    table also pulls in 20px on the right. */}
                                 <SectionHeadingWithTooltip
                                     title="Ranked Seasons"
                                     description="This table summarizes the player's historical ranked-season results, including total battles, win rate, and the best league finish reached in each season."
-                                    className="mb-3"
+                                    className="mb-3 pl-[15px]"
                                 />
-                                <RankedSeasons playerId={playerId} isLoading={isLoading} />
+                                <div className="pl-[15px] pr-[20px]">
+                                    <RankedSeasons playerId={playerId} isLoading={isLoading} />
+                                </div>
                             </div>
                         </div>
                     )
