@@ -51,3 +51,6 @@ server/Pipfile
 server/Pipfile.lock
 
 meta/
+
+# SuperLocalMemory auto-generated adapter for the Antigravity harness
+.agent/
