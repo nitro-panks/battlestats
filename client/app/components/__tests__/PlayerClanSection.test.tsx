@@ -92,16 +92,22 @@ describe('PlayerClanSection', () => {
             // ranked battles in the window (e.g. co-op-only) — must NOT make
             // the Active PvP block.
             makeMember('Bravo', 'active_30d'),
+            // Current-season CB player with no 30d randoms/ranked rides
+            // along in the Active PvP block — the this-season shield must
+            // not sit under the idle rule.
+            { ...makeMember('Foxtrot', 'cooling_90d'), is_clan_battle_player: true, clan_battle_win_rate: 55 },
         ]);
 
         const roster = screen.getByTestId('clan-activity-roster');
 
         // Top: the Active PvP label + the members with random/ranked battles
-        // in the 30d window, regardless of activity bucket.
-        expect(roster).toHaveTextContent('Active PvP (2)');
+        // in the 30d window (or a current-season CB shield), regardless of
+        // activity bucket.
+        expect(roster).toHaveTextContent('Active PvP (3)');
         const active = screen.getByTestId('clan-roster-active');
         expect(within(active).getByText('Alpha')).toBeInTheDocument();
         expect(within(active).getByText('Delta')).toBeInTheDocument();
+        expect(within(active).getByText('Foxtrot')).toBeInTheDocument();
 
         // A rule separates the two blocks.
         expect(roster.querySelector('hr')).toBeInTheDocument();
