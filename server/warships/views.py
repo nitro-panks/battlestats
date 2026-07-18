@@ -13,7 +13,7 @@ from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django.utils import timezone
-from warships.models import DEFAULT_REALM, VALID_REALMS, Player, Clan, Ship, EntityVisitDaily, realm_cache_key
+from warships.models import DEFAULT_REALM, VALID_REALMS, Player, Clan, Ship, EntityVisitDaily, PlayerDailyShipStats, realm_cache_key
 from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
@@ -1565,6 +1565,13 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
     return Response({'detail': 'Unsupported player correlation metric.'}, status=status.HTTP_404_NOT_FOUND)
 
 
+# Trailing window (days) for the roster's `is_active_pvp` flag: a member
+# counts as PvP-active when the battle-history daily layer holds any random
+# or ranked battles for them inside it. Matches the site's 30-day surfaces
+# (ship leaderboard window, battle-history month view).
+CLAN_ACTIVE_PVP_WINDOW_DAYS = 30
+
+
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def clan_members(request, clan_id: str) -> Response:
@@ -1608,9 +1615,10 @@ def clan_members(request, clan_id: str) -> Response:
     # `last_battle_date` at response-build time rather than read from the
     # stored snapshot column (which goes stale by 1 day/day between
     # refreshes). v2 entries served the stored, drifting value, so they
-    # are bypassed.
+    # are bypassed. v4: rows carry `is_active_pvp` (random/ranked battles in
+    # the trailing 30d window); v3 entries lack the field.
     CLAN_MEMBERS_CACHE_TTL = 300  # 5 minutes
-    cache_key = realm_cache_key(realm, f'clan:members:v3:{clan_id}')
+    cache_key = realm_cache_key(realm, f'clan:members:v4:{clan_id}')
     cached = cache.get(cache_key)
     if cached is not None:
         response = Response(cached)
@@ -1665,6 +1673,18 @@ def clan_members(request, clan_id: str) -> Response:
     # hydration poll loop doesn't re-run the bulk fetch on every poll.
     member_badges = _clan_member_badges_cached(clan_id, realm, [m.pk for m in members])
 
+    # One bulk read over the battle-history daily layer: which roster members
+    # have random/ranked battles inside the trailing window. PlayerDailyShipStats
+    # only holds those two modes, so no mode filter is needed; the
+    # (player, -date) index keeps this a cheap per-roster probe.
+    active_pvp_player_pks = set(
+        PlayerDailyShipStats.objects.filter(
+            player__in=members,
+            date__gte=today - timedelta(days=CLAN_ACTIVE_PVP_WINDOW_DAYS),
+            battles__gt=0,
+        ).values_list('player_id', flat=True).distinct()
+    )
+
     # One durable-reference read for the whole roster: the Ranked Enjoyer flag
     # and star color are scoped to the current ranked season (see
     # agents/work-items/ranked-enjoyer-current-season-spec.md), and the CB
@@ -1690,6 +1710,7 @@ def clan_members(request, clan_id: str) -> Response:
             ),
             'is_pve_player': is_pve_player(member.total_battles, member.pvp_battles),
             'is_sleepy_player': is_sleepy_player(days_since),
+            'is_active_pvp': member.pk in active_pvp_player_pks,
             'is_ranked_player': is_current_season_ranked_player(
                 member.ranked_json, current_ranked_season_id),
             'is_clan_battle_player': is_current_season_clan_battle_player(

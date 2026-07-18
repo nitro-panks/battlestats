@@ -24,6 +24,10 @@ export interface ClanMemberData {
     is_leader: boolean;
     is_pve_player: boolean;
     is_sleepy_player: boolean;
+    // Random or ranked battles in the battle-history daily layer inside the
+    // trailing 30d window — the profiles with something to see on the site;
+    // drives the player-page roster's "Active PvP" block.
+    is_active_pvp?: boolean;
     is_ranked_player: boolean;
     // Current-season semantics (server-computed): battles logged in the
     // current CB season, and that season's WR for the shield tint (null when

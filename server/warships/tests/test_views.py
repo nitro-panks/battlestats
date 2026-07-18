@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.models import Player, Clan, ClanBattleSeason, PlayerExplorerSummary, RankedSeason, realm_cache_key, Ship, ShipTopPlayerSnapshot, EntityVisitDaily
+from warships.models import Player, Clan, ClanBattleSeason, PlayerDailyShipStats, PlayerExplorerSummary, RankedSeason, realm_cache_key, Ship, ShipTopPlayerSnapshot, EntityVisitDaily
 from warships.views import PUBLIC_API_THROTTLES, _missing_player_lookup_cache_key
 
 
@@ -1170,6 +1170,53 @@ class ClanMembersEndpointTests(TestCase):
 
     @patch("warships.data.update_clan_members")
     @patch("warships.data.update_clan_data")
+    def test_clan_members_flags_active_pvp_from_recent_daily_stats(
+        self,
+        mock_update_clan_data,
+        mock_update_clan_members,
+    ):
+        # `is_active_pvp` keys on the battle-history daily layer (random or
+        # ranked rows inside the trailing 30d window), not on the WG account
+        # clock — a co-op-only member with a fresh last_battle_date must not
+        # qualify, and PvP older than the window must not either.
+        today = timezone.now().date()
+        clan = Clan.objects.create(
+            clan_id=4646, name="PvP Clan", members_count=4)
+        random_recent = Player.objects.create(
+            name="RandomRecent", player_id=20, clan=clan,
+            last_battle_date=today - timedelta(days=1))
+        ranked_recent = Player.objects.create(
+            name="RankedRecent", player_id=21, clan=clan,
+            last_battle_date=today - timedelta(days=2))
+        Player.objects.create(
+            name="CoopOnly", player_id=22, clan=clan,
+            last_battle_date=today)
+        stale_pvp = Player.objects.create(
+            name="StalePvp", player_id=23, clan=clan,
+            last_battle_date=today - timedelta(days=45))
+        PlayerDailyShipStats.objects.create(
+            player=random_recent, date=today - timedelta(days=3), ship_id=1,
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=2)
+        PlayerDailyShipStats.objects.create(
+            player=ranked_recent, date=today - timedelta(days=10), ship_id=2,
+            mode=PlayerDailyShipStats.MODE_RANKED, season_id=27, battles=1)
+        PlayerDailyShipStats.objects.create(
+            player=stale_pvp, date=today - timedelta(days=40), ship_id=3,
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=5)
+
+        response = self.client.get("/api/fetch/clan_members/4646/")
+
+        self.assertEqual(response.status_code, 200)
+        flags = {row["name"]: row["is_active_pvp"] for row in response.json()}
+        self.assertEqual(flags, {
+            "RandomRecent": True,
+            "RankedRecent": True,
+            "CoopOnly": False,
+            "StalePvp": False,
+        })
+
+    @patch("warships.data.update_clan_members")
+    @patch("warships.data.update_clan_data")
     def test_clan_members_include_current_ship_badges(
         self,
         mock_update_clan_data,
@@ -1325,6 +1372,7 @@ class ClanMembersEndpointTests(TestCase):
                              "is_leader": True,
                              "is_pve_player": False,
                              "is_sleepy_player": False,
+                             "is_active_pvp": False,
                              "is_ranked_player": False,
                              "is_clan_battle_player": False,
                              "clan_battle_win_rate": None,

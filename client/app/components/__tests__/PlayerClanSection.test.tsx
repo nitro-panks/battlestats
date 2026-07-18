@@ -35,9 +35,10 @@ jest.mock('../../lib/umami', () => ({
     trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
 }));
 
-const makeMember = (name: string, activityBucket: ActivityBucketKey): ClanMemberData => ({
+const makeMember = (name: string, activityBucket: ActivityBucketKey, isActivePvp = false): ClanMemberData => ({
     name,
     is_hidden: false,
+    is_active_pvp: isActivePvp,
     pvp_ratio: 52,
     days_since_last_battle: 3,
     is_leader: false,
@@ -81,35 +82,76 @@ describe('PlayerClanSection', () => {
         expect(clanLink.getAttribute('href')).toContain('/clan/4444');
     });
 
-    it('splits the roster into a labeled Active block and one unlabeled block of everyone else', () => {
+    it('splits the roster into a labeled Active PvP block and one unlabeled block of everyone else', () => {
         renderSection([
             makeMember('Echo', 'inactive_180d_plus'),
             makeMember('Charlie', 'cooling_90d'),
-            makeMember('Alpha', 'active_7d'),
-            makeMember('Delta', 'dormant_180d'),
+            makeMember('Alpha', 'active_7d', true),
+            makeMember('Delta', 'dormant_180d', true),
+            // Recently active on the WG account clock but with no random or
+            // ranked battles in the window (e.g. co-op-only) — must NOT make
+            // the Active PvP block.
             makeMember('Bravo', 'active_30d'),
         ]);
 
         const roster = screen.getByTestId('clan-activity-roster');
 
-        // Top: the Active label + the active members (active_7d + active_30d).
-        expect(roster).toHaveTextContent('Active Members (2)');
+        // Top: the Active PvP label + the members with random/ranked battles
+        // in the 30d window, regardless of activity bucket.
+        expect(roster).toHaveTextContent('Active PvP (2)');
         const active = screen.getByTestId('clan-roster-active');
         expect(within(active).getByText('Alpha')).toBeInTheDocument();
-        expect(within(active).getByText('Bravo')).toBeInTheDocument();
+        expect(within(active).getByText('Delta')).toBeInTheDocument();
 
         // A rule separates the two blocks.
         expect(roster.querySelector('hr')).toBeInTheDocument();
 
         // Below: everyone else in one alphabetical block with NO second label.
         const others = screen.getByTestId('clan-roster-others');
-        const names = ['Charlie', 'Delta', 'Echo'];
+        const names = ['Bravo', 'Charlie', 'Echo'];
         names.forEach((name) => expect(within(others).getByText(name)).toBeInTheDocument());
         const positions = names.map((name) => others.textContent!.indexOf(name));
         expect([...positions].sort((a, b) => a - b)).toEqual(positions);
         expect(roster).not.toHaveTextContent('Cooling Off');
         expect(roster).not.toHaveTextContent('Gone dark');
-        expect(screen.queryByTestId('clan-phase-cooling_90d')).not.toBeInTheDocument();
+    });
+
+    it('lays each block out as a fixed four-column grid with a WR-colored mark per name', () => {
+        renderSection([
+            { ...makeMember('Alpha', 'active_7d', true), pvp_ratio: 61 },
+            makeMember('Bravo', 'active_7d', true),
+            makeMember('Charlie', 'cooling_90d'),
+            makeMember('Delta', 'inactive_180d_plus'),
+            makeMember('Echo', 'inactive_180d_plus'),
+            { ...makeMember('Foxtrot', 'inactive_180d_plus'), pvp_ratio: null },
+            makeMember('Golf', 'inactive_180d_plus'),
+            makeMember('Hotel', 'inactive_180d_plus'),
+        ]);
+
+        // Both blocks use the same fixed grid: 4 even columns (2 below sm).
+        const active = screen.getByTestId('clan-roster-active');
+        expect(active.className).toContain('grid');
+        expect(active.className).toContain('sm:grid-cols-4');
+        const others = screen.getByTestId('clan-roster-others');
+        expect(others.className).toContain('sm:grid-cols-4');
+        // One grid cell per member.
+        expect(others.querySelectorAll('li')).toHaveLength(6);
+
+        // Every name leads with a diamond on the shared WR color scale.
+        const marks = screen.getAllByTestId('roster-wr-mark');
+        expect(marks).toHaveLength(8);
+        const markFillFor = (name: string) => {
+            const cell = screen.getByText(name).closest('li')!;
+            return within(cell as HTMLElement)
+                .getByTestId('roster-wr-mark')
+                .querySelector('polygon')!
+                .getAttribute('fill');
+        };
+        // 61% → the unicum magenta band; 52% → the light-green band.
+        expect(markFillFor('Alpha')).toBe('#D042F3');
+        expect(markFillFor('Bravo')).toBe('#a1d99b');
+        // Null WR → the scale's pale no-data blue.
+        expect(markFillFor('Foxtrot')).toBe('#c6dbef');
     });
 
     it('renders clanmates as player links but the viewed player as plain text', () => {

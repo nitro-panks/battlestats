@@ -93,26 +93,30 @@ describe('ClanDetail clan roster hydration wiring', () => {
         expect(mockUseClanMembers).toHaveBeenCalledWith(5555);
     });
 
-    it('keeps the icon+label phase headers on the clan-page roster (headers mode)', () => {
-        // The player page's clan section drops these headers (icon-lead mode);
-        // the clan page must keep them — guard the default.
+    it('splits the clan-page roster into Active PvP and everyone else', () => {
+        // Same shared presentation as the player page's clan section: the
+        // Active PvP block is gated on `is_active_pvp` (30d random/ranked
+        // battles), not on the WG account clock.
+        const baseMember = {
+            is_hidden: false,
+            pvp_ratio: 52,
+            days_since_last_battle: 3,
+            is_leader: false,
+            is_pve_player: false,
+            is_sleepy_player: false,
+            is_ranked_player: false,
+            is_clan_battle_player: false,
+            clan_battle_win_rate: null,
+            highest_ranked_league: null,
+            ranked_hydration_pending: false,
+            ranked_updated_at: null,
+            activity_bucket: 'active_7d',
+        };
         mockUseClanMembers.mockReturnValue({
-            members: [{
-                name: 'Alpha',
-                is_hidden: false,
-                pvp_ratio: 52,
-                days_since_last_battle: 3,
-                is_leader: false,
-                is_pve_player: false,
-                is_sleepy_player: false,
-                is_ranked_player: false,
-                is_clan_battle_player: false,
-                clan_battle_win_rate: null,
-                highest_ranked_league: null,
-                ranked_hydration_pending: false,
-                ranked_updated_at: null,
-                activity_bucket: 'active_7d',
-            }],
+            members: [
+                { ...baseMember, name: 'Alpha', is_active_pvp: true },
+                { ...baseMember, name: 'Bravo' },
+            ],
             loading: false,
             error: '',
         });
@@ -128,7 +132,10 @@ describe('ClanDetail clan roster hydration wiring', () => {
             />,
         );
 
-        expect(screen.getByTestId('clan-phase-active_7d')).toHaveTextContent('Active now (1)');
+        const roster = screen.getByTestId('clan-activity-roster');
+        expect(roster).toHaveTextContent('Active PvP (1)');
+        expect(screen.getByTestId('clan-roster-active')).toHaveTextContent('Alpha');
+        expect(screen.getByTestId('clan-roster-others')).toHaveTextContent('Bravo');
     });
 
     it('renders the clan members list before the clan battle seasons section', () => {
