@@ -179,6 +179,22 @@ describe('PlayerClanSection', () => {
         expect(within(active).getByLabelText('Hidden account')).toBeInTheDocument();
     });
 
+    it('marks gone-dark members with the bed icon, and only them', () => {
+        renderSection([
+            makeMember('Alpha', 'active_7d', true),
+            makeMember('Cooling', 'cooling_90d'),
+            makeMember('Sleeper', 'inactive_180d_plus'),
+            makeMember('DeepSleeper', 'dormant_180d'),
+        ]);
+
+        // dormant_180d collapses to Cooling — only true 181d+ members get
+        // the bed. One bed for Sleeper, none for the others.
+        const beds = screen.getAllByLabelText(/Asleep — inactive 180\+ days/);
+        expect(beds).toHaveLength(1);
+        const sleeperCell = screen.getByText('Sleeper').closest('li')!;
+        expect(within(sleeperCell as HTMLElement).getByLabelText(/Asleep/)).toBeInTheDocument();
+    });
+
     it('appends classification badges to member names', () => {
         renderSection([
             { ...makeMember('Captain', 'active_7d'), is_leader: true },

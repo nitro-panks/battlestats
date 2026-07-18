@@ -11,7 +11,7 @@ import PveEnjoyerIcon, { PVE_ENJOYER_ICON_ENABLED } from './PveEnjoyerIcon';
 import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import TopShipBadges from './TopShipBadges';
-import { type ClanMemberData } from './clanMembersShared';
+import { collapseActivityBucket, type ClanMemberData } from './clanMembersShared';
 import { buildPlayerPath } from '../lib/entityRoutes';
 import { useRealm } from '../context/RealmContext';
 import { trackEvent } from '../lib/umami';
@@ -89,11 +89,16 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
                 </svg>
             </span>
         );
-        // Same classification-badge dispatch as the player-header tray; the
-        // per-member activity icon is omitted — the scatterplot above carries
-        // recency on both surfaces.
+        // Same classification-badge dispatch as the player-header tray. The
+        // scatterplot above carries recency on both surfaces, so per-member
+        // activity icons are omitted — except the bed on gone-dark members
+        // (181d+), which marks the long-gone at a glance inside the
+        // otherwise-undifferentiated below-the-rule block.
         const badges = (
             <>
+                {collapseActivityBucket(member.activity_bucket) === 'inactive_180d_plus' && (
+                    <ActivityIcon bucket={member.activity_bucket} size="inline" />
+                )}
                 {member.is_hidden && <HiddenAccountIcon className="text-[11px] text-[var(--accent-light)]" />}
                 {member.is_leader && <LeaderCrownIcon size="inline" />}
                 {member.is_streamer && <TwitchStreamerIcon size="inline" />}
