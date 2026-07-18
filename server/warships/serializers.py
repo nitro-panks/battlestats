@@ -416,6 +416,10 @@ class ClanMemberSerializer(serializers.Serializer):
     is_leader = serializers.BooleanField()
     is_pve_player = serializers.BooleanField()
     is_sleepy_player = serializers.BooleanField()
+    # Random or ranked battles in the battle-history daily layer inside the
+    # trailing CLAN_ACTIVE_PVP_WINDOW_DAYS window — drives the player-page
+    # roster's "Active PvP" block (profiles worth checking out on the site).
+    is_active_pvp = serializers.BooleanField(default=False)
     is_ranked_player = serializers.BooleanField()
     is_clan_battle_player = serializers.BooleanField()
     clan_battle_win_rate = serializers.FloatField(allow_null=True)

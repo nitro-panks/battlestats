@@ -21,11 +21,13 @@ import wrColor from '../lib/wrColor';
 // tail. Presentation varies by surface (`phaseStyle`): the clan page groups
 // names into one flowing paragraph (✦ dividers) per collapsed activity phase
 // (Active / Cooling Off / Gone dark) under an icon-and-color header; the
-// player page's clan section splits the roster in two four-column grids — the
-// active phase under its label, then a rule and one unlabeled alphabetical
-// block of everyone else (the scatterplot above tells the finer-grained
-// activity story per member); each name in the grids leads with a diamond on
-// the shared win-rate color scale (member pvp_ratio through lib/wrColor).
+// player page's clan section splits the roster in two four-column grids —
+// "Active PvP" (members with random/ranked battles in the trailing 30d
+// window, `is_active_pvp`) under its label, then a rule and one unlabeled
+// alphabetical block of everyone else (the scatterplot above tells the
+// finer-grained activity story per member); each name in the grids leads
+// with a diamond on the shared win-rate color scale (member pvp_ratio
+// through lib/wrColor).
 
 interface ClanActivityRosterProps {
     members: ClanMemberData[];
@@ -37,9 +39,10 @@ interface ClanActivityRosterProps {
     // Which surface drove a member click — clan page vs player-page section.
     source?: 'clan' | 'player';
     // 'headers' (default): one paragraph per activity phase, icon+label header.
-    // 'split': active members under the Active label, an <hr>, then all other
-    // members as one unlabeled alphabetical block; both blocks lay out as
-    // four-column grids with a WR-colored diamond per name.
+    // 'split': members with 30d random/ranked battles under the Active PvP
+    // label, an <hr>, then all other members as one unlabeled alphabetical
+    // block; both blocks lay out as four-column grids with a WR-colored
+    // diamond per name.
     phaseStyle?: 'headers' | 'split';
 }
 
@@ -183,15 +186,14 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
     );
 
     if (phaseStyle === 'split') {
-        const activeMembers = membersByPhase.active_7d;
-        // Everyone not currently active — cooling, gone dark, and unknown —
-        // re-sorted into one alphabetical block; deliberately unlabeled (the
-        // rule is the whole distinction).
-        const otherMembers = [
-            ...membersByPhase.cooling_90d,
-            ...membersByPhase.inactive_180d_plus,
-            ...membersByPhase.unknown,
-        ].sort(byName);
+        // The top block is gated on the battle-history pipeline, not the WG
+        // account clock: members with random/ranked battles in the trailing
+        // 30d window (`is_active_pvp`) are the profiles with something to
+        // see on the site. Everyone else — co-op-only, cooling, gone dark —
+        // lands in one alphabetical block below the rule; deliberately
+        // unlabeled (the rule is the whole distinction).
+        const activeMembers = members.filter((m) => m.is_active_pvp).sort(byName);
+        const otherMembers = members.filter((m) => !m.is_active_pvp).sort(byName);
         return (
             // One text step up from the phase-grouped text-sm — this roster is
             // the section's only text surface, so the names carry more size.
@@ -207,7 +209,7 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
                             style={{ color: activityColor('active_7d') }}
                         >
                             <ActivityIcon bucket="active_7d" size="header" />
-                            <span>Active Members ({activeMembers.length})</span>
+                            <span>Active PvP ({activeMembers.length})</span>
                         </h3>
                         <ul className={`mt-2.5 ${ROSTER_GRID_CLASS} text-base leading-7`} data-testid="clan-roster-active">
                             {activeMembers.map((member) => (
