@@ -147,11 +147,20 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
     // The top block is gated on the battle-history pipeline, not the WG
     // account clock: members with random/ranked battles in the trailing
     // 30d window (`is_active_pvp`) are the profiles with something to
-    // see on the site. Everyone else — co-op-only, cooling, gone dark —
-    // lands in one alphabetical block below the rule; deliberately
-    // unlabeled (the rule is the whole distinction).
-    const activeMembers = members.filter((m) => m.is_active_pvp).sort(byName);
-    const otherMembers = members.filter((m) => !m.is_active_pvp).sort(byName);
+    // see on the site. Current-season clan-battle players ride along even
+    // without 30d randoms/ranked — a purple this-season shield under the
+    // idle rule reads as a contradiction (accepted tradeoff, 2026-07-18:
+    // the cohort is small and the shield's season can outlive a 30d lull).
+    // Everyone else — co-op-only, cooling, gone dark — lands in one
+    // alphabetical block below the rule; deliberately unlabeled (the rule
+    // is the whole distinction).
+    const isActive = (m: ClanMemberData): boolean => Boolean(m.is_active_pvp || m.is_clan_battle_player);
+    const activeMembers = members.filter(isActive).sort(byName);
+    const otherMembers = members.filter((m) => !isActive(m)).sort(byName);
+    // The clan page is the roster's primary surface and carries text-base;
+    // the player page's clan section is a supporting block below the
+    // insights, so names step down to text-sm there.
+    const listTextClass = source === 'player' ? 'text-sm leading-6' : 'text-base leading-7';
     return (
         <div data-testid="clan-activity-roster">
             {activeMembers.length > 0 ? (
@@ -167,7 +176,7 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
                         <ActivityIcon bucket="active_7d" size="header" />
                         <span>Active PvP ({activeMembers.length})</span>
                     </h3>
-                    <ul className={`mt-2.5 ${ROSTER_GRID_CLASS} text-base leading-7`} data-testid="clan-roster-active">
+                    <ul className={`mt-2.5 ${ROSTER_GRID_CLASS} ${listTextClass}`} data-testid="clan-roster-active">
                         {activeMembers.map((member) => (
                             <li key={member.name} className="min-w-0">
                                 {renderMemberLabel(member)}
@@ -180,7 +189,7 @@ const ClanActivityRoster: React.FC<ClanActivityRosterProps> = ({ members, loadin
                 <hr className="my-4 border-[var(--border)]" />
             ) : null}
             {otherMembers.length > 0 ? (
-                <ul className={`${ROSTER_GRID_CLASS} text-base leading-7`} data-testid="clan-roster-others">
+                <ul className={`${ROSTER_GRID_CLASS} ${listTextClass}`} data-testid="clan-roster-others">
                     {otherMembers.map((member) => (
                         <li key={member.name} className="min-w-0">
                             {renderMemberLabel(member)}
