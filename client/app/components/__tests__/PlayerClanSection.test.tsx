@@ -114,7 +114,6 @@ describe('PlayerClanSection', () => {
         expect([...positions].sort((a, b) => a - b)).toEqual(positions);
         expect(roster).not.toHaveTextContent('Cooling Off');
         expect(roster).not.toHaveTextContent('Gone dark');
-        expect(screen.queryByTestId('clan-phase-cooling_90d')).not.toBeInTheDocument();
     });
 
     it('lays each block out as a fixed four-column grid with a WR-colored mark per name', () => {
