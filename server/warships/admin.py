@@ -21,8 +21,8 @@ class ShipAdmin(admin.ModelAdmin):
 @admin.register(Snapshot)
 class SnapshotAdmin(admin.ModelAdmin):
     search_fields = ('player__name',)
-    list_display = ('player', 'date', 'battles', 'wins', 'battle_type')
-    list_filter = ('battle_type', 'date')
+    list_display = ('player', 'date', 'battles', 'wins', 'interval_battles')
+    list_filter = ('date',)
 
 
 @admin.register(Clan)

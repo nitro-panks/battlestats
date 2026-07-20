@@ -715,6 +715,13 @@ set_env_value BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT 180
 # armed it plateaus ~3.7 GB. Dry-run same day: 126,188 deletable rows.
 set_env_value SNAPSHOT_DOWNSAMPLE_ENABLED 1
 set_env_value SNAPSHOT_DOWNSAMPLE_RETENTION_DAYS 90
+# Snapshot delta gate (DB table audit F3.2, 2026-07-20): skip writing a
+# Snapshot row when the player's cumulative PvP stats haven't moved since
+# their latest stored row (~68% of the ~220K rows/day were zero-information).
+# Code default is also 1 (deliberately aligned — no env-gate trap); set
+# explicitly so prod intent is visible. 0 restores dense daily writes.
+# Spec: agents/work-items/snapshot-delta-gated-writes-spec.md
+set_env_value SNAPSHOT_DELTA_GATE_ENABLED 1
 # Inactive battles_json TOAST prune (prune_inactive_player_battles_json): NULL
 # the never-read battles_json blob on >180d-inactive players (reversible —
 # refetched on next view). The command self-gates on this env.

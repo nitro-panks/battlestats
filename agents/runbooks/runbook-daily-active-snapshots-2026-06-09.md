@@ -22,6 +22,16 @@ A dedicated, light, **crawl-coexisting** daily-snapshot engine:
   writes the daily row via `update_snapshot_data(refresh_player=False)` (pure-DB). It
   does **not** rebuild `battles_json` (that stays on incremental/on-demand). ~1 WG call
   per 100 players (≈1.2K calls/day for ~120K active).
+- **Delta-gated writes (2026-07-20, DB audit F3.2)**: `update_snapshot_data` skips the
+  whole write path when the player's cumulative `(battles, wins)` haven't moved since
+  their latest stored row (`SNAPSHOT_DELTA_GATE_ENABLED`, default **1**) — ~68% of the
+  ~220K daily rows were zero-information. Readers synthesize zeros for missing dates.
+  Because unchanged players then never gain a today-row, the engine keeps a per-day
+  cache-backed **checked set** (`snapshot_checked:{realm}:{date}`, 26h TTL) so the
+  30-min runs still walk the whole pool once/day instead of re-polling the recency-
+  ordered top. Output line gains `Unchanged-skipped: N`. The unchanged path rebuilds
+  `activity_json` only once per UTC day (the window slide), sparing Player/PES churn.
+  Spec: `agents/work-items/snapshot-delta-gated-writes-spec.md`.
 - **Task** `warships.tasks.snapshot_active_players_task` — single-flight per realm,
   **coexists with clan crawls** (no deferral) so coverage is guaranteed each UTC day.
   Idempotent per day → frequent runs converge.
@@ -39,6 +49,7 @@ A dedicated, light, **crawl-coexisting** daily-snapshot engine:
 | `SNAPSHOT_ACTIVE_LIMIT` | `3000` | Max players per run (×48 runs/day ≫ active-7d pool). |
 | `SNAPSHOT_ACTIVE_MIN_BATTLES` | `0` | Skip players below this PvP battle count. |
 | `SNAPSHOT_ACTIVE_DELAY` | `0.2` | Pause between bulk batches (WG pacing). |
+| `SNAPSHOT_DELTA_GATE_ENABLED` | `1` | Skip the Snapshot write for unchanged players (delta-gated writes, 2026-07-20). `0` restores dense daily rows. |
 
 Companion tuning (detailed `battles_json` chart freshness, separate axis): raise
 `PLAYER_REFRESH_ACTIVE_LIMIT` / `PLAYER_REFRESH_TOTAL_LIMIT`.
