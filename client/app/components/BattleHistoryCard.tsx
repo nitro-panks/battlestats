@@ -612,7 +612,15 @@ const WINDOW_TITLE: Record<BattleHistoryWindow, string> = {
     month: 'Last 30 days',
     year: 'Last 365 days',
 };
-const WINDOW_TITLE_DAY_DISABLED = 'No battles in the last 24 hours';
+// Tooltip shown when a window pill is disabled for having no battles in its
+// span. Day's emptiness is a backend flag (has_recent_24h_activity); week/
+// month are derived client-side from the month by_day the card already holds.
+const WINDOW_TITLE_EMPTY: Record<BattleHistoryWindow, string> = {
+    day: 'No battles in the last 24 hours',
+    week: 'No battles in the last 7 days',
+    month: 'No battles in the last 30 days',
+    year: 'No battles in the last 365 days',
+};
 const WINDOW_HEADER: Record<BattleHistoryWindow, string> = {
     day: 'Last 24 hours',
     week: 'Last 7 days',
@@ -635,6 +643,11 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     const requestSignal = usePlayerRequestSignal();
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
     const [monthByDay, setMonthByDay] = useState<BattleHistoryByDay[]>([]);
+    // True once the month fetch below has resolved for the current
+    // (player, realm, mode). Gates the derived week/month empty-pill disable
+    // so a still-loading card never dims a pill on stale/absent data — pills
+    // stay enabled until the data is authoritative (the safe direction).
+    const [monthLoaded, setMonthLoaded] = useState(false);
     // Lifetime baseline from the month fetch, used to anchor the sparkline's
     // overall-WR overlay line. Null in modes without a lifetime (e.g. combined).
     const [monthLifetime, setMonthLifetime] = useState<{
@@ -722,6 +735,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         };
     }, [playerName, realm, window, mode, refreshNonce, requestSignal]);
 
+    // Reset the loaded gate whenever the entity/mode identity changes, so the
+    // month fetch below re-establishes it rather than the empty-pill disable
+    // acting on the previous player's data (a refresh-poll re-fetch keeps it).
+    useEffect(() => {
+        setMonthLoaded(false);
+    }, [playerName, realm, mode]);
+
     // Separate fetch that always retrieves the month window for the sparkline,
     // independent of whichever window the user has selected. fetchSharedJson
     // deduplicates against the main fetch when window === 'month'.
@@ -743,6 +763,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     battles: data.totals?.lifetime_battles ?? null,
                     winRate: data.totals?.lifetime_win_rate ?? null,
                 });
+                setMonthLoaded(true);
             })
             .catch(() => { /* sparkline stays empty on error */ });
         return () => { cancelled = true; };
@@ -894,14 +915,31 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         return null;
     }
 
+    const monthDays = buildWindowedDays(monthByDay, 30);
     const sparkline = (
         <InlineSparkline
-            days={buildWindowedDays(monthByDay, 30)}
+            days={monthDays}
             ariaLabel="30-day battle activity"
             lifetimeBattles={monthLifetime.battles}
             lifetimeWinRate={monthLifetime.winRate}
         />
     );
+    // Empty-window pill disable. Day emptiness is the backend 24h flag; week/
+    // month are derived from the trailing slice of the month by_day the card
+    // already holds (gated on monthLoaded so a loading card never dims on
+    // stale/absent data). A pill dims + goes unclickable when its window has
+    // no battles — but never the window currently being viewed (handled at the
+    // call site via isActive), so the active pill stays interactive.
+    const sumTrailingBattles = (n: number): number =>
+        monthDays.slice(Math.max(0, monthDays.length - n))
+            .reduce((s, d) => s + (d.battles || 0), 0);
+    const isWindowEmpty = (w: BattleHistoryWindow): boolean => {
+        if (w === 'day') return payload?.has_recent_24h_activity === false;
+        if (!monthLoaded) return false;
+        if (w === 'week') return sumTrailingBattles(7) === 0;
+        if (w === 'month') return sumTrailingBattles(30) === 0;
+        return false;
+    };
     return (
         <section
             data-testid="battle-history-card"
@@ -935,18 +973,19 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     </h2>
                     <div className="flex items-center gap-1 text-xs" role="group" aria-label="Lookback window">
                         {VISIBLE_WINDOWS.map((w) => {
-                            // Only Day is conditionally disabled — Week/Month
-                            // always have something useful to render (even if
-                            // it's an empty-state with the pill row reachable).
-                            const dayDisabled = w === 'day'
-                                && payload?.has_recent_24h_activity === false;
+                            // Dim + disable any window with no battles in its
+                            // span (day via the backend 24h flag, week/month
+                            // derived from the month by_day), but never the
+                            // window currently being viewed — the active pill
+                            // stays interactive even in an empty span.
                             const isActive = window === w;
+                            const disabled = !isActive && isWindowEmpty(w);
                             return (
                                 <button
                                     key={w}
                                     type="button"
                                     onClick={() => {
-                                        if (dayDisabled) return;
+                                        if (disabled) return;
                                         if (!isActive) {
                                             trackEvent(`player-history-${w}`, { realm });
                                         }
@@ -954,11 +993,11 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                         setUserPickedWindow(true);
                                     }}
                                     aria-pressed={isActive}
-                                    aria-disabled={dayDisabled}
-                                    disabled={dayDisabled}
-                                    title={dayDisabled ? WINDOW_TITLE_DAY_DISABLED : WINDOW_TITLE[w]}
+                                    aria-disabled={disabled}
+                                    disabled={disabled}
+                                    title={disabled ? WINDOW_TITLE_EMPTY[w] : WINDOW_TITLE[w]}
                                     className={`rounded px-2 py-0.5 transition-colors ${
-                                        dayDisabled
+                                        disabled
                                             ? 'text-[var(--text-muted)] opacity-40 cursor-not-allowed'
                                             : isActive
                                                 ? 'bg-[var(--accent-secondary-mid)] text-[var(--bg-card)] font-semibold'
