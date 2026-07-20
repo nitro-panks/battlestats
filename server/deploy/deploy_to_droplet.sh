@@ -702,6 +702,14 @@ set_env_value BATTLE_HISTORY_ARCHIVE_DIR "${APP_ROOT}/shared/archives/battle_his
 set_env_value BATTLE_HISTORY_ARCHIVE_BATCH_SIZE 2000
 set_env_value BATTLE_HISTORY_ARCHIVE_SLEEP 0.5
 set_env_value BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT 180
+# BattleObservation row retention (DB audit F5, armed 2026-07-20): delete-only
+# tier riding the same archive command/timer. JSON-stripped skeletons past 32d
+# + fully-empty polls past 7d; never a JSON-carrying row (keep-latest-3
+# compaction owns those), never a player's latest observation (floor freshness
+# anchor). Provenance FKs relaxed in migration 0082, so deletes are safe.
+set_env_value BATTLE_OBSERVATION_ROW_RETENTION_ENABLED 1
+set_env_value BATTLE_OBSERVATION_ROW_RETENTION_DAYS 32
+set_env_value BATTLE_OBSERVATION_EMPTY_RETENTION_DAYS 7
 
 # Storage-retention maintenance jobs (data-lifecycle assessment 2026-06-21,
 # runbook-data-lifecycle-architecture-2026-06-21.md). Each runs as a systemd

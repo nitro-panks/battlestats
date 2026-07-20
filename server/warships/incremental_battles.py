@@ -2484,3 +2484,118 @@ def archive_and_prune_battle_history(
                 "tables": results}
     finally:
         lock.release()
+
+
+# ── BattleObservation row retention (DB audit F5) ─────────────────────────
+#
+# The observation table never deleted rows: ~89% are JSON-stripped skeletons
+# (per-row provenance no reader consumes at any age) and ~19% are fully-empty
+# polls. This tier deletes, in one batched pass:
+#   * stripped skeletons (both JSON columns NULL) older than
+#     ``retention_days`` (default 32 — the operational poll-trail lookback;
+#     deliberately NOT tied to the 92d BattleEvent archive retention, since
+#     events are archived to CSV while skeletons are archived nowhere), and
+#   * fully-empty polls (no last_battle_time, no JSON) older than
+#     ``empty_retention_days`` (default 7).
+# Two invariants, enforced in the candidate SQL itself:
+#   * a row carrying JSON (randoms or ranked) is NEVER deleted — the
+#     keep-latest-3 compaction owns JSON lifecycle; and
+#   * each player's latest observation is NEVER deleted (the floor's
+#     change-gate freshness anchor), via an EXISTS-newer guard.
+# Delete-only (no CSV export): the safety spine is the guarded candidate
+# query + chunked deletes + VACUUM, mirroring the archive path's batching.
+
+OBSERVATION_ROW_RETENTION_DAYS_DEFAULT = 32
+OBSERVATION_EMPTY_RETENTION_DAYS_DEFAULT = 7
+OBSERVATION_RETENTION_STATEMENT_TIMEOUT_DEFAULT = 600
+
+_OBSERVATION_TABLE = "warships_battleobservation"
+
+_OBSERVATION_CANDIDATE_WHERE = (
+    "o.ships_stats_json IS NULL AND o.ranked_ships_stats_json IS NULL "
+    "AND (o.observed_at < %s "
+    "     OR (o.last_battle_time IS NULL AND o.observed_at < %s)) "
+    "AND EXISTS (SELECT 1 FROM warships_battleobservation n "
+    "            WHERE n.player_id = o.player_id "
+    "            AND n.observed_at > o.observed_at)"
+)
+
+
+def prune_battle_observation_rows(
+    *,
+    retention_days: int = OBSERVATION_ROW_RETENTION_DAYS_DEFAULT,
+    empty_retention_days: int = OBSERVATION_EMPTY_RETENTION_DAYS_DEFAULT,
+    batch_size: int = ARCHIVE_BATCH_SIZE_DEFAULT,
+    max_rows: int = 0,
+    dry_run: bool = False,
+    sleep_between_batches: float = 0.0,
+    statement_timeout_s: int = OBSERVATION_RETENTION_STATEMENT_TIMEOUT_DEFAULT,
+    skip_vacuum: bool = False,
+) -> Dict[str, Any]:
+    is_pg = connection.vendor == "postgresql"
+    cutoff = _archive_cutoff(retention_days, as_date=False)
+    empty_cutoff = _archive_cutoff(empty_retention_days, as_date=False)
+    params: List[Any] = [cutoff, empty_cutoff]
+
+    base: Dict[str, Any] = {
+        "table": _OBSERVATION_TABLE,
+        "retention_days": int(retention_days),
+        "empty_retention_days": int(empty_retention_days),
+        "cutoff": cutoff.isoformat(),
+        "empty_cutoff": empty_cutoff.isoformat(),
+    }
+
+    if dry_run:
+        with transaction.atomic():
+            with connection.cursor() as cur:
+                _apply_statement_timeout(cur, statement_timeout_s, is_pg)
+                cur.execute(
+                    f"SELECT COUNT(*) FROM {_OBSERVATION_TABLE} o "
+                    f"WHERE {_OBSERVATION_CANDIDATE_WHERE}", params)
+                candidates = int(cur.fetchone()[0] or 0)
+        base.update({"status": "dry_run", "candidates": candidates,
+                     "deleted": 0})
+        return base
+
+    limit_clause = ""
+    if max_rows and max_rows > 0:
+        limit_clause = " LIMIT %s"
+        params = params + [int(max_rows)]
+
+    # Single collection pass spilled to disk (millions of ids on the first
+    # run), then chunked deletes — the same shape as the archive delete path.
+    fd, ids_path = tempfile.mkstemp(prefix="obs_prune_ids_", suffix=".txt")
+    candidates = 0
+    try:
+        with os.fdopen(fd, "w") as out:
+            with transaction.atomic():
+                with connection.cursor() as cur:
+                    _apply_statement_timeout(cur, statement_timeout_s, is_pg)
+                    cur.execute(
+                        f"SELECT o.id FROM {_OBSERVATION_TABLE} o "
+                        f"WHERE {_OBSERVATION_CANDIDATE_WHERE}{limit_clause}",
+                        params)
+                    while True:
+                        rows = cur.fetchmany(10000)
+                        if not rows:
+                            break
+                        for (row_id,) in rows:
+                            out.write(f"{row_id}\n")
+                            candidates += 1
+
+        deleted = _delete_ids_from_file(
+            _OBSERVATION_TABLE, ids_path, batch_size, sleep_between_batches,
+            statement_timeout_s, is_pg)
+    finally:
+        try:
+            os.unlink(ids_path)
+        except OSError:
+            pass
+
+    vacuumed = False
+    if deleted and not skip_vacuum and is_pg:
+        vacuumed = _vacuum_analyze(_OBSERVATION_TABLE)
+
+    base.update({"status": "completed", "candidates": candidates,
+                 "deleted": deleted, "vacuumed": vacuumed})
+    return base
