@@ -16,18 +16,29 @@ import {
     usePlayerLiveRefresh,
 } from './usePlayerLiveRefresh';
 import { trackEntityDetailView } from '../lib/visitAnalytics';
-import { useRealm } from '../context/RealmContext';
+import { useRealm, type Realm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
+import { trackEvent } from '../lib/umami';
+import RealmFallbackNotice from './RealmFallbackNotice';
 
 
 interface PlayerRouteViewProps {
     playerName: string;
 }
 
+// Header carrying the realm a player name actually resolved to (see the backend
+// PlayerViewSet). Equals the requested realm on the common in-realm hit; differs
+// only when cross-realm fallback found the player elsewhere.
+const RESOLVED_REALM_HEADER = 'X-Resolved-Realm';
+const VALID_REALMS: Realm[] = ['na', 'eu', 'asia'];
+
 
 const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
-    const { realm } = useRealm();
+    const { realm, setRealm, notifyRealmAutoSwitch } = useRealm();
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
+    const [fallbackNotice, setFallbackNotice] = useState<
+        { from: Realm; to: Realm; name: string } | null
+    >(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
     const [initialPending, setInitialPending] = useState(false);
@@ -71,7 +82,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                     signal: requestSignal,
                     priority: 'critical', // the page-blocking fetch — first in the queue
-                    responseHeaders: [PLAYER_REFRESH_PENDING_HEADER, PLAYER_NEXT_REFRESH_HEADER],
+                    responseHeaders: [PLAYER_REFRESH_PENDING_HEADER, PLAYER_NEXT_REFRESH_HEADER, RESOLVED_REALM_HEADER],
                     // Short-backoff retry on a transient 5xx / network blip ONLY so a
                     // single stalled upstream (the 502-on-the-request-thread tail) no
                     // longer strands the page. A real 404 is NOT retried (see
@@ -83,6 +94,27 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
                     setPlayerData(data);
                     setInitialPending(parsePendingHeader(headers[PLAYER_REFRESH_PENDING_HEADER]));
                     setInitialNextRefresh(parseNextRefreshHeader(headers[PLAYER_NEXT_REFRESH_HEADER]));
+
+                    // Cross-realm fallback: the backend resolved this player in a
+                    // realm other than the one requested. Switch the app to it,
+                    // flash the realm selector, and tell the user why. Switching
+                    // realm re-runs this effect once on the resolved realm (a
+                    // DB-cache hit that reports resolved == requested, so it does
+                    // not loop). Rewrite ?realm= so a reload/share is direct.
+                    const resolved = (headers[RESOLVED_REALM_HEADER] || '').toLowerCase() as Realm;
+                    if (resolved && resolved !== realm && VALID_REALMS.includes(resolved)) {
+                        setFallbackNotice({ from: realm, to: resolved, name: data.name || playerName });
+                        setRealm(resolved);
+                        notifyRealmAutoSwitch();
+                        trackEvent('realm-fallback', { from: realm, to: resolved });
+                        try {
+                            const nextUrl = new URL(window.location.href);
+                            nextUrl.searchParams.set('realm', resolved);
+                            window.history.replaceState(window.history.state, '', nextUrl.toString());
+                        } catch {
+                            // URL / history unavailable — the switch + localStorage still hold.
+                        }
+                    }
                 }
             } catch (fetchError) {
                 // Navigated away / switched realm mid-flight — benign, leave state alone.
@@ -115,7 +147,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
         return () => {
             cancelled = true;
         };
-    }, [playerName, realm, requestSignal]);
+    }, [playerName, realm, requestSignal, setRealm, notifyRealmAutoSwitch]);
 
     useEffect(() => {
         if (!playerData) {
@@ -145,23 +177,48 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
         signal: requestSignal,
     });
 
+    // Rendered above every branch so it persists through the one clean refetch
+    // that the realm switch triggers (the isLoading branch would otherwise
+    // unmount it mid-flash).
+    const notice = fallbackNotice ? (
+        <RealmFallbackNotice
+            playerName={fallbackNotice.name}
+            fromRealm={fallbackNotice.from}
+            toRealm={fallbackNotice.to}
+            onDismiss={() => setFallbackNotice(null)}
+        />
+    ) : null;
+
     if (isLoading) {
-        return <LoadingPanel label="Loading player profile..." minHeight={280} />;
+        return (
+            <>
+                {notice}
+                <LoadingPanel label="Loading player profile..." minHeight={280} />
+            </>
+        );
     }
 
     if (!playerData) {
-        return <p className="p-6 text-sm text-red-600">{error || 'Player not found.'}</p>;
+        return (
+            <>
+                {notice}
+                <p className="p-6 text-sm text-red-600">{error || 'Player not found.'}</p>
+            </>
+        );
     }
 
     return (
-        <PlayerRequestScopeProvider value={requestSignal}>
-            <PlayerDetail
-                player={playerData}
-                isLoading={false}
-                refreshStatus={{ phase: liveRefresh.phase, secondsRemaining: liveRefresh.secondsRemaining }}
-                refreshNonce={liveRefresh.refreshNonce}
-            />
-        </PlayerRequestScopeProvider>
+        <>
+            {notice}
+            <PlayerRequestScopeProvider value={requestSignal}>
+                <PlayerDetail
+                    player={playerData}
+                    isLoading={false}
+                    refreshStatus={{ phase: liveRefresh.phase, secondsRemaining: liveRefresh.secondsRemaining }}
+                    refreshNonce={liveRefresh.refreshNonce}
+                />
+            </PlayerRequestScopeProvider>
+        </>
     );
 };
 

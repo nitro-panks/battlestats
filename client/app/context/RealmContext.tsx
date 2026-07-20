@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 
 export type Realm = 'na' | 'eu' | 'asia';
@@ -10,11 +10,18 @@ const VALID_REALMS: Realm[] = ['na', 'eu', 'asia'];
 interface RealmContextValue {
     realm: Realm;
     setRealm: (r: Realm) => void;
+    // Monotonic counter bumped whenever the realm is switched *automatically*
+    // (cross-realm player fallback), NOT on ordinary manual switches. The realm
+    // selector watches it to flash a one-shot "your realm just changed" cue.
+    autoSwitchSignal: number;
+    notifyRealmAutoSwitch: () => void;
 }
 
 const RealmContext = createContext<RealmContextValue>({
     realm: 'na',
     setRealm: () => undefined,
+    autoSwitchSignal: 0,
+    notifyRealmAutoSwitch: () => undefined,
 });
 
 // Resolve the realm synchronously at first render from the same precedence the
@@ -47,6 +54,7 @@ const resolveInitialRealm = (): Realm => {
 
 export const RealmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [realm, setRealmState] = useState<Realm>(resolveInitialRealm);
+    const [autoSwitchSignal, setAutoSwitchSignal] = useState(0);
     const pathname = usePathname();
 
     // Resolve the realm on first mount AND on every client-side navigation
@@ -75,17 +83,24 @@ export const RealmProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
     }, [pathname]);
 
-    const setRealm = (r: Realm) => {
+    // Stable identities (useCallback) so consumers can safely list them in
+    // effect deps without re-running on every provider render.
+    const setRealm = useCallback((r: Realm) => {
         setRealmState(r);
         try {
             localStorage.setItem('bs-realm', r);
         } catch {
             // localStorage unavailable
         }
-    };
+    }, []);
+
+    // Signals that the realm was just switched automatically (cross-realm player
+    // fallback). Kept separate from setRealm so a manual realm change never
+    // triggers the selector flash.
+    const notifyRealmAutoSwitch = useCallback(() => setAutoSwitchSignal((n) => n + 1), []);
 
     return (
-        <RealmContext.Provider value={{ realm, setRealm }}>
+        <RealmContext.Provider value={{ realm, setRealm, autoSwitchSignal, notifyRealmAutoSwitch }}>
             {children}
         </RealmContext.Provider>
     );

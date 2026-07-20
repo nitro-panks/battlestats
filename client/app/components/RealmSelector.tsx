@@ -23,14 +23,29 @@ const ACTIVE_OPTION_BACKGROUND = 'var(--accent-faint)';
 const ACTIVE_OPTION_COLOR = 'var(--text-primary)';
 
 const RealmSelector: React.FC = () => {
-    const { realm, setRealm } = useRealm();
+    const { realm, setRealm, autoSwitchSignal } = useRealm();
     // Rendered label must be hydration-safe (SSG renders 'NA'); the dropdown's
     // active-option check below uses the live `realm` since it only renders
     // once open (post-mount).
     const displayRealm = useDisplayRealm();
     const [open, setOpen] = useState(false);
+    const [flash, setFlash] = useState(false);
+    const flashPrimedRef = useRef(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
+
+    // Flash the chip once whenever the realm was switched automatically
+    // (cross-realm player fallback). Skips the initial mount so a fresh load
+    // never flashes; only a genuine auto-switch bumps `autoSwitchSignal`.
+    useEffect(() => {
+        if (!flashPrimedRef.current) {
+            flashPrimedRef.current = true;
+            return;
+        }
+        setFlash(true);
+        const timer = setTimeout(() => setFlash(false), 1300);
+        return () => clearTimeout(timer);
+    }, [autoSwitchSignal]);
 
     useEffect(() => {
         if (!open) {
@@ -76,7 +91,7 @@ const RealmSelector: React.FC = () => {
             <button
                 type="button"
                 onClick={() => setOpen((prev) => !prev)}
-                className="inline-flex items-center gap-1.5 rounded-md px-[10px] transition-colors"
+                className={`realm-selector-glow inline-flex items-center gap-1.5 rounded-md px-[10px] transition-colors${flash ? ' realm-selector-glow--armed' : ''}`}
                 style={{
                     height: '28px',
                     border: '1px solid var(--border)',

@@ -1,3 +1,4 @@
+import os
 from unittest.mock import patch
 from datetime import datetime, timedelta
 from kombu.exceptions import OperationalError as KombuOperationalError
@@ -8,7 +9,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.models import Player, Clan, ClanBattleSeason, PlayerDailyShipStats, PlayerExplorerSummary, RankedSeason, realm_cache_key, Ship, ShipTopPlayerSnapshot, EntityVisitDaily
-from warships.views import PUBLIC_API_THROTTLES, _missing_player_lookup_cache_key
+from warships.views import PUBLIC_API_THROTTLES, _missing_player_lookup_cache_key, _all_realms_miss_cache_key
 
 
 class PlayerViewSetTests(TestCase):
@@ -3324,20 +3325,104 @@ class ApiThrottleTests(TestCase):
 
     @patch("warships.views._fetch_player_id_by_name", return_value=None)
     def test_missing_player_lookup_uses_negative_cache_after_first_miss(self, mock_lookup):
-        cache_key = _missing_player_lookup_cache_key(
-            "PlayerThatWillNeverExist")
-        cache.delete(cache_key)
+        # Cross-realm fallback ON (default): the first miss probes every realm,
+        # then the name-level all-realms-miss cache short-circuits subsequent
+        # requests so a genuinely nonexistent name is not re-probed each load.
+        all_miss_key = _all_realms_miss_cache_key("PlayerThatWillNeverExist")
+        cache.delete(all_miss_key)
 
         first_response = self.client.get(
             "/api/player/PlayerThatWillNeverExist/")
+        calls_after_first = mock_lookup.call_count
         second_response = self.client.get(
             "/api/player/PlayerThatWillNeverExist/")
 
         self.assertEqual(first_response.status_code, 404)
         self.assertEqual(second_response.status_code, 404)
-        self.assertTrue(cache.get(cache_key))
-        mock_lookup.assert_called_once_with(
-            "PlayerThatWillNeverExist", realm='na')
+        self.assertTrue(cache.get(all_miss_key))
+        # First request probed all three realms; the second added no probes.
+        self.assertEqual(calls_after_first, 3)
+        self.assertEqual(mock_lookup.call_count, calls_after_first)
+
+    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.data.update_player_data")
+    @patch("warships.views._fetch_player_id_by_name")
+    def test_cross_realm_fallback_resolves_player_in_other_realm(
+        self, mock_lookup, mock_update_player_data, _mock_task,
+    ):
+        # Name exists only on ASIA; visitor is on NA.
+        mock_lookup.side_effect = lambda name, realm='na': (
+            "888" if realm == 'asia' else None)
+
+        def hydrate(player, force_refresh=False, realm=None):
+            player.name = "AsiaOnly"
+            player.pvp_battles = 3
+            player.save()
+
+        mock_update_player_data.side_effect = hydrate
+
+        response = self.client.get("/api/player/AsiaOnly/?realm=na")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Resolved-Realm"], "asia")
+        self.assertEqual(response.json()["player_id"], 888)
+        self.assertTrue(Player.objects.filter(
+            player_id=888, realm='asia').exists())
+
+    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.data.update_player_data")
+    @patch("warships.views._fetch_player_id_by_name")
+    def test_cross_realm_fallback_prefers_asia_over_eu(
+        self, mock_lookup, mock_update_player_data, _mock_task,
+    ):
+        # Name exists in BOTH EU and ASIA; deterministic order picks ASIA and
+        # never even probes EU.
+        mock_lookup.side_effect = lambda name, realm='na': (
+            "888" if realm in ('asia', 'eu') else None)
+        mock_update_player_data.side_effect = (
+            lambda player, force_refresh=False, realm=None: None)
+
+        response = self.client.get("/api/player/Ambiguous/?realm=na")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Resolved-Realm"], "asia")
+        probed_realms = [c.kwargs.get('realm') for c in mock_lookup.call_args_list]
+        self.assertIn('asia', probed_realms)
+        self.assertNotIn('eu', probed_realms)
+
+    @patch("warships.views._fetch_player_id_by_name")
+    def test_cross_realm_fallback_disabled_stays_single_realm(self, mock_lookup):
+        # Kill switch off: only the requested realm is probed; an ASIA-only name
+        # 404s exactly as before the feature.
+        mock_lookup.side_effect = lambda name, realm='na': (
+            "888" if realm == 'asia' else None)
+
+        with patch.dict(os.environ, {"CROSS_REALM_FALLBACK_ENABLED": "0"}):
+            response = self.client.get("/api/player/AsiaOnly/?realm=na")
+
+        self.assertEqual(response.status_code, 404)
+        mock_lookup.assert_called_once_with("AsiaOnly", realm='na')
+
+    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.data.update_player_data")
+    @patch("warships.views._fetch_player_id_by_name")
+    def test_cross_realm_negative_cache_not_cross_poisoned(
+        self, mock_lookup, mock_update_player_data, _mock_task,
+    ):
+        # A cached NA miss must NOT block resolving the same name on ASIA.
+        cache.set(_missing_player_lookup_cache_key("AsiaOnly", "na"), True, 600)
+        mock_lookup.side_effect = lambda name, realm='na': (
+            "888" if realm == 'asia' else None)
+        mock_update_player_data.side_effect = (
+            lambda player, force_refresh=False, realm=None: None)
+
+        response = self.client.get("/api/player/AsiaOnly/?realm=na")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Resolved-Realm"], "asia")
+        probed_realms = [c.kwargs.get('realm') for c in mock_lookup.call_args_list]
+        self.assertNotIn('na', probed_realms)  # skipped via its cached miss
+        self.assertIn('asia', probed_realms)
 
 
 class StreamerSubmissionViewTests(TestCase):

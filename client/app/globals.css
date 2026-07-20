@@ -277,3 +277,34 @@ body {
 .bh-scope-slider:focus-visible {
   box-shadow: 0 0 0 2px var(--accent-faint);
 }
+
+/* Realm-selector auto-switch flash — a one-shot cue when cross-realm player
+   fallback switches the active realm (RealmSelector arms `--armed` for ~1.3s).
+   Mirrors .tab-attention-glow: the ::after ring holds a static box-shadow and
+   only OPACITY animates (cheap; never animate box-shadow). */
+.realm-selector-glow {
+  position: relative;
+}
+.realm-selector-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    0 0 12px 3px color-mix(in srgb, var(--accent-mid) 80%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--accent-mid) 65%, transparent);
+}
+.realm-selector-glow--armed::after {
+  animation: realm-selector-flash 0.6s ease-in-out 2 both;
+}
+@keyframes realm-selector-flash {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .realm-selector-glow--armed::after {
+    animation: none;
+  }
+}
