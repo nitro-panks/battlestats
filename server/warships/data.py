@@ -2661,6 +2661,22 @@ def _player_correlation_published_cache_key(metric: str, realm: str = DEFAULT_RE
     return f'{_player_correlation_cache_key(metric, realm=realm)}:published'
 
 
+# F9.4 (DB audit): the tier-type population rebuild is the heaviest standing
+# analytical statement on prod (~400 s/realm — a CROSS JOIN LATERAL
+# jsonb_array_elements over every qualifying player's battles_json). The daily
+# Beat always outlives the 12 h fresh-key TTL, so without a floor every daily
+# warm re-ran the full scan. The payload is a slow-moving career population
+# baseline, so the warmer now re-runs the scan at most once per
+# TIER_TYPE_POPULATION_REBUILD_HOURS per realm (marker key below) and serves
+# the durable `published` payload between rebuilds.
+TIER_TYPE_POPULATION_REBUILD_HOURS = int(
+    os.getenv('TIER_TYPE_POPULATION_REBUILD_HOURS', '72'))
+
+
+def _tier_type_rebuild_marker_key(realm: str = DEFAULT_REALM) -> str:
+    return f'{_player_correlation_cache_key(PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)}:rebuilt'
+
+
 def _build_doubling_bin_edges(max_value: int, seed_edges: list[int]) -> list[int]:
     if not seed_edges:
         return [1, max(2, max_value)]
@@ -3215,16 +3231,36 @@ def warm_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -> 
     (~8 min/realm on prod), so we only force it when the TTL'd cache is stale
     or empty — including a realm frozen at ``tracked_population=0`` by a warm
     that ran before its population was enriched (the original asia bug). A
-    fresh, non-empty cache short-circuits to a cheap no-op, so the periodic
-    (≤55 min) warmer runs the heavy scan at most once per
-    ``PLAYER_CORRELATION_CACHE_TTL`` (12 h) per realm instead of every cycle.
+    fresh, non-empty cache short-circuits to a cheap no-op.
+
+    F9.4 rebuild-interval floor: the daily Beat always outlives the 12 h
+    fresh-key TTL, so skip-if-fresh alone still re-ran the ~400 s/realm scan
+    every day. A marker key (TTL ``TIER_TYPE_POPULATION_REBUILD_HOURS``, set
+    only after a successful non-empty rebuild) bounds the scan to at most one
+    run per interval per realm; between rebuilds the warmer serves the durable
+    ``published`` payload. An empty/missing published payload rebuilds straight
+    through the marker (preserving the asia-freeze rescue), and a marker lost
+    to cache eviction merely rebuilds early — fail-safe in both directions.
     """
     cache_key = _player_correlation_cache_key(
         PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
     fresh = cache.get(cache_key)
     if isinstance(fresh, dict) and fresh.get('tracked_population', 0) > 0:
         return fresh
-    return _fetch_player_tier_type_population_correlation(realm=realm, force_rebuild=True)
+
+    marker_key = _tier_type_rebuild_marker_key(realm)
+    if cache.get(marker_key) is not None:
+        published = cache.get(_player_correlation_published_cache_key(
+            PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm))
+        if isinstance(published, dict) and published.get('tracked_population', 0) > 0:
+            return published
+
+    payload = _fetch_player_tier_type_population_correlation(
+        realm=realm, force_rebuild=True)
+    if isinstance(payload, dict) and payload.get('tracked_population', 0) > 0:
+        cache.set(marker_key, django_timezone.now().isoformat(),
+                  timeout=TIER_TYPE_POPULATION_REBUILD_HOURS * 3600)
+    return payload
 
 
 def warm_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
