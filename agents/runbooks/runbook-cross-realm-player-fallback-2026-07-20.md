@@ -113,6 +113,12 @@ In `PlayerRouteView`, after a successful fetch, compare the `X-Resolved-Realm` h
 
 Set `CROSS_REALM_FALLBACK_ENABLED=0` (backend env) — instant revert to single-realm lookup. Frontend consume-side is inert when `resolved_realm` always equals the requested realm.
 
+## Analytics / observability
+
+Two independent counters answer "how often does a cross-realm redirect fire in prod":
+- **Umami event `realm-fallback`** (preferred dashboard) — `trackEvent('realm-fallback', {from, to})` in `PlayerRouteView` on the resolved-realm mismatch. Kebab-case, low-cardinality realm props (≤6 combos). Registered in `runbook-umami-event-reference-2026-06-18.md`. Client-side, so ad-blockers undercount it.
+- **Backend INFO log `cross-realm-redirect`** (ground truth) — `logger.info("cross-realm-redirect name=%s from=%s to=%s", ...)` in `get_object`, emitted only when the resolved realm differs from the requested one. Captures API/bot hits Umami never sees. Count in prod with: `journalctl -u battlestats-django | grep -c cross-realm-redirect` (or the Docker log equivalent).
+
 ## Implementation Record (2026-07-20)
 
 Implemented on branch `cross-realm-fallback`. A code-assumption QA pass against the live source corrected four design details before any code was written:

@@ -308,3 +308,44 @@ body {
     animation: none;
   }
 }
+
+/* Cross-realm fallback toast: a floating overlay (position:fixed, does not
+   reflow the page). It descends from the top-right, holds a few seconds, shifts
+   to an accent tint, then fades + rises out — one 6s pass matching
+   AUTO_DISMISS_MS in RealmFallbackNotice. Only transform/color/opacity animate. */
+.realm-fallback-notice {
+  animation: realm-fallback-toast 6s ease-in-out both;
+  will-change: transform, opacity;
+}
+@keyframes realm-fallback-toast {
+  0% {
+    opacity: 0;
+    transform: translateY(-28px);
+  }
+  5% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  72% {
+    opacity: 1;
+    transform: translateY(0);
+    border-color: var(--border);
+    background-color: var(--bg-surface);
+  }
+  86% {
+    opacity: 1;
+    border-color: var(--accent-mid);
+    background-color: color-mix(in srgb, var(--accent-mid) 20%, var(--bg-surface));
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px);
+    border-color: var(--accent-mid);
+    background-color: color-mix(in srgb, var(--accent-mid) 14%, var(--bg-surface));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .realm-fallback-notice {
+    animation: none;
+  }
+}

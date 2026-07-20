@@ -3361,13 +3361,18 @@ class ApiThrottleTests(TestCase):
 
         mock_update_player_data.side_effect = hydrate
 
-        response = self.client.get("/api/player/AsiaOnly/?realm=na")
+        with self.assertLogs("warships.views", level="INFO") as logs:
+            response = self.client.get("/api/player/AsiaOnly/?realm=na")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["X-Resolved-Realm"], "asia")
         self.assertEqual(response.json()["player_id"], 888)
         self.assertTrue(Player.objects.filter(
             player_id=888, realm='asia').exists())
+        # Ground-truth prod counter is emitted on the redirect.
+        self.assertTrue(any(
+            "cross-realm-redirect" in line and "from=na" in line and "to=asia" in line
+            for line in logs.output))
 
     @patch("warships.views.update_player_data_task.delay")
     @patch("warships.data.update_player_data")

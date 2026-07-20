@@ -91,7 +91,7 @@ describe('PlayerRouteView cross-realm fallback', () => {
         expect(new URL(window.location.href).searchParams.get('realm')).toBe('asia');
 
         // The bring-along notice is shown.
-        expect(screen.getByRole('status')).toHaveTextContent(/isn't on NA — showing ASIA/i);
+        expect(screen.getByRole('status')).toHaveTextContent(/Achtung!.*isn't on NA — switched to ASIA/i);
     });
 
     it('does NOT switch realm when the resolved realm matches the requested one', async () => {

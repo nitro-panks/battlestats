@@ -361,12 +361,20 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 if cache.get(all_realms_miss_key):
                     raise Http404("Player matching query does not exist.")
 
+                requested_realm = realm
                 player_id, realm = self._resolve_player_across_realms(
-                    normalized_lookup_value, realm)
+                    normalized_lookup_value, requested_realm)
                 if not player_id:
                     cache.set(all_realms_miss_key, True,
                               MISSING_PLAYER_LOOKUP_CACHE_TTL)
                     raise Http404("Player matching query does not exist.")
+                if realm != requested_realm:
+                    # Ground-truth prod counter for cross-realm redirects
+                    # (complements the client-side `realm-fallback` Umami event,
+                    # which ad-blockers undercount). Grep: "cross-realm-redirect".
+                    logger.info(
+                        "cross-realm-redirect name=%s from=%s to=%s",
+                        normalized_lookup_value, requested_realm, realm)
             else:
                 # Legacy single-realm path (fallback disabled): unchanged.
                 if cache.get(missing_lookup_cache_key):
