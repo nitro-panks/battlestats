@@ -171,11 +171,12 @@ fi
 
 # Drop operator/internal first-party entity visits so dev browsing never taints
 # the Popular surface or the hot-player view-recurrence signal. Mirrors Umami's
-# IGNORE_IP (the operator home IP). See settings.ANALYTICS_IGNORE_IPS.
+# IGNORE_IP (operator home IP 130.44.131.215 + work IP 205.220.46.214, added
+# 2026-07-20). See settings.ANALYTICS_IGNORE_IPS.
 if grep -q '^ANALYTICS_IGNORE_IPS=' /etc/battlestats-server.env; then
-  sed -i 's|^ANALYTICS_IGNORE_IPS=.*|ANALYTICS_IGNORE_IPS=130.44.131.215|' /etc/battlestats-server.env
+  sed -i 's|^ANALYTICS_IGNORE_IPS=.*|ANALYTICS_IGNORE_IPS=130.44.131.215,205.220.46.214|' /etc/battlestats-server.env
 else
-  echo 'ANALYTICS_IGNORE_IPS=130.44.131.215' >> /etc/battlestats-server.env
+  echo 'ANALYTICS_IGNORE_IPS=130.44.131.215,205.220.46.214' >> /etc/battlestats-server.env
 fi
 
 # Gate the score_best_clans best-* prewarm OFF in prod. The 12h bulk-entity-
