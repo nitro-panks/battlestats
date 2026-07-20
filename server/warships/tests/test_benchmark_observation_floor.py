@@ -199,3 +199,69 @@ class Gap1dDecompositionTest(TestCase):
         self.assertEqual(totals["total"], 2)
         self.assertEqual(totals["pvp_mover"], 1)
         self.assertEqual(totals["non_pvp_active"], 1)
+
+
+class DeltaGatedSnapshotKPITest(TestCase):
+    """Pin the KPI under delta-gated (sparse) Snapshot writes: movers are
+    classified by the today-row's `interval_battles` (carry-forward delta vs
+    the player's previous stored row, whatever its date), falling back to the
+    legacy two-date cumulative pair when the interval is NULL. Spec:
+    agents/work-items/snapshot-delta-gated-writes-spec.md."""
+
+    def setUp(self):
+        self.today = timezone.now().date()
+        self.yesterday = self.today - timedelta(days=1)
+
+    def _player(self, player_id, *, realm="na"):
+        return Player.objects.create(
+            name=f"d{player_id}", player_id=player_id, realm=realm,
+            is_hidden=False, last_battle_date=self.today,
+        )
+
+    def _anchor_two_dates(self, player_id=3999):
+        """A dense flat pair so two global snapshot dates exist (under gating,
+        movers keep writing daily, so this matches prod)."""
+        anchor = self._player(player_id)
+        Snapshot.objects.create(
+            player=anchor, date=self.yesterday, battles=200, interval_battles=0)
+        Snapshot.objects.create(
+            player=anchor, date=self.today, battles=200, interval_battles=0)
+        return anchor
+
+    def test_sparse_mover_counted_via_interval(self):
+        # The mover's previous row predates yesterday (delta-gated history):
+        # no row on the prior snapshot date, but the today-row interval
+        # carries the real delta.
+        self._anchor_two_dates()
+        mover = self._player(3001)
+        Snapshot.objects.create(
+            player=mover, date=self.today, battles=105, interval_battles=5)
+        na = _run_json()["realms"]["na"]
+        self.assertEqual(na["snapshot_movers"], 1)
+
+    def test_sparse_mover_gap_bucket_is_pvp_mover(self):
+        # Active-1d, no BattleEvent, today-row interval>0, no prior-date row:
+        # a real missed mover, not "no_snapshot_pair".
+        self._anchor_two_dates()
+        mover = self._player(3101)
+        Snapshot.objects.create(
+            player=mover, date=self.today, battles=105, interval_battles=5)
+        g = _run_json()["realms"]["na"]["gap_1d"]
+        self.assertEqual(g["pvp_mover"], 1)
+        self.assertEqual(g["no_snapshot_pair"], 0)
+
+    def test_coverage_frac_none_while_gate_enabled(self):
+        # Under gating, "active players with a row today" only counts movers —
+        # coverage of the active base is unknowable, so it must not be
+        # reported as a fraction.
+        self._anchor_two_dates()
+        na = _run_json()["realms"]["na"]
+        self.assertIsNone(na["snapshot_coverage_frac"])
+
+    def test_coverage_frac_restored_when_gate_disabled(self):
+        import os
+        from unittest.mock import patch
+        self._anchor_two_dates()
+        with patch.dict(os.environ, {"SNAPSHOT_DELTA_GATE_ENABLED": "0"}):
+            na = _run_json()["realms"]["na"]
+        self.assertEqual(na["snapshot_coverage_frac"], 1.0)

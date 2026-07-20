@@ -24,6 +24,7 @@ import os
 import time
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
@@ -73,22 +74,41 @@ class Command(BaseCommand):
                     pvp_battles__gte=min_battles)
             .exclude(snapshot__date=today)
             .order_by('-last_battle_date')
-            .select_related('clan')
         )
+
+        # Delta-gated writes leave unchanged players without a today-row, so
+        # the has-today-row exclusion alone would re-select the same recency-
+        # ordered top of the pool every run. A per-day checked set (cache,
+        # realm+date-keyed) keeps the 30-min runs converging across the whole
+        # pool; on cache loss the engine gracefully degrades to re-polling.
+        # Errored players are deliberately NOT marked checked (retry next run).
+        checked_key = f"snapshot_checked:{realm}:{today.isoformat()}"
+        checked = cache.get(checked_key) or set()
 
         out = self.stdout.write
         if dry_run:
             pending = candidates.count()
             out(f"=== snapshot_active_players DRY RUN realm={realm} ===")
             out(f"Active (<= {active_days}d), visible, not yet snapshot today: {pending} "
-                f"(would process up to {limit})")
+                f"(checked-today (unchanged): {len(checked)}; "
+                f"would process up to {limit})")
             return
 
-        batch_players = list(candidates[:limit])
+        # At most len(checked) ids of this recency-ordered prefix can already
+        # be checked, so it always yields `limit` fresh targets when they exist.
+        candidate_ids = list(
+            candidates.values_list('player_id', flat=True)[:limit + len(checked)])
+        target_ids = [pid for pid in candidate_ids if pid not in checked][:limit]
+        rank = {pid: i for i, pid in enumerate(target_ids)}
+        batch_players = sorted(
+            Player.objects
+            .filter(realm=realm, player_id__in=target_ids)
+            .select_related('clan'),
+            key=lambda p: rank[p.player_id])
         clan_by_id = {p.player_id: p.clan for p in batch_players}
         all_ids = [p.player_id for p in batch_players]
 
-        snapshotted = skipped_hidden = errors = 0
+        snapshotted = skipped_unchanged = skipped_hidden = errors = 0
         for start in range(0, len(all_ids), BULK_ACCOUNT_INFO_SIZE):
             ids = all_ids[start:start + BULK_ACCOUNT_INFO_SIZE]
             data = fetch_players_bulk(ids, realm=realm, request_delay=delay)
@@ -103,14 +123,23 @@ class Command(BaseCommand):
                     if pdata and pdata.get('hidden_profile'):
                         skipped_hidden += 1
                         continue
-                    update_snapshot_data(pid, realm=realm, refresh_player=False)
-                    snapshotted += 1
+                    status = update_snapshot_data(
+                        pid, realm=realm, refresh_player=False)
+                    if status == 'skipped-unchanged':
+                        skipped_unchanged += 1
+                        checked.add(pid)
+                    else:
+                        snapshotted += 1
                 except Exception:
                     errors += 1
                     self.stderr.write(f"snapshot_active_players: error on player {pid_str}")
             if delay:
                 time.sleep(delay)
 
+        if checked:
+            cache.set(checked_key, checked, timeout=26 * 3600)
+
         out(f"=== snapshot_active_players realm={realm} ===")
         out(f"Queued: {len(all_ids)}  Snapshotted: {snapshotted}  "
+            f"Unchanged-skipped: {skipped_unchanged}  "
             f"Hidden-skipped: {skipped_hidden}  Errors: {errors}")

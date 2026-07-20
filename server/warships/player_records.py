@@ -62,14 +62,6 @@ def _merge_snapshot_rows(canonical: Player, duplicate: Player) -> None:
             canonical_snapshot.interval_wins,
             duplicate_snapshot.interval_wins,
         )
-        canonical_snapshot.last_fetch = _merge_scalar_value(
-            canonical_snapshot.last_fetch,
-            duplicate_snapshot.last_fetch,
-        )
-        canonical_snapshot.battle_type = _merge_scalar_value(
-            canonical_snapshot.battle_type,
-            duplicate_snapshot.battle_type,
-        )
         canonical_snapshot.save()
         duplicate_snapshot.delete()
 

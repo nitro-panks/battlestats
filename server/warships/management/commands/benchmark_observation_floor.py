@@ -113,13 +113,17 @@ class Command(BaseCommand):
 
         realms = sorted(VALID_REALMS)
 
-        # Mover-capture KPI denominator: the cheap bulk snapshot engine writes a
-        # daily cumulative `Snapshot.battles` for the active base, so a player
-        # who battled "today" is one whose cumulative battles rose between the
-        # two most-recent snapshot dates. This is the *true mover* set, derived
+        # Mover-capture KPI denominator: a player who battled "today" is one
+        # whose today-row `interval_battles` > 0 — the carry-forward delta vs
+        # the player's previous stored row (verified populated on every bulk
+        # row, 2026-07-20). Under delta-gated writes (SNAPSHOT_DELTA_GATE_ENABLED,
+        # spec agents/work-items/snapshot-delta-gated-writes-spec.md) unchanged
+        # players get no row at all, so the legacy two-date cumulative pair
+        # misses movers whose previous row is older than the prior snapshot
+        # date; the interval covers those. The pair remains as a fallback for
+        # rows with a NULL interval. The denominator stays derived
         # independently of the floor (which supplies the numerator via
-        # BattleEvent). `interval_battles` is NOT used: it's only populated on
-        # the per-player view path, not by the bulk engine.
+        # BattleEvent).
         snap_dates = list(
             Snapshot.objects.order_by("-date")
             .values_list("date", flat=True).distinct()[:2]
@@ -133,9 +137,24 @@ class Command(BaseCommand):
         # Instead: a single `date__in` pass over the two relevant dates, joined to
         # Player for realm/is_hidden, tallied per realm + total in Python.
         snap_today_count: dict[str, int] = {}   # realm/'__total__' -> active-7d w/ snapshot today
-        snap_movers: dict[str, int] = {}        # realm/'__total__' -> active-7d cumulative battles rose
+        snap_movers: dict[str, int] = {}        # realm/'__total__' -> active-7d battled since previous row
         today_b: dict[int, int] = {}
+        today_iv: dict[int, int | None] = {}    # today-row interval_battles (carry-forward delta)
         prior_b: dict[int, int] = {}
+
+        def _is_mover(pid: int) -> bool | None:
+            """True/False when classifiable, None when unknowable (no today
+            row, or NULL interval with no prior-date pair)."""
+            tb = today_b.get(pid)
+            if tb is None:
+                return None
+            iv = today_iv.get(pid)
+            if iv is not None:
+                return iv > 0
+            pb = prior_b.get(pid)
+            if pb is None:
+                return None
+            return tb > pb
         if latest_date is not None:
             # Scope the denominator to non-hidden active-7d players (the population
             # the per-ship-daily goal targets; also makes snapshot_coverage_frac =
@@ -149,23 +168,23 @@ class Command(BaseCommand):
                 Player.objects.filter(is_hidden=False, last_battle_date__gte=cut7)
                 .values_list("id", "realm").iterator()
             )
-            for pid, sdate, battles in (
+            for pid, sdate, battles, interval in (
                 Snapshot.objects
                 .filter(date__in=[latest_date] + ([prior_date] if prior_date else []))
-                .values_list("player_id", "date", "battles").iterator()
+                .values_list("player_id", "date", "battles", "interval_battles")
+                .iterator()
             ):
                 if sdate == latest_date:
                     today_b[pid] = battles
+                    today_iv[pid] = interval
                 elif sdate == prior_date:
                     prior_b[pid] = battles
             for pid, prealm in active_realm.items():
-                tb = today_b.get(pid)
-                if tb is None:
-                    continue  # active player not snapshotted today (a coverage gap)
+                if pid not in today_b:
+                    continue  # no row on the latest date (unchanged under gating, or a coverage gap)
                 for key in (prealm, "__total__"):
                     snap_today_count[key] = snap_today_count.get(key, 0) + 1
-                pb = prior_b.get(pid)
-                if pb is not None and tb > pb:
+                if prior_date is not None and _is_mover(pid):
                     for key in (prealm, "__total__"):
                         snap_movers[key] = snap_movers.get(key, 0) + 1
 
@@ -204,11 +223,12 @@ class Command(BaseCommand):
             for pid, prealm in active1_realm.items():
                 if pid in prod_ids:
                     continue
-                tb = today_b.get(pid)
-                pb = prior_b.get(pid)
-                if tb is None or pb is None:
+                mover = _is_mover(pid)
+                if mover is None:
+                    # No today-row (unchanged-under-gating or unchecked —
+                    # indistinguishable) or NULL interval without a pair.
                     bucket = "no_snapshot_pair"
-                elif tb > pb:
+                elif mover:
                     bucket = "pvp_mover"
                 else:
                     bucket = "non_pvp_active"
@@ -259,20 +279,24 @@ class Command(BaseCommand):
             never = fq.filter(latest__isnull=True).count()
             stale = active7 - fresh - never  # has an obs but >24h old
 
-            # Mover-capture KPI: distinct players who actually battled between
-            # the two most-recent snapshot dates (cumulative battles rose) =
-            # the true denominator; `distinct_productive` (BattleEvent) is the
-            # captured numerator. snapshot_coverage_frac validates that the
-            # snapshot engine clears the active base (else the denominator is
-            # itself incomplete and the KPI under-reports the real gap).
+            # Mover-capture KPI: distinct players whose today-row interval
+            # shows battles since their previous stored row (pair fallback for
+            # NULL intervals) = the true denominator; `distinct_productive`
+            # (BattleEvent) is the captured numerator. snapshot_coverage_frac
+            # validates that the snapshot engine clears the active base — but
+            # under delta-gated writes only movers get rows, so coverage of
+            # the active base is unknowable and reported as None.
+            delta_gated = os.getenv(
+                'SNAPSHOT_DELTA_GATE_ENABLED', '1') == '1'
             snapshot_today = None
             snapshot_movers = None
             snapshot_coverage_frac = None
             mover_capture_rate = None
             if latest_date is not None:
                 snapshot_today = snap_today_count.get(realm, 0)
-                snapshot_coverage_frac = (
-                    round(snapshot_today / active7, 4) if active7 else None)
+                if not delta_gated:
+                    snapshot_coverage_frac = (
+                        round(snapshot_today / active7, 4) if active7 else None)
                 if prior_date is not None:
                     snapshot_movers = snap_movers.get(realm, 0)
                     mover_capture_rate = (
@@ -350,11 +374,15 @@ class Command(BaseCommand):
         # Mover-capture KPI: the metric defined over players who actually
         # battled (snapshot battles-delta), not over the active-7d population.
         if t.get("snapshot_movers") is not None:
+            coverage_txt = (
+                f"{t['snapshot_coverage_frac']:.1%} of active-7d"
+                if t.get("snapshot_coverage_frac") is not None
+                else "n/a under delta-gated writes (movers-only rows)")
             self.stdout.write(
                 f"MOVER-CAPTURE: {t['distinct_productive']:,} of "
                 f"{t['snapshot_movers']:,} daily movers captured "
                 f"({(t['mover_capture_rate'] or 0):.1%}); snapshot covers "
-                f"{(t['snapshot_coverage_frac'] or 0):.1%} of active-7d "
+                f"{coverage_txt} "
                 f"(dates {result['snapshot_dates']}). GOAL (PvP capture): "
                 f"sustain this >= 100% with never_observed ~0; PvP capture is "
                 f"complete, the residual cov/1d gap is non-PvP game modes.")

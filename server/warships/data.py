@@ -2381,7 +2381,7 @@ def update_tiers_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
     player.save(update_fields=['tiers_json', 'tiers_updated_at'])
 
 
-def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM, refresh_player: bool = True) -> None:
+def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM, refresh_player: bool = True) -> str:
     """
     Records today's cumulative PvP stats as a Snapshot and computes
     daily interval_battles / interval_wins from successive snapshots.
@@ -2389,6 +2389,15 @@ def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM, refresh_pla
     The WoWS account/statsbydate endpoint no longer returns pvp data,
     so we use the Player model's pvp_battles / pvp_wins (kept current
     by update_player_data via account/info) as today's cumulative values.
+
+    Delta gate (``SNAPSHOT_DELTA_GATE_ENABLED``, default on): when the
+    cumulative stats haven't moved since the player's latest stored row,
+    the whole write path is skipped — no today-row, no purge, no interval
+    churn. Readers synthesize zero-battle days for missing dates, so the
+    zero rows carry no information. Activity still refreshes on both paths
+    (the 29-day window slides daily). Returns ``'written'`` or
+    ``'skipped-unchanged'``. Spec:
+    ``agents/work-items/snapshot-delta-gated-writes-spec.md``.
     """
     player = Player.objects.get(player_id=player_id, realm=realm)
 
@@ -2401,6 +2410,30 @@ def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM, refresh_pla
     today = datetime.now().date()
     start_date = today - timedelta(days=28)
 
+    current_battles = int(player.pvp_battles or 0)
+    current_wins = int(player.pvp_wins or 0)
+
+    # A today-row means the write path already ran today — keep maintaining
+    # it (the per-view path may upsert several times a day as stats move).
+    has_today = Snapshot.objects.filter(player=player, date=today).exists()
+    prior = (Snapshot.objects.filter(player=player, date__lt=today)
+             .order_by('-date').first())
+
+    if (os.getenv('SNAPSHOT_DELTA_GATE_ENABLED', '1') == '1'
+            and not has_today and prior is not None
+            and int(prior.battles or 0) == current_battles
+            and int(prior.wins or 0) == current_wins):
+        # First unchanged pass of the day still rebuilds activity (the 29-day
+        # window slides); repeats produce the identical payload, so throttle
+        # them to spare the Player/PES churn the gate exists to remove.
+        if (player.activity_json is None
+                or player.activity_updated_at is None
+                or player.activity_updated_at.date() < today):
+            update_activity_data(player_id, realm=realm)
+        logging.info(
+            f'Snapshot unchanged for player {player.name} — skipped write')
+        return 'skipped-unchanged'
+
     # Purge stale zero-value snapshots left by the broken statsbydate API
     Snapshot.objects.filter(
         player=player, battles=0, wins=0
@@ -2408,18 +2441,24 @@ def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM, refresh_pla
 
     # Upsert today's snapshot with current cumulative totals
     snapshot, _ = Snapshot.objects.get_or_create(player=player, date=today)
-    snapshot.battles = player.pvp_battles or 0
-    snapshot.wins = player.pvp_wins or 0
-    snapshot.last_fetch = datetime.now()
+    snapshot.battles = current_battles
+    snapshot.wins = current_wins
     snapshot.save()
 
-    # Recompute intervals for the whole 28-day window
+    # Recompute intervals for the whole 28-day window, seeded from the
+    # latest pre-window row: under sparse (delta-gated) storage the previous
+    # row can predate the window, and without the seed a returning mover's
+    # real delta would be zeroed at the window edge.
     snapshots = list(Snapshot.objects.filter(
         player=player, date__gte=start_date, date__lte=today).order_by('date'))
 
-    previous_battles = None
-    previous_wins = None
+    seed = (Snapshot.objects.filter(player=player, date__lt=start_date)
+            .order_by('-date').first())
+    previous_battles = seed.battles if seed else None
+    previous_wins = seed.wins if seed else None
+    changed = []
     for snap in snapshots:
+        before = (snap.interval_battles, snap.interval_wins)
         if previous_battles is None or previous_wins is None:
             snap.interval_battles = 0
             snap.interval_wins = 0
@@ -2429,14 +2468,18 @@ def update_snapshot_data(player_id: int, realm: str = DEFAULT_REALM, refresh_pla
             snap.interval_wins = max(
                 0, int(snap.wins or 0) - int(previous_wins or 0))
 
+        if (snap.interval_battles, snap.interval_wins) != before:
+            changed.append(snap)
         previous_battles = snap.battles
         previous_wins = snap.wins
 
-    Snapshot.objects.bulk_update(
-        snapshots, ['interval_battles', 'interval_wins'])
+    if changed:
+        Snapshot.objects.bulk_update(
+            changed, ['interval_battles', 'interval_wins'])
 
     update_activity_data(player_id, realm=realm)
     logging.info(f'Updated snapshot data for player {player.name}')
+    return 'written'
 
 
 def fetch_activity_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
@@ -2468,7 +2511,11 @@ def fetch_activity_data(player_id: str, realm: str = DEFAULT_REALM) -> list:
 def update_activity_data(player_id: int, realm: str = DEFAULT_REALM) -> None:
     player = Player.objects.get(player_id=player_id, realm=realm)
     month = []
-    snapshots = list(Snapshot.objects.filter(player=player).order_by('date'))
+    # Only the trailing 29-day window is rendered; don't load the whole
+    # snapshot history (unbounded growth — DB audit F3).
+    window_start = (datetime.now() - timedelta(28)).date()
+    snapshots = list(Snapshot.objects.filter(
+        player=player, date__gte=window_start).order_by('date'))
 
     latest_snapshot_by_date = {snap.date: snap for snap in snapshots}
 

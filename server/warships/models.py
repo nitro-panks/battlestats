@@ -218,8 +218,8 @@ class Snapshot(models.Model):
     battles = models.IntegerField(default=0)
     wins = models.IntegerField(default=0)
     survived_battles = models.IntegerField(default=0)
-    battle_type = models.CharField(max_length=200, null=True, blank=True)
-    last_fetch = models.DateTimeField(null=True, blank=True)
+    # battle_type + last_fetch dropped 2026-07-20 (DB audit F4): battle_type
+    # was '' in 100% of sampled rows; last_fetch was written but never read.
     interval_battles = models.IntegerField(null=True, blank=True)
     interval_wins = models.IntegerField(null=True, blank=True)
 

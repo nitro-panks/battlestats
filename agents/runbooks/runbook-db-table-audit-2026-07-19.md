@@ -6,7 +6,7 @@ _QA: all numbers measured live 2026-07-19/20 UTC with read-only queries (`statem
 
 ## Purpose
 
-A findings ledger for the database estate: where storage actually goes, which writes carry no information, which indexes are dead weight, how bloated the hot tables are, and which recomputed aggregations deserve materialization. Each finding carries Risk and Remediation; **none has been applied**. Read this before any storage-reclamation, index, or materialization work; refresh the numbers with "How to re-measure".
+A findings ledger for the database estate: where storage actually goes, which writes carry no information, which indexes are dead weight, how bloated the hot tables are, and which recomputed aggregations deserve materialization. Each finding carries Risk and Remediation. Read this before any storage-reclamation, index, or materialization work; refresh the numbers with "How to re-measure". See the **Applied log** at the end for which levers have since shipped (the finding sections keep their as-measured wording).
 
 ## Topline
 
@@ -164,3 +164,14 @@ Ordered by expected return per unit of risk:
 8. **Identify the 396 s JSON analytical task** (F9.4) and relocate it to relational storage if it is a standing daily.
 9. **Drop the LangGraph `checkpoints*` tables** (F8) after a reference check; record the DSN-hygiene rule.
 10. **Env-gate traps**: `BATTLE_OBSERVATION_COMPACT_ENABLED` and `HOT_PLAYERS_ENABLED` both have code defaults opposite to prod reality; align the code defaults with prod so a fresh environment fails safe.
+
+## Applied log
+
+| Date | Lever | What shipped | Result |
+|---|---|---|---|
+| 2026-07-19 | F3.1 arm the downsampler | `SNAPSHOT_DOWNSAMPLE_ENABLED=1` via deploy script (46e9822) | First armed run Mon 2026-07-20 04:30 UTC: deleted 126,188 rows in 26 batches, 475,461 weekly keepers, exit 0 — matched the dry run exactly. Snapshot is now bounded. |
+| 2026-07-19 | F7 dead-index drop | Migration `0082_drop_dead_indexes` (831463f), applied in prod | ~1 GB reclaimed. 30-day `pg_stat_user_indexes` seq-scan re-check due ~2026-08-19. |
+| 2026-07-19 | F1 PES repack | `VACUUM FULL` + `fillfactor=90` + tightened autovacuum opts (op, end of session) | Heap 1.6 GB → 151 MB (85% tuple density), indexes rebuilt to 16 MB each; DB 38 → 35 GB. F2 (`warships_player`, 28% free) deliberately NOT piggybacked — rewriting the 14 GB hot table incl. 11 GB TOAST needs its own decision. |
+| 2026-07-20 | F3.2 + F4 delta-gated writes | `SNAPSHOT_DELTA_GATE_ENABLED` gate in `update_snapshot_data` + engine checked-set + activity-rebuild throttle + carry-forward interval seed (window-edge zero bug fixed) + `battle_type`/`last_fetch` dropped (migration 0083) + `update_activity_data` bounded to the 29d window + mover-KPI reconcile in `benchmark_observation_floor` | Spec: `agents/work-items/snapshot-delta-gated-writes-spec.md`. Expected ~150K fewer rows/day (~68% of the stream) + per-player purge-DELETE and 29-row same-value bulk_update churn removed. |
+
+Still open (unchanged from Follow-ups): F5 observation row retention, F9.1 crawl candidate scans, F9.2 `ship_pop_avg_damage` rollup, F9.4 396 s JSON task, F8 `checkpoints*` drop, item 10 env-gate default alignment, and the F2 player-heap decision.
