@@ -277,3 +277,75 @@ body {
 .bh-scope-slider:focus-visible {
   box-shadow: 0 0 0 2px var(--accent-faint);
 }
+
+/* Realm-selector auto-switch flash — a one-shot cue when cross-realm player
+   fallback switches the active realm (RealmSelector arms `--armed` for ~1.3s).
+   Mirrors .tab-attention-glow: the ::after ring holds a static box-shadow and
+   only OPACITY animates (cheap; never animate box-shadow). */
+.realm-selector-glow {
+  position: relative;
+}
+.realm-selector-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow:
+    0 0 12px 3px color-mix(in srgb, var(--accent-mid) 80%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--accent-mid) 65%, transparent);
+}
+.realm-selector-glow--armed::after {
+  animation: realm-selector-flash 0.6s ease-in-out 2 both;
+}
+@keyframes realm-selector-flash {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .realm-selector-glow--armed::after {
+    animation: none;
+  }
+}
+
+/* Cross-realm fallback toast: a floating overlay (position:fixed, does not
+   reflow the page). It descends from the top-right, holds a few seconds, shifts
+   to an accent tint, then fades + rises out — one 6s pass matching
+   AUTO_DISMISS_MS in RealmFallbackNotice. Only transform/color/opacity animate. */
+.realm-fallback-notice {
+  animation: realm-fallback-toast 6s ease-in-out both;
+  will-change: transform, opacity;
+}
+@keyframes realm-fallback-toast {
+  0% {
+    opacity: 0;
+    transform: translateY(-28px);
+  }
+  5% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  72% {
+    opacity: 1;
+    transform: translateY(0);
+    border-color: var(--border);
+    background-color: var(--bg-surface);
+  }
+  86% {
+    opacity: 1;
+    border-color: var(--accent-mid);
+    background-color: color-mix(in srgb, var(--accent-mid) 20%, var(--bg-surface));
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px);
+    border-color: var(--accent-mid);
+    background-color: color-mix(in srgb, var(--accent-mid) 14%, var(--bg-surface));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .realm-fallback-notice {
+    animation: none;
+  }
+}

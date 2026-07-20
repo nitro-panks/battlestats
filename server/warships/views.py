@@ -185,10 +185,41 @@ def _clan_member_badges_cached(clan_id: str, realm: str, member_pks: list) -> di
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
 MISSING_PLAYER_LOOKUP_CACHE_TTL = 600
 
+# Header carrying the realm a player name actually resolved to. Equals the
+# requested realm on the common in-realm hit; differs only when cross-realm
+# fallback found the player elsewhere. The client switches its realm selector to
+# match. See runbook-cross-realm-player-fallback-2026-07-20.
+RESOLVED_REALM_HEADER = 'X-Resolved-Realm'
 
-def _missing_player_lookup_cache_key(player_name: str) -> str:
+# Fixed cross-realm fallback priority (rough player-population order). When a
+# name is absent from the visitor's selected realm, the OTHER realms are probed
+# in this order and the first hit wins — deterministic and reload-stable.
+CROSS_REALM_FALLBACK_ORDER = ('asia', 'eu', 'na')
+
+
+def _cross_realm_fallback_enabled() -> bool:
+    return os.getenv('CROSS_REALM_FALLBACK_ENABLED', '1') == '1'
+
+
+def _missing_player_lookup_cache_key(player_name: str, realm: str = DEFAULT_REALM) -> str:
+    """Per-realm negative-lookup key.
+
+    Realm-qualified (v2) so a miss in one realm cannot suppress a lookup in
+    another realm during cross-realm fallback.
+    """
     normalized_name = (player_name or '').strip().casefold()
-    return f'player:lookup:missing:v1:{normalized_name}'
+    return f'player:lookup:missing:v2:{realm}:{normalized_name}'
+
+
+def _all_realms_miss_cache_key(player_name: str) -> str:
+    """Name-level key marking a name absent from EVERY realm.
+
+    Set only after cross-realm fallback has exhausted all realms, so a genuinely
+    nonexistent name short-circuits to a 404 without re-probing every realm on
+    each subsequent request.
+    """
+    normalized_name = (player_name or '').strip().casefold()
+    return f'player:lookup:missing-all:v1:{normalized_name}'
 
 
 class PlayerViewSet(viewsets.ModelViewSet):
@@ -238,17 +269,23 @@ class PlayerViewSet(viewsets.ModelViewSet):
                         queue_ranked_data_refresh(player_id, realm=realm)
                     response = Response(cached)
                     response['X-Player-Cache'] = 'hit'
+                    # In-realm DB hit — resolved realm equals the requested one.
+                    response[RESOLVED_REALM_HEADER] = realm
                     _set_player_refresh_headers(
                         response, pending, next_refresh)
                     return response
 
         response = super().retrieve(request, *args, **kwargs)
         response['X-Player-Cache'] = 'miss'
+        # get_object may have resolved the player in a different realm via
+        # cross-realm fallback; scope the header + refresh signals to that realm.
+        resolved_realm = getattr(self, '_resolved_realm', realm)
+        response[RESOLVED_REALM_HEADER] = resolved_realm
         miss_player_id = (getattr(response, 'data', None)
                           or {}).get('player_id')
         if miss_player_id:
             pending, next_refresh = _player_refresh_signals(
-                miss_player_id, realm)
+                miss_player_id, resolved_realm)
             _set_player_refresh_headers(response, pending, next_refresh)
         return response
 
@@ -271,12 +308,42 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 last_lookup=timezone.now())
         push_recently_viewed_player(player_id, realm=realm)
 
+    def _resolve_player_across_realms(self, player_name: str, requested_realm: str):
+        """Resolve a player_id by probing the requested realm first, then every
+        other realm in ``CROSS_REALM_FALLBACK_ORDER`` (first hit wins).
+
+        Honors each realm's per-realm negative-lookup cache (skips a realm known
+        to be missing, records a fresh miss otherwise). Returns
+        ``(player_id, resolved_realm)``; ``(None, requested_realm)`` when the
+        name is absent from every realm.
+
+        Limitation: ``_fetch_player_id_by_name`` returns ``None`` for BOTH "not
+        found" and a transient WoWS API error, so a transient error in the
+        requested realm can resolve to a *different* same-named player in another
+        realm. Accepted (see runbook): ``RETRY_TOTAL`` + the deterministic order
+        keep it rare, the client's ``realm-fallback`` event makes it observable,
+        and ``CROSS_REALM_FALLBACK_ENABLED=0`` disables the whole path.
+        """
+        realms_to_try = [requested_realm] + [
+            r for r in CROSS_REALM_FALLBACK_ORDER if r != requested_realm
+        ]
+        for realm in realms_to_try:
+            negative_key = _missing_player_lookup_cache_key(player_name, realm)
+            if cache.get(negative_key):
+                continue
+            player_id = _fetch_player_id_by_name(player_name, realm=realm)
+            if player_id:
+                cache.delete(negative_key)
+                return player_id, realm
+            cache.set(negative_key, True, MISSING_PLAYER_LOOKUP_CACHE_TTL)
+        return None, requested_realm
+
     def get_object(self):
         realm = _get_realm(self.request)
         lookup_field_value = self.kwargs[self.lookup_field]
         normalized_lookup_value = (lookup_field_value or '').strip()
         missing_lookup_cache_key = _missing_player_lookup_cache_key(
-            normalized_lookup_value)
+            normalized_lookup_value, realm)
         try:
             obj = self.queryset.alias(name_lower=Lower("name")).get(
                 name_lower=normalized_lookup_value.casefold(),
@@ -284,17 +351,43 @@ class PlayerViewSet(viewsets.ModelViewSet):
             )
             cache.delete(missing_lookup_cache_key)
         except Player.DoesNotExist:
-            if cache.get(missing_lookup_cache_key):
-                raise Http404("Player matching query does not exist.")
+            if _cross_realm_fallback_enabled():
+                # Cross-realm fallback: probe the selected realm, then the
+                # others in fixed order (first hit wins). `realm` is reassigned
+                # to the realm the player was actually found in so everything
+                # downstream (get_or_create, refresh, headers) uses it.
+                all_realms_miss_key = _all_realms_miss_cache_key(
+                    normalized_lookup_value)
+                if cache.get(all_realms_miss_key):
+                    raise Http404("Player matching query does not exist.")
 
-            player_id = _fetch_player_id_by_name(
-                normalized_lookup_value, realm=realm)
-            if not player_id:
-                cache.set(missing_lookup_cache_key, True,
-                          MISSING_PLAYER_LOOKUP_CACHE_TTL)
-                raise Http404("Player matching query does not exist.")
+                requested_realm = realm
+                player_id, realm = self._resolve_player_across_realms(
+                    normalized_lookup_value, requested_realm)
+                if not player_id:
+                    cache.set(all_realms_miss_key, True,
+                              MISSING_PLAYER_LOOKUP_CACHE_TTL)
+                    raise Http404("Player matching query does not exist.")
+                if realm != requested_realm:
+                    # Ground-truth prod counter for cross-realm redirects
+                    # (complements the client-side `realm-fallback` Umami event,
+                    # which ad-blockers undercount). Grep: "cross-realm-redirect".
+                    logger.info(
+                        "cross-realm-redirect name=%s from=%s to=%s",
+                        normalized_lookup_value, requested_realm, realm)
+            else:
+                # Legacy single-realm path (fallback disabled): unchanged.
+                if cache.get(missing_lookup_cache_key):
+                    raise Http404("Player matching query does not exist.")
 
-            cache.delete(missing_lookup_cache_key)
+                player_id = _fetch_player_id_by_name(
+                    normalized_lookup_value, realm=realm)
+                if not player_id:
+                    cache.set(missing_lookup_cache_key, True,
+                              MISSING_PLAYER_LOOKUP_CACHE_TTL)
+                    raise Http404("Player matching query does not exist.")
+
+                cache.delete(missing_lookup_cache_key)
 
             from warships.blocklist import is_account_blocked
             if is_account_blocked(int(player_id)):
@@ -315,6 +408,12 @@ class PlayerViewSet(viewsets.ModelViewSet):
             # hooks enrich-on-view) — fast-path enrich it here too if eligible.
             from warships.tasks import _maybe_enrich_on_view
             _maybe_enrich_on_view(obj, realm)
+
+        # `realm` is now the realm the player actually resolved to (== requested
+        # on the common path; a fallback realm when cross-realm resolution ran).
+        # `retrieve` reads this to emit the X-Resolved-Realm header + scope the
+        # post-fetch refresh signals to the correct realm.
+        self._resolved_realm = realm
 
         needs_efficiency_refresh = (
             not obj.is_hidden and
