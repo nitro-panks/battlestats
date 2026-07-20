@@ -157,6 +157,14 @@ class Player(models.Model):
                          name='player_realm_battles_ratio_idx'),
             models.Index(fields=['realm', 'pvp_battles', 'pvp_survival_rate'],
                          name='player_realm_battles_surv_idx'),
+            # Recency-ordered active-pool candidate scans (snapshot engine,
+            # floor, benchmark) all filter realm + visible + last_battle_date
+            # and order by -last_battle_date; without this partial index each
+            # was a ~1M-row seq scan + sort (audit F9.1, 31-55 s on prod).
+            models.Index(fields=['realm', '-last_battle_date'],
+                         name='player_realm_lbd_active_idx',
+                         condition=models.Q(last_battle_date__isnull=False,
+                                            is_hidden=False)),
         ]
 
 

@@ -213,3 +213,60 @@ class SkipPathActivityThrottleTests(TestCase):
         update_snapshot_data(6701, realm="na", refresh_player=False)
         p.refresh_from_db()
         self.assertEqual(p.activity_updated_at, first_stamp)
+
+
+class CandidateQueryShapeTests(TestCase):
+    """DB audit F9.1: with the checked set carrying idempotency (written AND
+    unchanged players), the candidate query must not anti-join Snapshot —
+    the NOT EXISTS probe was the 55 s component on prod."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    @patch("warships.clan_crawl.fetch_players_bulk")
+    def test_candidate_query_has_no_snapshot_anti_join(self, mock_bulk):
+        _mk_player(6801, battles=1000, wins=550)
+        mock_bulk.return_value = {}
+        from django.db import connection as conn
+        from django.test.utils import CaptureQueriesContext
+        with CaptureQueriesContext(conn) as ctx:
+            call_command("snapshot_active_players", "--realm", "na",
+                         "--delay", "0", stdout=StringIO())
+        candidate_sqls = [
+            q["sql"] for q in ctx.captured_queries
+            if "warships_player" in q["sql"]
+            and "ORDER BY" in q["sql"] and "last_battle_date" in q["sql"]
+        ]
+        self.assertTrue(candidate_sqls)
+        for sql in candidate_sqls:
+            self.assertNotIn("warships_snapshot", sql)
+
+    @patch("warships.clan_crawl.fetch_players_bulk")
+    def test_written_mover_not_repolled_same_day(self, mock_bulk):
+        p = _mk_player(6802, battles=1010, wins=560)
+        _snap(p, 1, 1000, 550)  # mover: run 1 writes today's row
+
+        def bulk(ids, realm=None, request_delay=None):
+            return {
+                str(pid): {
+                    "account_id": pid, "nickname": f"P{pid}",
+                    "last_battle_time": int(timezone.now().timestamp()),
+                    "statistics": {
+                        "battles": 1015,
+                        "pvp": {"battles": 1010, "wins": 560, "losses": 450,
+                                "frags": 0, "survived_battles": 0},
+                    },
+                } for pid in ids
+            }
+        mock_bulk.side_effect = bulk
+
+        call_command("snapshot_active_players", "--realm", "na", "--delay", "0",
+                     stdout=StringIO())
+        self.assertTrue(
+            Snapshot.objects.filter(player=p, date=timezone.now().date()).exists())
+
+        mock_bulk.reset_mock()
+        call_command("snapshot_active_players", "--realm", "na", "--delay", "0",
+                     stdout=StringIO())
+        self.assertEqual(mock_bulk.call_count, 0)

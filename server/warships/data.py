@@ -5113,22 +5113,18 @@ def _get_hot_clan_ids(limit: int = HOT_ENTITY_CLAN_LIMIT, realm: str = DEFAULT_R
             'name',
         ).values_list('clan_id', flat=True)[:limit]
     )
+    # Rank by the denormalized cached_* columns, NOT a live SUM over every
+    # member row: the aggregate ranking was 30.7 s/call on the 30-min warm
+    # cycle — the single biggest cumulative DB consumer (audit F9.1). The
+    # cached values refresh on clan refresh; staleness is immaterial for
+    # choosing which clans to keep warm.
     candidate_ids.extend(
-        Clan.objects.filter(realm=realm).exclude(name__isnull=True).exclude(name='').annotate(
-            total_wins=Sum('player__pvp_wins'),
-            total_battles=Sum('player__pvp_battles'),
-            clan_wr=Case(
-                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
-                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
-                default=None,
-                output_field=FloatField(),
-            ),
-        ).filter(
-            total_battles__gte=100000,
-            clan_wr__isnull=False,
+        Clan.objects.filter(realm=realm).exclude(name__isnull=True).exclude(name='').filter(
+            cached_total_battles__gte=100000,
+            cached_clan_wr__isnull=False,
         ).order_by(
-            F('clan_wr').desc(nulls_last=True),
-            F('total_battles').desc(nulls_last=True),
+            F('cached_clan_wr').desc(nulls_last=True),
+            F('cached_total_battles').desc(nulls_last=True),
             'name',
         ).values_list('clan_id', flat=True)[:limit]
     )

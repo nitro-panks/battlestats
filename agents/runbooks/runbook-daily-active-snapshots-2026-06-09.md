@@ -29,7 +29,10 @@ A dedicated, light, **crawl-coexisting** daily-snapshot engine:
   Because unchanged players then never gain a today-row, the engine keeps a per-day
   cache-backed **checked set** (`snapshot_checked:{realm}:{date}`, 26h TTL) so the
   30-min runs still walk the whole pool once/day instead of re-polling the recency-
-  ordered top. Output line gains `Unchanged-skipped: N`. The unchanged path rebuilds
+  ordered top. Since 2026-07-20 (audit F9.1) the checked set is the **sole**
+  idempotency mechanism: written players are marked too and the candidate query's
+  Snapshot anti-join is gone (it cost 31-55 s/run on prod); candidates are a pure
+  walk of the `player_realm_lbd_active_idx` partial index. Output line gains `Unchanged-skipped: N`. The unchanged path rebuilds
   `activity_json` only once per UTC day (the window slide), sparing Player/PES churn.
   Spec: `agents/work-items/snapshot-delta-gated-writes-spec.md`.
 - **Task** `warships.tasks.snapshot_active_players_task` — single-flight per realm,
