@@ -24,8 +24,8 @@ class Migration(migrations.Migration):
                     model_name='player',
                     index=models.Index(
                         condition=models.Q(
-                            ('last_battle_date__isnull', False),
-                            ('is_hidden', False)),
+                            ('is_hidden', False),
+                            ('last_battle_date__isnull', False)),
                         fields=['realm', '-last_battle_date'],
                         name='player_realm_lbd_active_idx'),
                 ),
