@@ -733,16 +733,16 @@ def register_periodic_schedules(sender, **kwargs):
     # or skill. Two tasks (see runbook-hot-players-engagement-queue-2026-06-10):
     #
     #  * maintain (DB-only "brain") — promote/evict/re-score the HotPlayer set
-    #    from EntityVisitDaily. Coexists with crawls; ALWAYS enabled like the
-    #    snapshot/enrichment-maintenance families (still respects
-    #    HOT_PLAYERS_ENABLED). Striped in the 08:00-09:00 UTC maintenance band
+    #    from EntityVisitDaily. Coexists with crawls; `enabled` follows
+    #    HOT_PLAYERS_ENABLED, default OFF matching prod (queue disabled
+    #    2026-06-16; DB-audit item 10). Striped in the 08:00-09:00 UTC band
     #    (after the visit-daily rollup settles) so the analytical load clusters
     #    with enrichment pool maintenance. na :30, eu :50 of 08, asia :10 of 09.
     #  * capture (background "hands") — sweep the hot set, skip-if-fresh, write a
     #    BattleObservation + a gap-free daily Snapshot. It is a crawler-class WG
     #    consumer, so it gates on ENABLE_CRAWLER_SCHEDULES like the floor. Striped
     #    via REALM_INTERVAL_OFFSETS on a daily cycle.
-    hot_maintain_enabled = _env_flag("HOT_PLAYERS_ENABLED", True)
+    hot_maintain_enabled = _env_flag("HOT_PLAYERS_ENABLED", False)
     hot_maintain_times = {"na": ("30", "8"), "eu": ("50", "8"), "asia": ("10", "9")}
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = hot_maintain_times.get(realm, ("30", "8"))
@@ -892,13 +892,14 @@ def register_periodic_schedules(sender, **kwargs):
     # -- Daily BattleObservation payload compaction (disk retention) --
     # NULLs stale ships_stats_json / ranked_ships_stats_json blobs so the
     # append-only observation capture stops filling the cluster disk. Does
-    # NOT delete rows (BattleEvent FKs cascade). Disabled by default —
-    # BATTLE_OBSERVATION_COMPACT_ENABLED=1 flips it on after an operator has
-    # dry-run + run it manually once. Scheduled at the histogram's quietest
-    # UTC hour (12:30) to stay clear of the 03:00 / 23:00 CPU peaks.
+    # NOT delete rows (BattleEvent FKs cascade). Enabled by default — prod
+    # has run it daily since 2026-05-24, and DB-audit item 10 aligned the
+    # code default to prod reality (set BATTLE_OBSERVATION_COMPACT_ENABLED=0
+    # to disable). Scheduled at the histogram's quietest UTC hour (12:30) to
+    # stay clear of the 03:00 / 23:00 CPU peaks.
     # Runbook: agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md
     compact_enabled = os.getenv(
-        "BATTLE_OBSERVATION_COMPACT_ENABLED", "0") == "1"
+        "BATTLE_OBSERVATION_COMPACT_ENABLED", "1") == "1"
     compact_hour = os.getenv("BATTLE_OBSERVATION_COMPACT_HOUR", "12")
     compact_minute = os.getenv("BATTLE_OBSERVATION_COMPACT_MINUTE", "30")
     compact_schedule, _ = CrontabSchedule.objects.get_or_create(

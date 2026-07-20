@@ -2697,12 +2697,12 @@ def prune_battle_observations_task(self):
     `warships.incremental_battles.compact_battle_observation_payloads` and
     `agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md`.
 
-    Gated by `BATTLE_OBSERVATION_COMPACT_ENABLED` (default off) so the
-    schedule is wired but inert until an operator has dry-run and run it
-    manually once. Single-run lock prevents overlap. Params come from env so
-    they can be tuned without a redeploy.
+    Gated by `BATTLE_OBSERVATION_COMPACT_ENABLED` (default ON — prod has run
+    it daily since 2026-05-24; DB-audit item 10 aligned the code default to
+    prod reality; set 0 to disable). Single-run lock prevents overlap. Params
+    come from env so they can be tuned without a redeploy.
     """
-    if os.getenv("BATTLE_OBSERVATION_COMPACT_ENABLED", "0") != "1":
+    if os.getenv("BATTLE_OBSERVATION_COMPACT_ENABLED", "1") != "1":
         return {"status": "skipped", "reason": "compaction-disabled"}
 
     lock_key = _task_lock_key("prune_battle_observations", "global")
@@ -2906,10 +2906,11 @@ def maintain_hot_players_task(realm=DEFAULT_REALM):
     summed views) for the trailing ``HOT_PLAYERS_WINDOW_DAYS`` and applies the
     promotion rule, the eviction rule (with hysteresis), and the
     ``HOT_PLAYERS_MAX`` cap/trim by ``hot_score``. Kill switch
-    ``HOT_PLAYERS_ENABLED`` (default on). Runbook:
+    ``HOT_PLAYERS_ENABLED`` (default off, matching prod — queue disabled
+    2026-06-16; set 1 to re-enable). Runbook:
     ``agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md``.
     """
-    if os.getenv("HOT_PLAYERS_ENABLED", "1") != "1":
+    if os.getenv("HOT_PLAYERS_ENABLED", "0") != "1":
         return {"status": "skipped", "reason": "disabled"}
 
     lock_key = _task_lock_key("maintain_hot_players", realm)
@@ -2943,10 +2944,10 @@ def capture_hot_player_observations_task(self, realm=DEFAULT_REALM):
     paced by ``HOT_PLAYERS_CAPTURE_DELAY``. **Coexists with clan crawls** (no
     deferral) — guaranteed coverage is the whole point. Hidden accounts return
     nothing from WG and are recorded as skipped (no retry storm). Kill switch
-    ``HOT_PLAYERS_ENABLED``. Runbook:
+    ``HOT_PLAYERS_ENABLED`` (default off, matching prod). Runbook:
     ``agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md``.
     """
-    if os.getenv("HOT_PLAYERS_ENABLED", "1") != "1":
+    if os.getenv("HOT_PLAYERS_ENABLED", "0") != "1":
         return {"status": "skipped", "reason": "disabled"}
 
     lock_key = _hot_players_capture_lock_key(realm)

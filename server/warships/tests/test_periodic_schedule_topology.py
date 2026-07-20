@@ -391,7 +391,8 @@ class HotPlayersScheduleTopologyTests(TestCase):
 
     - `hot-players-maintain-{realm}` — DB-only daily brain, striped at fixed
       times in the 08:00-09:00 UTC maintenance band (na 08:30 / eu 08:50 /
-      asia 09:10). Always-enabled (respects HOT_PLAYERS_ENABLED).
+      asia 09:10). Always registered; `enabled` follows HOT_PLAYERS_ENABLED
+      (default off, prod-aligned — see EnvGateDefaultAlignmentTests).
     - `hot-players-capture-{realm}` — background daily sweep, striped via
       `_realm_crontab_for_cycle` / `REALM_INTERVAL_OFFSETS` (covered for
       existence + crontab + NA-lane de-pile by the families lists above).
@@ -456,3 +457,47 @@ class TrackedPlayerPollGateTests(TestCase):
     def test_poll_dispatcher_enabled_when_tracking_configured(self):
         with mock.patch.dict(os.environ, {"BATTLE_TRACKING_PLAYER_NAMES": "lil_boots"}, clear=False):
             self.assertTrue(self._registered_poll_task().enabled)
+
+
+class EnvGateDefaultAlignmentTests(TestCase):
+    """DB-audit item 10 (runbook-db-table-audit-2026-07-19.md): the code
+    defaults of these two gates must match prod reality so a fresh
+    environment fails safe — observation-payload compaction ON (prod since
+    2026-05-24), hot-players engagement queue OFF (prod since 2026-06-16).
+    Registration is re-run under a controlled env with the gate var ABSENT.
+    """
+
+    def _register_with_env(self, env):
+        with mock.patch.dict(os.environ, env, clear=True):
+            register_periodic_schedules(sender=apps.get_app_config("warships"))
+
+    @staticmethod
+    def _env_without(name):
+        return {k: v for k, v in os.environ.items() if k != name}
+
+    def test_prune_battle_observations_enabled_by_default(self):
+        self._register_with_env(
+            self._env_without("BATTLE_OBSERVATION_COMPACT_ENABLED"))
+        self.assertTrue(PeriodicTask.objects.get(
+            name="prune-battle-observations").enabled)
+
+    def test_prune_battle_observations_explicit_zero_disables(self):
+        env = self._env_without("BATTLE_OBSERVATION_COMPACT_ENABLED")
+        env["BATTLE_OBSERVATION_COMPACT_ENABLED"] = "0"
+        self._register_with_env(env)
+        self.assertFalse(PeriodicTask.objects.get(
+            name="prune-battle-observations").enabled)
+
+    def test_hot_players_maintain_disabled_by_default(self):
+        self._register_with_env(self._env_without("HOT_PLAYERS_ENABLED"))
+        for realm in VALID_REALMS:
+            self.assertFalse(PeriodicTask.objects.get(
+                name=f"hot-players-maintain-{realm}").enabled)
+
+    def test_hot_players_maintain_explicit_one_enables(self):
+        env = self._env_without("HOT_PLAYERS_ENABLED")
+        env["HOT_PLAYERS_ENABLED"] = "1"
+        self._register_with_env(env)
+        for realm in VALID_REALMS:
+            self.assertTrue(PeriodicTask.objects.get(
+                name=f"hot-players-maintain-{realm}").enabled)

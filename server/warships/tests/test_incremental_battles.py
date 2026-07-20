@@ -4198,3 +4198,34 @@ class PruneInactivePlayerBattlesJsonTests(TestCase):
                 )
         self.assertEqual(
             Player.objects.filter(battles_json__isnull=False).count(), 1)
+
+
+class PruneTaskEnvGateTests(TestCase):
+    """`prune_battle_observations_task` env-gate defaults (DB-audit item 10,
+    runbook-db-table-audit-2026-07-19.md): the compaction default is ON so a
+    fresh environment matches prod (enabled since 2026-05-24); an explicit
+    "0" still disables it.
+    """
+
+    def test_env_absent_defaults_enabled(self):
+        import os
+        from warships import tasks
+        env = {k: v for k, v in os.environ.items()
+               if k != "BATTLE_OBSERVATION_COMPACT_ENABLED"}
+        with mock.patch.dict("os.environ", env, clear=True), \
+                mock.patch(
+                    "warships.incremental_battles."
+                    "compact_battle_observation_payloads",
+                    return_value={"status": "completed", "cleared": 0},
+                ) as compact:
+            res = tasks.prune_battle_observations_task()
+        compact.assert_called_once()
+        self.assertNotEqual(res.get("reason"), "compaction-disabled")
+
+    def test_explicit_zero_disables(self):
+        from warships import tasks
+        with mock.patch.dict(
+                "os.environ", {"BATTLE_OBSERVATION_COMPACT_ENABLED": "0"}):
+            res = tasks.prune_battle_observations_task()
+        self.assertEqual(
+            res, {"status": "skipped", "reason": "compaction-disabled"})
