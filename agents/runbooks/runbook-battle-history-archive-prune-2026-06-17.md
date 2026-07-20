@@ -23,7 +23,7 @@ Cap the unbounded growth of the two append-only, no-retention battle-history tab
 | Decision | Value | Rationale |
 |---|---|---|
 | In scope | `BattleEvent` (filter `detected_at`), `PlayerDailyShipStats` (filter `date`) | The two monotonic no-retention growth tables (`archive/runbook-db-growth-analysis-2026-06-15.md`). |
-| Excluded | `BattleObservation` | Already handled by prod compaction (`prune_battle_observations` NULLs heavy JSON, keeps rows). `BattleEvent.from_observation`/`to_observation` are **CASCADE FKs into `BattleObservation`** (`models.py:617–626`), so deleting BO rows would destroy the durable event record — and keeping BO rows keeps archived events re-insertable in practice (parents persist). |
+| Row-retention tier (2026-07-20, DB audit F5) | `BattleObservation` | JSON lifecycle stays with prod compaction (`prune_battle_observations_task` NULLs heavy JSON, keeps rows). The old CASCADE-FK objection is obsolete: migration 0082 relaxed `BattleEvent.from_observation`/`to_observation` to `on_delete=DO_NOTHING` + `db_constraint=False` (dangling provenance ids are expected and never queried). `prune_battle_observation_rows` now deletes, in the same command run: JSON-stripped skeletons older than `BATTLE_OBSERVATION_ROW_RETENTION_DAYS` (32) and fully-empty polls older than `BATTLE_OBSERVATION_EMPTY_RETENTION_DAYS` (7) — never a JSON-carrying row, never a player's latest observation (the floor's change-gate freshness anchor). Delete-only (no CSV export — skeletons have no reader at any age; their events were already archived). Gate: `BATTLE_OBSERVATION_ROW_RETENTION_ENABLED`. |
 | Retention | **92 days** (32 until 2026-07-20), both tables | One window for everything in scope; raised after the 60→80 GiB disk resize. |
 | UI impact (accepted) | week/month/year cap at 92 days (32 until 2026-07-20) | Permanent; the deeper window fills forward-only. |
 | Restore | cold queryable archive | Load compressed CSV into a scratch DB for analysis. No one-command live re-insertion guarantee. |
@@ -40,7 +40,7 @@ Cap the unbounded growth of the two append-only, no-retention battle-history tab
 
 - `BATTLE_HISTORY_WINDOWS` (`views.py:608–613`): `day → 24h`, `week → 7 daily`, `month → 30 daily`, `year → 365 daily`. The week/month/year windows resolve to the `PlayerDailyShipStats` daily layer, so once rows older than 32d are pruned those windows cap at 32 days. The `year` window's 365-day span is the one that visibly shrinks.
 - The 24h "day" window routes through `_build_battle_history_payload_24h()` (`views.py:769`, referenced at `views.py:605`), which reads `BattleEvent` directly (`detected_at >= now-24h`). 24h ≪ 32d, so it is **never** affected by the prune.
-- `data.py` reads only the **latest** `BattleObservation` as a diff baseline; `BattleObservation` is out of scope and untouched.
+- `data.py` reads only the **latest** `BattleObservation` as a diff baseline; the row-retention tier (2026-07-20) preserves each player's latest observation unconditionally, so this contract holds under deletion.
 
 **Why the prune is correct regardless of concurrent writes.** The job does **not** assume "no new `<cutoff` rows can appear mid-run." Correctness comes from the **verify-before-delete gate** and the **delete-only-what-you-exported** discipline:
 

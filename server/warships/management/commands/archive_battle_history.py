@@ -3,8 +3,15 @@
 Exports BattleEvent / PlayerDailyShipStats rows older than the retention window
 to a gzip CSV + manifest on local disk, verifies the archive (count + sha256),
 then deletes ONLY the rows that physically landed in the verified archive, and
-runs VACUUM (ANALYZE). BattleObservation is out of scope (see the core docstring
-in warships/incremental_battles.py and the runbook).
+runs VACUUM (ANALYZE).
+
+BattleObservation row retention (DB audit F5, 2026-07-20) rides the same
+invocation as a delete-only tier after the archive tables: JSON-stripped
+skeletons past BATTLE_OBSERVATION_ROW_RETENTION_DAYS (default 32) and
+fully-empty polls past BATTLE_OBSERVATION_EMPTY_RETENTION_DAYS (default 7)
+are deleted — never a JSON-carrying row, never a player's latest observation.
+Gated separately by BATTLE_OBSERVATION_ROW_RETENTION_ENABLED (dry-run always
+reports it; --skip-observations omits it entirely).
 
 Runbook: agents/runbooks/runbook-battle-history-archive-prune-2026-06-17.md
 
@@ -29,7 +36,11 @@ from warships.incremental_battles import (
     ARCHIVE_RETENTION_DAYS_DEFAULT,
     ARCHIVE_STATEMENT_TIMEOUT_DEFAULT,
     ARCHIVE_TABLES,
+    OBSERVATION_EMPTY_RETENTION_DAYS_DEFAULT,
+    OBSERVATION_RETENTION_STATEMENT_TIMEOUT_DEFAULT,
+    OBSERVATION_ROW_RETENTION_DAYS_DEFAULT,
     archive_and_prune_battle_history,
+    prune_battle_observation_rows,
 )
 
 
@@ -116,6 +127,36 @@ class Command(BaseCommand):
             "--force", action="store_true",
             help="Run live even if BATTLE_HISTORY_ARCHIVE_ENABLED != 1.",
         )
+        parser.add_argument(
+            "--skip-observations", action="store_true",
+            dest="skip_observations",
+            help="Skip the BattleObservation row-retention tier entirely.",
+        )
+        parser.add_argument(
+            "--observation-retention-days", type=int,
+            dest="observation_retention_days",
+            default=_env_int("BATTLE_OBSERVATION_ROW_RETENTION_DAYS",
+                             OBSERVATION_ROW_RETENTION_DAYS_DEFAULT),
+            help=("Delete JSON-stripped observation skeletons older than this "
+                  "(each player's latest row is always kept). Default (env "
+                  "BATTLE_OBSERVATION_ROW_RETENTION_DAYS): "
+                  f"{OBSERVATION_ROW_RETENTION_DAYS_DEFAULT}."),
+        )
+        parser.add_argument(
+            "--observation-empty-days", type=int,
+            dest="observation_empty_days",
+            default=_env_int("BATTLE_OBSERVATION_EMPTY_RETENTION_DAYS",
+                             OBSERVATION_EMPTY_RETENTION_DAYS_DEFAULT),
+            help=("Delete fully-empty polls (no last_battle_time, no JSON) "
+                  "older than this. Default (env "
+                  "BATTLE_OBSERVATION_EMPTY_RETENTION_DAYS): "
+                  f"{OBSERVATION_EMPTY_RETENTION_DAYS_DEFAULT}."),
+        )
+        parser.add_argument(
+            "--observation-max-rows", type=int, dest="observation_max_rows",
+            default=0,
+            help="Cap observation rows deleted this run (0 = unlimited).",
+        )
 
     def handle(self, *args, **options):
         if options["retention_days"] < 0:
@@ -175,10 +216,51 @@ class Command(BaseCommand):
                     f"[{t['table']}]: FAILED ({t.get('reason')}) — "
                     f"archive kept, nothing deleted."))
 
+        obs_failed = False
+        if not options["skip_observations"]:
+            obs_enabled = os.getenv(
+                "BATTLE_OBSERVATION_ROW_RETENTION_ENABLED", "0") == "1"
+            if dry_run or obs_enabled:
+                try:
+                    obs = prune_battle_observation_rows(
+                        retention_days=options["observation_retention_days"],
+                        empty_retention_days=options["observation_empty_days"],
+                        batch_size=options["batch_size"],
+                        max_rows=options["observation_max_rows"],
+                        dry_run=dry_run,
+                        sleep_between_batches=options["sleep"],
+                        statement_timeout_s=_env_int(
+                            "BATTLE_OBSERVATION_ROW_RETENTION_STATEMENT_TIMEOUT",
+                            OBSERVATION_RETENTION_STATEMENT_TIMEOUT_DEFAULT),
+                        skip_vacuum=options["skip_vacuum"],
+                    )
+                except Exception as exc:
+                    obs_failed = True
+                    self.stdout.write(self.style.ERROR(
+                        f"[warships_battleobservation]: FAILED ({exc}) — "
+                        "archive tables above were unaffected."))
+                else:
+                    if obs["status"] == "dry_run":
+                        self.stdout.write(
+                            f"DRY-RUN [{obs['table']}]: {obs['candidates']:,} "
+                            f"stripped/empty rows (< {obs['cutoff']} / empty < "
+                            f"{obs['empty_cutoff']}) would be deleted "
+                            "(no archive — delete-only tier).")
+                    else:
+                        self.stdout.write(self.style.SUCCESS(
+                            f"[{obs['table']}]: deleted {obs['deleted']:,} "
+                            f"stripped/empty rows "
+                            f"(vacuumed={obs.get('vacuumed')})."))
+            else:
+                self.stdout.write(self.style.WARNING(
+                    "observation row retention disabled "
+                    "(BATTLE_OBSERVATION_ROW_RETENTION_ENABLED != 1) — "
+                    "skipped."))
+
         if dry_run:
             self.stdout.write(self.style.WARNING("--dry-run: no rows written"))
             return
 
-        if result.get("status") != "completed":
+        if result.get("status") != "completed" or obs_failed:
             raise CommandError(
                 "archive_battle_history completed with failures (see above).")
