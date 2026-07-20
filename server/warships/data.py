@@ -6967,6 +6967,100 @@ _SHIP_COMBAT_METRICS = (
 SHIP_POP_AVG_MIN_BATTLES = 20
 _SHIP_POP_AVG_CACHE_TTL = 26 * 3600  # day-scoped key; TTL is just a backstop
 
+# --- ShipPopDailyAgg rollup (DB-audit lever F9.2) ---
+# Per-(realm, mode, ship, day) aggregate of PlayerDailyShipStats, so the
+# nightly bulk warm sums ~30 tiny rows per ship instead of re-scanning the
+# 7M+ row PDSS table (~34s/realm measured). PDSS `date` comes from
+# `detected_at.date()`, so a past realm-day is frozen once the UTC day ends
+# (only the manual rebuild repair op rewrites history) — the catch-up
+# therefore fills missing dates and re-rolls only the trailing
+# SHIP_POP_ROLLUP_REFRESH_DAYS: the current UTC day is still accruing, and a
+# commit straddling midnight can land its detected-yesterday rows just after
+# the day flips.
+SHIP_POP_ROLLUP_RETENTION_DAYS = 100  # self-bounding; pruned inside the rollup
+SHIP_POP_ROLLUP_REFRESH_DAYS = 2      # today + yesterday always re-rolled
+
+# (PDSS source column, ShipPopDailyAgg column) — the sums the ship-population
+# consumers need: avg-damage baseline (battles, damage_sum) + the ship-combat
+# metric catalogue's per-battle rates and hit ratios incl. their shot gates.
+_SHIP_POP_ROLLUP_FIELDS = (
+    ('battles', 'battles'),
+    ('wins', 'wins'),
+    ('frags', 'frags'),
+    ('damage', 'damage_sum'),
+    ('xp', 'xp'),
+    ('main_shots', 'main_shots'),
+    ('main_hits', 'main_hits'),
+    ('secondary_shots', 'secondary_shots'),
+    ('secondary_hits', 'secondary_hits'),
+    ('torpedo_shots', 'torpedo_shots'),
+    ('torpedo_hits', 'torpedo_hits'),
+)
+
+
+def rollup_ship_pop_daily(realm: str, on_date) -> int:
+    """Recompute ONE realm-day of ShipPopDailyAgg from PlayerDailyShipStats.
+
+    Idempotent delete-and-replace upsert inside one transaction (a realm-day
+    is only a few hundred (ship, mode) rows). Also prunes the realm's rows
+    older than SHIP_POP_ROLLUP_RETENTION_DAYS so the table stays
+    self-bounding without a dedicated timer. Returns the number of agg rows
+    written for the day."""
+    from warships.models import PlayerDailyShipStats as _PDSS, ShipPopDailyAgg
+
+    sum_kwargs = {agg: Sum(src) for src, agg in _SHIP_POP_ROLLUP_FIELDS}
+    with transaction.atomic(), _elevated_work_mem():
+        rows = list(
+            _PDSS.objects
+            .filter(date=on_date, player__realm=realm)
+            .values('ship_id', 'mode')
+            .annotate(**sum_kwargs)
+        )
+        ShipPopDailyAgg.objects.filter(realm=realm, date=on_date).delete()
+        ShipPopDailyAgg.objects.bulk_create([
+            ShipPopDailyAgg(
+                realm=realm, date=on_date,
+                ship_id=row['ship_id'], mode=row['mode'],
+                **{agg: int(row[agg] or 0)
+                   for _, agg in _SHIP_POP_ROLLUP_FIELDS},
+            )
+            for row in rows
+        ])
+    prune_before = (django_timezone.now().date()
+                    - timedelta(days=SHIP_POP_ROLLUP_RETENTION_DAYS))
+    ShipPopDailyAgg.objects.filter(
+        realm=realm, date__lt=prune_before).delete()
+    return len(rows)
+
+
+def rollup_ship_pop_daily_catchup(
+        realm: str, window_days: int = SHIP_COMBAT_WINDOW_DAYS) -> int:
+    """Bring the trailing window's ShipPopDailyAgg up to date for a realm.
+
+    Rolls up (a) every window date with no agg rows yet — on first deploy
+    this backfills the whole window, afterwards only genuine gaps — and
+    (b) always the trailing SHIP_POP_ROLLUP_REFRESH_DAYS (still accruing).
+    A frozen day already rolled up is skipped, which is what makes the
+    nightly warm cheap after day one. Returns the number of days rolled."""
+    from warships.models import ShipPopDailyAgg
+
+    today = django_timezone.now().date()
+    cutoff = today - timedelta(days=window_days)
+    rolled_dates = set(
+        ShipPopDailyAgg.objects
+        .filter(realm=realm, date__gte=cutoff)
+        .values_list('date', flat=True)
+        .distinct()
+    )
+    days = 0
+    for offset in range(window_days + 1):
+        day = cutoff + timedelta(days=offset)
+        in_refresh_window = (today - day).days < SHIP_POP_ROLLUP_REFRESH_DAYS
+        if in_refresh_window or day not in rolled_dates:
+            rollup_ship_pop_daily(realm, day)
+            days += 1
+    return days
+
 
 def _ship_pop_avg_damage_cache_key(realm: str, ship_id: int) -> str:
     day = django_timezone.now().date().isoformat()
@@ -6999,26 +7093,30 @@ def compute_ship_pop_avg_damage(realm: str, ship_id: int) -> int:
 
 
 def compute_all_ship_pop_avg_damage(realm: str) -> dict:
-    """Bulk variant of compute_ship_pop_avg_damage: ONE grouped scan of the
-    trailing window computes + caches EVERY ship's realm-wide 30d random avg
-    damage, including the 0 below-floor sentinels. ~34s/realm measured on the
-    prod-size dataset (2026-07-13, ~900 ships) vs seconds *per ship* for the
-    per-ship shape — so the nightly pre-warm uses this, and the per-ship
-    request-driven warm survives only as the gap fallback (day-key rotation
-    at UTC midnight → first viewers before the snapshot chain fires).
-    Task-side only."""
-    from warships.models import PlayerDailyShipStats as _PDSS
+    """Bulk variant of compute_ship_pop_avg_damage: computes + caches EVERY
+    ship's realm-wide 30d random avg damage, including the 0 below-floor
+    sentinels. Nightly pre-warm path; the per-ship request-driven warm
+    survives only as the gap fallback (day-key rotation at UTC midnight →
+    first viewers before the snapshot chain fires). Task-side only.
 
+    F9.2 rework: instead of ONE grouped scan of the 7M+ row PDSS window
+    (~34s/realm measured 2026-07-13), first bring the ShipPopDailyAgg daily
+    rollup up to date (first call backfills the window; afterwards only the
+    trailing refresh days + genuine gaps compute), then sum the window from
+    the small agg table (~30 rows/ship). Output is IDENTICAL to the legacy
+    scan — same cache keys, values, floor, and sentinel semantics — because
+    per-day sums compose associatively into the same window totals."""
+    from warships.models import PlayerDailyShipStats as _PDSS, ShipPopDailyAgg
+
+    rollup_ship_pop_daily_catchup(realm)
     cutoff = django_timezone.now().date() - timedelta(
         days=SHIP_COMBAT_WINDOW_DAYS)
-    with transaction.atomic(), _elevated_work_mem():
-        rows = list(
-            _PDSS.objects
-            .filter(mode=_PDSS.MODE_RANDOM, date__gte=cutoff,
-                    player__realm=realm)
-            .values('ship_id')
-            .annotate(b=Sum('battles'), d=Sum('damage'))
-        )
+    rows = list(
+        ShipPopDailyAgg.objects
+        .filter(realm=realm, mode=_PDSS.MODE_RANDOM, date__gte=cutoff)
+        .values('ship_id')
+        .annotate(b=Sum('battles'), d=Sum('damage_sum'))
+    )
     payload = {}
     for row in rows:
         battles = int(row['b'] or 0)

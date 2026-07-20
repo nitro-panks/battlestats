@@ -491,8 +491,12 @@ def warm_all_ship_pop_avg_damage_task(self, realm=DEFAULT_REALM):
     at UTC midnight and (pre-2026-07-13) every day's first viewer of each
     ship ate the lazy warm (gray tiles → poll → colorize). Chained from
     snapshot_ship_top_players_task (02:00+ UTC striped, safely after the key
-    rotation), this runs ONE grouped scan per realm (~34s measured) instead
-    of hundreds of scattered per-ship aggregates through the day. The
+    rotation). Since the F9.2 rollup (2026-07-20) the compute reads the
+    small per-(realm, ship, day) ShipPopDailyAgg table — catch-up rolls
+    only the trailing refresh days + gaps, then sums ~30 tiny rows per ship
+    — instead of the old ONE full grouped PDSS scan per realm (~34s
+    measured; the first post-deploy run backfills the window at about that
+    cost, once). Spec: agents/work-items/ship-pop-daily-rollup-spec.md. The
     request-driven warm_ship_pop_avg_damage_task remains the fallback for
     the midnight→snapshot gap and any stragglers."""
     from warships.data import compute_all_ship_pop_avg_damage
