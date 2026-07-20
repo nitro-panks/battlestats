@@ -696,7 +696,7 @@ set_env_value WG_RATE_LIMIT_REQUEST_MAX_WAIT 0.5
 # timer maintains the rolling window twice a month (1st + 15th). Set to 0 to
 # pause — the timer still fires but the command no-ops.
 set_env_value BATTLE_HISTORY_ARCHIVE_ENABLED 1
-set_env_value BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS 32
+set_env_value BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS 92
 set_env_value BATTLE_HISTORY_ARCHIVE_DIR "${APP_ROOT}/shared/archives/battle_history"
 set_env_value BATTLE_HISTORY_ARCHIVE_BATCH_SIZE 2000
 set_env_value BATTLE_HISTORY_ARCHIVE_SLEEP 0.5

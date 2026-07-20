@@ -95,7 +95,7 @@ Battle-history pipeline (phased gates, all default 0):
 
 Battle-history monthly cold-archive + prune (`archive_battle_history` command, `battlestats-archive-battle-history.timer`; runbook `runbook-battle-history-archive-prune-2026-06-17.md`):
 - `BATTLE_HISTORY_ARCHIVE_ENABLED` (**1 in prod since 2026-06-17**) — **master kill switch.** The `battlestats-archive-battle-history.timer` fires on the 1st + 15th (03:00 UTC); the command no-ops at `0`. Exports `BattleEvent`/`PlayerDailyShipStats` rows older than the window to gzip CSV + manifest under `shared/archives/battle_history`, verifies, then deletes only the archived rows (`BattleObservation` out of scope).
-- `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` (32) — rows strictly older than midnight-UTC(now) − N are archived + deleted. **Caps every UI window (week/month/year) at N days** (year visibly shrinks).
+- `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` (**92** — raised from 32 on 2026-07-20 after the DB disk bump 60→80 GiB; the live window deepens forward-only and reaches full 92d depth ~2026-09-18) — rows strictly older than midnight-UTC(now) − N are archived + deleted. **Caps every UI window (week/month/year) at N days** (year visibly shrinks).
 - `BATTLE_HISTORY_ARCHIVE_DIR` (`${APP_ROOT}/shared/archives/battle_history`), `BATTLE_HISTORY_ARCHIVE_BATCH_SIZE` (2000), `BATTLE_HISTORY_ARCHIVE_SLEEP` (0.5 prod), `BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT` (180; bounds the count + delete batches, never the long COPY).
 
 Ship badges / standings (master gate `SHIP_BADGE_SNAPSHOT_ENABLED`=0):

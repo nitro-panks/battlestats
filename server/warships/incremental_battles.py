@@ -2126,7 +2126,9 @@ def record_ranked_observation_and_diff(player_id: int, realm: str) -> Dict[str, 
 #     bounded count query and the per-batch deletes carry SET LOCAL timeouts.
 # ---------------------------------------------------------------------------
 
-ARCHIVE_RETENTION_DAYS_DEFAULT = 32
+# Must stay comfortably above SHIP_LEADERBOARD_WINDOW_DAYS (30): the nightly
+# ship-standings snapshot aggregates BattleEvent over that trailing window.
+ARCHIVE_RETENTION_DAYS_DEFAULT = 92
 ARCHIVE_BATCH_SIZE_DEFAULT = 2000
 ARCHIVE_STATEMENT_TIMEOUT_DEFAULT = 180
 
