@@ -1,6 +1,6 @@
 # Ops: Infrastructure Resources
 
-**Lifecycle:** evergreen · **Owner:** platform · **Last verified:** 2026-06-11 (live `doctl` + `pg_settings`)
+**Lifecycle:** evergreen · **Owner:** platform · **Last verified:** 2026-07-20 (live `doctl`: `db-s-2vcpu-4gb`, `storage_size_mib=81920`, PG 18)
 
 Authoritative current production resource sizing. This is the single source of truth
 for "how big is the box" questions; **re-verify against live infra before quoting in
@@ -14,7 +14,9 @@ claim in older runbooks — those describe the **pre-2026-05-28** state, not tod
   **Do NOT plan against a 1-vCPU DB budget** — that is the most common stale assumption.
 - **App droplet is 2 vCPU / 8 GB RAM** (+ 2 GB swap).
 - DB **CPU** is a light watch-item, not a capacity blocker. DB **disk is not a
-  constraint** (60 GB plan, ~22 GB used).
+  constraint** (80 GiB since 2026-07-20, ~38 GB used; autoscale OFF, so it is
+  still a hard wall — expect ~50 GB at steady state once the 92d battle-history
+  retention window fills, ~2026-09-18).
 
 ## App droplet (`battlestats-droplet`, nyc3)
 
@@ -35,7 +37,7 @@ Co-hosts everything except the DB: nginx, gunicorn (Django), Next.js (3001), Uma
 | Plan slug | `db-s-2vcpu-4gb` |
 | vCPU | **2** |
 | RAM | **4 GB** |
-| Disk | 60 GB (~21.6 GB used) |
+| Disk | **80 GiB** (`storage_size_mib=81920`; resized 60→80 on 2026-07-20 for the 92d battle-history retention; ~38 GB used) |
 | Engine | PostgreSQL **18**, single node |
 | `max_connections` | 100 (**~97 usable**; DO reserves a few for management) |
 | `shared_buffers` | ~780 MB (`99840 × 8kB`) |
@@ -46,7 +48,8 @@ Co-hosts everything except the DB: nginx, gunicorn (Django), Next.js (3001), Uma
 `shared_buffers` / `max_connections` are not operator-configurable on DO managed PG —
 plan within these. History: the May 2026 disk/CPU incidents
 (`runbook-db-cpu-saturation-2026-05-24.md`) were on the old 1-vCPU / 2-GB plan; the
-resize + a disk bump to 60 GB followed.
+resize + a disk bump to 60 GB followed; a further bump to 80 GiB (2026-07-20)
+accompanied the battle-history retention raise 32→92d.
 
 ## Connection budget (well within ~97)
 
