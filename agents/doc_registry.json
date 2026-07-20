@@ -3477,6 +3477,30 @@
             "archive_on": [
                 "deferred touch-interaction follow-ups (C5-C8) land or are formally dropped"
             ]
+        },
+        "agents/runbooks/runbook-db-table-audit-2026-07-19.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db table audit",
+                "database audit",
+                "storage audit"
+            ],
+            "tags": [
+                "database",
+                "storage",
+                "bloat",
+                "indexes",
+                "retention",
+                "materialized views",
+                "cost"
+            ],
+            "archive_on": [
+                "follow-ups-completed-or-superseded"
+            ]
         }
     }
 }
