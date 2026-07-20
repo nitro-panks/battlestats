@@ -531,3 +531,15 @@ class CommandErgonomicsTests(TestCase):
         buf = StringIO()
         call_command("hot_players_status", "--realm", "na", stdout=buf)
         self.assertIn("Hot-set size: 1", buf.getvalue())
+
+
+class HotPlayersMaxDefaultTests(TestCase):
+    def test_code_default_matches_prod_800(self):
+        # DB-audit item-10 sweep follow-up: the deploy script pins 800; the
+        # code default must agree so a fresh environment behaves like prod.
+        import os
+        from unittest.mock import patch
+        from warships.hot_players import _hot_players_max
+        env = {k: v for k, v in os.environ.items() if k != "HOT_PLAYERS_MAX"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertEqual(_hot_players_max(), 800)

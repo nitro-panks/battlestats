@@ -79,7 +79,7 @@ Hot-players engagement capture queue (`warships/hot_players.py`; kill switch `HO
 - `HOT_EVICT_INACTIVITY_DAYS` (14) / `HOT_EVICT_MIN_ACTIVE_DAYS` (2) — eviction with hysteresis (promote ≥3, evict <2 → no flapping).
 - `HOT_OBSERVE_FLOOR_HOURS` (20) — skip-if-fresh: skip the observation when a `BattleObservation` is newer (the floor already got them).
 - `HOT_PLAYERS_CAPTURE_DELAY` (0.5) — WG pacing between hot captures (crawl-coexist value).
-- `HOT_PLAYERS_MAX` (code default 500, **prod=800 since 2026-06-15**) — per-realm cap on the hot set (capture sweep + cap-trim ranking). Sized so a full nightly capture pass fits a ~1h worst-case budget.
+- `HOT_PLAYERS_MAX` (default **800** — code default aligned with the deploy-script pin 2026-07-20; was 500) — per-realm cap on the hot set (capture sweep + cap-trim ranking). Sized so a full nightly capture pass fits a ~1h worst-case budget.
 - `HOT_BACKFILL_ACTIVE_DAYS` (7) — `backfill_hot_players` selects players with `last_battle_date` within this window (ordered by `pvp_battles` desc) to seed the queue to the cap as `source='backfill'`.
 - **Retired 2026-06-15:** `HOT_PLAYERS_FRESH_AFTER_MINUTES` / `HOT_PLAYERS_FRESH_CYCLE_MINUTES` and `refresh_hot_player_freshness_task` (the per-12-min visit-freshness sweep, latency-runbook Tier 3). The hot queue's sole purpose is now a ≥24h battle-history pull, guaranteed by the daily capture sweep + the observation floor; a visit to a stale hot player falls back to the normal live-refresh-on-view path. Schedule rows are in `signals._RETIRED_SCHEDULE_NAMES`.
 

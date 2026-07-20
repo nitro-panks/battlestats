@@ -131,7 +131,7 @@ OR `active_days < HOT_EVICT_MIN_ACTIVE_DAYS` (default 2 over W) for a hot member
 Promote at ≥3, evict below 2 → a player hovering at 2–3 active-days/14 stays put instead
 of churning in and out daily.
 
-**Cap:** keep at most `HOT_PLAYERS_MAX` (default 500) per realm, ranked by a hotness
+**Cap:** keep at most `HOT_PLAYERS_MAX` (default 800 — aligned with the deploy-script pin 2026-07-20; was 500) per realm, ranked by a hotness
 score (`active_days` primary, `unique_sessions` then `views_deduped` as tiebreaks) so the
 set is bounded and the marginal WG cost stays predictable (doctrine: no unbounded
 fan-out).

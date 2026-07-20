@@ -69,7 +69,9 @@ def _evict_min_active_days() -> int:
 
 
 def _hot_players_max() -> int:
-    return int(os.getenv("HOT_PLAYERS_MAX", "500"))
+    # Default matches the deploy script pin (800 since 2026-06-15) so a
+    # fresh environment behaves like prod (DB-audit item-10 trap shape).
+    return int(os.getenv("HOT_PLAYERS_MAX", "800"))
 
 
 def _observe_floor_hours() -> int:
