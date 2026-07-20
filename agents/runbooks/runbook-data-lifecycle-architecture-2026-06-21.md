@@ -18,7 +18,7 @@ app server; the DB is a separate managed disk.
 
 | Metric | Value (2026-06-21) | Source |
 |---|---|---|
-| Disk ceiling | **60 GiB** (`storage_size_mib=61440`), **autoscale OFF** | `doctl databases get <id>` |
+| Disk ceiling | **80 GiB since 2026-07-20** (`storage_size_mib=81920`; was 60 GiB at assessment time), **autoscale OFF** | `doctl databases get <id>` |
 | Disk **used** | **38.3 GB (62.5%)**, 22.9 GB free | DO Prometheus `:9273` `disk_used` |
 | `pg_database_size` | 31 GB | `SELECT pg_database_size(...)` |
 | Health | load15 1.53, iowait 3.4%, CPU idle ~59% | DO `:9273` — coping, not stressed |
@@ -152,7 +152,7 @@ destructive jobs stay **gated OFF** until an env flip.
    move to a per-ship baseline table. Biggest TOAST, **biggest risk** — design separately, do not attempt inline.
 4. **Schedule the inactive-`battles_json` prune + entity-visit cleanup:** flip `PRUNE_BATTLES_JSON_ENABLED=1`
    / `ENTITY_VISIT_CLEANUP_ENABLED=1` once the first supervised `--dry-run` looks right.
-5. **Disk alert / autoscale:** autoscale is OFF and the wall is hard at 60 GiB. Add an alert on
+5. **Disk alert / autoscale:** autoscale is OFF and the wall is hard (80 GiB since 2026-07-20). Add an alert on
    `disk_used_percent > 80` (DO `:9273`) or enable storage autoscale as the outage backstop (cf. the
    2026-05-24 read-only incident).
 
