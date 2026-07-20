@@ -41,15 +41,33 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
     // at once (frees the queue for the page the user actually navigated to).
     const scopeKey = `${playerName}:${realm}`;
     const scopeRef = useRef<{ key: string; controller: AbortController } | null>(null);
-    if (!scopeRef.current || scopeRef.current.key !== scopeKey) {
+    // Mint a fresh controller when the scope changes OR when the stored one is
+    // already aborted. The `.aborted` clause is what makes dev == prod: React
+    // Strict Mode (dev only) mounts → unmounts → remounts, and the simulated
+    // unmount fires the cleanup below (controller.abort()). Without this clause
+    // the remount re-reads the same, now-aborted controller, so the critical
+    // /api/player fetch is handed a dead signal and rejects instantly — the
+    // swallowed abort leaves playerData null → a spurious "Player not found."
+    // The setIsLoading(false) in that abort path re-renders, this guard mints a
+    // live controller, requestSignal changes, and the load effect re-runs. The
+    // clause is inert in production (single mount → the stored controller is
+    // only ever aborted on real nav-away, which also changes scopeKey).
+    if (!scopeRef.current || scopeRef.current.key !== scopeKey
+        || scopeRef.current.controller.signal.aborted) {
         scopeRef.current = { key: scopeKey, controller: new AbortController() };
     }
     const requestSignal = scopeRef.current.controller.signal;
 
+    // Abort on scope change / unmount. `controller` is captured at setup time
+    // (not read from the ref at cleanup) so a nav-away aborts the OUTGOING
+    // page's controller, not the incoming one the render guard just minted.
+    // requestSignal is in the deps so that if the guard mints a fresh
+    // controller mid-scope (the Strict-Mode remint above), this effect
+    // re-captures it and stays bound to the live controller.
     useEffect(() => {
         const controller = scopeRef.current!.controller;
         return () => controller.abort();
-    }, [scopeKey]);
+    }, [scopeKey, requestSignal]);
 
     useEffect(() => {
         let cancelled = false;
