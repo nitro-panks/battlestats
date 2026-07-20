@@ -540,7 +540,25 @@ describe('BattleHistoryCard', () => {
     test('clicking each visible window pill refetches with the matching ?window= param', async () => {
         // Year is intentionally not in the visible pill row (capture started
         // 2026-04-28 — won't have meaningful 365-day data for ~12 months).
-        resolveWith(buildPayload({ has_recent_24h_activity: true }));
+        // Give the (sparkline) month fetch recent by_day so Week/Month aren't
+        // treated as empty windows and disabled — this test exercises the
+        // pill→refetch wiring for an active player.
+        const utcDay = (o: number): string => {
+            const d = new Date();
+            d.setUTCDate(d.getUTCDate() - o);
+            return d.toISOString().slice(0, 10);
+        };
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({
+                has_recent_24h_activity: true,
+                by_day: [
+                    { date: utcDay(1), battles: 4, wins: 2, damage: 0, frags: 0 },
+                    { date: utcDay(0), battles: 3, wins: 1, damage: 0, frags: 0 },
+                ],
+            }),
+            headers: {},
+        });
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
@@ -549,7 +567,6 @@ describe('BattleHistoryCard', () => {
         expect(screen.queryByRole('button', { name: /^Year$/ })).toBeNull();
         for (const w of ['day', 'week', 'month'] as const) {
             const beforeCount = mockFetchSharedJson.mock.calls.length;
-            resolveWith(buildPayload({ has_recent_24h_activity: true }));
             await act(async () => {
                 const labelMatch = new RegExp(
                     `^${w[0].toUpperCase()}${w.slice(1)}$`,
@@ -565,7 +582,24 @@ describe('BattleHistoryCard', () => {
     });
 
     test('fires name-baked player-history-<window> events when a non-active pill is picked', async () => {
-        resolveWith(buildPayload({ has_recent_24h_activity: true }));
+        // Recent by_day so Week isn't disabled as an empty window (this test is
+        // about the click→event wiring, not the empty-pill disable).
+        const utcDay = (o: number): string => {
+            const d = new Date();
+            d.setUTCDate(d.getUTCDate() - o);
+            return d.toISOString().slice(0, 10);
+        };
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({
+                has_recent_24h_activity: true,
+                by_day: [
+                    { date: utcDay(1), battles: 4, wins: 2, damage: 0, frags: 0 },
+                    { date: utcDay(0), battles: 3, wins: 1, damage: 0, frags: 0 },
+                ],
+            }),
+            headers: {},
+        });
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
@@ -600,6 +634,77 @@ describe('BattleHistoryCard', () => {
         const beforeCount = mockFetchSharedJson.mock.calls.length;
         await act(async () => { dayBtn.click(); });
         expect(mockFetchSharedJson.mock.calls.length).toBe(beforeCount);
+    });
+
+    test('Week pill is disabled when the trailing 7 days have no battles (derived from month by_day)', async () => {
+        // A player whose only recent battle is ~10 days ago: inside the 30-day
+        // month window but outside the 7-day week window. Week must dim/disable;
+        // Month (which has the data, and is the active default) stays enabled.
+        const utcDay = (o: number): string => {
+            const d = new Date();
+            d.setUTCDate(d.getUTCDate() - o);
+            return d.toISOString().slice(0, 10);
+        };
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({
+                has_recent_24h_activity: false,
+                by_day: [{ date: utcDay(10), battles: 5, wins: 3, damage: 0, frags: 0 }],
+            }),
+            headers: {},
+        });
+        render(<BattleHistoryCard playerName="lapsed" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+
+        const weekBtn = screen.getByRole('button', { name: /^Week$/ });
+        await waitFor(() => expect(weekBtn).toBeDisabled());
+        expect(weekBtn.getAttribute('aria-disabled')).toBe('true');
+        expect(weekBtn.getAttribute('title')).toBe('No battles in the last 7 days');
+
+        // Day is disabled too (no 24h activity); Month has the 10-day-old data
+        // and is the active window, so it stays enabled.
+        expect(screen.getByRole('button', { name: /^Day$/ })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^Month$/ })).not.toBeDisabled();
+
+        // Clicking the disabled Week pill does not refetch.
+        const beforeCount = mockFetchSharedJson.mock.calls.length;
+        await act(async () => { weekBtn.click(); });
+        expect(mockFetchSharedJson.mock.calls.length).toBe(beforeCount);
+    });
+
+    test('the currently-viewed window is never disabled, even when its span is empty', async () => {
+        // All windows empty. Month is the active default → it must NOT be
+        // disabled (you are viewing it); the inactive Week pill IS disabled.
+        // Embedded so the empty card renders its chrome (pills) instead of null.
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({
+                has_recent_24h_activity: false,
+                totals: {
+                    battles: 0, wins: 0, losses: 0, win_rate: 0,
+                    damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                    planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                },
+                by_ship: [],
+                by_day: [],
+            }),
+            headers: {},
+        });
+        render(<BattleHistoryCard embedded playerName="empty" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+
+        // Active Month pill: enabled despite the empty window (isActive guard).
+        const monthBtn = screen.getByRole('button', { name: /^Month$/ });
+        expect(monthBtn).not.toBeDisabled();
+        expect(monthBtn.getAttribute('aria-pressed')).toBe('true');
+        // Inactive, equally-empty Week pill: disabled.
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: /^Week$/ })).toBeDisabled();
+        });
     });
 
     test('polls when X-Ranked-Observation-Pending is true on a ranked-mode response', async () => {
