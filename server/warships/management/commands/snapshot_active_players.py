@@ -67,21 +67,23 @@ class Command(BaseCommand):
         today = timezone.now().date()
         cutoff = today - timedelta(days=active_days)
 
+        # No Snapshot anti-join here (audit F9.1): the per-day checked set is
+        # the sole idempotency mechanism — BOTH written and unchanged players
+        # are marked checked, so the `.exclude(snapshot__date=today)` NOT
+        # EXISTS probe (the 55 s component of this query on prod) is gone and
+        # the candidate scan is a pure index-ordered walk. On cache loss the
+        # engine degrades to one redundant bulk re-poll pass (account/info is
+        # ~1 WG call per 100 players; update_snapshot_data handles an existing
+        # today-row idempotently). Errored players are deliberately NOT marked
+        # checked (retry next run); hidden players fall out via is_hidden.
         candidates = (
             Player.objects
             .filter(realm=realm, is_hidden=False,
                     last_battle_date__isnull=False, last_battle_date__gte=cutoff,
                     pvp_battles__gte=min_battles)
-            .exclude(snapshot__date=today)
             .order_by('-last_battle_date')
         )
 
-        # Delta-gated writes leave unchanged players without a today-row, so
-        # the has-today-row exclusion alone would re-select the same recency-
-        # ordered top of the pool every run. A per-day checked set (cache,
-        # realm+date-keyed) keeps the 30-min runs converging across the whole
-        # pool; on cache loss the engine gracefully degrades to re-polling.
-        # Errored players are deliberately NOT marked checked (retry next run).
         checked_key = f"snapshot_checked:{realm}:{today.isoformat()}"
         checked = cache.get(checked_key) or set()
 
@@ -89,8 +91,8 @@ class Command(BaseCommand):
         if dry_run:
             pending = candidates.count()
             out(f"=== snapshot_active_players DRY RUN realm={realm} ===")
-            out(f"Active (<= {active_days}d), visible, not yet snapshot today: {pending} "
-                f"(checked-today (unchanged): {len(checked)}; "
+            out(f"Active (<= {active_days}d), visible: {pending} "
+                f"(checked today: {len(checked)}; "
                 f"would process up to {limit})")
             return
 
@@ -127,9 +129,9 @@ class Command(BaseCommand):
                         pid, realm=realm, refresh_player=False)
                     if status == 'skipped-unchanged':
                         skipped_unchanged += 1
-                        checked.add(pid)
                     else:
                         snapshotted += 1
+                    checked.add(pid)
                 except Exception:
                     errors += 1
                     self.stderr.write(f"snapshot_active_players: error on player {pid_str}")
