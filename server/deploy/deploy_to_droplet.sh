@@ -711,7 +711,9 @@ set_env_value BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT 180
 #
 # Snapshot 90d downsample (downsample_snapshots): collapse >90d Snapshot rows
 # to one-per-player-per-ISO-week. The command self-gates on this env.
-set_env_value SNAPSHOT_DOWNSAMPLE_ENABLED 0
+# Armed 2026-07-19 (DB table audit): unarmed, Snapshot grows ~14.6 GB/yr;
+# armed it plateaus ~3.7 GB. Dry-run same day: 126,188 deletable rows.
+set_env_value SNAPSHOT_DOWNSAMPLE_ENABLED 1
 set_env_value SNAPSHOT_DOWNSAMPLE_RETENTION_DAYS 90
 # Inactive battles_json TOAST prune (prune_inactive_player_battles_json): NULL
 # the never-read battles_json blob on >180d-inactive players (reversible —
