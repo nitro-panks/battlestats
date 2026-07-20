@@ -336,9 +336,14 @@ def register_periodic_schedules(sender, **kwargs):
 
     # -- Player Correlation Warmer (split from landing warmer) --
     # 2026-06-20: 360 -> 1440 (daily). The tier-type correlation is the JSONB CROSS JOIN
-    # LATERAL scan over ~200k battles_json (a top DB cost); it's already ~12h-effective via
-    # skip-if-fresh, and the request path is allow_rebuild=False (never cold-computes in the
-    # request thread). Daily makes the floor explicit. Cost-reduction: analytical warmers.
+    # LATERAL scan over ~200k battles_json (a top DB cost); the request path is
+    # allow_rebuild=False (never cold-computes in the request thread).
+    # 2026-07-20 (F9.4): the daily run no longer implies the ~400 s/realm scan — the
+    # tier-type rebuild is floor-bounded to once per TIER_TYPE_POPULATION_REBUILD_HOURS
+    # (default 72) via a marker key in data.warm_player_tier_type_population_correlation;
+    # between rebuilds the warm serves the durable published payload. The daily Beat stays:
+    # it still warms wr_survival + ranked (cheap relational scans) and retries a
+    # tier-type realm frozen at tracked_population=0 every day.
     corr_warm_minutes = int(os.getenv("CORRELATION_WARM_MINUTES", "1440"))
     for realm in sorted(VALID_REALMS):
         minute_str, hour_str = _realm_crontab_for_cycle(
