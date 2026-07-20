@@ -113,6 +113,40 @@ describe('PlayerRouteView', () => {
         });
     });
 
+    it('renders the player under React.StrictMode instead of a spurious "not found" (dev double-mount abort)', async () => {
+        // Regression: Strict Mode mounts → unmounts → remounts. The simulated
+        // unmount aborts the page's scoped AbortController; before the fix the
+        // remount re-read that same aborted controller, so the /api/player fetch
+        // rejected instantly and the swallowed abort stranded the page on
+        // "Player not found." The guard now mints a fresh controller when the
+        // stored one is aborted, so the load succeeds. (Prod never double-mounts;
+        // this is a dev-parity guard.)
+        (global.fetch as jest.Mock).mockResolvedValue({
+            ok: true,
+            headers: {
+                get: (headerName: string) => headerName === 'content-type' ? 'application/json' : null,
+            },
+            json: async () => ({
+                id: 3,
+                name: 'Strict Player',
+                player_id: 55,
+                clan_name: 'Strict Clan',
+                clan_tag: 'STR',
+                clan_id: 300,
+            }),
+        });
+
+        render(
+            <React.StrictMode>
+                <PlayerRouteView playerName="Strict Player" />
+            </React.StrictMode>,
+        );
+
+        expect(await screen.findByTestId('player-detail')).toBeInTheDocument();
+        expect(screen.getByText('Strict Player')).toBeInTheDocument();
+        expect(screen.queryByText('Player not found.')).not.toBeInTheDocument();
+    });
+
     it('shows a not found state on a 404, with NO retry', async () => {
         (global.fetch as jest.Mock).mockResolvedValue({
             ok: false,
