@@ -784,6 +784,65 @@ class PlayerDailyShipStats(models.Model):
         )
 
 
+class ShipPopDailyAgg(models.Model):
+    """Per-(realm, mode, ship, day) population aggregate over PlayerDailyShipStats.
+
+    DB-audit lever F9.2 (`runbook-db-table-audit-2026-07-19.md`): the nightly
+    `compute_all_ship_pop_avg_damage` warm used to run one ~34s/realm grouped
+    scan of the 7M+ row PDSS table over the trailing 30d window. This table
+    collapses each realm-day into a few hundred ship rows, maintained by
+    `data.rollup_ship_pop_daily` (idempotent delete-and-replace per realm-day)
+    with a catch-up mode that fills missing window dates — so the nightly warm
+    becomes a sum over ~30 tiny rows per ship. PDSS dates come from
+    `detected_at.date()`, so a past realm-day is frozen once rolled; only the
+    trailing `SHIP_POP_ROLLUP_REFRESH_DAYS` are re-rolled each pass.
+
+    Carries the sum columns the ship-population consumers use: the avg-damage
+    baseline (battles, damage_sum) plus the ship-combat metric catalogue's
+    numerators/denominators (wins/frags/xp per-battle rates and the
+    main/secondary/torpedo hit ratios + their shot-count gates) so the 'all'
+    population shape can also be served from here. The skill-BRACKETED
+    ship-combat aggregation stays on PDSS — it ranks per player, which a
+    per-ship-day rollup structurally cannot express. Retention is capped at
+    `SHIP_POP_ROLLUP_RETENTION_DAYS` inside the rollup (self-bounding).
+    """
+    realm = models.CharField(
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM)
+    mode = models.CharField(
+        max_length=8, choices=PlayerDailyShipStats.MODE_CHOICES,
+        default=PlayerDailyShipStats.MODE_RANDOM)
+    ship_id = models.BigIntegerField()
+    date = models.DateField()
+    battles = models.BigIntegerField(default=0)
+    wins = models.BigIntegerField(default=0)
+    frags = models.BigIntegerField(default=0)
+    damage_sum = models.BigIntegerField(default=0)
+    xp = models.BigIntegerField(default=0)
+    main_shots = models.BigIntegerField(default=0)
+    main_hits = models.BigIntegerField(default=0)
+    secondary_shots = models.BigIntegerField(default=0)
+    secondary_hits = models.BigIntegerField(default=0)
+    torpedo_shots = models.BigIntegerField(default=0)
+    torpedo_hits = models.BigIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['realm', 'mode', 'ship_id', 'date'],
+                name='unique_ship_pop_daily_agg'),
+        ]
+        indexes = [
+            models.Index(fields=['realm', 'date'],
+                         name='shippop_realm_date_idx'),
+        ]
+
+    def __str__(self):
+        return (
+            f"ShipPopDailyAgg({self.realm} {self.date} {self.mode} "
+            f"ship={self.ship_id} battles={self.battles})"
+        )
+
+
 class PlayerActivityHourly(models.Model):
     """Per-realm histogram of distinct active players by UTC hour-of-day.
 
