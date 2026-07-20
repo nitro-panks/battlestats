@@ -150,4 +150,4 @@ Implemented on branch `cross-realm-fallback`. A code-assumption QA pass against 
 - [ ] Visual verify (FE visual-verify recipe): toast copy/placement, chip flash, dark/light, reduced-motion.
 - [ ] Doctrine pre-commit; `CLAUDE.md` routing note; `agents/doc_registry.json` entry; kill switch in `ops-env-reference.md`.
 - [ ] Release gate; **minor** version bump; deploy **both** backend and frontend (frontend rebuild mandatory after the bump).
-- [ ] Add `CROSS_REALM_FALLBACK_ENABLED` to Pass + regenerate droplet env files (default on).
+- [x] `CROSS_REALM_FALLBACK_ENABLED` pinned on the droplet (default on) via `set_env_value` in `server/deploy/deploy_to_droplet.sh` (2026-07-20); catalogued in `ops-env-reference.md`. The switch is now operable in prod (set to `0` + redeploy/env-flip to disable).

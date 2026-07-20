@@ -743,6 +743,15 @@ set_env_value PRUNE_BATTLES_JSON_ENABLED 0
 set_env_value ENTITY_VISIT_CLEANUP_ENABLED 0
 set_env_value ENTITY_VISIT_CLEANUP_OLDER_THAN_DAYS 180
 
+# Cross-realm player-deep-link fallback (v4.2.8, runbook-cross-realm-player-
+# fallback-2026-07-20). When a /player/<name> link is opened under the wrong
+# realm, PlayerViewSet probes the other realms (ASIA->EU->NA) and the client
+# auto-switches (X-Resolved-Realm header). Code default is also 1 (deliberately
+# aligned — no env-gate trap); pinned here so the kill switch is operable in
+# prod. 0 restores the legacy single-realm lookup (a wrong-realm link 404s
+# "Player not found").
+set_env_value CROSS_REALM_FALLBACK_ENABLED 1
+
 ln -sfn /etc/battlestats-server.env "${REMOTE_RELEASE}/server/.env"
 ln -sfn /etc/battlestats-server.secrets.env "${REMOTE_RELEASE}/server/.env.secrets"
 
