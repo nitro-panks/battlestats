@@ -1,6 +1,7 @@
-# Runbook: Twice-monthly cold-archive + prune of battle-history (>32d retention)
+# Runbook: Twice-monthly cold-archive + prune of battle-history (>92d retention)
 
 _Created: 2026-06-17_
+_Update 2026-07-20: **retention raised 32 → 92 days** (`ARCHIVE_RETENTION_DAYS_DEFAULT` + `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS`), enabled by a DB disk resize 60 → 80 GiB (autoscale still OFF). The mechanism below is unchanged; read the historical "32d" figures as the original window. The live window deepens forward-only (pruned rows are not restored), reaching full 92d depth ~2026-09-18. Expected steady-state cost: `BattleEvent` + `PlayerDailyShipStats` grow from ~6.2 GB toward ~18 GB (~2.9×), i.e. DB ~38 → ~50 GB of 80 GiB. The week/month/**year** UI windows now cap at 92 days instead of 32._
 _Author role: DBA / platform_
 _Context: The managed Postgres sits on a 60 GiB disk with autoscale OFF (~50% used as of 2026-06-15). `BattleEvent` + `PlayerDailyShipStats` are the monotonic, never-pruned growth slope identified in `archive/runbook-db-growth-analysis-2026-06-15.md`. This runbook specifies a monthly job that introduces a 32-day rolling window in live Postgres: export everything older to a compressed, restorable file on the app droplet, verify, then delete._
 _Status: **IMPLEMENTED + ENABLED in prod, 2026-06-17.** The `archive_battle_history` command + core (`incremental_battles.py`), the `battlestats-archive-battle-history.timer` systemd unit (1st + 15th, 03:00 UTC), deploy env knobs, and tests (`test_archive_battle_history.py`, green on sqlite + Postgres) shipped via PR #50. `BATTLE_HISTORY_ARCHIVE_ENABLED=1`. The 2026-06-17 rollout completed: first-run backlog pruned (703,891 + 694,083 rows) + one-time `VACUUM FULL` (~1 GB reclaimed, DB 23→22 GB); timer next fires 2026-07-01. See the Rollout log._
@@ -23,8 +24,8 @@ Cap the unbounded growth of the two append-only, no-retention battle-history tab
 |---|---|---|
 | In scope | `BattleEvent` (filter `detected_at`), `PlayerDailyShipStats` (filter `date`) | The two monotonic no-retention growth tables (`archive/runbook-db-growth-analysis-2026-06-15.md`). |
 | Excluded | `BattleObservation` | Already handled by prod compaction (`prune_battle_observations` NULLs heavy JSON, keeps rows). `BattleEvent.from_observation`/`to_observation` are **CASCADE FKs into `BattleObservation`** (`models.py:617–626`), so deleting BO rows would destroy the durable event record — and keeping BO rows keeps archived events re-insertable in practice (parents persist). |
-| Retention | 32 days, both tables | One window for everything in scope. |
-| UI impact (accepted) | week/month/year cap at 32 days | Permanent; impact today is ~2 weeks (pipeline ~6 weeks old). |
+| Retention | **92 days** (32 until 2026-07-20), both tables | One window for everything in scope; raised after the 60→80 GiB disk resize. |
+| UI impact (accepted) | week/month/year cap at 92 days (32 until 2026-07-20) | Permanent; the deeper window fills forward-only. |
 | Restore | cold queryable archive | Load compressed CSV into a scratch DB for analysis. No one-command live re-insertion guarantee. |
 | Archive host | app droplet | Separate host from the DB; ~58 GB free; no offsite (DO Spaces) yet. |
 

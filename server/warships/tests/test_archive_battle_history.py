@@ -20,6 +20,7 @@ from django.core.management import call_command
 from django.test import TestCase
 
 from warships.incremental_battles import (
+    ARCHIVE_RETENTION_DAYS_DEFAULT,
     _sha256_file,
     archive_and_prune_battle_history,
 )
@@ -161,6 +162,12 @@ class ArchiveBattleHistoryTests(TestCase):
         self.assertEqual(
             set(PlayerDailyShipStats.objects.values_list("pk", flat=True)),
             new_pd)
+
+    def test_default_retention_is_92_days(self):
+        # Raised 32 -> 92 on 2026-07-20 (DB disk 60 -> 80 GiB). Must stay
+        # above SHIP_LEADERBOARD_WINDOW_DAYS (30) or the nightly ship
+        # standings would aggregate over pruned rows.
+        self.assertEqual(ARCHIVE_RETENTION_DAYS_DEFAULT, 92)
 
     def test_command_disabled_without_force_is_noop(self):
         self._seed()
