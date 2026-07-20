@@ -163,7 +163,7 @@ Ordered by expected return per unit of risk:
 7. **`ship_pop_avg_damage` rollup** (F9.2): per-(realm, ship, day) incremental rollup replacing the nightly full scan.
 8. **Identify the 396 s JSON analytical task** (F9.4) and relocate it to relational storage if it is a standing daily.
 9. **Drop the LangGraph `checkpoints*` tables** (F8) after a reference check; record the DSN-hygiene rule.
-10. **Env-gate traps**: `BATTLE_OBSERVATION_COMPACT_ENABLED` and `HOT_PLAYERS_ENABLED` both have code defaults opposite to prod reality; align the code defaults with prod so a fresh environment fails safe.
+10. **Env-gate traps** — **SHIPPED 2026-07-20**: `BATTLE_OBSERVATION_COMPACT_ENABLED` code default flipped `0`→`1` (`tasks.py` task gate + `signals.py` Beat registration) and `HOT_PLAYERS_ENABLED` flipped `1`→`0` (`hot_players.py`, both `tasks.py` gates, `signals.py` maintain registration), aligning code defaults with prod; `BATTLE_OBSERVATION_COMPACT_ENABLED=1` is now pinned explicitly in `deploy_to_droplet.sh` (was only a manual `/etc` edit). Defaults pinned by tests (`test_periodic_schedule_topology.py::EnvGateDefaultAlignmentTests`, `test_hot_players.py`, `test_incremental_battles.py::PruneTaskEnvGateTests`). Residual trap noted, unchanged: `HOT_PLAYERS_MAX` code default 500 vs deploy-script 800.
 
 ## Applied log
 
@@ -183,6 +183,6 @@ State: levers F3.1 (downsampler), F7 (dead indexes), F1 (PES repack), and F3.2+F
 1. **Verify the delta-gate settled** (do this first): after a full UTC day, compare `warships_snapshot` rows/day against the ~220K baseline (expect ~70–90K) and eyeball one `/observation` readout — `snapshot_coverage_frac` now reports `null` by design; `snapshot_movers` should hold its ~72K/day continuity. Engine counters: `journalctl -u 'battlestats-celery*' | grep Unchanged-skipped` on the droplet.
 2. **F5 observation row retention** — SHIPPED 2026-07-20 (see Applied log); the twice-monthly timer now maintains it. Verify post-first-run: table heap/index trend down, floor change-gate unaffected (each player's latest observation preserved).
 3. **F9.1 candidate scans** — SHIPPED 2026-07-20 (see Applied log; the audit's "crawl" attribution was wrong — it was the hot-entity warmer + snapshot engine). Verify `pg_stat_statements` means after a day.
-4. **F9.2 `ship_pop_avg_damage` rollup** (per-(realm, ship, day) incremental), **F9.4** identify the 396 s JSON analytical task, **F8** drop the `checkpoints*` tables after a reference check, **item 10** env-gate default alignment (`BATTLE_OBSERVATION_COMPACT_ENABLED`, `HOT_PLAYERS_ENABLED`).
+4. **F9.2 `ship_pop_avg_damage` rollup** (per-(realm, ship, day) incremental), **F9.4** identify the 396 s JSON analytical task, **F8** drop the `checkpoints*` tables after a reference check. (**Item 10** env-gate default alignment — SHIPPED 2026-07-20, see Follow-ups item 10.)
 5. **F2 `warships_player` heap** (28% free, ~600 MB): rewriting the 14 GB hot table incl. 11 GB TOAST needs August's explicit ack and its own maintenance window — do not bundle with anything.
 6. **Calendar**: F7 30-day index re-check due ~2026-08-19 (`pg_stat_user_indexes` for seq-scan regressions).

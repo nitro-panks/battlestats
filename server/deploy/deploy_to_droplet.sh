@@ -710,6 +710,8 @@ set_env_value BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT 180
 set_env_value BATTLE_OBSERVATION_ROW_RETENTION_ENABLED 1
 set_env_value BATTLE_OBSERVATION_ROW_RETENTION_DAYS 32
 set_env_value BATTLE_OBSERVATION_EMPTY_RETENTION_DAYS 7
+# Daily observation-payload compaction: ON in prod since 2026-05-24 (was only a manual /etc edit); pinned explicitly per DB-audit item 10.
+set_env_value BATTLE_OBSERVATION_COMPACT_ENABLED 1
 
 # Storage-retention maintenance jobs (data-lifecycle assessment 2026-06-21,
 # runbook-data-lifecycle-architecture-2026-06-21.md). Each runs as a systemd

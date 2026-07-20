@@ -6,6 +6,7 @@ capture sweep's skip-if-fresh behaviour.
 
 See agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md.
 """
+import os
 from datetime import datetime, time, timedelta
 from io import StringIO
 from unittest.mock import patch
@@ -355,6 +356,24 @@ class KillSwitchTests(TestCase):
         with _hot_env(HOT_PLAYERS_ENABLED="0"):
             res = tasks.capture_hot_player_observations_task("na")
         self.assertEqual(res["status"], "skipped")
+
+    def test_env_absent_defaults_disabled(self):
+        # DB-audit item 10 (runbook-db-table-audit-2026-07-19.md): the code
+        # default must match prod reality — queue OFF (disabled 2026-06-16).
+        # With HOT_PLAYERS_ENABLED entirely ABSENT from the env, every gate
+        # read site resolves to disabled.
+        from warships import tasks
+        from warships.hot_players import _enabled
+        _mk_player(7902)
+        _spread_days(7902, 5, sessions_per_day=2)
+        env = {k: v for k, v in os.environ.items() if k != "HOT_PLAYERS_ENABLED"}
+        with patch.dict("os.environ", env, clear=True):
+            self.assertFalse(_enabled())
+            res = tasks.maintain_hot_players_task("na")
+            self.assertEqual(res["status"], "skipped")
+            res = tasks.capture_hot_player_observations_task("na")
+            self.assertEqual(res["status"], "skipped")
+        self.assertFalse(HotPlayer.objects.filter(player__player_id=7902).exists())
 
 
 class PerRealmIsolationTests(TestCase):

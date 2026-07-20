@@ -109,7 +109,9 @@ def _backfill_score(pvp_battles) -> float:
 
 
 def _enabled() -> bool:
-    return os.getenv("HOT_PLAYERS_ENABLED", "1") == "1"
+    # Default OFF, matching prod (queue disabled 2026-06-16 — near-pure floor
+    # overlap; DB-audit item 10 aligned the code default to prod reality).
+    return os.getenv("HOT_PLAYERS_ENABLED", "0") == "1"
 
 
 def compute_hot_score(active_days: int, sessions: int, views: int) -> float:
