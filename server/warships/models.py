@@ -14,9 +14,11 @@ def realm_cache_key(realm: str, key: str) -> str:
 
 class Player(models.Model):
     name = models.CharField(max_length=200)
-    player_id = models.BigIntegerField(null=False, blank=False, db_index=True)
+    # player_id lookups are served by unique_player_per_realm's leading
+    # column; realm-only scans by the realm-leading composite indexes.
+    player_id = models.BigIntegerField(null=False, blank=False)
     realm = models.CharField(
-        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM)
     is_hidden = models.BooleanField(default=False)
     is_streamer = models.BooleanField(default=False)
     twitch_handle = models.CharField(max_length=64, blank=True, default='')
@@ -177,7 +179,9 @@ class Ship(models.Model):
 
 
 class Clan(models.Model):
-    clan_id = models.BigIntegerField(db_index=True)
+    # clan_id lookups are served by the (clan_id, realm) unique constraint's
+    # leading column.
+    clan_id = models.BigIntegerField()
     realm = models.CharField(
         max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
     description = models.TextField(null=True, blank=True)
@@ -207,7 +211,9 @@ class Clan(models.Model):
 
 
 class Snapshot(models.Model):
-    player = models.ForeignKey(Player, on_delete=models.CASCADE)
+    # db_index=False: per-player lookups are served by the (player, date)
+    # unique_together index's leading column.
+    player = models.ForeignKey(Player, on_delete=models.CASCADE, db_index=False)
     date = models.DateField()
     battles = models.IntegerField(default=0)
     wins = models.IntegerField(default=0)
@@ -232,7 +238,7 @@ class PlayerExplorerSummary(models.Model):
         related_name='explorer_summary',
     )
     realm = models.CharField(
-        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM, db_index=True)
+        max_length=4, choices=REALM_CHOICES, default=DEFAULT_REALM)
     battles_last_29_days = models.IntegerField(null=True, blank=True)
     wins_last_29_days = models.IntegerField(null=True, blank=True)
     active_days_last_29_days = models.IntegerField(null=True, blank=True)
@@ -289,8 +295,6 @@ class PlayerExplorerSummary(models.Model):
         indexes = [
             models.Index(fields=['efficiency_rank_percentile'],
                          name='explorer_eff_rank_idx'),
-            models.Index(fields=['realm', 'player_score'],
-                         name='explorer_realm_score_idx'),
         ]
 
     def __str__(self):
@@ -505,7 +509,7 @@ class StreamerSubmission(models.Model):
     submitter_ip = models.GenericIPAddressField(null=True, blank=True)
     submitter_ua = models.CharField(max_length=300, blank=True, default='')
     status = models.CharField(
-        max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+        max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDING)
     notes = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
@@ -609,7 +613,9 @@ class BattleEvent(models.Model):
     # so randoms keeps its existing dedup semantics.
     mode = models.CharField(
         max_length=8, choices=MODE_CHOICES, default=MODE_RANDOM, db_index=True)
-    season_id = models.IntegerField(null=True, blank=True, db_index=True)
+    # season_id: no standalone index — never filtered without mode/player,
+    # and the ranked partial unique constraint below carries it.
+    season_id = models.IntegerField(null=True, blank=True)
     battles_delta = models.IntegerField(default=0)
     wins_delta = models.IntegerField(default=0)
     losses_delta = models.IntegerField(default=0)
@@ -633,15 +639,23 @@ class BattleEvent(models.Model):
     capture_points_delta = models.IntegerField(default=0)
     dropped_capture_points_delta = models.IntegerField(default=0)
     team_capture_points_delta = models.IntegerField(default=0)
+    # Provenance-only FKs (written at event creation, never queried back).
+    # db_constraint/db_index=False + DO_NOTHING so observation-row retention
+    # can delete old rows without FK checks or accidental ORM cascades; a
+    # dangling id here is fine — it references an archived observation.
     from_observation = models.ForeignKey(
         BattleObservation,
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         related_name='outgoing_events',
+        db_constraint=False,
+        db_index=False,
     )
     to_observation = models.ForeignKey(
         BattleObservation,
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         related_name='incoming_events',
+        db_constraint=False,
+        db_index=False,
     )
 
     class Meta:
@@ -753,8 +767,6 @@ class PlayerDailyShipStats(models.Model):
                          name='dly_ship_player_date_idx'),
             models.Index(fields=['player', 'ship_id', '-date'],
                          name='dly_ship_player_shipdt_idx'),
-            models.Index(fields=['date', '-battles'],
-                         name='dly_ship_date_battles_idx'),
         ]
 
     def __str__(self):
@@ -788,10 +800,6 @@ class PlayerActivityHourly(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=['realm', 'hour'], name='player_activity_hourly_uniq'),
-        ]
-        indexes = [
-            models.Index(fields=['realm', 'hour'],
-                         name='player_activity_realm_hour_idx'),
         ]
 
     def __str__(self):
