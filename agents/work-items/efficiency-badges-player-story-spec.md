@@ -25,6 +25,20 @@ _Drafted: 2026-03-15_
 > bottom of the Profile tab** (its umami event retired) and the Player Score
 > Distribution chart was dropped. The 2026-07-15 note below is retained for
 > history.
+>
+> **Follow-up (v4.3.1):** between the filter row and the award summary sit three
+> **small-multiples treemaps** (`EfficiencyMiniTreemaps.tsx`) — Tier / Type /
+> Award — each partitioning the *filtered* badge set by that dimension, tiles
+> sized by ship count. Type reuses the shared `shipTypeShortColor` (promoted to
+> `chartTheme.ts` so the table column and the treemap can't drift); Award reuses
+> `badgeClassColor`; Tier a neutral fill. Tile-label contrast is chosen by
+> perceived (YIQ) luminance, not HSL lightness, so bright warm tiles (dark-mode
+> amber/orange) get dark text. The table body is now height-capped + scroll
+> (sticky header) at the shared insights-panel height (`LOCKED_PANEL_HEIGHT_PX`,
+> threaded as `maxTableHeightPx`). Sort-header and filter clicks emit umami
+> `efficiency-sort` / `efficiency-filter`. Also fixed: the Profile population
+> row's breakpoint (`md:` not `lg:`) so it reflows in lockstep with the
+> Type/Tier row above instead of stacking alone near 950px.
 
 > **Status update (2026-07-15, v3.6.0):** the v1 summary-plus-table surface
 > described below shipped and was later superseded. The Efficiency tab now

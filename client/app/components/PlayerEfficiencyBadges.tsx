@@ -19,6 +19,9 @@ interface EfficiencyRowInput {
 
 interface PlayerEfficiencyBadgesProps {
     efficiencyRows?: EfficiencyRowInput[] | null;
+    // Scroll cap (px) for the badge table, forwarded to EfficiencyBadgeTable so
+    // a badge-heavy player's table matches the shared insights-panel height.
+    maxTableHeightPx?: number;
 }
 
 // Badge level names as the game presents them: Expert, I, II, III.
@@ -98,6 +101,7 @@ export const hasEfficiencyBadges = (
 
 const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
     efficiencyRows,
+    maxTableHeightPx,
 }) => {
     const { theme } = useTheme();
     const dots = useMemo(() => normalizeBadgeDots(efficiencyRows), [efficiencyRows]);
@@ -120,7 +124,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                     No Efficiency Badge data is stored for this player yet, or no qualifying ships have earned a badge.
                 </div>
             ) : (
-                <EfficiencyBadgeTable dots={dots} theme={theme} />
+                <EfficiencyBadgeTable dots={dots} theme={theme} maxTableHeightPx={maxTableHeightPx} />
             )}
         </div>
     );

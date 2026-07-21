@@ -519,7 +519,11 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     // battles to plot — never a dead column. Both cards share one height so the
     // row's bottom edge stays flush; each SVG measures its own column width.
     const showBattlesDistribution = pvpBattles >= 150;
-    const populationGridColsClass = showBattlesDistribution ? 'lg:grid-cols-2' : '';
+    // Match the Type/Tier profile row above, which goes side-by-side at md
+    // (768px). Keying this on lg (1024px) instead made the population charts
+    // stack full-width across the 768–1024px range while the row above stayed
+    // 2-up — a lone reflow at ~950px with nothing else moving.
+    const populationGridColsClass = showBattlesDistribution ? 'md:grid-cols-2' : '';
 
     return (
         <section className="mt-5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4" data-perf-section="insights-tabs-shell">
@@ -790,9 +794,10 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             regardless of that section's load state. A top margin
                             separates the player's own profile from where they sit
                             against the tracked population. The heatmap and the
-                            conditional histogram share one row on lg+; the grid drops
-                            to a single full-width column when the histogram is gated
-                            out, so a sparse player never leaves a dead column. Each
+                            conditional histogram share one row on md+ (matching the
+                            Type/Tier row above); the grid drops to a single full-width
+                            column when the histogram is gated out, so a sparse player
+                            never leaves a dead column. Each
                             column carries the pl-[15px] inset the profile section
                             labels above use, so the two rows line up. */}
                         <div className="mt-8">
@@ -823,7 +828,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
 
                 {activeTab === 'badges' ? (
                     <div>
-                        <PlayerEfficiencyBadges efficiencyRows={efficiencyRows} />
+                        <PlayerEfficiencyBadges efficiencyRows={efficiencyRows} maxTableHeightPx={LOCKED_PANEL_HEIGHT_PX} />
                     </div>
                 ) : null}
 

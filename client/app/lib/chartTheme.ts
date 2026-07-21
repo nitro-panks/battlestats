@@ -251,6 +251,21 @@ export const badgeClassColor = (colors: ChartColors, badgeClass: number): string
     return colors.badgeIII;
 };
 
+// Per-class color keyed on the SHORT class label (BB/CA/DD/CV/Sub) — the same
+// palette the battle-history table uses (BattleHistoryCard's shipTypeColor,
+// which keys on the full type name). Shared by the efficiency table's Type
+// column and its Type mini-treemap so the two never drift.
+export const shipTypeShortColor = (colors: ChartColors, shortLabel: string): string => {
+    switch (shortLabel) {
+        case 'DD': return colors.shipDD;
+        case 'CA': return colors.shipCA;
+        case 'BB': return colors.shipBB;
+        case 'CV': return colors.shipCV;
+        case 'Sub': return colors.shipSS;
+        default: return colors.shipDefault;
+    }
+};
+
 // Clear a chart container and render a single status/error message where the
 // chart would be. Shared by the D3 components' empty/pending/error states.
 export const drawSvgMessage = (
