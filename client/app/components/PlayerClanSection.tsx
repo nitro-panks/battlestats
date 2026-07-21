@@ -77,6 +77,7 @@ const PlayerClanSection: React.FC<PlayerClanSectionProps> = ({ clanId, clanName,
                         // Lift the log/linear toggle onto the clan-heading line
                         // (the section is the positioning ancestor).
                         scaleToggleClassName="absolute right-0 top-[27px]"
+                        xAxisLabel="Random Battles"
                     />
                 </div>
 

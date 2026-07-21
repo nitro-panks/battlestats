@@ -10,6 +10,7 @@ import BattleHistoryCard, {
 import PlayerEfficiencyBadges, { hasEfficiencyBadges } from './PlayerEfficiencyBadges';
 import LoadingPanel from './LoadingPanel';
 import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
+import RankedLeagueLegend from './RankedLeagueLegend';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import type { TierTypePayload } from './playerProfileChartData';
@@ -68,6 +69,11 @@ const RankedSeasons = dynamic(() => resilientDynamicImport(() => import('./Ranke
 const RankedWRBattlesHeatmapSVG = dynamic(() => resilientDynamicImport(() => import('./RankedWRBattlesHeatmapSVG'), 'PlayerDetailInsightsTabs-RankedWRBattlesHeatmapSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading ranked heatmap..." minHeight={280} />,
+});
+
+const RankedSeasonScatterSVG = dynamic(() => resilientDynamicImport(() => import('./RankedSeasonScatterSVG'), 'PlayerDetailInsightsTabs-RankedSeasonScatterSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading season scatter..." minHeight={240} />,
 });
 
 const PlayerClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./PlayerClanBattleSeasons'), 'PlayerDetailInsightsTabs-PlayerClanBattleSeasons'), {
@@ -721,6 +727,31 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     theme={theme}
                                 />
                             )}
+
+                            {/* Per-season scatter: ranked battles (x) vs win rate
+                                (y), one dot per season colored by WR — like the
+                                clan chart. Rendered full-width (no pl-[15px]) with
+                                the same margin.left as the heatmap so its y-axis
+                                lines up with the heatmap's left edge. Gated on the
+                                same ranked-history signal as the heatmap. */}
+                            {showRankedHeatmap ? (
+                                <div className="mt-4">
+                                    <SectionHeadingWithTooltip
+                                        title="Season Win Rate vs Battles"
+                                        description="Each point is one ranked season, placed by total ranked battles (x) and win rate (y) and colored by win rate. Hover a point for its season."
+                                        className="mb-2 pl-[15px]"
+                                    />
+                                    <RankedSeasonScatterSVG playerId={playerId} isLoading={isLoading} theme={theme} />
+                                </div>
+                            ) : null}
+
+                            {/* One-line shape key for the scatter's league glyphs,
+                                sitting just above the seasons table. */}
+                            {showRankedHeatmap ? (
+                                <div className="mt-3 pl-[15px]">
+                                    <RankedLeagueLegend theme={theme} />
+                                </div>
+                            ) : null}
 
                             <div className="mt-4">
                                 {/* Label + table share the tab's 15px left inset (same
