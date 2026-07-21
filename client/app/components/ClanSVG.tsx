@@ -22,6 +22,9 @@ interface ClanProps {
     // absolute-positioning classes to lift it into its own header row (the
     // player-page clan section puts it on the clan-heading line).
     scaleToggleClassName?: string;
+    // Optional x-axis title drawn (centered) under the battle axis. Off by
+    // default; the player-page clan section passes "Random Battles".
+    xAxisLabel?: string;
 }
 
 interface ClanData {
@@ -172,14 +175,18 @@ const drawClanPlot = (
     showGridlines: boolean = false,
     pinnedBucketRef?: React.MutableRefObject<ActivityBucketKey | null>,
     onBucketPin?: (bucket: ActivityBucketKey | null) => void,
+    xAxisLabel?: string,
 ) => {
     const colors = chartColors[theme];
     const compact = svgWidth < 480;
+    // Reserve extra bottom room for the x-axis title below the (rotated) tick
+    // labels when a label is requested.
+    const xLabelPad = xAxisLabel ? (compact ? 14 : 16) : 0;
     // Non-compact right margin trimmed 16 -> 1: the plot's right edge extends
     // 15px to line up with the tables/sections above it in the 850px column.
     const margin = compact
-        ? { top: 48, right: 10, bottom: 28, left: 30 }
-        : { top: 64, right: 1, bottom: 32, left: 38 };
+        ? { top: 48, right: 10, bottom: 28 + xLabelPad, left: 30 }
+        : { top: 64, right: 1, bottom: 32 + xLabelPad, left: 38 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -425,6 +432,18 @@ const drawClanPlot = (
         .style('text-anchor', 'end')
         .style('font-size', axisFontSize);
 
+    // x-axis title, centered below the rotated tick labels (bottom margin was
+    // padded by xLabelPad to make room).
+    if (xAxisLabel) {
+        svg.append('text')
+            .attr('x', width / 2)
+            .attr('y', height + margin.bottom - 6)
+            .attr('text-anchor', 'middle')
+            .style('font-size', axisFontSize)
+            .style('fill', colors.labelMuted)
+            .text(xAxisLabel);
+    }
+
     const y = d3.scaleLinear()
         .domain([ymin, ymax])
         .range([height, 0]);
@@ -645,7 +664,7 @@ const drawClanPlot = (
 // localStorage.
 const CLAN_SCALE_PREF_KEY = 'bs:clan-scale';
 
-const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [], theme = 'light', scaleToggleClassName }) => {
+const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [], theme = 'light', scaleToggleClassName, xAxisLabel }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const { realm } = useRealm();
     // null = follow the per-clan auto default; otherwise the user's stored pick.
@@ -839,6 +858,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                             trackEvent('clan-chart-activity-filter', { realm, bucket });
                         }
                     },
+                    xAxisLabel,
                 );
             };
 
@@ -852,7 +872,7 @@ const ClanSVGComponent: React.FC<ClanProps> = ({ clanId, onSelectMember, highlig
                 window.removeEventListener('resize', onResize);
             };
         }
-    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme, effectiveScaleType, realm]);
+    }, [chartMemberActivity, chartMemberActivitySignature, highlightedPlayerName, isPlotPendingRefresh, plotData, plotError, svgHeight, svgWidth, theme, effectiveScaleType, realm, xAxisLabel]);
 
     return (
         <div>
@@ -890,6 +910,7 @@ const areClanSvgPropsEqual = (previousProps: ClanProps, nextProps: ClanProps): b
         && (previousProps.svgHeight ?? 280) === (nextProps.svgHeight ?? 280)
         && (previousProps.theme ?? 'light') === (nextProps.theme ?? 'light')
         && previousProps.scaleToggleClassName === nextProps.scaleToggleClassName
+        && previousProps.xAxisLabel === nextProps.xAxisLabel
         && buildClanChartMemberActivitySignature(previousProps.membersData ?? []) === buildClanChartMemberActivitySignature(nextProps.membersData ?? []);
 };
 
