@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { badgeClassColor, chartColors, type ChartColors, type ChartTheme } from '../lib/chartTheme';
+import { badgeClassColor, chartColors, shipTypeShortColor, type ChartTheme } from '../lib/chartTheme';
 import wrColor from '../lib/wrColor';
+import { trackEvent } from '../lib/umami';
+import { useRealm } from '../context/RealmContext';
+import EfficiencyMiniTreemaps from './EfficiencyMiniTreemaps';
 
 // One badged ship, normalized from an efficiency row (see normalizeBadgeDots in
 // PlayerEfficiencyBadges). shipType is the short class label (BB/CA/DD/CV/Sub);
@@ -21,6 +24,9 @@ export interface EfficiencyBadgeDot {
 interface EfficiencyBadgeTableProps {
     dots: EfficiencyBadgeDot[];
     theme: ChartTheme;
+    // Scroll cap (px) for the table body — the shared insights-panel height so
+    // a badge-heavy player's table never runs longer than the other tabs.
+    maxTableHeightPx?: number;
 }
 
 type SortKey = 'name' | 'tier' | 'type' | 'award' | 'battles' | 'wr';
@@ -40,19 +46,6 @@ const SHIP_TYPE_ORDER = ['BB', 'CA', 'DD', 'CV', 'Sub'];
 const typeRank = (type: string): number => {
     const index = SHIP_TYPE_ORDER.indexOf(type);
     return index === -1 ? SHIP_TYPE_ORDER.length : index;
-};
-
-// The same per-class colors the battle-history table uses (BattleHistoryCard's
-// shipTypeColor), keyed here off the short label instead of the full type name.
-const typeColor = (colors: ChartColors, shipType: string): string => {
-    switch (shipType) {
-        case 'DD': return colors.shipDD;
-        case 'CA': return colors.shipCA;
-        case 'BB': return colors.shipBB;
-        case 'CV': return colors.shipCV;
-        case 'Sub': return colors.shipSS;
-        default: return colors.shipDefault;
-    }
 };
 
 const COLUMNS: Array<{ key: SortKey; label: string; align: 'left' | 'center' }> = [
@@ -111,8 +104,9 @@ const compareRows = (a: EfficiencyBadgeDot, b: EfficiencyBadgeDot, key: SortKey,
     }
 };
 
-const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme }) => {
+const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme, maxTableHeightPx }) => {
     const colors = chartColors[theme];
+    const { realm } = useRealm();
     const [sortKey, setSortKey] = useState<SortKey>('award');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
     // 'all' = no filter on that facet.
@@ -121,12 +115,16 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
     const [filterAward, setFilterAward] = useState<string>('all');
 
     const onSort = (key: SortKey) => {
-        if (key === sortKey) {
-            setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'));
-        } else {
-            setSortKey(key);
-            setSortDir(DEFAULT_DIR[key]);
-        }
+        const nextDir: SortDir = key === sortKey
+            ? (sortDir === 'asc' ? 'desc' : 'asc')
+            : DEFAULT_DIR[key];
+        setSortKey(key);
+        setSortDir(nextDir);
+        trackEvent('efficiency-sort', { realm, column: key, direction: nextDir });
+    };
+
+    const onFilter = (control: 'tier' | 'type' | 'award', value: string) => {
+        trackEvent('efficiency-filter', { realm, control, value });
     };
 
     // A new player's badges arrive as a fresh `dots` array; clear any active
@@ -195,7 +193,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Tier</span>
                     <select
                         value={filterTier}
-                        onChange={(event) => setFilterTier(event.target.value)}
+                        onChange={(event) => { setFilterTier(event.target.value); onFilter('tier', event.target.value); }}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
@@ -208,7 +206,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Type</span>
                     <select
                         value={filterType}
-                        onChange={(event) => setFilterType(event.target.value)}
+                        onChange={(event) => { setFilterType(event.target.value); onFilter('type', event.target.value); }}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
@@ -221,7 +219,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Award</span>
                     <select
                         value={filterAward}
-                        onChange={(event) => setFilterAward(event.target.value)}
+                        onChange={(event) => { setFilterAward(event.target.value); onFilter('award', event.target.value); }}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
@@ -232,6 +230,12 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                         ))}
                     </select>
                 </label>
+            </div>
+            {/* Small-multiples treemaps of the (filtered) badge set by tier,
+                type, and award — a composition overview between the filters and
+                the award-count summary. */}
+            <div className="mb-4">
+                <EfficiencyMiniTreemaps rows={filteredRows} theme={theme} />
             </div>
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[var(--text-secondary)]" aria-label="Award totals">
                 {GRADES.map((grade) => {
@@ -248,6 +252,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     );
                 })}
             </div>
+            <div className="overflow-auto" style={maxTableHeightPx ? { maxHeight: maxTableHeightPx } : undefined}>
             <table className="w-full border-collapse text-sm text-[var(--text-primary)]" aria-label="Efficiency badges by ship">
                 <thead>
                     <tr>
@@ -259,7 +264,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                                     key={column.key}
                                     scope="col"
                                     aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                                    className={`border-b border-[var(--border)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] ${alignClass}`}
+                                    className={`sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] ${alignClass}`}
                                 >
                                     <button
                                         type="button"
@@ -281,7 +286,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                         <tr key={row.shipId} className="border-b border-[var(--border)]">
                             <td className="px-3 py-1.5 text-left">{row.shipName}</td>
                             <td className="px-3 py-1.5 text-center tabular-nums">{row.shipTier}</td>
-                            <td className="px-3 py-1.5 text-center font-semibold" style={{ color: typeColor(colors, row.shipType) }}>{row.shipType}</td>
+                            <td className="px-3 py-1.5 text-center font-semibold" style={{ color: shipTypeShortColor(colors, row.shipType) }}>{row.shipType}</td>
                             <td className="px-3 py-1.5 text-center">{row.badgeLabel}</td>
                             <td className="px-3 py-1.5 text-center tabular-nums">
                                 {row.battles == null ? <span className="text-[var(--text-muted)]">—</span> : row.battles.toLocaleString()}
@@ -299,6 +304,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     ))}
                 </tbody>
             </table>
+            </div>
         </div>
     );
 };

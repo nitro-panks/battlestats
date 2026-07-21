@@ -1,5 +1,11 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import PlayerEfficiencyBadges from '../PlayerEfficiencyBadges';
+import { trackEvent } from '../../lib/umami';
+
+jest.mock('../../lib/umami', () => ({ trackEvent: jest.fn() }));
+const mockTrackEvent = trackEvent as jest.Mock;
+
+beforeEach(() => mockTrackEvent.mockClear());
 
 const sampleRows = [
     { ship_id: 1, top_grade_class: 2, ship_name: 'Bismarck', ship_type: 'battleship', ship_tier: 8, pvp_battles: 300, win_ratio: 0.52 },
@@ -169,6 +175,54 @@ describe('PlayerEfficiencyBadges', () => {
 
         fireEvent.change(screen.getByLabelText('Award'), { target: { value: '1' } });
         expect(rowNames()).toEqual(['Des Moines', 'Moskva']);
+    });
+
+    it('tracks a umami event on a sort-header click with the resolved direction', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        fireEvent.click(screen.getByRole('button', { name: /Battles/i }));
+        expect(mockTrackEvent).toHaveBeenCalledWith(
+            'efficiency-sort',
+            expect.objectContaining({ column: 'battles', direction: 'desc' }),
+        );
+
+        // Second click on the same column reverses and re-tracks.
+        fireEvent.click(screen.getByRole('button', { name: /Battles/i }));
+        expect(mockTrackEvent).toHaveBeenLastCalledWith(
+            'efficiency-sort',
+            expect.objectContaining({ column: 'battles', direction: 'asc' }),
+        );
+    });
+
+    it('tracks a umami event on each filter change', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'CA' } });
+        expect(mockTrackEvent).toHaveBeenCalledWith(
+            'efficiency-filter',
+            expect.objectContaining({ control: 'type', value: 'CA' }),
+        );
+
+        fireEvent.change(screen.getByLabelText('Award'), { target: { value: '1' } });
+        expect(mockTrackEvent).toHaveBeenLastCalledWith(
+            'efficiency-filter',
+            expect.objectContaining({ control: 'award', value: '1' }),
+        );
+    });
+
+    it('renders the tier/type/award small-multiples treemaps', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        expect(screen.getByRole('img', { name: 'Badged ships by tier' })).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: 'Badged ships by class' })).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: 'Badged ships by award grade' })).toBeInTheDocument();
+    });
+
+    it('caps the table scroll container at the provided height', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} maxTableHeightPx={1057} />);
+
+        const table = screen.getByRole('table');
+        expect(table.parentElement).toHaveStyle({ maxHeight: '1057px' });
     });
 
     it('drops rows without a tier so they never reach the table', () => {
