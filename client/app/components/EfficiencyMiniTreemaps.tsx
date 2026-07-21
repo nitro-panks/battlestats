@@ -3,13 +3,17 @@ import * as d3 from 'd3';
 import { badgeClassColor, chartColors, shipTypeShortColor, type ChartTheme } from '../lib/chartTheme';
 import type { EfficiencyBadgeDot } from './EfficiencyBadgeTable';
 
+type FilterControl = 'tier' | 'type' | 'award';
+
 // One tile of a mini-treemap, already aggregated by the parent: a bucket of
 // badged ships (a tier, a class, or an award grade) sized by its count.
+// filterValue is what a click sets the matching filter dropdown to.
 interface TreemapDatum {
     key: string;
     label: string;
     count: number;
     color: string;
+    filterValue: string;
 }
 
 const TREEMAP_HEIGHT = 128;
@@ -37,16 +41,25 @@ interface EfficiencyMiniTreemapProps {
     title: string;
     ariaLabel: string;
     data: TreemapDatum[];
+    control: FilterControl;
+    // Current filter value for this control ('all' = nothing selected); the
+    // matching tile is outlined. Clicking a tile toggles that filter.
+    selectedValue: string;
+    onSelect: (control: FilterControl, filterValue: string) => void;
 }
 
 // A flat count-sized treemap of one categorical breakdown. Mirrors the
 // battle-history MiniTreemap pattern (ResizeObserver width → d3.treemap →
 // direct labels + a hover tooltip) but trimmed to a single-level partition.
-const EfficiencyMiniTreemap: React.FC<EfficiencyMiniTreemapProps> = ({ title, ariaLabel, data }) => {
+const EfficiencyMiniTreemap: React.FC<EfficiencyMiniTreemapProps> = ({ title, ariaLabel, data, control, selectedValue, onSelect }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const svgRef = useRef<SVGSVGElement | null>(null);
     const [width, setWidth] = useState(0);
     const [hover, setHover] = useState<{ text: string; x: number; y: number } | null>(null);
+    // Read the latest onSelect from the D3 handler without re-running the
+    // treemap effect when the parent re-creates the callback.
+    const onSelectRef = useRef(onSelect);
+    useEffect(() => { onSelectRef.current = onSelect; });
 
     useEffect(() => {
         if (!containerRef.current) return undefined;
@@ -82,8 +95,16 @@ const EfficiencyMiniTreemap: React.FC<EfficiencyMiniTreemapProps> = ({ title, ar
             .attr('height', (d: { y0: number; y1: number }) => Math.max(0, d.y1 - d.y0))
             .attr('rx', 2)
             .attr('fill', (d: { data: TreemapDatum }) => d.data.color)
-            .attr('stroke', 'var(--bg-card)')
-            .attr('stroke-width', 1)
+            .attr('stroke', (d: { data: TreemapDatum }) => (
+                d.data.filterValue === selectedValue ? 'var(--text-strong)' : 'var(--bg-card)'
+            ))
+            .attr('stroke-width', (d: { data: TreemapDatum }) => (
+                d.data.filterValue === selectedValue ? 2 : 1
+            ))
+            .style('cursor', 'pointer')
+            .on('click', function onClick(this: SVGRectElement, _event: MouseEvent, d: { data: TreemapDatum }) {
+                onSelectRef.current(control, d.data.filterValue);
+            })
             .on('mousemove', function onMove(this: SVGRectElement, event: MouseEvent, d: { data: TreemapDatum }) {
                 const rect = containerRef.current?.getBoundingClientRect();
                 setHover({
@@ -124,7 +145,7 @@ const EfficiencyMiniTreemap: React.FC<EfficiencyMiniTreemapProps> = ({ title, ar
                     .text(String(d.data.count));
             }
         });
-    }, [width, data]);
+    }, [width, data, control, selectedValue]);
 
     return (
         <div>
@@ -147,14 +168,33 @@ const EfficiencyMiniTreemap: React.FC<EfficiencyMiniTreemapProps> = ({ title, ar
 interface EfficiencyMiniTreemapsProps {
     rows: EfficiencyBadgeDot[];
     theme: ChartTheme;
+    // Current filter selections ('all' = none) so the active tile is outlined.
+    selected: { tier: string; type: string; award: string };
+    // Fired when a tile is clicked; the parent toggles the matching filter.
+    onSelect: (control: FilterControl, filterValue: string) => void;
 }
 
 const AWARD_LABELS: Record<number, string> = { 1: 'Expert', 2: 'I', 3: 'II', 4: 'III' };
 
+// ColorBrewer sequential "Blues" (9-class). The tier treemap shades tiles by
+// tier value — higher tier = deeper blue — an ordinal encoding orthogonal to
+// the count-driven tile size. We map into indices 2..8 (skipping the two palest
+// steps, near-white, which wouldn't read on the card) so every tile is visible;
+// tile-label contrast is still handled by readableTextColor.
+const COLORBREWER_BLUES = [
+    '#f7fbff', '#deebf7', '#c6dbef', '#9ecae1', '#6baed6',
+    '#4292c6', '#2171b5', '#08519c', '#08306b',
+];
+const tierBlue = (tier: number, minTier: number, maxTier: number): string => {
+    const norm = maxTier === minTier ? 0.6 : (tier - minTier) / (maxTier - minTier);
+    const idx = Math.round(2 + norm * (COLORBREWER_BLUES.length - 1 - 2));
+    return COLORBREWER_BLUES[idx];
+};
+
 // Three small-multiples treemaps — Tier, Type, Award — each partitioning the
 // (filtered) badged ships by that dimension, sized by ship count. Type reuses
 // the table's class palette; Award the quality colors; Tier a neutral fill.
-const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, theme }) => {
+const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, theme, selected, onSelect }) => {
     const colors = chartColors[theme];
 
     const { tierData, typeData, awardData } = useMemo(() => {
@@ -167,13 +207,17 @@ const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, t
             awardCounts.set(row.badgeClass, (awardCounts.get(row.badgeClass) ?? 0) + 1);
         }
 
+        const tierValues = Array.from(tierCounts.keys());
+        const minTier = tierValues.length ? Math.min(...tierValues) : 0;
+        const maxTier = tierValues.length ? Math.max(...tierValues) : 0;
         const tier: TreemapDatum[] = Array.from(tierCounts.entries())
             .sort((a, b) => b[0] - a[0])
             .map(([tierValue, count]) => ({
                 key: `tier-${tierValue}`,
                 label: `T${tierValue}`,
                 count,
-                color: colors.shipDefault,
+                color: tierBlue(tierValue, minTier, maxTier),
+                filterValue: String(tierValue),
             }));
 
         const type: TreemapDatum[] = Array.from(typeCounts.entries())
@@ -182,6 +226,7 @@ const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, t
                 label: shipType,
                 count,
                 color: shipTypeShortColor(colors, shipType),
+                filterValue: shipType,
             }));
 
         const award: TreemapDatum[] = Array.from(awardCounts.entries())
@@ -191,6 +236,7 @@ const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, t
                 label: AWARD_LABELS[badgeClass] ?? `Class ${badgeClass}`,
                 count,
                 color: badgeClassColor(colors, badgeClass),
+                filterValue: String(badgeClass),
             }));
 
         return { tierData: tier, typeData: type, awardData: award };
@@ -198,9 +244,9 @@ const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, t
 
     return (
         <div className="grid grid-cols-3 gap-3">
-            <EfficiencyMiniTreemap title="Tier" ariaLabel="Badged ships by tier" data={tierData} />
-            <EfficiencyMiniTreemap title="Type" ariaLabel="Badged ships by class" data={typeData} />
-            <EfficiencyMiniTreemap title="Award" ariaLabel="Badged ships by award grade" data={awardData} />
+            <EfficiencyMiniTreemap title="Tier" ariaLabel="Badged ships by tier" data={tierData} control="tier" selectedValue={selected.tier} onSelect={onSelect} />
+            <EfficiencyMiniTreemap title="Type" ariaLabel="Badged ships by class" data={typeData} control="type" selectedValue={selected.type} onSelect={onSelect} />
+            <EfficiencyMiniTreemap title="Award" ariaLabel="Badged ships by award grade" data={awardData} control="award" selectedValue={selected.award} onSelect={onSelect} />
         </div>
     );
 };

@@ -39,6 +39,16 @@ _Drafted: 2026-03-15_
 > `efficiency-sort` / `efficiency-filter`. Also fixed: the Profile population
 > row's breakpoint (`md:` not `lg:`) so it reflows in lockstep with the
 > Type/Tier row above instead of stacking alone near 950px.
+>
+> **Follow-up (interactive treemaps):** the treemaps are now filter controls —
+> clicking a tile sets that dimension's filter (dropdowns + summary reflect it),
+> clicking the selected tile again toggles it off, and the active tile is
+> outlined. A **Clear** button sits right of the filter row (disabled when no
+> filter is active) and resets all three. All paths funnel through one
+> `applyFilter` so state + the `efficiency-filter` umami event never drift. The
+> **Tier treemap** shades tiles with a ColorBrewer sequential *Blues* ramp keyed
+> on tier value (higher tier = deeper blue), an ordinal encoding orthogonal to
+> the count-driven tile size.
 
 > **Status update (2026-07-15, v3.6.0):** the v1 summary-plus-table surface
 > described below shipped and was later superseded. The Efficiency tab now
