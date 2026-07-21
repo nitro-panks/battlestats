@@ -389,6 +389,53 @@ def _build_efficiency_badge_rows(raw_rows: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def join_efficiency_battle_stats(
+    efficiency_rows: Any, battles_json: Any,
+) -> list[dict[str, Any]]:
+    """Attach each badged ship's career random battles + win ratio to the
+    efficiency rows, joined by ``ship_id`` from ``battles_json`` (the same source
+    the ship list is built from; ``win_ratio`` is the stored 0..1 fraction).
+
+    Done at read time (serializer) rather than when ``efficiency_json`` is built
+    so the numbers are always current and appear for every player without
+    waiting for an efficiency rebuild. A badged ship absent from ``battles_json``
+    gets ``None`` for both; the client renders a dash. Returns fresh row dicts —
+    the stored ``efficiency_json`` is left untouched.
+    """
+    rows = _coerce_efficiency_rows(efficiency_rows)
+
+    stats_by_ship: dict[int, dict[str, Any]] = {}
+    if isinstance(battles_json, list):
+        for stat in battles_json:
+            if not isinstance(stat, dict):
+                continue
+            try:
+                ship_id = int(stat.get('ship_id') or 0)
+            except (TypeError, ValueError):
+                continue
+            if ship_id <= 0:
+                continue
+            stats_by_ship[ship_id] = {
+                'pvp_battles': int(stat.get('pvp_battles', 0) or 0),
+                'win_ratio': float(stat.get('win_ratio', 0) or 0),
+            }
+
+    enriched: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            ship_id = int(row.get('ship_id') or 0)
+        except (TypeError, ValueError):
+            ship_id = 0
+        stat = stats_by_ship.get(ship_id)
+        enriched.append({
+            **row,
+            'pvp_battles': stat['pvp_battles'] if stat else None,
+            'win_ratio': stat['win_ratio'] if stat else None,
+        })
+
+    return enriched
+
+
 def update_player_efficiency_data(player: Player, force_refresh: bool = False, realm: str = DEFAULT_REALM) -> list[dict[str, Any]]:
     if player.is_hidden:
         if player.efficiency_json is not None or player.efficiency_updated_at is not None:

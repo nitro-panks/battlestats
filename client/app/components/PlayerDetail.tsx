@@ -371,7 +371,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 pvpRatio={player.pvp_ratio}
                                 pvpSurvivalRate={player.pvp_survival_rate}
                                 pvpBattles={player.pvp_battles}
-                                playerScore={player.player_score}
                                 hasKnownRankedGames={hasKnownRankedGames}
                                 hasClan={Boolean(player.clan_id)}
                                 hasClanBattleData={hasClanBattleData}

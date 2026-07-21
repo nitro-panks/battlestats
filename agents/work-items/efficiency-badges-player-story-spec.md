@@ -2,6 +2,30 @@
 
 _Drafted: 2026-03-15_
 
+> **Status update (2026-07-21, v4.3.0):** the force-directed graph described in
+> the 2026-07-15 note below was superseded — first by a short-lived badge
+> heatmap, then by the current **sortable badge table** (`EfficiencyBadgeTable.tsx`).
+> The Efficiency tab now renders one row per badged ship with columns **Name ·
+> Tier · Type · Award · Battles · WR%**, every header a sort toggle (default:
+> Award best-first; Battles/WR biggest-first). **Type** is tinted with the same
+> per-class palette the battle-history table uses (`chartColors.ship{DD,CA,BB,CV,SS}`);
+> **WR%** is tinted via the shared `lib/wrColor` scale. Above the table sit a
+> filter row (Tier / Type / Award dropdowns, "All" default, options derived from
+> the player's own badges, reset on player change) and — below the filters — an
+> award-count summary line (Expert / I / II / III with color swatches) that
+> reflects the active filter. **Battles + WR% are the player's career random
+> battles and win ratio for that ship**, joined **read-time in the serializer**
+> (`join_efficiency_battle_stats` in `data.py`, keyed by `ship_id` off the
+> excluded-from-payload `battles_json`) so every player shows current numbers
+> without an efficiency rebuild; a ship absent from `battles_json` renders an
+> em-dash and always sorts last. `EfficiencyStripPlotSVG.tsx` and the interim
+> `EfficiencyBadgeHeatmap.tsx` were both removed. `PlayerEfficiencyBadges.tsx`
+> keeps the heading, info tooltip, empty state, and the `hasEfficiencyBadges`
+> tab-gate. Separately, the standalone **Population tab was folded into the
+> bottom of the Profile tab** (its umami event retired) and the Player Score
+> Distribution chart was dropped. The 2026-07-15 note below is retained for
+> history.
+
 > **Status update (2026-07-15, v3.6.0):** the v1 summary-plus-table surface
 > described below shipped and was later superseded. The Efficiency tab now
 > renders a live force-directed graph (`EfficiencyStripPlotSVG.tsx`): one

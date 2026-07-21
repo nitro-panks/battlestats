@@ -23,7 +23,7 @@ import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
 
-type InsightsTabId = 'activity' | 'profile' | 'ships' | 'ranked' | 'career' | 'badges' | 'population';
+type InsightsTabId = 'activity' | 'profile' | 'ships' | 'ranked' | 'career' | 'badges';
 
 interface PlayerDetailInsightsTabsProps {
     playerId: number;
@@ -32,7 +32,6 @@ interface PlayerDetailInsightsTabsProps {
     pvpRatio: number;
     pvpSurvivalRate: number;
     pvpBattles: number;
-    playerScore: number | null;
     hasKnownRankedGames: boolean;
     hasClan: boolean;
     hasClanBattleData: boolean;
@@ -101,22 +100,17 @@ const BattlesDistributionSVG = dynamic(() => resilientDynamicImport(() => import
     loading: () => <LoadingPanel label="Loading battles distribution..." minHeight={284} />,
 });
 
-const PlayerScoreDistributionSVG = dynamic(() => resilientDynamicImport(() => import('./PlayerScoreDistributionSVG'), 'PlayerDetailInsightsTabs-PlayerScoreDistributionSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading score distribution..." minHeight={284} />,
-});
-
 const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; minHeight: number; }> = [
     // Order reflects measured Umami tab-click demand (90d, 2026-07-08): Activity
     // stays first as the default landing tab; the remaining tabs are ranked by
-    // click volume — Ships > Profile > Population > Efficiency > Ranked > Clan Battles.
+    // click volume — Ships > Profile > Efficiency > Ranked > Clan Battles. The
+    // former Population tab was folded into the bottom of Profile (2026-07-20).
     // minHeight is only a loading-stability floor (roughly the tab's
     // LoadingPanel stack) — panels size to content since 2026-07-15, so a
     // large floor just recreates the dead space the content-sizing removed.
     { id: 'activity', label: 'Activity', panelLabel: 'Recent battle activity', minHeight: 420 },
     { id: 'ships', label: 'Ships', panelLabel: 'Ship insights', minHeight: 560 },
     { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 360 },
-    { id: 'population', label: 'Population', panelLabel: 'Population insights', minHeight: 360 },
     { id: 'badges', label: 'Efficiency', panelLabel: 'Efficiency insights', minHeight: 360 },
     { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 280 },
     { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
@@ -137,6 +131,12 @@ const LOCKED_PANEL_HEIGHT_PX = 1057;
 // preserves the historical ~28px step so type bars keep their thickness.
 const PROFILE_TYPE_CHART_ROW_STEP = 28;
 
+// Shared SVG height (px) for the Profile tab's population row — the WR-vs-Survival
+// heatmap and the two distribution histograms sit side by side on lg+, so one
+// common height keeps the row's bottom edge flush. Each chart measures its own
+// ~1/3 column width; below 480px the heatmap drops into its compact layout.
+const POPULATION_CHART_HEIGHT = 210;
+
 // The Ranked tab's activity/history sub-view toggle chip. Sized to sit inline
 // beside the mode caption ("Ranked"): same text size + padding, bordered (vs the
 // caption's fill) so it reads as an action rather than a label.
@@ -147,7 +147,6 @@ const RANKED_MODE_CAPTION_CLASS = 'rounded bg-[var(--accent-faint)] px-2 py-0.5 
 
 const panelSectionIdByTab: Record<InsightsTabId, string> = {
     activity: 'insights-activity',
-    population: 'insights-population',
     ships: 'insights-ships',
     ranked: 'insights-ranked',
     profile: 'insights-profile',
@@ -164,7 +163,6 @@ const insightsTabEventByTab: Record<InsightsTabId, string> = {
     ranked: 'player-insights-ranked',
     career: 'player-insights-clan-battles',
     badges: 'player-insights-efficiency',
-    population: 'player-insights-population',
 };
 
 const TAB_DATA_WARMUP_DELAY_MS = 250;
@@ -184,7 +182,6 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     pvpRatio,
     pvpSurvivalRate,
     pvpBattles,
-    playerScore,
     hasKnownRankedGames,
     hasClan,
     hasClanBattleData,
@@ -516,6 +513,14 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     // plottable efficiency badge, gating the Efficiency tab's enabled state.
     const hasBadges = hasEfficiencyBadges(efficiencyRows);
 
+    // Profile-tab population row (WR-vs-Survival heatmap + the conditional
+    // Battles-Played histogram, side by side on lg+). The histogram is conditional,
+    // so the grid drops to a single full-width column when the player has too few
+    // battles to plot — never a dead column. Both cards share one height so the
+    // row's bottom edge stays flush; each SVG measures its own column width.
+    const showBattlesDistribution = pvpBattles >= 150;
+    const populationGridColsClass = showBattlesDistribution ? 'lg:grid-cols-2' : '';
+
     return (
         <section className="mt-5 rounded-lg border border-[var(--border)] bg-[var(--bg-surface)] p-4" data-perf-section="insights-tabs-shell">
             {/* The tab strip is the section header now — the standalone "Insights"
@@ -626,53 +631,6 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             onSparklineAnimationEnd={() => setGlowArmed(true)}
                         />
                     )
-                ) : null}
-
-                {activeTab === 'population' ? (
-                    <div>
-                        {/* Tab-top header sits outside the chart inset below so it
-                            lands in the shared header spot (pt-2.5 / pl-[15px])
-                            used by the Profile/Efficiency/Clan Battles tabs. */}
-                        <SectionHeadingWithTooltip
-                            title="Win Rate vs Survival"
-                            description="This scatter plot shows how this player's win rate and survival rate compare to the broader tracked player base. Each dot represents a player, positioned by PvP win rate on the x-axis and PvP survival rate on the y-axis. Darker areas indicate denser player clusters, and the outlined marker shows where this player sits in that field."
-                            className="mb-2 pt-2.5 pl-[15px]"
-                        />
-                        {/* Inset the population charts by 50px on each side (100px
-                            narrower) on sm+; mobile stays full-width so the charts
-                            don't overflow their narrow container. */}
-                        <div className="sm:px-[50px]">
-                            <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={400} theme={theme} />
-
-                            {/* The two distribution histograms sit side by side on sm+,
-                                each a half-height landscape panel: the chart fills its
-                                half-column (~340px at the desktop insights width) at
-                                half that in height. Mobile stacks them full-width. */}
-                            <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
-                                {pvpBattles >= 150 ? (
-                                    <div className="min-w-0">
-                                        <SectionHeadingWithTooltip
-                                            title="Battles Played Distribution"
-                                            description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
-                                            className="mb-2"
-                                        />
-                                        <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={170} theme={theme} />
-                                    </div>
-                                ) : null}
-
-                                {playerScore != null && playerScore >= 2.0 ? (
-                                    <div className="min-w-0">
-                                        <SectionHeadingWithTooltip
-                                            title="Player Score Distribution"
-                                            description="Player score blends win rate, kill ratio, survival, and battle volume into a 0–10 composite. This distribution shows where the player falls relative to the tracked population."
-                                            className="mb-2"
-                                        />
-                                        <PlayerScoreDistributionSVG playerScore={playerScore} svgHeight={170} theme={theme} />
-                                    </div>
-                                ) : null}
-                            </div>
-                        </div>
-                    </div>
                 ) : null}
 
                 {activeTab === 'ships' ? (
@@ -824,6 +782,42 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         ) : (
                             <LoadingPanel label="Loading profile charts..." minHeight={560} />
                         )}
+
+                        {/* Population comparison — formerly the standalone Population
+                            tab, folded into the bottom of Profile (2026-07-20). It
+                            depends only on the header props (win rate, survival,
+                            battles), not the tier/type payload above, so it renders
+                            regardless of that section's load state. A top margin
+                            separates the player's own profile from where they sit
+                            against the tracked population. The heatmap and the
+                            conditional histogram share one row on lg+; the grid drops
+                            to a single full-width column when the histogram is gated
+                            out, so a sparse player never leaves a dead column. Each
+                            column carries the pl-[15px] inset the profile section
+                            labels above use, so the two rows line up. */}
+                        <div className="mt-8">
+                            <div className={`grid grid-cols-1 gap-6 ${populationGridColsClass}`}>
+                                <div className="min-w-0 pl-[15px]">
+                                    <SectionHeadingWithTooltip
+                                        title="Win Rate vs Survival"
+                                        description="This scatter plot shows how this player's win rate and survival rate compare to the broader tracked player base. Each dot represents a player, positioned by PvP win rate on the x-axis and PvP survival rate on the y-axis. Darker areas indicate denser player clusters, and the outlined marker shows where this player sits in that field."
+                                        className="mb-2"
+                                    />
+                                    <WRDistributionSVG playerWR={pvpRatio} playerSurvivalRate={pvpSurvivalRate} svgHeight={POPULATION_CHART_HEIGHT} theme={theme} />
+                                </div>
+
+                                {showBattlesDistribution ? (
+                                    <div className="min-w-0 pl-[15px]">
+                                        <SectionHeadingWithTooltip
+                                            title="Battles Played Distribution"
+                                            description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
+                                            className="mb-2"
+                                        />
+                                        <BattlesDistributionSVG playerBattles={pvpBattles} svgHeight={POPULATION_CHART_HEIGHT} theme={theme} />
+                                    </div>
+                                ) : null}
+                            </div>
+                        </div>
                     </div>
                 ) : null}
 

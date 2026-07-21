@@ -9,8 +9,6 @@ import LoadingPanel from './LoadingPanel';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
-type D3Selection = ReturnType<typeof d3.select>;
-
 interface WRDistributionProps {
     playerWR: number;
     playerSurvivalRate?: number | null;
@@ -102,53 +100,6 @@ const formatDelta = (value: number | null): string => {
     return `${sign}${value.toFixed(1)} pts vs trend`;
 };
 
-const appendSummaryBlock = (
-    svgRoot: D3Selection,
-    marginLeft: number,
-    width: number,
-    payload: CorrelationPayload,
-    expectedWR: number | null,
-    wrDelta: number | null,
-    colors: Colors,
-) => {
-    const header = svgRoot.append('g').attr('transform', `translate(${marginLeft + width - 6}, 10)`);
-    const headerText = header.append('text')
-        .attr('x', 0)
-        .attr('y', 0)
-        .attr('text-anchor', 'end')
-        .attr('dominant-baseline', 'hanging');
-
-    headerText.append('tspan')
-        .style('font-size', '11px')
-        .style('font-weight', '700')
-        .style('fill', colors.axisText)
-        .text(payload.correlation == null ? 'r unavailable' : `r = ${payload.correlation.toFixed(2)}`);
-
-    headerText.append('tspan')
-        .style('font-size', '10px')
-        .style('font-weight', '400')
-        .style('fill', colors.separator)
-        .text('  •  ');
-
-    headerText.append('tspan')
-        .style('font-size', '10px')
-        .style('font-weight', '400')
-        .style('fill', colors.axisText)
-        .text(expectedWR == null ? 'Expected WR unavailable' : `Expected WR ${formatPercent(expectedWR)}`);
-
-    headerText.append('tspan')
-        .style('font-size', '10px')
-        .style('font-weight', '400')
-        .style('fill', colors.separator)
-        .text('  •  ');
-
-    headerText.append('tspan')
-        .style('font-size', '10px')
-        .style('font-weight', '700')
-        .style('fill', wrDelta != null ? (wrDelta >= 0 ? colors.heatmapAboveTrend : colors.heatmapBelowTrend) : colors.labelMuted)
-        .text(formatDelta(wrDelta));
-};
-
 const drawChart = (
     containerElement: HTMLDivElement,
     payload: CorrelationPayload,
@@ -160,12 +111,13 @@ const drawChart = (
 ) => {
     const compact = svgWidth < 480;
     // Non-compact left pins to 30 — the compact left margin of the half-width
-    // PopulationDistributionSVG histograms below on the Population tab — so the
-    // two y axes share one vertical line; right trimmed to 28 (from the old
-    // symmetric 44/44) to widen the plot by 30px total.
+    // distribution histograms beside it in the Profile tab's population row — so
+    // the two y axes share one vertical line; right trimmed to 28 (from the old
+    // symmetric 44/44) to widen the plot by 30px total. Top is a slim 16 now that
+    // the r/Expected-WR/trend summary header (which needed ~38) was removed.
     const margin = compact
-        ? { top: 38, right: 32, bottom: 28, left: 32 }
-        : { top: 38, right: 28, bottom: 34, left: 30 };
+        ? { top: 16, right: 32, bottom: 28, left: 32 }
+        : { top: 16, right: 28, bottom: 34, left: 30 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -311,7 +263,15 @@ const drawChart = (
         .attr('stroke', colors.barStroke)
         .attr('stroke-width', 1.75);
 
-    const label = svg.append('g').attr('transform', `translate(${labelX}, ${labelY})`);
+    // The WR/survival + trend readout starts hidden and only appears while the
+    // player dot is hovered (toggled by the transparent hit target appended after
+    // the label below). pointer-events:none so the label itself never eats the
+    // hover; opacity (not display) so getBBox below can still measure it.
+    const label = svg.append('g')
+        .attr('transform', `translate(${labelX}, ${labelY})`)
+        .style('opacity', 0)
+        .style('pointer-events', 'none')
+        .style('transition', 'opacity 120ms ease-out');
     const labelText = label.append('text')
         .attr('text-anchor', labelAnchor)
         .attr('dominant-baseline', 'middle');
@@ -344,7 +304,23 @@ const drawChart = (
             .attr('stroke', colors.axisLine);
     }
 
-    appendSummaryBlock(svgRoot, margin.left, width, payload, expectedWR, wrDelta, colors);
+    // Transparent, larger-than-the-dot hit target (appended last so it sits on
+    // top of the guide lines) that reveals the readout on hover and hides it on
+    // leave. Keyboard/touch users get it on focus/tap too.
+    svg.append('circle')
+        .attr('cx', playerX)
+        .attr('cy', playerY)
+        .attr('r', 12)
+        .attr('fill', 'transparent')
+        .attr('tabindex', 0)
+        .style('cursor', 'pointer')
+        .style('outline', 'none')
+        .on('mouseenter focus', () => label.style('opacity', 1))
+        .on('mouseleave blur', () => label.style('opacity', 0))
+        .on('click', () => {
+            const shown = label.style('opacity') === '1';
+            label.style('opacity', shown ? 0 : 1);
+        });
 
     svg.append('text')
         .attr('x', width)

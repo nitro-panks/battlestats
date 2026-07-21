@@ -123,7 +123,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -173,7 +172,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -223,7 +221,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -246,7 +243,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -313,7 +309,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -366,7 +361,6 @@ describe('PlayerDetailInsightsTabs', () => {
             pvpRatio: 55,
             pvpSurvivalRate: 40,
             pvpBattles: 800,
-            playerScore: null,
             hasKnownRankedGames: true,
             hasClan: true,
             hasClanBattleData: true,
@@ -407,7 +401,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={1.8}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -440,7 +433,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -489,7 +481,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -518,7 +509,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -535,7 +525,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={56}
                 pvpSurvivalRate={41}
                 pvpBattles={820}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -554,7 +543,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan={false}
                 hasClanBattleData={false}
@@ -577,7 +565,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames={false}
                 hasClan
                 hasClanBattleData
@@ -601,7 +588,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -620,7 +606,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData={false}
@@ -644,7 +629,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -663,7 +647,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -687,7 +670,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -711,7 +693,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -730,7 +711,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -753,7 +733,6 @@ describe('PlayerDetailInsightsTabs', () => {
                     pvpRatio={55}
                     pvpSurvivalRate={40}
                     pvpBattles={800}
-                    playerScore={null}
                     hasKnownRankedGames
                     hasClan
                     hasClanBattleData
@@ -793,7 +772,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan={false}
                 hasClanBattleData={false}
@@ -852,7 +830,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan
                 hasClanBattleData
@@ -918,7 +895,6 @@ describe('PlayerDetailInsightsTabs', () => {
                 pvpRatio={55}
                 pvpSurvivalRate={40}
                 pvpBattles={800}
-                playerScore={null}
                 hasKnownRankedGames
                 hasClan={false}
                 hasClanBattleData={false}
