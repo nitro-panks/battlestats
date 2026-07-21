@@ -241,6 +241,16 @@ export const barChartDataRightX = (svgWidth: number): number => {
 // components — both themes have identical keys, so 'light' is representative.
 export type ChartColors = typeof chartColors['light'];
 
+// Efficiency badge quality (top_grade_class) → its palette color. 1 = Expert
+// (best), 2 = Badge I, 3 = Badge II, 4 = Badge III. Shared by the efficiency
+// heatmap's column hues and any legend so the quality colors never drift.
+export const badgeClassColor = (colors: ChartColors, badgeClass: number): string => {
+    if (badgeClass === 1) return colors.badgeE;
+    if (badgeClass === 2) return colors.badgeI;
+    if (badgeClass === 3) return colors.badgeII;
+    return colors.badgeIII;
+};
+
 // Clear a chart container and render a single status/error message where the
 // chart would be. Shared by the D3 components' empty/pending/error states.
 export const drawSvgMessage = (

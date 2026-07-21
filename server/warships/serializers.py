@@ -3,7 +3,7 @@ import time
 
 from rest_framework import serializers
 from .models import Player, Clan, Ship, StreamerSubmission
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_current_clan_battle_season_id, get_current_ranked_season_id, get_current_season_clan_battle_win_rate, get_current_season_ranked_league, is_current_season_clan_battle_player, is_current_season_ranked_player, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_current_clan_battle_season_id, get_current_ranked_season_id, get_current_season_clan_battle_win_rate, get_current_season_ranked_league, is_current_season_clan_battle_player, is_current_season_ranked_player, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges, join_efficiency_battle_stats
 
 
 TWITCH_URL_RE = re.compile(
@@ -101,6 +101,10 @@ class PlayerSerializer(serializers.ModelSerializer):
     clan_battle_header_updated_at = serializers.SerializerMethodField()
     is_pve_player = serializers.SerializerMethodField()
     ship_badges = serializers.SerializerMethodField()
+    # Overrides the raw model field so each efficiency row carries the player's
+    # career random battles + WR for that ship, joined read-time from
+    # battles_json (excluded above; read here off the model attribute).
+    efficiency_json = serializers.SerializerMethodField()
 
     class Meta:
         model = Player
@@ -199,6 +203,9 @@ class PlayerSerializer(serializers.ModelSerializer):
         # Current rolling-window top-player badges (worn while held). One indexed
         # lookup per player; bounded N+1 on the bulk-cache warmers is accepted.
         return get_player_ship_badges(obj)
+
+    def get_efficiency_json(self, obj):
+        return join_efficiency_battle_stats(obj.efficiency_json, obj.battles_json)
 
     def _get_efficiency_rank_payload(self, obj):
         payload_cache = getattr(self, '_efficiency_rank_payload_cache', None)

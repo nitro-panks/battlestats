@@ -78,7 +78,7 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | `player-insights-ranked` | `{realm}` | Click the "Ranked" insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 290 (185) |
 | `player-insights-clan-battles` | `{realm}` | Click the "Career" (clan battles) insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 223 (143) |
 | `player-insights-efficiency` | `{realm}` | Click the "Badges" (efficiency) insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 310 (186) |
-| `player-insights-population` | `{realm}` | Click the "Population" insights tab | `PlayerDetailInsightsTabs.tsx` | ✅ 349 (180) |
+| `player-insights-population` | `{realm}` | ~~Click the "Population" insights tab~~ **Retired 2026-07-20** — the Population tab was folded into the bottom of the Profile tab; the event no longer fires. | `PlayerDetailInsightsTabs.tsx` | ⛔ retired |
 | `player-history-{window}` | `{realm}` | Click a battle-history window pill — emits `player-history-day` / `-week` / `-month` | `BattleHistoryCard.tsx:947` | ✅ day 590 / week 588 / month 292 |
 | `realm-fallback` | `{from, to}` (realm→realm) | A `/player/<name>` deep-link opened under the wrong realm resolved the player in another realm; the app auto-switched. Counts user-facing cross-realm redirects. Complemented by the backend `cross-realm-redirect` INFO log (ground truth; Umami is ad-block-undercounted). | `PlayerRouteView.tsx` | 🟡 added 2026-07-20, pending deploy+captures |
 | `battle-history-mode` | `{mode:'random'\|'ranked'\|'all', window, realm}` | ~~Click a Random/Ranked/All mode pill in battle history~~ | — | ❌ **retired 2026-07-13** (pill removed — 136 clicks / 35 sessions in 90d; mode is now a fixed per-instance prop, ranked history lives on the Ranked tab) |
