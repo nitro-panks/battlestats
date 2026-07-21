@@ -210,6 +210,27 @@ describe('PlayerEfficiencyBadges', () => {
         );
     });
 
+    it('clears all filters via the Clear button (disabled until a filter is active)', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        const clearButton = screen.getByRole('button', { name: /Clear/i });
+        expect(clearButton).toBeDisabled();
+
+        // Activate a filter → table narrows and Clear enables.
+        fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'CA' } });
+        expect(rowNames()).toEqual(['Des Moines']);
+        expect(clearButton).toBeEnabled();
+
+        // Clear resets every filter and re-tracks the clear.
+        fireEvent.click(clearButton);
+        expect(rowNames()).toHaveLength(sampleRows.length);
+        expect(clearButton).toBeDisabled();
+        expect(mockTrackEvent).toHaveBeenLastCalledWith(
+            'efficiency-filter',
+            expect.objectContaining({ control: 'clear', value: 'all' }),
+        );
+    });
+
     it('renders the tier/type/award small-multiples treemaps', () => {
         render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 

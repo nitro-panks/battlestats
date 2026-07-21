@@ -123,8 +123,29 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
         trackEvent('efficiency-sort', { realm, column: key, direction: nextDir });
     };
 
-    const onFilter = (control: 'tier' | 'type' | 'award', value: string) => {
+    // Single entry point for every filter change (dropdown, treemap click,
+    // clear) so the state update + umami event never drift apart.
+    const applyFilter = (control: 'tier' | 'type' | 'award', value: string) => {
+        if (control === 'tier') setFilterTier(value);
+        else if (control === 'type') setFilterType(value);
+        else setFilterAward(value);
         trackEvent('efficiency-filter', { realm, control, value });
+    };
+
+    // A treemap tile click sets that control's filter — or clears it (toggle
+    // off) when the already-selected tile is clicked again.
+    const onTreemapSelect = (control: 'tier' | 'type' | 'award', value: string) => {
+        const current = control === 'tier' ? filterTier : control === 'type' ? filterType : filterAward;
+        applyFilter(control, current === value ? 'all' : value);
+    };
+
+    const hasActiveFilter = filterTier !== 'all' || filterType !== 'all' || filterAward !== 'all';
+
+    const clearFilters = () => {
+        setFilterTier('all');
+        setFilterType('all');
+        setFilterAward('all');
+        trackEvent('efficiency-filter', { realm, control: 'clear', value: 'all' });
     };
 
     // A new player's badges arrive as a fresh `dots` array; clear any active
@@ -193,7 +214,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Tier</span>
                     <select
                         value={filterTier}
-                        onChange={(event) => { setFilterTier(event.target.value); onFilter('tier', event.target.value); }}
+                        onChange={(event) => applyFilter('tier', event.target.value)}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
@@ -206,7 +227,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Type</span>
                     <select
                         value={filterType}
-                        onChange={(event) => { setFilterType(event.target.value); onFilter('type', event.target.value); }}
+                        onChange={(event) => applyFilter('type', event.target.value)}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
@@ -219,7 +240,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Award</span>
                     <select
                         value={filterAward}
-                        onChange={(event) => { setFilterAward(event.target.value); onFilter('award', event.target.value); }}
+                        onChange={(event) => applyFilter('award', event.target.value)}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
@@ -230,12 +251,25 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                         ))}
                     </select>
                 </label>
+                <button
+                    type="button"
+                    onClick={clearFilters}
+                    disabled={!hasActiveFilter}
+                    className="rounded border border-[var(--border)] px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-default disabled:opacity-40 disabled:hover:text-[var(--text-secondary)]"
+                >
+                    Clear
+                </button>
             </div>
             {/* Small-multiples treemaps of the (filtered) badge set by tier,
                 type, and award — a composition overview between the filters and
                 the award-count summary. */}
             <div className="mb-4">
-                <EfficiencyMiniTreemaps rows={filteredRows} theme={theme} />
+                <EfficiencyMiniTreemaps
+                    rows={filteredRows}
+                    theme={theme}
+                    selected={{ tier: filterTier, type: filterType, award: filterAward }}
+                    onSelect={onTreemapSelect}
+                />
             </div>
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[var(--text-secondary)]" aria-label="Award totals">
                 {GRADES.map((grade) => {
