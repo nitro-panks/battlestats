@@ -465,7 +465,7 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
-        expect(screen.getByText('Clan Battle Seasons')).toBeInTheDocument();
+        expect(screen.getByText('Clan Battles vs Win Rate')).toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
         expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
         expect(screen.queryByText('Tier vs Type Profile')).not.toBeInTheDocument();
@@ -552,7 +552,7 @@ describe('PlayerDetailInsightsTabs', () => {
 
         fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
 
-        expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+        expect(screen.queryByText('Clan Battles vs Win Rate')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
         expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
     });
@@ -618,7 +618,7 @@ describe('PlayerDetailInsightsTabs', () => {
         // Even for a clan member, no CB data means the tab never activates or renders.
         fireEvent.click(careerTab);
         expect(careerTab).toHaveAttribute('aria-selected', 'false');
-        expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+        expect(screen.queryByText('Clan Battles vs Win Rate')).not.toBeInTheDocument();
     });
 
     it('enables the Clan Battles tab when the player has clan-battle data', () => {
@@ -659,7 +659,7 @@ describe('PlayerDetailInsightsTabs', () => {
         fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
 
         expect(screen.getByText('Efficiency Badges')).toBeInTheDocument();
-        expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+        expect(screen.queryByText('Clan Battles vs Win Rate')).not.toBeInTheDocument();
     });
 
     it('darks out the Efficiency tab when the player has no efficiency badges', () => {

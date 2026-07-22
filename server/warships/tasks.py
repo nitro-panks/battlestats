@@ -84,6 +84,7 @@ CLAN_BATTLE_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_SNAPSHOT_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
+PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 DISTRIBUTION_WARM_LOCK_TIMEOUT = 15 * 60
 CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60
@@ -279,6 +280,14 @@ def _efficiency_snapshot_refresh_failure_key(realm: str = DEFAULT_REALM) -> str:
 
 def _player_ranked_wr_battles_correlation_refresh_failure_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_player_ranked_wr_battles_correlation_dispatch:{realm}:cooldown"
+
+
+def _player_clan_battle_wr_battles_correlation_refresh_dispatch_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_player_clan_battle_wr_battles_correlation_dispatch:{realm}"
+
+
+def _player_clan_battle_wr_battles_correlation_refresh_failure_key(realm: str = DEFAULT_REALM) -> str:
+    return f"warships:tasks:warm_player_clan_battle_wr_battles_correlation_dispatch:{realm}:cooldown"
 
 
 def _clan_battle_summary_refresh_dispatch_key(clan_id: object, realm: str = DEFAULT_REALM) -> str:
@@ -808,6 +817,29 @@ def queue_player_ranked_wr_battles_correlation_refresh(realm: str = DEFAULT_REAL
         return {"status": "skipped", "reason": "enqueue-failed"}
 
 
+def queue_player_clan_battle_wr_battles_correlation_refresh(realm: str = DEFAULT_REALM):
+    if cache.get(_player_clan_battle_wr_battles_correlation_refresh_failure_key(realm=realm)):
+        return {"status": "skipped", "reason": "broker-unavailable"}
+
+    dispatch_key = _player_clan_battle_wr_battles_correlation_refresh_dispatch_key(
+        realm=realm)
+    if not cache.add(dispatch_key, "queued", timeout=PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        warm_player_clan_battle_wr_battles_correlation_task.delay(realm=realm)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        cache.set(_player_clan_battle_wr_battles_correlation_refresh_failure_key(realm=realm), True,
+                  timeout=BROKER_DISPATCH_FAILURE_COOLDOWN)
+        logger.warning(
+            "Skipping clan-battle heatmap correlation refresh enqueue because broker dispatch failed: %s",
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
 # ---------------------------------------------------------------------------
 # Celery tasks
 # ---------------------------------------------------------------------------
@@ -1286,6 +1318,25 @@ def warm_player_ranked_wr_battles_correlation_task(self, realm=DEFAULT_REALM):
     finally:
         cache.delete(
             _player_ranked_wr_battles_correlation_refresh_dispatch_key(realm=realm))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_player_clan_battle_wr_battles_correlation_task(self, realm=DEFAULT_REALM):
+    from warships.data import warm_player_clan_battle_wr_battles_population_correlation
+
+    logger.info(
+        "Starting warm_player_clan_battle_wr_battles_correlation_task realm=%s", realm)
+    try:
+        return _run_locked_task(
+            "warm_player_clan_battle_wr_battles_correlation",
+            "population",
+            self.request.id,
+            lambda: warm_player_clan_battle_wr_battles_population_correlation(
+                realm=realm),
+        )
+    finally:
+        cache.delete(
+            _player_clan_battle_wr_battles_correlation_refresh_dispatch_key(realm=realm))
 
 
 @app.task(bind=True, **TASK_OPTS)

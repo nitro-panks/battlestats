@@ -32,6 +32,7 @@ from warships.data import (
     fetch_player_clan_battle_seasons,
     fetch_player_population_distribution,
     fetch_player_ranked_wr_battles_correlation,
+    fetch_player_clan_battle_wr_battles_correlation,
     fetch_player_summary,
     fetch_player_tier_type_correlation,
     fetch_player_wr_survival_correlation,
@@ -1639,6 +1640,40 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
             data, RankedPlayerCorrelationDistributionSerializer)
         if is_pending:
             response['X-Ranked-WR-Battles-Pending'] = 'true'
+        return response
+
+    if metric == 'clan_battle_wr_battles' and player_id is not None:
+        try:
+            data = fetch_player_clan_battle_wr_battles_correlation(
+                player_id, realm=realm)
+        except Player.DoesNotExist:
+            return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception:
+            logger.exception(
+                "clan_battle_wr_battles correlation failed for player_id=%s", player_id)
+            data = {
+                'metric': 'clan_battle_wr_battles',
+                'label': 'Clan Battles vs Win Rate',
+                'x_label': 'Total Clan Battles',
+                'y_label': 'Clan Battle Win Rate',
+                'x_scale': 'log',
+                'y_scale': 'linear',
+                'x_ticks': [50.0, 100.0],
+                'x_edges': [50.0, 100.0],
+                'tracked_population': 0,
+                'correlation': None,
+                'y_domain': {'min': 30.0, 'max': 70.0, 'bin_width': 0.75},
+                'tiles': [],
+                'trend': [],
+                'player_point': None,
+                '_pending': True,
+            }
+
+        is_pending = data.pop('_pending', False)
+        response = _validated_single_response(
+            data, RankedPlayerCorrelationDistributionSerializer)
+        if is_pending:
+            response['X-Clan-Battle-WR-Battles-Pending'] = 'true'
         return response
 
     if metric == 'tier_type' and player_id is not None:

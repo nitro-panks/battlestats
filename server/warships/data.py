@@ -2671,6 +2671,26 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG = {
 }
 PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION = 'ranked_wr_battles:v6'
 
+# Clan-battle analog of the ranked WR-vs-battles correlation. Population + player
+# point both come from PlayerExplorerSummary.clan_battle_total_battles /
+# clan_battle_overall_win_rate (the WR is already a percent). Floor + y-domain
+# set from the live population (2026-07: NA/EU/asia have 42K/76K/47K rows with
+# both fields; median ~90 battles, WR median ~48%, p25/p75 ~38/53).
+PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CONFIG = {
+    'label': 'Clan Battles vs Win Rate',
+    'x_label': 'Total Clan Battles',
+    'y_label': 'Clan Battle Win Rate',
+    'x_scale': 'log',
+    'y_scale': 'linear',
+    'min_battles': 50,
+    'base_x_edges': [50],
+    'x_bin_growth_factor': math.sqrt(math.sqrt(2)),
+    'y_min': 30.0,
+    'y_max': 70.0,
+    'y_bin_width': 0.75,
+}
+PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CACHE_VERSION = 'clan_battle_wr_battles:v1'
+
 PLAYER_TIER_TYPE_CORRELATION_CONFIG = {
     'label': 'Tier vs Ship Type',
     'x_label': 'Ship Type',
@@ -3331,6 +3351,11 @@ def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
     results['ranked_wr_battles'] = {
         'tracked_population': ranked.get('tracked_population', 0)}
 
+    clan_battle = warm_player_clan_battle_wr_battles_population_correlation(
+        realm=realm)
+    results['clan_battle_wr_battles'] = {
+        'tracked_population': clan_battle.get('tracked_population', 0)}
+
     return results
 
 
@@ -3686,6 +3711,201 @@ def fetch_player_ranked_wr_battles_correlation(player_id: str, realm: str = DEFA
         queue_player_ranked_wr_battles_correlation_refresh(realm=realm)
         population_payload = _build_empty_player_ranked_wr_battles_population_correlation_payload()
         pending = True
+
+    result = {
+        **population_payload,
+        'player_point': {
+            'x': float(total_battles),
+            'y': win_rate,
+            'label': player.name,
+        } if total_battles > 0 and win_rate is not None else None,
+    }
+    result['_pending'] = pending
+    return result
+
+
+def _build_empty_player_clan_battle_wr_battles_population_correlation_payload() -> dict:
+    config = PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CONFIG
+    seed_edges = config['base_x_edges']
+    base_edge = float(seed_edges[0]) if seed_edges else 1.0
+    x_max = float(max(base_edge * 2, base_edge + 1))
+
+    return {
+        'metric': 'clan_battle_wr_battles',
+        'label': config['label'],
+        'x_label': config['x_label'],
+        'y_label': config['y_label'],
+        'x_scale': config['x_scale'],
+        'y_scale': config['y_scale'],
+        'x_ticks': [base_edge, x_max],
+        'x_edges': [base_edge, x_max],
+        'tracked_population': 0,
+        'correlation': None,
+        'y_domain': {
+            'min': config['y_min'],
+            'max': config['y_max'],
+            'bin_width': config['y_bin_width'],
+        },
+        'tiles': [],
+        'trend': [],
+    }
+
+
+def _build_player_clan_battle_wr_battles_population_correlation_payload(realm: str = DEFAULT_REALM) -> dict:
+    """Population histogram of career clan-battle games vs overall CB win rate.
+
+    Mirrors the ranked builder but sources per-player totals straight from the
+    stored PlayerExplorerSummary CB fields (no per-row recompute): battles is a
+    plain int, win_rate is already a percent (0..100).
+    """
+    config = PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CONFIG
+    y_min = config['y_min']
+    y_max = config['y_max']
+    y_bin_width = config['y_bin_width']
+    y_bin_count = int((y_max - y_min) / y_bin_width)
+
+    records: list[tuple[int, float]] = []
+    max_battles = config['min_battles']
+
+    with transaction.atomic(), _elevated_work_mem():
+        rows = PlayerExplorerSummary.objects.filter(
+            realm=realm,
+            player__is_hidden=False,
+            clan_battle_total_battles__isnull=False,
+            clan_battle_overall_win_rate__isnull=False,
+            clan_battle_total_battles__gte=config['min_battles'],
+        ).values_list('clan_battle_total_battles', 'clan_battle_overall_win_rate')
+
+        for total_battles, win_rate in rows.iterator(chunk_size=2000):
+            if total_battles < config['min_battles'] or win_rate is None:
+                continue
+            records.append((int(total_battles), float(win_rate)))
+            max_battles = max(max_battles, int(total_battles))
+
+    x_edges = _build_geometric_bin_edges(
+        max_battles,
+        config['base_x_edges'],
+        config['x_bin_growth_factor'],
+    )
+    major_x_ticks = _build_doubling_bin_edges(
+        max_battles, config['base_x_edges'])
+    tile_counts: dict[tuple[int, int], int] = {}
+    trend_sum_y = [0.0 for _ in range(len(x_edges) - 1)]
+    trend_counts = [0 for _ in range(len(x_edges) - 1)]
+    tracked_population = 0
+    sum_x = 0.0
+    sum_y = 0.0
+    sum_xy = 0.0
+    sum_x2 = 0.0
+    sum_y2 = 0.0
+
+    for total_battles, win_rate in records:
+        x_index = _find_explicit_bin_index(total_battles, x_edges)
+        if x_index is None:
+            continue
+
+        y_clamped = _clamp_to_open_upper_bound(win_rate, y_min, y_max)
+        y_index = min(int((y_clamped - y_min) / y_bin_width), y_bin_count - 1)
+
+        tracked_population += 1
+        sum_x += float(total_battles)
+        sum_y += win_rate
+        sum_xy += float(total_battles) * win_rate
+        sum_x2 += float(total_battles) * float(total_battles)
+        sum_y2 += win_rate * win_rate
+
+        tile_counts[(x_index, y_index)] = tile_counts.get(
+            (x_index, y_index), 0) + 1
+        trend_sum_y[x_index] += win_rate
+        trend_counts[x_index] += 1
+
+    tiles = []
+    for (x_index, y_index), count in sorted(tile_counts.items()):
+        tiles.append({
+            'x_index': x_index,
+            'y_index': y_index,
+            'count': count,
+        })
+
+    trend = []
+    for index, count in enumerate(trend_counts):
+        if count == 0:
+            continue
+        trend.append({
+            'x_index': index,
+            'y': round(trend_sum_y[index] / count, 4),
+            'count': count,
+        })
+
+    return {
+        'metric': 'clan_battle_wr_battles',
+        'label': config['label'],
+        'x_label': config['x_label'],
+        'y_label': config['y_label'],
+        'x_scale': config['x_scale'],
+        'y_scale': config['y_scale'],
+        'x_ticks': [float(tick) for tick in major_x_ticks],
+        'x_edges': [float(edge) for edge in x_edges],
+        'tracked_population': tracked_population,
+        'correlation': round(_pearson_correlation(tracked_population, sum_x, sum_y, sum_xy, sum_x2, sum_y2), 4) if tracked_population > 1 else None,
+        'y_domain': {
+            'min': y_min,
+            'max': y_max,
+            'bin_width': y_bin_width,
+        },
+        'tiles': tiles,
+        'trend': trend,
+    }
+
+
+def warm_player_clan_battle_wr_battles_population_correlation(realm: str = DEFAULT_REALM) -> dict:
+    payload = _build_player_clan_battle_wr_battles_population_correlation_payload(
+        realm=realm)
+    cache_key = _player_correlation_cache_key(
+        PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
+    published_cache_key = _player_correlation_published_cache_key(
+        PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
+    cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
+    cache.set(published_cache_key, payload, timeout=None)
+    return payload
+
+
+def _player_clan_battle_record(explorer_summary: Optional[PlayerExplorerSummary]) -> tuple[int, Optional[float]]:
+    """The requesting player's own CB point, read from the SAME PES fields the
+    population scan uses so their dot lands in the right bin."""
+    if explorer_summary is None:
+        return 0, None
+    total_battles = explorer_summary.clan_battle_total_battles
+    win_rate = explorer_summary.clan_battle_overall_win_rate
+    if not total_battles or win_rate is None:
+        return 0, None
+    return int(total_battles), float(win_rate)
+
+
+def fetch_player_clan_battle_wr_battles_correlation(player_id: str, realm: str = DEFAULT_REALM) -> dict:
+    from warships.tasks import queue_player_clan_battle_wr_battles_correlation_refresh
+
+    player = Player.objects.select_related('explorer_summary').get(
+        player_id=player_id, realm=realm)
+    total_battles, win_rate = _player_clan_battle_record(
+        getattr(player, 'explorer_summary', None))
+    cache_key = _player_correlation_cache_key(
+        PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
+    published_cache_key = _player_correlation_published_cache_key(
+        PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CACHE_VERSION, realm=realm)
+    population_payload = cache.get(cache_key)
+    pending = False
+    if population_payload is not None:
+        cache.set(published_cache_key, population_payload, timeout=None)
+    else:
+        published_payload = cache.get(published_cache_key)
+        if published_payload is not None:
+            population_payload = published_payload
+            queue_player_clan_battle_wr_battles_correlation_refresh(realm=realm)
+        else:
+            queue_player_clan_battle_wr_battles_correlation_refresh(realm=realm)
+            population_payload = _build_empty_player_clan_battle_wr_battles_population_correlation_payload()
+            pending = True
 
     result = {
         **population_payload,
