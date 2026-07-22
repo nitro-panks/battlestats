@@ -76,6 +76,26 @@ const RankedSeasonScatterSVG = dynamic(() => resilientDynamicImport(() => import
     loading: () => <LoadingPanel label="Loading season scatter..." minHeight={240} />,
 });
 
+const ClanBattleWRBattlesHeatmapSVG = dynamic(() => resilientDynamicImport(() => import('./ClanBattleWRBattlesHeatmapSVG'), 'PlayerDetailInsightsTabs-ClanBattleWRBattlesHeatmapSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading clan battle heatmap..." minHeight={280} />,
+});
+
+const ClanBattleSeasonScatterSVG = dynamic(() => resilientDynamicImport(() => import('./ClanBattleSeasonScatterSVG'), 'PlayerDetailInsightsTabs-ClanBattleSeasonScatterSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading season scatter..." minHeight={240} />,
+});
+
+const ClanBattleSeasonTimelineSVG = dynamic(() => resilientDynamicImport(() => import('./ClanBattleSeasonTimelineSVG'), 'PlayerDetailInsightsTabs-ClanBattleSeasonTimelineSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading season timeline..." minHeight={128} />,
+});
+
+const RankedSeasonTimelineSVG = dynamic(() => resilientDynamicImport(() => import('./RankedSeasonTimelineSVG'), 'PlayerDetailInsightsTabs-RankedSeasonTimelineSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading season timeline..." minHeight={128} />,
+});
+
 const PlayerClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./PlayerClanBattleSeasons'), 'PlayerDetailInsightsTabs-PlayerClanBattleSeasons'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={220} />,
@@ -216,6 +236,10 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     // never be stranded on an empty activity view.
     const [rankedView, setRankedView] = useState<'activity' | 'history'>('activity');
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
+    // Gates ONLY the clan-battle population heatmap (hides itself when the
+    // player has no stored CB summary point); the scatter/timeline/table on the
+    // CB tab render independently. Defaults true so it shows while loading.
+    const [showClanBattleHeatmap, setShowClanBattleHeatmap] = useState(true);
     const [profileChartPayload, setProfileChartPayload] = useState<TierTypePayload | null>(null);
     const [profileChartState, setProfileChartState] = useState<'idle' | 'loading' | 'ready' | 'warming' | 'error'>('idle');
     // Gates the one-time tab-strip attention glow (see `.tab-attention-glow--armed`
@@ -326,6 +350,12 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     useEffect(() => {
         setShowRankedHeatmap(hasKnownRankedGames);
     }, [hasKnownRankedGames, playerId]);
+
+    useEffect(() => {
+        // Re-show the CB heatmap on player switch; the component hides it again
+        // if the new player has no stored CB summary point.
+        setShowClanBattleHeatmap(true);
+    }, [playerId]);
 
     useEffect(() => {
         dispatchPlayerRouteSectionRendered(panelSectionIdByTab[activeTab], playerId, 'immediate');
@@ -736,12 +766,21 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 same ranked-history signal as the heatmap. */}
                             {showRankedHeatmap ? (
                                 <div className="mt-4">
+                                    <RankedSeasonScatterSVG playerId={playerId} isLoading={isLoading} theme={theme} />
+                                </div>
+                            ) : null}
+
+                            {/* Season activity timeline (year markers) below the
+                                scatter — shows where the player's ranked seasons
+                                cluster in time. */}
+                            {showRankedHeatmap ? (
+                                <div className="mt-2">
                                     <SectionHeadingWithTooltip
-                                        title="Season Win Rate vs Battles"
-                                        description="Each point is one ranked season, placed by total ranked battles (x) and win rate (y) and colored by win rate. Hover a point for its season."
+                                        title="Ranked Season Timeline"
+                                        description="Where the player's ranked seasons fall in time. Each marker is one season, positioned by year; its shape shows the highest league reached that season, its size the battles played (relative to the player's own range), and its color the season win rate."
                                         className="mb-2 pl-[15px]"
                                     />
-                                    <RankedSeasonScatterSVG playerId={playerId} isLoading={isLoading} theme={theme} />
+                                    <RankedSeasonTimelineSVG playerId={playerId} isLoading={isLoading} theme={theme} />
                                 </div>
                             ) : null}
 
@@ -753,7 +792,9 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 </div>
                             ) : null}
 
-                            <div className="mt-4">
+                            {/* 30px gap between the season-glyph legend and the
+                                Ranked Seasons header (requested spacing). */}
+                            <div className="mt-[30px]">
                                 {/* Label + table share the tab's 15px left inset (same
                                     x as the Ranked Games vs Win Rate header above); the
                                     table also pulls in 20px on the right. */}
@@ -868,10 +909,41 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         {hasClan ? (
                             <div>
                                 <SectionHeadingWithTooltip
-                                    title="Clan Battle Seasons"
-                                    description="Player-specific clan battle participation by season, including battles played, ship tier bracket, and season win rate."
+                                    title="Clan Battles vs Win Rate"
+                                    description="Where this player sits in the tracked population by total clan battles and overall win rate (the heatmap: each tile is a pocket of players, the outlined marker is this player), followed by their own per-season battles and win rate below."
                                     className="mb-[18px] pt-2.5 pl-[15px]"
                                 />
+                                {/* Population heatmap at the top — mirrors the ranked
+                                    tab. Hides only itself (setShowClanBattleHeatmap)
+                                    when the player has no stored CB summary point;
+                                    the scatter/timeline/table below stay. */}
+                                {showClanBattleHeatmap ? (
+                                    <div className="mb-4">
+                                        <ClanBattleWRBattlesHeatmapSVG
+                                            playerId={playerId}
+                                            onVisibilityChange={setShowClanBattleHeatmap}
+                                            theme={theme}
+                                        />
+                                    </div>
+                                ) : null}
+                                {/* Per-season scatter above the table — clan battles
+                                    (x) vs win rate (y), one dot per season colored by
+                                    WR (circles; no CB league bracket is in the
+                                    payload). Mirrors the ranked-history scatter. */}
+                                <div className="mb-2">
+                                    <ClanBattleSeasonScatterSVG playerId={playerId} theme={theme} />
+                                </div>
+                                {/* Season activity timeline (year markers) below the
+                                    scatter — shows where the player's clan-battle
+                                    seasons cluster in time. */}
+                                <div className="mb-4">
+                                    <SectionHeadingWithTooltip
+                                        title="Clan Season Timeline"
+                                        description="Where the player's clan battle seasons fall in time. Each marker is one season, positioned by year, sized by battles played (relative to the player's own range), and colored by season win rate."
+                                        className="mb-2 pl-[15px]"
+                                    />
+                                    <ClanBattleSeasonTimelineSVG playerId={playerId} theme={theme} />
+                                </div>
                                 {/* Content shares the header's 15px inset, mirrored
                                     on the right so the table stays centered. */}
                                 <div className="px-[15px]">

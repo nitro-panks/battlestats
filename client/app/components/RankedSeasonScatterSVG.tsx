@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
+import { leagueOrderFrom, leagueSymbol, leagueStroke, leagueInnerBorderColor } from '../lib/rankedLeagueGlyph';
 import wrColor from '../lib/wrColor';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
@@ -18,27 +19,20 @@ interface RankedSeasonPoint {
     win_rate: number; // 0..1 fraction
     highest_league?: number;
     highest_league_name?: string;
+    start_date?: string | null;
 }
 
-// Ranked league ordinal (Bronze < Silver < Gold < Typhoon < Hurricane), matching
-// RankedSeasons' getRankOrderValue. 0 = unknown (old rank-only seasons).
-const leagueOrder = (season: RankedSeasonPoint): number => {
-    const map: Record<string, number> = { bronze: 1, silver: 2, gold: 3, typhoon: 4, hurricane: 5 };
-    const byName = map[(season.highest_league_name ?? '').trim().toLowerCase()];
-    return byName ?? (Number.isFinite(season.highest_league) ? Number(season.highest_league) : 0);
+// First 4-digit run in the season's start date (ISO "YYYY-…" or similar).
+const seasonYear = (startDate?: string | null): string | null => {
+    const match = /(\d{4})/.exec(startDate ?? '');
+    return match ? match[1] : null;
 };
 
-// Glyph shape encodes the season's highest league: circle (Bronze / unknown),
-// square-on-point (Silver — a 45°-rotated square, squarer than d3's rhombus
-// diamond), star (Gold and the two leagues above it). Fill still encodes win
-// rate, so shape and color are independent channels. Sizes are AREA; stars and
-// squares read smaller than a circle at equal area, so they're bumped up.
-const seasonSymbol = (season: RankedSeasonPoint) => {
-    const order = leagueOrder(season);
-    if (order >= 3) return { type: d3.symbolStar, size: 135, rotate: 0 };
-    if (order === 2) return { type: d3.symbolSquare, size: 95, rotate: 45 };
-    return { type: d3.symbolCircle, size: 85, rotate: 0 };
-};
+// League glyphs (shape/border/inner-hairline) live in ../lib/rankedLeagueGlyph
+// so the ranked scatter + timeline stay identical. These thin wrappers adapt a
+// RankedSeasonPoint to those helpers.
+const leagueOrder = (season: RankedSeasonPoint): number => leagueOrderFrom(season.highest_league_name, season.highest_league);
+const seasonSymbol = (season: RankedSeasonPoint) => leagueSymbol(leagueOrder(season));
 
 interface RankedSeasonScatterSVGProps {
     playerId: number;
@@ -164,26 +158,33 @@ const drawChart = (
     // never collides with the points.
     const detail = svg.append('g')
         .attr('class', 'hover-detail')
-        .attr('transform', `translate(0, ${compact ? -12 : -14})`)
+        .attr('transform', `translate(${width}, ${compact ? -14 : -16})`)
         .style('opacity', 0)
         .style('pointer-events', 'none');
-    const detailText = detail.append('text').attr('x', 0).attr('y', 0).attr('dominant-baseline', 'hanging');
+    const detailText = detail.append('text').attr('x', 0).attr('y', 0)
+        .attr('dominant-baseline', 'hanging').attr('text-anchor', 'end');
 
     const showDetail = (season: RankedSeasonPoint) => {
         detailText.selectAll('*').remove();
         detailText.append('tspan')
-            .style('font-size', '11px').attr('font-weight', '700').style('fill', colors.accentLink)
+            .style('font-size', '14px').attr('font-weight', '700').style('fill', colors.accentLink)
             .text(season.season_label);
+        const year = seasonYear(season.start_date);
+        if (year) {
+            detailText.append('tspan')
+                .attr('dx', 8).style('font-size', '13px').style('fill', colors.labelMuted)
+                .text(year);
+        }
         if (season.highest_league_name) {
             detailText.append('tspan')
-                .attr('dx', 10).style('font-size', '10px').style('fill', colors.labelText)
+                .attr('dx', 12).style('font-size', '13px').style('fill', colors.labelText)
                 .text(season.highest_league_name);
         }
         detailText.append('tspan')
-            .attr('dx', 10).style('font-size', '10px').style('fill', colors.labelText)
+            .attr('dx', 12).style('font-size', '13px').style('fill', colors.labelText)
             .text(`${season.total_battles.toLocaleString()} Battles`);
         detailText.append('tspan')
-            .attr('dx', 10).style('font-size', '10px').style('fill', colors.labelText)
+            .attr('dx', 12).style('font-size', '13px').style('fill', colors.labelText)
             .text(`${(season.win_rate * 100).toFixed(1)}% WR`);
         detail.style('opacity', 1);
     };
@@ -196,16 +197,11 @@ const drawChart = (
 
     // Border encodes league metal: 1px silver on the Silver squares, 1px gold on
     // the Gold+ stars; Bronze/unknown keeps the neutral card-bg contrast ring.
-    const strokeFor = (season: RankedSeasonPoint): { color: string; width: number } => {
-        const order = leagueOrder(season);
-        if (order >= 3) return { color: colors.badgeI, width: 1 };
-        if (order === 2) return { color: colors.badgeII, width: 1 };
-        return { color: colors.barBg, width: 1.5 };
-    };
+    const strokeFor = (season: RankedSeasonPoint) => leagueStroke(leagueOrder(season), colors);
 
     // Hairline drawn just inside the metal border of the Silver/Gold glyphs so
     // the metal ring reads against the fill; black in dark mode, white in light.
-    const innerBorderColor = theme === 'dark' ? '#000000' : '#ffffff';
+    const innerBorderColor = leagueInnerBorderColor(theme);
 
     // One group per season so the metal-bordered glyph and its inner hairline
     // scale together on hover.
