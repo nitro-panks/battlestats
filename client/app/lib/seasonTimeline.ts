@@ -88,15 +88,20 @@ export const drawSeasonTimeline = (
     const markTitle = (mark: TimelineMark) => `${mark.label} ${Math.floor(mark.frac)}: ${mark.battles.toLocaleString()} battles, ${mark.winRate.toFixed(1)}% WR`;
 
     // Marker size encodes battles played, relative to the player's OWN record:
-    // fewest battles → 1× base, most → 4× (linear); a flat/single record sits at
-    // the 2.5× midpoint. Returned as a LINEAR scale (radius/side); glyph areas
-    // use its square.
+    // fewest battles → 1× base, most → maxMult (linear); a flat/single record
+    // sits at the midpoint. Returned as a LINEAR scale (radius/side). Circles use
+    // it directly (max 4×); glyph AREAS use its square, so glyphs cap lower (3×)
+    // to keep the biggest star from ballooning.
     const battlesValues = marks.map((mark) => mark.battles);
     const minBattles = Math.min(...battlesValues);
     const maxBattles = Math.max(...battlesValues);
-    const sizeScale = (battles: number): number => (
-        maxBattles > minBattles ? 1 + 3 * (battles - minBattles) / (maxBattles - minBattles) : 2.5
+    const sizeScaleTo = (maxMult: number) => (battles: number): number => (
+        maxBattles > minBattles
+            ? 1 + (maxMult - 1) * (battles - minBattles) / (maxBattles - minBattles)
+            : 1 + (maxMult - 1) / 2
     );
+    const circleSizeScale = sizeScaleTo(4);
+    const glyphSizeScale = sizeScaleTo(3);
 
     if (glyphByLeague) {
         // League glyphs (shape + metal border + inner hairline), identical to the
@@ -118,7 +123,7 @@ export const drawSeasonTimeline = (
         groups.append('path')
             .attr('d', (mark: TimelineMark) => {
                 const { type, size } = leagueSymbol(orderOf(mark));
-                return symbolGen.type(type).size(size * sizeScale(mark.battles) ** 2)();
+                return symbolGen.type(type).size(size * glyphSizeScale(mark.battles) ** 2)();
             })
             .attr('fill', (mark: TimelineMark) => wrColor(mark.winRate))
             .attr('stroke', (mark: TimelineMark) => leagueStroke(orderOf(mark), colors).color)
@@ -128,7 +133,7 @@ export const drawSeasonTimeline = (
             .append('path')
             .attr('d', (mark: TimelineMark) => {
                 const { type, size } = leagueSymbol(orderOf(mark));
-                return symbolGen.type(type).size(size * 0.66 * sizeScale(mark.battles) ** 2)();
+                return symbolGen.type(type).size(size * 0.66 * glyphSizeScale(mark.battles) ** 2)();
             })
             .attr('fill', 'none')
             .attr('stroke', innerBorder)
@@ -154,7 +159,7 @@ export const drawSeasonTimeline = (
         .append('circle')
         .attr('cx', (mark: TimelineMark) => x(mark.frac))
         .attr('cy', baselineY)
-        .attr('r', (mark: TimelineMark) => 5 * sizeScale(mark.battles))
+        .attr('r', (mark: TimelineMark) => 5 * circleSizeScale(mark.battles))
         .attr('fill', (mark: TimelineMark) => wrColor(mark.winRate))
         .attr('stroke', colors.barBg)
         .attr('stroke-width', 1.5)
@@ -164,9 +169,9 @@ export const drawSeasonTimeline = (
 
     dots
         .on('mouseover', function onOver(this: SVGCircleElement, _event: MouseEvent, mark: TimelineMark) {
-            d3.select(this).attr('r', 5 * sizeScale(mark.battles) * 1.4).attr('stroke', colors.labelText);
+            d3.select(this).attr('r', 5 * circleSizeScale(mark.battles) * 1.4).attr('stroke', colors.labelText);
         })
         .on('mouseout', function onOut(this: SVGCircleElement, _event: MouseEvent, mark: TimelineMark) {
-            d3.select(this).attr('r', 5 * sizeScale(mark.battles)).attr('stroke', colors.barBg);
+            d3.select(this).attr('r', 5 * circleSizeScale(mark.battles)).attr('stroke', colors.barBg);
         });
 };

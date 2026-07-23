@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
 import wrColor from '../lib/wrColor';
-import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
 import { degradationMonitor } from '../lib/degradationMonitor';
 import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
@@ -61,13 +61,14 @@ const drawChart = (
     svgWidth: number,
     svgHeight: number,
     theme: ChartTheme,
+    emptyMessage: string,
 ): void => {
     const colors = chartColors[theme];
     const plot = seasons.filter((season) => (season.battles || 0) > 0);
 
     d3.select(container).selectAll('*').remove();
     if (plot.length === 0) {
-        drawSvgMessage(container, 'No clan battle seasons to plot yet.', { width: svgWidth, height: 120, color: colors.labelMuted });
+        drawSvgMessage(container, emptyMessage, { width: svgWidth, height: 120, color: colors.labelMuted });
         return;
     }
 
@@ -195,6 +196,9 @@ const ClanBattleSeasonScatterSVG: React.FC<ClanBattleSeasonScatterSVGProps> = ({
     const { realm } = useRealm();
     const requestSignal = usePlayerRequestSignal();
     const [seasons, setSeasons] = useState<ClanBattleSeasonPoint[] | null>(null);
+    // True while the endpoint is still serving []+pending (cold cache, background
+    // WG fetch). Distinguishes "loading" from a genuine settled-empty.
+    const [pending, setPending] = useState(true);
 
     // Fetch CB seasons (same endpoint + pending-retry as PlayerClanBattleSeasons;
     // fetchSharedJson dedups the two callers into one request).
@@ -209,20 +213,25 @@ const ClanBattleSeasonScatterSVG: React.FC<ClanBattleSeasonScatterSVGProps> = ({
             try {
                 const { data, headers } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
                     label: `Player clan battle seasons ${playerId}`,
-                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                     signal: requestSignal,
-                    cacheKey: `clan-cb-seasons:${playerId}:${pendingAttempts}`,
+                    cacheKey: `clan-cb-seasons:${realm}:${playerId}:${pendingAttempts}`,
                     responseHeaders: ['X-Clan-Battle-Seasons-Pending'],
                 });
                 if (cancelled) return;
                 setSeasons(Array.isArray(data) ? (data as ClanBattleSeasonPoint[]) : []);
-                if (headers['X-Clan-Battle-Seasons-Pending'] === 'true' && pendingAttempts < CB_SEASONS_PENDING_RETRY_LIMIT) {
+                const isPending = headers['X-Clan-Battle-Seasons-Pending'] === 'true';
+                if (isPending && pendingAttempts < CB_SEASONS_PENDING_RETRY_LIMIT) {
+                    setPending(true);
                     pendingAttempts += 1;
                     timeoutId = setTimeout(() => { void fetchSeasons(); }, CB_SEASONS_PENDING_RETRY_DELAY_MS * degradationMonitor.getPollIntervalMultiplier());
+                } else {
+                    setPending(false);
                 }
             } catch (err) {
                 if (isAbortError(err) || cancelled) return;
                 setSeasons([]);
+                setPending(false);
             }
         };
 
@@ -234,12 +243,17 @@ const ClanBattleSeasonScatterSVG: React.FC<ClanBattleSeasonScatterSVGProps> = ({
     }, [playerId, realm, isLoading, requestSignal]);
 
     useEffect(() => {
-        if (seasons === null || !containerRef.current) return undefined;
+        if (!containerRef.current) return undefined;
         const resolveWidth = () => resolveContainerChartWidth(containerRef.current?.clientWidth, svgWidth);
         const redraw = () => {
-            if (containerRef.current) {
-                drawChart(containerRef.current, seasons, resolveWidth(), svgHeight, theme);
+            if (!containerRef.current) return;
+            // Still loading (no data yet, or []+pending): show a quiet loading
+            // note rather than the "no seasons" empty state.
+            if (seasons === null || (seasons.length === 0 && pending)) {
+                drawChart(containerRef.current, [], resolveWidth(), svgHeight, theme, 'Loading clan battle seasons…');
+                return;
             }
+            drawChart(containerRef.current, seasons, resolveWidth(), svgHeight, theme, 'No clan battle seasons to plot yet.');
         };
         redraw();
 
@@ -253,7 +267,7 @@ const ClanBattleSeasonScatterSVG: React.FC<ClanBattleSeasonScatterSVGProps> = ({
             window.removeEventListener('resize', onResize);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
-    }, [seasons, theme, svgHeight, svgWidth]);
+    }, [seasons, pending, theme, svgHeight, svgWidth]);
 
     return (
         <div

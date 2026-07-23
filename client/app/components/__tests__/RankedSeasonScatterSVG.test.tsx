@@ -17,9 +17,7 @@ const resolved = (data: unknown) => Promise.resolve({ data, headers: {} });
 describe('RankedSeasonScatterSVG', () => {
     beforeEach(() => mockFetch.mockReset());
 
-    it('renders the labelled chart region and draws without throwing (multi-season)', async () => {
-        // Mixed leagues exercise the glyph mapping (star/diamond/circle) plus a
-        // league-less season (→ circle) without throwing.
+    it('renders the labelled chart region and one WR-colored circle per season', async () => {
         mockFetch.mockReturnValue(resolved([
             { season_id: 3, season_label: 'S3', total_battles: 400, win_rate: 0.55, highest_league_name: 'Gold' },
             { season_id: 2, season_label: 'S2', total_battles: 120, win_rate: 0.49, highest_league_name: 'Silver' },
@@ -30,7 +28,11 @@ describe('RankedSeasonScatterSVG', () => {
         render(<RankedSeasonScatterSVG playerId={1} theme="light" />);
 
         const region = screen.getByRole('img', { name: /win rate versus battles/i });
-        await waitFor(() => expect(region.querySelector('svg')).toBeTruthy());
+        // One circle per season (4) — wait for the data draw (the initial draw is
+        // a "loading" message while the fetch resolves).
+        await waitFor(() => expect(region.querySelectorAll('circle')).toHaveLength(4));
+        // A medal icon only for the Silver and Gold seasons (2).
+        expect(region.querySelectorAll('.medal-icon')).toHaveLength(2);
     });
 
     it('survives a single season (collapsed domains) without throwing', async () => {

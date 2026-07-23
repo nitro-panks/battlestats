@@ -61,7 +61,7 @@ describe('RankedSeasons', () => {
 
         expect(mockFetchSharedJson).toHaveBeenNthCalledWith(1, '/api/fetch/ranked_data/123/?realm=na', expect.objectContaining({
             ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
-            cacheKey: 'ranked-data:123:0:0',
+            cacheKey: 'ranked-data:na:123:0:0',
         }));
     });
 

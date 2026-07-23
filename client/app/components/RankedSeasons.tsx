@@ -134,7 +134,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                         label: `Ranked data ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                         signal: requestSignal,
-                        cacheKey: `ranked-data:${playerId}:${pendingAttempts}:${attempt}`,
+                        cacheKey: `ranked-data:${realm}:${playerId}:${pendingAttempts}:${attempt}`,
                         responseHeaders: ['X-Ranked-Pending'],
                     });
 

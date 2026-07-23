@@ -382,31 +382,48 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     cacheKey: `tier-type:${playerId}:0:0:${refreshNonce}`,
                     responseHeaders: ['X-Tier-Type-Pending'],
                 }),
+                // No explicit cacheKey: RankedWRBattlesHeatmapSVG fetches this same
+                // URL with the URL-default key, so this warm-up must share that key
+                // (an explicit key here would populate a dead entry the component
+                // never reads, leaving the heatmap cold on first open).
                 fetchSharedJson<unknown>(withRealm(`/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`, realm), {
                     label: `Ranked correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                     priority: 'low',
                     signal: requestSignal,
-                    cacheKey: `ranked-corr:${playerId}:${refreshNonce}`,
                 }),
                 fetchSharedJson<unknown>(withRealm(`/api/fetch/ranked_data/${playerId}/`, realm), {
                     label: `Ranked data ${playerId}`,
                     ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                     priority: 'low',
                     signal: requestSignal,
-                    cacheKey: `ranked-data:${playerId}:0:0:${refreshNonce}`,
+                    cacheKey: `ranked-data:${realm}:${playerId}:0:0:${refreshNonce}`,
                     responseHeaders: ['X-Ranked-Pending'],
                 }),
             ];
 
             if (hasClan) {
                 requests.push(
+                    // CB population heatmap — mirrors the ranked correlation warm-up
+                    // above (URL-default key shared with ClanBattleWRBattlesHeatmapSVG),
+                    // so the Clan Battles tab's heatmap is warm on first open.
+                    fetchSharedJson<unknown>(withRealm(`/api/fetch/player_correlation/clan_battle_wr_battles/${playerId}/`, realm), {
+                        label: `Clan battle correlation ${playerId}`,
+                        ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
+                        priority: 'low',
+                        signal: requestSignal,
+                    }),
                     fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
                         label: `Player clan battle seasons ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                         priority: 'low',
                         signal: requestSignal,
-                        cacheKey: `clan-cb-seasons:${playerId}:${refreshNonce}`,
+                        cacheKey: `clan-cb-seasons:${realm}:${playerId}:${refreshNonce}`,
+                        // Must capture the pending header: the CB scatter/timeline/table
+                        // share this exact cacheKey (pendingAttempts 0), so if this warm-up
+                        // caches a cold []+pending result WITHOUT the flag, those components
+                        // read the entry, see no pending, and settle empty without retrying.
+                        responseHeaders: ['X-Clan-Battle-Seasons-Pending'],
                     }),
                 );
             }

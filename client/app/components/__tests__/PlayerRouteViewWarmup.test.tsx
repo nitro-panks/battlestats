@@ -216,7 +216,7 @@ describe('PlayerRouteView tab warmup smoke', () => {
             expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/77/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
         });
 
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/77/?realm=na', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:77:0:0:0' }));
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/77/?realm=na', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:na:77:0:0:0' }));
         expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/tier_type/77/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/type_data/77/?realm=na', expect.anything());
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/tier_data/77/?realm=na', expect.anything());
