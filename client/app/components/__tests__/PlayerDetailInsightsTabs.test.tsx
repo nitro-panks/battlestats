@@ -749,17 +749,25 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            // 4 background warmup calls + 2 from the embedded Activity card (its
-            // main window/mode fetch and the always-month sparkline fetch). The
+            // 5 background warmup calls (tier_type, ranked correlation, ranked_data,
+            // CB correlation heatmap, CB seasons) + 2 from the embedded Activity card
+            // (its main window/mode fetch and the always-month sparkline fetch). The
             // profile chart still does NOT self-fetch tier_type until Profile is
             // selected; warmup pre-warms tier_type once.
-            expect(mockFetchSharedJson).toHaveBeenCalledTimes(6);
+            expect(mockFetchSharedJson).toHaveBeenCalledTimes(7);
         });
 
         expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/ranked_wr_battles/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/101/?realm=na', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:101:0:0:0' }));
+        // CB population heatmap warm-up — URL-default key shared with the heatmap
+        // component so its Clan Battles tab is warm on first open (symmetry with ranked).
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/clan_battle_wr_battles/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/ranked_data/101/?realm=na', expect.objectContaining({ ttlMs: 30000, cacheKey: 'ranked-data:na:101:0:0:0' }));
         expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_correlation/tier_type/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
-        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_clan_battle_seasons/101/?realm=na', expect.objectContaining({ ttlMs: 30000 }));
+        // The CB warm-up shares its cacheKey with the CB scatter/timeline/table
+        // (pendingAttempts 0), so it MUST capture the pending header — otherwise a
+        // cold []+pending warm-up poisons the shared cache and those components
+        // settle empty without retrying (first-load-empty regression).
+        expect(mockFetchSharedJson).toHaveBeenCalledWith('/api/fetch/player_clan_battle_seasons/101/?realm=na', expect.objectContaining({ ttlMs: 30000, cacheKey: 'clan-cb-seasons:na:101:0', responseHeaders: ['X-Clan-Battle-Seasons-Pending'] }));
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/type_data/101/?realm=na', expect.anything());
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/tier_data/101/?realm=na', expect.anything());
     });

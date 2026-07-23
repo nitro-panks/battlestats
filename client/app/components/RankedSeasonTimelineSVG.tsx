@@ -61,6 +61,8 @@ const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
     const { realm } = useRealm();
     const requestSignal = usePlayerRequestSignal();
     const [seasons, setSeasons] = useState<RankedSeasonRow[] | null>(null);
+    // True while the endpoint is still serving []+pending (cold cache).
+    const [pending, setPending] = useState(true);
 
     useEffect(() => {
         if (isLoading) return undefined;
@@ -75,7 +77,7 @@ const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
                         label: `Ranked data ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                         signal: requestSignal,
-                        cacheKey: `ranked-data:${playerId}:${pendingAttempts}:${attempt}`,
+                        cacheKey: `ranked-data:${realm}:${playerId}:${pendingAttempts}:${attempt}`,
                         responseHeaders: ['X-Ranked-Pending'],
                     });
                     return { data: payload.data, pending: payload.headers['X-Ranked-Pending'] === 'true' };
@@ -97,16 +99,21 @@ const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
                 if (!isMounted) return;
                 if (result === null) {
                     setSeasons([]);
+                    setPending(false);
                     return;
                 }
                 setSeasons(result.data);
                 if (result.pending && pendingAttempts < RANKED_PENDING_RETRY_LIMIT) {
+                    setPending(true);
                     pendingAttempts += 1;
                     timeoutId = setTimeout(() => { void fetchData(); }, RANKED_PENDING_RETRY_DELAY_MS * degradationMonitor.getPollIntervalMultiplier());
+                } else {
+                    setPending(false);
                 }
             } catch (err) {
                 if (isAbortError(err) || !isMounted) return;
                 setSeasons([]);
+                setPending(false);
             }
         };
 
@@ -118,13 +125,15 @@ const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
     }, [playerId, realm, isLoading, requestSignal]);
 
     useEffect(() => {
-        if (seasons === null || !containerRef.current) return undefined;
-        const marks = toMarks(seasons);
+        if (!containerRef.current) return undefined;
         const resolveWidth = () => resolveContainerChartWidth(containerRef.current?.clientWidth, svgWidth);
         const redraw = () => {
-            if (containerRef.current) {
-                drawSeasonTimeline(containerRef.current, marks, resolveWidth(), svgHeight, theme, 'No dated ranked seasons to plot yet.', true);
+            if (!containerRef.current) return;
+            if (seasons === null || (seasons.length === 0 && pending)) {
+                drawSeasonTimeline(containerRef.current, [], resolveWidth(), svgHeight, theme, 'Loading ranked seasons…', true);
+                return;
             }
+            drawSeasonTimeline(containerRef.current, toMarks(seasons), resolveWidth(), svgHeight, theme, 'No dated ranked seasons to plot yet.', true);
         };
         redraw();
 
@@ -138,7 +147,7 @@ const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
             window.removeEventListener('resize', onResize);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
-    }, [seasons, theme, svgHeight, svgWidth]);
+    }, [seasons, pending, theme, svgHeight, svgWidth]);
 
     return (
         <div

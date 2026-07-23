@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
-import { leagueOrderFrom, leagueSymbol, leagueStroke, leagueInnerBorderColor } from '../lib/rankedLeagueGlyph';
+import { leagueOrderFrom } from '../lib/rankedLeagueGlyph';
 import wrColor from '../lib/wrColor';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
@@ -28,11 +28,9 @@ const seasonYear = (startDate?: string | null): string | null => {
     return match ? match[1] : null;
 };
 
-// League glyphs (shape/border/inner-hairline) live in ../lib/rankedLeagueGlyph
-// so the ranked scatter + timeline stay identical. These thin wrappers adapt a
-// RankedSeasonPoint to those helpers.
+// League ordinal (0 Bronze/unknown, 2 Silver, 3+ Gold and above). Silver+ get a
+// drop-line + medal icon at the axis.
 const leagueOrder = (season: RankedSeasonPoint): number => leagueOrderFrom(season.highest_league_name, season.highest_league);
-const seasonSymbol = (season: RankedSeasonPoint) => leagueSymbol(leagueOrder(season));
 
 interface RankedSeasonScatterSVGProps {
     playerId: number;
@@ -75,13 +73,14 @@ const drawChart = (
     svgWidth: number,
     svgHeight: number,
     theme: ChartTheme,
+    emptyMessage: string,
 ): void => {
     const colors = chartColors[theme];
     const plot = seasons.filter((season) => (season.total_battles || 0) > 0);
 
     d3.select(container).selectAll('*').remove();
     if (plot.length === 0) {
-        drawSvgMessage(container, 'No ranked seasons to plot yet.', { width: svgWidth, height: 120, color: colors.labelMuted });
+        drawSvgMessage(container, emptyMessage, { width: svgWidth, height: 120, color: colors.labelMuted });
         return;
     }
 
@@ -89,9 +88,11 @@ const drawChart = (
     // right also matches so the plots share a right edge. compact uses the same
     // svgWidth < 480 threshold the heatmap uses.
     const compact = svgWidth < 480;
+    // A touch more bottom room + tickPadding so the medal icons (Silver/Gold,
+    // just below the x-axis) sit above the axis labels.
     const margin = compact
-        ? { top: 16, right: 8, bottom: 40, left: 38 }
-        : { top: 20, right: 18, bottom: 46, left: 52 };
+        ? { top: 16, right: 8, bottom: 48, left: 38 }
+        : { top: 20, right: 18, bottom: 54, left: 52 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -130,7 +131,7 @@ const drawChart = (
     svg.append('g')
         .style('color', colors.labelText)
         .attr('transform', `translate(0, ${height})`)
-        .call(d3.axisBottom(x).ticks(compact ? 3 : 5, '~s').tickSizeOuter(0))
+        .call(d3.axisBottom(x).ticks(compact ? 3 : 5, '~s').tickSizeOuter(0).tickPadding(compact ? 12 : 14))
         .selectAll('text')
         .style('font-size', axisFontSize);
     svg.append('g')
@@ -141,7 +142,7 @@ const drawChart = (
 
     // Axis titles.
     svg.append('text')
-        .attr('x', width / 2).attr('y', height + (compact ? 32 : 36))
+        .attr('x', width / 2).attr('y', height + (compact ? 40 : 44))
         .attr('text-anchor', 'middle')
         .style('font-size', axisFontSize)
         .style('fill', colors.labelMuted)
@@ -154,8 +155,8 @@ const drawChart = (
         .style('fill', colors.labelMuted)
         .text('Win Rate');
 
-    // Hover detail sits in the top margin, left-aligned with the y-axis, so it
-    // never collides with the points.
+    // Hover detail sits in the top margin, right-aligned with the plot's right
+    // edge, so it never collides with the points.
     const detail = svg.append('g')
         .attr('class', 'hover-detail')
         .attr('transform', `translate(${width}, ${compact ? -14 : -16})`)
@@ -189,66 +190,46 @@ const drawChart = (
         detail.style('opacity', 1);
     };
 
-    // One symbol path per season: shape by league, fill by WR. The base
-    // translate is kept on a data attribute so hover can re-apply it with a
-    // scale (a symbol has no radius to bump like a circle did).
+    const cx = (season: RankedSeasonPoint) => x(season.total_battles);
+
+    // Silver/Gold+ seasons get a small metal icon just below the x-axis at the
+    // season's x: Silver = a sideways square, Gold+ = a star. No borders.
+    const medalSeasons = plot.filter((season) => leagueOrder(season) >= 2);
+    const iconY = height + (compact ? 8 : 9);
     const symbolGen = d3.symbol();
-    const pointTransform = (season: RankedSeasonPoint) => `translate(${x(season.total_battles)}, ${y(season.win_rate * 100)}) rotate(${seasonSymbol(season).rotate})`;
-
-    // Border encodes league metal: 1px silver on the Silver squares, 1px gold on
-    // the Gold+ stars; Bronze/unknown keeps the neutral card-bg contrast ring.
-    const strokeFor = (season: RankedSeasonPoint) => leagueStroke(leagueOrder(season), colors);
-
-    // Hairline drawn just inside the metal border of the Silver/Gold glyphs so
-    // the metal ring reads against the fill; black in dark mode, white in light.
-    const innerBorderColor = leagueInnerBorderColor(theme);
-
-    // One group per season so the metal-bordered glyph and its inner hairline
-    // scale together on hover.
-    const points = svg.append('g')
-        .selectAll('g')
-        .data(plot)
-        .enter()
-        .append('g')
-        .attr('transform', pointTransform)
-        .style('cursor', 'pointer');
-
-    points.append('path')
-        .attr('d', (season: RankedSeasonPoint) => {
-            const { type, size } = seasonSymbol(season);
-            return symbolGen.type(type).size(size)();
-        })
-        .attr('fill', (season: RankedSeasonPoint) => wrColor(season.win_rate * 100))
-        .attr('stroke', (season: RankedSeasonPoint) => strokeFor(season).color)
-        .attr('stroke-width', (season: RankedSeasonPoint) => strokeFor(season).width);
-
-    // Inner 1px hairline (Silver squares + Gold+ stars only), ~81% of the glyph
-    // radius so it sits just inside the metal border.
-    points.filter((season: RankedSeasonPoint) => leagueOrder(season) >= 2)
-        .append('path')
-        .attr('d', (season: RankedSeasonPoint) => {
-            const { type, size } = seasonSymbol(season);
-            return symbolGen.type(type).size(size * 0.66)();
-        })
-        .attr('fill', 'none')
-        .attr('stroke', innerBorderColor)
-        .attr('stroke-width', 1)
+    svg.append('g').selectAll('path')
+        .data(medalSeasons).enter().append('path')
+        .attr('class', 'medal-icon')
+        .attr('transform', (season: RankedSeasonPoint) => `translate(${cx(season)}, ${iconY}) rotate(${leagueOrder(season) >= 3 ? 0 : 45})`)
+        .attr('d', (season: RankedSeasonPoint) => symbolGen.type(leagueOrder(season) >= 3 ? d3.symbolStar : d3.symbolSquare).size(leagueOrder(season) >= 3 ? 52 : 42)())
+        .attr('fill', (season: RankedSeasonPoint) => (leagueOrder(season) >= 3 ? colors.badgeI : colors.badgeII))
         .style('pointer-events', 'none');
 
-    points.append('title')
+    // One circle per season, colored by win rate. r5 matches the clan-battle
+    // scatter's dots (hover → 7 on both).
+    const circleR = 5;
+    const circles = svg.append('g').selectAll('circle')
+        .data(plot).enter().append('circle')
+        .attr('cx', (season: RankedSeasonPoint) => x(season.total_battles))
+        .attr('cy', (season: RankedSeasonPoint) => y(season.win_rate * 100))
+        .attr('r', circleR)
+        .attr('fill', (season: RankedSeasonPoint) => wrColor(season.win_rate * 100))
+        .attr('stroke', colors.barBg).attr('stroke-width', 1.5)
+        .style('cursor', 'pointer');
+
+    circles.append('title')
         .text((season: RankedSeasonPoint) => {
             const league = season.highest_league_name ? `${season.highest_league_name} · ` : '';
             return `${season.season_label}: ${league}${season.total_battles.toLocaleString()} battles, ${(season.win_rate * 100).toFixed(1)}% WR`;
         });
 
-    points
-        .on('mouseover', function onOver(this: SVGGElement, _event: MouseEvent, season: RankedSeasonPoint) {
-            // Keep the league metal border; the scale is the hover emphasis.
-            d3.select(this).attr('transform', `${pointTransform(season)} scale(1.35)`);
+    circles
+        .on('mouseover', function onOver(this: SVGCircleElement, _event: MouseEvent, season: RankedSeasonPoint) {
+            d3.select(this).attr('r', circleR * 1.4).attr('stroke', colors.labelText);
             showDetail(season);
         })
-        .on('mouseout', function onOut(this: SVGGElement, _event: MouseEvent, season: RankedSeasonPoint) {
-            d3.select(this).attr('transform', pointTransform(season));
+        .on('mouseout', function onOut(this: SVGCircleElement) {
+            d3.select(this).attr('r', circleR).attr('stroke', colors.barBg);
             detail.style('opacity', 0);
         });
 };
@@ -264,6 +245,9 @@ const RankedSeasonScatterSVG: React.FC<RankedSeasonScatterSVGProps> = ({
     const { realm } = useRealm();
     const requestSignal = usePlayerRequestSignal();
     const [seasons, setSeasons] = useState<RankedSeasonPoint[] | null>(null);
+    // True while the endpoint is still serving []+pending (cold cache), so the
+    // chart shows "loading" instead of the settled-empty message.
+    const [pending, setPending] = useState(true);
 
     // Fetch ranked seasons (same endpoint + pending-retry as the RankedSeasons
     // table; fetchSharedJson dedups the two callers so it's one request).
@@ -280,7 +264,7 @@ const RankedSeasonScatterSVG: React.FC<RankedSeasonScatterSVGProps> = ({
                         label: `Ranked data ${playerId}`,
                         ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                         signal: requestSignal,
-                        cacheKey: `ranked-data:${playerId}:${pendingAttempts}:${attempt}`,
+                        cacheKey: `ranked-data:${realm}:${playerId}:${pendingAttempts}:${attempt}`,
                         responseHeaders: ['X-Ranked-Pending'],
                     });
                     return { data: payload.data, pending: payload.headers['X-Ranked-Pending'] === 'true' };
@@ -302,16 +286,21 @@ const RankedSeasonScatterSVG: React.FC<RankedSeasonScatterSVGProps> = ({
                 if (!isMounted) return;
                 if (result === null) {
                     setSeasons([]);
+                    setPending(false);
                     return;
                 }
                 setSeasons(result.data);
                 if (result.pending && pendingAttempts < RANKED_PENDING_RETRY_LIMIT) {
+                    setPending(true);
                     pendingAttempts += 1;
                     timeoutId = setTimeout(() => { void fetchData(); }, RANKED_PENDING_RETRY_DELAY_MS * degradationMonitor.getPollIntervalMultiplier());
+                } else {
+                    setPending(false);
                 }
             } catch (err) {
                 if (isAbortError(err) || !isMounted) return;
                 setSeasons([]);
+                setPending(false);
             }
         };
 
@@ -325,13 +314,16 @@ const RankedSeasonScatterSVG: React.FC<RankedSeasonScatterSVGProps> = ({
     // Draw on data/theme/size change, and redraw on resize so the axis keeps
     // filling the container (staying aligned with the heatmap above).
     useEffect(() => {
-        if (seasons === null || !containerRef.current) return undefined;
+        if (!containerRef.current) return undefined;
         const resolveWidth = () => resolveContainerChartWidth(containerRef.current?.clientWidth, svgWidth);
 
         const redraw = () => {
-            if (containerRef.current) {
-                drawChart(containerRef.current, seasons, resolveWidth(), svgHeight, theme);
+            if (!containerRef.current) return;
+            if (seasons === null || (seasons.length === 0 && pending)) {
+                drawChart(containerRef.current, [], resolveWidth(), svgHeight, theme, 'Loading ranked seasons…');
+                return;
             }
+            drawChart(containerRef.current, seasons, resolveWidth(), svgHeight, theme, 'No ranked seasons to plot yet.');
         };
         redraw();
 
@@ -345,7 +337,7 @@ const RankedSeasonScatterSVG: React.FC<RankedSeasonScatterSVGProps> = ({
             window.removeEventListener('resize', onResize);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
-    }, [seasons, theme, svgHeight, svgWidth]);
+    }, [seasons, pending, theme, svgHeight, svgWidth]);
 
     return (
         <div

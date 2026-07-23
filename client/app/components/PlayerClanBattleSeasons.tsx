@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import wrColor from '../lib/wrColor';
-import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
 import { degradationMonitor } from '../lib/degradationMonitor';
 import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
@@ -89,9 +89,9 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
             try {
                 const { data, headers } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
                     label: `Player clan battle seasons ${playerId}`,
-                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                     signal: requestSignal,
-                    cacheKey: `clan-cb-seasons:${playerId}:${pendingAttempts}`,
+                    cacheKey: `clan-cb-seasons:${realm}:${playerId}:${pendingAttempts}`,
                     responseHeaders: ['X-Clan-Battle-Seasons-Pending'],
                 });
                 if (cancelled) {

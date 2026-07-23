@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { drawSeasonTimeline, fractionalYear, type TimelineMark } from '../lib/seasonTimeline';
-import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
 import { degradationMonitor } from '../lib/degradationMonitor';
 import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
@@ -46,6 +46,9 @@ const ClanBattleSeasonTimelineSVG: React.FC<ClanBattleSeasonTimelineSVGProps> = 
     const { realm } = useRealm();
     const requestSignal = usePlayerRequestSignal();
     const [seasons, setSeasons] = useState<ClanBattleSeasonRow[] | null>(null);
+    // True while the endpoint is still serving []+pending (cold cache); keeps the
+    // timeline showing "loading" instead of the settled-empty message.
+    const [pending, setPending] = useState(true);
 
     useEffect(() => {
         if (isLoading) return undefined;
@@ -58,20 +61,25 @@ const ClanBattleSeasonTimelineSVG: React.FC<ClanBattleSeasonTimelineSVGProps> = 
             try {
                 const { data, headers } = await fetchSharedJson<unknown>(withRealm(`/api/fetch/player_clan_battle_seasons/${playerId}/`, realm), {
                     label: `Player clan battle seasons ${playerId}`,
-                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                    ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS,
                     signal: requestSignal,
-                    cacheKey: `clan-cb-seasons:${playerId}:${pendingAttempts}`,
+                    cacheKey: `clan-cb-seasons:${realm}:${playerId}:${pendingAttempts}`,
                     responseHeaders: ['X-Clan-Battle-Seasons-Pending'],
                 });
                 if (cancelled) return;
                 setSeasons(Array.isArray(data) ? (data as ClanBattleSeasonRow[]) : []);
-                if (headers['X-Clan-Battle-Seasons-Pending'] === 'true' && pendingAttempts < CB_SEASONS_PENDING_RETRY_LIMIT) {
+                const isPending = headers['X-Clan-Battle-Seasons-Pending'] === 'true';
+                if (isPending && pendingAttempts < CB_SEASONS_PENDING_RETRY_LIMIT) {
+                    setPending(true);
                     pendingAttempts += 1;
                     timeoutId = setTimeout(() => { void fetchSeasons(); }, CB_SEASONS_PENDING_RETRY_DELAY_MS * degradationMonitor.getPollIntervalMultiplier());
+                } else {
+                    setPending(false);
                 }
             } catch (err) {
                 if (isAbortError(err) || cancelled) return;
                 setSeasons([]);
+                setPending(false);
             }
         };
 
@@ -83,13 +91,15 @@ const ClanBattleSeasonTimelineSVG: React.FC<ClanBattleSeasonTimelineSVGProps> = 
     }, [playerId, realm, isLoading, requestSignal]);
 
     useEffect(() => {
-        if (seasons === null || !containerRef.current) return undefined;
-        const marks = toMarks(seasons);
+        if (!containerRef.current) return undefined;
         const resolveWidth = () => resolveContainerChartWidth(containerRef.current?.clientWidth, svgWidth);
         const redraw = () => {
-            if (containerRef.current) {
-                drawSeasonTimeline(containerRef.current, marks, resolveWidth(), svgHeight, theme, 'No dated clan battle seasons to plot yet.');
+            if (!containerRef.current) return;
+            if (seasons === null || (seasons.length === 0 && pending)) {
+                drawSeasonTimeline(containerRef.current, [], resolveWidth(), svgHeight, theme, 'Loading clan battle seasons…');
+                return;
             }
+            drawSeasonTimeline(containerRef.current, toMarks(seasons), resolveWidth(), svgHeight, theme, 'No dated clan battle seasons to plot yet.');
         };
         redraw();
 
@@ -103,7 +113,7 @@ const ClanBattleSeasonTimelineSVG: React.FC<ClanBattleSeasonTimelineSVGProps> = 
             window.removeEventListener('resize', onResize);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
-    }, [seasons, theme, svgHeight, svgWidth]);
+    }, [seasons, pending, theme, svgHeight, svgWidth]);
 
     return (
         <div
