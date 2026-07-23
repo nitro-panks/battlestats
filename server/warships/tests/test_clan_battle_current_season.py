@@ -323,6 +323,29 @@ class ClanBattleSeasonActivityImputationTests(TestCase):
         self.assertEqual(row.start_date, date.today())
         self.assertEqual(row.label, 'S35')
         self.assertEqual(get_current_clan_battle_season_id(), 35)
+        # The imputed season is injected into season_meta so the caller's per-row
+        # start_date/label reflect it instead of nulls.
+        self.assertEqual(meta[35]['start_date'], date.today().isoformat())
+        self.assertEqual(meta[35]['label'], 'S35')
+
+    def test_fetch_stamps_imputed_start_onto_result_row(self):
+        # End-to-end: the per-season result row shows the imputed date, not null.
+        cache.clear()
+        Player.objects.create(name='CBImpute', player_id=6262, realm='na')
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        with patch('warships.data._get_clan_battle_seasons_metadata') as mock_meta, \
+                patch('warships.data._fetch_clan_battle_season_stats') as mock_stats:
+            mock_meta.return_value = {
+                34: {'name': 'Hammerhead', 'label': 'S34',
+                     'start_date': '2026-01-01', 'end_date': yesterday}}
+            mock_stats.return_value = {'seasons': [
+                {'season_id': 35, 'battles': 4, 'wins': 3, 'losses': 1}]}
+
+            rows = fetch_player_clan_battle_seasons(6262, realm='na')
+
+        row35 = next(r for r in rows if r['season_id'] == 35)
+        self.assertEqual(row35['start_date'], date.today().isoformat())
+        self.assertTrue(row35['is_current'])
 
     def test_brawl_season_id_never_imputes(self):
         # A brawl/special id (101+) must never become current, even with battles.

@@ -230,6 +230,23 @@ class RankedSeasonActivityImputationTests(TestCase):
         self.assertIsNone(row.end_date)
         # The resolver now rolls over to the live season.
         self.assertEqual(get_current_ranked_season_id(), 1009)
+        # And the aggregated row carries the imputed date so the season table
+        # shows it instead of "Start date unavailable".
+        self.assertEqual(result[0]['start_date'], date.today().isoformat())
+
+    def test_stamps_earliest_stored_date_onto_a_null_row(self):
+        # A later-observed player whose aggregated row is null still shows the
+        # earliest fleet-wide imputed date, and does not drift the DB forward.
+        earlier = date.today() - timedelta(days=3)
+        RankedSeason.objects.create(
+            season_id=1009, label='S9', start_date=earlier)
+        meta = self._ended_prior_meta()
+        result = [{'season_id': 1009, 'total_battles': 3, 'start_date': None}]
+
+        _impute_ranked_season_from_activity(result, meta)
+
+        self.assertEqual(result[0]['start_date'], earlier.isoformat())
+        self.assertEqual(RankedSeason.objects.get(season_id=1009).start_date, earlier)
 
     def test_no_imputation_once_wg_publishes_the_season(self):
         # Self-correction: once seasons/info lists 1009, we stop imputing so

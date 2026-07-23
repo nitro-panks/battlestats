@@ -4139,21 +4139,36 @@ def _impute_ranked_season_from_activity(result: list, season_meta: dict) -> None
         return
 
     existing = RankedSeason.objects.filter(season_id=next_season).first()
-    if existing is not None and existing.start_date is not None and existing.start_date <= today:
-        return  # Already imputed at the earliest observation — steady-state no-op.
+    if existing is not None and existing.start_date is not None:
+        imputed_start = min(existing.start_date, today)
+    else:
+        imputed_start = today
 
-    RankedSeason.objects.update_or_create(
-        season_id=next_season,
-        defaults={
-            'name': f'Season {next_season - 1000}',
-            'label': f'S{next_season - 1000}',
-            'start_date': today,
-            'end_date': None,
-        },
-    )
-    logging.info(
-        'Imputed RankedSeason %s start_date=%s from observed play '
-        '(WG seasons/info not yet published)', next_season, today)
+    # Stamp the imputed date onto the aggregated row so the ranked season table
+    # shows it instead of "Start date unavailable" — aggregation ran before this
+    # with no season_meta entry, leaving the row's start_date null. Uses the
+    # earliest fleet-wide observation (the stored row), not just this player's.
+    for row in result:
+        if row.get('season_id') == next_season and not row.get('start_date'):
+            row['start_date'] = imputed_start.isoformat()
+            break
+
+    # Write the durable row only when it creates or improves (earlier) the stored
+    # start; steady-state (already at the earliest observation) is a stamp-only
+    # no-op on the DB.
+    if existing is None or existing.start_date is None or existing.start_date > imputed_start:
+        RankedSeason.objects.update_or_create(
+            season_id=next_season,
+            defaults={
+                'name': f'Season {next_season - 1000}',
+                'label': f'S{next_season - 1000}',
+                'start_date': imputed_start,
+                'end_date': None,
+            },
+        )
+        logging.info(
+            'Imputed RankedSeason %s start_date=%s from observed play '
+            '(WG seasons/info not yet published)', next_season, imputed_start)
 
 
 def _upsert_clan_battle_seasons_reference(metadata: dict) -> None:
@@ -4315,23 +4330,41 @@ def _impute_clan_battle_season_from_activity(seasons: list, season_meta: dict) -
         return
 
     existing = ClanBattleSeason.objects.filter(season_id=next_season).first()
-    if existing is not None and existing.start_date is not None and existing.start_date <= today:
-        return  # Already imputed at the earliest observation — steady-state no-op.
+    if existing is not None and existing.start_date is not None:
+        imputed_start = min(existing.start_date, today)
+    else:
+        imputed_start = today
 
-    ClanBattleSeason.objects.update_or_create(
-        season_id=next_season,
-        defaults={
-            'name': f'Season {next_season}',
-            'label': f'S{next_season}',
-            'start_date': today,
-            'end_date': None,
-            'ship_tier_min': None,
-            'ship_tier_max': None,
-        },
-    )
-    logging.info(
-        'Imputed ClanBattleSeason %s start_date=%s from observed play '
-        '(WG clans/season not yet published)', next_season, today)
+    # Surface the imputed season into the metadata dict so the caller's per-season
+    # result rows carry the imputed start_date (and label) instead of nulls. The
+    # caller passes a private copy of season_meta, so this never poisons the
+    # 24h-cached metadata.
+    season_meta[next_season] = {
+        'name': f'Season {next_season}',
+        'label': f'S{next_season}',
+        'start_date': imputed_start.isoformat(),
+        'end_date': None,
+        'ship_tier_min': None,
+        'ship_tier_max': None,
+    }
+
+    # Write the durable row only when it creates or improves (earlier) the stored
+    # start; steady-state is a metadata-inject-only no-op on the DB.
+    if existing is None or existing.start_date is None or existing.start_date > imputed_start:
+        ClanBattleSeason.objects.update_or_create(
+            season_id=next_season,
+            defaults={
+                'name': f'Season {next_season}',
+                'label': f'S{next_season}',
+                'start_date': imputed_start,
+                'end_date': None,
+                'ship_tier_min': None,
+                'ship_tier_max': None,
+            },
+        )
+        logging.info(
+            'Imputed ClanBattleSeason %s start_date=%s from observed play '
+            '(WG clans/season not yet published)', next_season, imputed_start)
 
 
 def _player_clan_battle_season_cache_key(account_id: int, realm: str = DEFAULT_REALM) -> str:
@@ -4483,7 +4516,10 @@ def fetch_player_clan_battle_seasons(
 
     # Bridge clans/season publish lag: impute the live regular season's start
     # from observed play so the CB shield's current-season resolution rolls over
-    # now instead of clinging to the prior (ended) season.
+    # now instead of clinging to the prior (ended) season. Pass a private copy —
+    # the impute injects the imputed season into season_meta for the per-row
+    # start_date/label below, and season_meta may be the 24h-cached dict.
+    season_meta = dict(season_meta)
     _impute_clan_battle_season_from_activity(seasons, season_meta)
 
     current_season_id = get_current_clan_battle_season_id()
