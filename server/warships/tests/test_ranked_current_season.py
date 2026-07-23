@@ -17,6 +17,7 @@ from django.test import TestCase
 from warships.data import (
     RANKED_SEASONS_CACHE_KEY,
     _get_ranked_seasons_metadata,
+    _impute_ranked_season_from_activity,
     get_current_ranked_season_id,
     get_current_season_ranked_league,
     is_current_season_ranked_player,
@@ -181,3 +182,127 @@ class CurrentSeasonQualificationTests(TestCase):
                  'highest_league_name': 'Bronze'}]
         self.assertEqual(
             get_current_season_ranked_league(rows, 1008), 'Bronze')
+
+
+class RankedSeasonActivityImputationTests(TestCase):
+    """Bridge WG's seasons/info publish lag by imputing the live season's start
+    from observed play. Spec: ranked-enjoyer-current-season-spec.md.
+    """
+
+    def _ended_prior_meta(self):
+        # 1008 is the newest season WG has dated, and it ended yesterday.
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        return {1008: {'name': 'Season 8', 'label': 'S8',
+                       'start_date': '2026-01-01', 'end_date': yesterday}}
+
+    def test_imputes_next_season_start_from_observed_play(self):
+        meta = self._ended_prior_meta()
+        result = [{'season_id': 1009, 'total_battles': 3}]
+
+        _impute_ranked_season_from_activity(result, meta)
+
+        row = RankedSeason.objects.get(season_id=1009)
+        self.assertEqual(row.start_date, date.today())
+        self.assertEqual(row.label, 'S9')
+        self.assertIsNone(row.end_date)
+        # The resolver now rolls over to the live season.
+        self.assertEqual(get_current_ranked_season_id(), 1009)
+
+    def test_no_imputation_once_wg_publishes_the_season(self):
+        # Self-correction: once seasons/info lists 1009, we stop imputing so
+        # WG's real dates (written by _upsert_ranked_seasons_reference) stand.
+        meta = self._ended_prior_meta()
+        meta[1009] = {'name': 'Season 9', 'label': 'S9',
+                      'start_date': None, 'end_date': None}
+        result = [{'season_id': 1009, 'total_battles': 3}]
+
+        _impute_ranked_season_from_activity(result, meta)
+
+        self.assertFalse(RankedSeason.objects.filter(season_id=1009).exists())
+
+    def test_phantom_far_future_season_id_does_not_impute(self):
+        # Only max_known + 1 rolls over; a stray 1011 in one player's rank_info
+        # cannot leap the fleet forward.
+        meta = self._ended_prior_meta()
+        result = [{'season_id': 1011, 'total_battles': 3}]
+
+        _impute_ranked_season_from_activity(result, meta)
+
+        self.assertFalse(RankedSeason.objects.filter(season_id=1011).exists())
+        self.assertFalse(RankedSeason.objects.filter(season_id=1009).exists())
+
+    def test_no_imputation_while_prior_season_still_running(self):
+        # Overlap edge: WG says 1008 runs through next week, so early 1009
+        # pre-season battles must not kill the still-live 1008 stars.
+        next_week = (date.today() + timedelta(days=7)).isoformat()
+        meta = {1008: {'name': 'Season 8', 'label': 'S8',
+                       'start_date': '2026-01-01', 'end_date': next_week}}
+        result = [{'season_id': 1009, 'total_battles': 3}]
+
+        _impute_ranked_season_from_activity(result, meta)
+
+        self.assertFalse(RankedSeason.objects.filter(season_id=1009).exists())
+
+    def test_zero_battle_next_season_row_does_not_impute(self):
+        meta = self._ended_prior_meta()
+        result = [{'season_id': 1009, 'total_battles': 0}]
+
+        _impute_ranked_season_from_activity(result, meta)
+
+        self.assertFalse(RankedSeason.objects.filter(season_id=1009).exists())
+
+    def test_empty_reference_does_not_bootstrap(self):
+        result = [{'season_id': 1001, 'total_battles': 3}]
+
+        _impute_ranked_season_from_activity(result, {})
+
+        self.assertEqual(RankedSeason.objects.count(), 0)
+
+    def test_prior_null_end_date_still_imputes(self):
+        # A prior season WG never dated an end for is treated as ended once the
+        # next season shows real play.
+        meta = {1008: {'name': 'Season 8', 'label': 'S8',
+                       'start_date': '2026-01-01', 'end_date': None}}
+        result = [{'season_id': 1009, 'total_battles': 3}]
+
+        _impute_ranked_season_from_activity(result, meta)
+
+        self.assertTrue(RankedSeason.objects.filter(season_id=1009).exists())
+
+    def test_steady_state_reimputation_is_idempotent(self):
+        meta = self._ended_prior_meta()
+        result = [{'season_id': 1009, 'total_battles': 3}]
+
+        _impute_ranked_season_from_activity(result, meta)
+        first = RankedSeason.objects.get(season_id=1009)
+        # A later refresh the same gap must not drift the start_date forward.
+        _impute_ranked_season_from_activity(result, meta)
+
+        rows = RankedSeason.objects.filter(season_id=1009)
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.get().start_date, first.start_date)
+
+    @patch('warships.data.refresh_player_explorer_summary')
+    @patch('warships.data._build_top_ranked_ship_names_by_season', return_value={})
+    @patch('warships.data._fetch_ranked_ship_stats_for_player', return_value=[])
+    @patch('warships.data._get_ranked_seasons_metadata')
+    @patch('warships.data._fetch_ranked_account_info')
+    def test_update_ranked_data_imputes_end_to_end(
+        self, mock_acct, mock_meta, _ships, _top, _refresh,
+    ):
+        # WG's seasons/info tops out at an ended 1008; the player already has
+        # 1009 battles → the icon's current season rolls to 1009 after refresh.
+        Player.objects.create(name='RollPlayer', player_id=9911, realm='na')
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        ended = {1008: {'name': 'Season 8', 'label': 'S8',
+                        'start_date': '2026-01-01', 'end_date': yesterday}}
+        # Both the initial read and the self-heal force_refresh see only 1008.
+        mock_meta.side_effect = [ended, ended]
+        mock_acct.return_value = {
+            'rank_info': {'1009': {'1': {'1': {'battles': 4, 'victories': 2, 'rank': 5}}}},
+        }
+
+        update_ranked_data(9911, realm='na')
+
+        self.assertEqual(get_current_ranked_season_id(), 1009)
+        self.assertEqual(RankedSeason.objects.get(season_id=1009).start_date, date.today())
