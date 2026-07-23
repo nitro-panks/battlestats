@@ -941,7 +941,10 @@ class RankedSeason(models.Model):
     the WG fetch fails — prod Redis is `allkeys-lru`, so even no-TTL keys can
     evict, and season dates must survive that. Season ids are global across
     realms (WG numbers ranked seasons once, 1000-offset), so no realm column.
-    Spec: `agents/work-items/ranked-enjoyer-current-season-spec.md`.
+    A row may also be *imputed* from observed play when `seasons/info/` lags
+    the season it dates (`_impute_ranked_season_from_activity`): the imputed
+    `start_date` is overwritten by WG's real dates once published. Spec:
+    `agents/work-items/ranked-enjoyer-current-season-spec.md`.
     """
     season_id = models.IntegerField(primary_key=True)
     name = models.CharField(max_length=200, blank=True, default='')

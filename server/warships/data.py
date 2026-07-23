@@ -4093,6 +4093,69 @@ def get_current_ranked_season_id() -> Optional[int]:
     return max(candidates) if candidates else None
 
 
+def _impute_ranked_season_from_activity(result: list, season_meta: dict) -> None:
+    """Roll the current-season resolution forward from observed play when WG's
+    `seasons/info/` hasn't published the new season's dates yet.
+
+    WG publishes a season's metadata (`seasons/info/`) on its own schedule, but
+    per-player `rank_info` starts returning the new season's battles the moment
+    it opens. During that gap the durable RankedSeason reference has no row for
+    the live season, so `get_current_ranked_season_id()` stays pinned to the
+    prior (now-ended) season and the Ranked Enjoyer star clings to last-season
+    players. We bridge it: when a refreshed player has battles in the season one
+    past the newest we know about, write an imputed RankedSeason row with
+    `start_date` = first observation. The resolver then rolls over immediately;
+    once WG publishes, `_upsert_ranked_seasons_reference` overwrites the imputed
+    row with the real dates (unconditional `update_or_create`), so this
+    self-corrects. Spec: agents/work-items/ranked-enjoyer-current-season-spec.md.
+
+    Guards keep the rollover honest:
+    - Only the *immediate* next season (`max_known + 1`) — a phantom far-future
+      id in one player's rank_info can't leap the fleet forward.
+    - Only when the prior season has ended (or has no end_date) — overlap-edge
+      pre-season/qualification battles can't kill a still-live season's stars.
+    - Never bootstraps from an empty reference (first boot stays icon-dark).
+    """
+    from warships.models import RankedSeason
+
+    if not season_meta:
+        return
+
+    max_known = max(season_meta)
+    next_season = max_known + 1
+    if next_season in season_meta:
+        return  # WG already published it; nothing to impute.
+
+    today = date.today()
+    prior_end = (season_meta.get(max_known) or {}).get('end_date')
+    if prior_end and prior_end >= today.isoformat():
+        return  # Prior season still running per WG — don't roll over early.
+
+    has_next_season_play = any(
+        row.get('season_id') == next_season and (row.get('total_battles') or 0) > 0
+        for row in result
+    )
+    if not has_next_season_play:
+        return
+
+    existing = RankedSeason.objects.filter(season_id=next_season).first()
+    if existing is not None and existing.start_date is not None and existing.start_date <= today:
+        return  # Already imputed at the earliest observation — steady-state no-op.
+
+    RankedSeason.objects.update_or_create(
+        season_id=next_season,
+        defaults={
+            'name': f'Season {next_season - 1000}',
+            'label': f'S{next_season - 1000}',
+            'start_date': today,
+            'end_date': None,
+        },
+    )
+    logging.info(
+        'Imputed RankedSeason %s start_date=%s from observed play '
+        '(WG seasons/info not yet published)', next_season, today)
+
+
 def _upsert_clan_battle_seasons_reference(metadata: dict) -> None:
     """Persist fetched CB season metadata into the durable ClanBattleSeason table.
 
@@ -4713,6 +4776,12 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
     # Aggregate into per-season summaries
     result = _aggregate_ranked_seasons(
         rank_info, season_meta, top_ship_names_by_season=top_ship_names_by_season)
+
+    # Bridge WG's seasons/info publish lag: if this player logged battles in a
+    # season newer than anything WG has dated, impute its start so the Ranked
+    # Enjoyer icon's current-season resolution rolls over now instead of clinging
+    # to the prior (ended) season.
+    _impute_ranked_season_from_activity(result, season_meta)
 
     if len(result) > 50:
         logging.warning(

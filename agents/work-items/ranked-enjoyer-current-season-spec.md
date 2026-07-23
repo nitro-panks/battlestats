@@ -32,6 +32,12 @@ Redis is `allkeys-lru` — even `timeout=None` keys can evict — so season date
 
 WG lists a new season in `seasons/info/` on its own schedule, and our metadata key is 24h-cached. If `update_ranked_data` sees a `season_id` in a player's `rank_info` that is **newer than the max known season**, it deletes the Redis metadata key and refetches once before aggregating — bounding rollover lag to WG's own listing latency.
 
+### Activity-imputed rollover (WG publish-lag fallback, 2026-07-23)
+
+`seasons/info/` can lag the season it dates by **a week or more**: per-player `rank_info` starts returning the new season's battles at open, but `seasons/info/` still tops out at the prior season, so the self-heal refetch above yields nothing new and `get_current_ranked_season_id()` stays pinned to the prior (now-ended) season — last-season players keep the star, new-season players don't get it. Observed at the S29→S30 rollover: S29 ended 2026-07-15, ~20% of recently-refreshed players had real S30 battles, yet `seasons/info/` still listed only ≤S29.
+
+`_impute_ranked_season_from_activity(result, season_meta)` (called from `update_ranked_data` after aggregation) bridges the gap: when a refreshed player has `total_battles > 0` in the season `max_known + 1` and WG hasn't dated it, it writes an imputed `RankedSeason` row with `start_date` = first-observation date (today). The resolver rolls over immediately. Guards: **only `max_known + 1`** (a phantom far-future id can't leap the fleet forward); **only when the prior season has ended** (`end_date < today` or null — overlap-edge pre-season battles can't kill a still-live season's stars); **never bootstraps from an empty reference**; **idempotent** (skips the write once `start_date ≤ today` is already set, so the date never drifts forward). Self-corrects: once WG publishes the season, `_upsert_ranked_seasons_reference`'s unconditional `update_or_create` overwrites the imputed placeholder date/name with WG's real dates, and imputation stops (`next_season in season_meta`).
+
 ## Wiring (single source of truth = server)
 
 | Site | Before | After |
@@ -46,13 +52,14 @@ Legacy `is_ranked_player`/`get_highest_ranked_league_name` remain for non-icon c
 
 ## Freshness caveat (accepted)
 
-A player whose `ranked_json` predates the current season shows no icon until their ranked data refreshes (profile view, floor ranked sweep). Data-driven by design; no speculative WG calls added.
+A player whose `ranked_json` predates the current season shows no icon until their ranked data refreshes (profile view, floor ranked sweep). Data-driven by design; no speculative WG calls added. This is also the transient at an activity-imputed rollover: the instant the new season is imputed, every prior-season-only player (and anyone whose `ranked_json` predates it) loses the star until their next ranked refresh — correct, and strictly better than showing wrong prior-season stars through WG's publish lag.
 
 ## Tests
 
 - Season resolution: started / future-dated / off-season persistence / empty reference.
 - Metadata upsert + DB fallback when WG fetch fails.
 - Self-heal: unknown season id busts the cache and refetches.
+- Activity-imputed rollover: imputes `max_known + 1` from observed play + flips resolution; stops once WG publishes (self-correction); rejects a phantom far-future id; holds while the prior season still runs; idempotent (no forward drift); empty-reference no bootstrap; end-to-end through `update_ranked_data`.
 - `clan_members` payload: `is_ranked_player` + `highest_ranked_league` reflect current season only.
 - Player serializer: new boolean + scoped league.
 - Frontend: `PlayerDetail` renders/omits the star from payload flags alone.
