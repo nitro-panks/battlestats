@@ -149,6 +149,29 @@ class SelfHealingRolloverTests(TestCase):
 
         self.assertEqual(mock_meta.call_count, 1)
 
+    @patch('warships.data.refresh_player_explorer_summary')
+    @patch('warships.data._build_top_ranked_ship_names_by_season', return_value={})
+    @patch('warships.data._fetch_ranked_ship_stats_for_player', return_value=[])
+    @patch('warships.data._get_ranked_seasons_metadata')
+    @patch('warships.data._fetch_ranked_account_info')
+    def test_already_imputed_season_skips_metadata_refetch(
+        self, mock_acct, mock_meta, _ships, _top, _refresh,
+    ):
+        # Dedup: once the live season is in the durable reference (imputed here),
+        # a player with battles there must not re-hit seasons/info every refresh.
+        RankedSeason.objects.create(
+            season_id=1009, label='S9', start_date=date.today())
+        mock_meta.return_value = {
+            1008: {'name': 'Season 8', 'label': 'S8', 'start_date': None, 'end_date': None},
+        }
+        mock_acct.return_value = {
+            'rank_info': {'1009': {'1': {'1': {'battles': 5, 'victories': 3, 'rank': 5}}}},
+        }
+
+        update_ranked_data(self.PID, realm='na')
+
+        self.assertEqual(mock_meta.call_count, 1)
+
 
 class CurrentSeasonQualificationTests(TestCase):
     ROWS = [

@@ -967,7 +967,10 @@ class ClanBattleSeason(models.Model):
     ranked, the WG id space mixes regular ladder seasons (1..~34) with old
     brawl/special events (101+, 201+, 301+), so current-season resolution
     filters to ids < 100 and sorts by start_date, not max id. Season calendar
-    is global across realms, so no realm column.
+    is global across realms, so no realm column. A regular-season row may also
+    be *imputed* from observed play when `clans/season/` lags the season it
+    dates (`_impute_clan_battle_season_from_activity`, regular ids only); the
+    imputed `start_date` is overwritten by WG's real dates once published.
     Runbook: `agents/runbooks/runbook-cb-icon-current-season-2026-07-15.md`.
     """
     season_id = models.IntegerField(primary_key=True)
