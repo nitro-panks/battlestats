@@ -408,20 +408,30 @@ describe('PlayerDetailInsightsTabs', () => {
             />,
         );
 
-        // Ships is the default tab; switching to others fires distinct named events.
-        fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
-        expect(mockTrackEvent).toHaveBeenCalledWith('player-insights-ranked', expect.objectContaining({ realm: expect.any(String) }));
+        // Activity is the default tab; every other tab fires a distinct named
+        // event on switch, and Activity itself fires when switched back to. The
+        // walk visits all six exactly once and never re-clicks the active tab
+        // (a re-click is deliberately silent — pinned at the end of this test).
+        const expectedEventByLabel: Array<[string, string]> = [
+            ['Ships', 'player-insights-ships'],
+            ['Profile', 'player-insights-profile'],
+            // 'Efficiency' (id: badges) and 'Clan Battles' (id: career) use the
+            // readable label slug, not the internal tab id.
+            ['Efficiency', 'player-insights-efficiency'],
+            ['Ranked', 'player-insights-ranked'],
+            ['Clan Battles', 'player-insights-clan-battles'],
+            ['Activity', 'player-insights-activity'],
+        ];
 
-        // 'Clan Battles' (id: career) and 'Efficiency' (id: badges) use the readable label slug.
-        fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
-        expect(mockTrackEvent).toHaveBeenCalledWith('player-insights-clan-battles', expect.objectContaining({ realm: expect.any(String) }));
+        expectedEventByLabel.forEach(([label, event]) => {
+            fireEvent.click(screen.getByRole('tab', { name: label }));
+            expect(mockTrackEvent).toHaveBeenCalledWith(event, expect.objectContaining({ realm: expect.any(String) }));
+        });
 
-        fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
-        expect(mockTrackEvent).toHaveBeenCalledWith('player-insights-efficiency', expect.objectContaining({ realm: expect.any(String) }));
-
-        // Re-clicking the already-active tab does not re-fire.
+        // Re-clicking the already-active tab (Activity, where the walk ended)
+        // does not re-fire.
         mockTrackEvent.mockReset();
-        fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
         expect(mockTrackEvent).not.toHaveBeenCalled();
     });
 
