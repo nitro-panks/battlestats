@@ -21,6 +21,7 @@ from django.utils import timezone as django_timezone
 from warships.data import (
     CLAN_BATTLE_SEASONS_CACHE_KEY,
     _get_clan_battle_seasons_metadata,
+    _impute_clan_battle_season_from_activity,
     clan_battle_summary_is_stale,
     fetch_player_clan_battle_seasons,
     get_current_clan_battle_season_id,
@@ -280,6 +281,104 @@ class SelfHealingRolloverTests(TestCase):
         fetch_player_clan_battle_seasons(self.PID, realm='na')
 
         self.assertEqual(mock_meta.call_count, 1)
+
+    @patch('warships.data._get_clan_battle_seasons_metadata')
+    @patch('warships.data._fetch_clan_battle_season_stats')
+    def test_already_imputed_season_skips_metadata_refetch(
+        self, mock_stats, mock_meta,
+    ):
+        # Dedup: once the live season is in the durable reference (published OR
+        # imputed), a player with battles there must not re-hit clans/season.
+        ClanBattleSeason.objects.create(
+            season_id=35, label='S35', start_date=date.today())
+        mock_meta.return_value = {
+            34: {'name': 'Hammerhead', 'label': 'S34',
+                 'start_date': None, 'end_date': None}}
+        mock_stats.return_value = {'seasons': [
+            {'season_id': 35, 'battles': 3, 'wins': 2, 'losses': 1},
+        ]}
+
+        fetch_player_clan_battle_seasons(self.PID, realm='na')
+
+        self.assertEqual(mock_meta.call_count, 1)
+
+
+class ClanBattleSeasonActivityImputationTests(TestCase):
+    """Bridge WG's clans/season publish lag by imputing the live regular
+    season's start from observed play. Runbook: runbook-cb-icon-current-season.
+    """
+
+    def _ended_prior_meta(self):
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        return {34: {'name': 'Hammerhead', 'label': 'S34',
+                     'start_date': '2026-01-01', 'end_date': yesterday}}
+
+    def test_imputes_next_regular_season_from_observed_play(self):
+        meta = self._ended_prior_meta()
+        seasons = [{'season_id': 35, 'battles': 3, 'wins': 2, 'losses': 1}]
+
+        _impute_clan_battle_season_from_activity(seasons, meta)
+
+        row = ClanBattleSeason.objects.get(season_id=35)
+        self.assertEqual(row.start_date, date.today())
+        self.assertEqual(row.label, 'S35')
+        self.assertEqual(get_current_clan_battle_season_id(), 35)
+
+    def test_brawl_season_id_never_imputes(self):
+        # A brawl/special id (101+) must never become current, even with battles.
+        meta = {33: {'name': 'S33', 'label': 'S33',
+                     'start_date': '2026-01-01', 'end_date': '2026-02-01'},
+                # A brawl already on record must not shift max_known off regular.
+                305: {'name': 'Brawl', 'label': 'S305',
+                      'start_date': '2020-01-01', 'end_date': '2020-02-01'}}
+        seasons = [{'season_id': 305, 'battles': 9, 'wins': 5, 'losses': 4}]
+
+        _impute_clan_battle_season_from_activity(seasons, meta)
+
+        # Only regular 34 (max_known 33 + 1) could impute, and there is no play
+        # there; the brawl row triggers nothing.
+        self.assertFalse(ClanBattleSeason.objects.filter(season_id=306).exists())
+        self.assertFalse(ClanBattleSeason.objects.filter(season_id=34).exists())
+
+    def test_no_imputation_once_wg_publishes(self):
+        meta = self._ended_prior_meta()
+        meta[35] = {'name': 'Next', 'label': 'S35',
+                    'start_date': None, 'end_date': None}
+        seasons = [{'season_id': 35, 'battles': 3, 'wins': 2, 'losses': 1}]
+
+        _impute_clan_battle_season_from_activity(seasons, meta)
+
+        self.assertFalse(ClanBattleSeason.objects.filter(season_id=35).exists())
+
+    def test_no_imputation_while_prior_season_running(self):
+        next_week = (date.today() + timedelta(days=7)).isoformat()
+        meta = {34: {'name': 'Hammerhead', 'label': 'S34',
+                     'start_date': '2026-01-01', 'end_date': next_week}}
+        seasons = [{'season_id': 35, 'battles': 3, 'wins': 2, 'losses': 1}]
+
+        _impute_clan_battle_season_from_activity(seasons, meta)
+
+        self.assertFalse(ClanBattleSeason.objects.filter(season_id=35).exists())
+
+    def test_zero_battle_next_season_does_not_impute(self):
+        meta = self._ended_prior_meta()
+        seasons = [{'season_id': 35, 'battles': 0, 'wins': 0, 'losses': 0}]
+
+        _impute_clan_battle_season_from_activity(seasons, meta)
+
+        self.assertFalse(ClanBattleSeason.objects.filter(season_id=35).exists())
+
+    def test_idempotent_reimputation(self):
+        meta = self._ended_prior_meta()
+        seasons = [{'season_id': 35, 'battles': 3, 'wins': 2, 'losses': 1}]
+
+        _impute_clan_battle_season_from_activity(seasons, meta)
+        first = ClanBattleSeason.objects.get(season_id=35).start_date
+        _impute_clan_battle_season_from_activity(seasons, meta)
+
+        rows = ClanBattleSeason.objects.filter(season_id=35)
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.get().start_date, first)
 
 
 class CurrentSeasonQualificationTests(TestCase):

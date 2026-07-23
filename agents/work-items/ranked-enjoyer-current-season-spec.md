@@ -30,7 +30,7 @@ Redis is `allkeys-lru` — even `timeout=None` keys can evict — so season date
 
 ### Self-healing rollover
 
-WG lists a new season in `seasons/info/` on its own schedule, and our metadata key is 24h-cached. If `update_ranked_data` sees a `season_id` in a player's `rank_info` that is **newer than the max known season**, it deletes the Redis metadata key and refetches once before aggregating — bounding rollover lag to WG's own listing latency.
+WG lists a new season in `seasons/info/` on its own schedule, and our metadata key is 24h-cached. If `update_ranked_data` sees a `season_id` in a player's `rank_info` that is **newer than the max known season**, it deletes the Redis metadata key and refetches once before aggregating — bounding rollover lag to WG's own listing latency. The refetch is **skipped once that season is already in the durable `RankedSeason` table** (published OR activity-imputed, below) — otherwise every ranked refresh during a publish-lag gap re-hits `seasons/info/` uselessly (it can't return a season WG hasn't listed); real dates then land via the normal 24h cache expiry.
 
 ### Activity-imputed rollover (WG publish-lag fallback, 2026-07-23)
 

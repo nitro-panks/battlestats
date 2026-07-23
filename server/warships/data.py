@@ -4269,6 +4269,71 @@ def get_current_clan_battle_season_id() -> Optional[int]:
     return max(candidates)[1]
 
 
+def _impute_clan_battle_season_from_activity(seasons: list, season_meta: dict) -> None:
+    """CB analogue of `_impute_ranked_season_from_activity`: roll the CB shield's
+    current-season resolution forward from observed play when WG's `clans/season/`
+    hasn't published the new regular season's dates yet.
+
+    Same publish-lag failure as ranked — per-player CB stats return the new
+    season's battles at open, but `clans/season/` lags, so
+    `get_current_clan_battle_season_id()` stays pinned to the prior season and
+    the shield clings to last-season players. When a fetched player has battles
+    in the *regular* season one past the newest we know about and WG hasn't
+    dated it, write an imputed `ClanBattleSeason` row with `start_date` = first
+    observation; resolution rolls over immediately. Self-corrects once WG
+    publishes (`_upsert_clan_battle_seasons_reference`'s unconditional
+    `update_or_create`). Runbook: `runbook-cb-icon-current-season-2026-07-15.md`.
+
+    Guards mirror ranked, plus the CB-specific brawl guard: only regular ladder
+    ids (`<= CLAN_BATTLE_REGULAR_SEASON_MAX_ID`) can ever impute — a brawl/special
+    id (101+/201+/301+) must never become "current".
+    """
+    from warships.models import ClanBattleSeason
+
+    known_regular_ids = [
+        int(sid) for sid in season_meta
+        if int(sid) <= CLAN_BATTLE_REGULAR_SEASON_MAX_ID
+    ]
+    if not known_regular_ids:
+        return
+
+    max_known = max(known_regular_ids)
+    next_season = max_known + 1
+    if next_season > CLAN_BATTLE_REGULAR_SEASON_MAX_ID or next_season in season_meta:
+        return
+
+    today = date.today()
+    prior_end = (season_meta.get(max_known) or {}).get('end_date')
+    if prior_end and prior_end >= today.isoformat():
+        return  # Prior regular season still running per WG — don't roll over early.
+
+    has_next_season_play = any(
+        int(s.get('season_id', 0) or 0) == next_season and int(s.get('battles', 0) or 0) > 0
+        for s in seasons
+    )
+    if not has_next_season_play:
+        return
+
+    existing = ClanBattleSeason.objects.filter(season_id=next_season).first()
+    if existing is not None and existing.start_date is not None and existing.start_date <= today:
+        return  # Already imputed at the earliest observation — steady-state no-op.
+
+    ClanBattleSeason.objects.update_or_create(
+        season_id=next_season,
+        defaults={
+            'name': f'Season {next_season}',
+            'label': f'S{next_season}',
+            'start_date': today,
+            'end_date': None,
+            'ship_tier_min': None,
+            'ship_tier_max': None,
+        },
+    )
+    logging.info(
+        'Imputed ClanBattleSeason %s start_date=%s from observed play '
+        '(WG clans/season not yet published)', next_season, today)
+
+
 def _player_clan_battle_season_cache_key(account_id: int, realm: str = DEFAULT_REALM) -> str:
     return realm_cache_key(realm, f'clan_battles:player:{account_id}')
 
@@ -4401,13 +4466,25 @@ def fetch_player_clan_battle_seasons(
         if int(sid) <= CLAN_BATTLE_REGULAR_SEASON_MAX_ID
     ]
     max_known_regular = max(known_regular_ids, default=0)
-    has_unknown_regular_season = any(
-        0 < int(season.get('season_id', 0) or 0) <= CLAN_BATTLE_REGULAR_SEASON_MAX_ID
-        and int(season.get('season_id', 0) or 0) > max_known_regular
-        for season in seasons
+    newest_played_regular = max(
+        (int(season.get('season_id', 0) or 0)
+         for season in seasons
+         if 0 < int(season.get('season_id', 0) or 0) <= CLAN_BATTLE_REGULAR_SEASON_MAX_ID),
+        default=0,
     )
-    if has_unknown_regular_season:
-        season_meta = _get_clan_battle_seasons_metadata(force_refresh=True)
+    if newest_played_regular > max_known_regular:
+        # Skip the refetch once that season is already in the durable reference
+        # (published OR activity-imputed) — otherwise every CB fetch during a WG
+        # publish-lag gap re-hits clans/season uselessly. Real dates land via the
+        # normal 24h cache expiry once WG publishes. (Mirrors the ranked path.)
+        from warships.models import ClanBattleSeason
+        if not ClanBattleSeason.objects.filter(season_id=newest_played_regular).exists():
+            season_meta = _get_clan_battle_seasons_metadata(force_refresh=True)
+
+    # Bridge clans/season publish lag: impute the live regular season's start
+    # from observed play so the CB shield's current-season resolution rolls over
+    # now instead of clinging to the prior (ended) season.
+    _impute_clan_battle_season_from_activity(seasons, season_meta)
 
     current_season_id = get_current_clan_battle_season_id()
     _persist_player_clan_battle_summary(
@@ -4764,10 +4841,17 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
     # metadata means WG opened a new season since the last seasons/info fetch.
     # Refetch once so the new season lands in the durable RankedSeason reference
     # and the Ranked Enjoyer icon's current-season resolution rolls over without
-    # waiting out the cache TTL.
+    # waiting out the cache TTL. Skip the refetch once the season is already in
+    # the durable reference (published OR activity-imputed) — otherwise every
+    # ranked refresh during a WG publish-lag gap re-hits seasons/info uselessly,
+    # since the fetch can't yet return a season WG hasn't listed. Real dates then
+    # land via the normal 24h cache expiry once WG publishes.
     if requested_season_ids and (
             not season_meta or max(requested_season_ids) > max(season_meta)):
-        season_meta = _get_ranked_seasons_metadata(force_refresh=True)
+        from warships.models import RankedSeason
+        if not RankedSeason.objects.filter(
+                season_id=max(requested_season_ids)).exists():
+            season_meta = _get_ranked_seasons_metadata(force_refresh=True)
     ranked_ship_stats_rows = _fetch_ranked_ship_stats_for_player(
         int(player_id), season_ids=requested_season_ids, realm=realm)
     top_ship_names_by_season = _build_top_ranked_ship_names_by_season(

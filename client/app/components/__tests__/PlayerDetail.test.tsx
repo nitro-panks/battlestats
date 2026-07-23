@@ -586,7 +586,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
             expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
         });
         expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
-        expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+        expect(screen.queryByText('Clan Battles vs Win Rate')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
 
         // Performance by Tier lives behind the Profile tab.
@@ -598,12 +598,12 @@ describe('PlayerDetail efficiency-rank icon', () => {
         fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
 
         expect(screen.getByText('Efficiency badges')).toBeInTheDocument();
-        expect(screen.queryByText('Clan Battle Seasons')).not.toBeInTheDocument();
+        expect(screen.queryByText('Clan Battles vs Win Rate')).not.toBeInTheDocument();
         expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
 
-        expect(screen.getByText('Clan Battle Seasons')).toBeInTheDocument();
+        expect(screen.getByText('Clan Battles vs Win Rate')).toBeInTheDocument();
         expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
     });
