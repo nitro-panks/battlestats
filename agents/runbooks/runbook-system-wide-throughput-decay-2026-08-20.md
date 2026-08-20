@@ -121,11 +121,31 @@ Recording these so the next pass does not re-derive them and build on sand.
 - **`benchmarks/db-size/` is stale**, newest file `db-size-20260622T130000Z.txt`. Note the convention differs from every sibling benchmark directory: `db-size-<TIMESTAMP>.txt` plus a `diff-<TIMESTAMP>.txt`, not `YYYY-MM-DD_HHMMZ_*.json`. A date-globbed JSON pattern returns nothing there and that absence is a pattern mismatch, not staleness; the staleness is separately confirmed by a plain `ls -1t`. It cannot answer the growth question.
 - **Full-day medians must never be compared against a partial day.** This bit twice in one session: once on `incremental_player_refresh_task`, once on the read-side warmers where it briefly manufactured the DB hypothesis's second leg. Restrict both sides to the same wall-clock window before reading a trend.
 
+## The probe is armed and running (2026-08-20 05:10 UTC)
+
+Scheduled server-side so it does not depend on any session staying open:
+
+```bash
+# script (read-only; 0700, embeds the account-level metrics basic-auth)
+/usr/local/bin/bs_db_probe.sh
+# transient unit, self-terminating at 11:40 UTC, RuntimeMaxSec backstop 25000
+systemctl status battlestats-db-probe
+systemctl stop battlestats-db-probe          # to end it early
+# output, one row per 30s
+/opt/battlestats-server/shared/benchmarks/db-latency-probe/2026-08-20_dbprobe.tsv
+```
+
+Columns: `ts_utc iowait idle load1 load5 load15 conns sel1_ms pk_ms pk_id`. It runs from 05:10 to 11:40 UTC, so it captures roughly five hours of control period **and** all three recapture stripes (10:10/10:30/10:50) with their runtime.
+
+Two probes per sample, and the pairing is the point. `select 1` is a pure round trip: network plus backend scheduling, no I/O. `select last_battle_date from warships_player where id = <fresh random id>` is a primary-key lookup on a different row every sample, deliberately kept off `shared_buffers`, which measures **random-access latency**: the shape recapture and the observation floor are actually bound by. If the decay is I/O, `pk_ms` rises during the stripe while `sel1_ms` stays flat. If both rise together, it is not I/O.
+
+**Preliminary, from the first six samples (05:09 to 05:11 UTC):** iowait 23% to 38%, `load1` 5.6 to 10.0 on 2 vCPU, `pk_ms` 4.0 to 16.8 against `sel1_ms` 1.0 to 3.2. **This is well outside the 04:30 rollup window**, which cannot run past 04:39 on its 540s soft limit. That is early evidence against the "the rollup saturates it briefly" branch, and it should be confirmed against the full series rather than these six rows.
+
 ## Recommended next steps, in order
 
 1. **Do not pull L1.** `RECAPTURE_LAPSED_DELAY=0.05` buys about 45s against a ~590s gap. It cannot close this, it spends the one-lever-per-step budget, and it contaminates the measurement of whatever actually caused the rate collapse. L2b, L3 and L4 are equally beside the point if the constraint is the database. The lever ordering in `runbook-recapture-soft-limit-budget-2026-08-13.md` was sized for a 34 rows/s world that no longer exists.
 2. ~~Count WG-side faults with an anchored pattern.~~ **DONE, and it falsified the WG-ceiling hypothesis.** See the section above: zero `REQUEST_LIMIT_EXCEEDED` on every day and queue.
-3. **Sample the DB during the recapture window today**, 10:00 to 11:30 UTC, from the droplet, and compare against the 04:41 numbers. This separates "the DB is saturated all day" from "the 04:30 rollup saturates it briefly," and with the WG branch closed it is now **the** discriminating measurement. If saturation holds outside the rollup window, rank `pg_stat_statements` by `shared_blks_read` and `total_exec_time`; do not reset it on prod (blocked by the auto-mode classifier), snapshot and diff over a window.
+3. ~~Sample the DB during the recapture window.~~ **ARMED AND RUNNING**; see the section above. Read the series after 11:40 UTC. If saturation holds outside the rollup window and `pk_ms` diverges from `sel1_ms` during the stripe, rank `pg_stat_statements` by `shared_blks_read` and `total_exec_time`; do not reset it on prod (blocked by the auto-mode classifier), snapshot and diff over a window.
 4. **Verify the 60d rollout's required post-deploy work actually completed.** `runbook-ship-standings-60d-rollout-2026-08-18.md` names a snapshot rebuild per realm plus a forced grid warm, and `reference_rollup_coverage_gate_breaks_on_widen` warns that if the new oldest day was not backfilled first, every bucket falls back to a raw scan. Commit `fe717e4` claims the warm completed and all buckets verified; confirm that against the live rollup coverage, not against the commit message.
 5. **Only then** consider a reversible probe on `SHIP_LEADERBOARD_WINDOW_DAYS` (60 back to 45). That is a production lever and needs an explicit ack; one lever at a time, per `feedback_prod_levers_one_at_a_time`.
 6. **Treat NA's floor coverage at 0.21 as its own item.** It is a freshness regression on the product's primary asset and it will not be fixed by anything in the recapture lever list.
