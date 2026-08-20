@@ -6,7 +6,7 @@ _Status: **DIAGNOSIS ONLY. NOTHING ARMED, NOTHING CHANGED.** No env touched, no 
 
 ## The one-paragraph version
 
-The alert is real and it is worse than the ones before it, but the sweep is not the thing that broke. asia scanned 18,100 rows in 900.9s: **20.1 rows/s**, against its own 35 to 46 baseline and below even the contended 25.3 and 31.6 of Aug 13 and Aug 14. At that rate a 30,000 row pass needs roughly 1,493s, so the shortfall against a 900s budget is about **590s**. The same decay is visible on every realm and on other work entirely: NA fell from 86.4 to 48.6 rows/s over four days and is now under its own floor; the observation floor lost half of NA's daily observations in the same window. The prescribed recapture lever L1 buys about 45s and is therefore **dead as a response to this alert**. The evidence points at a shared resource ceiling. Worker slots are **falsified**. The database was the leading candidate until its second leg was tested like-for-like and **failed**: pure-DB aggregation warmers are flat over the same four days while WG-bound bulk work decayed, which is the opposite of what a DB constraint produces. **The mechanism is not yet identified**; the DB rests on one windowed sample, and the WG side has the right shape but numbers an order of magnitude too small.
+The alert is real and it is worse than the ones before it, but the sweep is not the thing that broke. asia scanned 18,100 rows in 900.9s: **20.1 rows/s**, against its own 35 to 46 baseline and below even the contended 25.3 and 31.6 of Aug 13 and Aug 14. At that rate a 30,000 row pass needs roughly 1,493s, so the shortfall against a 900s budget is about **590s**. The same decay is visible on every realm and on other work entirely: NA fell from 86.4 to 48.6 rows/s over four days and is now under its own floor; the observation floor lost half of NA's daily observations in the same window. The prescribed recapture lever L1 buys about 45s and is therefore **dead as a response to this alert**. The evidence points at a shared resource ceiling. Worker slots are **falsified**, and so is the WG ceiling: `REQUEST_LIMIT_EXCEEDED` is zero on every day and every queue. That leaves the database as the only standing candidate, on one windowed sample of 42% to 50% iowait, with the specific shape being **round-trip latency** rather than throughput: latency-bound work (recapture, the floor) decayed while throughput-bound analytical warmers did not.
 
 ## What the alert says, verified against the files
 
@@ -64,7 +64,24 @@ The WG global token bucket (`warships/api/rate_limiter.py`, 9 req/s, burst 18, s
 
 The trend on `background` is real and monotonic. It is nonetheless **not sized to explain this**: 21 exhaustions at an 8s budget is at most 168s of logged tail-wait across the entire background queue for the entire day, against a ~590s shortfall on one task. More decisively, the limiter **fails open** by design once the budget is spent, so the floor exhausting 474 to 1,099 times a day is not actually being held to 9 req/s. A bucket that fails open cannot be what throttles recapture to 20 rows/s. Keep this as a secondary signal; do not build the story on it.
 
-## Candidate cause: the database. One line supports it; the second was tested and failed.
+## The WG-ceiling hypothesis is FALSIFIED
+
+Counted with anchored patterns from `warships/api/client.py`, per day per queue:
+
+| day | floor `HTTP request failed` | floor `Error in response` | floor `REQUEST_LIMIT_EXCEEDED` | background `Error in response` |
+|---|---|---|---|---|
+| Aug 16 | 0 | 4079 | **0** | 16 |
+| Aug 17 | 1319 | 4432 | **0** | 26 |
+| Aug 18 | 3 | 4078 | **0** | 35 |
+| Aug 19 | 0 | 3999 | **0** | 427 |
+
+**`REQUEST_LIMIT_EXCEEDED` is zero on every day and every queue.** The system is not meeting Wargaming's ceiling, so the fail-open limiter is not letting us over-transact into upstream throttling. That was the mechanism the like-for-like recompute pointed toward, and it is dead. The floor's payload-error rate is flat (4079 / 4432 / 4078 / 3999) and its transport failures are a one-day Aug 17 spike that is **gone by Aug 19**, the worst day, so neither tracks the decay. The lone correlated figure is background `Error in response` at 427 on Aug 19 against 16 to 35 before, but recapture logged `chunk_errors: 0`, so those belong to other tasks and 427 events cannot cost 590 seconds.
+
+## Candidate cause: the database. This is now the only standing candidate.
+
+**Reconciling the apparent inversion.** The flat aggregation warmers looked like they exonerated the DB. On reflection they do not, and the distinction is worth stating precisely: `snapshot_active_players_task` and `warm_all_clan_tier_distributions_task` are large analytical aggregations running under `_elevated_work_mem()`, bound by sequential scan and sort throughput. `recapture_lapsed_players` and the observation floor are the opposite shape: many thousands of small indexed reads and row-level writes, bound by **per-round-trip latency**. An I/O-saturated server at 42% to 50% iowait degrades round-trip latency far more than it degrades a handful of large sequential scans. So "latency-bound work decayed while throughput-bound work did not" is consistent with I/O saturation, and is in fact the signature of it.
+
+This is a refinement of the hypothesis, not a confirmation of it. It still rests on one windowed sample, and it now carries a specific, testable prediction: per-chunk cost inside recapture should track DB round-trip latency, not WG call latency.
 
 **1. Direct measurement.** Managed Postgres is 2 vCPU / 4 GB. Sampled 2026-08-20 04:41 and 04:42 UTC:
 
@@ -107,8 +124,8 @@ Recording these so the next pass does not re-derive them and build on sand.
 ## Recommended next steps, in order
 
 1. **Do not pull L1.** `RECAPTURE_LAPSED_DELAY=0.05` buys about 45s against a ~590s gap. It cannot close this, it spends the one-lever-per-step budget, and it contaminates the measurement of whatever actually caused the rate collapse. L2b, L3 and L4 are equally beside the point if the constraint is the database. The lever ordering in `runbook-recapture-soft-limit-budget-2026-08-13.md` was sized for a 34 rows/s world that no longer exists.
-2. **Count WG-side faults with an anchored pattern**, since the like-for-like recompute pushed the reading back toward the WG side. The client logs `HTTP request failed for endpoint '%s'` and `Error in response for endpoint '%s'` (`warships/api/client.py`); count those per day per queue, and look for `REQUEST_LIMIT_EXCEEDED`. The hypothesis worth testing: the floor's demand grew with the active-7d pool (206,829 to 227,194 over five days), the limiter's 8s budget is exhausted 474 to 1,099 times a day, it **fails open**, and the system therefore transacts above 9 req/s and meets Wargaming's own ceiling instead of ours. That would slow every WG-bound task and leave DB-only warmers untouched, which is exactly the observed pattern.
-3. **Sample the DB during the recapture window today**, 10:00 to 11:30 UTC, from the droplet, and compare against the 04:41 numbers. This separates "the DB is saturated all day" from "the 04:30 rollup saturates it briefly," and it is the only thing that keeps the DB candidate alive or kills it. If it stays alive, rank `pg_stat_statements` by `shared_blks_read` and `total_exec_time`; do not reset it on prod (blocked by the auto-mode classifier), snapshot and diff over a window.
+2. ~~Count WG-side faults with an anchored pattern.~~ **DONE, and it falsified the WG-ceiling hypothesis.** See the section above: zero `REQUEST_LIMIT_EXCEEDED` on every day and queue.
+3. **Sample the DB during the recapture window today**, 10:00 to 11:30 UTC, from the droplet, and compare against the 04:41 numbers. This separates "the DB is saturated all day" from "the 04:30 rollup saturates it briefly," and with the WG branch closed it is now **the** discriminating measurement. If saturation holds outside the rollup window, rank `pg_stat_statements` by `shared_blks_read` and `total_exec_time`; do not reset it on prod (blocked by the auto-mode classifier), snapshot and diff over a window.
 4. **Verify the 60d rollout's required post-deploy work actually completed.** `runbook-ship-standings-60d-rollout-2026-08-18.md` names a snapshot rebuild per realm plus a forced grid warm, and `reference_rollup_coverage_gate_breaks_on_widen` warns that if the new oldest day was not backfilled first, every bucket falls back to a raw scan. Commit `fe717e4` claims the warm completed and all buckets verified; confirm that against the live rollup coverage, not against the commit message.
 5. **Only then** consider a reversible probe on `SHIP_LEADERBOARD_WINDOW_DAYS` (60 back to 45). That is a production lever and needs an explicit ack; one lever at a time, per `feedback_prod_levers_one_at_a_time`.
 6. **Treat NA's floor coverage at 0.21 as its own item.** It is a freshness regression on the product's primary asset and it will not be fixed by anything in the recapture lever list.
