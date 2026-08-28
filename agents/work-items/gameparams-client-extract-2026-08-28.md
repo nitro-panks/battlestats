@@ -8,7 +8,7 @@
 
 ## QA Notes
 
-_Reviewed 2026-08-28 against `/home/august/code/battlestats`. 21 assertions checked, 6 corrected._
+_Reviewed 2026-08-28 against `/home/august/code/battlestats`. 21 repo assertions enumerated and checked, 6 corrected; the seven Resolved items below are the corrections plus one confirmation that a correction depends on. Every Resolved item carries a `file:line` except the artifact-path finding, which cites the **absence** of `server/warships/data/` and so has no line to cite._
 
 ### Resolved
 
@@ -29,7 +29,7 @@ _Reviewed 2026-08-28 against `/home/august/code/battlestats`. 21 assertions chec
 
 ### Open Questions
 
-1. **On patch-day import, are the durable `:published` ship payloads invalidated, or left to age out?** Leaving them means characteristics appear on a given ship only when its fresh key next misses, up to 26h later and unpredictably per ship, which on patch day is exactly when the numbers changed. Invalidating them means deliberately dropping the durable fallback that exists to keep the page serving, and the ship-board cache key is known not to invalidate itself. The repo's own precedent is warm-before-evict (`runbook-shipleaderboard-warm-before-evict-2026-...`), which suggests warming the new payload before dropping the old rather than either extreme, but that is a third option with its own cost. Blocks Rollout step 3.
+1. **On patch-day import, are the durable `:published` ship payloads invalidated, or left to age out?** Leaving them means characteristics appear on a given ship only when its fresh key next misses, up to 26h later and unpredictably per ship, which on patch day is exactly when the numbers changed. Invalidating them means deliberately dropping the durable fallback that exists to keep the page serving, and the ship-board cache key is known not to invalidate itself. The repo's own precedent is warm-before-evict (`agents/runbooks/runbook-shipleaderboard-warm-before-evict-2026-06-18.md`), which suggests warming the new payload before dropping the old rather than either extreme, but that is a third option with its own cost. Blocks Rollout step 3.
 
 ## Why
 
