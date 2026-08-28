@@ -4385,6 +4385,35 @@
                 "clan-members-invalidation-shipped-and-verified"
             ]
         },
+        "agents/work-items/gameparams-client-extract-2026-08-28.md": {
+            "kind": "work-item",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "architecture",
+            "owner": "platform",
+            "aliases": [
+                "gameparams extract",
+                "ship characteristics spec",
+                "wows-toolkit integration",
+                "wowsunpack pipeline",
+                "vortex retirement",
+                "ship page characteristics"
+            ],
+            "tags": [
+                "gameparams",
+                "wowsunpack",
+                "wows-toolkit",
+                "ship",
+                "characteristics",
+                "concealment",
+                "vortex",
+                "patch-day",
+                "staleness"
+            ],
+            "archive_on": [
+                "ship-characteristics-shipped-and-verified"
+            ]
+        },
         "agents/runbooks/archive/runbook-ship-standings-60d-foothold-2026-08-18.md": {
             "kind": "runbook",
             "status": "archived",
