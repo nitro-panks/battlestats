@@ -6,6 +6,31 @@
 **Retires:** the `vortex.worldofwarships.com` HTTP dependency in `populate_shiptool_codes`
 **Tooling dependency:** [`landaire/wows-toolkit`](https://github.com/landaire/wows-toolkit) `wowsunpack`, used as an opaque CLI
 
+## QA Notes
+
+_Reviewed 2026-08-28 against `/home/august/code/battlestats`. 21 assertions checked, 6 corrected._
+
+### Resolved
+
+- **"`is_premium` ... becomes a derived function of `param_group` and `RarityCategory`"** -> actual: `is_premium` already has two writers that source it from the WG API, `_upsert_ship_from_api_payload` (`server/warships/api/ships.py:113`) and `sync_ship_catalog` (`server/warships/api/ships.py:166`, `:177`, `:191`) -> the design as written creates a two-writer conflict in which the next catalog sync silently reverts every GameParams-derived value. **Corrected in the body:** `import_game_params` must not write `is_premium` at all; the GameParams signal is purely additive via `param_group` / `rarity` / `is_paper_ship`.
+- **"(serializers, the client, `shipIdentity.ts` all read it)"** -> actual: `shipIdentity.ts` exports only `shipClass` and `nationLabel` and never references `is_premium` (`client/app/lib/shipIdentity.ts:33`, `:55`) -> corrected to the real consumers: `data.py:6541`, `data.py:7086`, `admin.py:17`, and `ShipLeaderboard.tsx:157`.
+- **"A check joins the exception-only ops digest ... compare against the stored semver"** -> actual: `daily_ops_email.py` is stdlib-only (urllib + smtplib, no venv, no pip) and consumes durable snapshot JSON via `_load_dir()`, never the database (`server/scripts/daily_ops_email.py:31`, `:86`) -> it can neither import Django to read `Ship.game_build` nor use `requests` as `smoke_test_wg_api.py` does. **Corrected in the body** to the established pattern: a snapshot script writes the version comparison to a durable JSON family and the digest evaluates it, exactly as `snapshot_service_health.sh` feeds `gather_service_health` (`server/scripts/snapshot_service_health.sh:1`, `daily_ops_email.py:399`).
+- **`bulk_update` clobber risk for the new columns** -> actual: `sync_ship_catalog`'s update list is explicit and enumerates only the six WG-owned fields (`server/warships/api/ships.py:191`) -> the thirteen additive columns and `params_json` are structurally safe from the catalog sync. Recorded because this fact is what makes the `is_premium` resolution above safe.
+- **Artifact path `server/warships/data/gameparams.json`** -> actual: the directory does not exist and there is no precedent for a shipped JSON data file anywhere under `server/` -> body now states the directory is new and must be created; the deploy rsyncs all of `server/`, so no packaging change is required.
+- **"Migration: thirteen columns + `params_json`"** -> actual: migration head is `0086_add_feedback.py` (`server/warships/migrations/`) -> body now names the new migration `0087`.
+- **Ship payload caching not addressed** -> actual: the `ship` block is built at `server/warships/data.py:6535` and stored by `_store_realm_ship_cache` under both a 26h fresh key and a **no-expiry durable `:published` key** (`server/warships/data.py:6548`) -> adding fields means an already-published payload lacks them until it is rewritten. Body now requires the frontend to treat every characteristic as optional. See Open Question 1 for the invalidation decision.
+
+### Unverified
+
+- The exact `encyclopedia/info/` response field carrying the game version: verifying it needs a live call with `WG_APP_ID`, which is not readable in this session. Already carried as the spec's own Open Question 1; the QA pass did not close it.
+- The ~2 MB artifact size estimate: `extract_game_params.py` does not exist yet, so nothing can be measured. Carried as the spec's Open Question 3.
+- Whether `ShipUpgradeInfo` resolves the top hull for all 345 multi-hull ships: requires the extractor. Carried as the spec's Open Question 2.
+- Every claim about `wowsunpack` behaviour, timings and GameParams field names: these describe an external binary and the game client, not this repo. They were measured directly on 2026-08-27 against build 13015811 and are recorded in "What was verified", but they are not repo assertions and will decay with each WoWS patch.
+
+### Open Questions
+
+1. **On patch-day import, are the durable `:published` ship payloads invalidated, or left to age out?** Leaving them means characteristics appear on a given ship only when its fresh key next misses, up to 26h later and unpredictably per ship, which on patch day is exactly when the numbers changed. Invalidating them means deliberately dropping the durable fallback that exists to keep the page serving, and the ship-board cache key is known not to invalidate itself. The repo's own precedent is warm-before-evict (`runbook-shipleaderboard-warm-before-evict-2026-...`), which suggests warming the new payload before dropping the old rather than either extreme, but that is a third option with its own cost. Blocks Rollout step 3.
+
 ## Why
 
 `/ship/[shipSlug]` is a ship page with no ship data on it. It shows identity
@@ -84,6 +109,10 @@ The artifact is a **single file overwritten each patch**, at
 readable `git diff` showing exactly which ships WG changed. Estimated ~2 MB for
 ~1038 ships.
 
+`server/warships/data/` **does not exist yet** and there is no precedent for a
+shipped JSON data file anywhere under `server/`; the directory is created by this
+work. No packaging change is needed, since the deploy rsyncs all of `server/`.
+
 It is committed rather than left to ride the deploy's working-tree rsync. The
 rsync would work (see `reference_deploy_ships_working_tree`), and that is exactly
 the hazard: an uncommitted artifact is invisible to review, absent from a fresh
@@ -151,11 +180,20 @@ and a missing value must not be able to make one.
 
 ### The identity fix
 
-`is_premium` **stays as a column** for backward compatibility (serializers, the
-client, `shipIdentity.ts` all read it), but stops being independently sourced. It
-becomes a derived function of `param_group` and `RarityCategory`, which is where
-the real distinction lives. `rarity`, `param_group`, `is_paper_ship` and
-`subnation` are additive and break nothing.
+**`import_game_params` must not write `is_premium`.** That field already has two
+WG-sourced writers, `_upsert_ship_from_api_payload` (`api/ships.py:113`) and
+`sync_ship_catalog` (`api/ships.py:166`), so a GameParams-derived value would be
+silently reverted by the next catalog sync. Field ownership stays with WG.
+
+The GameParams distinction is therefore **additive, not a replacement**:
+`param_group`, `rarity` and `is_paper_ship` carry the finer signal in new
+columns, and any richer presentation reads those rather than `is_premium`. This
+is safe because `sync_ship_catalog`'s `bulk_update` list is explicit and
+enumerates only the six WG-owned fields (`api/ships.py:191`), so it cannot
+clobber the new columns.
+
+`is_premium` keeps its current meaning and its current consumers: `data.py:6541`,
+`data.py:7086`, `admin.py:17`, and `ShipLeaderboard.tsx:157`.
 
 ## Hull convention
 
@@ -184,14 +222,26 @@ So:
 
 1. The artifact records `game_build` (13015811), the semver (`15.7.0`) and
    `extracted_at`. `import_game_params` writes them onto every row it touches.
-2. A check joins the **exception-only ops digest**
-   (`runbook-ops-email-exception-only-2026-08-09.md`): fetch the live version
-   from `encyclopedia/info/` and compare against the stored semver. Raise **only**
-   on mismatch, so the digest stays silent when things are fine.
+2. A new **snapshot script** writes a durable JSON snapshot holding two values:
+   the imported artifact's semver, and the live version from `encyclopedia/info/`.
+3. The **exception-only ops digest** consumes that snapshot family and raises
+   **only** on mismatch, so it stays silent when things are fine.
+
+**The two-script shape is not optional.** `daily_ops_email.py` is stdlib-only
+(urllib + smtplib, no venv, no pip installs, `daily_ops_email.py:31`) and reads
+durable snapshot files through `_load_dir()` (`:86`); it never touches the
+database. So it can neither import Django to read `Ship.game_build` nor use
+`requests` the way `smoke_test_wg_api.py` does. This mirrors exactly how
+`snapshot_service_health.sh` feeds `gather_service_health` (`:399`), which exists
+for the same reason.
+
+Consuming a snapshot family also inherits the digest's existing guarantees for
+free: snapshot shape is checked before any value is trusted, and a missing or
+stale snapshot is itself an alert condition.
 
 `encyclopedia/info/` is already exercised from the droplet with `WG_APP_ID` by
-`server/scripts/smoke_test_wg_api.py`, so this is a proven call, not a new
-dependency. **Open item:** confirm the exact response field name for the version
+`server/scripts/smoke_test_wg_api.py`, so the call is proven; only the caller
+changes. **Open item:** confirm the exact response field name for the version
 against a live call during implementation rather than trusting recalled schema.
 
 This gives the ritual the thing `populate_shiptool_codes` lacks: the system says
@@ -222,14 +272,20 @@ balance patch for no good reason.
 
 ## Rollout
 
-1. Migration: thirteen columns + `params_json` + `params_extracted_at`.
+1. Migration `0087` (head is `0086_add_feedback`): thirteen columns +
+   `params_json` + `params_extracted_at`.
 2. Generate the artifact; commit it.
-3. `import_game_params --dry-run` against prod, inspect, then run for real.
+3. `import_game_params --dry-run` against prod, inspect, then run for real. Note
+   that the `/ship/` payload carries a **no-expiry durable `:published` copy**
+   (`data.py:6548`), so imported characteristics do not appear until that copy is
+   rewritten. See QA Open Question 1.
 4. Fold `shiptool_code` derivation in; delete the Vortex fetch; remove
    `populate_shiptool_codes.py`.
 5. Add the staleness check to the ops digest.
 6. Frontend: characteristics block on `/ship/[shipSlug]`. The only frontend work
-   in scope.
+   in scope. **Every characteristic must be treated as optional**: the columns are
+   nullable by design, and a durable `:published` payload published before this
+   work carries none of them. A missing value renders as absent, never as zero.
 7. Version bump, then **rebuild and redeploy the client** even though this is
    mostly backend: `NEXT_PUBLIC_APP_VERSION` is captured at build time, so a bump
    without a client deploy leaves the production footer stale. Non-negotiable per
