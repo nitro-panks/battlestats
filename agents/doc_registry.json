@@ -4478,6 +4478,34 @@
                 "tier-7-decision-made",
                 "ship-standings-feature-removed"
             ]
+        },
+        "agents/runbooks/runbook-broker-publish-request-thread-2026-09-09.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "broker publish blocks request thread",
+                "gunicorn worker timeout amqp",
+                "when_ready fork inherits broker socket",
+                "task.delay hangs"
+            ],
+            "tags": [
+                "celery",
+                "rabbitmq",
+                "gunicorn",
+                "request-thread",
+                "worker-timeout",
+                "fork",
+                "kombu",
+                "py-amqp",
+                "socket-timeout",
+                "ops-alert"
+            ],
+            "archive_on": [
+                "broker-publish-moved-off-request-thread-entirely"
+            ]
         }
     }
 }
