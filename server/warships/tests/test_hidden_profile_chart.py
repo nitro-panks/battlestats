@@ -27,6 +27,7 @@ from django.core.cache import cache
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from warships.tests.conftest import assert_dispatched_once_with
 from warships.data import update_battle_data
 from warships.models import Player
 
@@ -114,7 +115,7 @@ class TierTypePendingDiscriminatorTests(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-    @patch("warships.data.update_battle_data_task.delay")
+    @patch("warships.data.update_battle_data_task.apply_async")
     def test_never_fetched_battles_json_none_is_pending(self, mock_task):
         cache.clear()
         Player.objects.create(
@@ -126,9 +127,9 @@ class TierTypePendingDiscriminatorTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp["X-Tier-Type-Pending"], "true")
         self.assertEqual(resp.json()["player_cells"], [])
-        mock_task.assert_called_once_with(player_id="8811", realm="na")
+        assert_dispatched_once_with(mock_task, player_id="8811", realm="na")
 
-    @patch("warships.data.update_battle_data_task.delay")
+    @patch("warships.data.update_battle_data_task.apply_async")
     def test_empty_battles_json_is_terminal_not_pending(self, mock_task):
         cache.clear()
         Player.objects.create(

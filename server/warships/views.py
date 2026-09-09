@@ -2,7 +2,7 @@ import logging
 import os
 from datetime import timedelta
 from hashlib import sha256
-from battlestats.celery import app as celery_app
+from warships.broker import publish_task
 from django.core.cache import cache
 from django.db.models import Sum, F, Case, When, Value, IntegerField, Q
 from django.db.models.functions import Lower
@@ -67,52 +67,11 @@ logger = logging.getLogger(__name__)
 
 LAZY_REFRESH_DEDUP_TIMEOUT = 60  # seconds
 
-# Per-read ceiling on a lazy-refresh dispatch's wait on the broker. Without it,
-# a publish on a wedged AMQP socket blocks in ``drain_events`` with no socket
-# timeout until gunicorn's 25s worker timeout kills the worker mid-request — a
-# 500 with an empty body, which is exactly the request-thread blocking CLAUDE.md
-# forbids. Observed in production 2026-09-08 (two workers, /api/fetch/clan_members
-# and /api/player, both stuck in ``exchange_declare``).
-#
-# This is a PER-READ budget, not a total: kombu retries the read three times
-# before giving up, so the worst case a request can absorb is ~3x this value
-# (measured 15.07s at 5s; 2s keeps the worst case near 6s, under nginx's 20s
-# proxy_read_timeout and well under the 25s worker timeout).
-BROKER_PUBLISH_TIMEOUT_SECONDS = float(
-    os.getenv('BROKER_PUBLISH_TIMEOUT_SECONDS', '2'))
-
-
 def _get_realm(request) -> str:
     realm = (getattr(request, 'query_params', None)
              or request.GET).get('realm', DEFAULT_REALM)
     realm = (realm or DEFAULT_REALM).lower().strip()
     return realm if realm in VALID_REALMS else DEFAULT_REALM
-
-
-def _bounded_broker_connection():
-    """A dedicated broker connection whose reads cannot outlive the request.
-
-    Not the pooled default: a pooled socket can be wedged (or, before
-    2026-09-09, inherited across the gunicorn fork), and a publish on it blocks
-    forever. The bound has to be the *Python-level* socket timeout: py-amqp's
-    ``read_timeout`` reaches only ``SO_RCVTIMEO``, which CPython ignores on a
-    blocking socket — verified 2026-09-09 against a broker wedged mid
-    ``exchange.declare``, where a publish carrying ``read_timeout=5`` still hung
-    past 45s. ``settimeout`` on the live socket is what actually bounds
-    ``drain_events``; ``having_timeout(None)`` preserves it.
-    """
-    connection = celery_app.connection_for_write(
-        connect_timeout=BROKER_PUBLISH_TIMEOUT_SECONDS)
-    try:
-        connection.connect()
-        sock = getattr(
-            getattr(connection.connection, 'transport', None), 'sock', None)
-        if sock is not None:
-            sock.settimeout(BROKER_PUBLISH_TIMEOUT_SECONDS)
-    except Exception:
-        connection.release()
-        raise
-    return connection
 
 
 def _delay_task_safely(task, **kwargs) -> None:
@@ -121,16 +80,10 @@ def _delay_task_safely(task, **kwargs) -> None:
     dedup_key = f'views_dedup:{task_name.rsplit(".", 1)[-1]}:{kw_hash}'
     if not cache.add(dedup_key, 1, timeout=LAZY_REFRESH_DEDUP_TIMEOUT):
         return
-    try:
-        with _bounded_broker_connection() as connection:
-            task.apply_async(kwargs=kwargs, connection=connection, retry=False)
-    except Exception as error:  # noqa: BLE001 - fire-and-forget: never fail the response
+    if not publish_task(task, **kwargs):
+        # Let the next request retry rather than sitting out the dedup window
+        # on a dispatch that never reached the broker.
         cache.delete(dedup_key)
-        logging.warning(
-            'Skipping async task enqueue for %s due to broker error: %s',
-            task_name,
-            error,
-        )
 
 
 def _player_refresh_signals(player_id: int, realm: str = DEFAULT_REALM) -> tuple[bool, int]:

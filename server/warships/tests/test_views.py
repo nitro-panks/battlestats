@@ -9,20 +9,8 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from warships.models import Player, Clan, ClanBattleSeason, PlayerDailyShipStats, PlayerExplorerSummary, RankedSeason, realm_cache_key, Ship, ShipTopPlayerSnapshot, EntityVisitDaily
+from warships.tests.conftest import assert_dispatched_once_with
 from warships.views import PUBLIC_API_THROTTLES, _missing_player_lookup_cache_key, _all_realms_miss_cache_key
-
-
-def assert_dispatched_once_with(mock, **expected):
-    """Assert a view dispatched a task exactly once with these task kwargs.
-
-    Views enqueue through ``_delay_task_safely``, which publishes on its own
-    time-bounded broker connection: the call shape is
-    ``apply_async(kwargs={...}, connection=..., retry=False)``. Only the task
-    kwargs are the contract under test; the transport arguments are not.
-    """
-    mock.assert_called_once()
-    actual = mock.call_args.kwargs["kwargs"]
-    assert actual == expected, f"dispatched {actual!r}, expected {expected!r}"
 
 
 class PlayerViewSetTests(TestCase):
@@ -747,7 +735,7 @@ class LandingWarmupViewTests(TestCase):
     @patch("warships.views.update_clan_members_task.apply_async")
     @patch("warships.views.update_clan_data_task.apply_async")
     @patch("warships.views.update_player_data_task.apply_async")
-    @patch("warships.tasks.update_battle_data_task.delay")
+    @patch("warships.tasks.update_battle_data_task.apply_async")
     @patch("warships.data.update_battle_data")
     def test_player_lookup_keeps_missing_kill_ratio_without_sync_battle_hydration(
         self,
@@ -793,7 +781,8 @@ class LandingWarmupViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["kill_ratio"])
         mock_update_battle_data.assert_not_called()
-        mock_update_battle_data_task.assert_called_once_with(
+        assert_dispatched_once_with(
+            mock_update_battle_data_task,
             player_id=player.player_id,
             realm='na',
         )
@@ -2760,7 +2749,7 @@ class ApiContractTests(TestCase):
             {("Destroyer", 10), ("Cruiser", 8), ("Battleship", 8)},
         )
 
-    @patch("warships.data.update_battle_data_task.delay")
+    @patch("warships.data.update_battle_data_task.apply_async")
     def test_player_correlation_distribution_flags_pending_tier_type_refresh_when_player_battles_are_missing(self, mock_update_battle_data_task):
         cache.clear()
 
@@ -2800,8 +2789,8 @@ class ApiContractTests(TestCase):
                 "Aircraft Carrier", "Submarine"],
         )
         self.assertEqual(payload["y_values"][:3], [11, 10, 9])
-        mock_update_battle_data_task.assert_called_once_with(
-            player_id='8834', realm='na')
+        assert_dispatched_once_with(
+            mock_update_battle_data_task, player_id='8834', realm='na')
 
     def test_player_correlation_distribution_returns_ranked_wr_battles_payload(self):
         cache.clear()
@@ -3868,7 +3857,7 @@ class PlayerLiveRefreshSignalTests(TestCase):
         cache.clear()
 
     @patch("warships.tasks.queue_ranked_data_refresh")
-    @patch("warships.tasks.update_battle_data_task.delay")
+    @patch("warships.tasks.update_battle_data_task.apply_async")
     @patch("warships.views.update_clan_members_task.apply_async")
     @patch("warships.views.update_clan_data_task.apply_async")
     @patch("warships.views.update_player_data_task.apply_async")
@@ -3887,7 +3876,7 @@ class PlayerLiveRefreshSignalTests(TestCase):
         self.assertAlmostEqual(next_refresh, expected, delta=5)
 
     @patch("warships.tasks.queue_ranked_data_refresh")
-    @patch("warships.tasks.update_battle_data_task.delay")
+    @patch("warships.tasks.update_battle_data_task.apply_async")
     @patch("warships.views.update_clan_members_task.apply_async")
     @patch("warships.views.update_clan_data_task.apply_async")
     @patch("warships.views.update_player_data_task.apply_async")
@@ -3903,7 +3892,7 @@ class PlayerLiveRefreshSignalTests(TestCase):
         self.assertEqual(response["X-Player-Refresh-Pending"], "true")
 
     @patch("warships.tasks.queue_ranked_data_refresh")
-    @patch("warships.tasks.update_battle_data_task.delay")
+    @patch("warships.tasks.update_battle_data_task.apply_async")
     @patch("warships.views.update_clan_members_task.apply_async")
     @patch("warships.views.update_clan_data_task.apply_async")
     @patch("warships.views.update_player_data_task.apply_async")
@@ -3918,7 +3907,7 @@ class PlayerLiveRefreshSignalTests(TestCase):
 
     @patch.dict("os.environ", {"BATTLESTATS_DISABLE_LIVE_REFRESH": "1"})
     @patch("warships.tasks.queue_ranked_data_refresh")
-    @patch("warships.tasks.update_battle_data_task.delay")
+    @patch("warships.tasks.update_battle_data_task.apply_async")
     @patch("warships.views.update_clan_members_task.apply_async")
     @patch("warships.views.update_clan_data_task.apply_async")
     @patch("warships.views.update_player_data_task.apply_async")

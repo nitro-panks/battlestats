@@ -50,6 +50,12 @@ def when_ready(server):
         # nothing to inherit; each worker opens its own connection on demand.
         try:
             from battlestats.celery import app as celery_app
+            # close() alone only drops the app's reference to the connection
+            # pool; the socket stays open (verified 2026-09-09 against a live
+            # broker: one connection still "running" after boot). Forcing both
+            # pools shut is what actually releases it.
+            celery_app.amqp.producer_pool.force_close_all()
+            celery_app.pool.force_close_all()
             celery_app.close()
         except Exception:
             server.log.exception(

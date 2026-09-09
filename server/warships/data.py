@@ -1,3 +1,4 @@
+from warships.broker import publish_task
 from warships.tasks import update_activity_data_task, update_battle_data_task, update_clan_data_task, update_clan_members_task, update_randoms_data_task, update_snapshot_data_task, update_tiers_data_task, update_type_data_task
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
     _fetch_clan_battle_seasons_info, _fetch_clan_battle_season_stats
@@ -154,14 +155,8 @@ CLAN_PLOT_DATA_CACHE_TTL = 15 * 60
 
 
 def _dispatch_async_refresh(task, *args, **kwargs) -> None:
-    try:
-        task.delay(*args, **kwargs)
-    except Exception as error:
-        logging.warning(
-            'Skipping async refresh for %s because broker dispatch failed: %s',
-            getattr(task, 'name', repr(task)),
-            error,
-        )
+    """Enqueue a lazy refresh from the request thread; see warships.broker."""
+    publish_task(task, *args, **kwargs)
 
 
 def player_detail_needs_refresh(

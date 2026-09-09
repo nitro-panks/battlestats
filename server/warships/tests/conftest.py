@@ -19,3 +19,20 @@ def _isolate_cache():
     cache.clear()
     yield
     cache.clear()
+
+
+def assert_dispatched_once_with(mock, *expected_args, **expected_kwargs):
+    """Assert a request-thread dispatch happened once with these task arguments.
+
+    Views and hydration enqueue through ``warships.broker.publish_task``, which
+    publishes on its own time-bounded connection: the call shape is
+    ``apply_async(args=(...), kwargs={...}, connection=..., retry=False)``. Only
+    the task arguments are the contract under test, not the transport ones.
+    """
+    mock.assert_called_once()
+    actual_args = tuple(mock.call_args.kwargs["args"])
+    actual_kwargs = mock.call_args.kwargs["kwargs"]
+    assert actual_args == expected_args, (
+        f"dispatched args {actual_args!r}, expected {expected_args!r}")
+    assert actual_kwargs == expected_kwargs, (
+        f"dispatched {actual_kwargs!r}, expected {expected_kwargs!r}")
