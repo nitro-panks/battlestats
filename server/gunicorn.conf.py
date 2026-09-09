@@ -38,3 +38,20 @@ def when_ready(server):
     except Exception:
         server.log.exception(
             "Startup cache warm dispatch failed; continuing without startup warmers.")
+    finally:
+        # Gunicorn calls when_ready in the ARBITER, before it forks any worker,
+        # so the AMQP socket the dispatch above opens is inherited by every
+        # worker. Several processes then interleave frames on one file
+        # descriptor: a worker's first publish waits in ``drain_events`` for a
+        # declare-ok a sibling already consumed, and blocks until the 25s worker
+        # timeout kills it mid-request (500, empty body). Observed 2026-09-08:
+        # two workers died 9s apart with zero new AMQP accepts in the window,
+        # proving they were publishing on the inherited fd. Closing here leaves
+        # nothing to inherit; each worker opens its own connection on demand.
+        try:
+            from battlestats.celery import app as celery_app
+            celery_app.close()
+        except Exception:
+            server.log.exception(
+                "Failed to close the broker connection before fork; workers may "
+                "inherit it.")

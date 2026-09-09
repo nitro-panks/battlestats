@@ -12,13 +12,26 @@ from warships.models import Player, Clan, ClanBattleSeason, PlayerDailyShipStats
 from warships.views import PUBLIC_API_THROTTLES, _missing_player_lookup_cache_key, _all_realms_miss_cache_key
 
 
+def assert_dispatched_once_with(mock, **expected):
+    """Assert a view dispatched a task exactly once with these task kwargs.
+
+    Views enqueue through ``_delay_task_safely``, which publishes on its own
+    time-bounded broker connection: the call shape is
+    ``apply_async(kwargs={...}, connection=..., retry=False)``. Only the task
+    kwargs are the contract under test; the transport arguments are not.
+    """
+    mock.assert_called_once()
+    actual = mock.call_args.kwargs["kwargs"]
+    assert actual == expected, f"dispatched {actual!r}, expected {expected!r}"
+
+
 class PlayerViewSetTests(TestCase):
     def setUp(self):
         cache.clear()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_accepts_no_trailing_slash(
         self,
         mock_update_player_task,
@@ -49,9 +62,9 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay", side_effect=KombuOperationalError("broker-down"))
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async", side_effect=KombuOperationalError("broker-down"))
     def test_player_detail_returns_200_when_background_enqueue_fails(
         self,
         mock_update_player_task,
@@ -85,9 +98,9 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_exposes_ship_badges(
         self,
         mock_update_player_task,
@@ -121,9 +134,9 @@ class PlayerViewSetTests(TestCase):
         self.assertEqual(badges[0]["avg_damage"], 62_000)        # 19_344_000/312
         self.assertEqual(badges[0]["window_days"], SHIP_LEADERBOARD_WINDOW_DAYS)
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_ship_badges_empty_when_none(
         self,
         mock_update_player_task,
@@ -141,9 +154,9 @@ class PlayerViewSetTests(TestCase):
         self.assertEqual(response.json()["ship_badges"], [])
         self.assertNotIn("ship_awards", response.json())
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_exposes_clan_leader_flag(
         self,
         mock_update_player_task,
@@ -173,9 +186,9 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_exposes_efficiency_and_randoms_rows(
         self,
         mock_update_player_task,
@@ -244,9 +257,9 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_exposes_fresh_efficiency_rank_fields(
         self,
         mock_update_player_task,
@@ -285,9 +298,9 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_serves_stored_efficiency_rank_when_inputs_advanced(
         self,
         mock_update_player_task,
@@ -326,9 +339,9 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_exposes_shared_pve_player_flag(
         self,
         mock_update_player_task,
@@ -364,9 +377,9 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_exposes_streamer_flag(
         self,
         mock_update_player_task,
@@ -403,9 +416,9 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_members_task.assert_not_called()
 
     @patch("warships.data._fetch_clan_battle_season_stats")
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_exposes_cached_clan_battle_header_fields(
         self,
         mock_update_player_task,
@@ -444,9 +457,9 @@ class PlayerViewSetTests(TestCase):
         self.assertIsNotNone(payload["clan_battle_header_updated_at"])
         mock_fetch_clan_battle_season_stats.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_scopes_shield_fields_to_the_current_cb_season(
         self,
         mock_update_player_task,
@@ -499,9 +512,9 @@ class PlayerViewSetTests(TestCase):
         # Career tab gate is untouched by the icon's season scoping.
         self.assertTrue(sitout_payload["clan_battle_header_eligible"])
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_current_season_cb_participation_unlocks_the_clan_battles_tab(
         self,
         mock_update_player_task,
@@ -535,9 +548,9 @@ class PlayerViewSetTests(TestCase):
         self.assertEqual(payload["clan_battle_header_seasons_played"], 1)
 
     @patch("warships.data._fetch_clan_battle_season_stats")
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_defaults_clan_battle_header_fields_when_cache_missing(
         self,
         mock_update_player_task,
@@ -569,9 +582,9 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_members_task.assert_not_called()
 
     @patch("warships.data._fetch_clan_battle_season_stats")
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_prefers_durable_clan_battle_header_fields_when_cache_missing(
         self,
         mock_update_player_task,
@@ -611,9 +624,9 @@ class PlayerViewSetTests(TestCase):
 
 
 class LandingWarmupViewTests(TestCase):
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_lookup_updates_last_lookup_timestamp(
         self,
         _mock_update_player_task,
@@ -731,9 +744,9 @@ class LandingWarmupViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["clan_id"], clan.clan_id)
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     @patch("warships.tasks.update_battle_data_task.delay")
     @patch("warships.data.update_battle_data")
     def test_player_lookup_keeps_missing_kill_ratio_without_sync_battle_hydration(
@@ -789,9 +802,9 @@ class LandingWarmupViewTests(TestCase):
         self.assertGreaterEqual(player.last_lookup, request_started_at)
         self.assertLessEqual(player.last_lookup, timezone.now())
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     @patch("warships.data.update_player_data")
     @patch("warships.views._fetch_player_id_by_name")
     def test_player_lookup_falls_back_to_remote_then_persists(
@@ -820,7 +833,7 @@ class LandingWarmupViewTests(TestCase):
         self.assertEqual(payload["name"], "RemotePlayer")
         self.assertTrue(Player.objects.filter(
             player_id=777, name="RemotePlayer").exists())
-        mock_update_player_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_player_task, 
             player_id=777,
             force_refresh=True,
             realm='na',
@@ -828,9 +841,9 @@ class LandingWarmupViewTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     @patch("warships.data.update_clan_data")
     @patch("warships.data.update_player_data")
     def test_player_lookup_without_clan_serves_stored_payload_and_enqueues_refresh(
@@ -857,7 +870,7 @@ class LandingWarmupViewTests(TestCase):
         self.assertIsNone(payload["clan_tag"])
         mock_update_player_data.assert_not_called()
         mock_update_clan_data.assert_not_called()
-        mock_update_player_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_player_task, 
             player_id=player.player_id,
             force_refresh=True,
             realm='na',
@@ -891,9 +904,9 @@ class LandingWarmupViewTests(TestCase):
             realm='eu',
         )
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     @patch("warships.data.update_player_data")
     def test_player_lookup_does_not_enqueue_when_data_is_fresh(
         self,
@@ -924,9 +937,9 @@ class LandingWarmupViewTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     @patch("warships.data.update_player_data")
     def test_player_lookup_enqueues_force_refresh_when_efficiency_data_is_missing(
         self,
@@ -959,7 +972,7 @@ class LandingWarmupViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_update_player_data.assert_not_called()
-        mock_update_player_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_player_task, 
             player_id=player.player_id,
             force_refresh=True,
             realm='na',
@@ -967,9 +980,9 @@ class LandingWarmupViewTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     @patch("warships.data.update_player_data")
     def test_player_lookup_enqueues_refresh_for_efficiency_gap_when_actual_kdr_present(
         self,
@@ -1002,7 +1015,7 @@ class LandingWarmupViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_update_player_data.assert_not_called()
-        mock_update_player_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_player_task, 
             player_id=9005,
             force_refresh=True,
             realm='na',
@@ -1010,9 +1023,9 @@ class LandingWarmupViewTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_lookup_recomputes_missing_verdict_from_stored_stats(
         self,
         mock_update_player_task,
@@ -1052,9 +1065,9 @@ class LandingWarmupViewTests(TestCase):
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_lookup_enqueues_when_data_is_stale(
         self,
         mock_update_player_task,
@@ -1078,12 +1091,12 @@ class LandingWarmupViewTests(TestCase):
         response = self.client.get("/api/player/StalePlayer/")
 
         self.assertEqual(response.status_code, 200)
-        mock_update_player_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_player_task, 
             player_id=9002,
             realm='na',
         )
-        mock_update_clan_task.assert_called_once_with(clan_id=901, realm='na')
-        mock_update_clan_members_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_clan_task, clan_id=901, realm='na')
+        assert_dispatched_once_with(mock_update_clan_members_task, 
             clan_id=901, realm='na')
 
 
@@ -1472,8 +1485,8 @@ class ClanMembersEndpointTests(TestCase):
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
     @patch("warships.data.update_clan_members")
     @patch("warships.data.update_clan_data")
     def test_clan_members_returns_partial_rows_and_queues_refresh_for_incomplete_clan(
@@ -1505,13 +1518,13 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(response.json()[0]["name"], "ExistingMember")
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
-        mock_update_clan_data_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_clan_data_task, 
             clan_id="420", realm='na')
-        mock_update_clan_members_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_clan_members_task, 
             clan_id="420", realm='na')
 
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
     def test_clan_members_enqueues_realm_aware_refresh_for_eu_clan(
         self,
         mock_update_clan_data_task,
@@ -1537,9 +1550,9 @@ class ClanMembersEndpointTests(TestCase):
         response = self.client.get("/api/fetch/clan_members/421/?realm=eu")
 
         self.assertEqual(response.status_code, 200)
-        mock_update_clan_data_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_clan_data_task, 
             clan_id="421", realm='eu')
-        mock_update_clan_members_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_clan_members_task, 
             clan_id="421", realm='eu')
 
     def test_clan_members_exposes_ranked_hydration_metadata(self):
@@ -2434,7 +2447,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(player.explorer_summary.kill_ratio, 0.78)
         self.assertEqual(player.explorer_summary.player_score, 3.87)
 
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_player_detail_keeps_missing_actual_kdr_and_queues_refresh(self, mock_update_player_data_task):
         now = timezone.now()
         player = Player.objects.create(
@@ -2458,7 +2471,7 @@ class ApiContractTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()["actual_kdr"])
-        mock_update_player_data_task.assert_called_once_with(
+        assert_dispatched_once_with(mock_update_player_data_task, 
             player_id=player.player_id,
             force_refresh=True,
             realm='na',
@@ -3477,7 +3490,7 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(calls_after_first, 3)
         self.assertEqual(mock_lookup.call_count, calls_after_first)
 
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_player_data_task.apply_async")
     @patch("warships.data.update_player_data")
     @patch("warships.views._fetch_player_id_by_name")
     def test_cross_realm_fallback_resolves_player_in_other_realm(
@@ -3507,7 +3520,7 @@ class ApiThrottleTests(TestCase):
             "cross-realm-redirect" in line and "from=na" in line and "to=asia" in line
             for line in logs.output))
 
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_player_data_task.apply_async")
     @patch("warships.data.update_player_data")
     @patch("warships.views._fetch_player_id_by_name")
     def test_cross_realm_fallback_prefers_asia_over_eu(
@@ -3541,7 +3554,7 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.status_code, 404)
         mock_lookup.assert_called_once_with("AsiaOnly", realm='na')
 
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_player_data_task.apply_async")
     @patch("warships.data.update_player_data")
     @patch("warships.views._fetch_player_id_by_name")
     def test_cross_realm_negative_cache_not_cross_poisoned(
@@ -3856,9 +3869,9 @@ class PlayerLiveRefreshSignalTests(TestCase):
 
     @patch("warships.tasks.queue_ranked_data_refresh")
     @patch("warships.tasks.update_battle_data_task.delay")
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_fresh_player_reports_not_pending_with_next_refresh(self, *_mocks):
         now = timezone.now()
         Player.objects.create(
@@ -3875,9 +3888,9 @@ class PlayerLiveRefreshSignalTests(TestCase):
 
     @patch("warships.tasks.queue_ranked_data_refresh")
     @patch("warships.tasks.update_battle_data_task.delay")
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_stale_player_reports_pending(self, *_mocks):
         stale = timezone.now() - timedelta(minutes=20)
         Player.objects.create(
@@ -3891,9 +3904,9 @@ class PlayerLiveRefreshSignalTests(TestCase):
 
     @patch("warships.tasks.queue_ranked_data_refresh")
     @patch("warships.tasks.update_battle_data_task.delay")
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_never_fetched_player_reports_pending(self, *_mocks):
         Player.objects.create(
             name="NeverLivePlayer", player_id=77003, realm="na",
@@ -3906,9 +3919,9 @@ class PlayerLiveRefreshSignalTests(TestCase):
     @patch.dict("os.environ", {"BATTLESTATS_DISABLE_LIVE_REFRESH": "1"})
     @patch("warships.tasks.queue_ranked_data_refresh")
     @patch("warships.tasks.update_battle_data_task.delay")
-    @patch("warships.views.update_clan_members_task.delay")
-    @patch("warships.views.update_clan_data_task.delay")
-    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
     def test_live_refresh_can_be_disabled_for_local_stale_snapshots(self, *_mocks):
         stale = timezone.now() - timedelta(days=30)
         Player.objects.create(
