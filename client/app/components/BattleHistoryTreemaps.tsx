@@ -13,6 +13,11 @@
 //     toggles the same ShipStats combat panel a table-row click does.
 //   • Tier — tiles per tier, sized by battles, colored by tier aggregate WR.
 //
+// Every tile carries up to three lines: the name, the color metric's own
+// figure, and the games record ("4W 5L") from the summed wins/losses. The
+// record is drawn on all three maps and under every color metric — it is what
+// was played, not what the fill encodes.
+//
 // Purely presentational: BattleHistoryCard owns the fetch and passes the
 // resolved `by_ship` rows, so the maps re-render on every Window/Mode pill
 // change and always mirror the table.
@@ -29,7 +34,19 @@ import type { BattleHistoryByShip } from './BattleHistoryCard';
 // too noisy for a tile label.
 const fmtDamage = (value: number): string => d3.format('.3~s')(value).replace('G', 'B');
 
+// The games record drawn under the metric line: "4W 5L". Ungrouped digits on
+// purpose — "1,204W 1,098L" would blow the tile's width gate and drop the line
+// entirely on exactly the ships that earned the most battles.
+const formatRecord = (wins: number, losses: number): string => `${wins}W ${losses}L`;
+
 const PANEL_HEIGHT = 150;
+
+// The type and tier maps run shorter than the ships map, which stays the
+// visual anchor. 100px rather than half of PANEL_HEIGHT: at 75 a stacked pair
+// of tiles landed near 35px each and dropped BOTH the metric and the W/L line,
+// so the two smaller panels read as blank rectangles on any player with a
+// spread of tiers.
+const SECONDARY_PANEL_HEIGHT = 100;
 
 const SHIP_TYPE_LABEL: Record<string, string> = {
     Destroyer: 'DD',
@@ -75,6 +92,12 @@ interface TreemapDatum {
     key: string;            // stable identity + default label
     label: string;          // text drawn on the tile
     sub?: string | null;    // second label line (avg dmg on the ships map, WR% on type/tier)
+    // Third label line: the games record, "4W 5L". Independent of the color
+    // metric — it is what was played, not what the fill encodes. Stays Latin
+    // in every locale for the same reason the WR%/dmg/Kills pills do: it is a
+    // compact figure-plus-unit token, and translating it alone would leave a
+    // mixed-script tile.
+    record?: string | null;
     size: number;           // area (battles)
     color: string;          // tile fill, computed by the parent per map
     tooltip: TooltipLine[]; // lines for the hover overlay; first is always the title string
@@ -195,12 +218,24 @@ const MiniTreemap: React.FC<MiniTreemapProps> = ({
                 .text(label);
             // The sub line (avg dmg / WR%) is drawn only when it fits whole —
             // a truncated number misleads; the tooltip always has the full data.
-            if (h >= 38 && d.data.sub && d.data.sub.length <= Math.floor((w - 6) / 6.6)) {
+            const drewSub = h >= 38 && !!d.data.sub && d.data.sub.length <= Math.floor((w - 6) / 6.6);
+            if (drewSub) {
                 node.append('text')
                     .attr('x', 4).attr('y', 29)
                     .attr('font-size', 11).attr('fill', textColor).attr('opacity', 0.85)
                     .style('pointer-events', 'none')
-                    .text(d.data.sub);
+                    .text(d.data.sub as string);
+            }
+            // Same whole-or-nothing rule for the W/L record, and never without
+            // the metric line above it: the record is the narrower string, so
+            // on a thin tile it would otherwise render alone and read as the
+            // metric it is not.
+            if (drewSub && h >= 50 && d.data.record && d.data.record.length <= Math.floor((w - 6) / 6.0)) {
+                node.append('text')
+                    .attr('x', 4).attr('y', 43)
+                    .attr('font-size', 10).attr('fill', textColor).attr('opacity', 0.75)
+                    .style('pointer-events', 'none')
+                    .text(d.data.record);
             }
         });
     }, [data, width, height, selectedKey]);
@@ -274,18 +309,21 @@ const aggregateTiles = (
     colorMetric: ShipsColorMetric,
 ): TreemapDatum[] => {
     const groups = new Map<string, {
-        battles: number; wins: number; ships: number; damage: number; frags: number;
-        expectedDamage: number; baselinedDamage: number;
+        battles: number; wins: number; losses: number; ships: number; damage: number;
+        frags: number; expectedDamage: number; baselinedDamage: number;
     }>();
     rows.forEach((r) => {
         const key = groupKey(r);
         if (key == null) return;
         const cur = groups.get(key) ?? {
-            battles: 0, wins: 0, ships: 0, damage: 0, frags: 0,
+            battles: 0, wins: 0, losses: 0, ships: 0, damage: 0, frags: 0,
             expectedDamage: 0, baselinedDamage: 0,
         };
         cur.battles += r.battles;
         cur.wins += r.wins;
+        // Summed, never derived as battles − wins: a draw is neither, and the
+        // table below reports the same two columns from the same fields.
+        cur.losses += r.losses;
         cur.ships += 1;
         cur.damage += r.damage;
         cur.frags += r.frags;
@@ -317,6 +355,7 @@ const aggregateTiles = (
                 key,
                 label: labelFor(key),
                 sub,
+                record: formatRecord(v.wins, v.losses),
                 size: v.battles,
                 color,
                 tooltip: [
@@ -506,6 +545,7 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                     key: String(r.ship_id),
                     label: r.ship_name || `Ship ${r.ship_id}`,
                     sub,
+                    record: formatRecord(r.wins, r.losses),
                     size: r.battles,
                     color,
                     tooltip: [
@@ -609,13 +649,13 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
                     title={`${t('common.type')} × ${COLOR_METRIC_LABEL[colorMetric]}`}
                     ariaLabel={`Battles by ship type, colored by ${METRIC_ARIA[colorMetric]}`}
                     data={typeTiles}
-                    height={PANEL_HEIGHT / 2}
+                    height={SECONDARY_PANEL_HEIGHT}
                 />
                 <MiniTreemap
                     title={`${t('common.tier')} × ${COLOR_METRIC_LABEL[colorMetric]}`}
                     ariaLabel={`Battles by ship tier, colored by ${METRIC_ARIA[colorMetric]}`}
                     data={tierTiles}
-                    height={PANEL_HEIGHT / 2}
+                    height={SECONDARY_PANEL_HEIGHT}
                 />
             </div>
         </div>

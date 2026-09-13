@@ -289,6 +289,43 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         ).toHaveLength(15);
     });
 
+    it('draws the games record on all three maps, summed from wins/losses, under every color metric', () => {
+        render(
+            <BattleHistoryTreemaps
+                byShip={[
+                    // 9 battles, 4W 5L — the Brennus case the line was added for.
+                    row({ ship_name: 'Brennus', ship_type: 'Cruiser', battles: 9, wins: 4, losses: 5, win_rate: 44.4 }),
+                    row({ ship_id: 2, ship_name: 'Shimakaze', ship_type: 'Destroyer', battles: 20, wins: 11, losses: 9, win_rate: 55 }),
+                ]}
+            />,
+        );
+        const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
+        const typeSvg = screen.getByRole('img', { name: /battles by ship type/i });
+        const tierSvg = screen.getByRole('img', { name: /battles by ship tier/i });
+        const textOf = (svg: HTMLElement) => Array.from(svg.querySelectorAll('text')).map((t) => t.textContent);
+
+        expect(textOf(shipsSvg)).toEqual(expect.arrayContaining(['4W 5L', '11W 9L']));
+        // Type tiles carry their own group's record, not a ship's.
+        expect(textOf(typeSvg)).toEqual(expect.arrayContaining(['4W 5L', '11W 9L']));
+        // Both ships are T10, so the tier tile sums them: 15W 14L.
+        expect(textOf(tierSvg)).toEqual(expect.arrayContaining(['15W 14L']));
+
+        // The record is a property of the games played, so it survives a
+        // color-metric switch that replaces the WR% line above it.
+        fireEvent.click(screen.getByRole('button', { name: 'dmg' }));
+        expect(textOf(shipsSvg)).toEqual(expect.arrayContaining(['4W 5L']));
+        expect(textOf(shipsSvg)).not.toEqual(expect.arrayContaining(['44.4%']));
+    });
+
+    it('derives losses from the losses field, so a draw is neither a win nor a loss', () => {
+        // 10 battles, 4 wins, 5 losses: one draw. battles − wins would say 6L.
+        render(<BattleHistoryTreemaps byShip={[row({ battles: 10, wins: 4, losses: 5, win_rate: 40 })]} />);
+        const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
+        const texts = Array.from(shipsSvg.querySelectorAll('text')).map((t) => t.textContent);
+        expect(texts).toContain('4W 5L');
+        expect(texts).not.toContain('4W 6L');
+    });
+
     it('clicking a ship tile reports the row (ShipStats toggle contract)', () => {
         const onShipClick = jest.fn();
         const { container } = render(
