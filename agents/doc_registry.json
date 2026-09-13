@@ -2834,6 +2834,38 @@
                 "recapture-soft-limit-resolved"
             ]
         },
+        "agents/runbooks/runbook-system-wide-throughput-decay-2026-08-20.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "system-wide throughput decay",
+                "recapture partial asia 2026-08-19",
+                "rows per second decay",
+                "db latency probe",
+                "random-access latency vs round-trip latency",
+                "observation floor coverage regression"
+            ],
+            "tags": [
+                "throughput",
+                "recapture",
+                "observation-floor",
+                "managed-postgres",
+                "iowait",
+                "latency",
+                "probe",
+                "celery",
+                "benchmark-snapshots",
+                "detector-gaps",
+                "closed"
+            ],
+            "archive_on": [
+                "db-iowait-sizing-resolved",
+                "throughput-decay-detectors-shipped"
+            ]
+        },
         "agents/runbooks/runbook-recapture-truncation-handler-crash-2026-08-16.md": {
             "kind": "runbook",
             "status": "active",

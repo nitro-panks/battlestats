@@ -2,7 +2,95 @@
 
 _Created: 2026-08-20_
 _Context: the 2026-08-19T11:34Z ops mail fired one condition, `recapture_partial:asia` (`scanned=18100` of `candidates=30000`, `advanced=537`, `yield_frac=0.0297`)._
-_Status: **DIAGNOSIS ONLY. NOTHING ARMED, NOTHING CHANGED.** No env touched, no worker restarted, no deploy. The 2026-08-20 stripe had not fired at time of writing (04:41 UTC; Beat fires 10:10/10:30/10:50 UTC), so the next confirming observation is available later today._
+_Status: **CLOSED 2026-09-13. The episode resolved on its own; the probe's answer is below and it was never read until landing day.** The body from "The one-paragraph version" down is the 2026-08-20 diagnosis, preserved as written; read the closing section first._
+
+> **Landing note.** This runbook was written on 2026-08-20 and sat on an unmerged
+> worktree branch for three weeks while `server/warships/tasks.py:98` and
+> `runbook-recapture-soft-limit-budget-2026-08-13.md:325` both cited it by name.
+> It was landed on 2026-09-13 to close those two dangling references, with the
+> closing section added and nothing in the original body edited.
+
+## CLOSING SECTION (2026-09-13)
+
+**The decay resolved. No lever in the "Recommended next steps" list was ever pulled as such.**
+Recapture on 2026-09-13, all three realms complete, none partial:
+
+| realm | scanned | duration_s | rows/s | vs 2026-08-19 | own baseline |
+|---|---|---|---|---|---|
+| na | 30,000 | 381.3 | **78.7** | 48.6 | 66 to 85 |
+| eu | 30,000 | 444.6 | **67.5** | 44.3 | (noisy) |
+| asia | 30,000 | 690.3 | **43.5** | 20.1 | 35 to 46 |
+
+Every realm is back inside its own baseline, asia included. The observation floor
+recovered with it: NA `coverage_ratio_vs_7d` is **0.3152** on 2026-09-13 against the
+**0.21** that this runbook called a product-visible freshness regression, and NA's daily
+observations are 33,124 against the 15,690 measured on 08-19.
+
+**The one change that did land was not aimed at this.** `RECAPTURE_TASK_OPTS` went 15/16
+to 20/21 min in v5.6.7 (2026-08-30), sized from asia's own 08-19..08-30 duration
+distribution — see `tasks.py:83-128`. That is a budget widening, not a fix for a rate
+collapse, and this runbook's step 1 ("do not pull L1") held: L1 was never pulled.
+
+**Step 5's candidate trigger is falsified by inaction.** The best-dated suspect was
+v5.3.11 moving `SHIP_LEADERBOARD_WINDOW_DAYS` 45 to 60 on 2026-08-18. That value is
+**still 60** (authority: `server/deploy/deploy_to_droplet.sh:793`, read 2026-09-13) and
+throughput recovered anyway. The widen was not the cause.
+
+### The probe ran to completion, and nobody read it
+
+`/opt/battlestats-server/shared/benchmarks/db-latency-probe/2026-08-20_dbprobe.tsv`
+holds the full series: **784 rows, 05:09:06Z to 11:39:30Z**, all three stripes covered.
+The transient unit is long gone; `/usr/local/bin/bs_db_probe.sh` is still on the droplet
+at 0700. Read for the first time on 2026-09-13:
+
+| band | n | sel1_ms median | sel1_ms p90 | pk_ms median | pk_ms p90 | pk_ms mean |
+|---|---|---|---|---|---|---|
+| control 05:09-10:09 | 583 | 1.202 | 3.645 | 11.485 | 41.081 | 29.1 |
+| stripe 10:10-11:40 | 200 | 1.215 | 3.176 | 11.152 | 51.854 | 53.1 |
+
+**The test the probe was built for returns a split verdict, and the split is the finding.**
+The prediction was "if the decay is I/O, `pk_ms` rises during the stripe while `sel1_ms`
+stays flat." `sel1_ms` is flat, exactly as predicted: 1.202 to 1.215 at the median, and
+its p90 actually falls. `pk_ms` does **not** rise at the median (11.485 to 11.152). It
+rises only in the tail: p90 41.1 to 51.9, mean 29.1 to 53.1. So the stripe buys tail
+latency, not a shifted distribution.
+
+The larger result is the one nobody was looking for. **Random-access latency runs roughly
+10x pure round-trip at all hours**: 11.5ms against 1.2ms at the median, in the CONTROL
+band, five hours away from any stripe. Mean iowait is 37.0% in control and 37.9% during
+the stripe, both far past the ~25% trouble threshold in
+`reference_managed_pg_trouble_signs`, and essentially identical. **The 04:30-rollup
+caveat the original body flagged is therefore dead: the saturation is not a rollup
+artifact and it is not stripe-induced. It is the standing condition of a 2 vCPU / 4 GB
+managed instance**, and the recapture sweep is simply the workload whose shape makes it
+legible.
+
+That reframes the whole episode. The database was the right suspect and "I/O saturation"
+was the right mechanism, but it is chronic, not an August event. What varied in
+2026-08-16..19 and then recovered is still unexplained; this probe rules out the stripe
+window as its locus.
+
+### What is still open
+
+1. **The three detector gaps are still open**, and they are the durable lesson: no
+   near-miss condition on `duration_s` above ~85% of the soft limit (Aug 18's asia pass
+   at 97.7% would have fired a day early), no "the task raised" condition, no
+   `flush_failed` condition, and no condition watching rows/s against a realm's own
+   baseline. Every realm degraded for four days in plain sight and only the one with the
+   least headroom tripped a threshold.
+2. **The chronic 10x random-access gap is unaddressed** and is a sizing question, not a
+   task-tuning one. It belongs with `agents/work-items/db-growth-capacity-2026-08-05.md`.
+3. **Step 4 was never done**: the 60d rollout's required snapshot rebuild and forced grid
+   warm were confirmed only against commit `fe717e4`'s own message, never against live
+   rollup coverage. `reference_rollup_coverage_gate_breaks_on_widen` is the reason that
+   matters, and a further widen to 90d was under consideration as of 2026-09-11.
+
+### What this runbook is good for now
+
+Not as a live incident. As the record of (a) a four-day system-wide decay that recovered
+untouched, (b) the probe design that separates round-trip latency from random-access
+latency, which is reusable, and (c) the discarded-measurements list below, every entry of
+which is still a live trap.
 
 ## The one-paragraph version
 
@@ -121,7 +209,7 @@ Recording these so the next pass does not re-derive them and build on sand.
 - **`benchmarks/db-size/` is stale**, newest file `db-size-20260622T130000Z.txt`. Note the convention differs from every sibling benchmark directory: `db-size-<TIMESTAMP>.txt` plus a `diff-<TIMESTAMP>.txt`, not `YYYY-MM-DD_HHMMZ_*.json`. A date-globbed JSON pattern returns nothing there and that absence is a pattern mismatch, not staleness; the staleness is separately confirmed by a plain `ls -1t`. It cannot answer the growth question.
 - **Full-day medians must never be compared against a partial day.** This bit twice in one session: once on `incremental_player_refresh_task`, once on the read-side warmers where it briefly manufactured the DB hypothesis's second leg. Restrict both sides to the same wall-clock window before reading a trend.
 
-## The probe is armed and running (2026-08-20 05:10 UTC)
+## The probe is armed and running (2026-08-20 05:10 UTC) — _superseded; it ran to completion, see the closing section_
 
 Scheduled server-side so it does not depend on any session staying open:
 
