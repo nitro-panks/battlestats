@@ -284,6 +284,55 @@ Not taken: the window is still 60, the percentile warmer is still one task per
 realm, and the rollup backfill has not been run. Steps 0, 1, 3, 4 and 5 stand as
 written.
 
+
+### Post-deploy verification, 2026-09-16 03:0x-03:5x UTC
+
+Released as **v5.9.0**. Backend and frontend deployed; the droplet's
+`/etc/battlestats-server.env` reads `SHIP_BADGE_TIERS=8,9,10,11`.
+
+The na snapshot rebuilt in 47.4s: `ships_qualified` 358, `ships_total` **611**
+(was 588 on the same night's pre-T11 run), `badges` 1068, `ranked_rows` 5226.
+The 23-hull delta is tier 11 entering scope.
+
+Ranked T11 ships per bucket, read from the public API after all three realms
+rebuilt, against what this study predicted at 60d/floor 20:
+
+| realm | BB | CA | DD | CV | predicted |
+|---|---|---|---|---|---|
+| na | 7 | 5 | 4 | 1 | 7 / 5 / 4 / 1 |
+| eu | 7 | 8 | 5 | 3 | 7 / 8 / 5 / 3 |
+| asia | 7 | 8 | 2 | 3 | 7 / 8 / 2 / 3 |
+
+Every bucket matches the spike exactly: 60 boards across three realms. The
+instrument is therefore validated against production, not merely plausible.
+
+**One trap, worth remembering before the next tier opens.** The API gate opened
+at deploy time, but the snapshot that ranks the new tier runs later. Probing a
+T11 bucket in that gap computed a payload from the pre-T11 snapshot and cached
+it under the *current* generation key (`captured_on` had already advanced on the
+02:31 nightly run), so `na T11 Battleship` served one ship while the snapshot
+held seven. Nothing detects this: the payload is well-formed, on the right
+generation, and simply short.
+
+Sequence a tier addition as: deploy, rebuild the snapshot per realm, **then**
+warm or read the new buckets. If a bucket was read too early, force it:
+
+```python
+from warships.data import compute_realm_ships_by_tier_type as c
+for t in ('Battleship', 'Cruiser', 'Destroyer', 'AirCarrier'):
+    print(t, len(c('na', tier=11, ship_type=t, mode='random', use_cache=False)['ships']))
+```
+
+Snapshot dispatch used for the rollout (striped 0 / 900 / 1800s so three realms
+do not contend; the background worker had a 16-message backlog and took ~8
+minutes to reach the first one):
+
+```python
+from warships.tasks import snapshot_ship_top_players_task
+for i, realm in enumerate(('na', 'eu', 'asia')):
+    snapshot_ship_top_players_task.apply_async(kwargs={'realm': realm}, countdown=i * 900)
+```
+
 ## Recommendation
 
 **All three tiers are addable on the data. Sequence them behind the warmer fix,
@@ -363,12 +412,14 @@ ssh root@battlestats.online 'journalctl -u battlestats-celery-background --since
       waits for 2026-09-18.
 - [ ] Flip the window; capture the post-flip per-bucket warmer cost, now with
       20 buckets rather than 15 (T11 added 2026-09-15).
+- [ ] Read the first `warm_realm_ships_pct_task` run at 20 buckets against the
+      1228-1384s/15-bucket baseline; the estimate was +5-8%.
 - [ ] Split `warm_realm_ships_pct_task` per tier; required before T7 or T6, and
       before T11 if the post-flip warmer exceeds ~1450s on any realm.
 - [x] T11 label decided: `11`, slug `t11-<type>` (operator, 2026-09-15).
 - [x] Generalize the tier-9 empty-bucket predicate (`isShiplessBucket`, shipped
       with T11 on 2026-09-15).
-- [ ] Reply to feedback #6 now that T11 is live; it is the first submission the
+- [ ] Reply to feedback #6 now that T11 is live on all three realms; it is the first submission the
       site has received and the requester named that tier specifically.
 - [ ] Archive `runbook-ship-standings-tier7-spike-2026-09-07.md` once the tier
       decision lands; this runbook supersedes its verdict.
