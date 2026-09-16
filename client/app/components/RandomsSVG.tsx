@@ -68,6 +68,11 @@ interface RandomsSVGProps {
 interface RandomsWindowStat {
     deltaWinRate: number | null;
     battles: number;
+    /** The window's own record on this ship. Carried for the compact hover
+     *  line, which quotes what the captain actually did this window in place
+     *  of the lifetime win total. */
+    wins: number;
+    losses: number;
 }
 type RandomsWindowMap = Map<string, RandomsWindowStat>;
 
@@ -643,9 +648,15 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 const map: RandomsWindowMap = new Map();
                 for (const ship of data?.by_ship ?? []) {
                     if (!ship.ship_name) continue;
+                    const battles = ship.battles ?? 0;
+                    const wins = ship.wins ?? 0;
                     map.set(ship.ship_name, {
                         deltaWinRate: ship.delta_win_rate ?? null,
-                        battles: ship.battles ?? 0,
+                        battles,
+                        wins,
+                        // The payload carries losses directly; the subtraction
+                        // is only a floor for an older backend that does not.
+                        losses: ship.losses ?? Math.max(battles - wins, 0),
                     });
                 }
                 setWindowStats(map);
@@ -876,6 +887,12 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     };
 
     const randomsFreshness = getFreshnessStatus(randomsUpdatedAt);
+    // Window record for the hovered ship, compact variant only — the full
+    // variant's hover line stays lifetime end to end, because its rows are not
+    // window-scoped and a mixed line there would have nothing to anchor it.
+    const compactRecord = compact && hoveredShip
+        ? windowStats.get(hoveredShip.ship_name) ?? null
+        : null;
 
     const shouldGrayOut = isLoading || isChartLoading || (compact && !windowLoaded);
     const shouldShowEmptyState = !shouldGrayOut && chartData.length === 0;
@@ -1052,9 +1069,44 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                             <span className="text-[var(--text-secondary)]">{'  •  '}</span>
                             <span className="text-[var(--text-secondary)]">T{hoveredShip.ship_tier} {hoveredShip.ship_type}</span>
                             <span className="text-[var(--text-secondary)]">{'  •  '}</span>
-                            <span className="text-[var(--text-secondary)]">{hoveredShip.pvp_battles.toLocaleString()} battles • {hoveredShip.wins.toLocaleString()} wins</span>
-                            <span className="text-[var(--text-secondary)]">{'  •  '}</span>
-                            <span className="font-semibold text-[var(--text-primary)]">{(hoveredShip.win_ratio * 100).toFixed(1)}% win rate</span>
+                            <span className="text-[var(--text-secondary)]">
+                                {hoveredShip.pvp_battles.toLocaleString()} battles
+                                {' • '}
+                                {/* The one window-scoped figure on an otherwise
+                                    lifetime line. The compact chart's whole
+                                    subject is the window, so the captain's
+                                    record THERE is the useful quote; a lifetime
+                                    win total says nothing the lifetime battle
+                                    count beside it and the row's own WR label
+                                    have not already said. Letters at 0.75em and the trailing
+                                    qualifier follow the strip crosshair's
+                                    readout, so a W/L record reads the same in
+                                    both places. Falls back to the lifetime
+                                    total if the join somehow lacks this ship. */}
+                                {compactRecord ? (
+                                    <>
+                                        {compactRecord.wins.toLocaleString()}<span className="text-[0.75em]">W</span>
+                                        {' '}
+                                        {compactRecord.losses.toLocaleString()}<span className="text-[0.75em]">L</span>
+                                        <span className="text-[var(--text-muted)]"> this window</span>
+                                    </>
+                                ) : (
+                                    <>{hoveredShip.wins.toLocaleString()} wins</>
+                                )}
+                            </span>
+                            {/* The compact line stops at the window record. Its
+                                bars already print the ship's win rate at the end
+                                of every row, so repeating it here spent the
+                                line's last slot restating what the reader is
+                                looking at. The Ships tab keeps it: that chart is
+                                filterable by win rate, so the hovered value is
+                                the figure the reader is steering by. */}
+                            {!compact ? (
+                                <>
+                                    <span className="text-[var(--text-secondary)]">{'  •  '}</span>
+                                    <span className="font-semibold text-[var(--text-primary)]">{(hoveredShip.win_ratio * 100).toFixed(1)}% win rate</span>
+                                </>
+                            ) : null}
                         </span>
                     ) : null}
                 </div>

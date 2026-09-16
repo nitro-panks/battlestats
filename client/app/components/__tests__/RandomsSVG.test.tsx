@@ -479,8 +479,11 @@ describe('RandomsSVG compact variant (Activity tab)', () => {
     beforeEach(() => {
         mockFetch.mockReset();
         global.fetch = mockFetch as unknown as typeof fetch;
-        const chain = (d3.select as unknown as jest.Mock)(null) as unknown as { data: jest.Mock };
+        const chain = (d3.select as unknown as jest.Mock)(null) as unknown as {
+            data: jest.Mock; on: jest.Mock;
+        };
         chain.data.mockClear();
+        chain.on.mockClear();
     });
 
     it('draws only ships played in the window, tier floor and all, with no controls', async () => {
@@ -576,5 +579,86 @@ describe('RandomsSVG compact variant (Activity tab)', () => {
         await waitFor(() => {
             expect(historyUrls().some((url) => url.includes('window=seventyfive'))).toBe(true);
         });
+    });
+});
+
+describe('RandomsSVG hover readout — window record vs lifetime wins', () => {
+    const RANDOMS_ROWS = [
+        { ship_id: 1, ship_name: 'Window Eight', ship_chart_name: 'Window Eight', ship_tier: 8, ship_type: 'Cruiser', pvp_battles: 120, wins: 66, win_ratio: 0.55 },
+    ];
+    const WINDOW_BY_SHIP = [
+        { ship_id: 1, ship_name: 'Window Eight', battles: 9, wins: 6, losses: 3, delta_win_rate: 0.4 },
+    ];
+
+    const hoverFirstRow = () => {
+        const chain = (d3.select as unknown as jest.Mock)(null) as unknown as {
+            on: jest.Mock; data: jest.Mock;
+        };
+        const handler = chain.on.mock.calls
+            .filter(([event]) => event === 'mouseover')
+            .map(([, fn]) => fn)[0];
+        const datum = chain.data.mock.calls
+            .map(([bound]) => bound)
+            .filter((bound: unknown): bound is Array<{ ship_name?: string }> => Array.isArray(bound))
+            .flat()
+            .find((row) => row && row.ship_name === 'Window Eight');
+        act(() => { handler.call({}, new MouseEvent('mouseover'), datum); });
+    };
+
+    beforeEach(() => {
+        mockFetch.mockReset();
+        global.fetch = mockFetch as unknown as typeof fetch;
+        const chain = (d3.select as unknown as jest.Mock)(null) as unknown as {
+            data: jest.Mock; on: jest.Mock;
+        };
+        chain.data.mockClear();
+        chain.on.mockClear();
+        mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, WINDOW_BY_SHIP));
+    });
+
+    it('quotes the WINDOW record, not the lifetime win total, on the compact chart', async () => {
+        render(<RandomsSVG compact playerId={401} playerName="TesterHover" />);
+        await waitFor(() => {
+            expect(document.querySelectorAll('svg').length >= 0).toBe(true);
+        });
+        await waitFor(() => {
+            const chain = (d3.select as unknown as jest.Mock)(null) as unknown as { on: jest.Mock };
+            expect(chain.on.mock.calls.some(([event]) => event === 'mouseover')).toBe(true);
+        });
+
+        hoverFirstRow();
+
+        // The readout's text is split across spans (the W/L letters ride at
+        // 0.75em), so read the whole line rather than matching a fragment.
+        const line = () => (document.querySelector('.min-h-\\[1\\.5rem\\]')?.textContent ?? '')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        // 6W 3L from the window, not the 66 lifetime wins.
+        expect(line()).toContain('6W 3L this window');
+        expect(line()).not.toContain('66 wins');
+        // The lifetime battle count beside it is untouched.
+        expect(line()).toContain('120 battles');
+        // ...and the line stops there: the win-rate tail is the Ships tab's.
+        expect(line()).not.toContain('win rate');
+    });
+
+    it('leaves the full variant\'s hover line on lifetime wins', async () => {
+        render(<RandomsSVG playerId={402} playerName="TesterHoverFull" />);
+        await waitFor(() => {
+            const chain = (d3.select as unknown as jest.Mock)(null) as unknown as { on: jest.Mock };
+            expect(chain.on.mock.calls.some(([event]) => event === 'mouseover')).toBe(true);
+        });
+
+        hoverFirstRow();
+
+        const line = (document.querySelector('.min-h-\\[1\\.5rem\\]')?.textContent ?? '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        expect(line).toContain('66 wins');
+        expect(line).not.toContain('this window');
+        // The full variant is filterable by win rate, so its hover keeps the
+        // figure the reader is steering by.
+        expect(line).toContain('55.0% win rate');
     });
 });

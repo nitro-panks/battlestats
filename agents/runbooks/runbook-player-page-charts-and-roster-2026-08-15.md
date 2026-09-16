@@ -383,6 +383,18 @@ implementation falls into.
    `PlayerDetailInsightsTabs` therefore holds `activityWindow` as
    `BattleHistoryWindow | null` and shows a loader until the card publishes.
 
+**The hover line is window-scoped in its middle slot only.** The compact
+readout reads `<ship> • T10 Destroyer • 317 battles • 3W 3L this window`. The
+battle count stays lifetime; the win total is replaced by the window's own W/L
+record (`by_ship.wins` / `.losses`, carried on `RandomsWindowStat`), and the
+trailing `n% win rate` is dropped. Two reasons it differs from the Ships tab,
+which keeps both: the compact chart's every row already prints its win rate at
+the bar's end, so the tail restated what the reader was looking at; and the
+Ships tab is *filterable* by win rate, which makes the hovered value the figure
+its reader is steering by. The W/L letters ride at 0.75em, matching the strip
+crosshair's readout, so a record reads the same in both places. A ship missing
+from the join falls back to the lifetime total.
+
 **The height clamp moved inward.** `LOCKED_PANEL_HEIGHT_PX` (1057) used to sit
 on the tabpanel for both battle-table views. It still does for the Ranked
 activity sub-view, whose card *is* the whole panel. The Activity panel now
