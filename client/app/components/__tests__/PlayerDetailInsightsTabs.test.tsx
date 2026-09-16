@@ -135,6 +135,57 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
     });
 
+    it('hangs the ships-played chart under the Activity card, and clamps only the card', () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData
+                efficiencyRows={[]}
+            />,
+        );
+
+        const chart = screen.getByTestId('activity-ships-chart');
+        expect(chart).toBeInTheDocument();
+        expect(screen.getByText('Ships Played in This Window')).toBeInTheDocument();
+
+        // The 1057px clamp used to sit on the panel. It has to move inward onto
+        // the card's own wrapper, or the chart below is squeezed into whatever
+        // the battle table leaves over — or clipped outright.
+        const panel = document.getElementById('player-insights-panel-activity');
+        expect(panel).not.toBeNull();
+        expect((panel as HTMLElement).style.maxHeight).toBe('');
+        expect(panel).toContainElement(chart);
+        const clamped = (panel as HTMLElement).querySelector('[style*="max-height"]');
+        expect(clamped).not.toBeNull();
+        expect(clamped).not.toContainElement(chart);
+    });
+
+    it('leaves the ships-played chart behind when the reader moves off Activity', () => {
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData
+                efficiencyRows={[]}
+            />,
+        );
+
+        expect(screen.getByTestId('activity-ships-chart')).toBeInTheDocument();
+        act(() => { fireEvent.click(screen.getByRole('tab', { name: 'Ships' })); });
+        expect(screen.queryByTestId('activity-ships-chart')).not.toBeInTheDocument();
+    });
+
     it('darks out the Activity tab and falls back to Ships when there is no activity', async () => {
         // Battle-history payload with zero battles + only random mode → no activity.
         mockFetchSharedJson.mockImplementation((url) => {

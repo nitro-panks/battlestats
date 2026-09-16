@@ -30,6 +30,7 @@ export const ja: Partial<Record<StringKey, string>> = {
 
     'player.section.rankedSeasons': 'ランク戦シーズン',
     'player.section.randomBattlesByTier': 'Tier別ランダム戦',
+    'player.section.shipsPlayedInWindow': 'この期間に乗った艦艇',
 
     // Composed-template blocker (see the research doc + spec's "Known traps"
     // section): the clauses below are resolved through t() in the components,

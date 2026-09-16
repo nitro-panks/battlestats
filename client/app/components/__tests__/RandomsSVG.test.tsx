@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
+import * as d3 from 'd3';
 import RandomsSVG from '../RandomsSVG';
 
 jest.mock('d3', () => {
@@ -442,5 +443,138 @@ describe('RandomsSVG min-battles slider + window filter', () => {
             expect(screen.getByText(/≥\s*0$/)).toBeInTheDocument();
         });
         expect(screen.queryByText('No ships match the selected filters.')).not.toBeInTheDocument();
+    });
+});
+describe('RandomsSVG compact variant (Activity tab)', () => {
+    // The compact chart's rows are never in the DOM (d3 is mocked here), so the
+    // observable is what the draw binds: d3's shared chain `.data(rows)`. Each
+    // draw binds TWICE — the full row set, then the delta-pill subset (ships
+    // with a computable window delta) — so the row set is the widest bind.
+    const boundShipNames = (): string[][] => {
+        const chain = (d3.select as unknown as jest.Mock)(null) as unknown as {
+            data: jest.Mock;
+        };
+        return chain.data.mock.calls
+            .map(([rows]) => rows)
+            .filter((rows: unknown): rows is Array<{ ship_name?: string }> => (
+                Array.isArray(rows) && rows.every((row) => row && typeof row === 'object' && 'ship_name' in row)
+            ))
+            .map((rows) => rows.map((row) => row.ship_name as string));
+    };
+    const widestBind = (): string[] => boundShipNames()
+        .reduce((widest, rows) => (rows.length >= widest.length ? rows : widest), [] as string[]);
+
+    // A T4 ship played in the window, a T8 played in the window, and a T10 with
+    // a big lifetime grind that was NOT played in the window.
+    const RANDOMS_ROWS = [
+        { ship_id: 1, ship_name: 'Dormant Ten', ship_chart_name: 'Dormant Ten', ship_tier: 10, ship_type: 'Battleship', pvp_battles: 900, wins: 500, win_ratio: 0.556 },
+        { ship_id: 2, ship_name: 'Window Eight', ship_chart_name: 'Window Eight', ship_tier: 8, ship_type: 'Cruiser', pvp_battles: 120, wins: 66, win_ratio: 0.55 },
+        { ship_id: 3, ship_name: 'Window Four', ship_chart_name: 'Window Four', ship_tier: 4, ship_type: 'Destroyer', pvp_battles: 30, wins: 16, win_ratio: 0.533 },
+    ];
+    const WINDOW_BY_SHIP = [
+        { ship_id: 2, ship_name: 'Window Eight', battles: 12, delta_win_rate: 0.4 },
+        { ship_id: 3, ship_name: 'Window Four', battles: 5, delta_win_rate: null },
+    ];
+
+    beforeEach(() => {
+        mockFetch.mockReset();
+        global.fetch = mockFetch as unknown as typeof fetch;
+        const chain = (d3.select as unknown as jest.Mock)(null) as unknown as { data: jest.Mock };
+        chain.data.mockClear();
+    });
+
+    it('draws only ships played in the window, tier floor and all, with no controls', async () => {
+        mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, WINDOW_BY_SHIP));
+
+        render(<RandomsSVG compact playerId={301} playerName="TesterCompact" />);
+
+        await waitFor(() => {
+            expect(boundShipNames().length).toBeGreaterThan(0);
+        });
+
+        const rows = widestBind();
+        // The dormant T10 is excluded despite dwarfing both others in lifetime
+        // battles; the T4 is INCLUDED, because the tier-5 floor that the Ships
+        // tab applies would act invisibly here (there are no pills to undo it).
+        expect(rows).toEqual(['Window Eight', 'Window Four']);
+
+        // None of the Ships-tab furniture comes over.
+        expect(screen.queryByRole('button', { name: 'T8' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Window Only' })).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Minimum lifetime random battles to show a ship')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Randoms data last refreshed/)).not.toBeInTheDocument();
+    });
+
+    it('never paints the lifetime roster before the window join settles', async () => {
+        // The trap: windowStats starts empty, and the full variant treats an
+        // empty join as "no window data, show everything". The compact variant
+        // must hold instead, or it flashes every lifetime ship and then culls.
+        let releaseWindow: ((value: unknown) => void) | null = null;
+        mockFetch.mockImplementation((input: RequestInfo | URL) => {
+            const url = typeof input === 'string' ? input : input.toString();
+            if (url.includes('/battle-history')) {
+                return new Promise((resolve) => {
+                    releaseWindow = () => resolve({
+                        ok: true,
+                        headers: { get: (n: string) => (n.toLowerCase() === 'content-type' ? 'application/json' : null) },
+                        json: async () => ({ by_ship: WINDOW_BY_SHIP }),
+                    });
+                });
+            }
+            return buildUrlRoutedFetch(RANDOMS_ROWS, WINDOW_BY_SHIP)(input);
+        });
+
+        render(<RandomsSVG compact playerId={302} playerName="TesterCompactB" />);
+
+        await waitFor(() => {
+            expect(screen.getByText('Loading ships played in this window...')).toBeInTheDocument();
+        });
+        expect(boundShipNames()).toEqual([]);
+
+        await act(async () => {
+            releaseWindow?.(null);
+            await Promise.resolve();
+        });
+
+        await waitFor(() => {
+            expect(boundShipNames().length).toBeGreaterThan(0);
+        });
+        expect(widestBind()).toEqual(['Window Eight', 'Window Four']);
+    });
+
+    it('says the window is empty rather than falling back to the lifetime roster', async () => {
+        mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, []));
+
+        render(<RandomsSVG compact playerId={303} playerName="TesterCompactC" />);
+
+        await waitFor(() => {
+            expect(screen.getByText('No ships played in this window.')).toBeInTheDocument();
+        });
+        expect(boundShipNames()).toEqual([]);
+    });
+
+    it('re-reads the join when the host card moves its window pill', async () => {
+        mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, WINDOW_BY_SHIP));
+
+        const { rerender } = render(
+            <RandomsSVG compact playerId={304} playerName="TesterCompactD" windowName="month" />,
+        );
+
+        await waitFor(() => {
+            expect(boundShipNames().length).toBeGreaterThan(0);
+        });
+        const historyUrls = () => mockFetch.mock.calls
+            .map(([input]) => (typeof input === 'string' ? input : String(input)))
+            .filter((url) => url.includes('/battle-history'));
+        expect(historyUrls().some((url) => url.includes('window=month'))).toBe(true);
+        expect(historyUrls().some((url) => url.includes('window=seventyfive'))).toBe(false);
+
+        rerender(
+            <RandomsSVG compact playerId={304} playerName="TesterCompactD" windowName="seventyfive" />,
+        );
+
+        await waitFor(() => {
+            expect(historyUrls().some((url) => url.includes('window=seventyfive'))).toBe(true);
+        });
     });
 });

@@ -1640,3 +1640,88 @@ describe('30d-empty fallback to 75d', () => {
         expect(screen.getByRole('button', { name: /^Month$/ })).toHaveAttribute('aria-pressed', 'true');
     });
 });
+
+describe('onWindowChange — publishing the live window to a sibling surface', () => {
+    const KEY = 'battlestats:battle-history:window';
+    const utcDay = (o: number): string => {
+        const d = new Date();
+        d.setUTCDate(d.getUTCDate() - o);
+        return d.toISOString().slice(0, 10);
+    };
+
+    beforeEach(() => {
+        mockFetchSharedJson.mockReset();
+        mockTrackEvent.mockReset();
+        window.localStorage.clear();
+    });
+
+    test('reports the default window on a clean mount', async () => {
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({ by_day: [{ date: utcDay(1), battles: 4, wins: 2, damage: 0, frags: 0 }] }),
+            headers: {},
+        });
+        const onWindowChange = jest.fn();
+        render(<BattleHistoryCard embedded playerName="lil_boots" realm="na" onWindowChange={onWindowChange} />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(onWindowChange.mock.calls.map(([w]) => w)).toEqual(['month']);
+    });
+
+    test('reports a STORED pick, not just a click — and never the default first', async () => {
+        // Two wedges in one. A host wired only to the pill handler would leave
+        // a reader whose remembered pick is 60d reading a 30d sibling. And an
+        // UNGATED publish would announce the default 'month' on mount and
+        // correct to 'sixty' a tick later — which a host that fetches per
+        // window renders as a visible flash of the wrong span. Hence the
+        // sequence assertion: 'sixty' alone, never ['month', 'sixty'].
+        window.localStorage.setItem(`${KEY}:na:lil_boots:random`, 'sixty');
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({ by_day: [{ date: utcDay(1), battles: 4, wins: 2, damage: 0, frags: 0 }] }),
+            headers: {},
+        });
+        const onWindowChange = jest.fn();
+        render(<BattleHistoryCard embedded playerName="lil_boots" realm="na" onWindowChange={onWindowChange} />);
+        await waitFor(() => {
+            expect(onWindowChange).toHaveBeenCalled();
+        });
+        expect(onWindowChange.mock.calls.map(([w]) => w)).toEqual(['sixty']);
+    });
+
+    test('reports the automatic 75d fallback for a 30d-empty player', async () => {
+        // The other windowless path: nobody clicked, no pref is stored, and the
+        // card promotes itself to 75d.
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({ by_day: [{ date: utcDay(45), battles: 9, wins: 5, damage: 0, frags: 0 }] }),
+            headers: {},
+        });
+        const onWindowChange = jest.fn();
+        render(<BattleHistoryCard embedded playerName="lapsed" realm="na" onWindowChange={onWindowChange} />);
+        await waitFor(() => {
+            expect(onWindowChange).toHaveBeenLastCalledWith('seventyfive');
+        });
+        // The fallback is a correction to the default, so 'month' legitimately
+        // precedes it here — unlike the stored-pick case above, nothing knew
+        // the wider window was wanted until the strip landed.
+        expect(onWindowChange.mock.calls.map(([w]) => w)).toEqual(['month', 'seventyfive']);
+    });
+
+    test('reports a pill click', async () => {
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({
+                by_day: [
+                    { date: utcDay(1), battles: 4, wins: 2, damage: 0, frags: 0 },
+                    { date: utcDay(0), battles: 3, wins: 1, damage: 0, frags: 0 },
+                ],
+            }),
+            headers: {},
+        });
+        const onWindowChange = jest.fn();
+        render(<BattleHistoryCard embedded playerName="lil_boots" realm="na" onWindowChange={onWindowChange} />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        await act(async () => { screen.getByRole('button', { name: /^Week$/ }).click(); });
+        expect(onWindowChange.mock.calls.map(([w]) => w)).toEqual(['month', 'week']);
+    });
+});

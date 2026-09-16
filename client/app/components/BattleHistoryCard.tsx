@@ -263,6 +263,13 @@ interface BattleHistoryCardProps {
     // once when the populated reveal completes; not fired when the player has no
     // WR line to draw (no battles / pure-ranked with no lifetime baseline).
     onSparklineAnimationEnd?: () => void;
+    // Reports the window this card is currently scoped to, so a sibling surface
+    // can re-scope with the pill. Unlike onAvailabilityChange this fires EVERY
+    // time the window moves, and covers all three ways it can: the stored-pick
+    // restore, the automatic 75d fallback, and a pill click. A host that wires
+    // only the click would leave a reader whose sticky pick is 60d looking at a
+    // 30d sibling.
+    onWindowChange?: (window: BattleHistoryWindow) => void;
     // Optional node rendered in the header immediately to the LEFT of the mode
     // caption ("Ranked" / "Random Battles"), sized to sit inline beside it. The
     // Ranked tab passes its History/Activity sub-view toggle here so the control
@@ -1049,7 +1056,7 @@ type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 // for the next ~12 months. The backend still accepts ?window=year for
 // back-compat, but no pill exposes it. Re-add to VISIBLE_WINDOWS once
 // >180 days of capture have accumulated.
-type BattleHistoryWindow = 'day' | 'week' | 'month' | 'fortyfive' | 'sixty' | 'seventyfive' | 'year';
+export type BattleHistoryWindow = 'day' | 'week' | 'month' | 'fortyfive' | 'sixty' | 'seventyfive' | 'year';
 const VISIBLE_WINDOWS: ReadonlyArray<BattleHistoryWindow> = [
     'day', 'week', 'month', 'fortyfive', 'sixty', 'seventyfive',
 ];
@@ -1189,6 +1196,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     overallWins = null,
     onAvailabilityChange,
     onSparklineAnimationEnd,
+    onWindowChange,
     captionLeading,
 }) => {
     const requestSignal = usePlayerRequestSignal();
@@ -1248,6 +1256,21 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         setUserPickedWindow(stored !== null && stored !== DEFAULT_BATTLE_HISTORY_WINDOW);
         setWindowPrefScope(prefScope);
     }, [prefScope]);
+    // Publish the live window to any host that asked for it. Driven off the
+    // state rather than the pill handler on purpose: the restore above and the
+    // 75d fallback below both move `window` without a click, and a host that
+    // missed those would be scoped to a window the reader is not looking at.
+    //
+    // Gated on the restored scope for the same reason the main fetch is: the
+    // initial state is the DEFAULT window, so an ungated publish would announce
+    // `month` on mount and correct itself to the stored pick a tick later —
+    // and a host that fetches per window would visibly render the wrong span
+    // first. The restore batches setWindow with setWindowPrefScope, so the
+    // first publish this gate allows already carries the remembered pick.
+    useEffect(() => {
+        if (windowPrefScope !== prefScope) return;
+        onWindowChange?.(window);
+    }, [window, onWindowChange, windowPrefScope, prefScope]);
     // Ship selected in the table → its combat profile (ShipStats) shows below
     // the rollup separator. Clicking the same row again clears it (toggle).
     const [selectedShip, setSelectedShip] = useState<{

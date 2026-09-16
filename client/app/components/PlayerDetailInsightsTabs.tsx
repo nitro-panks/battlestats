@@ -6,6 +6,7 @@ import BattleHistoryCard, {
     battleHistoryFetchUrl,
     battleHistoryIndicatesActivity,
     type BattleHistoryPayload,
+    type BattleHistoryWindow,
 } from './BattleHistoryCard';
 import PlayerEfficiencyBadges, { hasEfficiencyBadges } from './PlayerEfficiencyBadges';
 import LoadingPanel from './LoadingPanel';
@@ -228,6 +229,15 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     // null = unknown (still resolving); true/false once the Activity card's first
     // payload lands. Drives the default-tab choice and the dark Activity tab.
     const [activityAvailable, setActivityAvailable] = useState<boolean | null>(null);
+    // The window the Activity card is scoped to, published by the card itself
+    // (its pill, its stored pick, and its automatic 75d fallback all move it).
+    // The ships-played chart below the card reads the same window, so the two
+    // always describe the same span.
+    //
+    // null until the card has published one. Seeding it with the default
+    // instead would make the chart fetch and draw a 30d ship set for a reader
+    // whose remembered pick is 60d, then re-scope a tick later.
+    const [activityWindow, setActivityWindow] = useState<BattleHistoryWindow | null>(null);
     // null = unknown; set by the Ranked tab's battle-history card. false means
     // the player has no recent ranked battle activity.
     const [rankedHistoryAvailable, setRankedHistoryAvailable] = useState<boolean | null>(null);
@@ -675,7 +685,14 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 // without this the chip jumped 10px every time the user switched
                 // views. Padding the panel moves the whole card, keeping the chip
                 // inline with the caption beside it.
-                className={`${activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity') ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0'}${activeTab === 'ranked' && rankedView === 'activity' ? ' pt-2.5' : ''}`}
+                // The height CLAMP used to live here for both battle-table
+                // views. It still does for the Ranked activity sub-view, whose
+                // card is the whole panel. The Activity tab now carries a
+                // second surface below the card (the ships-played chart), so
+                // its clamp moved inward onto the card's own wrapper: clamping
+                // the panel would squeeze the chart into whatever the card left
+                // over, or clip it entirely.
+                className={`${activeTab === 'ranked' && rankedView === 'activity' ? 'flex min-h-0 min-w-0 flex-col pt-2.5' : 'min-w-0'}`}
                 data-perf-section={panelSectionIdByTab[activeTab]}
                 style={{
                     // Panels size to their content instead of a shared locked
@@ -689,7 +706,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     // grows naturally — Ships' filters can wrap, and a dense
                     // badge plot or Clan Battles seasons table can run taller
                     // than the cap and must not clip.
-                    ...(activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity')
+                    ...(activeTab === 'ranked' && rankedView === 'activity'
                         ? { maxHeight: LOCKED_PANEL_HEIGHT_PX }
                         : {}),
                     minHeight: activeConfig.minHeight,
@@ -700,18 +717,62 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                     isLoading ? (
                         <LoadingPanel label="Loading activity..." minHeight={360} />
                     ) : (
-                        <BattleHistoryCard
-                            embedded
-                            fillHeight
-                            mode="random"
-                            playerName={playerName}
-                            realm={realm}
-                            overallBattles={pvpBattles}
-                            overallWins={pvpWins}
-                            refreshNonce={refreshNonce}
-                            onAvailabilityChange={handleActivityAvailability}
-                            onSparklineAnimationEnd={() => setGlowArmed(true)}
-                        />
+                        <>
+                            {/* The card keeps the height clamp it has always
+                                had; the wrapper reproduces the flex column the
+                                panel used to provide, because the card's
+                                fillHeight layout (h-full inside a flex column)
+                                resolves against exactly this shape. */}
+                            <div
+                                className="flex min-h-0 min-w-0 flex-col"
+                                style={{ maxHeight: LOCKED_PANEL_HEIGHT_PX }}
+                            >
+                                <BattleHistoryCard
+                                    embedded
+                                    fillHeight
+                                    mode="random"
+                                    playerName={playerName}
+                                    realm={realm}
+                                    overallBattles={pvpBattles}
+                                    overallWins={pvpWins}
+                                    refreshNonce={refreshNonce}
+                                    onAvailabilityChange={handleActivityAvailability}
+                                    onWindowChange={setActivityWindow}
+                                    onSparklineAnimationEnd={() => setGlowArmed(true)}
+                                />
+                            </div>
+
+                            {/* The Ships tab's chart, in its compact variant:
+                                the same bars, no controls, and the ship set
+                                locked to "played in the window" — the window
+                                being whatever the card's pill above currently
+                                reads, which is why it re-scopes when the reader
+                                moves the pill. */}
+                            <div className="mt-8" data-testid="activity-ships-chart">
+                                <SectionHeadingWithTooltip
+                                    title={t('player.section.shipsPlayedInWindow')}
+                                    description="Every ship this captain took into a random battle during the window selected above. Bar length is the ship's lifetime random battles and the fill is its lifetime win rate, so the chart reads as: here is what they have been playing lately, and here is how good they are in it. Change the window above and this list follows."
+                                    className="mb-2 pl-[15px]"
+                                />
+                                {activityWindow ? (
+                                    <RandomsSVG
+                                        compact
+                                        playerId={playerId}
+                                        playerName={playerName}
+                                        isLoading={isLoading}
+                                        theme={theme}
+                                        windowName={activityWindow}
+                                        refreshNonce={refreshNonce}
+                                    />
+                                ) : (
+                                    <LoadingPanel
+                                        tone="muted"
+                                        label="Loading ships played in this window..."
+                                        minHeight={300}
+                                    />
+                                )}
+                            </div>
+                        </>
                     )
                 ) : null}
 

@@ -2,7 +2,7 @@
 
 _Created: 2026-08-15_
 _Context: extracted verbatim-in-substance from `CLAUDE.md`'s "Key frontend patterns" block during the 2026-08-15 doc-estate pass. This material had no owning document — it was ~700 words of always-loaded context describing component behavior, and the only nearby docs (`runbook-mobile-player-detail-charts.md`, `archive/runbook-tier-type-correlation-rework-2026-07-01.md`) describe components that no longer exist._
-_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9, plus the sticky window pill and the 30/60-day strip domain added 2026-08-19 (v5.4.0, v5.4.1), plus the strip crosshair and the `lifetime_wins` precision contract (v5.4.2), plus the crosshair readout's right-justified W/L record (v5.4.3)._
+_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9, plus the sticky window pill and the 30/60-day strip domain added 2026-08-19 (v5.4.0, v5.4.1), plus the strip crosshair and the `lifetime_wins` precision contract (v5.4.2), plus the crosshair readout's right-justified W/L record (v5.4.3), plus the Activity tab's compact ships-played chart and the window-publish contract that feeds it (2026-09-16, branch `feat/activity-ships-chart`, not yet deployed)._
 
 ## Purpose
 
@@ -336,6 +336,73 @@ pills, the 45d/60d bracket geometry, and a 60d localStorage round-trip.
 Backend 1298 passed (2 skipped, unrelated), frontend 729 passed, `tsc
 --noEmit` clean. Same worktree, not yet deployed.
 
+## RandomsSVG compact — the ships-played chart under the Activity card (2026-09-16)
+
+The Activity tab carries a second surface below the battle-history card and
+above the clan section: the Ships tab's bar chart in a **compact variant**
+(`RandomsSVG compact`), showing only ships played in the window the card's pill
+currently names. No controls come over — no type/tier pills, no Min WR or Min
+battles sliders, no Activity mode toggle, no freshness line.
+
+Four things are load-bearing, and three of them are traps the obvious
+implementation falls into.
+
+1. **The compact ship set is its own branch in `chartData`, not a locked
+   `activityMode`.** The full variant has `effectiveActivityMode`, which falls
+   back to `'all'` whenever `windowStats` is empty — correct for its disabled
+   Window Only pill, wrong here. `windowStats` starts empty and fills async, so
+   a locked mode would paint the entire lifetime roster and then cull it, and
+   would paint it *permanently* for a player with nothing in the window.
+2. **The tier-5 floor must not reach it.** `deriveRandomsSelections` floors
+   `selectedTiers` at 5. The Ships tab can afford that because a drill-down that
+   pins T2 still gets a visible, un-pressable pill (see the drill-down section
+   above); with no pills at all the floor would silently drop a T4 played this
+   window and offer nothing to reveal or undo it. The compact branch bypasses
+   every pill and slider predicate for exactly this reason.
+3. **`windowLoaded` gates the compact draw.** Set when the by_ship join settles
+   (success, or a non-abort failure — an abort leaves the gate closed so a
+   navigation does not flash "no ships" on the way out). Without it the chart
+   draws before its own data exists.
+4. **The window is published from the card's STATE, gated on the restored
+   scope.** `BattleHistoryCard` gained `onWindowChange`, fired from an effect on
+   `window`, not from the pill's `onClick`. Three paths move that state — the
+   stored-pick restore, the automatic 75d fallback, and a pill click — and a
+   host wired only to the click leaves a reader whose sticky pick is 60d looking
+   at a 30d chart. The publish carries the same `windowPrefScope !== prefScope`
+   gate the main fetch does, because the initial state is the *default* window:
+   ungated, it announces `month` on mount and corrects to the stored pick a tick
+   later, which a per-window host renders as a visible flash of the wrong span.
+   `PlayerDetailInsightsTabs` therefore holds `activityWindow` as
+   `BattleHistoryWindow | null` and shows a loader until the card publishes.
+
+**The height clamp moved inward.** `LOCKED_PANEL_HEIGHT_PX` (1057) used to sit
+on the tabpanel for both battle-table views. It still does for the Ranked
+activity sub-view, whose card *is* the whole panel. The Activity panel now
+carries two surfaces, so its clamp moved onto an inner wrapper around the card
+alone — reproducing the panel's `flex min-h-0 min-w-0 flex-col`, because the
+card's `fillHeight` layout (`flex h-full min-h-0 w-full flex-col`) resolves
+against exactly that shape. Clamping the panel would have squeezed the chart
+into whatever the table left over, or clipped it.
+
+**No extra round trip.** The join's url and cacheKey both carry the window and
+the host card's `refreshNonce`, so it dedupes onto the request the card is
+already making. Measured on `nekonomae`/na with a seeded `sixty` pref: three
+`/battle-history` requests in order — `month` (PlayerRouteView's prefetch,
+pre-existing), `sixty` (card + chart, deduped), `seventyfive` (the strip). The
+same three the page made before this change.
+
+**Cost this does add**: Activity is the default landing tab, so every player
+open now also pays a `randoms_data` read that used to be Ships-tab-only. It is
+cache-first, and the module-scope seed is shared with the Ships tab, so a reader
+who visits both pays it once.
+
+Verified live against prod data (`nekonomae`/na, dev server proxying
+`https://battlestats.online`): 8 ships at Week, 26 at Month, 34 at 60d, 37 at
+75d; card clamp measured at exactly 1057px with the chart 696px below it; light
+and dark both read correctly. Frontend 780 passed, `tsc --noEmit` and `eslint`
+clean. Worktree `activity-ships-chart`, branch `feat/activity-ships-chart`, not
+yet deployed.
+
 ## The other player-page figures
 
 - **ActivitySVG** — activity over time.
@@ -440,6 +507,16 @@ drops the moment the player is displaced), fed by `ship_badges`
   explicitly why a low-n cell should read as confident.
 - Touching `RandomsSVG` fetch/cache: re-test a **return** visit for drill-down
   survival, not a first visit.
+- Touching `RandomsSVG` filtering: there are two variants. Check the Activity
+  tab's compact chart, whose ship set bypasses every pill and slider — a new
+  predicate added to the shared path may be invisible there, or may act there
+  with no control to undo it.
+- Touching the Activity tabpanel's height: the 1057px clamp belongs on the
+  card's wrapper, not the panel. Putting it back on the panel squeezes or clips
+  the ships-played chart below.
+- Adding a surface that follows the window pill: subscribe to
+  `onWindowChange`, never to the pill's `onClick` — the stored pick and the 75d
+  fallback both move the window without one.
 - Touching badge order: there are two dispatch sites, not one.
 - Touching the roster split: `is_clan_battle_player` must keep overriding the
   idle rule, or current-season shield wearers fall below the fold.

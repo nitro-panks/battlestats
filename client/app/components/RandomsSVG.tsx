@@ -12,6 +12,7 @@ import {
     battleHistoryFetchUrl,
     battleHistoryCacheKey,
     BATTLE_HISTORY_FETCH_TTL_MS,
+    DEFAULT_BATTLE_HISTORY_WINDOW,
     type BattleHistoryPayload,
 } from './BattleHistoryCard';
 
@@ -38,6 +39,24 @@ interface RandomsSVGProps {
     isLoading?: boolean;
     theme?: ChartTheme;
     filterRequest?: RandomsFilterRequest | null;
+    /**
+     * Compact variant (the Activity tab's copy of this chart). No controls at
+     * all: no filter pills, no cutoff sliders, no Activity mode toggle, no
+     * freshness line. The ship set is exactly "played in the window" — which is
+     * why the tier-5 floor and every pill/slider predicate are bypassed rather
+     * than merely hidden. A hidden filter is an invisible filter, and this
+     * variant has no pill to reveal or undo one.
+     */
+    compact?: boolean;
+    /**
+     * Battle-history window the played-in-window join is read over. The Ships
+     * tab leaves this at the card's default (30d); the Activity tab hands down
+     * whatever its window pill currently reads, so the compact chart re-scopes
+     * with the pill.
+     */
+    windowName?: string;
+    /** Mirrors the host card's refresh nonce so the join shares its cacheKey. */
+    refreshNonce?: number;
 }
 
 // Per-ship stats over the trailing 30-day random-battle window, joined into the
@@ -466,6 +485,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     isLoading = false,
     theme = 'light',
     filterRequest = null,
+    compact = false,
+    windowName = DEFAULT_BATTLE_HISTORY_WINDOW,
+    refreshNonce = 0,
 }) => {
     const { realm } = useRealm();
     const requestSignal = usePlayerRequestSignal();
@@ -487,6 +509,11 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const [minWR, setMinWR] = useState<number>(0);
     const [activityMode, setActivityMode] = useState<ActivityMode>('all');
     const [windowStats, setWindowStats] = useState<RandomsWindowMap>(() => new Map());
+    // Whether the played-in-window join has SETTLED for the current window.
+    // Only the compact variant reads it, and it must: that variant's ship set
+    // IS the join, so drawing before it lands would paint every lifetime ship
+    // and then cull — the opposite of what the chart claims to show.
+    const [windowLoaded, setWindowLoaded] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Fetch ALL ships, then re-fetch if stale until the backend delivers fresh data.
@@ -580,35 +607,41 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         };
     }, [playerId, realm, requestSignal]);
 
-    // Join the trailing-30d random window (delta_win_rate + played-in-window) by
-    // ship name. Dedupes onto the battle-history month/random request the
-    // Activity tab + PlayerRouteView prefetch already fire (same cacheKey), so
-    // it costs no extra round-trip. Window deltas are pure enrichment: if this
-    // fetch is slow or fails, the pills + "played this window" filter simply
-    // stay inactive until it lands.
+    // Join the random-battle window (delta_win_rate + played-in-window) by ship
+    // name. `windowName` is the battle-history window it reads over: the Ships
+    // tab leaves it at the card default (30d), the Activity tab hands down its
+    // live pill. Both the url and the cacheKey carry that window plus the host
+    // card's refreshNonce, so each variant dedupes onto the request its own
+    // host card is already making rather than opening a second one.
+    //
+    // For the full variant these are pure enrichment: if the fetch is slow or
+    // fails, the delta pills and the Window Only filter simply stay inactive.
+    // For the compact variant the join IS the data — hence `windowLoaded`,
+    // which gates that variant's draw.
     useEffect(() => {
         if (!playerName) return;
         let cancelled = false;
+        setWindowLoaded(false);
 
         void (async () => {
             try {
                 const { data } = await fetchSharedJson<BattleHistoryPayload>(
-                    battleHistoryFetchUrl(playerName, realm),
+                    battleHistoryFetchUrl(playerName, realm, windowName),
                     {
                         label: `Randoms window ${playerName}`,
                         ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
-                        cacheKey: battleHistoryCacheKey(playerName, realm),
+                        cacheKey: battleHistoryCacheKey(
+                            playerName, realm, windowName, 'random', 0, refreshNonce,
+                        ),
                         responseHeaders: ['X-Ranked-Observation-Pending', 'X-Ship-Pop-Pending'],
                         signal: requestSignal,
                     },
                 );
 
-                if (cancelled || !data || !Array.isArray(data.by_ship)) {
-                    return;
-                }
+                if (cancelled) return;
 
                 const map: RandomsWindowMap = new Map();
-                for (const ship of data.by_ship) {
+                for (const ship of data?.by_ship ?? []) {
                     if (!ship.ship_name) continue;
                     map.set(ship.ship_name, {
                         deltaWinRate: ship.delta_win_rate ?? null,
@@ -616,16 +649,23 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     });
                 }
                 setWindowStats(map);
+                setWindowLoaded(true);
             } catch (error) {
-                if (isAbortError(error)) return;
-                // Enrichment-only; leave deltas/checkbox absent on failure.
+                // An abort is a navigation/realm switch, not an answer: leave
+                // the gate closed so the compact chart shows its loader rather
+                // than flashing "no ships" on the way out.
+                if (isAbortError(error) || cancelled) return;
+                // Enrichment-only for the full variant; the compact variant
+                // shows its empty state rather than falling back to lifetime.
+                setWindowStats(new Map());
+                setWindowLoaded(true);
             }
         })();
 
         return () => {
             cancelled = true;
         };
-    }, [playerName, realm, requestSignal]);
+    }, [playerName, realm, windowName, refreshNonce, requestSignal]);
 
     // Largest per-ship lifetime battle count — the min-battles slider's ceiling.
     const maxBattles = useMemo(
@@ -661,28 +701,40 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const effectiveActivityMode: ActivityMode = hasWindowActivity ? activityMode : 'all';
 
     // Filter and sort every matching ship; the chart container scrolls to fit.
+    //
+    // The compact variant takes a separate branch rather than a locked mode:
+    // its ship set is exactly the window join, with NO pill or slider
+    // predicate applied. In particular the tier-5 floor in
+    // deriveRandomsSelections must not reach it — a T4 ship played this window
+    // belongs on that chart, and with no pills there would be nothing to
+    // reveal or undo the floor with.
     const chartData = useMemo(() => {
-        const base = allShips.filter((row) => (
-            selectedTypes.includes(row.ship_type)
-            && selectedTiers.includes(row.ship_tier)
-            && row.pvp_battles >= minBattles
-            && row.win_ratio * 100 >= minWR
-            // Window Only hides ships not played in the trailing window; All
-            // keeps every matching ship.
-            && (effectiveActivityMode !== 'window' || windowStats.has(row.ship_name))
-        ));
+        const base = compact
+            ? allShips.filter((row) => windowStats.has(row.ship_name))
+            : allShips.filter((row) => (
+                selectedTypes.includes(row.ship_type)
+                && selectedTiers.includes(row.ship_tier)
+                && row.pvp_battles >= minBattles
+                && row.win_ratio * 100 >= minWR
+                // Window Only hides ships not played in the trailing window;
+                // All keeps every matching ship.
+                && (effectiveActivityMode !== 'window' || windowStats.has(row.ship_name))
+            ));
         return base.slice().sort((a, b) => b.pvp_battles - a.pvp_battles);
-    }, [allShips, selectedTypes, selectedTiers, minBattles, minWR, effectiveActivityMode, windowStats]);
+    }, [compact, allShips, selectedTypes, selectedTiers, minBattles, minWR, effectiveActivityMode, windowStats]);
 
-    // Draw chart when data (or the window join) changes.
+    // Draw chart when data (or the window join) changes. The compact variant
+    // holds until the join has settled: its rows ARE the join, so drawing
+    // early would paint the full lifetime list and then cull it.
     useEffect(() => {
         if (!containerRef.current) return;
+        if (compact && !windowLoaded) return;
         d3.select(containerRef.current).selectAll("*").remove();
         setHoveredShip(null);
         if (chartData.length > 0) {
             drawBattlePlotDesign1(containerRef.current, chartData, theme, windowStats, setHoveredShip);
         }
-    }, [chartData, theme, windowStats]);
+    }, [compact, windowLoaded, chartData, theme, windowStats]);
 
     // Apply a drill-down request from the Profile tab's tier figure. Waits for
     // `allShips`, because a request can arrive before the payload lands (the
@@ -825,7 +877,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
 
     const randomsFreshness = getFreshnessStatus(randomsUpdatedAt);
 
-    const shouldGrayOut = isLoading || isChartLoading;
+    const shouldGrayOut = isLoading || isChartLoading || (compact && !windowLoaded);
     const shouldShowEmptyState = !shouldGrayOut && chartData.length === 0;
     const filterButtonClass = (selected: boolean) => selected
         ? 'border border-[var(--accent-mid)] bg-[var(--accent-faint)] px-2 py-1 text-xs font-medium text-[var(--accent-dark)]'
@@ -835,6 +887,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         <div>
             {/* pt-2.5/pl-[15px] is the shared tab-top header spot across the
                 player insight tabs. */}
+            {!compact ? (
             <div className="mb-2 pt-2.5 pl-[15px] text-xs text-[var(--text-secondary)]">
                 Randoms data last refreshed: {formatTimestamp(randomsUpdatedAt)}
                 {' · '}
@@ -842,9 +895,11 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     {randomsFreshness === 'fresh' ? 'fresh' : randomsFreshness === 'stale' ? 'stale' : 'unknown'}
                 </span>
             </div>
+            ) : null}
             {/* pl mirrors the chart's margin.left below (60 compact / 85 +
                 RANDOMS_CHART_SHIFT_RIGHT_PX desktop) so the filter rows start
                 on the y-axis line. */}
+            {!compact ? (
             <div className="mt-[40px] space-y-3 pl-[75px] text-sm sm:pl-[115px]">
                 <div className="flex flex-wrap justify-start gap-1">
                     <button
@@ -974,6 +1029,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                     </div>
                 </div>
             </div>
+            ) : null}
 
             {shouldShowEmptyState ? (
                 // Matches the hover-details line's slot (my / min-h / pl / text-sm)
@@ -982,7 +1038,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 // text left-aligns with them; my-3 keeps the gap to the filters
                 // above equal to the gap to the chart below.
                 <div className="my-3 flex min-h-[1.5rem] items-center pl-[75px] text-sm sm:pl-[115px]">
-                    <span className="text-[var(--text-secondary)]">No ships match the selected filters.</span>
+                    <span className="text-[var(--text-secondary)]">
+                        {compact ? 'No ships played in this window.' : 'No ships match the selected filters.'}
+                    </span>
                 </div>
             ) : null}
 
@@ -1016,7 +1074,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 {shouldGrayOut ? (
                     <div className="absolute inset-0 flex items-center justify-center rounded bg-[var(--bg-page)]/65">
                         <span className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                            Loading random battles...
+                            {compact ? 'Loading ships played in this window...' : 'Loading random battles...'}
                         </span>
                     </div>
                 ) : null}
