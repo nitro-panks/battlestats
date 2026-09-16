@@ -1,4 +1,4 @@
-import { buildClanPath, buildPlayerPath, parseClanIdFromRouteSegment, buildShipPath, parseShipIdFromRouteSegment, SHIP_BUCKET_TIERS, SHIP_TYPES, buildShipBucketSegment, parseShipBucketSegment, allShipBucketSegments, buildShipBucketPath, parseWrPctParam, shipBucketLabel } from '../entityRoutes';
+import { buildClanPath, buildPlayerPath, parseClanIdFromRouteSegment, buildShipPath, parseShipIdFromRouteSegment, SHIP_BUCKET_TIERS, SHIP_TYPES, buildShipBucketSegment, parseShipBucketSegment, allShipBucketSegments, buildShipBucketPath, parseWrPctParam, shipBucketLabel, isShiplessBucket } from '../entityRoutes';
 
 describe('entityRoutes', () => {
     it('builds player paths with trimmed encoded names and optional realm', () => {
@@ -44,6 +44,34 @@ describe('ship bucket segments', () => {
         }
     });
 
+    it('computes tier 11, the supership tier', () => {
+        expect(SHIP_BUCKET_TIERS).toContain(11);
+        expect(parseShipBucketSegment('t11-battleships')).toEqual({ tier: 11, type: 'Battleship' });
+        expect(shipBucketLabel(11, 'Cruiser')).toBe('T11 Cruisers');
+    });
+
+    it('knows which buckets the game has no hulls for', () => {
+        // Carriers are even-tier only; neither T9 nor T11 has a submarine.
+        expect(isShiplessBucket(9, 'AirCarrier')).toBe(true);
+        expect(isShiplessBucket(9, 'Submarine')).toBe(true);
+        expect(isShiplessBucket(11, 'Submarine')).toBe(true);
+        expect(isShiplessBucket(11, 'AirCarrier')).toBe(false);
+        expect(isShiplessBucket(10, 'Submarine')).toBe(false);
+    });
+
+    it('keeps shipless buckets out of the sitemap but still parseable', () => {
+        const segments = allShipBucketSegments();
+        expect(segments).not.toContain('t9-submarines');
+        expect(segments).not.toContain('t9-carriers');
+        expect(segments).not.toContain('t11-submarines');
+        expect(segments).toContain('t11-battleships');
+        expect(segments).toContain('t11-carriers');
+        // 4 tiers x 5 types, less the 3 buckets with no hulls in the game.
+        expect(segments).toHaveLength(SHIP_BUCKET_TIERS.length * SHIP_TYPES.length - 3);
+        // The route itself still resolves, so a typed URL is not a 404.
+        expect(parseShipBucketSegment('t11-submarines')).toEqual({ tier: 11, type: 'Submarine' });
+    });
+
     it('slugs AirCarrier as "carriers", not "aircarriers"', () => {
         expect(buildShipBucketSegment(10, 'AirCarrier')).toBe('t10-carriers');
         expect(parseShipBucketSegment('t10-carriers')).toEqual({ tier: 10, type: 'AirCarrier' });
@@ -64,10 +92,11 @@ describe('ship bucket segments', () => {
         expect(parseShipBucketSegment(segment)).toBeNull();
     });
 
-    it('enumerates all 15 buckets for the sitemap, with no duplicates', () => {
+    it('enumerates every indexable bucket for the sitemap, with no duplicates', () => {
         const segments = allShipBucketSegments();
-        expect(segments).toHaveLength(15);
-        expect(new Set(segments).size).toBe(15);
+        const indexable = SHIP_BUCKET_TIERS.length * SHIP_TYPES.length - 3;
+        expect(segments).toHaveLength(indexable);
+        expect(new Set(segments).size).toBe(indexable);
     });
 });
 

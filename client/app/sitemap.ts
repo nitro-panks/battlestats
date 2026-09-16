@@ -24,7 +24,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ];
 
-  // The 15 tier x type ship-standings buckets. Static (they are a fixed
+  // The tier x type ship-standings buckets, less the ones the game has no hulls
+  // for (see isShiplessBucket). Static (they are a fixed
   // vocabulary, not entities), and canonical without view state so a bucket is
   // one page rather than one per sort. The standings behind them are recomputed
   // nightly.

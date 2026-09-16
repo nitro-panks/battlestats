@@ -18,11 +18,11 @@ import { resolveOgRealm } from '../../lib/ogCard';
 // prerendered static, and reading searchParams in its metadata would turn the
 // site's most-hit route into a per-request render for the sake of a share
 // button. A dedicated route keeps `/` static and, as a second benefit, makes the
-// 15 tier x type buckets individually indexable.
+// tier x type buckets individually indexable.
 //
 // The bucket lives in the path because it is identity; the percentile and column
 // sort are view state and stay in the query string, excluded from the canonical
-// so those 15 pages do not fragment into hundreds of near-duplicates.
+// so those pages do not fragment into hundreds of near-duplicates.
 //
 // Runbook: agents/runbooks/runbook-shareable-ship-leaderboard-2026-08-20.md
 

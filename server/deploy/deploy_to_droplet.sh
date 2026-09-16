@@ -478,9 +478,9 @@ fi
 # Ship standings span Tiers 8–10 (per-tier density study, 2026-06-05). Pinned
 # here for the same .env.cloud-overwrite reason as the flag above.
 if grep -q '^SHIP_BADGE_TIERS=' /etc/battlestats-server.env; then
-  sed -i 's|^SHIP_BADGE_TIERS=.*|SHIP_BADGE_TIERS=8,9,10|' /etc/battlestats-server.env
+  sed -i 's|^SHIP_BADGE_TIERS=.*|SHIP_BADGE_TIERS=8,9,10,11|' /etc/battlestats-server.env
 else
-  echo 'SHIP_BADGE_TIERS=8,9,10' >> /etc/battlestats-server.env
+  echo 'SHIP_BADGE_TIERS=8,9,10,11' >> /etc/battlestats-server.env
 fi
 
 get_env_value() {

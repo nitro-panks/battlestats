@@ -6313,7 +6313,7 @@ def _ship_tier_map(ship_ids) -> dict:
     """`{ship_id: tier}` for the given ids — labels badges/awards with their tier.
 
     The snapshot/award rows don't denormalize tier, so the read paths look it up
-    from `Ship` (one short query). Matters now that standings span tiers 8–10 and
+    from `Ship` (one short query). Matters now that standings span tiers 8–11 and
     a T8 #1 must not read like a T10 #1.
     """
     ids = [s for s in set(ship_ids or []) if s is not None]

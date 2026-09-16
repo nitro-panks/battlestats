@@ -120,9 +120,9 @@ interface RealmTopShipsTreemapSVGProps {
     windowEnd?: string;    // date-only ISO (UTC midnight), exclusive (== captured_on)
     loading?: boolean;     // first load / filter switch in flight
     pending?: boolean;     // cold WR-percentile bucket being computed server-side
-    empty?: boolean;       // bucket has no ships (e.g. T9 sub/CV easter egg)
+    empty?: boolean;       // bucket has no ships (e.g. T9 sub/CV, T11 sub)
     // Clicking a tile whose tier+type the inline ShipLeaderboard can represent
-    // (T8/9/10 + a canonical type) drills there in place; anything else keeps the
+    // (SHIP_BUCKET_TIERS + a canonical type) drills there in place; anything else keeps the
     // /ship/<id> route fallback.
     onSelect?: (sel: { id: number; name: string; tier: Tier; type: ShipType }) => void;
 }
@@ -268,7 +268,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
         svg.selectAll('*').remove();
         svg.attr('viewBox', `0 0 ${width} ${height}`).attr('width', '100%').attr('height', height);
 
-        // Shared: what a tile/dot click does. The leaderboard only covers T8/9/10 +
+        // Shared: what a tile/dot click does. The leaderboard only covers SHIP_BUCKET_TIERS +
         // the five canonical types; anything else keeps the /ship/<id> route so no
         // mark is a dead click.
         const activate = (s: ListShip) => {

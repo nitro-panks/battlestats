@@ -3,7 +3,7 @@
 // Inline ship leaderboard — the filterable ship explorer under the landing
 // treemap.
 //
-// Pick a TIER (8/9/10 — the tiers we compute ship data for) and a TYPE
+// Pick a TIER (8/9/10/11 — the tiers we compute ship data for) and a TYPE
 // (BB/CA/DD/CV/SS); the ship list (`/api/realm/<realm>/ships`) shows that bucket
 // ranked by realm-wide win rate, mirroring the BattleEvent population stats the
 // treemap above already uses. Clicking a ship swaps the list IN PLACE for that
@@ -26,6 +26,7 @@ import {
     buildPlayerPath,
     buildShipBucketPath,
     buildShipPath,
+    isShiplessBucket,
     SHIP_BUCKET_TIERS,
     SHIP_TYPES,
     type ShipType,
@@ -110,8 +111,8 @@ export interface ShipLeaderboardHandle {
 // The resolved ship bucket this component emits upward (to PlayerSearch → the
 // treemap) on every filter change / load transition, so the treemap can render
 // the same tier+type (+ WR-percentile) selection without a second fetch. `empty`
-// is true for the T9 sub/CV easter-egg buckets and any resolved-but-shipless
-// bucket, distinct from a still-loading one.
+// is true for every bucket the game has no hulls for (T9 sub/CV, T11 sub) and
+// for any resolved-but-shipless bucket, distinct from a still-loading one.
 export interface ShipBucket {
     tier: Tier | null;
     type: ShipType | null;
@@ -514,15 +515,16 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
     };
 
     const bothSelected = tier != null && type != null;
-    // World of Warships has no Tier 9 submarine and no Tier 9 aircraft carrier
-    // (carriers are even-tier only), so both buckets are always empty. Each
-    // short-circuits to its own easter egg and must issue NO fetch — the endpoint
-    // would 400 in any env where SHIP_BADGE_TIERS excludes 9 (e.g. local dev) and
-    // is pointless in prod. Gate both the fetch effect and the render branch on
-    // these predicates.
+    // Some buckets have no hulls in the game at all (`isShiplessBucket`), so no
+    // fetch may be issued for them: the endpoint would 400 in any env whose
+    // SHIP_BADGE_TIERS excludes the tier (e.g. local dev) and is pointless in
+    // prod. Two of them — the T9 submarine and the T9 carrier — have their own
+    // easter eggs; the rest (T11 submarines) get a plain explanation. Gate the
+    // fetch effect on `isShipless`, the render on the specific predicate.
     const isSubEasterEgg = tier === 9 && type === 'Submarine';
     const isCarrierEasterEgg = tier === 9 && type === 'AirCarrier';
     const isEasterEgg = isSubEasterEgg || isCarrierEasterEgg;
+    const isShipless = bothSelected && isShiplessBucket(tier as Tier, type as ShipType);
     const eggKind = isSubEasterEgg ? 't9-submarine' : isCarrierEasterEgg ? 't9-carrier' : null;
 
     // Count every time an easter egg surfaces. The render branch is the single
@@ -551,7 +553,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
     // warm-bucket re-fetches cheap.
     const listReqId = useRef(0);
     useEffect(() => {
-        if (!prefsRestored || !bothSelected || selectedShip || isEasterEgg) return;
+        if (!prefsRestored || !bothSelected || selectedShip || isShipless) return;
         const reqId = ++listReqId.current;
         setListLoading(true);
         setListError(false);
@@ -599,7 +601,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
         return () => {
             if (timer) clearTimeout(timer);
         };
-    }, [realm, tier, type, wrPct, bothSelected, selectedShip, isEasterEgg, prefsRestored]);
+    }, [realm, tier, type, wrPct, bothSelected, selectedShip, isShipless, prefsRestored]);
 
     // Ship board fetch (drill-down) — reuses the existing /ship leaderboard.
     const boardReqId = useRef(0);
@@ -661,32 +663,32 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
         // effect after this commit), so it may still hold the previous bucket.
         // Flag that as stale so the treemap dims the old map and waits, never
         // painting the prior bucket's ships under the new heading.
-        const stale = !isEasterEgg && listBucketKey !== `${tier}|${type}|${wrPct}`;
+        const stale = !isShipless && listBucketKey !== `${tier}|${type}|${wrPct}`;
         const resolvedOnce = list !== null || listError;
-        const loading = listLoading || stale || (!resolvedOnce && !isEasterEgg);
+        const loading = listLoading || stale || (!resolvedOnce && !isShipless);
         onBucketRef.current?.({
             tier,
             type,
             wrPct,
-            ships: isEasterEgg ? [] : (list ?? []),
+            ships: isShipless ? [] : (list ?? []),
             totalBattles: listTotalBattles,
             windowStart: listWindow.start,
             windowEnd: listWindow.end,
             loading,
             pending: listPending,
-            empty: isEasterEgg
+            empty: isShipless
                 || (!stale && resolvedOnce && !listLoading && !listPending && (list?.length ?? 0) === 0),
         });
-    }, [tier, type, wrPct, list, listLoading, listPending, listTotalBattles, listWindow, listBucketKey, isEasterEgg, listError]);
+    }, [tier, type, wrPct, list, listLoading, listPending, listTotalBattles, listWindow, listBucketKey, isShipless, listError]);
 
     const typeLabel = useMemo(() => (type ? shipClass(type)?.label ?? type : null), [type]);
 
     // The shareable address for the bucket currently on screen. The landing page
     // keeps its own URL, so this is built from live state rather than read from
-    // the address bar. Null for the shipless T9 sub/CV buckets, which have
+    // the address bar. Null for buckets with no hulls in the game, which have
     // nothing to show a recipient.
     const listShareUrl = useMemo(() => {
-        if (tier == null || type == null || isEasterEgg) return null;
+        if (tier == null || type == null || isShipless) return null;
         return buildShipBucketPath({
             tier,
             type,
@@ -695,7 +697,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
             sort: listSort ? String(listSort.key) : null,
             dir: listSort?.dir ?? null,
         });
-    }, [tier, type, realm, wrPct, listSort, isEasterEgg]);
+    }, [tier, type, realm, wrPct, listSort, isShipless]);
 
     // The drill-down already has a real route of its own; sharing it just points
     // at /ship/<id>-<slug> with the sort the sharer was looking at.
@@ -921,6 +923,10 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                     <SubmarineEasterEgg />
                 ) : isCarrierEasterEgg ? (
                     <CarrierEasterEgg />
+                ) : isShipless ? (
+                    <p className="py-6 text-sm text-[var(--text-muted)]">
+                        World of Warships has no {`T${tier} ${typeLabel ?? ''}`.trim()}.
+                    </p>
                 ) : selectedShip ? (
                     <ShipBoard
                         realm={realm}

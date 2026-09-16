@@ -1923,7 +1923,7 @@ def realm_ships_by_tier_type(request, realm: str) -> Response:
     BattleEvent over the rolling trailing window the treemap + /ship board read
     (anchored on the latest ShipTopPlayerSnapshot.captured_on), ordered by win rate
     descending, restricted to ships with a populated drill-down board. Requires
-    `tier` (one of the badge tiers, prod 8/9/10) and `type` (a raw WG ship-type
+    `tier` (one of the badge tiers, prod 8/9/10/11) and `type` (a raw WG ship-type
     string). 404 on unknown realm; 400 on missing/invalid tier or type.
 
     Optional ``wr_pct`` (one of ``SHIP_LIST_WR_PCTS`` — 50 or 25) switches each

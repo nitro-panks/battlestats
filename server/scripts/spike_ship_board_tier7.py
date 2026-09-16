@@ -145,6 +145,31 @@ def report(tag, b, pools, tier, mb):
           f"short_boards(<{list_size})={short} empty_after_wr_gate={empty} | marginal(pool<=floor+3)={marg}")
 
 
+BY_TYPE = os.getenv('SPIKE_BY_TYPE', '0') == '1'
+
+
+def report_by_type(tag, b, pools, tier):
+    """Per (tier, ship_type) ranked counts — the axis the product surfaces.
+
+    `/ships/<tier>-<type>` is one indexable route per bucket, and both warm
+    loops iterate tier x type, so a tier's depth only answers half the
+    question: a bucket with three hulls in the roster is a thin page no matter
+    how deep the tier reads in aggregate.
+    """
+    for stype in ('Battleship', 'Cruiser', 'Destroyer', 'AirCarrier', 'Submarine'):
+        roster_n = sum(1 for v in target.values() if v[1] == tier and v[2] == stype)
+        ids = [s for s in b if target[s][1] == tier and target[s][2] == stype]
+        seen = [s for s in pools if target[s][1] == tier and target[s][2] == stype]
+        if not roster_n:
+            print(f"      T{tier} {stype:12s} {tag}: roster=0 (structurally empty bucket)")
+            continue
+        psz = [pools[s][0] for s in ids]
+        short = sum(1 for s in ids if len(b[s]) < list_size)
+        print(f"      T{tier} {stype:12s} {tag}: ranked={len(ids)}/{roster_n} roster "
+              f"(any pool={len(seen)}) | pool med={med(psz)} min={min(psz) if psz else None} "
+              f"| short_boards={short}")
+
+
 for realm in REALMS:
     print(f"\n=== {realm} today={today} (window B is a proxy for 90d; earliest event 2026-06-13)", flush=True)
     for days in WINDOWS:
@@ -154,5 +179,7 @@ for realm in REALMS:
             b, pools = board(rows, f)
             for t in TIERS:
                 report(f"{days}d/floor{f}", b, pools, t, f)
+                if BY_TYPE:
+                    report_by_type(f"{days}d/floor{f}", b, pools, t)
         del rows
 print("\nDONE", flush=True)

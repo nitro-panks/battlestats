@@ -77,13 +77,41 @@ export const parseShipIdFromRouteSegment = (segment: string): number | null => {
 // Runbook: agents/runbooks/runbook-shareable-ship-leaderboard-2026-08-20.md
 // ---------------------------------------------------------------------------
 
-/** Tiers the backend computes ship-standings data for. */
-export const SHIP_BUCKET_TIERS = [8, 9, 10] as const;
+/**
+ * Tiers the backend computes ship-standings data for. Must stay in step with
+ * `SHIP_BADGE_TIERS` on the server (`server/deploy/deploy_to_droplet.sh`): a
+ * tier listed here but absent there makes the bucket endpoint 400.
+ *
+ * Tier 11 is Wargaming's supership tier; it ranks as an ordinary tier because
+ * every ship is ranked within its own pool (depth study:
+ * `agents/runbooks/runbook-ship-standings-tier-extension-2026-09-15.md`).
+ */
+export const SHIP_BUCKET_TIERS = [8, 9, 10, 11] as const;
 export type Tier = (typeof SHIP_BUCKET_TIERS)[number];
 
 /** Raw `Ship.ship_type` strings the backend filters on (note: "AirCarrier"). */
 export const SHIP_TYPES = ['Battleship', 'Cruiser', 'Destroyer', 'AirCarrier', 'Submarine'] as const;
 export type ShipType = (typeof SHIP_TYPES)[number];
+
+/**
+ * Buckets World of Warships has no hulls for, so no data can ever exist:
+ * carriers are even-tier only (no T9 CV), and neither T9 nor T11 has a
+ * submarine. These must issue NO fetch and stay out of the sitemap — an empty
+ * indexable page is worse than no page.
+ *
+ * This is the single source of truth. Before it existed the knowledge lived as
+ * `tier === 9` inside `ShipLeaderboard.tsx`, which is why adding a tier meant
+ * remembering to look there.
+ */
+const SHIPLESS_BUCKETS: ReadonlySet<string> = new Set([
+    '9|AirCarrier',
+    '9|Submarine',
+    '11|Submarine',
+]);
+
+/** True when the game has no hulls at all for this bucket. */
+export const isShiplessBucket = (tier: Tier, type: ShipType): boolean =>
+    SHIPLESS_BUCKETS.has(`${tier}|${type}`);
 
 /** Win-rate-percentile filter; `null` is the realm-wide aggregate ("All"). */
 export type WrPct = 50 | 25 | null;
@@ -135,9 +163,16 @@ export const parseShipBucketSegment = (
     return { tier, type };
 };
 
-/** Every bucket segment, for the sitemap. */
+/**
+ * Every bucket segment worth indexing, for the sitemap. Shipless buckets are
+ * excluded: the route still resolves (a visitor who types it gets the "no hulls"
+ * branch), it simply is not advertised.
+ */
 export const allShipBucketSegments = (): string[] =>
-    SHIP_BUCKET_TIERS.flatMap((tier) => SHIP_TYPES.map((type) => buildShipBucketSegment(tier, type)));
+    SHIP_BUCKET_TIERS.flatMap((tier) =>
+        SHIP_TYPES
+            .filter((type) => !isShiplessBucket(tier, type))
+            .map((type) => buildShipBucketSegment(tier, type)));
 
 export interface ShipBucketView {
     tier: Tier;

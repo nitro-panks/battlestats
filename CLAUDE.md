@@ -65,7 +65,7 @@ cd server && python manage.py populate_shiptool_codes [--dry-run]      # run on 
 
 - `/` — Landing: search, filter-correlated ship treemap, inline ship leaderboard. **Static — keep it that way**; reading request state here costs the prerender on the most-hit route.
 - `/player/[playerName]` · `/clan/[clanSlug]` (`<clan_id>-<slug>`) · `/ship/[shipSlug]` (`<ship_id>-<slug>`) · `/umami`
-- `/ships/[bucket]` (`t10-battleships`) — shareable ship standings, 15 indexable buckets. On this route **the URL outranks localStorage and is never written back**, or a shared link renders the recipient's view instead of the sharer's: `agents/runbooks/runbook-shareable-ship-leaderboard-2026-08-20.md`.
+- `/ships/[bucket]` (`t10-battleships`) — shareable ship standings, 17 indexable buckets (4 tiers incl. T11 superships × 5 types, less the 3 the game has no hulls for). On this route **the URL outranks localStorage and is never written back**, or a shared link renders the recipient's view instead of the sharer's: `agents/runbooks/runbook-shareable-ship-leaderboard-2026-08-20.md`.
 
 ### API proxy
 

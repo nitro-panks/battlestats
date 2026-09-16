@@ -1,6 +1,6 @@
 """Tests for the top-ships warm split into per-bucket subtasks.
 
-`warm_realm_top_ships_task` used to walk all 15 tier×type buckets inline under one
+`warm_realm_top_ships_task` used to walk every tier×type bucket inline under one
 540s soft limit. Measured on prod 2026-08-12: **12 dispatches in 24h, 12
 SoftTimeLimitExceeded, zero completions** — it died after 2-5 buckets, so T9/T10
 (including the landing page's default T10 view) never warmed on any realm, and the
@@ -98,9 +98,10 @@ class TopShipsWarmBucketSplitTests(TestCase):
         cache.clear()
 
     # `_badge_tiers()` follows SHIP_BADGE_TIERS, which is '10' by default locally
-    # and '8,9,10' in prod. Pin it so these assert the production shape rather
-    # than whatever the test environment happens to be configured for.
-    PROD_TIERS = [8, 9, 10]
+    # and '8,9,10,11' in prod (tier 11 added 2026-09-15). Pin it so these assert
+    # the production shape rather than whatever the test environment happens to
+    # be configured for.
+    PROD_TIERS = [8, 9, 10, 11]
 
     def test_orchestrator_computes_nothing_at_all(self):
         # THE LOAD-BEARING CONTRACT. Anything heavy left on the orchestrator's own
@@ -140,10 +141,13 @@ class TopShipsWarmBucketSplitTests(TestCase):
                 mock.patch("warships.tasks.warm_ships_bucket_task.apply_async") as sub:
             result = warm_realm_top_ships_task(realm="na")
 
-        # 3 tiers x 5 types, dispatched — not computed on this task's budget.
-        self.assertEqual(sub.call_count, 3 * len(SHIP_LEADERBOARD_TYPES))
+        # One subtask per tier x type, dispatched — not computed on this task's
+        # budget. Derived from PROD_TIERS so adding a tier updates one constant.
+        self.assertEqual(sub.call_count,
+                         len(self.PROD_TIERS) * len(SHIP_LEADERBOARD_TYPES))
         self.assertEqual(result["status"], "completed")
-        self.assertEqual(result["results"]["tier_type_buckets_dispatched"], 15)
+        self.assertEqual(result["results"]["tier_type_buckets_dispatched"],
+                         len(self.PROD_TIERS) * len(SHIP_LEADERBOARD_TYPES))
         # Both treemap modes and the default pct bucket are dispatched too.
         self.assertEqual(tm.call_count, 2)
         self.assertEqual(
@@ -153,7 +157,8 @@ class TopShipsWarmBucketSplitTests(TestCase):
 
     def test_every_dispatch_is_staggered_across_all_three_families(self):
         # Treemaps, buckets and the pct bucket share one spacing sequence so the
-        # 17 jobs do not land on the shared queue simultaneously.
+        # every job (2 treemap modes + one per tier x type bucket) does not land
+        # on the shared queue simultaneously.
         from warships.tasks import (
             SHIPS_BUCKET_WARM_SPACING_SECONDS, warm_realm_top_ships_task,
         )
@@ -170,7 +175,9 @@ class TopShipsWarmBucketSplitTests(TestCase):
         seen = ([c.kwargs["countdown"] for c in tm.call_args_list]
                 + [c.kwargs["countdown"] for c in sub.call_args_list])
         self.assertEqual(
-            seen, [i * SHIPS_BUCKET_WARM_SPACING_SECONDS for i in range(17)])
+            seen,
+            [i * SHIPS_BUCKET_WARM_SPACING_SECONDS
+             for i in range(2 + len(self.PROD_TIERS) * len(SHIP_LEADERBOARD_TYPES))])
 
     def test_every_tier_type_pair_is_covered_exactly_once(self):
         from warships.tasks import warm_realm_top_ships_task
@@ -188,7 +195,7 @@ class TopShipsWarmBucketSplitTests(TestCase):
             (c.kwargs["kwargs"]["tier"], c.kwargs["kwargs"]["ship_type"])
             for c in sub.call_args_list)
         expected = sorted(
-            (t, st) for t in (8, 9, 10) for st in SHIP_LEADERBOARD_TYPES)
+            (t, st) for t in self.PROD_TIERS for st in SHIP_LEADERBOARD_TYPES)
         self.assertEqual(pairs, expected)
 
     def test_bucket_order_rotates_by_day(self):

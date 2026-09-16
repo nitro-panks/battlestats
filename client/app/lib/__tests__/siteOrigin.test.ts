@@ -1,6 +1,7 @@
 import robots from "../../robots";
 import sitemap from "../../sitemap";
 import { getSiteOrigin, getSiteUrl } from "../siteOrigin";
+import { allShipBucketSegments } from "../entityRoutes";
 
 describe("site origin helpers", () => {
   const originalAppOrigin = process.env.BATTLESTATS_APP_ORIGIN;
@@ -52,9 +53,9 @@ describe("site origin helpers", () => {
 
     const entries = await sitemap();
 
-    // Root plus the 15 static tier x type ship-standings buckets. Player and
+    // Root plus every indexable tier x type ship-standings bucket. Player and
     // clan entries come from an upstream fetch that is not stubbed here.
-    expect(entries).toHaveLength(16);
+    expect(entries).toHaveLength(1 + allShipBucketSegments().length);
     expect(entries[0]).toMatchObject({
       url: "https://battlestats.online/",
       changeFrequency: "daily",
@@ -68,8 +69,11 @@ describe("site origin helpers", () => {
 
     const buckets = (await sitemap()).filter((e) => e.url.includes("/ships/"));
 
-    expect(buckets).toHaveLength(15);
+    expect(buckets).toHaveLength(allShipBucketSegments().length);
     expect(buckets.map((e) => e.url)).toContain("https://battlestats.online/ships/t10-battleships");
+    expect(buckets.map((e) => e.url)).toContain("https://battlestats.online/ships/t11-battleships");
+    // Buckets the game has no hulls for are never advertised.
+    expect(buckets.map((e) => e.url)).not.toContain("https://battlestats.online/ships/t11-submarines");
     // A bucket is one page; the percentile and column sort must not fragment it.
     for (const entry of buckets) {
       expect(entry.url).not.toContain("?");

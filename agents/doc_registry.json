@@ -4538,6 +4538,37 @@
             "archive_on": [
                 "broker-publish-moved-off-request-thread-entirely"
             ]
+        },
+        "agents/runbooks/runbook-ship-standings-tier-extension-2026-09-15.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "backend",
+            "aliases": [
+                "ship standings tier extension",
+                "can we add T11",
+                "supership leaderboard",
+                "T6 T7 T11 depth study",
+                "which tiers can we add",
+                "tier extension 90d"
+            ],
+            "tags": [
+                "ship-standings",
+                "ship-badges",
+                "SHIP_BADGE_TIERS",
+                "SHIP_LEADERBOARD_WINDOW_DAYS",
+                "ShipPopDailyAgg",
+                "warm_realm_ships_pct_task",
+                "tier-11",
+                "superships",
+                "feedback-driven",
+                "cost-measurement"
+            ],
+            "archive_on": [
+                "tier-extension-decision-shipped",
+                "ship-standings-feature-removed"
+            ]
         }
     }
 }
