@@ -33,7 +33,7 @@ export const ko: Partial<Record<StringKey, string>> = {
 
     'player.section.rankedSeasons': '랭크전 시즌',
     'player.section.randomBattlesByTier': '티어별 랜덤전',
-    'player.section.shipsPlayedInWindow': '이 기간에 탄 함선',
+    'player.section.windowActivityVsShipHistory': '기간 활동과 함선 통산 전적',
 
     // Composed-template blocker (see the research doc + spec's "Known traps"
     // section): the clauses below are resolved through t() in the components,

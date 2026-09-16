@@ -336,12 +336,20 @@ pills, the 45d/60d bracket geometry, and a 60d localStorage round-trip.
 Backend 1298 passed (2 skipped, unrelated), frontend 729 passed, `tsc
 --noEmit` clean. Same worktree, not yet deployed.
 
-## RandomsSVG compact — the ships-played chart under the Activity card (2026-09-16)
+## RandomsSVG compact — "Window Activity vs Ship History" (2026-09-16)
 
 The Activity tab carries a second surface below the battle-history card and
 above the clan section: the Ships tab's bar chart in a **compact variant**
 (`RandomsSVG compact`), showing only ships played in the window the card's pill
-currently names. No controls come over — no type/tier pills, no Min WR or Min
+currently names.
+
+The heading names the two timescales the figure puts on one row, because they
+are easy to misread as one. **Membership and the badge's games count are the
+window**; **the bar — its length the lifetime battle count, its fill the
+lifetime win rate — is the whole career.** A reader who takes the bar for window
+volume will read a 900-battle grind as this month's play. The ko/ja strings
+carry that sense rather than the word "vs": a literal 대 / 対 reads as a
+head-to-head matchup in both languages, which is not what the figure shows. No controls come over — no type/tier pills, no Min WR or Min
 battles sliders, no Activity mode toggle, no freshness line.
 
 Four things are load-bearing, and three of them are traps the obvious

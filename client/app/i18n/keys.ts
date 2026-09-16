@@ -30,7 +30,7 @@ export type StringKey =
     | 'player.section.rankedSeasonTimeline'
     | 'player.section.rankedSeasons'
     | 'player.section.randomBattlesByTier'
-    | 'player.section.shipsPlayedInWindow'
+    | 'player.section.windowActivityVsShipHistory'
     | 'player.section.winRateVsSurvival'
     | 'player.section.battlesPlayedDistribution'
     | 'player.section.clanBattlesVsWinRate'

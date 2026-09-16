@@ -152,7 +152,7 @@ describe('PlayerDetailInsightsTabs', () => {
 
         const chart = screen.getByTestId('activity-ships-chart');
         expect(chart).toBeInTheDocument();
-        expect(screen.getByText('Ships Played in This Window')).toBeInTheDocument();
+        expect(screen.getByText('Window Activity vs Ship History')).toBeInTheDocument();
 
         // The 1057px clamp used to sit on the panel. It has to move inward onto
         // the card's own wrapper, or the chart below is squeezed into whatever

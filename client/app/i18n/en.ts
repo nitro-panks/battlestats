@@ -40,7 +40,7 @@ export const en: Record<StringKey, string> = {
     'player.section.rankedSeasonTimeline': 'Ranked Season Timeline',
     'player.section.rankedSeasons': 'Ranked Seasons',
     'player.section.randomBattlesByTier': 'Random Battles by Tier',
-    'player.section.shipsPlayedInWindow': 'Ships Played in This Window',
+    'player.section.windowActivityVsShipHistory': 'Window Activity vs Ship History',
     'player.section.winRateVsSurvival': 'Win Rate vs Survival',
     'player.section.battlesPlayedDistribution': 'Battles Played Distribution',
     'player.section.clanBattlesVsWinRate': 'Clan Battles vs Win Rate',

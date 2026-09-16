@@ -750,8 +750,8 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 moves the pill. */}
                             <div className="mt-8" data-testid="activity-ships-chart">
                                 <SectionHeadingWithTooltip
-                                    title={t('player.section.shipsPlayedInWindow')}
-                                    description="Every ship this captain took into a random battle during the window selected above. Bar length is the ship's lifetime random battles and the fill is its lifetime win rate, so the chart reads as: here is what they have been playing lately, and here is how good they are in it. Change the window above and this list follows."
+                                    title={t('player.section.windowActivityVsShipHistory')}
+                                    description="Two timescales on one row. Which ships appear, and the games count on each badge, come from the window selected above: this is what the captain has been playing lately. The bar itself is that ship's whole career in random battles, its length the lifetime battle count and its fill the lifetime win rate, with the badge's second figure the percentage points the window moved that career rate. So the chart answers: what are they playing now, and how good are they in it. Change the window above and the list follows."
                                     className="mb-2 pl-[15px]"
                                 />
                                 {activityWindow ? (
