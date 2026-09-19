@@ -234,7 +234,7 @@ Two probes per sample, and the pairing is the point. `select 1` is a pure round 
 1. **Do not pull L1.** `RECAPTURE_LAPSED_DELAY=0.05` buys about 45s against a ~590s gap. It cannot close this, it spends the one-lever-per-step budget, and it contaminates the measurement of whatever actually caused the rate collapse. L2b, L3 and L4 are equally beside the point if the constraint is the database. The lever ordering in `runbook-recapture-soft-limit-budget-2026-08-13.md` was sized for a 34 rows/s world that no longer exists.
 2. ~~Count WG-side faults with an anchored pattern.~~ **DONE, and it falsified the WG-ceiling hypothesis.** See the section above: zero `REQUEST_LIMIT_EXCEEDED` on every day and queue.
 3. ~~Sample the DB during the recapture window.~~ **ARMED AND RUNNING**; see the section above. Read the series after 11:40 UTC. If saturation holds outside the rollup window and `pk_ms` diverges from `sel1_ms` during the stripe, rank `pg_stat_statements` by `shared_blks_read` and `total_exec_time`; do not reset it on prod (blocked by the auto-mode classifier), snapshot and diff over a window.
-4. **Verify the 60d rollout's required post-deploy work actually completed.** `runbook-ship-standings-60d-rollout-2026-08-18.md` names a snapshot rebuild per realm plus a forced grid warm, and `reference_rollup_coverage_gate_breaks_on_widen` warns that if the new oldest day was not backfilled first, every bucket falls back to a raw scan. Commit `fe717e4` claims the warm completed and all buckets verified; confirm that against the live rollup coverage, not against the commit message.
+4. **Verify the 60d rollout's required post-deploy work actually completed.** `archive/runbook-ship-standings-60d-rollout-2026-08-18.md` names a snapshot rebuild per realm plus a forced grid warm, and `reference_rollup_coverage_gate_breaks_on_widen` warns that if the new oldest day was not backfilled first, every bucket falls back to a raw scan. Commit `fe717e4` claims the warm completed and all buckets verified; confirm that against the live rollup coverage, not against the commit message.
 5. **Only then** consider a reversible probe on `SHIP_LEADERBOARD_WINDOW_DAYS` (60 back to 45). That is a production lever and needs an explicit ack; one lever at a time, per `feedback_prod_levers_one_at_a_time`.
 6. **Treat NA's floor coverage at 0.21 as its own item.** It is a freshness regression on the product's primary asset and it will not be fixed by anything in the recapture lever list.
 
@@ -251,6 +251,6 @@ A third is now visible: **no condition watches rows/s against a realm's own base
 
 `runbook-recapture-soft-limit-budget-2026-08-13.md`,
 `runbook-recapture-truncation-handler-crash-2026-08-16.md`,
-`runbook-ship-standings-60d-rollout-2026-08-18.md`,
+`archive/runbook-ship-standings-60d-rollout-2026-08-18.md`,
 `runbook-realm-schedule-striping-2026-08-15.md`,
 `agents/work-items/db-growth-capacity-2026-08-05.md`.

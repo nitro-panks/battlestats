@@ -430,7 +430,7 @@ ssh root@battlestats.online 'journalctl -u battlestats-celery-background --since
   per-tier instrument this study extends)
 - `runbook-ship-standings-75d-spike-2026-09-03.md` (window decision, floor
   question)
-- `runbook-ship-standings-60d-rollout-2026-08-18.md` (rollout procedure and the
+- `archive/runbook-ship-standings-60d-rollout-2026-08-18.md` (rollout procedure and the
   rollup-coverage backfill)
 - `runbook-shareable-ship-leaderboard-2026-08-20.md` (the `/ships/[bucket]`
   routes that grow with every tier)

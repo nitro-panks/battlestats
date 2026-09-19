@@ -4,7 +4,7 @@
 > was renamed to `60d` end to end (`fortyfive` → `sixty`, strip domain 45 → 60).
 > The mechanics below — fixed strip domain, right-anchored bracket, empty-pill
 > derivation — are unchanged; only the number moved. Read every "45" here as the
-> era's value. See `agents/runbooks/runbook-ship-standings-60d-rollout-2026-08-18.md`.
+> era's value. See `agents/runbooks/archive/runbook-ship-standings-60d-rollout-2026-08-18.md`.
 
 > Spec: `agents/work-items/battle-history-window-bracket-spec.md`
 

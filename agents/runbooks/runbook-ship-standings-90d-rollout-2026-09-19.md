@@ -7,7 +7,7 @@ _QA: every number below was measured on prod on 2026-09-19 before the flip; the 
 ## Purpose
 
 The execution plan for the last step of the ship-standings window walk, and for
-the timeline pill row that goes with it. `runbook-ship-standings-60d-rollout-2026-08-18.md`
+the timeline pill row that goes with it. `archive/runbook-ship-standings-60d-rollout-2026-08-18.md`
 is the precedent this forks; the evidence for the floor decision lives in
 `runbook-ship-standings-tier7-spike-2026-09-07.md` and
 `runbook-ship-standings-75d-spike-2026-09-03.md`.
@@ -229,7 +229,7 @@ bookmarked URLs), so a revert of the client alone is coherent.
 
 ## Related
 
-- `runbook-ship-standings-60d-rollout-2026-08-18.md` — the procedure this forks.
+- `archive/runbook-ship-standings-60d-rollout-2026-08-18.md` — the procedure this forks.
 - `runbook-ship-leaderboard-window-30d-2026-06-29.md` — the **Current value**
   banner, authoritative for the live window.
 - `runbook-ship-standings-tier7-spike-2026-09-07.md` — the floor-30 measurement.

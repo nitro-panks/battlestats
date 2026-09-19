@@ -175,7 +175,7 @@ aggregate. After 2026-09-11, re-run with `SPIKE_WINDOWS=60,90` to replace the
       hold. Flip the window first; hold the tier extension for a separate
       change once the warmers have two clean nights.
 - [ ] Before flipping: confirm `ship_pop_rollup_covers_window` for 90d on all
-      three realms (`runbook-ship-standings-60d-rollout-2026-08-18.md`), and
+      three realms (`archive/runbook-ship-standings-60d-rollout-2026-08-18.md`), and
       note that the rollup coverage gate is per-window, not per-tier — T7 rides
       the same check.
 - [ ] If T7 ships: watch `warm_realm_ships_pct_task` for soft-limits on the
@@ -186,7 +186,7 @@ aggregate. After 2026-09-11, re-run with `SPIKE_WINDOWS=60,90` to replace the
 
 - `runbook-ship-standings-75d-spike-2026-09-03.md` (window decision; owns the
   floor question this spike answers for T7/T8)
-- `runbook-ship-standings-60d-rollout-2026-08-18.md` (rollout procedure,
+- `archive/runbook-ship-standings-60d-rollout-2026-08-18.md` (rollout procedure,
   rollup-coverage backfill)
 - `runbook-shareable-ship-leaderboard-2026-08-20.md` (the `/ships/[bucket]`
   routes that would go 15 → 20)

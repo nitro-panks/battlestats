@@ -266,7 +266,7 @@ are now 75d.** This is a straight rename, same shape as the 45d→60d hop
 `last60`→`last75`. **Scoped to the player-timeline card only** —
 `SHIP_LEADERBOARD_WINDOW_DAYS` (ship standings) is untouched and stays at 60;
 the two windows are independent levers on the same 90d end state (see
-`runbook-ship-standings-60d-rollout-2026-08-18.md` for that one).
+`archive/runbook-ship-standings-60d-rollout-2026-08-18.md` for that one).
 
 Bar geometry at the new domain: `barW = (100 − 0.5×74) ÷ 75 = 0.84`, so
 `barW + gap = 1.34` and the bracket's left edge = `(75 − span) × 1.34`. The

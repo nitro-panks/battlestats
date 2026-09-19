@@ -256,7 +256,7 @@ def register_periodic_schedules(sender, **kwargs):
     # paid for the 45d -> 60d window widen; both chained warms
     # (queue_realm_top_ships_warm, warm_all_ship_pop_avg_damage_task) have their
     # own daily Beat entries, so a single firing orphans neither.
-    # See agents/runbooks/runbook-ship-standings-60d-rollout-2026-08-18.md.
+    # See agents/runbooks/archive/runbook-ship-standings-60d-rollout-2026-08-18.md.
     ship_badge_hour = int(os.getenv("SHIP_BADGE_SNAPSHOT_HOUR", "2"))
     for realm in sorted(VALID_REALMS):
         realm_hour = (ship_badge_hour +

@@ -209,7 +209,7 @@ class ShipSnapshotFiresOncePerDayTests(TestCase):
     the same `captured_on` intra-day, and at 100-350s per run it was the cheapest
     thing to give up to pay for the 45d -> 60d window widen. Both chained warms
     have their own daily Beat entries, so dropping it orphans neither.
-    Runbook: runbook-ship-standings-60d-rollout-2026-08-18.md.
+    Runbook: archive/runbook-ship-standings-60d-rollout-2026-08-18.md.
     """
 
     def test_ship_snapshot_fires_once_per_day(self):

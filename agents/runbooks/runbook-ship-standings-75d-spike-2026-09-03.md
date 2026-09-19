@@ -131,7 +131,7 @@ ssh -o ConnectTimeout=15 root@battlestats.online \
 realms. To model a different floor, prefix `SHIP_BADGE_MIN_BATTLES=30` after
 the env sourcing. `events_reach_90d=YES` on every realm is the go signal for
 the data side; then check `ship_pop_rollup_covers_window` for the 90d window
-(see `runbook-ship-standings-60d-rollout-2026-08-18.md` for the backfill
+(see `archive/runbook-ship-standings-60d-rollout-2026-08-18.md` for the backfill
 call) and follow that runbook's rollout procedure.
 
 ## Follow-ups
@@ -144,8 +144,8 @@ call) and follow that runbook's rollout procedure.
 
 ## Related
 
-- `runbook-ship-standings-60d-foothold-2026-08-18.md` (floor study, rebuild
+- `archive/runbook-ship-standings-60d-foothold-2026-08-18.md` (floor study, rebuild
   cost, the 2026-06-13 data-depth floor)
-- `runbook-ship-standings-60d-rollout-2026-08-18.md` (rollout procedure)
+- `archive/runbook-ship-standings-60d-rollout-2026-08-18.md` (rollout procedure)
 - `runbook-ship-leaderboard-architecture-2026-06-18.md`
 - `runbook-ship-badges-rolling-2026-06-14.md` (weights, gate, prior)

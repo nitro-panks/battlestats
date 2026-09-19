@@ -1,6 +1,6 @@
 # Runbook — Ship-leaderboard rolling window (14 → 30 → 45 → 60 → 90)
 
-**Date:** 2026-06-29 (14→30); extended 2026-08-02 to cover 30→45 and the advance procedure; 45→60 landed 2026-08-18 (`runbook-ship-standings-60d-rollout-2026-08-18.md`)
+**Date:** 2026-06-29 (14→30); extended 2026-08-02 to cover 30→45 and the advance procedure; 45→60 landed 2026-08-18 (`archive/runbook-ship-standings-60d-rollout-2026-08-18.md`)
 **Status:** active — this is the single reference for the window's live value and how to advance it
 **Owner:** data
 **Area:** `SHIP_LEADERBOARD_WINDOW_DAYS` (`data.py` default / deploy-script pin), nightly `snapshot_ship_top_players_task`, treemap / inline ship list / `/ship/<id>` board / profile ship badges, header copy
