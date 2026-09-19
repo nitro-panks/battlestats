@@ -4390,6 +4390,34 @@
                 "90d-window-shipped"
             ]
         },
+        "agents/runbooks/runbook-ship-standings-90d-rollout-2026-09-19.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "deploy",
+            "owner": "backend",
+            "aliases": [
+                "ship standings 90d rollout",
+                "60d to 90d rollout",
+                "how to move the ship leaderboard window",
+                "90d window deploy steps",
+                "player timeline 90d pill"
+            ],
+            "tags": [
+                "ship-standings",
+                "SHIP_LEADERBOARD_WINDOW_DAYS",
+                "SHIP_BADGE_MIN_BATTLES",
+                "battle-history-window",
+                "rollout",
+                "deploy",
+                "snapshot-rebuild",
+                "cache-warm",
+                "rollup-coverage"
+            ],
+            "archive_on": [
+                "90d-rollout-verified-and-stable"
+            ]
+        },
         "agents/runbooks/runbook-ops-alert-remediation-2026-08-28.md": {
             "kind": "runbook",
             "status": "active",

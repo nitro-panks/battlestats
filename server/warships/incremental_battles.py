@@ -2204,11 +2204,16 @@ def record_ranked_observation_and_diff(player_id: int, realm: str) -> Dict[str, 
 
 # Must stay comfortably above SHIP_LEADERBOARD_WINDOW_DAYS: the nightly
 # ship-standings snapshot aggregates BattleEvent over that trailing window.
-# That window is env-pinned per environment (prod=45 as of 2026-07-24; the
-# data.py default of 30 is NOT the live value) and is walking toward 90 — see
-# agents/runbooks/runbook-ship-leaderboard-window-30d-2026-06-29.md. Prod pins
-# BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS=105 in the deploy script.
-ARCHIVE_RETENTION_DAYS_DEFAULT = 92
+# That window is env-pinned per environment (prod=90 as of 2026-09-19; the
+# data.py default of 30 is NOT the live value) and the walk that began at 30
+# has now arrived — see runbook-ship-standings-90d-rollout-2026-09-19.md.
+# Prod pins BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS=105 in the deploy script.
+#
+# The default moved 92 -> 105 with that last step: at a 90-day window a 92-day
+# default leaves two days of slack, so an environment running on the default
+# would quietly serve a short window the first time a prune ran early. The
+# prod pin already reads 105; this only closes the gap for everything else.
+ARCHIVE_RETENTION_DAYS_DEFAULT = 105
 ARCHIVE_BATCH_SIZE_DEFAULT = 2000
 ARCHIVE_STATEMENT_TIMEOUT_DEFAULT = 180
 

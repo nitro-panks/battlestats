@@ -142,15 +142,11 @@ export const ko: Partial<Record<StringKey, string>> = {
     'battleHistory.window.day': '일',
     'battleHistory.window.week': '주',
     'battleHistory.window.month': '월',
-    'battleHistory.window.fortyfive': '45일',
-    'battleHistory.window.sixty': '60일',
-    'battleHistory.window.seventyfive': '75일',
+    'battleHistory.window.ninety': '90일',
     'battleHistory.header.today': '오늘',
     'battleHistory.header.last7': '최근 7일',
     'battleHistory.header.last30': '최근 30일',
-    'battleHistory.header.last45': '최근 45일',
-    'battleHistory.header.last60': '최근 60일',
-    'battleHistory.header.last75': '최근 75일',
+    'battleHistory.header.last90': '최근 90일',
     // Compact battle-mode forms, the resolved fork: what players write and
     // what wows-numbers' own tables use.
     'battleHistory.mode.random': '랜덤전',

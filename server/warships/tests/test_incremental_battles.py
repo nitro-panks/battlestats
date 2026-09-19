@@ -3201,6 +3201,40 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(body["totals"]["battles"], 9)
         self.assertEqual(body["totals"]["wins"], 5)
 
+    def test_window_ninety_returns_90_days_of_daily_rollups(self):
+        """The `ninety` window reads PlayerDailyShipStats with windows=90.
+
+        This is the timeline's longest reach and, since 2026-09-19, the only
+        extended-lookback pill the client exposes: 45/60/75 stay accepted for
+        bookmarked URLs, but a reader picks Day / Week / Month / 90d.
+        """
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=5, wins=3,
+        )
+        # 89 days old — inside the 90-day window, outside the 75-day one.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today - timedelta(days=89),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=2,
+        )
+        # 91 days old — outside the 90-day window.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today - timedelta(days=91),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=99, wins=99,
+        )
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?window=ninety&mode=random",
+            )
+        body = r.json()
+        self.assertEqual(body["totals"]["battles"], 9)
+        self.assertEqual(body["totals"]["wins"], 5)
+
     def test_window_year_does_not_trip_legacy_30d_cap(self):
         """Pre-fix `BATTLE_HISTORY_MAX_DAYS=30` would have capped a 365-day
         request at 30. The `year` window must request 365 windows fully.

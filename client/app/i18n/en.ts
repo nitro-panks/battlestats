@@ -78,20 +78,16 @@ export const en: Record<StringKey, string> = {
     'player.hidden.body': 'The player has set their profile to private. Detailed statistics and charts are not available.',
 
     // Activity card. The window pills and their span header are two different
-    // strings for the same span on purpose (pill '60d' vs header 'Last 60
+    // strings for the same span on purpose (pill '90d' vs header 'Last 90
     // days') — the pill is width-constrained, the header is not.
     'battleHistory.window.day': 'Day',
     'battleHistory.window.week': 'Week',
     'battleHistory.window.month': 'Month',
-    'battleHistory.window.fortyfive': '45d',
-    'battleHistory.window.sixty': '60d',
-    'battleHistory.window.seventyfive': '75d',
+    'battleHistory.window.ninety': '90d',
     'battleHistory.header.today': 'Today',
     'battleHistory.header.last7': 'Last 7 days',
     'battleHistory.header.last30': 'Last 30 days',
-    'battleHistory.header.last45': 'Last 45 days',
-    'battleHistory.header.last60': 'Last 60 days',
-    'battleHistory.header.last75': 'Last 75 days',
+    'battleHistory.header.last90': 'Last 90 days',
     'battleHistory.mode.random': 'Random Battles',
     'battleHistory.mode.ranked': 'Ranked',
     // Plural, so it cannot reuse common.ship ('Ship', the table column).
