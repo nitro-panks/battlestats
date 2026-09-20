@@ -4,7 +4,7 @@ _Created: 2026-09-20_
 _Lifecycle: dated-active · Owner: platform_
 _Context: the product has reached its end state (90-day rolling window, 105-day retention, no further window moves). `agents/work-items/db-table-shape-audit-2026-09-20.md` (the H-series) tested the design assumption behind each of the seven largest tables against the measured shape of its data; five of six assumptions were false. This runbook is the execution plan those findings imply._
 _QA: every figure traces to the H-series work item or to a live check recorded here. Figures measured 2026-09-20._
-_Status 2026-09-20: **Step 2 is done** (v5.11.3): the truncate returned 1.43 GB to the OS and the volume went 78.57% → 76.44%. Step 4's client is built and installed. Steps 1 and 3 are next; nothing else has been applied._
+_Status 2026-09-20: **Steps 1-4 are done. The volume went from 78.57% to 59.47% in one day, with no feature change and no spend**, which retires the resize question. Step 2 truncate (v5.11.3), Step 1 daily prune (v5.11.4), Step 3 three index drops (v5.11.5), Step 4 `pg_repack` (24 → 11 GB). Steps 5-9 are structural, have no deadline, and each needs its own approval._
 
 ## QA Notes
 
@@ -45,7 +45,7 @@ _Reviewed 2026-09-20 against `/home/august/code/battlestats/.claude/worktrees/db
 | 1 — prune daily, not twice monthly | H5 | ✅ | ✅ v5.11.4 | ✅ **2026-09-20** | Done, 12 days inside the deadline. Watch the first runs with candidates, from 2026-09-27 |
 | 2 — truncate `PlayerAchievementStat` | H6 | ✅ `0088` | ✅ v5.11.3 | ✅ **2026-09-20 16:57 UTC** | Done. 1.43 GB returned to the OS |
 | 3 — drop 4 indexes, make 1 partial | H7 | ✅ `0089` | ✅ v5.11.5 | ✅ **2026-09-20** | **Three dropped, not five.** EXPLAIN kept two: one permanently, one until Step 6 |
-| 4 — `pg_repack` `battleobservation` | H1 | n/a | n/a | ☐ | **Client built and installed 2026-09-20.** Supervised run still waits on Steps 2 and 3 |
+| 4 — `pg_repack` `battleobservation` | H1 | n/a | n/a | ✅ **2026-09-20 19:51-20:11 UTC** | Done. 24 GB → 11 GB; **volume 75.93% → 59.47%** |
 | 5 — stop fetching achievements | H6 | ☐ | ☐ | ☐ | Product decision |
 | 6 — aggregations to PDSS; `BattleEvent` 105 → 35 d | H2 | ☐ | ☐ | ☐ | Per-reader payload equivalence |
 | 7 — `Player` row shape | H4 | ☐ | ☐ | ☐ | `toast_tuple_target` only; measure on a copy first. The index stays (see QA) |
@@ -167,6 +167,50 @@ The four drops follow `0087_drop_unused_pdss_indexes`: bound `lock_timeout` to 5
 
 ## Step 4 — `pg_repack` the observation table ★ largest reclaim
 
+> **Outcome 2026-09-20 — read this first.** Ran 19:51:46 → ~20:11 UTC, **19.5
+> minutes**, no abort, zero blocked sessions at every check, site answering 200
+> throughout.
+>
+> | | Before | After |
+> |---|---|---|
+> | `warships_battleobservation` | 24 GB (761 MB heap / 686 MB idx / 23 GB TOAST) | **11 GB** (500 MB / 313 MB / 10 GB) |
+> | `pg_database_size` | 56.88 GB | **43.06 GB** |
+> | `disk_used_percent` | 75.93% | **59.47%** (free 20.2 → 34.0 GB) |
+> | Peak during the run | — | **89.82%** |
+>
+> Integrity after the swap: 3,449,205 rows, 625,639 carrying a payload, a sample
+> payload readable (301 ships), 424 new observations written *after* the swap, all
+> four indexes valid, no leftover `repack` tables or triggers. Extension dropped
+> and the metrics credentials removed from the droplet afterwards.
+>
+> **Three things the plan below got wrong, all caught before the table was touched:**
+>
+> 1. **The binary's NAME is part of the version handshake.** It was installed as
+>    `pg_repack-1.5.2` so that apt could never shadow it. `pg_repack` builds its
+>    handshake string from its own program name, so it announced itself as
+>    `pg_repack-1.5.2 1.5.2` and the server refused it: *"does not match database
+>    library 'pg_repack 1.5.2'"*. It now lives at
+>    **`/usr/local/lib/pg_repack-1.5.2/pg_repack`** — a versioned *directory*,
+>    which keeps the no-shadow property and the right name. **The `--dry-run`
+>    caught this**; it exercises the full handshake. Never skip it.
+> 2. **The live set was ~10.7 GB, not ~9 GB**, so the copy was ~12 GB and the
+>    peak ~90%, not ~89%. The daily compaction was run first to shrink the copy
+>    and freed only 0.4 GB (26,673 payloads): the payload *percentage* had risen
+>    from 14.7% to 18.9% because that day's archive run deleted 673 K empty rows
+>    and shrank the denominator, not because superseded generations had piled up.
+>    Size a repack from **payload row counts**, not from a percentage.
+> 3. **The abort line was raised 92% → 94%.** At a ~90% projected peak, 92% left
+>    1.5 GB of WAL headroom and would likely have killed a good run near its end.
+>    At 94% there are still 5 GB free, the watchdog polls every 30 s, and an abort
+>    frees the whole half-built copy at once. The peak was 89.82%, so neither line
+>    was reached.
+>
+> The measured rate was a steady ~1 point of volume per minute (~14 MB/s), which
+> is the signature of the copy writing alone with WAL not backing up. The runner
+> and watchdog that did this are in `server/scripts/pg_repack_client/`. The
+> watchdog runs **on the droplet**, under `setsid nohup`, so it outlives the
+> operator's session.
+
 ### What is wrong
 
 `warships_battleobservation` is 25.79 GB, of which 24.27 GB is TOAST. After the 2026-09-20 `keep=1` fix only **14.7%** of rows carry `ships_stats_json` (1% sample, 41,875 rows), at 15 kB stored each: **~9.0 GB live**, so **~15 GB is free space**. Steady state is one payload per observed player plus about a day of intake before the 12:30 UTC compaction, ~10.5 GB. **About 13 GB is stranded permanently**: reusable space only helps if something grows into it, and nothing will.
@@ -178,7 +222,7 @@ The four drops follow `0087_drop_unused_pdss_indexes`: bound `lock_timeout` to 5
 ### Preconditions
 
 - Steps 2 and 3 done. The repack needs room for a second copy of the live data (~10 GB) plus WAL; free space is 17.97 GB today and ~20.2 GB after them.
-- ✅ **A 1.5.2 client — done 2026-09-20.** `pg_repack` refuses to run unless client and extension versions match exactly; the cluster offers 1.5.2 and apt offers only 1.5.3. Operator decision: build tag `ver_1.5.2` from source. Installed at **`/usr/local/bin/pg_repack-1.5.2`** on the droplet (versioned name on purpose, so an `apt install` of 1.5.3 can never shadow it).
+- ✅ **A 1.5.2 client — done 2026-09-20.** `pg_repack` refuses to run unless client and extension versions match exactly; the cluster offers 1.5.2 and apt offers only 1.5.3. Operator decision: build tag `ver_1.5.2` from source. Installed at **`/usr/local/lib/pg_repack-1.5.2/pg_repack`** on the droplet — a versioned *directory*, so an `apt install` of 1.5.3 can never shadow it. (It was first installed as `/usr/local/bin/pg_repack-1.5.2`; that name broke the version handshake — see the outcome box above.)
   - Built in an `ubuntu:24.04` container from `server/scripts/pg_repack_client/Dockerfile`, against `postgresql-server-dev-18`. The droplet is 24.04 and the dev box 26.04, so a native build would have linked a newer glibc than production has; the container also keeps a compiler toolchain off the production host. Only the client binary leaves the image — the server-side library is the cluster's own.
   - `sha256 c1a187dbf0b9ab8b168d3625089b4cb931e53b12e58223bbfa43b27492ef4d58`, 273,736 bytes. Verified on the droplet: `--version` prints `1.5.2`, `ldd` reports nothing unresolved (the runtime libraries arrive with the already-installed `postgresql-client-18` / `libpq5`).
   - Rebuild: `DOCKER_BUILDKIT=0 docker build -t pgrepack-152-build server/scripts/pg_repack_client` (the dev box's Docker has no `buildx`), then `docker cp` `/out/pg_repack` out of a created container.
@@ -191,8 +235,8 @@ Supervised, never scheduled. All three flags below were confirmed against the in
 
 ```
 CREATE EXTENSION pg_repack;                         -- once, as doadmin
-pg_repack-1.5.2 --dry-run            -k -D -t warships_battleobservation …   # first
-pg_repack-1.5.2                      -k -D -t warships_battleobservation …
+/root/pg_repack_run.sh --dry-run     # first: full connection + version handshake
+/root/pg_repack_run.sh               # -k -D --no-order -t public.warships_battleobservation
 ```
 
 - `-D, --no-kill-backend` — by default `pg_repack` *terminates* the sessions blocking it once `--wait-timeout` (60 s) expires. The floor's connections are not expendable; with `-D` it gives up instead.
@@ -277,7 +321,6 @@ On a rolling table a `DROP COLUMN` needs no rewrite: new rows stop carrying it a
 
 | Gate | Who | Blocks |
 |---|---|---|
-| Schedule the supervised repack | operator | Step 4 |
 | Stop the achievements fetch | operator | Step 5 |
 | `BattleEvent` retention 35 d | operator | Step 6 |
 
@@ -287,8 +330,8 @@ On a rolling table a `DROP COLUMN` needs no rewrite: new rows stop carrying it a
 - [ ] Step 1: runs from 2026-09-27 report deleted rows for both tables, and the unit's duration stays comfortably inside the hour.
 - [x] **Step 2 verified 2026-09-20:** 0 rows, 24 kB; database 59.20 → 57.29 GB; volume 78.57% → 76.44%.
 - [x] **Step 3 shipped 2026-09-20 (v5.11.5):** three indexes gone; two kept on `EXPLAIN` evidence. See the outcome box in Step 3.
-- [ ] Step 4: table ~11-12 GB; `disk_used_percent` down ~15 points.
-- [ ] Re-measure `disk_used_percent` after Steps 1-4 against the ~60% projection.
+- [x] **Step 4 done 2026-09-20:** table 24 → 11 GB; `disk_used_percent` 75.93% → **59.47%** (−16.5 points); peak 89.82%, no abort.
+- [x] **Steps 1-4 complete 2026-09-20: `disk_used_percent` 59.47% against a ~60% projection.** Morning figure was 78.57%. The resize question (capacity runbook Step 3) is retired.
 
 ## Related
 

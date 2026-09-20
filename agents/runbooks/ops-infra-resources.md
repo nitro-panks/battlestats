@@ -18,9 +18,10 @@ claim in older runbooks — those describe the **pre-2026-05-28** state, not tod
   off** — standing operator decision 2026-09-20, because unpredictable cost is
   disqualifying for a hobby project. The ceiling is therefore a chosen property,
   not a gap: a full volume is a read-only outage and nothing will absorb it
-  automatically. Measured 2026-09-19: ~59 GB of database, disk ≈79%, with the
-  slope and the plateau dates in
-  `runbook-db-capacity-remediation-2026-09-19.md`.
+  automatically. Measured 2026-09-20 after the table-shape remediation:
+  **43.06 GB of database, disk 59.47%** (it was 59 GB / 78.57% that morning;
+  see `runbook-db-table-shape-remediation-2026-09-20.md`). Growth slope and
+  plateau dates: `runbook-db-capacity-remediation-2026-09-19.md`.
 
 ## App droplet (`battlestats-droplet`, nyc3)
 

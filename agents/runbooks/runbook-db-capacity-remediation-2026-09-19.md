@@ -30,7 +30,7 @@ _Reviewed 2026-09-19 against `/home/august/code/battlestats/.claude/worktrees/db
 |---|---|---|---|---|
 | 1 — restore `keep=1` | ✅ | ✅ v5.11.1 | ✅ **2026-09-20 12:32 UTC** | Done. Re-measure the slope ~2026-10-04 |
 | 2 — disk alerts | n/a | n/a | ✅ **closed 2026-09-20** | They already existed at 90%, delivering to gmail. Operator kept 90%. Autoscale measured OFF |
-| 3 — volume sizing decision | n/a | n/a | ☐ | **LAST RESORT.** Operator decision, after 4-6. Read the slope ~2026-10-04 |
+| 3 — volume sizing decision | n/a | n/a | ✅ **retired 2026-09-20** | Not needed. The table-shape runbook took the volume 78.57% → **59.47%** with no spend (`runbook-db-table-shape-remediation-2026-09-20.md` Steps 1-4). Still worth reading the slope ~2026-10-04 |
 | 4 — drop two unscanned PDSS indexes | ✅ | ☐ | ☐ | Migration `0087`, lock-bounded. Plans verified on prod first |
 | 5 — `playerachievementstat` disposition | ✅ | ☐ | ☐ | **Write stopped** (operator-approved). Reads derive from `achievements_json`. Existing 1.5 GB of rows still to dispose |
 | 6 — `battles_json` prune: arm or remove | ✅ | ☐ | ☐ | **Armed**: `PRUNE_BATTLES_JSON_ENABLED` 0 -> 1. First real run Sun 05:00 UTC |
