@@ -8,7 +8,7 @@ from warships.achievements_catalog import get_achievement_catalog_entry
 from warships.player_analytics import compute_player_verdict
 from warships.data_support import _coerce_activity_rows, _coerce_battle_rows, _coerce_efficiency_rows, _coerce_ranked_rows, _has_newer_source_timestamp, _is_stale_timestamp, _queue_limited_player_hydration, _timestamped_payload_needs_refresh, clamp
 from warships.player_records import BlockedAccountError, get_or_create_canonical_player
-from warships.models import PlayerAchievementStat, MvPlayerDistributionStats
+from warships.models import MvPlayerDistributionStats
 from warships.models import DEFAULT_REALM, realm_cache_key, Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 from django.utils import timezone as django_timezone
 from django.db.models.functions import Cast, Lower, TruncMonth
@@ -485,14 +485,19 @@ def player_achievements_need_refresh(
 
 
 def _stored_player_achievement_rows(player: Player) -> list[dict[str, Any]]:
-    return list(player.achievement_stats.order_by('achievement_slug').values(
-        'achievement_code',
-        'achievement_slug',
-        'achievement_label',
-        'category',
-        'count',
-        'source_kind',
-    ))
+    """Rows for a player whose achievements are NOT being refreshed right now.
+
+    Derived from the stored raw payload rather than from PlayerAchievementStat.
+    That table stopped being written on 2026-09-20 (see update_achievements_data
+    for why), so reading it would return rows that freeze at whatever the last
+    pre-cutover refresh left behind, and nothing at all for a player first seen
+    after it. `achievements_json` is the same upstream payload the rows were
+    derived from in the first place, so this is the identical data one
+    normalization later — and sorted the same way the old query was.
+    """
+    rows = normalize_player_achievement_rows(player.achievements_json)
+    rows.sort(key=lambda row: row['achievement_slug'])
+    return rows
 
 
 def _coerce_achievement_count(value: Any) -> int:
@@ -585,26 +590,20 @@ def update_achievements_data(player_id: int, force_refresh: bool = False, realm:
     normalized_rows = normalize_player_achievement_rows(raw_payload)
     refreshed_at = django_timezone.now()
 
-    with transaction.atomic():
-        player.achievements_json = raw_payload
-        player.achievements_updated_at = refreshed_at
-        player.save(update_fields=[
-                    'achievements_json', 'achievements_updated_at'])
-
-        PlayerAchievementStat.objects.filter(player=player).delete()
-        PlayerAchievementStat.objects.bulk_create([
-            PlayerAchievementStat(
-                player=player,
-                achievement_code=row['achievement_code'],
-                achievement_slug=row['achievement_slug'],
-                achievement_label=row['achievement_label'],
-                category=row['category'],
-                count=row['count'],
-                source_kind=row['source_kind'],
-                refreshed_at=refreshed_at,
-            )
-            for row in normalized_rows
-        ])
+    # The normalized rows are NOT written to PlayerAchievementStat any more
+    # (2026-09-20). That table had no reader: no serializer field, no view, and
+    # zero occurrences of "achievement" anywhere in the client. It held 1.50 GB
+    # across 5.34M rows — with 821 MB of index against 610 MB of heap — and was
+    # rebuilt delete-then-bulk_create on every refresh of every player, so it
+    # also bought a continuous stream of dead tuples and WAL for nobody.
+    #
+    # `player.achievements_json` still carries the raw payload, is still in the
+    # player serializer, and is what `_stored_player_achievement_rows` now
+    # normalizes on read — so this function's return value is unchanged and the
+    # data is not lost, merely stored once instead of twice.
+    player.achievements_json = raw_payload
+    player.achievements_updated_at = refreshed_at
+    player.save(update_fields=['achievements_json', 'achievements_updated_at'])
 
     return normalized_rows
 

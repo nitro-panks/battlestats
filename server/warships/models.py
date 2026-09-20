@@ -759,8 +759,19 @@ class PlayerDailyShipStats(models.Model):
     MODE_RANKED = 'ranked'
     MODE_CHOICES = [(MODE_RANDOM, 'Random'), (MODE_RANKED, 'Ranked')]
 
+    # db_index=False on the FK is deliberate (2026-09-20). Django indexes a
+    # ForeignKey by default, but every query filtering on `player` here also
+    # carries a date or a ship, so `dly_ship_player_date_idx` (player, -date)
+    # and `dly_ship_player_shipdt_idx` (player, ship_id, -date) serve them —
+    # both lead with this column. The standalone index had taken **10 lifetime
+    # scans** reading 546 tuples while costing 191 MB and a write on every one
+    # of ~20.5M rows. Postgres does not need it for the constraint, and Django
+    # emulates the cascade in Python with a query the composites serve.
+    # Plans verified on prod before removal: the player-timeline payload and
+    # the clan-roster active-PvP probe both choose dly_ship_player_date_idx.
     player = models.ForeignKey(
-        Player, on_delete=models.CASCADE, related_name='daily_ship_stats')
+        Player, on_delete=models.CASCADE, related_name='daily_ship_stats',
+        db_index=False)
     date = models.DateField(db_index=True)
     ship_id = models.BigIntegerField(db_index=True)
     ship_name = models.CharField(max_length=200, blank=True, default='')
@@ -770,8 +781,14 @@ class PlayerDailyShipStats(models.Model):
     # collision. `season_id` is populated only for `mode='ranked'`
     # (NULL for randoms), with partial unique constraints below mirroring
     # the BattleEvent shape from migration 0057.
+    # No db_index on `mode` (dropped 2026-09-20): two values across 20.5M
+    # rows is far too low a cardinality for the planner to choose it, and it
+    # never did — **1 lifetime scan**, and that one was the read-only probe
+    # run to decide this (counters have never been reset). Every real query
+    # pairs mode with a player or a date, which the composites and the date
+    # index already serve. It cost 197 MB plus a write on every row.
     mode = models.CharField(
-        max_length=8, choices=MODE_CHOICES, default=MODE_RANDOM, db_index=True)
+        max_length=8, choices=MODE_CHOICES, default=MODE_RANDOM)
     season_id = models.IntegerField(null=True, blank=True, db_index=True)
     battles = models.IntegerField(default=0)
     wins = models.IntegerField(default=0)

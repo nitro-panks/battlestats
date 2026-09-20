@@ -31,14 +31,15 @@ _Reviewed 2026-09-19 against `/home/august/code/battlestats/.claude/worktrees/db
 | 1 — restore `keep=1` | ✅ | ✅ v5.11.1 | ✅ **2026-09-20 12:32 UTC** | Done. Re-measure the slope ~2026-10-04 |
 | 2 — disk alerts | n/a | n/a | ✅ **closed 2026-09-20** | They already existed at 90%, delivering to gmail. Operator kept 90%. Autoscale measured OFF |
 | 3 — volume sizing decision | n/a | n/a | ☐ | **LAST RESORT.** Operator decision, after 4-6. Read the slope ~2026-10-04 |
-| 4 — drop two unscanned PDSS indexes | ☐ | ☐ | ☐ | ~385 MB + write amplification. Model edit + migration; planner check on the battle-history payload builder |
-| 5 — `playerachievementstat` disposition | ☐ | ☐ | ☐ | ~1.5 GB + a delete/recreate per refresh. No user-facing reader; two maintenance call sites |
-| 6 — `battles_json` prune: arm or remove | ☐ | ☐ | ☐ | ~326 MB, or delete a timer that has no-opped weekly since June |
+| 4 — drop two unscanned PDSS indexes | ✅ | ☐ | ☐ | Migration `0087`, lock-bounded. Plans verified on prod first |
+| 5 — `playerachievementstat` disposition | ✅ | ☐ | ☐ | **Write stopped** (operator-approved). Reads derive from `achievements_json`. Existing 1.5 GB of rows still to dispose |
+| 6 — `battles_json` prune: arm or remove | ✅ | ☐ | ☐ | **Armed**: `PRUNE_BATTLES_JSON_ENABLED` 0 -> 1. First real run Sun 05:00 UTC |
 | 7 — age-bound the observation JSON | n/a | n/a | ✅ **declined** | Measured ~400 MB, not August's ~9 GB. Irreversible. Not worth it |
 
 **Do 4, 5 and 6 before 3.** They are ~2.2 GB and a continuous write cost we are
 paying for nothing; Step 3 buys headroom with money. See "The objective this
-plan optimises" below.
+plan optimises" below. **Code for all three landed 2026-09-20** and ships in one
+deploy; what each one actually reclaims is recorded in Validation.
 
 ## Purpose
 
@@ -435,6 +436,14 @@ Record measurements here as steps land.
       run reports deleted rows rather than `skipped (no rows older than cutoff)`.
 - [ ] Re-measure `pg_database_size` two weeks after Step 1 and compare against
       the 264 MB/day post-fill projection.
+- [ ] Step 4: after the migration, confirm both indexes are gone from
+      `pg_stat_user_indexes` and that the player timeline still plans on
+      `dly_ship_player_date_idx`. If the migration aborts on `lock_timeout`,
+      that is the guard working — retry in a quieter minute, do not remove it.
+- [ ] Step 5: `PlayerAchievementStat.objects.count()` stops rising. It will not
+      fall on its own; the existing 5.34M rows need a separate decision.
+- [ ] Step 6: the Sunday 05:00 UTC run reports rows pruned instead of the
+      "not set — no-op" line it has logged every week since 2026-06-21.
 
 ## Follow-ups
 

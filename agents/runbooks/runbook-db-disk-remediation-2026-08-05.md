@@ -12,7 +12,7 @@ _Status 2026-08-06: **code for Steps 1, 3 and 4b is implemented and merged** (TD
 |---|---|---|---|---|
 | 0 — disk alerts | n/a | n/a | ☐ | Operator action in the DO console. 70% ≈ 2026-09-11 |
 | 1 — compaction on a timer | ✅ | ✅ v5.1.3 | ✅ **timer armed** | Watch the first fire (below), then the catch-up pass |
-| 2 — arm `PRUNE_BATTLES_JSON_ENABLED=1` | n/a (config) | — | ☐ | Deploy-script one-liner + Pass; `--dry-run` first |
+| 2 — arm `PRUNE_BATTLES_JSON_ENABLED=1` | n/a (config) | — | ✅ **armed 2026-09-20** | Done. Measured yield ~326 MB, not the ~2 GB projected here — see `runbook-db-capacity-remediation-2026-09-19.md` Step 6 |
 | 3 — age-bound observation JSON | ✅ **default off** | ✅ v5.1.3 | ☐ | Set `BATTLE_OBSERVATION_COMPACT_DORMANT_DAYS=105`. **Irreversible** — only after Step 1 runs clean |
 | 4 — soft-limit triage | n/a | n/a | ☐ | Investigation, not a lever |
 | 4b — rollup Phase-7 fix | ✅ | ✅ v5.1.3 | ☐ **backfill pending** | 37 days to rebuild (below) |

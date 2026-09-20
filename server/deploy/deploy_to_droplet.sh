@@ -842,7 +842,16 @@ set_env_value SNAPSHOT_DELTA_GATE_ENABLED 1
 # Inactive battles_json TOAST prune (prune_inactive_player_battles_json): NULL
 # the never-read battles_json blob on >180d-inactive players (reversible —
 # refetched on next view). The command self-gates on this env.
-set_env_value PRUNE_BATTLES_JSON_ENABLED 0
+#
+# ARMED 2026-09-20 (0 -> 1). Its weekly timer has fired every Sunday since
+# 2026-06-21 and no-opped every time, which is worse than having no timer at
+# all: it reads as coverage. Measured yield is ~326 MB — 997 of a 34,178-row
+# sample are >180d inactive and still hold the blob, about 2.9% of players —
+# far below the ~2 GB the 2026-08-05 capacity work-item projected. Small, but
+# it is reversible, it costs nothing to run, and the alternative was deleting
+# the timer. Reclaim is reusable space inside warships_player, not a smaller
+# volume. See runbook-db-capacity-remediation-2026-09-19.md Step 6.
+set_env_value PRUNE_BATTLES_JSON_ENABLED 1
 # Raw entity-visit event cleanup (cleanup_entity_visit_events): delete
 # EntityVisitEvent rows older than the window, keeping EntityVisitDaily
 # aggregates. The command self-gates on this env.
