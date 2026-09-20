@@ -86,7 +86,7 @@ The A1 probe is worth a footnote: `count(*)` over **one day** of `BattleEvent` d
 
 **Two levers, neither needing a rewrite.**
 1. `ALTER TABLE warships_player SET (toast_tuple_target = 256)` pushes those JSON values out of line for *new* tuple versions. An update that does not touch a JSON column then reuses its TOAST pointer instead of copying the value; the hot tuple falls to ~400 B. Cost: one extra TOAST fetch when a payload is actually read — and those reads are Redis-first. **Measure on a copy before trusting it**, but it is a one-line, reversible, no-lock change.
-2. `player_last_fetch_idx` is **234 MB with 516 lifetime scans** (M) on a column that changes on every refresh, so it both costs space and disqualifies those updates from HOT. Its only consumer is `incremental_player_refresh`'s three tier queries (C, `:125,140,157`), about three scans a day. A batch job does not justify an index taxed 31 M times. Candidate to drop, with the caveat that those three queries then scan the 1.76 GB heap.
+2. ~~`player_last_fetch_idx` (234 MB, 516 lifetime scans) — candidate to drop.~~ **Retracted in QA, 2026-09-20.** This finding named `incremental_player_refresh` as the index's only consumer. It is not: the index backs the daily enrichment reclassify's `last_fetch >= now - H hours` filter, EXPLAIN-verified, taking that pass from ~36 min to 2.5-6 min per realm (`tasks.py:3594-3596`). It was dropped as unused once (`0034`) and deliberately re-created (`0067`). The grep behind the original claim looked for `last_fetch__lt` and missed `__gte`. **A low scan count is frequency, not value.** Keep the index.
 
 ## H5 — prune daily, and do it before the first peak
 
@@ -137,7 +137,7 @@ Dead or write-only **columns** (C+M): `Snapshot.survived_battles` is **0 in all 
 | 4 | **H1** — `pg_repack` `battleobservation`, supervised, after 2 and 3 | **~13 GB to OS** | one supervised operation | medium |
 | 5 | **H6** — stop fetching achievements; NULL the column | ~0.66 GB + WG budget + row width | small code; product call | low |
 | 6 | **H2** — move 4 aggregations to PDSS, then `BattleEvent` retention 105 → 35 d | ~5 GB steady state + daily CPU | moderate code, per-reader equivalence | medium |
-| 7 | **H4** — `toast_tuple_target`, then weigh `player_last_fetch_idx` | the write-amplification centre | one-line, reversible; measure first | low-medium |
+| 7 | **H4** — `toast_tuple_target` (the index stays; see the H4 retraction) | the write-amplification centre | one-line, reversible; measure first | low-medium |
 | 8 | **H3** — slim `battles_json` to counters; join `Ship` at serve time | ~1.9 GB, gradual | moderate code | medium |
 | 9 | **H7** — drop the dead/write-only columns | ~1 GB over 105 days | migrations | low |
 
