@@ -4,7 +4,7 @@ _Created: 2026-09-19_
 _Lifecycle: dated-active · Owner: platform_
 _Context: the managed-PG volume reached ≈79% on the day the ship-standings window moved to 90d. `agents/work-items/db-growth-capacity-2026-09-19.md` re-measured the August forecast and found it arriving roughly six weeks early, with one correctable cause: `BATTLE_OBSERVATION_COMPACT_KEEP=1` is pinned in two authorities, documented in three runbooks, and **read by nothing** since the 2026-08-06 Celery-to-timer migration._
 _QA: every figure traces to that work-item or to a live check recorded in the Validation section. Figures measured 2026-09-19 ~23:50 UTC._
-_Status 2026-09-19: **Step 1's code is implemented and green** (1,313 backend tests); nothing else has been touched, and no production mutation has happened yet. Deploying Step 1 arms it: the next timer fire at 12:30 UTC compacts at `keep=1`, which discards generations 2 and 3 permanently. Each later step carries its own gate._
+_Status 2026-09-20: **Step 1 is done and verified in production** (v5.11.1; first `keep=1` compaction 2026-09-20 12:32 UTC, 627,835 payloads). Steps 2-6 are untouched and each carries its own gate. Step 2 remains blocked on a working `doctl` token._
 
 ## QA Notes
 
@@ -28,7 +28,7 @@ _Reviewed 2026-09-19 against `/home/august/code/battlestats/.claude/worktrees/db
 
 | Step | Code | Deployed | Done in prod | What remains |
 |---|---|---|---|---|
-| 1 — restore `keep=1` | ✅ | ☐ | ☐ | Deploy, then the next timer fire (12:30 UTC) applies it |
+| 1 — restore `keep=1` | ✅ | ✅ v5.11.1 | ✅ **2026-09-20 12:32 UTC** | Done. Re-measure the slope ~2026-10-04 |
 | 2 — disk alerts + confirm autoscale | n/a | n/a | ☐ | **Blocked**: both `doctl` tokens return 401. Operator action |
 | 3 — volume sizing decision | n/a | n/a | ☐ | Operator decision; the only unconditional headroom |
 | 4 — drop two unscanned PDSS indexes | ☐ | ☐ | ☐ | Model edit + migration; planner check on the battle-history payload builder |
@@ -281,8 +281,19 @@ orphaned by a Celery-to-timer migration. The grep is cheap: for each
 
 Record measurements here as steps land.
 
-- [ ] Step 1: timer logs `keep_per_player=1`; the 400-player probe trends to 1.
-- [ ] Step 1: `battleobservation` size flattens (it will not fall).
+- [x] **Step 1 verified 2026-09-20.** Deployed v5.11.1 at 03:01 UTC; the
+      12:32:33 UTC fire logged `keep_per_player=1` and compacted **627,835
+      payloads in 314 batches** — against 96,622 on the last keep=3 run the day
+      before, the difference being the two generations of backlog it released.
+- [x] **The 400-player probe fell 4.18 → 1.90** payload rows per
+      recently-observed player; players at three or more generations went
+      **394/400 → 8/400**. It does not sit at exactly 1 because players observed
+      after a given fire re-accumulate until the next one; the steady state is
+      1 plus one day of new observations.
+- [x] **The table flattened rather than fell, as predicted**: 25.72 → 25.79 GB
+      (TOAST 24.27 GB), with dead tuples up to 6.7% — that is the released space
+      sitting inside the table awaiting reuse, which is the whole point.
+      `pg_database_size` 59.06 → 59.20 GB over the same 15.5 hours.
 - [ ] Step 2: alerts visible in the DO console at 80% and 90%; autoscale state recorded.
 - [ ] Post-2026-09-26: `BattleEvent` and `PDSS` stop growing; the 10-01 archive
       run reports deleted rows rather than `skipped (no rows older than cutoff)`.
