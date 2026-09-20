@@ -345,9 +345,13 @@ the canonical player, and `purge_deleted_accounts.py:206` counts them before a
 purge. Stopping the *write* leaves both correct against an empty set; dropping
 the *model* breaks them.
 
-Note the separate store: `warships_player.achievements_json` **is** in the
-player serializer (`serializers.py:180`), inside that table's 8.9 GB of TOAST,
-and is likewise unread by the client.
+Note the separate store: `warships_player.achievements_json` (~660 MB, sampled).
+**Correction 2026-09-20:** this runbook first said it "is in the player
+serializer (`serializers.py:180`)". That was a misreading — line 180 sits in
+the serializer's `exclude` list, so the payload is **not served at all**. With
+the normalized table gone, the raw payload is now the only copy *and has no
+reader either*; the achievements fetch itself serves nobody. Carried forward as
+finding H6 in `agents/work-items/db-table-shape-audit-2026-09-20.md`.
 
 This is a product decision, not a capacity lever. If nothing will read it,
 stopping the write is worth more than the 1.5 GB: it removes a

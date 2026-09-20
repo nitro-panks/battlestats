@@ -597,10 +597,13 @@ def update_achievements_data(player_id: int, force_refresh: bool = False, realm:
     # rebuilt delete-then-bulk_create on every refresh of every player, so it
     # also bought a continuous stream of dead tuples and WAL for nobody.
     #
-    # `player.achievements_json` still carries the raw payload, is still in the
-    # player serializer, and is what `_stored_player_achievement_rows` now
-    # normalizes on read — so this function's return value is unchanged and the
-    # data is not lost, merely stored once instead of twice.
+    # `player.achievements_json` still carries the raw payload and is what
+    # `_stored_player_achievement_rows` now normalizes on read — so this
+    # function's return value is unchanged and the data is not lost, merely
+    # stored once instead of twice. (It is NOT served: PlayerSerializer lists it
+    # under `exclude`. An earlier version of this comment said otherwise; that
+    # was a misreading of serializers.py:180. The remaining copy therefore has
+    # no reader either — see the 2026-09-20 table-shape audit, finding H6.)
     player.achievements_json = raw_payload
     player.achievements_updated_at = refreshed_at
     player.save(update_fields=['achievements_json', 'achievements_updated_at'])
