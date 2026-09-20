@@ -30,16 +30,24 @@ _Reviewed 2026-09-19 against `/home/august/code/battlestats/.claude/worktrees/db
 |---|---|---|---|---|
 | 1 — restore `keep=1` | ✅ | ✅ v5.11.1 | ✅ **2026-09-20 12:32 UTC** | Done. Re-measure the slope ~2026-10-04 |
 | 2 — disk alerts | n/a | n/a | ☐ | **Blocked**: both `doctl` tokens return 401. Operator action. Autoscale stays OFF by decision |
-| 3 — volume sizing decision | n/a | n/a | ☐ | Operator decision; the only unconditional headroom |
-| 4 — drop two unscanned PDSS indexes | ☐ | ☐ | ☐ | Model edit + migration; planner check on the battle-history payload builder |
-| 5 — `playerachievementstat` disposition | ☐ | ☐ | ☐ | Product decision: no user-facing reader; two maintenance call sites |
-| 6 — `battles_json` prune: arm or remove | ☐ | ☐ | ☐ | ~326 MB. Tidiness, not capacity |
+| 3 — volume sizing decision | n/a | n/a | ☐ | **LAST RESORT.** Operator decision, after 4-6. Read the slope ~2026-10-04 |
+| 4 — drop two unscanned PDSS indexes | ☐ | ☐ | ☐ | ~385 MB + write amplification. Model edit + migration; planner check on the battle-history payload builder |
+| 5 — `playerachievementstat` disposition | ☐ | ☐ | ☐ | ~1.5 GB + a delete/recreate per refresh. No user-facing reader; two maintenance call sites |
+| 6 — `battles_json` prune: arm or remove | ☐ | ☐ | ☐ | ~326 MB, or delete a timer that has no-opped weekly since June |
+| 7 — age-bound the observation JSON | n/a | n/a | ✅ **declined** | Measured ~400 MB, not August's ~9 GB. Irreversible. Not worth it |
+
+**Do 4, 5 and 6 before 3.** They are ~2.2 GB and a continuous write cost we are
+paying for nothing; Step 3 buys headroom with money. See "The objective this
+plan optimises" below.
 
 ## Purpose
 
 Convert the 2026-09-19 capacity re-assessment into a sequenced plan. Read it before touching the disk problem. Work the steps **in order**, one production lever at a time, with an operator acknowledgement between each.
 
-Step 1 is the only step that changes the shape of the problem. Steps 4-6 are hygiene that would not, on their own, change any date in the projection.
+Step 1 is the only step that changes the shape of the problem by itself. Steps
+4-6 are not filler: on a project whose objective is to run as cheaply as it can,
+storage and writes we get nothing back from are the work, and they come before
+the step that spends money.
 
 ## TL;DR
 
@@ -65,9 +73,36 @@ Step 1 is the only step that changes the shape of the problem. Steps 4-6 are hyg
 
 † Self-limiting: both are bounded by the 105d archive retention and have never pruned once. Floor `2026-06-13` on both, so depth completes 2026-09-26.
 
+## The objective this plan optimises
+
+**Battlestats is art, not a commercial product** (operator, 2026-09-20): the job
+is to run it efficiently, as inexpensively as possible. That is not a footnote
+on this plan; it is the plan's objective function, and it changes the ranking.
+
+- **Spending is the last resort, not the escape hatch.** Solving a capacity
+  problem by buying capacity is a failure to solve it. Step 3 exists, is honest
+  about the number, and comes after every byte we can decline to store.
+- **Waste is the headline, not hygiene.** A 1.5 GB table nothing reads, 385 MB
+  of unscanned indexes on the highest-write table, and a weekly timer that
+  no-ops are the actual work — rank levers by bytes and cycles removed, not by
+  whether they shift a projected date.
+- **Prefer levers that cost nothing to run**: a config flag, a dropped index, a
+  write that stops happening. Deleting work beats optimising it.
+
 ## Sequencing rationale
 
-Step 1 first because it is the only lever that bends the dominant slope, and because its effect changes the measurement every later step is judged against. Step 2 next because it is the cheapest insurance and it is currently absent — both alert thresholds are already behind us. Step 3 after those two, because a resize decided before Step 1 lands would be sized against a slope we are about to change. Steps 4-6 last: they are real waste, but at ~385 MB, ~1.5 GB and ~326 MB they do not move a date.
+Step 1 first because it is the only lever that bends the dominant slope, and
+because its effect changes the measurement every later step is judged against.
+Step 2 next because it is the cheapest insurance that exists and it is currently
+absent — both alert thresholds are already behind us, and with autoscale off
+permanently it is the only warning there will ever be.
+
+**Steps 4-6 then come before Step 3, deliberately.** Under a
+lowest-cost objective their ~2.2 GB of pure waste outranks a resize that buys
+headroom with money. None of them moves a projected date on its own; together
+they remove storage and write amplification we are paying for and getting
+nothing back from, which is the whole point. Step 3 is what remains after they
+are done, decided with a date and a price rather than reached for first.
 
 ## Step 1 — Restore `keep=1` ★ highest value
 
@@ -199,18 +234,24 @@ credentials returned `not_found` with the same token. Needs a refreshed token or
 operator action in the DO console. Until then `disk_used_percent` is **derived,
 not measured** — from `pg_database_size` plus the WAL ceiling.
 
-## Step 3 — The volume sizing decision ☐ OPERATOR
+## Step 3 — The volume sizing decision ☐ OPERATOR, LAST RESORT
 
-With autoscale permanently off (Step 2), a deliberate manual resize is the only
-move that buys unconditional headroom, and the only one that does not depend on
-an estimate in the work-item being right. Decide after Step 1 has run for a
-couple of weeks, so it is sized against the post-fix slope rather than the
-pre-fix one; **~2026-10-04** is the natural read date.
+**Do Steps 4-6 first.** A resize is the one move on this list that solves the
+problem with money rather than with engineering, and on a project whose stated
+objective is to run as inexpensively as possible it is what remains after the
+waste is gone, not the first reach. It is also the only move that does not
+depend on an estimate in this document being right, which is exactly why it is
+tempting — resist that until the free bytes are actually collected.
+
+When it is genuinely needed, decide it with a date and a price. Read the
+post-Step-1 slope first: **~2026-10-04** gives two weeks of data, so the
+decision is sized against the fixed slope rather than the broken one.
 
 Prior art: 60 → 80 GiB on 2026-07-20 for the 92d retention raise, an operator
 decision made the same way. A DO managed volume resize is online and **one-way —
-it cannot be shrunk**, so each step up is permanent monthly spend and should be
-sized once rather than crept upward.
+it cannot be shrunk** — so each step up is permanent monthly spend. Size it once,
+deliberately; do not creep it upward, and never as a reflex when a number looks
+uncomfortable.
 
 ## Step 4 — Drop two unscanned PDSS indexes
 
@@ -274,6 +315,34 @@ players, **~326 MB**, against the ~2 GB estimate.
 
 Either arm it or delete the timer. A weekly job that exists to do nothing is
 worse than no job, because it reads as coverage.
+
+## Step 7 — Age-bounding the observation JSON: MEASURED AND DECLINED
+
+August's remediation runbook carried this as its "largest structural win"
+(its Step 3): set `BATTLE_OBSERVATION_COMPACT_DORMANT_DAYS=105` and clear the
+JSON of players who have gone dark, estimated then at **~9 GB**. The knob works
+— it is the one sibling that reads its env var correctly, and it is `0` today.
+
+**Measured 2026-09-20, after Step 1 landed, it is worth ~400 MB.** JSON held per
+player-dormancy bucket, 4% `TABLESAMPLE`, scaled ×25:
+
+| Latest observation | Players (est.) | JSON held (est.) |
+|---|---|---|
+| active, <30d | ~1.98 M | ~6.4 GB |
+| 30-60d | ~491 K | ~1.05 GB |
+| 60-105d | ~174 K | ~1.3 GB |
+| **dormant, >105d** | **~47 K** | **~400 MB** |
+
+The ~9 GB estimate was computed while production held **three** generations per
+player. Step 1 collapsed that to one, and in doing so it already captured most
+of what this lever would have returned; what remains is one generation belonging
+to a small dormant tail.
+
+**Recommendation: do not arm it.** It is irreversible — a returning dormant
+player's diff baseline cannot be re-fetched from WG, which serves only current
+cumulative stats — and 400 MB does not buy that. Revisit only if the dormant
+tail grows into a real share of the pool, and **re-measure before believing any
+number in this section**: that is exactly the mistake this step exists to record.
 
 ## The checker gap this exposes
 
