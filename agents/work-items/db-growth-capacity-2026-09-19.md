@@ -24,7 +24,7 @@ Carried over from the 2026-08-05 document so the two can be read together.
 4. **That regression is worth ~12 GB of the table and two thirds of its slope** (S+D). `warships_battleobservation` is now **25.72 GB** (M), +9.88 GB since August = **220 MB/day**, the largest single line in the growth decomposition.
 5. **Two of the four biggest growth lines stop by themselves within a fortnight.** `BattleEvent` and `PlayerDailyShipStats` (181 MB/day combined) have **never pruned once** — the 2026-09-15 archive run logged `skipped (no rows older than cutoff)` for both (M). Their floor is 2026-06-13 (M), so 105d depth lands 2026-09-26 and the 2026-10-01 timer run is the first with candidates. Post-fill slope is **~264 MB/day** (D).
 6. **Reclaim is not the same as `disk_used` falling.** Every lever below frees space *inside* its table for reuse. Without `VACUUM FULL` (forbidden: the 2026-07-21 24-minute outage) or `pg_repack` (v1.5.2 available on the cluster, not installed), the volume does not shrink. Price the levers as **slope**, not as GB returned.
-7. **Alerting was never armed.** Step 0 of the August remediation plan (DO disk alerts at 70% and 80%) is still open, and both thresholds are now behind us. The `doctl` token in `~/.config/doctl/config.yaml` and on the droplet both return 401, so `disk_used_percent` and the storage-autoscale setting could not be confirmed today (**the autoscale-OFF assumption is A, not M** — if it has been enabled since August, item 1 becomes a cost question rather than an outage risk).
+7. **Alerting was never armed, and nothing else will catch this.** Step 0 of the August remediation plan (DO disk alerts at 70% and 80%) is still open, and both thresholds are now behind us. The `doctl` token in `~/.config/doctl/config.yaml` and on the droplet both return 401, so `disk_used_percent` could not be read from the metrics endpoint today and the 79% figure is derived. **Storage autoscale is off permanently by operator decision (2026-09-20)** — unpredictable cost is disqualifying for this project — so the ceiling is a chosen property of the system and item 1's dates are hard deadlines, not points where the bill grows instead.
 
 ## Measured state, 2026-09-19 ~23:50 UTC
 
@@ -71,7 +71,7 @@ journalctl 2026-09-19:            "Compacted 96,622 observation payloads in 49 b
 
 The pin is correct, present in both authorities, and inert. `prune_battle_observations` takes `--keep-per-player`, defaulting to `COMPACT_KEEP_PER_PLAYER_DEFAULT = 3` (`incremental_battles.py:1565`); the unit does not pass it. The env name is read in exactly one place, `prune_battle_observations_task` (`tasks.py`), whose Beat registration was deliberately disabled on 2026-08-06 when the work moved onto the timer. The knob and its only reader were switched off in the same change.
 
-Four other knobs went inert with it: `COMPACT_DORMANT_DAYS`, `COMPACT_MIN_AGE_HOURS`, `COMPACT_BATCH_SIZE`, `COMPACT_MAX_ROWS`. Of these only `DORMANT_DAYS` matters today, and it is 0 in both places, so its behaviour is unchanged by accident.
+Corrected in QA 2026-09-19: the sibling knobs did **not** all go inert. `--dormant-after-days` reads its env var **as its own argparse default** (`prune_battle_observations.py:102-104`), so the unit's `EnvironmentFile` carries it through and it works. `--keep-per-player`, forty lines earlier in the same argparse block, takes the module constant instead. The defect is an inconsistency inside one command, which is exactly why it was invisible. The knobs genuinely unread from the environment are `KEEP`, `MIN_AGE_HOURS`, `BATCH_SIZE`, `MAX_ROWS` and `SLEEP`; of those only `KEEP` is pinned in production, so it is the only one whose being ignored had a live effect.
 
 ### What it costs
 
@@ -102,7 +102,7 @@ Central path, assuming the observation slope continues and nothing is changed (D
 | First archive run with candidates | **2026-10-01** | timer, 1st + 15th (M) |
 | 80% of volume | **~now to 2026-09-26** | +1.2 GB of window fill |
 | 90% of volume | **~2026-10-21** | 264 MB/day post-fill |
-| Volume full (read-only outage) | **~2026-11-22** | 264 MB/day, autoscale assumed OFF (A) |
+| Volume full (read-only outage) | **~2026-11-22** | 264 MB/day; autoscale OFF permanently by decision |
 
 With `keep=1` restored, the ~12 GB of reusable space absorbs inserts for roughly 45 days and the slope falls to roughly **120-150 MB/day** (S+D), moving the 90% date into 2027. That is a reprieve, not a fix: the per-player coefficient is still unbounded in the player pool, which is the conclusion the August document reached and this one does not overturn.
 
@@ -126,7 +126,7 @@ Healthy, for the record: 0 blocked queries, 0 idle-in-transaction, 34 of 100 con
 One lever per acknowledgement, per standing practice. Nothing in this document has been applied.
 
 1. **Restore `keep=1`** by passing `--keep-per-player "${BATTLE_OBSERVATION_COMPACT_KEEP:-1}"` in the unit's `ExecStart`, and change `COMPACT_KEEP_PER_PLAYER_DEFAULT` to 1 so the code default stops contradicting every document. Irreversible for generations 2 and 3. Largest single win.
-2. **Re-arm alerting** (August's Step 0): DO disk alerts at 80% and 90%. Needs a working `doctl` token. Confirm the storage-autoscale setting at the same time — it converts the November date from an outage into a bill.
+2. **Re-arm alerting** (August's Step 0): DO disk alerts at 80% and 90%. Needs a working `doctl` token. This is the only warning that will ever fire: autoscale is off by decision, so nothing converts the November date into a bill instead of an outage.
 3. **Decide the volume.** Even with lever 1, 84 GiB at ~264 MB/day pre-fix is thin. A resize is the only move that buys unconditional headroom, and it is the one that does not depend on any estimate in this document being right.
 4. **Drop the two unscanned `PDSS` indexes** after confirming no planner regression on the ship-standings aggregations that read that table.
 5. **Decide `playerachievementstat`'s fate.** If nothing is going to read it, stopping the write is worth more than the 1.5 GB: it removes a delete-and-recreate cycle from every player refresh.

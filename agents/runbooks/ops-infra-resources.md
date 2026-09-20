@@ -14,9 +14,13 @@ claim in older runbooks — those describe the **pre-2026-05-28** state, not tod
   **Do NOT plan against a 1-vCPU DB budget** — that is the most common stale assumption.
 - **App droplet is 2 vCPU / 8 GB RAM** (+ 2 GB swap).
 - DB **CPU** is a light watch-item, not a capacity blocker. DB **disk is not a
-  constraint** (80 GiB since 2026-07-20, ~38 GB used; autoscale OFF, so it is
-  still a hard wall — expect ~50 GB at steady state once the 92d battle-history
-  retention window fills, ~2026-09-18).
+  constraint** (80 GiB since 2026-07-20). **Storage autoscale is OFF and stays
+  off** — standing operator decision 2026-09-20, because unpredictable cost is
+  disqualifying for a hobby project. The ceiling is therefore a chosen property,
+  not a gap: a full volume is a read-only outage and nothing will absorb it
+  automatically. Measured 2026-09-19: ~59 GB of database, disk ≈79%, with the
+  slope and the plateau dates in
+  `runbook-db-capacity-remediation-2026-09-19.md`.
 
 ## App droplet (`battlestats-droplet`, nyc3)
 

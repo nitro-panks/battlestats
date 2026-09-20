@@ -21,7 +21,7 @@ _Reviewed 2026-09-19 against `/home/august/code/battlestats/.claude/worktrees/db
 ### Unverified
 - `pg_repack` v1.5.2 availability on the cluster: carried from the 2026-06-21 data-lifecycle assessment, not re-checked today.
 - The 2026-07-20 60 -> 80 GiB resize cited as prior art in Step 3: from prior documents, not re-verified against the DO API.
-- `disk_used_percent` and the storage-autoscale setting: both `doctl` tokens return 401, so the 79% figure is derived from `pg_database_size` plus the WAL ceiling, and autoscale-OFF is assumed.
+- `disk_used_percent`: both `doctl` tokens return 401, so the 79% figure is derived from `pg_database_size` plus the WAL ceiling rather than read from the metrics endpoint. Autoscale-OFF is no longer an assumption to verify — it is a standing operator decision (Step 2).
 - The WAL gap of 7.25 GB: `pg_ls_waldir()` is `permission denied` for the application role, so today's figure is carried from the 2026-08-05 measurement and its configured ceiling.
 
 ## Implementation status
@@ -29,7 +29,7 @@ _Reviewed 2026-09-19 against `/home/august/code/battlestats/.claude/worktrees/db
 | Step | Code | Deployed | Done in prod | What remains |
 |---|---|---|---|---|
 | 1 — restore `keep=1` | ✅ | ✅ v5.11.1 | ✅ **2026-09-20 12:32 UTC** | Done. Re-measure the slope ~2026-10-04 |
-| 2 — disk alerts + confirm autoscale | n/a | n/a | ☐ | **Blocked**: both `doctl` tokens return 401. Operator action |
+| 2 — disk alerts | n/a | n/a | ☐ | **Blocked**: both `doctl` tokens return 401. Operator action. Autoscale stays OFF by decision |
 | 3 — volume sizing decision | n/a | n/a | ☐ | Operator decision; the only unconditional headroom |
 | 4 — drop two unscanned PDSS indexes | ☐ | ☐ | ☐ | Model edit + migration; planner check on the battle-history payload builder |
 | 5 — `playerachievementstat` disposition | ☐ | ☐ | ☐ | Product decision: no user-facing reader; two maintenance call sites |
@@ -170,28 +170,47 @@ retains the newest, which is the one the diff uses.
 Revert the `ExecStart` argument and redeploy. The discarded generations do not
 come back; the compaction behaviour does.
 
-## Step 2 — Disk alerts, and confirm autoscale ☐ BLOCKED
+## Step 2 — Disk alerts ☐ BLOCKED
 
 August's Step 0 was never done, and both its thresholds (70%, 80%) are now
-behind us. Alerts at **80% and 90%**, plus the storage-autoscale setting, which
-decides whether the November date is an outage or a bill.
+behind us. Alerts at **80% and 90%**.
+
+**Storage autoscale is not part of this step, and is not a question.** Standing
+operator decision, 2026-09-20: *"i will never autoscale the db for this hobby
+project, period. it makes costs unpredictable."* The volume ceiling is therefore
+a **chosen property of the system**, not a gap to be closed — a knob that turns
+a capacity mistake into a larger bill without anyone deciding is worse, here,
+than the outage it would prevent. Do not propose enabling it, and do not list it
+as an option in a future capacity plan.
+
+Two consequences follow, and they are why this step matters more than its size
+suggests:
+
+1. **Nothing will catch a full volume automatically.** A full volume is a
+   read-only outage (the 2026-05-24 failure mode). Alerting is the only warning
+   that will ever exist.
+2. **Every projected date in this runbook is a real deadline**, not a
+   cost-conversion point. The ~2026-11-22 figure is when the site stops
+   accepting writes, full stop.
 
 **Blocker:** `~/.config/doctl/config.yaml` and the droplet's token both return
 401 (`Unable to authenticate you`). The DO API route for database metrics
 credentials returned `not_found` with the same token. Needs a refreshed token or
-operator action in the DO console. Until then, `disk_used_percent` and the
-autoscale flag are **assumed, not measured** — the 79% figure is derived from
-`pg_database_size` plus the WAL ceiling.
+operator action in the DO console. Until then `disk_used_percent` is **derived,
+not measured** — from `pg_database_size` plus the WAL ceiling.
 
 ## Step 3 — The volume sizing decision ☐ OPERATOR
 
-Even with Step 1, 84 GiB at the measured slope is thin, and a resize is the only
-move that does not depend on an estimate in the work-item being right. Decide
-after Step 1 has run for a few nights, so the decision is sized against the
-post-fix slope rather than the current one.
+With autoscale permanently off (Step 2), a deliberate manual resize is the only
+move that buys unconditional headroom, and the only one that does not depend on
+an estimate in the work-item being right. Decide after Step 1 has run for a
+couple of weeks, so it is sized against the post-fix slope rather than the
+pre-fix one; **~2026-10-04** is the natural read date.
 
-Prior art: 60 → 80 GiB on 2026-07-20 for the 92d retention raise. Resizing a DO
-managed volume is online and one-way (no shrink).
+Prior art: 60 → 80 GiB on 2026-07-20 for the 92d retention raise, an operator
+decision made the same way. A DO managed volume resize is online and **one-way —
+it cannot be shrunk**, so each step up is permanent monthly spend and should be
+sized once rather than crept upward.
 
 ## Step 4 — Drop two unscanned PDSS indexes
 
@@ -294,7 +313,7 @@ Record measurements here as steps land.
       (TOAST 24.27 GB), with dead tuples up to 6.7% — that is the released space
       sitting inside the table awaiting reuse, which is the whole point.
       `pg_database_size` 59.06 → 59.20 GB over the same 15.5 hours.
-- [ ] Step 2: alerts visible in the DO console at 80% and 90%; autoscale state recorded.
+- [ ] Step 2: alerts visible in the DO console at 80% and 90%.
 - [ ] Post-2026-09-26: `BattleEvent` and `PDSS` stop growing; the 10-01 archive
       run reports deleted rows rather than `skipped (no rows older than cutoff)`.
 - [ ] Re-measure `pg_database_size` two weeks after Step 1 and compare against
