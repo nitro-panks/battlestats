@@ -42,7 +42,7 @@ _Reviewed 2026-09-20 against `/home/august/code/battlestats/.claude/worktrees/db
 
 | Step | Finding | Code | Deployed | Done in prod | What remains |
 |---|---|---|---|---|---|
-| 1 — prune daily, not twice monthly | H5 | ☐ | ☐ | ☐ | **Deadline ~2026-10-02.** One `OnCalendar` line |
+| 1 — prune daily, not twice monthly | H5 | ✅ | ✅ v5.11.4 | ✅ **2026-09-20** | Done, 12 days inside the deadline. Watch the first runs with candidates, from 2026-09-27 |
 | 2 — truncate `PlayerAchievementStat` | H6 | ✅ `0088` | ✅ v5.11.3 | ✅ **2026-09-20 16:57 UTC** | Done. 1.43 GB returned to the OS |
 | 3 — drop 4 indexes, make 1 partial | H7 | ☐ | ☐ | ☐ | One migration, `0087` pattern |
 | 4 — `pg_repack` `battleobservation` | H1 | n/a | n/a | ☐ | **Client built and installed 2026-09-20.** Supervised run still waits on Steps 2 and 3 |
@@ -79,7 +79,9 @@ The window fills on 2026-09-26 and the first prune with candidates is 2026-10-01
 
 ### The change
 
-`server/deploy/deploy_to_droplet.sh`, the `battlestats-archive-battle-history.timer` heredoc: `OnCalendar=*-*-01,15 03:00:00 UTC` → `OnCalendar=*-*-* 03:00:00 UTC`. Update the unit `Description` lines, which say "monthly" and "1st + 15th".
+`server/deploy/deploy_to_droplet.sh`, the `battlestats-archive-battle-history.timer` heredoc: `OnCalendar=*-*-01,15 03:00:00 UTC` → **`OnCalendar=*-*-* 07:00:00 UTC`**. Update the unit `Description` lines, which say "monthly" and "1st + 15th".
+
+**The hour moved too, 03:00 → 07:00, and that was not in the draft.** A job that ran twice a month could share an hour with anything; a daily one cannot. Mapping the live Beat schedule by UTC hour before shipping showed 03:00 inside the nightly standings-warmer window (02:30-03:25), one hour ahead of `battle-history-daily-rollup` at 04:00 — which rewrites the *newest* days of the same two tables this job deletes the oldest days of — and two ahead of the reconcile at 05:00. 07:00 follows all three, carries four light tasks, precedes the 08:00-09:00 enrichment cluster (ten tasks each), and sits in the global traffic trough.
 
 The archive step writes a directory named for the UTC run date (`incremental_battles.py:2547-2548`), so daily runs need no code change on the happy path. Three things to carry with it:
 
@@ -263,7 +265,8 @@ On a rolling table a `DROP COLUMN` needs no rewrite: new rows stop carrying it a
 
 ## Validation
 
-- [ ] Step 1: timer shows a daily next-fire; runs after 2026-09-27 report deletes.
+- [x] **Step 1 shipped 2026-09-20 (v5.11.4):** timer shows a daily 07:00 UTC next-fire; pinned by `test_battle_history_archive_timer_fires_daily`.
+- [ ] Step 1: runs from 2026-09-27 report deleted rows for both tables, and the unit's duration stays comfortably inside the hour.
 - [x] **Step 2 verified 2026-09-20:** 0 rows, 24 kB; database 59.20 → 57.29 GB; volume 78.57% → 76.44%.
 - [ ] Step 3: indexes absent from `pg_stat_user_indexes`; reader plans unchanged.
 - [ ] Step 4: table ~11-12 GB; `disk_used_percent` down ~15 points.

@@ -769,7 +769,8 @@ set_env_value WG_RATE_LIMIT_REQUEST_MAX_WAIT 0.5
 # PlayerDailyShipStats rows older than the retention window to gzip CSV +
 # manifest under shared/archives, verifies, then deletes the archived rows.
 # ENABLED in prod (first run + VACUUM FULL done 2026-06-17, see runbook); the
-# timer maintains the rolling window twice a month (1st + 15th). Set to 0 to
+# timer maintains the rolling window DAILY at 07:00 UTC (since 2026-09-20; it
+# was the 1st + 15th, see the unit's own comment below for why). Set to 0 to
 # pause — the timer still fires but the command no-ops.
 set_env_value BATTLE_HISTORY_ARCHIVE_ENABLED 1
 # Raised 92 -> 105 on 2026-07-24: prerequisite for a 90d rolling ship
@@ -1144,7 +1145,29 @@ WantedBy=timers.target
 EOF
 
 # Battle-history cold-archive + prune. A oneshot that runs the
-# archive_battle_history management command on the 1st + 15th of each month.
+# archive_battle_history management command DAILY at 07:00 UTC.
+#
+# Daily since 2026-09-20 (was the 1st + 15th). The cadence sets the permanent
+# size of two tables: a delete-based prune returns nothing to the OS, so
+# BattleEvent and PlayerDailyShipStats sit at their high-water mark forever.
+# Twice a month that mark is ~120 days of rows against a 105-day retention;
+# daily it is ~106. At 0.163 GB per day of window that is ~2.3 GB never
+# allocated -- and it had to be decided before the first peak, since the
+# window only filled on 2026-09-26. It also turns one ~3M-row delete and its
+# WAL burst into fifteen small ones.
+#
+# 07:00, not the old 03:00: a daily job must not share an hour with the work
+# that contends for the same tables. 02:30-03:25 is the nightly standings-warmer
+# window, 04:00 is battle-history-daily-rollup (it rewrites the NEWEST days of
+# these same tables while this deletes the oldest) and 05:00 is the reconcile.
+# 07:00 follows all three, carries four light Beat tasks, precedes the
+# 08:00-09:00 enrichment cluster, and sits in the global traffic trough.
+#
+# Each run ends with a VACUUM of both tables. Deliberately kept at this
+# cadence: pages freed by the delete are not reusable until a vacuum has run,
+# and reuse is the entire point. Runbook:
+# agents/runbooks/runbook-db-table-shape-remediation-2026-09-20.md (Step 1).
+#
 # NOT a Celery task: a backlog/steady-state run deletes hundreds of thousands
 # of rows over many minutes, too long for a Celery soft-time-limit / worker
 # slot. Gated by BATTLE_HISTORY_ARCHIVE_ENABLED — the timer fires
@@ -1152,7 +1175,7 @@ EOF
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/archives/battle_history"
 cat > /etc/systemd/system/battlestats-archive-battle-history.service <<EOF
 [Unit]
-Description=Battlestats monthly battle-history cold-archive + prune
+Description=Battlestats daily battle-history cold-archive + prune
 After=network-online.target
 Wants=network-online.target
 
@@ -1168,10 +1191,10 @@ EOF
 
 cat > /etc/systemd/system/battlestats-archive-battle-history.timer <<'EOF'
 [Unit]
-Description=Run Battlestats battle-history archive on the 1st + 15th of each month
+Description=Run Battlestats battle-history archive daily (07:00 UTC)
 
 [Timer]
-OnCalendar=*-*-01,15 03:00:00 UTC
+OnCalendar=*-*-* 07:00:00 UTC
 Persistent=true
 
 [Install]

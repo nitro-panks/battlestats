@@ -214,6 +214,31 @@ class DeployPreflightTests(unittest.TestCase):
         self.assertNotIn("--batch-size 5000", exec_line,
                          "5000 exceeded the statement timeout on its own")
 
+    def test_battle_history_archive_timer_fires_daily(self):
+        """2026-09-20: the prune cadence sets the permanent size of two tables.
+
+        A delete-based prune returns nothing to the OS, so BattleEvent and
+        PlayerDailyShipStats stay at their high-water mark forever. On the old
+        1st-and-15th schedule that mark was ~120 days of rows against a 105-day
+        retention; pruned daily it is ~106. At 0.163 GB per day that is ~2.3 GB
+        that is either never allocated or never given back, and the choice had
+        to be made before the first peak (the window only filled 2026-09-26).
+
+        Pinned here because a timer's schedule is invisible until the day it
+        matters, and reverting it would cost nothing to write and gigabytes to
+        live with — the same reason the two ExecStart tests above exist.
+        """
+        text = self.DEPLOY.read_text()
+        start = text.index("battlestats-archive-battle-history.timer <<")
+        unit = text[start:text.index("\nEOF", start)]
+        calendars = [ln for ln in unit.splitlines()
+                     if ln.startswith("OnCalendar=")]
+        self.assertEqual(len(calendars), 1, "expected exactly one OnCalendar")
+        # `*-*-*` is every day. Reject a day-of-month list such as `*-*-01,15`.
+        self.assertRegex(
+            calendars[0], r"^OnCalendar=\*-\*-\* \d{2}:\d{2}:\d{2} UTC$",
+            "the battle-history archive must fire daily, not on listed days")
+
     def test_deploy_resolves_all_three_untracked_files(self):
         text = self.DEPLOY.read_text()
         for name in (".env.cloud", ".env.secrets.cloud", "ca-certificate.crt"):
