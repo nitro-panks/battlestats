@@ -3,8 +3,8 @@
 The table had zero lifetime deletes: ~89% of rows are JSON-stripped skeletons
 (no reader at any age) and ~19% are fully-empty polls. This tier deletes
 stripped skeletons past the retention window and empty polls past a short
-window, always preserving (a) every JSON-carrying row (the keep-latest-3
-compaction owns those) and (b) each player's latest observation (the floor's
+window, always preserving (a) every JSON-carrying row (the keep-newest-N
+compaction owns those; N=1 in prod) and (b) each player's latest observation (the floor's
 freshness anchor). Backend-agnostic like the archive tests.
 """
 from __future__ import annotations

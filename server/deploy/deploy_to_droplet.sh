@@ -802,8 +802,8 @@ set_env_value SHIP_LEADERBOARD_WINDOW_DAYS 90
 set_env_value SHIP_BADGE_MIN_BATTLES 20
 # BattleObservation row retention (DB audit F5, armed 2026-07-20): delete-only
 # tier riding the same archive command/timer. JSON-stripped skeletons past 32d
-# + fully-empty polls past 7d; never a JSON-carrying row (keep-latest-3
-# compaction owns those), never a player's latest observation (floor freshness
+# + fully-empty polls past 7d; never a JSON-carrying row (the keep-newest-N
+# compaction owns those; N=1 in prod), never a player's latest observation (floor freshness
 # anchor). Provenance FKs relaxed in migration 0082, so deletes are safe.
 set_env_value BATTLE_OBSERVATION_ROW_RETENTION_ENABLED 1
 set_env_value BATTLE_OBSERVATION_ROW_RETENTION_DAYS 32
@@ -1217,7 +1217,16 @@ EnvironmentFile=/etc/battlestats-server.env
 EnvironmentFile=/etc/battlestats-server.secrets.env
 # No Celery soft limit here; the statement timeout is the only bound and it is
 # generous because the candidate scan is O(table), not O(candidates).
-ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py prune_battle_observations --statement-timeout "\${BATTLE_OBSERVATION_COMPACT_STATEMENT_TIMEOUT:-1800}"'
+#
+# --keep-per-player is passed EXPLICITLY (2026-09-19). Omitting it cost six
+# weeks: the pin below is set in this same script and in live /etc, but the
+# command's own default is the module constant COMPACT_KEEP_PER_PLAYER_DEFAULT,
+# and the only code that read the env name was the Celery task this timer
+# replaced. Production kept three JSON generations per player instead of one,
+# on the largest table in the schema. Sibling --dormant-after-days reads its env
+# var as its argparse default and was fine throughout; that inconsistency is
+# what made this invisible. Guarded by test_compaction_unit_passes_the_keep_pin.
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py prune_battle_observations --keep-per-player "\${BATTLE_OBSERVATION_COMPACT_KEEP:-1}" --statement-timeout "\${BATTLE_OBSERVATION_COMPACT_STATEMENT_TIMEOUT:-1800}"'
 TimeoutStartSec=7200
 EOF
 

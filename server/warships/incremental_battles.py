@@ -1562,7 +1562,17 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
 # BattleObservation payload compaction (disk retention)
 # ---------------------------------------------------------------------------
 
-COMPACT_KEEP_PER_PLAYER_DEFAULT = 3
+# JSON generations retained per player. 3 until 2026-09-19, when it was found
+# to be the LIVE value despite `BATTLE_OBSERVATION_COMPACT_KEEP=1` being pinned
+# in the deploy script, set in /etc, and documented as production's value in
+# three runbooks: the systemd timer that replaced the Celery task on 2026-08-06
+# did not pass `--keep-per-player`, so this constant won. Holding three
+# generations of a ~16 kB payload for every observed player put roughly 12 GB
+# into `warships_battleobservation` that nothing reads — one generation is the
+# diff baseline; the other two are history the site never serves.
+# The timer now passes the pin explicitly; this default is the fallback for the
+# case where the env var is absent, and it must agree with the pin.
+COMPACT_KEEP_PER_PLAYER_DEFAULT = 1
 COMPACT_BATCH_SIZE_DEFAULT = 2000
 COMPACT_STATEMENT_TIMEOUT_DEFAULT = 180
 
@@ -2584,7 +2594,7 @@ def archive_and_prune_battle_history(
 #     ``empty_retention_days`` (default 7).
 # Two invariants, enforced in the candidate SQL itself:
 #   * a row carrying JSON (randoms or ranked) is NEVER deleted — the
-#     keep-latest-3 compaction owns JSON lifecycle; and
+#     keep-newest-N compaction owns JSON lifecycle (N=1 in prod); and
 #   * each player's latest observation is NEVER deleted (the floor's
 #     change-gate freshness anchor), via an EXISTS-newer guard.
 # Delete-only (no CSV export): the safety spine is the guarded candidate

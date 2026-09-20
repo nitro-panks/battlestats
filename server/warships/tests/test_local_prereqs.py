@@ -159,6 +159,34 @@ class DeployPreflightTests(unittest.TestCase):
         self.assertLess(preflight, rsync,
                         "preflight must run before any expensive work")
 
+    def test_compaction_unit_passes_the_keep_pin_to_the_command(self):
+        """2026-09-19: `BATTLE_OBSERVATION_COMPACT_KEEP=1` was pinned in the
+        deploy script AND in live /etc AND documented in three runbooks, and
+        production ignored it for six weeks.
+
+        When the compaction moved off Celery onto this timer (2026-08-06), the
+        unit was written passing only --statement-timeout. Every other knob fell
+        back to its argparse default, and --keep-per-player's default is the
+        module constant, not the env var — so prod kept three JSON generations
+        per player instead of one, on the largest table in the schema.
+
+        The failure was a missing ARGUMENT, so the assertion has to be on the
+        command line the unit runs. Asserting on the function's behaviour would
+        have passed throughout.
+        """
+        lines = self.DEPLOY.read_text().splitlines()
+        execs = [ln for ln in lines
+                 if ln.startswith("ExecStart=")
+                 and "prune_battle_observations" in ln]
+        self.assertEqual(len(execs), 1,
+                         "expected exactly one compaction ExecStart line")
+        exec_line = execs[0]
+        self.assertIn("--keep-per-player", exec_line,
+                      "the compaction unit must pass the keep pin explicitly; "
+                      "the command's own default is the module constant")
+        self.assertIn("BATTLE_OBSERVATION_COMPACT_KEEP", exec_line,
+                      "the keep argument must read the pinned env value")
+
     def test_deploy_resolves_all_three_untracked_files(self):
         text = self.DEPLOY.read_text()
         for name in (".env.cloud", ".env.secrets.cloud", "ca-certificate.crt"):
