@@ -30,12 +30,12 @@ _Reviewed 2026-09-20 against `/home/august/code/battlestats/.claude/worktrees/db
 
 ### Unverified
 - `toast_tuple_target = 256` (Step 7.1): valid Postgres storage parameter, but its effect on this table's write volume and read latency is unmeasured. The step already says to measure on a copy first.
-- Whether `doadmin` may `CREATE EXTENSION pg_repack` on this cluster: listed in `pg_available_extensions`, not attempted.
+- ~~Whether `doadmin` may `CREATE EXTENSION pg_repack`.~~ **Verified 2026-09-20** by read-only query: `doadmin` holds `CREATE` on the database and `pg_repack` is in `extwlist.extensions`. Still not *attempted*; that is part of the supervised run.
 - The ~13 GB repack return rests on a 1% sample (14.7% of rows carrying 15 kB). `pgstattuple` is installed and would measure it exactly, but scanning a 24 GB relation on this I/O-bound cluster was judged not worth the load.
 - That the five index drops leave plans unchanged: the runbook requires the `EXPLAIN` checks; none has been run yet.
 
 ### Open Questions
-1. **Where does a `pg_repack` 1.5.2 client come from?** apt offers only 1.5.3, which will refuse to talk to the 1.5.2 extension. Options: build tag `ver_1.5.2` from source (needs `postgresql-server-dev-18` and a toolchain — on the production droplet, or on `fogbreak` if the cluster's trusted sources admit it), or ask DigitalOcean whether the extension can be raised to 1.5.3. Blocks Step 4.
+1. ~~**Where does a `pg_repack` 1.5.2 client come from?**~~ **Answered 2026-09-20: built from source, tag `ver_1.5.2`, by operator decision.** Installed and verified; see Step 4's preconditions. Step 4 is no longer blocked on tooling, only on Steps 2 and 3.
 2. **How does `0088` run?** Deploy it, or run `migrate warships 0088` by hand. Blocks Step 2, and through the migration numbering, Step 3.
 
 ## Implementation status
@@ -45,7 +45,7 @@ _Reviewed 2026-09-20 against `/home/august/code/battlestats/.claude/worktrees/db
 | 1 — prune daily, not twice monthly | H5 | ☐ | ☐ | ☐ | **Deadline ~2026-10-02.** One `OnCalendar` line |
 | 2 — truncate `PlayerAchievementStat` | H6 | ✅ `0088`, parked | ☐ | ☐ | Operator chooses: deploy it, or run it by hand |
 | 3 — drop 4 indexes, make 1 partial | H7 | ☐ | ☐ | ☐ | One migration, `0087` pattern |
-| 4 — `pg_repack` `battleobservation` | H1 | n/a | n/a | ☐ | Supervised, after 2 and 3. **Blocked on a 1.5.2 client** (QA, Open Question 1) |
+| 4 — `pg_repack` `battleobservation` | H1 | n/a | n/a | ☐ | **Client built and installed 2026-09-20.** Supervised run still waits on Steps 2 and 3 |
 | 5 — stop fetching achievements | H6 | ☐ | ☐ | ☐ | Product decision |
 | 6 — aggregations to PDSS; `BattleEvent` 105 → 35 d | H2 | ☐ | ☐ | ☐ | Per-reader payload equivalence |
 | 7 — `Player` row shape | H4 | ☐ | ☐ | ☐ | `toast_tuple_target` only; measure on a copy first. The index stays (see QA) |
@@ -147,13 +147,26 @@ The four drops follow `0087_drop_unused_pdss_indexes`: bound `lock_timeout` to 5
 ### Preconditions
 
 - Steps 2 and 3 done. The repack needs room for a second copy of the live data (~10 GB) plus WAL; free space is 17.97 GB today and ~20.2 GB after them.
-- `CREATE EXTENSION pg_repack` run by `doadmin`.
-- A `pg_repack` client binary whose version matches the server extension **exactly**. The cluster offers 1.5.2; the droplet has no client, and apt offers only **1.5.3**, which will refuse to run against 1.5.2. **This blocks the step** — see QA Open Question 1.
+- ✅ **A 1.5.2 client — done 2026-09-20.** `pg_repack` refuses to run unless client and extension versions match exactly; the cluster offers 1.5.2 and apt offers only 1.5.3. Operator decision: build tag `ver_1.5.2` from source. Installed at **`/usr/local/bin/pg_repack-1.5.2`** on the droplet (versioned name on purpose, so an `apt install` of 1.5.3 can never shadow it).
+  - Built in an `ubuntu:24.04` container from `server/scripts/pg_repack_client/Dockerfile`, against `postgresql-server-dev-18`. The droplet is 24.04 and the dev box 26.04, so a native build would have linked a newer glibc than production has; the container also keeps a compiler toolchain off the production host. Only the client binary leaves the image — the server-side library is the cluster's own.
+  - `sha256 c1a187dbf0b9ab8b168d3625089b4cb931e53b12e58223bbfa43b27492ef4d58`, 273,736 bytes. Verified on the droplet: `--version` prints `1.5.2`, `ldd` reports nothing unresolved (the runtime libraries arrive with the already-installed `postgresql-client-18` / `libpq5`).
+  - Rebuild: `DOCKER_BUILDKIT=0 docker build -t pgrepack-152-build server/scripts/pg_repack_client` (the dev box's Docker has no `buildx`), then `docker cp` `/out/pg_repack` out of a created container.
+- ✅ **The role can create the extension.** The app connects as `doadmin`: not a superuser (`rolsuper = false`), which is why `--no-superuser-check` is required rather than optional, but it holds `CREATE` on the database and `pg_repack` is on DigitalOcean's extension allow-list (`extwlist.extensions`). Not yet created — that belongs to the supervised run.
 - A quiet hour, outside the 12:30 UTC compaction and the realm stripes.
 
 ### Procedure
 
-Supervised, never scheduled. Pass `--no-kill-backend` (by default `pg_repack` *terminates* blocking sessions after its 60 s `--wait-timeout`; the floor's connections are not expendable) and `--no-superuser-check` for `doadmin`.
+Supervised, never scheduled. All three flags below were confirmed against the installed binary's `--help`, not recalled:
+
+```
+CREATE EXTENSION pg_repack;                         -- once, as doadmin
+pg_repack-1.5.2 --dry-run            -k -D -t warships_battleobservation …   # first
+pg_repack-1.5.2                      -k -D -t warships_battleobservation …
+```
+
+- `-D, --no-kill-backend` — by default `pg_repack` *terminates* the sessions blocking it once `--wait-timeout` (60 s) expires. The floor's connections are not expendable; with `-D` it gives up instead.
+- `-k, --no-superuser-check` — `doadmin` is not a superuser.
+- `-N, --dry-run` first, which exercises the connection, the version handshake and the privilege check without touching the table.
 
 Watch `disk_used_percent` from the droplet throughout (the metrics scrape must run there; port 9273 is blocked locally). The copy is ~11 GB and fully WAL-logged, so expect a peak near **89%** — the standing 90% disk alert will very likely fire, and that is expected. Abort at 92%; that line is this runbook's own choice, not a measured limit.
 
