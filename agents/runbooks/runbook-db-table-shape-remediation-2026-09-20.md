@@ -44,7 +44,7 @@ _Reviewed 2026-09-20 against `/home/august/code/battlestats/.claude/worktrees/db
 |---|---|---|---|---|---|
 | 1 — prune daily, not twice monthly | H5 | ✅ | ✅ v5.11.4 | ✅ **2026-09-20** | Done, 12 days inside the deadline. Watch the first runs with candidates, from 2026-09-27 |
 | 2 — truncate `PlayerAchievementStat` | H6 | ✅ `0088` | ✅ v5.11.3 | ✅ **2026-09-20 16:57 UTC** | Done. 1.43 GB returned to the OS |
-| 3 — drop 4 indexes, make 1 partial | H7 | ☐ | ☐ | ☐ | One migration, `0087` pattern |
+| 3 — drop 4 indexes, make 1 partial | H7 | ✅ `0089` | ✅ v5.11.5 | ✅ **2026-09-20** | **Three dropped, not five.** EXPLAIN kept two: one permanently, one until Step 6 |
 | 4 — `pg_repack` `battleobservation` | H1 | n/a | n/a | ☐ | **Client built and installed 2026-09-20.** Supervised run still waits on Steps 2 and 3 |
 | 5 — stop fetching achievements | H6 | ☐ | ☐ | ☐ | Product decision |
 | 6 — aggregations to PDSS; `BattleEvent` 105 → 35 d | H2 | ☐ | ☐ | ☐ | Per-reader payload equivalence |
@@ -128,6 +128,24 @@ The operator asked for the action to be double-checked before it ran. Re-verifie
 **Result.** `0088` applied with no lock contention. Rows 5,361,115 → **0**; table 1,434 MB → **24 kB**; `pg_database_size` 59.20 → **57.29 GB**; `disk_used_percent` 78.57% → **76.44%** (free 17.97 → 19.76 GB), measured from the droplet. The same deploy put the fixed `battles_json` prune unit in place ahead of Sunday's run.
 
 ## Step 3 — Drop four indexes, make one partial
+
+> **Outcome 2026-09-20 — read this before the plan below.** The plan said five.
+> Twenty `EXPLAIN`s on production said **three**. ~437 MB returned to the OS, not
+> ~800 MB. The table and prose below are the plan as drafted and are kept as the
+> record; this box is what happened.
+>
+> | Index | Verdict | Why |
+> |---|---|---|
+> | `battleevent_player_id_1f7bf48a` (202 MB) | **dropped** | every scan is a bare `player_id = X`; `battle_event_player_time_idx` leads with `player` and serves it identically |
+> | `playerdailyshipstats_season_id_69e0cf16` (197 MB) | **dropped outright**, not made partial | one reader, the ranked-season timeline, already player-scoped and narrowed to ~230 rows by `dly_ship_player_date_idx`; the season index was only ever an optional BitmapAnd arm. A partial index would have needed a concurrent, non-atomic build on 20.9 M rows for no gain |
+> | `explorer_eff_rank_idx` (38 MB) | **dropped** | zero lifetime scans; nothing orders or ranges on the percentile in SQL |
+> | `playerdailyshipstats_ship_id_16c96227` (198 MB) | **KEEP, permanently** | carries the ship combat-profile population query (`_ship_population_brackets_30d` — the 36 s aggregation that blew the gunicorn timeout in August), the legacy per-ship avg-damage scan, and the trailing-days arm of the rollup path. All per-ship across every player; no other index serves them. The audit's "the rollup scans by `date`" was true of the rollup and had looked at nothing else |
+> | `battleevent_mode_983942c4` (174 MB) | **HOLD until Step 6** | the ranked treemap (`compute_realm_top_ships`, `mode='ranked'`) plans a Parallel Index Scan on it, exactly as QA predicted. Without it that warm scans the whole 4.5 GB heap |
+>
+> Both keeps are now documented **on the model fields themselves**, so the next
+> audit that sees "225 scans" reads the reason before it reads the number. This
+> is the third time in one day that a low scan count turned out to mean *rare but
+> expensive*, not *unused* (`player_last_fetch_idx` was the first).
 
 Lifetime scan counts; `pg_stat` counters have never been reset.
 
@@ -268,7 +286,7 @@ On a rolling table a `DROP COLUMN` needs no rewrite: new rows stop carrying it a
 - [x] **Step 1 shipped 2026-09-20 (v5.11.4):** timer shows a daily 07:00 UTC next-fire; pinned by `test_battle_history_archive_timer_fires_daily`.
 - [ ] Step 1: runs from 2026-09-27 report deleted rows for both tables, and the unit's duration stays comfortably inside the hour.
 - [x] **Step 2 verified 2026-09-20:** 0 rows, 24 kB; database 59.20 → 57.29 GB; volume 78.57% → 76.44%.
-- [ ] Step 3: indexes absent from `pg_stat_user_indexes`; reader plans unchanged.
+- [x] **Step 3 shipped 2026-09-20 (v5.11.5):** three indexes gone; two kept on `EXPLAIN` evidence. See the outcome box in Step 3.
 - [ ] Step 4: table ~11-12 GB; `disk_used_percent` down ~15 points.
 - [ ] Re-measure `disk_used_percent` after Steps 1-4 against the ~60% projection.
 

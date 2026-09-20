@@ -299,11 +299,11 @@ class PlayerExplorerSummary(models.Model):
         null=True, blank=True)
     refreshed_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        indexes = [
-            models.Index(fields=['efficiency_rank_percentile'],
-                         name='explorer_eff_rank_idx'),
-        ]
+    # `explorer_eff_rank_idx` on efficiency_rank_percentile was dropped
+    # 2026-09-20 (migration 0089): 38 MB and ZERO scans over the cluster's whole
+    # lifetime. Nothing orders or ranges on the percentile in SQL; the one
+    # command that filters on it (`enrichment_lift_report`) does filtered counts
+    # over a realm, which the planner answers with a sequential scan anyway.
 
     def __str__(self):
         return f"Explorer summary for {self.player_id}"
@@ -656,8 +656,14 @@ class BattleEvent(models.Model):
     MODE_RANKED = 'ranked'
     MODE_CHOICES = [(MODE_RANDOM, 'Random'), (MODE_RANKED, 'Ranked')]
 
+    # db_index=False is deliberate (2026-09-20, migration 0089). The FK's
+    # automatic index was 202 MB with 2,518 lifetime scans, every one of them a
+    # bare `player_id = X` lookup. `battle_event_player_time_idx` below leads
+    # with `player`, so it serves that lookup identically; EXPLAIN on prod
+    # confirmed the composite already carries the player+time readers.
     player = models.ForeignKey(
-        Player, on_delete=models.CASCADE, related_name='battle_events')
+        Player, on_delete=models.CASCADE, related_name='battle_events',
+        db_index=False)
     detected_at = models.DateTimeField(auto_now_add=True)
     ship_id = models.BigIntegerField()
     ship_name = models.CharField(max_length=200, blank=True, default='')
@@ -667,6 +673,15 @@ class BattleEvent(models.Model):
     # `season_id` is populated only for `mode='ranked'` (NULL for randoms),
     # and the unique constraint below has separate partial indexes per mode
     # so randoms keeps its existing dedup semantics.
+    # KEEP this index for now — it looks droppable and is not. 174 MB, only 106
+    # lifetime scans, two values over 22.6M rows: the same profile as the PDSS
+    # `mode` index dropped in 0087. But the readers of THIS table span 90 of its
+    # 105 days, so the date predicate barely narrows anything, and for
+    # mode='ranked' (~5% of rows) this index IS the plan: EXPLAIN on prod,
+    # 2026-09-20, shows the ranked treemap (`compute_realm_top_ships`) doing a
+    # Parallel Index Scan on it. Without it that warm becomes a scan of the
+    # whole 4.5 GB heap. Droppable only once that reader moves to
+    # ShipPopDailyAgg (runbook-db-table-shape-remediation-2026-09-20.md Step 6).
     mode = models.CharField(
         max_length=8, choices=MODE_CHOICES, default=MODE_RANDOM, db_index=True)
     # season_id: no standalone index — never filtered without mode/player,
@@ -773,6 +788,14 @@ class PlayerDailyShipStats(models.Model):
         Player, on_delete=models.CASCADE, related_name='daily_ship_stats',
         db_index=False)
     date = models.DateField(db_index=True)
+    # KEEP this index. It has only 225 lifetime scans and the 2026-09-20 audit
+    # listed it for removal on the theory that "the rollup scans by date, not by
+    # ship". The rollup does; three other readers do not. EXPLAIN on prod shows
+    # it carrying the ship combat-profile population query
+    # (`_ship_population_brackets_30d`, the 36s aggregation that blew the gunicorn
+    # timeout in August), the legacy per-ship avg-damage scan, and the trailing
+    # -days arm of the rollup path. All are per-SHIP across every player, which
+    # no other index here can serve. A scan COUNT is frequency, not value.
     ship_id = models.BigIntegerField(db_index=True)
     ship_name = models.CharField(max_length=200, blank=True, default='')
     # Phase 3 of the ranked rollout (runbook-ranked-battle-history-rollout-2026-05-02.md).
@@ -789,7 +812,14 @@ class PlayerDailyShipStats(models.Model):
     # index already serve. It cost 197 MB plus a write on every row.
     mode = models.CharField(
         max_length=8, choices=MODE_CHOICES, default=MODE_RANDOM)
-    season_id = models.IntegerField(null=True, blank=True, db_index=True)
+    # No standalone index (dropped 2026-09-20, migration 0089): 197 MB on a
+    # column that is 94.1% NULL. Its one reader is the ranked-season timeline
+    # (`views.py`, `qs.filter(season_id=...)`), which is already scoped to one
+    # player and narrowed to ~230 rows by `dly_ship_player_date_idx`; the season
+    # index only ever appeared as an optional BitmapAnd arm on top of that, so
+    # the plan is no dearer without it. Ranked uniqueness is enforced by the
+    # partial constraint below, which carries season_id itself.
+    season_id = models.IntegerField(null=True, blank=True)
     battles = models.IntegerField(default=0)
     wins = models.IntegerField(default=0)
     losses = models.IntegerField(default=0)

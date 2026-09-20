@@ -117,6 +117,15 @@ Same playbook as migration `0087`; counters have never been reset, so these are 
 | `explorer_eff_rank_idx` | 38 MB | **0** | |
 | **Total** | **~800 MB** | | **returned to the OS**, unlike row deletes |
 
+> **Corrected 2026-09-20 after EXPLAIN on production: three of these five, ~437 MB.**
+> `playerdailyshipstats_ship_id` is **kept permanently** — it carries the ship
+> combat-profile population query, the legacy avg-damage scan and the rollup's
+> trailing-days arm; "the rollup scans by `date`" was true of the rollup and this
+> audit had checked nothing else. `battleevent_mode` is **held until H2's readers
+> move**: the ranked treemap plans on it. `season_id` was dropped outright rather
+> than made partial. Same error as the H4 retraction — a lifetime scan count read
+> as a verdict. Migration `0089`; details in the remediation runbook, Step 3.
+
 Dead or write-only **columns** (C+M): `Snapshot.survived_battles` is **0 in all 138,714 sampled rows** with no reader or writer in `data.py` (52 MB). PDSS `first_event_at`, `last_event_at` and `updated_at` are written and never read (24 B × 20.95 M = **~500 MB**). `ship_name` on both PDSS and `BattleEvent` (~435 MB together) duplicates `Ship.name`, and its one reader already falls back to the `Ship` table (`views.py:1020`). On a rolling table a `DROP COLUMN` needs no rewrite: new rows simply stop carrying it, and the saving arrives by itself over one 105-day window.
 
 ## What is right, and should be left alone
