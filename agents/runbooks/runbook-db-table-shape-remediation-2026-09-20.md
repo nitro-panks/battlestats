@@ -4,7 +4,7 @@ _Created: 2026-09-20_
 _Lifecycle: dated-active · Owner: platform_
 _Context: the product has reached its end state (90-day rolling window, 105-day retention, no further window moves). `agents/work-items/db-table-shape-audit-2026-09-20.md` (the H-series) tested the design assumption behind each of the seven largest tables against the measured shape of its data; five of six assumptions were false. This runbook is the execution plan those findings imply._
 _QA: every figure traces to the H-series work item or to a live check recorded here. Figures measured 2026-09-20._
-_Status 2026-09-20: **nothing in this runbook has been applied.** One migration (`0088`) is written and parked off `main`._
+_Status 2026-09-20: **Step 2 is done** (v5.11.3): the truncate returned 1.43 GB to the OS and the volume went 78.57% → 76.44%. Step 4's client is built and installed. Steps 1 and 3 are next; nothing else has been applied._
 
 ## QA Notes
 
@@ -36,14 +36,14 @@ _Reviewed 2026-09-20 against `/home/august/code/battlestats/.claude/worktrees/db
 
 ### Open Questions
 1. ~~**Where does a `pg_repack` 1.5.2 client come from?**~~ **Answered 2026-09-20: built from source, tag `ver_1.5.2`, by operator decision.** Installed and verified; see Step 4's preconditions. Step 4 is no longer blocked on tooling, only on Steps 2 and 3.
-2. **How does `0088` run?** Deploy it, or run `migrate warships 0088` by hand. Blocks Step 2, and through the migration numbering, Step 3.
+2. ~~**How does `0088` run?**~~ **Answered 2026-09-20: deployed as v5.11.3**, after a from-scratch pre-flight (Step 2). Step 3's migration is now `0089` and depends on `0088`.
 
 ## Implementation status
 
 | Step | Finding | Code | Deployed | Done in prod | What remains |
 |---|---|---|---|---|---|
 | 1 — prune daily, not twice monthly | H5 | ☐ | ☐ | ☐ | **Deadline ~2026-10-02.** One `OnCalendar` line |
-| 2 — truncate `PlayerAchievementStat` | H6 | ✅ `0088`, parked | ☐ | ☐ | Operator chooses: deploy it, or run it by hand |
+| 2 — truncate `PlayerAchievementStat` | H6 | ✅ `0088` | ✅ v5.11.3 | ✅ **2026-09-20 16:57 UTC** | Done. 1.43 GB returned to the OS |
 | 3 — drop 4 indexes, make 1 partial | H7 | ☐ | ☐ | ☐ | One migration, `0087` pattern |
 | 4 — `pg_repack` `battleobservation` | H1 | n/a | n/a | ☐ | **Client built and installed 2026-09-20.** Supervised run still waits on Steps 2 and 3 |
 | 5 — stop fetching achievements | H6 | ☐ | ☐ | ☐ | Product decision |
@@ -107,12 +107,23 @@ Migration `0088_truncate_playerachievementstat` is written, tested and parked on
 
 Safe because the rows are a pure derivative: of 3,000 sampled players holding rows, 3,000 still carry the source payload in `Player.achievements_json`. No foreign key points at the table, so the truncate neither fails nor cascades. Both remaining readers no-op against an empty table: `_merge_achievement_rows` (`player_records.py`) and the pre-purge count in `purge_deleted_accounts.py`.
 
-The direct `TRUNCATE` was blocked by the auto-mode classifier as a mass delete. **Operator chooses the path:**
+The direct `TRUNCATE` was blocked by the auto-mode classifier as a mass delete, so it shipped as a migration through the deploy path instead. Lock wait is bounded to 5 s, as in `0087`.
 
-1. Merge the branch and deploy; the migration runs through `manage.py migrate`.
-2. Run it by hand on the droplet: `manage.py migrate warships 0088`.
+### Done 2026-09-20 — and the pre-flight that preceded it
 
-Lock wait is bounded to 5 s, as in `0087`.
+The operator asked for the action to be double-checked before it ran. Re-verified from scratch rather than from this runbook's own text:
+
+| Check | Result |
+|---|---|
+| Has the write really stopped since v5.11.2? | `n_tup_ins` flat at 1,356,234 across two reads; newest row `refreshed_at` 14:06 UTC, nothing after the 15:43 deploy |
+| Anything still touching the table? | 0 sessions; 0 updates lifetime |
+| Inbound foreign keys? | none — the truncate can neither fail nor cascade |
+| Every reference in the codebase | the model, the merge loop (`player_records.py:72,75`), the purge count (`purge_deleted_accounts.py:206`). No raw SQL, no contract, no client reference |
+| The GDPR purge transcript (G4's caveat) | records `rows_deleted.achievements: N`; against an empty table it records 0, which is accurate. Record **shape** unchanged. The payload itself lives on the `Player` row and is still deleted with the player |
+| Independent corroboration | G4 reached the same verdict in August: "reversible (the mirror rebuilds from the blob)" |
+| Recovery path if this proved wrong | 8 daily managed backups on the cluster, newest 57.7 GB |
+
+**Result.** `0088` applied with no lock contention. Rows 5,361,115 → **0**; table 1,434 MB → **24 kB**; `pg_database_size` 59.20 → **57.29 GB**; `disk_used_percent` 78.57% → **76.44%** (free 17.97 → 19.76 GB), measured from the droplet. The same deploy put the fixed `battles_json` prune unit in place ahead of Sunday's run.
 
 ## Step 3 — Drop four indexes, make one partial
 
@@ -246,7 +257,6 @@ On a rolling table a `DROP COLUMN` needs no rewrite: new rows stop carrying it a
 
 | Gate | Who | Blocks |
 |---|---|---|
-| How `0088` runs | operator | Step 2 |
 | Schedule the supervised repack | operator | Step 4 |
 | Stop the achievements fetch | operator | Step 5 |
 | `BattleEvent` retention 35 d | operator | Step 6 |
@@ -254,7 +264,7 @@ On a rolling table a `DROP COLUMN` needs no rewrite: new rows stop carrying it a
 ## Validation
 
 - [ ] Step 1: timer shows a daily next-fire; runs after 2026-09-27 report deletes.
-- [ ] Step 2: `PlayerAchievementStat` is 0 rows; database ~1.4 GB smaller.
+- [x] **Step 2 verified 2026-09-20:** 0 rows, 24 kB; database 59.20 → 57.29 GB; volume 78.57% → 76.44%.
 - [ ] Step 3: indexes absent from `pg_stat_user_indexes`; reader plans unchanged.
 - [ ] Step 4: table ~11-12 GB; `disk_used_percent` down ~15 points.
 - [ ] Re-measure `disk_used_percent` after Steps 1-4 against the ~60% projection.
