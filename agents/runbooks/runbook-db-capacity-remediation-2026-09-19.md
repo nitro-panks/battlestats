@@ -21,7 +21,7 @@ _Reviewed 2026-09-19 against `/home/august/code/battlestats/.claude/worktrees/db
 ### Unverified
 - `pg_repack` v1.5.2 availability on the cluster: carried from the 2026-06-21 data-lifecycle assessment, not re-checked today.
 - The 2026-07-20 60 -> 80 GiB resize cited as prior art in Step 3: from prior documents, not re-verified against the DO API.
-- ~~`disk_used_percent`: both `doctl` tokens return 401, so the 79% figure is derived rather than measured.~~ **→ RESOLVED 2026-09-20.** Only the droplet's token was dead; the laptop's is valid, and the earlier local failure was a missing `doctl` binary, not a credential. Measured: **78.57%**, and `autoscale.storage.enabled = false` read from the database object. The derived figure was right to within half a point. See Step 2.
+- ~~`disk_used_percent`: both `doctl` tokens return 401, so the 79% figure is derived rather than measured.~~ **→ RESOLVED 2026-09-20.** Only the droplet's token was dead; the one on the dev machine (`fogbreak`) is valid, and the earlier local failure was a missing `doctl` binary, not a credential. Measured: **78.57%**, and `autoscale.storage.enabled = false` read from the database object. The derived figure was right to within half a point. See Step 2.
 - The WAL gap of 7.25 GB: `pg_ls_waldir()` is `permission denied` for the application role, so today's figure is carried from the 2026-08-05 measurement and its configured ceiling.
 
 ## Implementation status
@@ -250,9 +250,10 @@ suggests:
 The 401s were real but misread. There are **two different tokens**, and only one
 was dead:
 
-- **The laptop's** (`~/.config/doctl/config.yaml`) is **valid** — `GET /v2/account`
-  returns 200. The earlier `doctl: command not found` was a missing *binary*, not
-  a bad credential, and the two failures were conflated.
+- **The dev machine's** (`fogbreak`, `~/.config/doctl/config.yaml`) is **valid**
+  — `GET /v2/account` returns 200. The earlier `doctl: command not found` there
+  was a missing *binary*, not a bad credential, and the two failures were
+  conflated.
 - **The droplet's** was a different token and genuinely dead. Its only consumer
   was `/usr/local/bin/invoke-enrichment.sh`, which invoked DO Functions from the
   decommissioned serverless-enrichment era; no unit, timer or cron referenced it,
