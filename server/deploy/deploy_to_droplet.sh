@@ -1284,7 +1284,21 @@ EnvironmentFile=/etc/battlestats-server.secrets.env
 # the unit calls it directly, same shape as the downsample unit. (An earlier
 # version put an escaped shell gate in ExecStart that broke the deploy heredoc;
 # keep this body free of backticks and dollar signs.)
-ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py prune_inactive_player_battles_json --batch-size 5000 --sleep 0.5'
+#
+# Arguments measured on the first real run, 2026-09-20 — the flag was armed
+# that day, so every prior firing no-opped and none of this was exercised:
+#   * --statement-timeout 1800 (was the 180s default, never passed). NULLing
+#     battles_json deletes TOAST chunks, which on this table is the same class
+#     of work the observation compaction gets 1800s for. At 180s the run died.
+#   * --max-rows 40000 bounds the candidate scan. UNBOUNDED, that scan is what
+#     actually timed out: the same command with a LIMIT finished 2,000 rows in
+#     34s. The band is ~32.5K players, so this covers a full week's accumulation
+#     with room to spare, and a backlog simply takes an extra Sunday.
+#   * --batch-size 250 (was 5000). ~4s per batch; 5000 exceeded the timeout on
+#     its own. Smaller batches also mean shorter locks and less WAL per
+#     transaction on a DB whose random-access latency is chronically ~10x its
+#     round-trip.
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py prune_inactive_player_battles_json --batch-size 250 --sleep 0.5 --max-rows 40000 --statement-timeout 1800'
 EOF
 
 cat > /etc/systemd/system/battlestats-prune-battles-json.timer <<'EOF'

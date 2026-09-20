@@ -187,6 +187,33 @@ class DeployPreflightTests(unittest.TestCase):
         self.assertIn("BATTLE_OBSERVATION_COMPACT_KEEP", exec_line,
                       "the keep argument must read the pinned env value")
 
+    def test_battles_json_prune_unit_carries_its_measured_bounds(self):
+        """2026-09-20: the flag was armed and the first real run failed twice.
+
+        The unit had passed only --batch-size and --sleep since June, and every
+        firing no-opped behind PRUNE_BATTLES_JSON_ENABLED=0, so its arguments
+        had never once been exercised. On the first live run the default 180s
+        statement timeout killed it, and the unbounded candidate scan killed it
+        again at a smaller batch. Bounded, the same work finished in seconds.
+
+        Asserting on the command line rather than the behaviour, for the same
+        reason as the compaction test above: what was wrong was an argument
+        that was not there.
+        """
+        lines = self.DEPLOY.read_text().splitlines()
+        execs = [ln for ln in lines
+                 if ln.startswith("ExecStart=")
+                 and "prune_inactive_player_battles_json" in ln]
+        self.assertEqual(len(execs), 1,
+                         "expected exactly one battles_json prune ExecStart")
+        exec_line = execs[0]
+        for flag in ("--statement-timeout", "--max-rows", "--batch-size"):
+            self.assertIn(flag, exec_line,
+                          f"the prune unit must pass {flag}; its default was "
+                          "measured to fail on this table")
+        self.assertNotIn("--batch-size 5000", exec_line,
+                         "5000 exceeded the statement timeout on its own")
+
     def test_deploy_resolves_all_three_untracked_files(self):
         text = self.DEPLOY.read_text()
         for name in (".env.cloud", ".env.secrets.cloud", "ca-certificate.crt"):
