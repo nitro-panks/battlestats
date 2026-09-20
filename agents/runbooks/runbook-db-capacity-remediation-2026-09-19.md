@@ -4,7 +4,7 @@ _Created: 2026-09-19_
 _Lifecycle: dated-active · Owner: platform_
 _Context: the managed-PG volume reached ≈79% on the day the ship-standings window moved to 90d. `agents/work-items/db-growth-capacity-2026-09-19.md` re-measured the August forecast and found it arriving roughly six weeks early, with one correctable cause: `BATTLE_OBSERVATION_COMPACT_KEEP=1` is pinned in two authorities, documented in three runbooks, and **read by nothing** since the 2026-08-06 Celery-to-timer migration._
 _QA: every figure traces to that work-item or to a live check recorded in the Validation section. Figures measured 2026-09-19 ~23:50 UTC._
-_Status 2026-09-20: **Step 1 is done and verified in production** (v5.11.1; first `keep=1` compaction 2026-09-20 12:32 UTC, 627,835 payloads). Steps 2-6 are untouched and each carries its own gate. Step 2 remains blocked on a working `doctl` token._
+_Status 2026-09-20: **Steps 1 and 2 are closed.** Step 1 shipped in v5.11.1 and its first `keep=1` compaction ran at 12:32 UTC (627,835 payloads). Step 2 turned out to need no work: the alerts it assumed were missing have been live at 90% all along. Step 7 is measured and declined. Steps 4-6 remain, and they come before Step 3._
 
 ## QA Notes
 
@@ -21,7 +21,7 @@ _Reviewed 2026-09-19 against `/home/august/code/battlestats/.claude/worktrees/db
 ### Unverified
 - `pg_repack` v1.5.2 availability on the cluster: carried from the 2026-06-21 data-lifecycle assessment, not re-checked today.
 - The 2026-07-20 60 -> 80 GiB resize cited as prior art in Step 3: from prior documents, not re-verified against the DO API.
-- `disk_used_percent`: both `doctl` tokens return 401, so the 79% figure is derived from `pg_database_size` plus the WAL ceiling rather than read from the metrics endpoint. Autoscale-OFF is no longer an assumption to verify — it is a standing operator decision (Step 2).
+- ~~`disk_used_percent`: both `doctl` tokens return 401, so the 79% figure is derived rather than measured.~~ **→ RESOLVED 2026-09-20.** Only the droplet's token was dead; the laptop's is valid, and the earlier local failure was a missing `doctl` binary, not a credential. Measured: **78.57%**, and `autoscale.storage.enabled = false` read from the database object. The derived figure was right to within half a point. See Step 2.
 - The WAL gap of 7.25 GB: `pg_ls_waldir()` is `permission denied` for the application role, so today's figure is carried from the 2026-08-05 measurement and its configured ceiling.
 
 ## Implementation status
@@ -29,7 +29,7 @@ _Reviewed 2026-09-19 against `/home/august/code/battlestats/.claude/worktrees/db
 | Step | Code | Deployed | Done in prod | What remains |
 |---|---|---|---|---|
 | 1 — restore `keep=1` | ✅ | ✅ v5.11.1 | ✅ **2026-09-20 12:32 UTC** | Done. Re-measure the slope ~2026-10-04 |
-| 2 — disk alerts | n/a | n/a | ☐ | **Blocked**: both `doctl` tokens return 401. Operator action. Autoscale stays OFF by decision |
+| 2 — disk alerts | n/a | n/a | ✅ **closed 2026-09-20** | They already existed at 90%, delivering to gmail. Operator kept 90%. Autoscale measured OFF |
 | 3 — volume sizing decision | n/a | n/a | ☐ | **LAST RESORT.** Operator decision, after 4-6. Read the slope ~2026-10-04 |
 | 4 — drop two unscanned PDSS indexes | ☐ | ☐ | ☐ | ~385 MB + write amplification. Model edit + migration; planner check on the battle-history payload builder |
 | 5 — `playerachievementstat` disposition | ☐ | ☐ | ☐ | ~1.5 GB + a delete/recreate per refresh. No user-facing reader; two maintenance call sites |
@@ -205,10 +205,27 @@ retains the newest, which is the one the diff uses.
 Revert the `ExecStart` argument and redeploy. The discarded generations do not
 come back; the compaction behaviour does.
 
-## Step 2 — Disk alerts ☐ BLOCKED
+## Step 2 — Disk alerts ✅ CLOSED 2026-09-20: they already existed
 
-August's Step 0 was never done, and both its thresholds (70%, 80%) are now
-behind us. Alerts at **80% and 90%**.
+**The premise was wrong.** This step, and August's Step 0 before it, assumed
+alerting had never been armed. Three DO alert policies have been live on this
+cluster all along, all enabled, all delivering to the operator's gmail:
+
+| Policy | Threshold | Window | UUID |
+|---|---|---|---|
+| `v1/dbaas/alerts/disk_utilization_alerts` | > 90% | 5m | `fd8bc34a-8a30-484d-bcfa-461e697eb900` |
+| `v1/dbaas/alerts/memory_utilization_alerts` | > 90% | 5m | `7ab27336-f775-4c8b-ab06-68a886ee59d6` |
+| `v1/dbaas/alerts/cpu_alerts` | > 90% | 5m | `b1130ea5-720d-483c-8528-f1cf2965bc74` |
+
+Read with `GET /v2/monitoring/alerts`. Two prior documents asserted the absence
+without ever querying for it — the same shape of error as the compaction pin in
+Step 1, arrived at from the opposite direction: there, a thing that looked
+present was inert; here, a thing that looked absent was working.
+
+**Operator decision 2026-09-20: leave the threshold at 90%, do not add an 80%
+policy.** At 78.57% an 80% alert would fire within days and then keep firing;
+90% of 83.87 GB is 75.5 GB, about 36 days out at the current slope, with a
+further ~32 days from there to full.
 
 **Storage autoscale is not part of this step, and is not a question.** Standing
 operator decision, 2026-09-20: *"i will never autoscale the db for this hobby
@@ -228,11 +245,40 @@ suggests:
    cost-conversion point. The ~2026-11-22 figure is when the site stops
    accepting writes, full stop.
 
-**Blocker:** `~/.config/doctl/config.yaml` and the droplet's token both return
-401 (`Unable to authenticate you`). The DO API route for database metrics
-credentials returned `not_found` with the same token. Needs a refreshed token or
-operator action in the DO console. Until then `disk_used_percent` is **derived,
-not measured** — from `pg_database_size` plus the WAL ceiling.
+### The token, and why it looked broken
+
+The 401s were real but misread. There are **two different tokens**, and only one
+was dead:
+
+- **The laptop's** (`~/.config/doctl/config.yaml`) is **valid** — `GET /v2/account`
+  returns 200. The earlier `doctl: command not found` was a missing *binary*, not
+  a bad credential, and the two failures were conflated.
+- **The droplet's** was a different token and genuinely dead. Its only consumer
+  was `/usr/local/bin/invoke-enrichment.sh`, which invoked DO Functions from the
+  decommissioned serverless-enrichment era; no unit, timer or cron referenced it,
+  and its log stops at 2026-04-06. **Script and credential removed 2026-09-20.**
+  The `doctl` snap remains on the box, now with no configuration.
+- The metrics-credentials route is **`/v2/databases/metrics/credentials`** —
+  no database id. The earlier `not_found` came from calling
+  `/v2/databases/{id}/metrics/credentials`, which does not exist.
+- **The scrape must run from the droplet.** The local sandbox blocks outbound
+  9273 (`http 000`); the droplet returns 200 and ~128 KB. Mint the basic-auth
+  credential locally with the good token, then `ssh` the curl.
+
+### Measured 2026-09-20 15:5x UTC, at last
+
+| Metric | Value |
+|---|---|
+| `disk_used_percent` | **78.57%** |
+| `disk_used` / `disk_total` | 65.89 GB / 83.87 GB (17.97 GB free) |
+| `autoscale.storage.enabled` | **false** (from the database object — now M, not A) |
+| `read_only` | false |
+| `system_load15` / `cpu_usage_idle` / `cpu_usage_iowait` | 3.23 / 56.5% / 13.6% |
+| `mem_used_percent` | 46.2% |
+
+The derived 79% in this runbook's TL;DR was right to within half a point. The
+WAL gap resolves to 6.69 GB (65.89 − 59.20), slightly under the 7.25 GB carried
+forward from August.
 
 ## Step 3 — The volume sizing decision ☐ OPERATOR, LAST RESORT
 
@@ -382,7 +428,8 @@ Record measurements here as steps land.
       (TOAST 24.27 GB), with dead tuples up to 6.7% — that is the released space
       sitting inside the table awaiting reuse, which is the whole point.
       `pg_database_size` 59.06 → 59.20 GB over the same 15.5 hours.
-- [ ] Step 2: alerts visible in the DO console at 80% and 90%.
+- [x] **Step 2 closed 2026-09-20.** Three DBaaS alert policies were already live at 90%/5m (disk, memory, CPU), all enabled, all mailing the operator. Threshold left at 90% by decision.
+- [x] **`disk_used_percent` measured at 78.57%** (65.89 of 83.87 GB), and `autoscale.storage.enabled = false` read from the database object rather than assumed.
 - [ ] Post-2026-09-26: `BattleEvent` and `PDSS` stop growing; the 10-01 archive
       run reports deleted rows rather than `skipped (no rows older than cutoff)`.
 - [ ] Re-measure `pg_database_size` two weeks after Step 1 and compare against
