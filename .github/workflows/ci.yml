@@ -47,17 +47,17 @@ jobs:
       # npm's own "fix" for them is a downgrade to jest@25 / eslint-config-next
       # @0.2.4, so gating on them would mean a permanently red build.
       #
-      # The threshold is `critical` rather than `high` for exactly one reason:
-      # sharp <0.35.0 carries high libvips CVEs and 0.35.0 HAS NO STABLE RELEASE
-      # — only 0.35.0-rc.N — so there is nothing to upgrade to. Exposure is
-      # bounded (the app never uses next/image and sets no images.remotePatterns,
-      # so attacker-controlled bytes cannot reach libvips). RAISE THIS TO `high`
-      # the moment sharp 0.35.0 ships stable; prod-only is otherwise clean.
+      # The threshold is `high` since 2026-09-21. It sat at `critical` while
+      # sharp <0.35.0 carried high libvips CVEs with no stable release to move
+      # to; next 16.3.5 pulls sharp ^0.35.4, which cleared them, and prod-only
+      # now audits to zero. A red run here is the gate working: from 09-09 to
+      # 09-21 it was two critical next RCE advisories (fixed in 16.3.3), and the
+      # remedy was the upgrade, not the threshold.
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=critical
+        run: npm audit --omit=dev --audit-level=high
 
-      # Non-blocking visibility: the full prod-only report, so a new high shows
-      # up in the log even while the gate sits at critical.
+      # Non-blocking visibility: the full prod-only report, so a new moderate
+      # shows up in the log even though the gate sits at high.
       - name: Audit report (informational)
         if: always()
         run: npm audit --omit=dev || true
