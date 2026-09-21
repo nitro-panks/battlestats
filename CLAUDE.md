@@ -112,7 +112,7 @@ App droplet **2 vCPU / 8 GB**; managed Postgres **2 vCPU / 4 GB** (PG 18). **Do 
 
 Player, Clan, Ship, Snapshot, PlayerExplorerSummary, EntityVisitEvent/Daily, PlayerAchievementStat, DeletedAccount, MvPlayerDistributionStats, ShipTopPlayerSnapshot, StreamerSubmission, Feedback, HotPlayer, RankedSeason, ClanBattleSeason.
 
-Battle-history pipeline: BattleObservation → BattleEvent → PlayerDailyShipStats → ShipPopDailyAgg. **Retention `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` prod=105 since 2026-07-24, pinned in `server/deploy/deploy_to_droplet.sh`** — sized to sustain a 90-day rolling read, so **retention reduction is not a disk lever**; the binding constraint is the player pool (`agents/work-items/db-growth-capacity-2026-08-05.md`).
+Battle-history pipeline: BattleObservation → BattleEvent → PlayerDailyShipStats → ShipPopDailyAgg. **Retention `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` prod=105 since 2026-07-24, pinned in `server/deploy/deploy_to_droplet.sh`** — sized to sustain a 90-day rolling read, so **retention reduction is not a disk lever**; players bind, not retention. DB disk plan (autoscale **off by decision**): `agents/runbooks/runbook-db-table-shape-remediation-2026-09-20.md`.
 
 ## Team Doctrine (Pre-commit Requirements)
 
