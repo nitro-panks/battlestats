@@ -211,8 +211,11 @@ The admin remains the one §6 item still unexercised; it is little used here.
   with autoscale off, that is a real saving — **but a PK change is a full table
   rewrite on a hot table.** Evaluate against `project_db_table_audit_2026-07-19`
   before going near it.
-- Raise the CI `npm audit` gate from `critical` to `high` when `sharp` 0.35.0 ships
-  stable (unrelated to Django; tracked in `ops-env-reference.md`).
+- ~~Raise the CI `npm audit` gate from `critical` to `high` when `sharp` 0.35.0 ships
+  stable.~~ **Done 2026-09-21**: `next` 16.2.12 → 16.3.5 pulled `sharp` 0.35.4 and
+  cleared two critical `next` RCE advisories (GHSA-p293-qw3h-jr36,
+  GHSA-2xp9-vwfh-vxw4) that had held CI red since 2026-09-09; prod-only audits to
+  zero and the gate sits at `high` in `.github/workflows/ci.yml`.
 
 ## 8. Related
 
