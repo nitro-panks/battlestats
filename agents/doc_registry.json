@@ -4418,6 +4418,67 @@
                 "90d-rollout-verified-and-stable"
             ]
         },
+        "agents/runbooks/runbook-db-capacity-remediation-2026-09-19.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db capacity remediation",
+                "database disk 79 percent",
+                "compaction keep regression",
+                "BATTLE_OBSERVATION_COMPACT_KEEP read by nothing",
+                "never autoscale the database",
+                "disk alerts already armed"
+            ],
+            "tags": [
+                "database",
+                "disk",
+                "capacity",
+                "battle-observation",
+                "compaction",
+                "retention",
+                "systemd-timer",
+                "env-authority",
+                "cost"
+            ],
+            "archive_on": [
+                "slope-re-measured-2026-10-04-and-stable"
+            ]
+        },
+        "agents/runbooks/runbook-db-table-shape-remediation-2026-09-20.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db table shape remediation",
+                "H-series remediation",
+                "pg_repack battleobservation",
+                "pickup pointer database work",
+                "prune battle history daily",
+                "which indexes are safe to drop",
+                "BattleEvent to PlayerDailyShipStats"
+            ],
+            "tags": [
+                "database",
+                "disk",
+                "pg_repack",
+                "indexes",
+                "idx_scan",
+                "retention",
+                "battle-event",
+                "player-daily-ship-stats",
+                "achievements",
+                "cost",
+                "pickup-pointer"
+            ],
+            "archive_on": [
+                "steps-5-through-9-done-or-declined"
+            ]
+        },
         "agents/runbooks/runbook-ops-alert-remediation-2026-08-28.md": {
             "kind": "runbook",
             "status": "active",

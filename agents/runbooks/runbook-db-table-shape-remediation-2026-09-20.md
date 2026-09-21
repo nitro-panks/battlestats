@@ -4,7 +4,7 @@ _Created: 2026-09-20_
 _Lifecycle: dated-active · Owner: platform_
 _Context: the product has reached its end state (90-day rolling window, 105-day retention, no further window moves). `agents/work-items/db-table-shape-audit-2026-09-20.md` (the H-series) tested the design assumption behind each of the seven largest tables against the measured shape of its data; five of six assumptions were false. This runbook is the execution plan those findings imply._
 _QA: every figure traces to the H-series work item or to a live check recorded here. Figures measured 2026-09-20._
-_Status 2026-09-20: **Steps 1-4 are done. The volume went from 78.57% to 59.47% in one day, with no feature change and no spend**, which retires the resize question. Step 2 truncate (v5.11.3), Step 1 daily prune (v5.11.4), Step 3 three index drops (v5.11.5), Step 4 `pg_repack` (24 → 11 GB). Steps 5-9 are structural, have no deadline, and each needs its own approval._
+_Status 2026-09-21: **Steps 1-4 are done and verified; the volume went 78.57% → 59.47% with no feature change and no spend.** Steps 5-9 are structural, undated, and each needs its own approval. **Resume from the "Pickup pointer" section below** — it holds the last measured state, the dated checks still owed, and what each remaining step needs._
 
 ## QA Notes
 
@@ -37,6 +37,115 @@ _Reviewed 2026-09-20 against `/home/august/code/battlestats/.claude/worktrees/db
 ### Open Questions
 1. ~~**Where does a `pg_repack` 1.5.2 client come from?**~~ **Answered 2026-09-20: built from source, tag `ver_1.5.2`, by operator decision.** Installed and verified; see Step 4's preconditions. Step 4 is no longer blocked on tooling, only on Steps 2 and 3.
 2. ~~**How does `0088` run?**~~ **Answered 2026-09-20: deployed as v5.11.3**, after a from-scratch pre-flight (Step 2). Step 3's migration is now `0089` and depends on `0088`.
+
+## Pickup pointer (session close 2026-09-21 ~05:00 UTC)
+
+**Read this section first when resuming.** Everything above it in the file is
+QA history; everything below is the plan with its per-step outcome boxes.
+
+### Where we are
+
+Steps 1-4 are done and verified in production. The volume went **78.57% →
+59.47%** on 2026-09-20 with no feature change and no spend; the resize question
+in `runbook-db-capacity-remediation-2026-09-19.md` Step 3 is retired. Live
+version is **5.11.5**. Nothing is mid-flight: no migration parked, no extension
+installed, no credentials left on the droplet.
+
+| Release | What |
+|---|---|
+| 5.11.1 | compaction `keep=1` actually reaches the command |
+| 5.11.2 | two dead PDSS indexes (`0087`); achievements table write stopped; `battles_json` prune armed |
+| 5.11.3 | `0088` truncate, 1.43 GB to the OS; `battles_json` prune timer given its measured bounds |
+| 5.11.4 | archive/prune timer daily at 07:00 UTC |
+| 5.11.5 | `0089`: three indexes dropped, two kept on `EXPLAIN` evidence |
+| (no release) | `pg_repack`, 24 → 11 GB |
+
+### Last measured state — Mon 2026-09-21 04:40 UTC, 8.5 h after the repack
+
+| | Value |
+|---|---|
+| `disk_used_percent` | **60.57%**, 33.1 GB free |
+| `pg_database_size` | 44.02 GB |
+| `warships_battleobservation` | 12.84 GB — growing ~0.14 GB/h, the normal intake between compactions |
+| its indexes | all four valid and ready; 0 dead tuples; no `repack` schema or triggers |
+| true DB-level errors since the swap | **0**, across all four Celery services and gunicorn |
+
+### Checks that are owed, in date order
+
+1. **Today after 12:34 UTC** — the daily compaction should pull
+   `warships_battleobservation` back toward ~11 GB. This is the first full
+   cycle on the repacked table; it establishes the real steady-state band
+   (expected ~11-13 GB). If it settles materially higher, the live set is larger
+   than the 10.7 GB measured before the repack, which changes nothing
+   structurally but should be written down.
+2. **Today 07:00 UTC** — first *scheduled* fire of the daily archive (the
+   2026-09-20 17:07 run was a `Persistent=true` catch-up). Expect both big tables
+   `skipped`, the observation tier deleting a small number of rows, and a run of
+   a few minutes.
+3. **2026-09-27** — first daily prune with real candidates. `BattleEvent` and
+   `PlayerDailyShipStats` must report **deleted** rows, not `skipped`, and the
+   unit must finish comfortably inside the hour. If a run fails mid-delete,
+   **move that day's archive directory aside before rerunning** (the export opens
+   its file `"wb"`; see Step 1).
+4. **~2026-10-04** — re-measure `pg_database_size` and read the growth slope
+   against the 264 MB/day post-fill projection in the capacity work-item. With
+   `keep=1` live and the two time-series tables capped, it should be far lower.
+5. **Next Sunday 05:00 UTC** — first *timer-driven* `battles_json` prune with its
+   new bounds. The 2026-09-20 run was manual; the unit itself is unexercised.
+
+### What is left, and what each needs
+
+None of Steps 5-9 has a deadline. **Each needs its own operator approval**, one
+lever at a time.
+
+| Step | Needs | Note for whoever picks it up |
+|---|---|---|
+| 5 — stop the achievements fetch | a product "yes" | Both the table and `achievements_json` have no reader. Saves a WG API call per player refresh, which is the scarce resource. Clearing the column is a separate one-off batched job |
+| 6 — readers off `BattleEvent`, then 105 → 35 d | approval + per-reader equivalence proofs | **Largest remaining win (~5 GB).** Order is load-bearing: repoint the two *fallbacks* (`data.py:7069, 7165`) before cutting retention, or a failed coverage gate serves 35 days under a 90-day label. Unlocks the held `battleevent_mode` index drop (174 MB) |
+| 7 — `toast_tuple_target = 256` on `warships_player` | measure on a copy first | One line, reversible. Do **not** touch `player_last_fetch_idx` |
+| 8 — slim `battles_json` | moderate code | ~1.9 GB, arrives gradually |
+| 9 — dead / write-only columns | migrations + four code sites for `ship_name` | Savings arrive over one 105-day window, no rewrite |
+
+### Three lessons this session paid for — apply them before acting on any number here
+
+1. **A lifetime `idx_scan` count is frequency, not value.** Three indexes were
+   nearly dropped on low counts and turned out to carry expensive, rare queries
+   (`player_last_fetch_idx`, `playerdailyshipstats_ship_id`, `battleevent_mode`).
+   Before dropping any index: `EXPLAIN` every reader on production, **and** check
+   the migration history for a prior drop-and-re-create.
+2. **A value that agrees everywhere can still be read by nothing.** The
+   compaction `keep` pin, the `battles_json` prune's arguments and the disk
+   alerts were each "known" from documents and each wrong in a different
+   direction. Query the running system.
+3. **Dry-run the real command.** `pg_repack --dry-run` caught a version-handshake
+   failure that came from the binary's *filename*.
+
+### Noticed in passing, not part of this plan
+
+- **`Failed ranked incremental refresh … Player matching query does not exist`**:
+  exactly **25 per run**, every run, at least since 2026-09-17 (125 / 250 / 175
+  / 175 per day). Predates everything in this runbook and is unrelated to it. A
+  fixed 25 looks like the same players missing every time — plausibly a realm
+  mismatch in that task's lookup. Small, but it is a standing defect that
+  nothing alerts on.
+- **Wargaming `504 SOURCE_NOT_AVAILABLE` bursts**, NA-side, 2026-09-20 17:00-21:00
+  and 2026-09-21 01:00-03:00 UTC (1,337 / 1,140 / 573 / 84 per hour, recovering).
+  Upstream, began before the repack, handled by the floor as designed. Expect the
+  11:30 UTC ops digest to mention NA if the crawl was affected.
+
+### How to re-measure quickly
+
+```bash
+# volume, from the droplet (the local sandbox blocks port 9273)
+TOKEN=$(grep -oP '^access-token:\s*\K\S+' ~/.config/doctl/config.yaml)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  https://api.digitalocean.com/v2/databases/metrics/credentials   # no database id in this route
+# then, on the droplet:  curl -u USER:PASS https://<db-host>:9273/metrics | grep disk_used_percent
+
+# the three timers this plan changed
+ssh root@battlestats.online 'systemctl list-timers --no-pager | grep -E "archive|compact|prune-battles"'
+ssh root@battlestats.online 'journalctl -u battlestats-archive-battle-history --since "2 days ago" -o cat | grep -E "skipped|deleted"'
+```
 
 ## Implementation status
 
