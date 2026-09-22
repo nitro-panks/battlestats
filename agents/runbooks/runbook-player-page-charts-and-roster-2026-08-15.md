@@ -133,6 +133,18 @@ colours on the WR value and the delta. The `W` and `L` glyphs themselves render
 at `0.75em` — they are unit labels, not data, so the counts carry the row's
 weight and the letters only disambiguate them.
 
+**The date carries a `UTC` unit label (2026-09-22, v5.11.7).** Rendered like the
+`W`/`L` glyphs (`0.75em`, muted, `data-testid="strip-readout-utc"`), with a
+translated tooltip (`battleHistory.strip.utcTitle`). The reason: the backend
+dates a battle by the poll that first detected it, `detected_at.date()` in UTC
+(`server/warships/incremental_battles.py`), so an NA evening session played after
+17:00 PT / 20:00 ET lands on the NEXT day's bar. A player who went 1-4 on the
+evening of the 21st and 2-0 on the 22nd sees `3W 4L` on the 22nd and reads it
+as a bug (reported by the operator's own account, 2026-09-22; prod events at
+03:58 UTC on the 22nd confirmed it). The label makes the day boundary explicit;
+the alternative, a realm-local rollup day, would mean rebucketing
+`PlayerDailyShipStats` and re-warming the strip, and was not taken.
+
 **What snaps and what does not.** Hover state is carried as a viewBox x, not a
 day index, so the rule tracks the pointer continuously (and survives a domain
 change for free — the coordinate space is identical at 30d and 60d). The dot is

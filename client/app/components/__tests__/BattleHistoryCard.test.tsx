@@ -294,9 +294,15 @@ describe('BattleHistoryCard', () => {
         // The row reports the hovered day, the overall (lifetime) win rate at the
         // end of it, and — only when the line actually moved — a signed delta.
         expect(readout()).toContain(utcDay(3));
+        // The date carries a "UTC" unit label: the backend buckets battles by
+        // UTC calendar date at detection time, so an NA evening session lands
+        // on the next day's bar. Without the label that reads as a bug.
         expect(readout()).toMatch(
-            /^\d{4}-\d{2}-\d{2}\d+\.\d{2}%(?:[+\u2212]\d+\.\d{2})?\d+W \d+L$/,
+            /^\d{4}-\d{2}-\d{2}UTC\d+\.\d{2}%(?:[+\u2212]\d+\.\d{2})?\d+W \d+L$/,
         );
+        const utcLabel = screen.getByTestId('strip-readout-utc');
+        expect(utcLabel.textContent).toBe('UTC');
+        expect(utcLabel.getAttribute('title')).toMatch(/UTC/);
         // ...and, right-justified, the day's own record. That day is 130 wins in
         // 250 battles, so the losses are derived, not read: 250 - 130 = 120.
         expect(screen.getByTestId('strip-readout-record').textContent).toBe('130W 120L');

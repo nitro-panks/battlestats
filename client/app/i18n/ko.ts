@@ -172,6 +172,7 @@ export const ko: Partial<Record<StringKey, string>> = {
     // 격침 비율 (our KDR card) is exactly the contrast pair wows-numbers itself
     // renders as two adjacent columns.
     'battleHistory.tile.fragsPerBattle': '평균 격침',
+    'battleHistory.strip.utcTitle': '날짜는 UTC 기준입니다. 전투는 처음 감지된 시점으로 기록되므로, 한국 시간 오전 9시 이전의 전투는 전날 날짜로 표시됩니다.',
 
     'common.battles': '전투 수',
     'common.avgDamage': '평균 데미지',

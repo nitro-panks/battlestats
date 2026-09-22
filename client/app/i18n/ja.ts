@@ -149,6 +149,7 @@ export const ja: Partial<Record<StringKey, string>> = {
     // wikiwiki.jp/nanjwows/指標 has the heading `### 平均撃沈数` (×2).
     // 撃沈 over 撃破 because it is the ship-specific verb.
     'battleHistory.tile.fragsPerBattle': '平均撃沈数',
+    'battleHistory.strip.utcTitle': '日付はUTC基準です。戦闘は最初に検出された時点で記録されるため、日本時間午前9時より前の戦闘は前日の日付に表示されます。',
 
     'common.battles': '戦闘数',
     'common.avgDamage': '平均ダメージ',

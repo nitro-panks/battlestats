@@ -99,6 +99,7 @@ export const en: Record<StringKey, string> = {
     // this tile has room for the unabbreviated word and shows it.
     'battleHistory.tile.avgDamage': 'Avg damage',
     'battleHistory.tile.fragsPerBattle': 'Frags/Battle',
+    'battleHistory.strip.utcTitle': 'Days are UTC calendar dates. Battles are dated when they are first detected, so an evening session in the Americas lands on the next day (after 5pm PT / 8pm ET).',
 
     // Composed at runtime; word order differs per language, so the whole
     // sentence is one template rather than concatenated fragments. {bucket}

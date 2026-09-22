@@ -610,7 +610,10 @@ const StripReadoutRow: React.FC<{
     wins: number | null;
     battles: number | null;
     live: boolean;
-}> = ({ date, overall, delta, wins, battles, live }) => (
+    /** Tooltip for the "UTC" unit label after the date, resolved by the host
+     *  so this row stays a plain render function. */
+    utcTitle: string;
+}> = ({ date, overall, delta, wins, battles, live, utcTitle }) => (
     <div
         data-testid="strip-readout"
         // Typeface and weight match the per-ship table's ship-name cell: the body
@@ -622,7 +625,23 @@ const StripReadoutRow: React.FC<{
     >
         {date != null && (
             <>
-                <span className="text-[var(--text-strong)]">{date}</span>
+                <span className="text-[var(--text-strong)]">
+                    {date}
+                    {/* The day is a UTC calendar date: the backend dates a
+                        battle by the poll that first detected it, in UTC, so
+                        an NA evening session lands on the NEXT day's bar
+                        (anything after 17:00 PT / 20:00 ET). Unlabelled, that
+                        reads as a bug. "UTC" is the same token in en/ko/ja, so
+                        only the tooltip is translated. Styled as a unit label
+                        like the W/L letters: 0.75em, muted, not data. */}
+                    <span
+                        data-testid="strip-readout-utc"
+                        className="ml-1 text-[0.75em] text-[var(--text-muted)]"
+                        title={utcTitle}
+                    >
+                        UTC
+                    </span>
+                </span>
                 {overall != null && (
                     <span style={{ color: wrColor(overall) }}>{overall.toFixed(2)}%</span>
                 )}
@@ -679,6 +698,7 @@ const InlineSparkline: React.FC<{
     // hovered bar's inner-halo clip (colons from useId aren't valid in a
     // url(#...) fragment, so strip them).
     const uid = React.useId().replace(/:/g, '');
+    const t = useT();
     const wrClipId = `sparkline-wr-${uid}`;
     const haloClipId = `sparkline-halo-${uid}`;
     const stripClipId = `sparkline-strip-${uid}`;
@@ -852,6 +872,7 @@ const InlineSparkline: React.FC<{
     return (
         <div>
             <StripReadoutRow
+                utcTitle={t('battleHistory.strip.utcTitle')}
                 date={visible.length > 0 ? visible[readIdx].date : null}
                 overall={visible.length > 0 ? wrSeries[readIdx] ?? null : null}
                 delta={

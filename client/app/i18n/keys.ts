@@ -69,6 +69,7 @@ export type StringKey =
     | 'battleHistory.tile.windowWr'
     | 'battleHistory.tile.avgDamage'
     | 'battleHistory.tile.fragsPerBattle'
+    | 'battleHistory.strip.utcTitle'
     // — landing —
     | 'landing.treemap.heading'
     | 'landing.treemap.ariaLabel'
