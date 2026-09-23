@@ -4511,36 +4511,6 @@
                 "long-cycle-exemption-removed"
             ]
         },
-        "agents/runbooks/runbook-eu-ranked-correlation-budget-2026-08-29.md": {
-            "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
-            "section": "operations",
-            "owner": "platform",
-            "aliases": [
-                "eu ranked correlation budget",
-                "warm_player_ranked_wr_battles_correlation_task soft limit",
-                "CORRELATION_METRIC_WARM_LOCK_TIMEOUT",
-                "_run_locked_task lock_timeout",
-                "correlation per-realm signal moved to the subtasks",
-                "zero-success rule misses a mostly-failing task"
-            ],
-            "tags": [
-                "ops-email",
-                "alerting",
-                "warmers",
-                "celery",
-                "soft-limit",
-                "locks",
-                "background-queue",
-                "detector-gap",
-                "gunicorn"
-            ],
-            "archive_on": [
-                "correlation-budget-resized-again",
-                "ranked-correlation-query-optimised"
-            ]
-        },
         "agents/runbooks/runbook-ship-standings-75d-spike-2026-09-03.md": {
             "kind": "runbook",
             "status": "active",
@@ -4657,6 +4627,68 @@
             "archive_on": [
                 "tier-extension-decision-shipped",
                 "ship-standings-feature-removed"
+            ]
+        },
+        "agents/runbooks/archive/runbook-eu-ranked-correlation-budget-2026-08-29.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "eu ranked correlation budget",
+                "warm_player_ranked_wr_battles_correlation_task soft limit",
+                "CORRELATION_METRIC_WARM_LOCK_TIMEOUT",
+                "_run_locked_task lock_timeout",
+                "correlation per-realm signal moved to the subtasks",
+                "zero-success rule misses a mostly-failing task"
+            ],
+            "tags": [
+                "ops-email",
+                "alerting",
+                "warmers",
+                "celery",
+                "soft-limit",
+                "locks",
+                "background-queue",
+                "detector-gap",
+                "gunicorn"
+            ],
+            "archive_on": [
+                "correlation-budget-resized-again",
+                "ranked-correlation-query-optimised"
+            ]
+        },
+        "agents/runbooks/runbook-ranked-correlation-materialized-record-2026-09-23.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "ranked correlation materialised record",
+                "Player.ranked_total_battles / ranked_win_rate",
+                "backfill_ranked_record",
+                "ranked_record_backfill_marker_key",
+                "eu ranked correlation soft limit 2026-09-23",
+                "warm_player_ranked_wr_battles_correlation_task reads columns not ranked_json"
+            ],
+            "tags": [
+                "ops-email",
+                "alerting",
+                "warmers",
+                "celery",
+                "soft-limit",
+                "background-queue",
+                "player-table",
+                "toast",
+                "materialised-column",
+                "backfill",
+                "migration-0090"
+            ],
+            "archive_on": [
+                "backfill-stamped-all-realms-and-verified",
+                "ranked-json-path-removed"
             ]
         }
     }

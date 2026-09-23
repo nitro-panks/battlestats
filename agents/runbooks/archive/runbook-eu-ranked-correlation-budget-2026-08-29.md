@@ -1,6 +1,6 @@
 # EU ranked correlation: the budget the fan-out exposed (2026-08-29)
 
-**Status:** shipped.
+**Status:** shipped; **archived 2026-09-23** — its follow-up fired (eu ranked landed above 1000s and was killed at 1080s on 09-23) and the query was replaced, not re-budgeted: `runbook-ranked-correlation-materialized-record-2026-09-23.md`.
 **Predecessors:** `runbook-ops-alert-remediation-2026-08-28.md` (the fan-out),
 `runbook-correlation-warm-budget-and-per-realm-alerting-2026-08-26.md` (the 780s
 sizing and the realm-scoped locks).

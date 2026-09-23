@@ -311,6 +311,7 @@ def _process_player_ranked_data(player, rank_info, realm: str):
         _get_ranked_seasons_metadata,
         _aggregate_ranked_seasons,
         _build_top_ranked_ship_names_by_season,
+        ranked_record_from_json,
     )
 
     ranked_rows = []
@@ -329,7 +330,11 @@ def _process_player_ranked_data(player, rank_info, realm: str):
 
     player.ranked_json = ranked_rows
     player.ranked_updated_at = datetime.now()
-    player.save(update_fields=['ranked_json', 'ranked_updated_at'])
+    player.ranked_total_battles, player.ranked_win_rate = ranked_record_from_json(
+        ranked_rows)
+    player.save(update_fields=[
+        'ranked_json', 'ranked_updated_at',
+        'ranked_total_battles', 'ranked_win_rate'])
     return ranked_rows
 
 

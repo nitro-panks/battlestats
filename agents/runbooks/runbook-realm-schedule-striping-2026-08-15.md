@@ -67,7 +67,7 @@ failure modes belong to their own runbooks — this is an index, not a summary.
   daily) with `base_minute=45`, so stride 480 and the fires land at **na 00:45,
   eu 08:45, asia 16:45 UTC**. Since 2026-08-28 the registered task is a
   *dispatcher*: one Beat fire per realm enqueues three per-metric warms.
-  `runbook-eu-ranked-correlation-budget-2026-08-29.md`,
+  `archive/runbook-eu-ranked-correlation-budget-2026-08-29.md`,
   `runbook-correlation-warm-budget-and-per-realm-alerting-2026-08-26.md`.
 
 ## Three non-obvious reads for anyone interpreting a striped task's output

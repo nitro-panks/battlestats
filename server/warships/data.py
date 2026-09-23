@@ -2682,6 +2682,11 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG = {
     'y_bin_width': 0.75,
 }
 PLAYER_RANKED_WR_BATTLES_CORRELATION_CACHE_VERSION = 'ranked_wr_battles:v6'
+# Set (durably, no TTL) by `backfill_ranked_record` once every ranked_json in a
+# realm has its materialised record. Until then the warm reads ranked_json as
+# before; a Redis eviction only degrades back to that slow path, never to a
+# short population.
+RANKED_RECORD_BACKFILL_MARKER_VERSION = 'v1'
 
 # Clan-battle analog of the ranked WR-vs-battles correlation. Population + player
 # point both come from PlayerExplorerSummary.clan_battle_total_battles /
@@ -2738,6 +2743,51 @@ def _player_correlation_cache_key(metric: str, realm: str = DEFAULT_REALM) -> st
 
 def _player_correlation_published_cache_key(metric: str, realm: str = DEFAULT_REALM) -> str:
     return f'{_player_correlation_cache_key(metric, realm=realm)}:published'
+
+
+def ranked_record_backfill_marker_key(realm: str = DEFAULT_REALM) -> str:
+    return realm_cache_key(
+        realm, f'players:ranked_record_backfilled:{RANKED_RECORD_BACKFILL_MARKER_VERSION}')
+
+
+def ranked_record_backfill_complete(realm: str = DEFAULT_REALM) -> bool:
+    return bool(cache.get(ranked_record_backfill_marker_key(realm=realm)))
+
+
+def _iter_ranked_records(realm: str, min_battles: int) -> Iterable[tuple[int, float]]:
+    """Yield (total ranked battles, win rate) for every visible player in the
+    realm at or above `min_battles`.
+
+    Materialised path (after `backfill_ranked_record` has stamped the realm):
+    two narrow columns, no JSON, no TOAST. Legacy path: every ranked_json
+    payload, which on eu is 237k TOAST reads and is what outgrew the 1080s
+    soft limit (runbook-ranked-correlation-materialized-record-2026-09-23).
+    """
+    if ranked_record_backfill_complete(realm=realm):
+        rows = Player.objects.filter(
+            realm=realm,
+            is_hidden=False,
+            ranked_total_battles__gte=min_battles,
+            ranked_win_rate__isnull=False,
+        ).values_list('ranked_total_battles', 'ranked_win_rate')
+        logger.info(
+            "Ranked correlation realm=%s source=ranked_record", realm)
+        for total_battles, win_rate in rows.iterator(chunk_size=2000):
+            yield int(total_battles), float(win_rate)
+        return
+
+    logger.info(
+        "Ranked correlation realm=%s source=ranked_json (backfill marker absent)", realm)
+    rows = Player.objects.filter(
+        realm=realm,
+        is_hidden=False,
+        ranked_json__isnull=False,
+    ).values_list('ranked_json', flat=True)
+    for ranked_rows in rows.iterator(chunk_size=2000):
+        total_battles, win_rate = _calculate_ranked_record(ranked_rows)
+        if total_battles < min_battles or win_rate is None:
+            continue
+        yield total_battles, win_rate
 
 
 def _build_doubling_bin_edges(max_value: int, seed_edges: list[int]) -> list[int]:
@@ -3362,17 +3412,8 @@ def _build_player_ranked_wr_battles_population_correlation_payload(realm: str = 
     max_battles = config['min_battles']
 
     with transaction.atomic(), _elevated_work_mem():
-        rows = Player.objects.filter(
-            realm=realm,
-            is_hidden=False,
-            ranked_json__isnull=False,
-        ).values_list('ranked_json', flat=True)
-
-        for ranked_rows in rows.iterator(chunk_size=2000):
-            total_battles, win_rate = _calculate_ranked_record(ranked_rows)
-            if total_battles < config['min_battles'] or win_rate is None:
-                continue
-
+        for total_battles, win_rate in _iter_ranked_records(
+                realm, config['min_battles']):
             records.append((total_battles, win_rate))
             max_battles = max(max_battles, total_battles)
 
@@ -4627,6 +4668,23 @@ def ranked_last_season_from_json(ranked_json) -> Optional[int]:
     return max(seasons) if seasons else None
 
 
+def ranked_record_from_json(ranked_json) -> tuple[Optional[int], Optional[float]]:
+    """(total ranked battles, ranked win rate %) as stored on Player, or
+    (None, None) when there is no ranked_json at all.
+
+    The materialised form of `_calculate_ranked_record`: every ranked_json
+    writer (update_ranked_data, the enrichment command, the hidden-wipe path)
+    and the `backfill_ranked_record` command derive the two columns through
+    this one function so the correlation warm can read them instead of
+    detoasting every payload. `[]` (fetched, no ranked play) is (0, None) so
+    a backfilled row is distinguishable from a not-yet-backfilled NULL.
+    """
+    if ranked_json is None:
+        return None, None
+    total_battles, win_rate = _calculate_ranked_record(ranked_json)
+    return int(total_battles), win_rate
+
+
 def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
     """Fetch ranked data from WG API, aggregate, and cache on Player model."""
     player = Player.objects.get(player_id=player_id, realm=realm)
@@ -4643,12 +4701,14 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
         player.ranked_json = []
         player.ranked_updated_at = datetime.now()
         player.ranked_last_season_id = None
+        player.ranked_total_battles, player.ranked_win_rate = ranked_record_from_json([])
         # Scoped save: this task only owns the ranked_* columns. A bare save() would
         # write back EVERY field on the snapshot loaded at the top — including a now-stale
         # battles_updated_at — clobbering a concurrent update_battle_data now()-write and
         # re-arming the "Updating…" pill (runbook-player-refresh-pill-clobber-2026-06-21).
         player.save(update_fields=[
-            'ranked_json', 'ranked_updated_at', 'ranked_last_season_id'])
+            'ranked_json', 'ranked_updated_at', 'ranked_last_season_id',
+            'ranked_total_battles', 'ranked_win_rate'])
         return
 
     requested_season_ids = sorted(
@@ -4699,11 +4759,13 @@ def update_ranked_data(player_id, realm: str = DEFAULT_REALM) -> None:
     # observation floor's random-first routing (heavy ranked sweep only for
     # current-season players). NULL when they have no ranked battles.
     player.ranked_last_season_id = ranked_last_season_from_json(result)
+    player.ranked_total_battles, player.ranked_win_rate = ranked_record_from_json(result)
     # Scoped save — see the no-rank_info branch above: a bare save() races a concurrent
     # update_battle_data now()-write on battles_updated_at and re-arms the live-refresh
     # pill (runbook-player-refresh-pill-clobber-2026-06-21).
     player.save(update_fields=[
-        'ranked_json', 'ranked_updated_at', 'ranked_last_season_id'])
+        'ranked_json', 'ranked_updated_at', 'ranked_last_season_id',
+        'ranked_total_battles', 'ranked_win_rate'])
     refresh_player_explorer_summary(player, ranked_rows=result)
     logging.info(
         f'Updated ranked data for {player.name}: {len(result)} seasons')
@@ -5284,6 +5346,8 @@ def update_player_data(player: Player, force_refresh: bool = False, realm: str |
         player.randoms_updated_at = None
         player.ranked_json = None
         player.ranked_updated_at = None
+        player.ranked_total_battles = None
+        player.ranked_win_rate = None
         player.efficiency_json = None
         player.efficiency_updated_at = None
         player.verdict = None

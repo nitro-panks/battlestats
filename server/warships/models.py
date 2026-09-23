@@ -70,6 +70,16 @@ class Player(models.Model):
     # self-heals when a player (re)starts the current ranked season. No index:
     # the routing query is already bounded by player_id__in=<candidates>.
     ranked_last_season_id = models.IntegerField(null=True, blank=True)
+    # The two numbers the ranked-correlation heatmap needs per player, derived
+    # from ranked_json by data.ranked_record_from_json at every ranked_json
+    # write (update_ranked_data, the enrichment command, the hidden-wipe path).
+    # Materialised 2026-09-23 because the population warm was reading every
+    # ranked_json payload through TOAST (eu: 237k rows, ~0.6 ms of random I/O
+    # each) and grew from 505s to past its 1080s soft limit in five days. NULL
+    # win rate = no ranked battles; NULL total = not yet backfilled
+    # (backfill_ranked_record). No index: the warm is a narrow realm scan.
+    ranked_total_battles = models.IntegerField(null=True, blank=True)
+    ranked_win_rate = models.FloatField(null=True, blank=True)
 
     efficiency_json = models.JSONField(null=True, blank=True)
     efficiency_updated_at = models.DateTimeField(null=True, blank=True)
