@@ -333,6 +333,14 @@ succeeds. It cannot distinguish "failed" from "never dispatched" — both look
 like zero successes. That is acceptable, and arguably correct: a striped task
 that stopped being dispatched for one realm is also worth an alert.
 
+**Enrolled 2026-09-26: `snapshot_ship_top_players_task`.** The EU run takes
+279-502s against a 540s soft limit (NA/asia ~60s) and overran on 2026-09-24;
+NA and asia successes hid it on the task-name axis. It now logs
+`Finished snapshot_ship_top_players_task realm=<r>` on a completed run only.
+Timing caveat: the asia stripe fires 10:30 UTC and the writer at 11:00, so an
+asia run delayed more than ~30 min by queue contention reads as a zero for that
+realm on that morning.
+
 ## Implementation plan
 
 Ordered smallest-risk first; each step independently shippable and verifiable.

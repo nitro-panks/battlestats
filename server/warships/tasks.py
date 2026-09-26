@@ -1528,6 +1528,9 @@ def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
     # means a lock-skip (the disabled path already returned above) — nothing was
     # rewritten, so skip.
     if isinstance(result, dict) and result.get("status") == "completed":
+        # The ops digest's per-realm success axis: without it an EU-only nightly
+        # failure reads green, because NA and asia satisfy the task-name rule.
+        logger.info("Finished snapshot_ship_top_players_task realm=%s", realm)
         queue_realm_top_ships_warm(realm)
         # The damage-treemap baselines are day-keyed and rotated cold at UTC
         # midnight; this snapshot (02:00+ UTC) is the first post-rotation

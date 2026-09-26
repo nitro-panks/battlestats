@@ -194,6 +194,34 @@ class SnapshotChainsWarmerTests(TestCase):
         mock_warm.assert_not_called()
 
     @patch("warships.tasks.queue_realm_top_ships_warm")
+    @patch("warships.data.compute_ship_top_player_snapshot")
+    @patch.dict("os.environ", {"SHIP_BADGE_SNAPSHOT_ENABLED": "1"})
+    def test_completed_run_emits_per_realm_success_line(self, mock_compute, _warm):
+        """`Finished <task> realm=<r>` is the ops digest's per-realm success
+        axis (`snapshot_service_health.sh` greps exactly that string). Without
+        it an EU-only nightly failure reads green, because NA and asia satisfy
+        the task-name rule; the EU run overran its soft limit on 2026-09-24."""
+        from warships.tasks import snapshot_ship_top_players_task
+        mock_compute.return_value = {"status": "completed", "realm": "eu"}
+        with self.assertLogs("warships.tasks", level="INFO") as logs:
+            snapshot_ship_top_players_task.run(realm="eu")
+        self.assertIn(
+            "Finished snapshot_ship_top_players_task realm=eu",
+            "\n".join(logs.output))
+
+    @patch("warships.tasks.queue_realm_top_ships_warm")
+    @patch("warships.data.compute_ship_top_player_snapshot")
+    @patch.dict("os.environ", {"SHIP_BADGE_SNAPSHOT_ENABLED": "1"})
+    def test_lock_skip_emits_no_success_line(self, mock_compute, _warm):
+        """A lock-skip did no work, so it must not count as the realm's success."""
+        from warships.tasks import snapshot_ship_top_players_task
+        mock_compute.return_value = {"status": "skipped", "reason": "already-running"}
+        with self.assertLogs("warships.tasks", level="INFO") as logs:
+            snapshot_ship_top_players_task.run(realm="eu")
+        self.assertNotIn("Finished snapshot_ship_top_players_task",
+                         "\n".join(logs.output))
+
+    @patch("warships.tasks.queue_realm_top_ships_warm")
     @patch.dict("os.environ", {"SHIP_BADGE_SNAPSHOT_ENABLED": "0"})
     def test_no_warm_when_disabled(self, mock_warm):
         from warships.tasks import snapshot_ship_top_players_task
