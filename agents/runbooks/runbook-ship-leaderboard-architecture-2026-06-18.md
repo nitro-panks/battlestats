@@ -40,7 +40,8 @@ snapshot task ──> compute (BattleEvent aggregate + shrinkage + z-score)
   540s `TASK_OPTS` soft limit; ~275s of it is 369k random `warships_player`
   pkey lookups through a Nested Loop, because the DB-wide `random_page_cost=1`
   prices them as sequential. `SET LOCAL enable_nestloop = off` gave a Hash Join
-  and 65.5s for the same 187,730 rows (proposed, not applied). Moving the read
+  and 65.5s for the same 187,730 rows; **applied 2026-09-26 in v5.11.10** as
+  `data._prefer_hash_join()` around the aggregate only (never DB-wide). Moving the read
   to `PlayerDailyShipStats` was measured and rejected: identical rows, no
   saving (14.2M vs 15.2M in-window rows). Delegates to
   `data.compute_ship_top_player_snapshot()`; on success enqueues

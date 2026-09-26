@@ -48,6 +48,28 @@ def _elevated_work_mem():
 
 
 @contextmanager
+def _prefer_hash_join():
+    """Forbid Nested Loop joins for the rest of the current transaction.
+
+    Production runs `random_page_cost = 1`, so the planner prices a random
+    `warships_player` pkey probe like a sequential page. For a realm-filtered
+    aggregate over BattleEvent that makes a Nested Loop into Player look cheap
+    when it is not: measured 2026-09-26 on the eu ship snapshot, 369,350 probes
+    at 0.68 ms each were ~275s of a 322s query. With nested loops off the same
+    query took a Hash Join over a Player seq scan and ran in 65.5s, identical
+    rows. Must be used INSIDE a `transaction.atomic()` (`SET LOCAL`). No-op off
+    PostgreSQL so the sqlite test harness is unaffected.
+    """
+    if connection.vendor != 'postgresql':
+        yield
+        return
+
+    with connection.cursor() as cursor:
+        cursor.execute("SET LOCAL enable_nestloop = off")
+    yield
+
+
+@contextmanager
 def _statement_timeout(timeout_ms: int):
     """Bound a heavy analytical statement so it can never outlive its caller.
 
@@ -6244,7 +6266,7 @@ def compute_ship_top_player_snapshot(realm: str = DEFAULT_REALM, *,
     # per-pool sort stays in memory (default work_mem spills it to disk — see the
     # prod sizing in runbook-ship-badges-rolling-2026-06-14.md). SET LOCAL needs a
     # transaction, hence the atomic wrapper.
-    with transaction.atomic(), _elevated_work_mem():
+    with transaction.atomic(), _elevated_work_mem(), _prefer_hash_join():
         rows = list(agg)
 
     by_ship: dict = {}
