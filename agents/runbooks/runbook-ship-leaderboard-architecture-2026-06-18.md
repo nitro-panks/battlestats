@@ -30,10 +30,19 @@ snapshot task ──> compute (BattleEvent aggregate + shrinkage + z-score)
 
 ## 1. Precompute — the source of truth
 
-- **Task:** `snapshot_ship_top_players_task` — `server/warships/tasks.py:1215`.
-  Runs **per realm, twice daily** (every 12h: each realm fires at `realm_hour`
-  and `realm_hour+12`, striped via `REALM_INTERVAL_OFFSETS*4` in
-  `signals.py:243`), gated by `SHIP_BADGE_SNAPSHOT_ENABLED`. Delegates to
+- **Task:** `snapshot_ship_top_players_task` — `server/warships/tasks.py:1495`.
+  Runs **per realm, once daily** on a striped crontab (`signals.py`
+  `ship-top-player-snapshot-<realm>`; observed in the journal 2026-09-20..26 at
+  na 02:30, eu 06:35, asia 10:30 UTC), gated by `SHIP_BADGE_SNAPSHOT_ENABLED`.
+  A completed run logs `Finished snapshot_ship_top_players_task realm=<r>`,
+  which puts it on the ops digest's per-realm success axis (2026-09-26).
+  **Cost, measured 2026-09-26 on prod (EXPLAIN ANALYZE, eu):** 322s against the
+  540s `TASK_OPTS` soft limit; ~275s of it is 369k random `warships_player`
+  pkey lookups through a Nested Loop, because the DB-wide `random_page_cost=1`
+  prices them as sequential. `SET LOCAL enable_nestloop = off` gave a Hash Join
+  and 65.5s for the same 187,730 rows (proposed, not applied). Moving the read
+  to `PlayerDailyShipStats` was measured and rejected: identical rows, no
+  saving (14.2M vs 15.2M in-window rows). Delegates to
   `data.compute_ship_top_player_snapshot()`; on success enqueues
   `materialize_landing_player_best_snapshots_task` (`tasks.py:1579`, called at
   `tasks.py:1250`) to refresh landing caches.
@@ -42,7 +51,7 @@ snapshot task ──> compute (BattleEvent aggregate + shrinkage + z-score)
      window (default **30**, `data.py:6015`) — filtered `mode='random'`,
      `player__is_hidden=False`, realm, window; grouped by `(ship_id, player_id)`;
      sums battles/wins/damage/frags/survived. Scope = `SHIP_BADGE_TIERS`
-     (**prod = 8,9,10; local default = 10** — see the local-default memory).
+     (**prod = 8,9,10,11, read from the live env on the droplet 2026-09-26; local default = 10** — see the local-default memory).
   2. **Empirical-Bayes shrinkage** of each metric toward a prior
      (`SHIP_BADGE_PRIOR_WR=0.5`, `SHIP_BADGE_PRIOR_BATTLES=50`) so short hot
      streaks regress and high-volume records stay near true rate.
