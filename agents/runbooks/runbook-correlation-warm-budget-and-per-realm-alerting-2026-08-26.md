@@ -337,9 +337,11 @@ that stopped being dispatched for one realm is also worth an alert.
 279-502s against a 540s soft limit (NA/asia ~60s) and overran on 2026-09-24;
 NA and asia successes hid it on the task-name axis. It now logs
 `Finished snapshot_ship_top_players_task realm=<r>` on a completed run only.
-Timing caveat: the asia stripe fires 10:30 UTC and the writer at 11:00, so an
-asia run delayed more than ~30 min by queue contention reads as a zero for that
-realm on that morning.
+Timing margin: the asia stripe fires 10:30 UTC and the writer at 11:00. Asia
+finished between 10:30:58 and 10:31:33 on all seven days to 2026-09-25, so the
+margin is ~29 min against ~1 min of observed spread. **Deploy this after an
+11:00 writer run**, or the first window holds only some realms' new-code runs
+and trips a false `celery_task_realm_failing` for the rest.
 
 ## Implementation plan
 
