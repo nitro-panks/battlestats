@@ -85,6 +85,25 @@ def _max_consecutive_chunk_failures() -> int:
         return 10
 
 
+def _chunk_failure_backoff_base() -> float:
+    """Seconds slept after the first unproductive chunk; doubles per consecutive
+    failure up to CHUNK_FAILURE_BACKOFF_CAP_S. 0 disables.
+
+    Without it the guard measured calls, not time: on 2026-09-28 WG answered ten
+    NA chunks with an instant 504 SOURCE_NOT_AVAILABLE inside 0.13s, and the
+    whole 30,000-row sweep aborted on a blip shorter than one healthy chunk. At
+    base 1s the default threshold of 10 now needs ~2.5 min of sustained failure
+    (1+2+4+8+16+30x4 = 151s), while an isolated blip costs a second or two.
+    """
+    try:
+        return max(0.0, float(os.getenv("RECAPTURE_CHUNK_FAILURE_BACKOFF_S", "1")))
+    except ValueError:
+        return 1.0
+
+
+CHUNK_FAILURE_BACKOFF_CAP_S = 30.0
+
+
 class Command(BaseCommand):
     help = ("Detect returning lapsed players via bulk account/info and (with "
             "--apply) promote them back into the active_7d floor scope, stamping "
@@ -220,6 +239,7 @@ class Command(BaseCommand):
         abort_reason = None
         consecutive_chunk_failures = 0
         max_consecutive_chunk_failures = _max_consecutive_chunk_failures()
+        backoff_base = _chunk_failure_backoff_base()
 
         def note_chunk_failure(reason):
             """Count an unproductive chunk; True when the pass must abort."""
@@ -238,6 +258,11 @@ class Command(BaseCommand):
                     "cursor and are retried on the next run.",
                     realm, consecutive_chunk_failures, reason)
                 return True
+            # Space the next attempt out so the streak measures an outage's
+            # duration rather than how fast WG can return an error.
+            if backoff_base:
+                time.sleep(min(CHUNK_FAILURE_BACKOFF_CAP_S,
+                               backoff_base * 2 ** (consecutive_chunk_failures - 1)))
             return False
 
         truncated = False

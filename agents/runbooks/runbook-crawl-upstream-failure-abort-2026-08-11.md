@@ -95,6 +95,14 @@ Deliberate. After a clean abort the task's `finally` clears the lock and heartbe
 - **`fetch_players_bulk` is the real unguarded sibling.** It is the only crawl call on a *different* endpoint (`account/info/`, vs `clans/info/` for both `fetch_clan_info` and `fetch_member_ids` — so an outage of the clan endpoint trips the new guard on the first call and never reaches the second). It is also where **100% of the yield comes from**: if it fails wholesale, `player_map` is empty, `clans_processed += 1` still runs, and the pass completes with near-zero `players_saved` — exactly the false-complete just fixed, caught again only by `crawl_low_classified`'s magnitude. Guarding it needs a distinct signal, since an empty `player_map` is legitimate for a clan of hidden accounts.
 - ~~**Consider raising `crawl_classified_min`.**~~ **DONE 2026-08-11.** The global 150,000 floor went per realm (na 250,000 / eu 430,000 / asia 235,000, ~91% of each realm's observed steady-state minimum, via a new `thr_realm` resolver with `OPS_ALERT_CRAWL_CLASSIFIED_MIN_<REALM>` overrides). Detection improved from a 45–68% coverage loss to ~9%. The backtest surfaced a **second** partial pass the old floor had absorbed silently — eu 2026-07-17, 336,000 of ~473k — which `crawl_bucket_mismatch` also could not see, because its buckets summed to 336,000 exactly. Derivation, per-realm bands and full 42-snapshot backtest: `runbook-ops-email-exception-only-2026-08-09.md`.
 
+## 2026-09-29: a failed clans/list page ended the list
+
+The guard above covers `clans/info/`, not pagination. `crawl_clan_ids` treated a failed `clans/list/` page as end-of-list: at 09:32Z one WG 504 on NA page 79 logged `Empty page 79, stopping pagination`, the walk covered **7,800 of ~36,120** clans, and the pass returned normally, emitting a crawl-yield snapshot of 177,165 classified (vs a steady ~276k) and clearing the resume marker. That tripped `crawl_low_classified:na`.
+
+Fix: `fetch_clan_list_page` returns `None` on a failed fetch, distinct from an ok page with no rows. `_fetch_clan_list_page_with_retry` retries 4 times with 5/10/20s backoff (touching the heartbeat), then raises `CrawlUpstreamFailure`, so the task keeps the marker and skips the snapshot. An ok-but-empty page still ends pagination quietly (the list can shrink mid-walk). Page 1 now fails through the same exception rather than a bare `RuntimeError`. Tests: `ClanListPaginationFailureTests`.
+
+**Consequence of the 09-29 pass:** the truncated pass is closed, so `crawl_low_classified:na` keeps reading the 177,165 snapshot until the next full NA pass finishes (~3 days at the observed cadence).
+
 ## Related
 
 - `agents/runbooks/runbook-crawls-queue-depth-alarm-2026-06-12.md` — the pending-flag dedup and watchdog topology the no-retry decision rests on

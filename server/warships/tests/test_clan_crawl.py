@@ -591,3 +591,51 @@ class BenchmarkCrawlProductivityTests(TestCase):
         self.assertEqual(data["totals"]["realms_crawling"], 1)
         # na has no lock set → not crawling
         self.assertFalse(data["realms"]["na"]["liveness"]["crawl_lock_held"])
+
+
+class ClanListPaginationFailureTests(TestCase):
+    """2026-09-29: one WG 504 on NA clans/list page 79 read as end-of-list, so the
+    pass walked 7,800 of ~36,100 clans and closed as complete."""
+
+    def _crawl(self, pages):
+        """`pages` maps page -> list of (batch, total_pages) results, in order."""
+        from warships.clan_crawl import crawl_clan_ids
+        calls = {p: list(results) for p, results in pages.items()}
+
+        def fake(page, realm="na", request_delay=0):
+            return calls[page].pop(0)
+
+        with patch("warships.clan_crawl.fetch_clan_list_page", side_effect=fake), \
+                patch("warships.clan_crawl.time.sleep") as mock_sleep:
+            return crawl_clan_ids(realm="na", request_delay=0), mock_sleep
+
+    def test_transient_page_failure_is_retried_and_the_walk_continues(self):
+        stubs, mock_sleep = self._crawl({
+            1: [([{"clan_id": 1}], 3)],
+            2: [(None, 0), ([{"clan_id": 2}], 3)],
+            3: [([{"clan_id": 3}], 3)],
+        })
+        self.assertEqual([s["clan_id"] for s in stubs], [1, 2, 3])
+        self.assertEqual(mock_sleep.call_count, 1)
+
+    def test_persistent_page_failure_aborts_instead_of_truncating(self):
+        from warships.clan_crawl import CLAN_LIST_PAGE_ATTEMPTS, CrawlUpstreamFailure
+        with self.assertRaises(CrawlUpstreamFailure):
+            self._crawl({
+                1: [([{"clan_id": 1}], 3)],
+                2: [(None, 0)] * CLAN_LIST_PAGE_ATTEMPTS,
+            })
+
+    def test_first_page_failure_aborts_through_the_same_path(self):
+        from warships.clan_crawl import CLAN_LIST_PAGE_ATTEMPTS, CrawlUpstreamFailure
+        with self.assertRaises(CrawlUpstreamFailure):
+            self._crawl({1: [(None, 0)] * CLAN_LIST_PAGE_ATTEMPTS})
+
+    def test_ok_but_empty_page_still_ends_pagination(self):
+        # The list can shrink under the walk; an ok response with no rows is the end.
+        stubs, mock_sleep = self._crawl({
+            1: [([{"clan_id": 1}], 3)],
+            2: [([], 3)],
+        })
+        self.assertEqual([s["clan_id"] for s in stubs], [1])
+        mock_sleep.assert_not_called()

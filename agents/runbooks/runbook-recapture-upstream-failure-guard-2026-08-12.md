@@ -199,6 +199,12 @@ WG calls spent against the dead endpoint drop from **300 to 10**. This is the ch
 - **The crawl's `fetch_players_bulk` guard** stays open — see `runbook-crawl-upstream-failure-abort-2026-08-11.md`.
 - **DNS recurrence.** Two events in three days, uncharacterized. Being watched, not fixed. If it becomes frequent, characterize the negative answer from outside the droplet before changing resolver config.
 
+## 2026-09-29: the guard counted calls, not time
+
+NA aborted on 09-28 and 09-29 (`recapture_aborted:na`, scanned 3,500 and 6,500 of 30,000). The 09-28 journal shows all ten failing chunks inside **0.13s**: WG returned `504 SOURCE_NOT_AVAILABLE` instantly, and the loop fired the next chunk immediately, so a sub-second blip met a threshold that was meant to describe an outage. The same 504s appeared across the floor, hydration and crawl units in short bursts through 09-28/29 while direct probes between bursts were healthy: WG-side flakiness, not a poison chunk (the two days aborted at different offsets, and stamped rows rotated out between them).
+
+Fix: `note_chunk_failure` now sleeps `RECAPTURE_CHUNK_FAILURE_BACKOFF_S * 2^(n-1)` (default 1s, cap 30s) before the next chunk, so ten failures span ~151s of real time. Tests: `test_failed_chunks_back_off_so_a_blip_cannot_abort`, `test_backoff_is_capped`.
+
 ## Related
 
 - `agents/runbooks/runbook-crawl-upstream-failure-abort-2026-08-11.md` — the sibling guard this mirrors, and the follow-up this partly closes

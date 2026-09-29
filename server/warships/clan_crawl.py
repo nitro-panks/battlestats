@@ -245,7 +245,9 @@ def _api_get(endpoint: str, params: Dict, realm: str = DEFAULT_REALM, request_de
     return body
 
 
-def fetch_clan_list_page(page: int, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> tuple[List[Dict], int]:
+def fetch_clan_list_page(page: int, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> tuple[Optional[List[Dict]], int]:
+    """One `clans/list/` page. The batch is None when the fetch failed, which is
+    distinct from an ok response carrying no rows."""
     body = _api_get(
         "clans/list/",
         {
@@ -257,7 +259,7 @@ def fetch_clan_list_page(page: int, realm: str = DEFAULT_REALM, request_delay: f
         request_delay=request_delay,
     )
     if body is None:
-        return [], 0
+        return None, 0
 
     total = body.get("meta", {}).get("total", 0)
     total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
@@ -411,18 +413,45 @@ def save_player(player_data: Dict, clan: Clan, realm: str = DEFAULT_REALM, core_
         created, old_lbd, player.last_battle_date, cutoff)
 
 
+CLAN_LIST_PAGE_ATTEMPTS = 4
+CLAN_LIST_RETRY_BACKOFF_S = 5.0
+
+
+def _fetch_clan_list_page_with_retry(page: int, realm: str, request_delay: float,
+                                     heartbeat_callback: Optional[Callable[[], None]] = None,
+                                     ) -> tuple[List[Dict], int]:
+    """Fetch a `clans/list/` page, retrying a failed fetch with backoff.
+
+    A page that still fails raises CrawlUpstreamFailure. Before this a failed page
+    read as the end of the list: on 2026-09-29 one WG 504 on NA page 79 cut the
+    walk to 7,800 of ~36,100 clans, and the pass then closed as complete, wrote a
+    yield snapshot 36% low, and cleared its resume marker.
+    """
+    for attempt in range(1, CLAN_LIST_PAGE_ATTEMPTS + 1):
+        batch, total_pages = fetch_clan_list_page(
+            page, realm=realm, request_delay=request_delay)
+        if batch is not None:
+            return batch, total_pages
+        if attempt < CLAN_LIST_PAGE_ATTEMPTS:
+            log.warning("clans/list/ page %d failed (realm=%s, attempt %d/%d); retrying",
+                        page, realm, attempt, CLAN_LIST_PAGE_ATTEMPTS)
+            _touch_crawl_heartbeat(heartbeat_callback)
+            time.sleep(CLAN_LIST_RETRY_BACKOFF_S * 2 ** (attempt - 1))
+    log.error("clans/list/ page %d failed %d times (realm=%s); aborting the pass",
+              page, CLAN_LIST_PAGE_ATTEMPTS, realm)
+    raise CrawlUpstreamFailure(_crawl_summary(0, 0, 0, 0, {}),
+                               consecutive_failures=CLAN_LIST_PAGE_ATTEMPTS)
+
+
 def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, request_delay: float = 0.25) -> List[Dict]:
     all_clans: List[Dict] = []
     page = 1
     _touch_crawl_heartbeat(heartbeat_callback)
 
-    first_batch, total_pages = fetch_clan_list_page(
-        page,
-        realm=realm,
-        request_delay=request_delay,
-    )
+    first_batch, total_pages = _fetch_clan_list_page_with_retry(
+        page, realm, request_delay, heartbeat_callback)
     if not first_batch:
-        log.error("Failed to fetch first page of clans/list/")
+        log.error("First page of clans/list/ came back empty")
         return []
 
     all_clans.extend(first_batch)
@@ -433,12 +462,11 @@ def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Cal
         _touch_crawl_heartbeat(heartbeat_callback)
         if limit and len(all_clans) >= limit:
             break
-        batch, _ = fetch_clan_list_page(
-            page,
-            realm=realm,
-            request_delay=request_delay,
-        )
+        batch, _ = _fetch_clan_list_page_with_retry(
+            page, realm, request_delay, heartbeat_callback)
         if not batch:
+            # An ok response with no rows: the list shrank under the walk (clans
+            # disband mid-pass), so this really is the end.
             log.warning("Empty page %d, stopping pagination", page)
             break
         all_clans.extend(batch)

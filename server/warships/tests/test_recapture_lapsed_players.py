@@ -421,7 +421,8 @@ class RecaptureUpstreamFailureAbortTests(TestCase):
 
     def _run(self, tmpdir, side, batch=10, env=None, fallback=None):
         """Run a full apply pass against `side`, returning (outcome, snapshot)."""
-        stack_env = {"RECAPTURE_MAX_CONSECUTIVE_CHUNK_FAILURES": "3"}
+        stack_env = {"RECAPTURE_MAX_CONSECUTIVE_CHUNK_FAILURES": "3",
+                     "RECAPTURE_CHUNK_FAILURE_BACKOFF_S": "0"}
         stack_env.update(env or {})
         with patch.dict("os.environ", stack_env):
             with patch("warships.api.players._bulk_fetch_account_info",
@@ -534,6 +535,44 @@ class RecaptureUpstreamFailureAbortTests(TestCase):
         self.assertFalse(snap["aborted"])
         self.assertEqual(snap["no_data"], 2)
         self.assertEqual(snap["cursor_stamped"], 20, "no_data rows still rotate")
+
+    def test_failed_chunks_back_off_so_a_blip_cannot_abort(self):
+        """2026-09-28: ten instant 504s inside 0.13s aborted a whole NA sweep.
+
+        Each unproductive chunk short of the threshold now sleeps an exponential
+        backoff, so the streak spans real time; the aborting chunk does not sleep.
+        """
+        import tempfile
+        self._mk_band(100)
+
+        def side(ids, realm):
+            return (None, "SOURCE_NOT_AVAILABLE")
+
+        cmd = "warships.management.commands.recapture_lapsed_players"
+        with tempfile.TemporaryDirectory() as d:
+            with patch(f"{cmd}.time.sleep") as mock_sleep:
+                outcome, snap = self._run(
+                    d, side, env={"RECAPTURE_CHUNK_FAILURE_BACKOFF_S": "2"})
+
+        self.assertEqual(outcome, "aborted")
+        self.assertEqual([c.args[0] for c in mock_sleep.call_args_list], [2, 4])
+
+    def test_backoff_is_capped(self):
+        import tempfile
+        self._mk_band(100)
+
+        def side(ids, realm):
+            return (None, "SOURCE_NOT_AVAILABLE")
+
+        cmd = "warships.management.commands.recapture_lapsed_players"
+        with tempfile.TemporaryDirectory() as d:
+            with patch(f"{cmd}.time.sleep") as mock_sleep:
+                self._run(d, side, env={
+                    "RECAPTURE_CHUNK_FAILURE_BACKOFF_S": "20",
+                    "RECAPTURE_MAX_CONSECUTIVE_CHUNK_FAILURES": "4"})
+
+        self.assertEqual([c.args[0] for c in mock_sleep.call_args_list],
+                         [20, 30, 30])
 
     def test_threshold_zero_disables_the_guard(self):
         import tempfile
