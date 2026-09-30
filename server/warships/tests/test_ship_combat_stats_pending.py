@@ -178,7 +178,7 @@ class ShipCombatPopWarmTaskTests(TestCase):
     def test_queue_helper_coalesces_a_burst_into_one_dispatch(self):
         from warships.tasks import queue_ship_combat_pop_warm
 
-        with mock.patch("warships.tasks.warm_ship_combat_pop_task.delay") as d:
+        with mock.patch("warships.tasks.warm_ship_combat_pop_task.apply_async") as d:
             first = queue_ship_combat_pop_warm(
                 SHIMA, "na", SHIP_COMBAT_WINDOW_DAYS)
             second = queue_ship_combat_pop_warm(

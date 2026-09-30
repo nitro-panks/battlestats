@@ -4940,7 +4940,8 @@ def update_clan_tier_distribution(clan_id: str, realm: str = DEFAULT_REALM) -> l
 
     for player_id, tiers_json in players:
         if not tiers_json:
-            update_tiers_data_task.delay(player_id=player_id, realm=realm)
+            _dispatch_async_refresh(
+                update_tiers_data_task, player_id=player_id, realm=realm)
             hydrating_count += 1
             continue
 

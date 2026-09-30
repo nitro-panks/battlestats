@@ -6,9 +6,12 @@ the publish is time-bounded, and the arbiter leaves no broker socket for the
 forked workers to fight over.
 """
 import importlib.util
+import os
 import socket
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import kombu.pools
 
 from django.core.cache import cache
 from django.test import TestCase
@@ -130,3 +133,109 @@ class GunicornForkHygieneTests(TestCase):
             conf.when_ready(MagicMock())
 
         fake_app.close.assert_called_once()
+
+
+class RequestThreadDispatchSurvivesForkHygieneTests(TestCase):
+    """The regression the mocked when_ready tests above could not see.
+
+    when_ready force-closes the app's producer pool in the arbiter. kombu keeps
+    that closed pool in its process-global registry, so every forked worker's
+    ``task.delay()`` raised ``Acquire on closed pool``: 14,944 request-thread
+    refreshes were silently skipped between 2026-09-09 and 2026-09-30. These
+    tests run the REAL close sequence against the real app, then dispatch.
+    """
+
+    # (helper name, positional args). Every queue_* helper a request can reach.
+    HELPERS = [
+        ('queue_clan_battle_summary_refresh', (7001, 'na')),
+        ('queue_clan_member_idle_refresh', (7002, 'na')),
+        ('queue_realm_top_ships_warm', ('na',)),
+        ('queue_ships_by_pct_warm', ('na', 10, 'Battleship')),
+        ('queue_ship_combat_pop_warm', (7003, 'na')),
+        ('queue_realm_ships_pct_warm', ('na',)),
+        ('queue_ship_pop_avg_damage_warm', ('na', [7004])),
+        ('queue_warm_player_correlations', ('na',)),
+        ('queue_ranked_observation_refresh', (7005, 'na')),
+        ('queue_ranked_data_refresh', (7006, 'na')),
+        ('queue_clan_battle_data_refresh', (7007, 'na')),
+        ('queue_efficiency_data_refresh', (7008, 'na')),
+        ('queue_efficiency_rank_snapshot_refresh', ('na',)),
+        ('queue_player_ranked_wr_battles_correlation_refresh', ('na',)),
+        ('queue_player_clan_battle_wr_battles_correlation_refresh', ('na',)),
+    ]
+
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        # Leave the process-wide app usable for the rest of the suite.
+        from battlestats.celery import app as celery_app
+        kombu.pools.reset()
+        celery_app.amqp._producer_pool = None
+        celery_app._pool = None
+        cache.clear()
+
+    def _run_real_when_ready(self):
+        conf = GunicornForkHygieneTests._load_gunicorn_conf()
+        with patch('warships.tasks.startup_warm_caches_task.apply_async'):
+            conf.when_ready(MagicMock())
+
+    def test_the_arbiter_close_sequence_really_does_poison_the_pool(self):
+        """Pins the mechanism, so the next test cannot pass vacuously."""
+        from warships.tasks import update_clan_members_task as task
+        self._run_real_when_ready()
+        with self.assertRaisesRegex(RuntimeError, 'Acquire on closed pool'):
+            task.delay(clan_id=1, realm='na')
+
+    def test_every_queue_helper_still_enqueues_after_the_close_sequence(self):
+        from warships import tasks
+        self._run_real_when_ready()
+        with patch.dict(os.environ, {'EFFICIENCY_RANK_EVENT_TRIGGER_ENABLED': '1'}):
+            for name, args in self.HELPERS:
+                with self.subTest(helper=name):
+                    result = getattr(tasks, name)(*args)
+                    self.assertEqual(
+                        result.get('status'), 'queued',
+                        f'{name} returned {result!r} after the fork hygiene')
+
+    def test_enrich_on_view_enqueues_after_the_close_sequence(self):
+        from warships import tasks
+        player = MagicMock(player_id=7009, battles_json=None)
+        self._run_real_when_ready()
+        with patch.dict(os.environ, {'ENRICH_ON_VIEW_ENABLED': '1'}), \
+                patch.object(tasks.enrich_player_on_view_task,
+                             'apply_async') as dispatch, \
+                patch.object(tasks.logger, 'warning') as warning:
+            tasks._maybe_enrich_on_view(player, 'na')
+        dispatch.assert_called_once()
+        self.assertEqual(dispatch.call_args.kwargs['queue'], 'background')
+        warning.assert_not_called()
+
+
+class NoPooledDispatchOnRequestPathsTests(TestCase):
+    """Source guard: request-reachable dispatchers must not use the pool.
+
+    ``task.delay()`` and a connection-less ``apply_async()`` both publish via
+    the producer pool that the gunicorn arbiter closes. The queue_* helpers go
+    through ``warships.broker.enqueue_task`` instead.
+    """
+
+    def test_queue_helpers_never_call_delay_or_apply_async(self):
+        import ast
+        import inspect
+        from warships import tasks
+
+        tree = ast.parse(inspect.getsource(tasks))
+        offenders = []
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if not (node.name.startswith('queue_')
+                    or node.name == '_maybe_enrich_on_view'):
+                continue
+            for call in ast.walk(node):
+                if (isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Attribute)
+                        and call.func.attr in ('delay', 'apply_async')):
+                    offenders.append(f'{node.name}:{call.lineno}')
+        self.assertEqual(offenders, [])

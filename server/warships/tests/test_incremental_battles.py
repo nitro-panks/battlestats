@@ -38,6 +38,7 @@ from warships.incremental_battles import (
     record_observation_from_payloads,
     record_ranked_observation_and_diff,
 )
+from warships.tests.conftest import assert_dispatched_once_with
 from warships.models import (
     BattleEvent,
     BattleObservation,
@@ -974,20 +975,20 @@ class QueueRankedObservationRefreshTests(TestCase):
             queue_ranked_observation_refresh,
         )
         with mock.patch(
-            "warships.tasks.refresh_ranked_observation_task.delay",
+            "warships.tasks.refresh_ranked_observation_task.apply_async",
         ) as fake_delay:
             result = queue_ranked_observation_refresh(
                 self.player.player_id, realm="na")
         self.assertEqual(result["status"], "queued")
-        fake_delay.assert_called_once_with(
-            player_id=self.player.player_id, realm="na")
+        assert_dispatched_once_with(
+            fake_delay, player_id=self.player.player_id, realm="na")
         self.assertTrue(is_ranked_observation_refresh_pending(
             self.player.player_id, realm="na"))
 
     def test_dedup_short_circuits_subsequent_dispatches(self):
         from warships.tasks import queue_ranked_observation_refresh
         with mock.patch(
-            "warships.tasks.refresh_ranked_observation_task.delay",
+            "warships.tasks.refresh_ranked_observation_task.apply_async",
         ) as fake_delay:
             first = queue_ranked_observation_refresh(
                 self.player.player_id, realm="na")
@@ -1007,7 +1008,7 @@ class QueueRankedObservationRefreshTests(TestCase):
             queue_ranked_observation_refresh,
         )
         with mock.patch(
-            "warships.tasks.refresh_ranked_observation_task.delay",
+            "warships.tasks.refresh_ranked_observation_task.apply_async",
             side_effect=RuntimeError("broker down"),
         ):
             result = queue_ranked_observation_refresh(
@@ -1035,7 +1036,7 @@ class QueueRankedObservationRefreshTests(TestCase):
             True, timeout=60,
         )
         with mock.patch(
-            "warships.tasks.refresh_ranked_observation_task.delay",
+            "warships.tasks.refresh_ranked_observation_task.apply_async",
         ) as fake_delay:
             result = queue_ranked_observation_refresh(
                 self.player.player_id, realm="na")

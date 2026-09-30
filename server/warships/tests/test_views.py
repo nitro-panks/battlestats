@@ -1338,7 +1338,7 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(rows[0]["name"], "StaleSnapshot")
         self.assertEqual(rows[0]["days_since_last_battle"], 5)
 
-    @patch("warships.tasks.refresh_clan_member_idle_task.delay")
+    @patch("warships.tasks.refresh_clan_member_idle_task.apply_async")
     @patch("warships.data.update_clan_members")
     @patch("warships.data.update_clan_data")
     def test_clan_members_cold_cache_queues_idle_refresh_and_flags_pending(
@@ -1364,9 +1364,9 @@ class ClanMembersEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["X-Clan-Idle-Pending"], "true")
-        mock_idle_delay.assert_called_once_with(clan_id="4244", realm="na")
+        assert_dispatched_once_with(mock_idle_delay, clan_id="4244", realm="na")
 
-    @patch("warships.tasks.refresh_clan_member_idle_task.delay")
+    @patch("warships.tasks.refresh_clan_member_idle_task.apply_async")
     @patch("warships.data.update_clan_members")
     @patch("warships.data.update_clan_data")
     def test_clan_members_idle_refresh_respects_cooldown(

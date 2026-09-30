@@ -120,3 +120,23 @@ and that `when_ready` closes both pools even when the warm dispatch raises.
 passing an explicit connection means `apply_async`, not `delay`: the call shape
 is `apply_async(args=(...), kwargs={...}, connection=..., retry=False)`, and
 only the task arguments are the contract under test.
+
+## Regression: the fork fix closed the pool every `queue_*` helper used (2026-09-09 → 2026-09-30)
+
+`force_close_all()` in `when_ready` does more than release the arbiter's socket: it marks the kombu pool **closed**, and the closed `ProducerPool` survives `celery_app.close()` in kombu's process-global `kombu.pools.producers` registry. Every forked gunicorn worker inherited it, so every request-thread `task.delay()` raised `RuntimeError('Acquire on closed pool')`. The `queue_*` helpers in `warships/tasks.py` caught it and logged a WARNING: **14,944** refreshes and warms silently skipped, first at 2026-09-09 21:32:48, found by the page-load audit (`runbook-page-load-speed-audit-2026-09-29.md`, F10). The views' `publish_task` path was never affected.
+
+The mocked `when_ready` tests above could not see it: they assert that the close is *called*, not what it does to the next publish.
+
+**Fix (v5.11.12):** every request-reachable dispatcher (the 15 `queue_*` helpers, `_maybe_enrich_on_view`, the clan tier-distribution hydrate in `data.py`) enqueues through `warships.broker.enqueue_task`, which publishes on its own bounded connection and never touches the pool. `publish_task` is now `enqueue_task` plus the swallow. The `when_ready` close sequence is unchanged, so the inherited-socket fix stands.
+
+Resetting `amqp._producer_pool` and `app._pool` in the worker is **not** sufficient (reproduced): the registry returns the same closed pool. Only `kombu.pools.reset()` first restores it.
+
+**Guards** in `test_broker_publish.py`: the real close sequence is run against the real app, then every helper must return `queued` (fails on the old code with 15 `enqueue-failed`); a test pins that the close sequence really does poison `.delay()`, so the other cannot pass vacuously; an AST guard fails if any `queue_*` helper calls `.delay()` or `.apply_async()` directly.
+
+**Verify in production:**
+
+```bash
+ssh root@battlestats.online 'journalctl -u battlestats-gunicorn --since "-1 hour" --no-pager | grep -c "Acquire on closed pool"'
+```
+
+Must be `0` after the deploy.

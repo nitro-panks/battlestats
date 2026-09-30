@@ -13,6 +13,7 @@ from django.db import DatabaseError, connection
 from django.utils import timezone as django_timezone
 
 from battlestats.celery import app
+from warships.broker import enqueue_task
 
 # Duplicated here (instead of importing from warships.models) to avoid
 # importing models at module scope — gunicorn's when_ready hook loads this
@@ -508,7 +509,8 @@ def queue_clan_battle_summary_refresh(clan_id: object, realm: str = DEFAULT_REAL
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        update_clan_battle_summary_task.delay(clan_id=clan_id, realm=realm)
+        enqueue_task(update_clan_battle_summary_task,
+                     clan_id=clan_id, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -544,7 +546,7 @@ def queue_clan_member_idle_refresh(clan_id: object, realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        refresh_clan_member_idle_task.delay(clan_id=clan_id, realm=realm)
+        enqueue_task(refresh_clan_member_idle_task, clan_id=clan_id, realm=realm)
         cache.set(cooldown_key, "1", timeout=CLAN_MEMBER_IDLE_REFRESH_COOLDOWN)
         return {"status": "queued"}
     except Exception as error:
@@ -581,7 +583,7 @@ def queue_realm_top_ships_warm(realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_realm_top_ships_task.delay(realm=realm)
+        enqueue_task(warm_realm_top_ships_task, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -616,8 +618,8 @@ def queue_ships_by_pct_warm(realm=DEFAULT_REALM, tier=None, ship_type=None,
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_ships_by_pct_task.delay(
-            realm=realm, tier=tier, ship_type=ship_type, mode=mode)
+        enqueue_task(warm_ships_by_pct_task,
+                     realm=realm, tier=tier, ship_type=ship_type, mode=mode)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -658,8 +660,8 @@ def queue_ship_combat_pop_warm(ship_id, realm=DEFAULT_REALM,
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_ship_combat_pop_task.delay(
-            ship_id=ship_id, realm=realm, window_days=window_days)
+        enqueue_task(warm_ship_combat_pop_task,
+                     ship_id=ship_id, realm=realm, window_days=window_days)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -690,7 +692,7 @@ def queue_realm_ships_pct_warm(realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_realm_ships_pct_task.delay(realm=realm)
+        enqueue_task(warm_realm_ships_pct_task, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -773,7 +775,7 @@ def queue_ship_pop_avg_damage_warm(realm, ship_ids):
     if not to_queue:
         return {"status": "skipped", "reason": "already-queued"}
     try:
-        warm_ship_pop_avg_damage_task.delay(realm=realm, ship_ids=to_queue)
+        enqueue_task(warm_ship_pop_avg_damage_task, realm=realm, ship_ids=to_queue)
         return {"status": "queued", "ships": len(to_queue)}
     except Exception as error:
         for sid in to_queue:
@@ -804,7 +806,7 @@ def queue_warm_player_correlations(realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_player_correlations_task.delay(realm=realm)
+        enqueue_task(warm_player_correlations_task, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -903,8 +905,8 @@ def queue_ranked_observation_refresh(
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        refresh_ranked_observation_task.delay(
-            player_id=player_id, realm=realm)
+        enqueue_task(refresh_ranked_observation_task,
+                     player_id=player_id, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -929,7 +931,7 @@ def queue_ranked_data_refresh(player_id: object, realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        update_ranked_data_task.delay(player_id=player_id, realm=realm)
+        enqueue_task(update_ranked_data_task, player_id=player_id, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -956,8 +958,8 @@ def queue_clan_battle_data_refresh(player_id: object, realm: str = DEFAULT_REALM
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        update_player_clan_battle_data_task.delay(
-            player_id=player_id, realm=realm)
+        enqueue_task(update_player_clan_battle_data_task,
+                     player_id=player_id, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -984,8 +986,8 @@ def queue_efficiency_data_refresh(player_id: object, realm: str = DEFAULT_REALM)
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        update_player_efficiency_data_task.delay(
-            player_id=player_id, realm=realm)
+        enqueue_task(update_player_efficiency_data_task,
+                     player_id=player_id, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -1024,7 +1026,7 @@ def queue_efficiency_rank_snapshot_refresh(realm: str = DEFAULT_REALM):
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        refresh_efficiency_rank_snapshot_task.delay(realm=realm)
+        enqueue_task(refresh_efficiency_rank_snapshot_task, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -1047,7 +1049,8 @@ def queue_player_ranked_wr_battles_correlation_refresh(realm: str = DEFAULT_REAL
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_player_ranked_wr_battles_correlation_task.delay(realm=realm)
+        enqueue_task(
+            warm_player_ranked_wr_battles_correlation_task, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -1070,7 +1073,8 @@ def queue_player_clan_battle_wr_battles_correlation_refresh(realm: str = DEFAULT
         return {"status": "skipped", "reason": "already-queued"}
 
     try:
-        warm_player_clan_battle_wr_battles_correlation_task.delay(realm=realm)
+        enqueue_task(
+            warm_player_clan_battle_wr_battles_correlation_task, realm=realm)
         return {"status": "queued"}
     except Exception as error:
         cache.delete(dispatch_key)
@@ -1178,8 +1182,8 @@ def _maybe_enrich_on_view(player, realm):
                 f"enrich_on_view_seen:{realm}:{player.player_id}", "1",
                 ENRICH_ON_VIEW_COOLDOWN):
             return
-        enrich_player_on_view_task.apply_async(
-            (player.player_id, realm), queue="background")
+        enqueue_task(enrich_player_on_view_task, player.player_id, realm,
+                     _options={"queue": "background"})
     except Exception as exc:
         logger.warning(
             "enrich-on-view enqueue failed for %s/%s: %s",

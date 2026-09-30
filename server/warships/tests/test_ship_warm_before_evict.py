@@ -24,6 +24,7 @@ from warships.data import (
     compute_realm_top_ships,
     latest_ship_snapshot_window,
 )
+from warships.tests.conftest import assert_dispatched_once_with
 from warships.models import (
     BattleEvent, BattleObservation, Player, Ship, ShipTopPlayerSnapshot,
     realm_cache_key,
@@ -83,7 +84,7 @@ class ShipWarmBeforeEvictTests(TestCase):
         self.assertEqual(cache.get(self._top_ships_fresh_key()), payload)
         self.assertEqual(cache.get(self._top_ships_published_key()), payload)
 
-    @patch("warships.tasks.warm_realm_top_ships_task.delay")
+    @patch("warships.tasks.warm_realm_top_ships_task.apply_async")
     def test_top_ships_serves_published_when_fresh_cold(self, mock_delay):
         """Fresh key cold + published present → serve last-good, queue a warm,
         never run the aggregation in-request."""
@@ -96,11 +97,11 @@ class ShipWarmBeforeEvictTests(TestCase):
         result = compute_realm_top_ships("na", mode="random", use_cache=True)
 
         self.assertEqual(result, old_payload)  # served the OLD numbers
-        mock_delay.assert_called_once_with(realm="na")  # queued the warm
+        assert_dispatched_once_with(mock_delay, realm="na")  # queued the warm
         # The cold read must not have computed/written the fresh key itself.
         self.assertIsNone(cache.get(self._top_ships_fresh_key()))
 
-    @patch("warships.tasks.warm_realm_top_ships_task.delay")
+    @patch("warships.tasks.warm_realm_top_ships_task.apply_async")
     def test_top_ships_cold_read_dedups_warm(self, mock_delay):
         old_payload = {"realm": "na", "ships": []}
         cache.set(self._top_ships_published_key(), old_payload, timeout=None)
@@ -136,7 +137,7 @@ class ShipWarmBeforeEvictTests(TestCase):
         self.assertEqual(cache.get(self._ships_by_fresh_key()), payload)
         self.assertEqual(cache.get(self._ships_by_published_key()), payload)
 
-    @patch("warships.tasks.warm_realm_top_ships_task.delay")
+    @patch("warships.tasks.warm_realm_top_ships_task.apply_async")
     def test_ships_by_serves_published_when_fresh_cold(self, mock_delay):
         old_payload = {"realm": "na", "tier": 10, "ship_type": "Battleship",
                        "ships": [{"ship_id": 9}], "window_end": "2000-01-01"}
@@ -148,7 +149,7 @@ class ShipWarmBeforeEvictTests(TestCase):
             use_cache=True)
 
         self.assertEqual(result, old_payload)
-        mock_delay.assert_called_once_with(realm="na")
+        assert_dispatched_once_with(mock_delay, realm="na")
         self.assertIsNone(cache.get(self._ships_by_fresh_key()))
 
     def test_ships_by_warm_publishes_empty_to_clear_stale(self):

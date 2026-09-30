@@ -126,7 +126,7 @@ class EfficiencyRankEventTriggerGateTests(TestCase):
         with mock.patch.dict(
             os.environ, {"EFFICIENCY_RANK_EVENT_TRIGGER_ENABLED": "1"}
         ), mock.patch(
-            "warships.tasks.refresh_efficiency_rank_snapshot_task.delay"
+            "warships.tasks.refresh_efficiency_rank_snapshot_task.apply_async"
         ) as delay:
             result = queue_efficiency_rank_snapshot_refresh(realm="na")
         # Gate passed -> not short-circuited; it proceeds to dispatch the task.

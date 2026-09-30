@@ -50,6 +50,23 @@ def bounded_broker_connection():
     return connection
 
 
+def enqueue_task(task, *args, _options=None, **kwargs) -> None:
+    """Enqueue ``task`` on a bounded connection of its own; raise on failure.
+
+    For callers that keep their own failure handling (dedup-key cleanup, a
+    broker-failure cooldown). Never use ``task.delay()`` on a request thread:
+    it publishes through the app's producer pool, which ``when_ready`` closes
+    in the gunicorn arbiter, so every forked worker inherits a pool that
+    raises ``Acquire on closed pool`` (every pooled request-thread dispatch
+    failed that way from 2026-09-09 to 2026-09-30). ``_options`` carries
+    ``apply_async`` routing options such as ``queue``.
+    """
+    with bounded_broker_connection() as connection:
+        task.apply_async(
+            args=args, kwargs=kwargs, connection=connection, retry=False,
+            **(_options or {}))
+
+
 def publish_task(task, *args, **kwargs) -> bool:
     """Enqueue ``task``, returning whether the message reached the broker.
 
@@ -57,9 +74,7 @@ def publish_task(task, *args, **kwargs) -> bool:
     caller is mid-response.
     """
     try:
-        with bounded_broker_connection() as connection:
-            task.apply_async(
-                args=args, kwargs=kwargs, connection=connection, retry=False)
+        enqueue_task(task, *args, **kwargs)
     except Exception as error:  # noqa: BLE001 - fire-and-forget by design
         logging.warning(
             'Skipping async task enqueue for %s due to broker error: %s',
