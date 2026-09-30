@@ -177,7 +177,9 @@ The barrier's documented reason (`:151-157`): on 2026-04-08 a Celery worker **bo
 - The running gunicorn keeps its broker credentials across `configure_local_rabbitmq`, which reuses the existing password (`extract_existing_broker_password`, `:590`) rather than rotating it. Its publishes fail during the ~14 s RabbitMQ restart, which `broker.publish_task` already tolerates as a skipped refresh.
 - Under `HUP`, re-check the `when_ready` fork hazard (`agents/runbooks/runbook-broker-publish-request-thread-2026-09-09.md`), and see F10 first: the same hook is currently breaking every pooled publish.
 
-### F10. Every pooled `.delay()` from gunicorn has failed since 2026-09-09 (measured; not load speed, but found here, and it is severe)
+### F10. Every pooled `.delay()` from gunicorn has failed since 2026-09-09 (measured; FIXED v5.11.12, 2026-09-30)
+
+**Status: SHIPPED v5.11.12 and verified 2026-09-30.** Every request-reachable dispatcher now enqueues through `warships.broker.enqueue_task` (details in `runbook-broker-publish-request-thread-2026-09-09.md`). In the first 7 minutes after the 04:11:27Z deploy: `Acquire on closed pool` / `broker dispatch failed` count **0** (was 10-88/hour); the workers received 28 `update_ranked_data_task`, 26 `update_player_efficiency_data_task`, 17 `update_player_clan_battle_data_task` and 2 `refresh_clan_member_idle_task` in the first two minutes; only `celery` processes hold AMQP connections, so the v5.7.3 inherited-socket fix stands. The body below is the original finding.
 
 While attributing F9, the gunicorn journal showed `broker dispatch failed: Acquire on closed pool` on request threads. It is not a deploy transient. It is continuous:
 
@@ -228,7 +230,7 @@ One lever per deploy; re-run the probe between each and record before/after here
 
 | # | Lever | Finding | Cost | Risk | Expected |
 |---|---|---|---|---|---|
-| 0 | **Fix the closed producer pool (do this first; not a speed lever, a correctness one)** | F10 | Small + test | Medium; fork/AMQP interaction | 14,944 silent enqueue failures → 0; request-triggered refreshes resume |
+| 0 | **DONE v5.11.12:** fix the closed producer pool | F10 | Small + test | Medium; fork/AMQP interaction | 14,944 silent enqueue failures → 0; request-triggered refreshes resume |
 | 1 | Reserve main-content height; fix the 8 px header growth; stable leaderboard/treemap placeholders | F1 | CSS + small render changes | Low; verify visually | `/`, `/player` desktop CLS 0.15-0.17 → good |
 | 2 | Prefetch `clan_data` in parallel with `/api/clan` | F3a | Few lines | Low | ~−100-150 ms clan TTC warm |
 | 3 | `ClanBattleSeasons` gate behind the dewaterfall flag | F3b | Few lines | Low | ~−500-900 ms clan lower section |
