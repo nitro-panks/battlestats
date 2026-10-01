@@ -55,7 +55,9 @@ Neither existing guard could catch it. `crawl_bucket_mismatch` is structurally b
 
 ### Why 25, and why aborting is cheap
 
-A healthy pass fails essentially nothing: **0 failed fetches in 9,625 NA clans** and **1 in a full EU pass**, both observed 2026-08-11. So 25 sits far above the noise floor while still tripping ~5 seconds into an outage.
+A healthy pass fails essentially nothing: **0 failed fetches in 9,625 NA clans** and **1 in a full EU pass**, both observed 2026-08-11. ~~So 25 sits far above the noise floor while still tripping ~5 seconds into an outage.~~
+
+**Superseded 2026-09-30: a count is not a noise floor.** WG answers a 504 in ~0.2s, so "~5 seconds into an outage" also meant "5 seconds into a blip". On 2026-09-30 two NA bursts of instant `504 SOURCE_NOT_AVAILABLE` (10:12, ~22 failures; 10:28, **25 failures in 4.9s**) aborted the pass at clan 337/36,132 and lost the day's dispatch. The threshold is now paired with a per-failure backoff, `CLAN_CRAWL_FAILURE_BACKOFF_S` (default 1s, doubling to a 30s cap, `0` disables): after each failed info fetch the loop sleeps before the next, except on the failure that aborts. At the defaults an abort needs **~601s of sustained failure** (1+2+4+8+16+30×19), inside the 15-min heartbeat-stale window; an isolated failure costs one second. The backoff is **off whenever the abort is disabled** (`CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES=0`), or the unwedge lever below would sleep 30s per clan through a whole outage. Each sleep logs `Backing off Ns after K consecutive failed clan info fetches`. Same lesson and shape as the recapture guard: `runbook-recapture-upstream-failure-guard-2026-08-12.md`.
 
 For a **transient** outage the abort costs almost nothing: the marker survives, the next dispatch resumes, and the run-scoped resume skip drops every clan already walked, so a false abort costs one clan-list re-fetch (~2 min) rather than a re-walk.
 
@@ -71,9 +73,9 @@ If 25+ consecutive clans fail *every* time — a bad ID range, a migrating shard
 
 No loop-detection logic was added: the scenario is unobserved, the wedge is reversible with one env value, and guessing at a detector would be speculative complexity in the path that just caused an incident.
 
-### Why there is no retry and no backoff
+### Why there is no retry (and, until 2026-09-30, no backoff)
 
-Deliberate. After a clean abort the task's `finally` clears the lock and heartbeat, so no lock and no pending flag remain — and `ensure_crawl_all_clans_running_task` only revives crawls that **died holding a lock** or lost a queued message. With neither present the watchdog returns `idle` and leaves it to the scheduler. The realm therefore waits for its next daily Beat rather than retry-storming a still-broken upstream. No extra backoff logic was needed; the dispatch topology already provides it.
+Deliberate. After a clean abort the task's `finally` clears the lock and heartbeat, so no lock and no pending flag remain — and `ensure_crawl_all_clans_running_task` only revives crawls that **died holding a lock** or lost a queued message. With neither present the watchdog returns `idle` and leaves it to the scheduler. The realm therefore waits for its next daily Beat rather than retry-storming a still-broken upstream. No extra backoff logic was needed *between* dispatches; the dispatch topology already provides it. The 2026-09-30 per-failure backoff is *within* a pass, and exists only so the abort measures duration (above).
 
 ## Reading an aborted pass
 

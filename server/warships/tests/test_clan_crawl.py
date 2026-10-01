@@ -309,7 +309,7 @@ class ClanCrawlUpstreamFailureAbortTests(TestCase):
     now aborts the pass instead. See runbook-crawl-upstream-failure-abort.
     """
 
-    def _run(self, side_effect, threshold="25", **kwargs):
+    def _run(self, side_effect, threshold="25", backoff="0", **kwargs):
         """Walk one clan per `side_effect` entry; None entries are fetch failures.
 
         members_count=0 keeps the per-clan path to the info fetch alone, so the
@@ -322,13 +322,19 @@ class ClanCrawlUpstreamFailureAbortTests(TestCase):
                   "members_count": 0}
             for info, stub in zip(side_effect, stubs)
         ]
-        env = {"CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES": threshold}
+        env = {"CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES": threshold,
+               "CLAN_CRAWL_FAILURE_BACKOFF_S": backoff}
         with patch.dict(os.environ, env):
-            with patch("warships.clan_crawl.fetch_clan_info") as mock_info:
+            with patch("warships.clan_crawl.fetch_clan_info") as mock_info, \
+                    patch("warships.clan_crawl.time.sleep") as mock_sleep:
                 mock_info.side_effect = effects
-                result = crawl_clan_members(
-                    stubs, resume=False, realm="na", core_only=True,
-                    request_delay=0, **kwargs)
+                try:
+                    result = crawl_clan_members(
+                        stubs, resume=False, realm="na", core_only=True,
+                        request_delay=0, **kwargs)
+                finally:
+                    self.sleeps = [c.args[0]
+                                   for c in mock_sleep.call_args_list]
         return result, mock_info
 
     def test_summary_counts_failed_clan_fetches(self):
@@ -365,6 +371,38 @@ class ClanCrawlUpstreamFailureAbortTests(TestCase):
         self.assertEqual(result["clans_failed"], 5)
         self.assertEqual(result["clans_processed"], 0)
 
+    def test_failures_back_off_exponentially_up_to_the_cap(self):
+        from warships.clan_crawl import CrawlUpstreamFailure
+        with self.assertRaises(CrawlUpstreamFailure):
+            self._run([None] * 8, threshold="8", backoff="1")
+        # No sleep after the failure that triggers the abort.
+        self.assertEqual(self.sleeps, [1, 2, 4, 8, 16, 30, 30])
+
+    def test_default_abort_needs_minutes_of_failure_not_a_burst(self):
+        """On 2026-09-30 25 instant 504s in 4.9s aborted the NA pass. At the
+        defaults an abort must now require ~10 min of sustained failure."""
+        from warships.clan_crawl import CrawlUpstreamFailure
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CLAN_CRAWL_FAILURE_BACKOFF_S", None)
+            os.environ.pop("CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES", None)
+            stubs = [{"clan_id": 7300 + i} for i in range(30)]
+            with patch("warships.clan_crawl.fetch_clan_info", return_value=None), \
+                    patch("warships.clan_crawl.time.sleep") as mock_sleep:
+                with self.assertRaises(CrawlUpstreamFailure):
+                    crawl_clan_members(stubs, resume=False, realm="na",
+                                       core_only=True, request_delay=0)
+        total = sum(c.args[0] for c in mock_sleep.call_args_list)
+        self.assertGreaterEqual(total, 600)
+        self.assertLess(total, 15 * 60)  # heartbeat-stale window
+
+    def test_backoff_resets_after_a_successful_fetch(self):
+        self._run([None, None, True, None], threshold="5", backoff="1")
+        self.assertEqual(self.sleeps, [1, 2, 1])
+
+    def test_disabled_abort_never_sleeps(self):
+        self._run([None] * 5, threshold="0", backoff="1")
+        self.assertEqual(self.sleeps, [])
+
     def test_abort_flushes_yield_counts_earned_before_the_outage(self):
         """The Redis aggregate is what the resumed pass keeps accumulating into,
         so counts earned before the abort must be flushed on the way out.
@@ -378,6 +416,7 @@ class ClanCrawlUpstreamFailureAbortTests(TestCase):
         stubs = [{"clan_id": 7200 + i} for i in range(3)]
         with patch.dict(os.environ, {
                 "CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES": "2",
+                "CLAN_CRAWL_FAILURE_BACKOFF_S": "0",
                 "CRAWL_YIELD_INSTRUMENT_ENABLED": "1"}):
             with patch("warships.clan_crawl.fetch_clan_info") as mock_info, \
                     patch("warships.clan_crawl.fetch_member_ids") as mock_members, \

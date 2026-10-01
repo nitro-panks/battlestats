@@ -109,14 +109,36 @@ def _max_consecutive_clan_failures() -> int:
     """Consecutive failed `clans/info/` fetches that abort the pass; 0 disables.
 
     A healthy pass fails essentially nothing (0 in 9,625 NA clans, 1 in a full EU
-    pass observed 2026-08-11), so 25 sits far above the noise floor. Aborting
-    early is cheap: the pass marker survives, so the next dispatch resumes and
-    skips every clan already walked.
+    pass observed 2026-08-11). A count alone is not a noise floor, though: WG
+    answers a 504 in ~0.2s, so 25 failures arrive in under five seconds. The
+    threshold is therefore paired with `_clan_failure_backoff_base`, which makes
+    it measure sustained failure instead. Aborting is cheap: the pass marker
+    survives, so the next dispatch resumes and skips every clan already walked.
     """
     try:
         return int(os.getenv("CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES", "25"))
     except ValueError:
         return 25
+
+
+def _clan_failure_backoff_base() -> float:
+    """Seconds slept after the first failed `clans/info/` fetch in a run; doubles
+    per consecutive failure up to CLAN_FAILURE_BACKOFF_CAP_S. 0 disables.
+
+    Without it the guard measured calls, not time: on 2026-09-30 two NA bursts of
+    instant 504 SOURCE_NOT_AVAILABLE (10:12, ~22 failures; 10:28, 25 failures in
+    4.9s) aborted the pass at clan 337/36,132, losing the day's dispatch to a
+    blip. At base 1s the default threshold of 25 now needs ~10 min of sustained
+    failure (1+2+4+8+16+30x19 = 601s), still inside the 15-min heartbeat-stale
+    window, while an isolated failure costs a second.
+    """
+    try:
+        return max(0.0, float(os.getenv("CLAN_CRAWL_FAILURE_BACKOFF_S", "1")))
+    except ValueError:
+        return 1.0
+
+
+CLAN_FAILURE_BACKOFF_CAP_S = 30.0
 
 
 def _crawl_yield_enabled() -> bool:
@@ -512,6 +534,10 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
     clans_failed = 0
     consecutive_failures = 0
     max_consecutive_failures = _max_consecutive_clan_failures()
+    # Backoff only when the abort is armed: with the guard disabled (0) a sleep
+    # per failure would turn an 08-10-sized outage into days inside one task.
+    backoff_base = (_clan_failure_backoff_base()
+                    if max_consecutive_failures else 0.0)
 
     # Yield-by-source instrumentation. `cutoff` (computed once) classifies each
     # saved player; `yield_counts` is this execution's running total returned in
@@ -566,6 +592,13 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
                     _crawl_summary(clans_processed, clans_failed,
                                    players_saved, skipped, yield_counts),
                     consecutive_failures=consecutive_failures)
+            if backoff_base:
+                delay = min(CLAN_FAILURE_BACKOFF_CAP_S,
+                            backoff_base * 2 ** (consecutive_failures - 1))
+                log.warning("Backing off %.0fs after %d consecutive failed "
+                            "clan info fetches (realm=%s)",
+                            delay, consecutive_failures, realm)
+                time.sleep(delay)
             continue
         consecutive_failures = 0
 
