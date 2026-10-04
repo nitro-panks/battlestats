@@ -53,6 +53,15 @@ mechanisms close that, and none of them may be removed:
    look exactly like a quiet healthy day. Only a periodic unconditional send
    proves the transport. Set the var to an empty string to disable, at the cost
    of that proof.
+   **Corrected 2026-10-03:** until that date the code did not do what this item
+   says. A clear-day heartbeat called the model with the digest prompt and only
+   the subject was overwritten. `main()` now computes
+   `heartbeat_only = beat and not alerting and not (always or forced)` and skips
+   the Anthropic call when it is true, so the heartbeat is the deterministic
+   table and the transport proof no longer depends on the API. An alert on the
+   heartbeat day still goes out as an alert, and `--force` /
+   `OPS_EMAIL_ALWAYS_SEND=1` still write the LLM digest. Record:
+   `runbook-llm-token-optimization-2026-10-03.md`.
 
 ## Shape before numbers
 

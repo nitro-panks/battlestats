@@ -1034,6 +1034,23 @@ Output STRICT JSON only, no prose outside it, no markdown fences: \
 <html>...</html> fragment using inline styles, readable on mobile, no external images."""
 
 
+def _usage_line(payload: dict) -> str:
+    """One journal line recording what an Anthropic call cost.
+
+    The `usage` object on a real response is the only trustworthy record of
+    billed tokens, so it is printed on every call. Reads the RESPONSE only: the
+    request, and therefore the API key, cannot reach this line. A missing or
+    null `usage` prints zeros, because the accounting line must never be the
+    reason an email fails.
+    """
+    usage = payload.get("usage") or {}
+    fields = ("input_tokens", "output_tokens",
+              "cache_creation_input_tokens", "cache_read_input_tokens")
+    counts = " ".join(f"{k}={usage.get(k) or 0}" for k in fields)
+    return (f"[llm] model={payload.get('model')} "
+            f"stop_reason={payload.get('stop_reason')} {counts}")
+
+
 def call_anthropic(model: str, api_key: str, data_package: dict,
                    system: str | None = None, instruction: str | None = None) -> dict:
     body = {
@@ -1056,7 +1073,7 @@ def call_anthropic(model: str, api_key: str, data_package: dict,
                         "snapshot). Write the digest."
                     ))
                     + "\n\n"
-                    + json.dumps(data_package, indent=2, default=str)
+                    + json.dumps(data_package, separators=(",", ":"), default=str)
                 ),
             }
         ],
@@ -1073,6 +1090,7 @@ def call_anthropic(model: str, api_key: str, data_package: dict,
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
+    print(_usage_line(payload))
     # A safety-classifier decline is HTTP 200 with stop_reason=refusal and no
     # content, so it must be checked before reading content -- otherwise it
     # surfaces as an opaque JSON parse error instead of a named cause.
@@ -1252,9 +1270,16 @@ def main() -> int:
         # Only reachable under --dry-run, which deliberately skips the early return.
         reason = "all clear (dry run; nothing would have been sent)"
 
+    # A heartbeat-only send is the transport proof and nothing else: no condition
+    # tripped and nobody forced a digest. It mails the deterministic table, as the
+    # module docstring and render_plain promise, so the proof does not depend on
+    # the Anthropic API and does not pay for a narrative about an all-clear day.
+    # This is the same predicate that stamps the heartbeat subject below.
+    heartbeat_only = beat and not alerting and not (always or forced)
+
     email = None
     llm_error = None
-    if not no_llm:
+    if not no_llm and not heartbeat_only:
         api_key = cfg("ANTHROPIC_API_KEY")
         model = cfg("ANTHROPIC_MODEL", "claude-opus-5")
         if not api_key:
@@ -1284,7 +1309,8 @@ def main() -> int:
                 llm_error = f"{type(e).__name__}: {detail}"
 
     if email is None:
-        # Deterministic fallback (--no-llm, no key, or the API failed). On the
+        # Deterministic table: the heartbeat-only send by design, otherwise the
+        # fallback (--no-llm, no key, or the API failed). On the
         # fire path render_plain names the conditions in the subject, so an LLM
         # outage cannot downgrade an alert into something reading "digest".
         email = render_plain(data, conditions, reason)
@@ -1300,7 +1326,7 @@ def main() -> int:
     if alerting:
         if not email["subject"].startswith("[battlestats] ops ALERT"):
             email["subject"] = alert_subject(conditions)
-    elif beat and not (always or forced):
+    elif heartbeat_only:
         email["subject"] = "[battlestats] ops heartbeat: all clear"
 
     if dry_run:

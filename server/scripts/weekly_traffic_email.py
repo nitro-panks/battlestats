@@ -1253,6 +1253,23 @@ def llm_payload(data: dict) -> dict:
     }
 
 
+def _usage_line(payload: dict) -> str:
+    """One journal line recording what an Anthropic call cost.
+
+    The `usage` object on a real response is the only trustworthy record of
+    billed tokens, so it is printed on every call. Reads the RESPONSE only: the
+    request, and therefore the API key, cannot reach this line. A missing or
+    null `usage` prints zeros, because the accounting line must never be the
+    reason an email fails.
+    """
+    usage = payload.get("usage") or {}
+    fields = ("input_tokens", "output_tokens",
+              "cache_creation_input_tokens", "cache_read_input_tokens")
+    counts = " ".join(f"{k}={usage.get(k) or 0}" for k in fields)
+    return (f"[llm] model={payload.get('model')} "
+            f"stop_reason={payload.get('stop_reason')} {counts}")
+
+
 def call_anthropic(model: str, api_key: str, data: dict) -> str:
     body = {
         # max_tokens caps thinking AND response text together, which is what
@@ -1268,7 +1285,7 @@ def call_anthropic(model: str, api_key: str, data: dict) -> str:
             {
                 "role": "user",
                 "content": "Figures for the week. Write the lead.\n\n"
-                + json.dumps(data, indent=2, default=str),
+                + json.dumps(data, separators=(",", ":"), default=str),
             }
         ],
     }
@@ -1284,6 +1301,7 @@ def call_anthropic(model: str, api_key: str, data: dict) -> str:
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
+    print(_usage_line(payload))
     # A safety-classifier decline is HTTP 200 with stop_reason=refusal and no
     # content, so name it before the generic empty-response case below.
     if payload.get("stop_reason") == "refusal":

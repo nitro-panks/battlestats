@@ -2757,6 +2757,32 @@
                 "traffic-email-decommissioned"
             ]
         },
+        "agents/runbooks/runbook-llm-token-optimization-2026-10-03.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "llm token optimization",
+                "anthropic api cost",
+                "llm usage journal line",
+                "ops email model choice",
+                "prompt caching evaluation"
+            ],
+            "tags": [
+                "anthropic",
+                "llm",
+                "cost",
+                "tokens",
+                "email",
+                "operations"
+            ],
+            "archive_on": [
+                "ops-email-llm-removed",
+                "traffic-email-decommissioned"
+            ]
+        },
         "agents/runbooks/runbook-recapture-lapsed-players-2026-06-26.md": {
             "kind": "runbook",
             "status": "active",
