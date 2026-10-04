@@ -228,6 +228,29 @@ The admin remains the one §6 item still unexercised; it is little used here.
   the 782 client tests and the build pass, and `/` is still prerendered static.
   As in September, the red audit step ran before lint, test and build, so no
   client check ran in CI for those four pushes.
+- **2026-10-04: backend security patch set, four pins.** From the Dependabot
+  alert list (the repo has no `.github/dependabot.yml`, so alerts arrive but
+  upgrade PRs do not):
+  - `django` 6.0.7 → 6.0.8. One high (CVE-2026-15307, file write and request
+    forgery through GeoDjango spatial lookups), two moderate, one low. The
+    project does not use `django.contrib.gis`, so the high is not reachable
+    here. The spatial-lookup type restriction is the only backward-incompatible
+    change and does not touch us.
+  - `urllib3` 2.7.0 → 2.8.0. Two high: unbounded chunk-size buffering in
+    `stream()`/`read_chunked()`, and HTTPS proxy TLS settings being overridden.
+    The first is the reachable one, since every WG call goes through urllib3.
+    The proxy behaviour change is a no-op: no proxy is configured in code or in
+    the droplet env.
+  - `sqlparse` 0.5.4 → 0.6.0. Four quadratic-CPU DoS fixes and one string-escape
+    fix. Drops Python 3.8/3.9, irrelevant at 3.12.
+  - `djangorestframework` 3.17.1 → 3.17.2. `request.data` parsing now enforces
+    `DATA_UPLOAD_MAX_MEMORY_SIZE`. The setting is not overridden, so the Django
+    default of 2.5 MB applies to POST bodies; the feedback and streamer forms
+    are far below it.
+  Verified in a clean 3.12 virtualenv: `pip check` clean, `manage.py check`
+  clean, 1,377 passed and 2 skipped. Not touched: the 15 alerts against
+  `functions/packages/enrichment/enrich-batch/requirements.txt`, unchanged since
+  2026-04-04; whether that function is still deployed is an open question.
 
 ## 8. Related
 

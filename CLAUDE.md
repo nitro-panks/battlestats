@@ -15,7 +15,7 @@ Only confirm before: force-pushing to main, dropping database tables, or deletin
 Battlestats is a World of Warships player and clan statistics platform. Live at https://battlestats.online. Version is in `VERSION` at the repo root (semver, surfaced in the client footer).
 
 - **Frontend**: Next.js 16 (App Router) + React 18 + Tailwind + D3 charts — `client/`
-- **Backend**: Django 6 + DRF + Celery (RabbitMQ + Redis) + PostgreSQL — `server/` (`django==6.0.7` since 2026-07-30, pinned in `server/requirements.txt`)
+- **Backend**: Django 6 + DRF + Celery (RabbitMQ + Redis) + PostgreSQL — `server/` (`django==6.0.8` since 2026-10-04, pinned in `server/requirements.txt`)
 - **Agents**: markdown personas, knowledge base, and operational runbooks — `agents/` (not a runtime)
 
 ## Common Commands
