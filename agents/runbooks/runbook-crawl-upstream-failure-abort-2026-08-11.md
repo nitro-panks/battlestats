@@ -105,6 +105,17 @@ Fix: `fetch_clan_list_page` returns `None` on a failed fetch, distinct from an o
 
 **Consequence of the 09-29 pass:** the truncated pass is closed, so `crawl_low_classified:na` keeps reading the 177,165 snapshot until the next full NA pass finishes (~3 days at the observed cadence).
 
+### The re-fire window, as it actually ran (read 2026-10-04 17:05Z)
+
+The estimate above was short. `crawl_low_classified:na` re-fired on every digest from 09-29 through 10-04, six mails for one truncated pass, and each one was expected:
+
+- The replacement NA pass started 09-30 09:56Z and lost that day's dispatch to the count-based abort (the 09-30 note above). It resumed on the same marker after v5.11.13.
+- A dispatch ends at the 20,700s soft limit by design and covers about 10,000 clans, so a 36,145-clan pass needs four dispatches, one per day: 4,800 by 10-01 21:41Z, 25,041 by 10-03 14:48Z, 34,940 when the 10-04 dispatch ended at 15:39Z.
+- The backoff held throughout. Bursts of 1-4 consecutive `clans/info/` 504s on 10-01 and 10-03 were absorbed with no abort.
+- About 1,200 clans remain, under an hour of the 10-05 dispatch. The condition clears on the first digest after that pass writes its snapshot, provided the pass classifies at least 250,000; a completed pass below the floor is a new finding, not a re-fire. `snapshot_stale:crawl-yield:na` would fire around 10-06 09:32Z (168h past the 09-29 snapshot) and is not at risk.
+
+**How to read a repeat of this:** while the condition's operand is unchanged from the previous mail and a pass is progressing on the same `fresh_after` marker in the `crawls` journal, the mail is a re-fire and needs no remedy. A truncated snapshot costs one mail per day until a full pass replaces it, which at four dispatches per pass is at least four days. The snapshot-quarantine lever was not pulled.
+
 ## Related
 
 - `agents/runbooks/runbook-crawls-queue-depth-alarm-2026-06-12.md` — the pending-flag dedup and watchdog topology the no-retry decision rests on
