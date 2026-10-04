@@ -1,9 +1,9 @@
 # Runbook: three realms share one incremental-refresh checkpoint file (2026-10-04)
 
-**Status:** active; diagnosis complete, remediation NOT yet implemented
+**Status:** active; fix shipped and verified on all three realms 2026-10-04
 **Owner:** platform
 **Subject:** `server/warships/management/commands/incremental_ranked_data.py`, `server/warships/management/commands/incremental_player_refresh.py`, and their tasks in `server/warships/tasks.py`
-**Shipped:** nothing yet
+**Shipped:** v5.11.14 (`b884c1f`), backend deployed 2026-10-04 05:36 UTC
 **Origin:** side observation during the 2026-10-03 ops-alert run: ranked incremental runs ending `attempted=25, succeeded=0, errors=25`
 
 ## QA Notes
@@ -264,6 +264,29 @@ lever and is pulled alone, with the operator's acknowledgement.
   fired at least once outside its crawl window: a realm that skipped on the
   crawl lock has proved nothing.
 - Player: no run completes faster than about 2 s per row.
+
+### Result, 2026-10-04 (deploy 05:36 UTC, read 11:25 UTC)
+
+- Six per-realm checkpoint files exist, each stamped with its own realm, all
+  with `error_total=0`.
+- Ranked: seven productive fires across the three realms (asia 06:00 and
+  09:52, na 07:04 and 08:59, eu 08:26 and 11:09, plus one more), every one
+  `errors=0`; asia completed a full 375-row queue. No `Player matching query
+  does not exist` line since the deploy. EU could not be checked until its
+  crawl ended; its first productive fire was 08:26.
+- Player: every completed run took 1.8 s per row or more (na 1,500 rows in
+  2,725 s; eu 1,500 in 4,033 s). No fast no-op runs.
+- Asia's first queue was 7,853 rows with a hot tier of 6,353, against 3 and 320
+  for na and eu: the backlog left by months of discarded asia queues. At 1,500
+  rows per fire it drains over several cycles.
+- Load: the `background` queue ran 4 to 50 minutes behind Beat during the
+  morning. The worst delays followed a second, unrelated backend deploy at
+  06:26 that restarted two player-refresh runs from the top of their limit.
+  Recapture was unaffected: na 500 s, eu 494 s, asia 610 s against a 1,200 s
+  soft limit, none partial; asia started 8 minutes late (10:58 for a 10:50
+  slot). `PLAYER_REFRESH_TOTAL_LIMIT` was left at 1500.
+- Not yet observed: an abort raising in production. No run has hit
+  `--max-errors` since the deploy; the behaviour is covered by tests only.
 
 ## Related
 
