@@ -625,6 +625,54 @@ class LivenessTests(OpsAlertTestCase):
         send.assert_called_once()
         self.assertIn("heartbeat", send.call_args[0][0].lower() + send.call_args[0][1].lower())
 
+    def test_heartbeat_only_send_does_not_call_the_model(self):
+        """The transport proof must not depend on, or pay for, the Anthropic API."""
+        today = doe.DOW_NAMES[doe.utcnow().weekday()]
+        rc, send, llm = self.run_main(env={"OPS_EMAIL_HEARTBEAT_DOW": today})
+        self.assertEqual(rc, 0)
+        llm.assert_not_called()
+        send.assert_called_once()
+        subject, html = send.call_args[0][0], send.call_args[0][1]
+        self.assertEqual(subject, "[battlestats] ops heartbeat: all clear")
+        self.assertIn("deterministic table", html)
+        self.assertIn("weekly heartbeat", html)
+        # By design, not a failure: the fallback banner must not appear.
+        self.assertNotIn("LLM synthesis failed", html)
+
+    def test_heartbeat_day_dry_run_does_not_call_the_model_either(self):
+        """A dry run shows what would be sent, so it follows the same rule."""
+        today = doe.DOW_NAMES[doe.utcnow().weekday()]
+        _rc, send, llm = self.run_main(argv=["--dry-run"],
+                                       env={"OPS_EMAIL_HEARTBEAT_DOW": today})
+        llm.assert_not_called()
+        send.assert_not_called()
+
+    def test_an_alert_on_the_heartbeat_day_still_calls_the_model(self):
+        """The heartbeat never downgrades an alert: the alert write-up runs."""
+        self.rewrite_recapture("eu", partial=True, scanned=11200)
+        today = doe.DOW_NAMES[doe.utcnow().weekday()]
+        _rc, send, llm = self.run_main(env={"OPS_EMAIL_HEARTBEAT_DOW": today})
+        llm.assert_called_once()
+        self.assertEqual(llm.call_args.kwargs.get("system"), doe.ALERT_SYSTEM_PROMPT)
+        self.assertTrue(send.call_args[0][0].startswith("[battlestats] ops ALERT"))
+
+    def test_an_alert_send_calls_the_model(self):
+        self.rewrite_recapture("eu", partial=True, scanned=11200)
+        _rc, send, llm = self.run_main()
+        llm.assert_called_once()
+        self.assertEqual(llm.call_args.kwargs.get("system"), doe.ALERT_SYSTEM_PROMPT)
+        send.assert_called_once()
+
+    def test_a_forced_send_on_the_heartbeat_day_still_writes_the_digest(self):
+        """--force and OPS_EMAIL_ALWAYS_SEND ask for the digest; the day does not change that."""
+        today = doe.DOW_NAMES[doe.utcnow().weekday()]
+        for argv, env in ((["--force"], {}), ([], {"OPS_EMAIL_ALWAYS_SEND": "1"})):
+            _rc, send, llm = self.run_main(
+                argv=argv, env=dict(env, OPS_EMAIL_HEARTBEAT_DOW=today))
+            llm.assert_called_once()
+            self.assertIsNone(llm.call_args.kwargs.get("system"))
+            self.assertNotEqual(send.call_args[0][0], "[battlestats] ops heartbeat: all clear")
+
     def test_heartbeat_is_quiet_on_other_days(self):
         other = doe.DOW_NAMES[(doe.utcnow().weekday() + 3) % 7]
         _rc, send, _llm = self.run_main(env={"OPS_EMAIL_HEARTBEAT_DOW": other})
@@ -1017,3 +1065,112 @@ class CeleryPerRealmConditions(OpsAlertTestCase):
         self.assertEqual(
             [c for c in self.codes() if c.startswith("celery_task_realm_failing")],
             [], "eu succeeded twice on one unit; a zero row must not erase it")
+
+
+class _FakeResponse:
+    """Stand-in for the urlopen context manager: yields one canned JSON body."""
+
+    def __init__(self, payload: dict):
+        self._raw = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._raw
+
+
+def _api_response(**overrides):
+    payload = {
+        "model": "claude-opus-5",
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": json.dumps(
+            {"subject": "[battlestats] ops ALERT x", "html_body": "<html><body>x</body></html>"})}],
+        "usage": {"input_tokens": 4012, "output_tokens": 1877,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+    }
+    payload.update(overrides)
+    return payload
+
+
+class AnthropicRequestTests(SimpleTestCase):
+    """The real call_anthropic, with only the network replaced.
+
+    Every other test patches call_anthropic whole, so nothing else pins what is
+    actually put on the wire or what is recorded about the response.
+    """
+
+    SECRET = "sk-test-not-a-real-key"
+    PACKAGE = {"observation": {"latest": {"totals": {"active_7d": 206904}}},
+               "tripped_conditions": [{"code": "c", "detail": "d"}]}
+
+    def call(self, response=None, **kwargs):
+        import contextlib
+        import io
+        sent = {}
+
+        def _urlopen(req, timeout=None):
+            sent["body"] = json.loads(req.data.decode("utf-8"))
+            return _FakeResponse(response if response is not None else _api_response())
+
+        out = io.StringIO()
+        with mock.patch.object(doe.urllib.request, "urlopen", _urlopen), \
+             contextlib.redirect_stdout(out):
+            result = doe.call_anthropic("claude-opus-5", self.SECRET, self.PACKAGE, **kwargs)
+        return result, sent["body"], out.getvalue()
+
+    def test_data_package_is_sent_as_compact_json(self):
+        """Indentation is billed input that carries no information."""
+        _result, body, _out = self.call()
+        content = body["messages"][0]["content"]
+        instruction, _, blob = content.partition("\n\n")
+        self.assertTrue(instruction)
+        self.assertEqual(blob, json.dumps(self.PACKAGE, separators=(",", ":")))
+        self.assertNotIn("\n", blob)
+        self.assertEqual(json.loads(blob), self.PACKAGE)
+
+    def test_request_shape_is_otherwise_unchanged(self):
+        _result, body, _out = self.call(system="S", instruction="I")
+        self.assertEqual(body["model"], "claude-opus-5")
+        self.assertEqual(body["max_tokens"], 8000)
+        self.assertEqual(body["output_config"], {"effort": "low"})
+        self.assertEqual(body["system"], "S")
+        self.assertTrue(body["messages"][0]["content"].startswith("I\n\n"))
+        self.assertNotIn("cache_control", json.dumps(body))
+
+    def test_usage_is_logged_and_the_key_is_not(self):
+        result, _body, out = self.call()
+        self.assertEqual(result["subject"], "[battlestats] ops ALERT x")
+        self.assertIn(
+            "[llm] model=claude-opus-5 stop_reason=end_turn input_tokens=4012 "
+            "output_tokens=1877 cache_creation_input_tokens=0 cache_read_input_tokens=0",
+            out,
+        )
+        self.assertNotIn(self.SECRET, out)
+
+    def test_a_response_without_usage_still_parses(self):
+        for usage in (doe_DELETE, None):
+            response = _api_response()
+            if usage is doe_DELETE:
+                del response["usage"]
+            else:
+                response["usage"] = None
+            result, _body, out = self.call(response=response)
+            self.assertEqual(result["html_body"], "<html><body>x</body></html>")
+            self.assertIn("input_tokens=0 output_tokens=0", out)
+
+    def test_usage_is_logged_before_a_refusal_raises(self):
+        """A declined request is still a billed, accountable call."""
+        import contextlib
+        import io
+        response = _api_response(stop_reason="refusal", content=[])
+        out = io.StringIO()
+        with mock.patch.object(doe.urllib.request, "urlopen",
+                               lambda req, timeout=None: _FakeResponse(response)), \
+             contextlib.redirect_stdout(out), \
+             self.assertRaises(RuntimeError):
+            doe.call_anthropic("claude-opus-5", self.SECRET, self.PACKAGE)
+        self.assertIn("[llm] model=claude-opus-5 stop_reason=refusal", out.getvalue())

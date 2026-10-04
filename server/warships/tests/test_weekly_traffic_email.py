@@ -1151,3 +1151,94 @@ class LlmPayloadTests(SimpleTestCase):
         self.assertNotIn("referrers", called["payload"])
         self.assertIn("top_route_labels", called["payload"])
         self.assertNotIn("daily", called["payload"])
+
+
+class _FakeResponse:
+    """Stand-in for the urlopen context manager: yields one canned JSON body."""
+
+    def __init__(self, payload: dict):
+        self._raw = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._raw
+
+
+def _api_response(**overrides):
+    payload = {
+        "model": "claude-opus-5",
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": json.dumps({"lead": "An ordinary week."})}],
+        "usage": {"input_tokens": 1290, "output_tokens": 412,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+    }
+    payload.update(overrides)
+    return payload
+
+
+class AnthropicRequestTests(SimpleTestCase):
+    """The real call_anthropic, with only the network replaced.
+
+    Every other test patches call_anthropic whole, so nothing else pins what is
+    actually put on the wire or what is recorded about the response.
+    """
+
+    SECRET = "sk-test-not-a-real-key"
+
+    def call(self, response=None):
+        import contextlib
+        import io
+        sent = {}
+        payload = mod.llm_payload(_computed())
+
+        def _urlopen(req, timeout=None):
+            sent["body"] = json.loads(req.data.decode("utf-8"))
+            return _FakeResponse(response if response is not None else _api_response())
+
+        out = io.StringIO()
+        with mock.patch.object(mod.urllib.request, "urlopen", _urlopen), \
+             contextlib.redirect_stdout(out):
+            lead = mod.call_anthropic("claude-opus-5", self.SECRET, payload)
+        return lead, payload, sent["body"], out.getvalue()
+
+    def test_payload_is_sent_as_compact_json(self):
+        """Indentation is billed input that carries no information."""
+        _lead, payload, body, _out = self.call()
+        content = body["messages"][0]["content"]
+        instruction, _, blob = content.partition("\n\n")
+        self.assertEqual(instruction, "Figures for the week. Write the lead.")
+        self.assertEqual(blob, json.dumps(payload, separators=(",", ":"), default=str))
+        self.assertNotIn("\n", blob)
+        self.assertEqual(json.loads(blob), json.loads(json.dumps(payload, default=str)))
+
+    def test_request_shape_is_otherwise_unchanged(self):
+        _lead, _payload, body, _out = self.call()
+        self.assertEqual(body["model"], "claude-opus-5")
+        self.assertEqual(body["max_tokens"], 4000)
+        self.assertEqual(body["output_config"], {"effort": "low"})
+        self.assertEqual(body["system"], mod.SYSTEM_PROMPT)
+        self.assertNotIn("cache_control", json.dumps(body))
+
+    def test_usage_is_logged_and_the_key_is_not(self):
+        lead, _payload, _body, out = self.call()
+        self.assertEqual(lead, "An ordinary week.")
+        self.assertIn(
+            "[llm] model=claude-opus-5 stop_reason=end_turn input_tokens=1290 "
+            "output_tokens=412 cache_creation_input_tokens=0 cache_read_input_tokens=0",
+            out,
+        )
+        self.assertNotIn(self.SECRET, out)
+
+    def test_a_response_without_usage_still_parses(self):
+        missing = _api_response()
+        del missing["usage"]
+        for response in (missing, _api_response(usage=None)):
+            with self.subTest(usage=response.get("usage", "absent")):
+                lead, _payload, _body, out = self.call(response=response)
+                self.assertEqual(lead, "An ordinary week.")
+                self.assertIn("input_tokens=0 output_tokens=0", out)
