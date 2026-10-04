@@ -216,6 +216,18 @@ The admin remains the one §6 item still unexercised; it is little used here.
   cleared two critical `next` RCE advisories (GHSA-p293-qw3h-jr36,
   GHSA-2xp9-vwfh-vxw4) that had held CI red since 2026-09-09; prod-only audits to
   zero and the gate sits at `high` in `.github/workflows/ci.yml`.
+- **2026-10-04: `next` 16.3.5 → 16.3.8.** The gate went red again on 2026-10-01
+  (v5.11.13) and stayed red for four pushes: GHSA-vcvr-r3jv-pc5j, a critical RCE
+  in `next/og` `ImageResponse`, affecting 16.2.0-16.3.5 and fixed in 16.3.6. This
+  one is in a code path we serve: `client/app/og/route.tsx` renders the dynamic
+  OG cards with `ImageResponse`. Versions crossed: 16.3.6 (that fix alone);
+  16.3.7 (a turbo-tasks hang backport, no behaviour change for us); 16.3.8 (one
+  high, SSRF in Image Optimization, GHSA-cjq9-62q9-8jv4, plus five medium
+  cache-poisoning and `use cache` leaks and one low). `/_next/image` is live on
+  prod, so the SSRF fix applies too. No config or API change was needed; lint,
+  the 782 client tests and the build pass, and `/` is still prerendered static.
+  As in September, the red audit step ran before lint, test and build, so no
+  client check ran in CI for those four pushes.
 
 ## 8. Related
 
