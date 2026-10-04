@@ -191,7 +191,8 @@ Future agent sessions need one high-density bootstrap file that explains the liv
   - durable checkpointing, retries failed players first, resumable
   - allowed to repair stale or incomplete ranked rows including missing top-ship enrichment
 - daily freshness lane:
-  - `python manage.py incremental_ranked_data --state-file logs/incremental_ranked_data_state.json`
+  - `python manage.py incremental_ranked_data --realm na --state-file logs/incremental_ranked_data_state.na.json`
+  - one checkpoint file per realm (`…_state.<realm>.json`); the Celery task derives it from `RANKED_INCREMENTAL_STATE_FILE`. A checkpoint is never resumed by another realm
   - queue-based Celery task on the `background` queue
   - known ranked + discovery candidates are interleaved
   - defaults in docker: `LIMIT=150`, `SKIP_FRESH_HOURS=24`, `KNOWN_LIMIT=300`, `DISCOVERY_LIMIT=75`
@@ -199,7 +200,7 @@ Future agent sessions need one high-density bootstrap file that explains the liv
   - default schedule: `10:30 UTC`
   - skips while clan crawl lock is active
 - wrapper script:
-  - `python scripts/incremental_ranked_data.py --status-only`
+  - `python scripts/incremental_ranked_data.py --realm na --status-only`
 
 ## Clan And Activity Semantics
 

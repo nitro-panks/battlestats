@@ -4598,6 +4598,32 @@
                 "broker-publish-moved-off-request-thread-entirely"
             ]
         },
+        "agents/runbooks/runbook-incremental-refresh-shared-state-file-2026-10-04.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "ranked incremental aborting after 25 errors",
+                "player matching query does not exist ranked incremental",
+                "incremental refresh shared state file",
+                "player refresh wrong realm silent success"
+            ],
+            "tags": [
+                "celery",
+                "background-queue",
+                "incremental-ranked",
+                "incremental-player-refresh",
+                "state-file",
+                "per-realm",
+                "striping",
+                "silent-failure"
+            ],
+            "archive_on": [
+                "per-realm-checkpoint-files-shipped-and-verified"
+            ]
+        },
         "agents/runbooks/runbook-ship-standings-tier-extension-2026-09-15.md": {
             "kind": "runbook",
             "status": "active",

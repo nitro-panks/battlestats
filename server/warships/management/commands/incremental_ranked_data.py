@@ -30,6 +30,9 @@ def _env_int(name: str, default: int) -> int:
 def _default_state() -> dict:
     return {
         'version': 1,
+        # The realm whose players fill the queue. A checkpoint is only ever
+        # resumed by that realm; see handle().
+        'realm': None,
         'pending_player_ids': [],
         'next_index': 0,
         'processed_total': 0,
@@ -225,7 +228,13 @@ class Command(BaseCommand):
         pending_player_ids = state.get('pending_player_ids', [])
         next_index = state.get('next_index', 0)
         failed_player_ids = state.get('failed_player_ids', [])
-        if bool(options['rebuild_queue']) or not pending_player_ids or (
+        # The queue holds one realm's Player rows, and update_ranked_data looks
+        # each one up under the realm it is given. A queue built for another
+        # realm (or by a pre-stamp version, which shared one file across all
+        # three) raises DoesNotExist on every row, so it is rebuilt, not resumed.
+        # runbook-incremental-refresh-shared-state-file-2026-10-04.md
+        foreign_queue = state.get('realm') != realm
+        if bool(options['rebuild_queue']) or foreign_queue or not pending_player_ids or (
             next_index >= len(pending_player_ids) and not failed_player_ids
         ):
             pending_player_ids = _build_candidate_queue(
@@ -238,6 +247,7 @@ class Command(BaseCommand):
                 min_discovery_pvp_battles=min_discovery_pvp_battles,
                 realm=realm,
             )
+            state['realm'] = realm
             state['pending_player_ids'] = pending_player_ids
             state['next_index'] = 0
             state['failed_player_ids'] = []
@@ -352,3 +362,11 @@ class Command(BaseCommand):
             f'queue_remaining={max(len(state["pending_player_ids"]) - state["next_index"], 0)}, '
             f'failed_pending={len(state["failed_player_ids"])}'
         ))
+
+        # Raised after the checkpoint and the summary are written, so the run is
+        # still resumable. Without this the Celery task reports "completed" for
+        # a run that refreshed nothing, which no monitor can see.
+        if errors_this_run >= max_errors:
+            raise CommandError(
+                f'incremental_ranked_data aborted for realm={realm} after '
+                f'{errors_this_run} errors; last error: {state["last_error"]}')
