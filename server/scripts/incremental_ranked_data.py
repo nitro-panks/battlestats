@@ -21,8 +21,10 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description='Run or inspect the durable ranked incremental refresh command.'
     )
-    parser.add_argument(
-        '--state-file', default='logs/incremental_ranked_data_state.json')
+    # Checkpoints are per realm. With no --state-file this resolves to the same
+    # file the Celery task uses for --realm; an explicit path is used as given.
+    parser.add_argument('--state-file', default=None)
+    parser.add_argument('--realm', default='na')
     parser.add_argument('--limit', type=int,
                         default=_env_int('RANKED_INCREMENTAL_LIMIT', 150))
     parser.add_argument('--batch-size', type=int, default=50)
@@ -68,7 +70,12 @@ def main() -> int:
     print(f'Loading environment variables from {loaded_names}')
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'battlestats.settings')
 
-    state_path = Path(args.state_file)
+    if args.state_file:
+        state_path = Path(args.state_file)
+    else:
+        base = Path(os.getenv('RANKED_INCREMENTAL_STATE_FILE',
+                              'logs/incremental_ranked_data_state.json'))
+        state_path = base.with_name(f'{base.stem}.{args.realm}{base.suffix}')
     if not state_path.is_absolute():
         state_path = (base_dir / state_path).resolve()
 
@@ -95,6 +102,7 @@ def main() -> int:
         include_hidden=args.include_hidden,
         reset_state=args.reset_state,
         rebuild_queue=args.rebuild_queue,
+        realm=args.realm,
     )
     return 0
 

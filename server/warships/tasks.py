@@ -1,6 +1,7 @@
 from __future__ import absolute_import, unicode_literals
 import logging
 import os
+from pathlib import Path
 import re
 import time
 
@@ -258,6 +259,18 @@ def _clan_crawl_pass_marker_key(realm: str = DEFAULT_REALM) -> str:
 
 def _clan_crawl_pending_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:crawl_all_clans:{realm}:pending"
+
+
+def _realm_state_file(base_path: str, realm: str) -> str:
+    """Per-realm checkpoint path: ``state.json`` -> ``state.<realm>.json``.
+
+    The incremental refresh commands keep one realm's queue in their checkpoint,
+    and the lock that serialises them is per realm, so the file has to be too.
+    One shared file had each realm consuming the others' queues.
+    runbook-incremental-refresh-shared-state-file-2026-10-04.md
+    """
+    path = Path(base_path)
+    return str(path.with_name(f"{path.stem}.{realm}{path.suffix}"))
 
 
 def _ranked_incremental_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -2465,8 +2478,8 @@ def incremental_player_refresh_task(self, realm=DEFAULT_REALM):
     try:
         call_command(
             'incremental_player_refresh',
-            state_file=os.getenv(
-                'PLAYER_REFRESH_STATE_FILE', 'logs/incremental_player_refresh_state.json'),
+            state_file=_realm_state_file(os.getenv(
+                'PLAYER_REFRESH_STATE_FILE', 'logs/incremental_player_refresh_state.json'), realm),
             limit=int(os.getenv('PLAYER_REFRESH_TOTAL_LIMIT', '1200')),
             batch_size=int(os.getenv('PLAYER_REFRESH_BATCH_SIZE', '50')),
             hot_stale_hours=int(
@@ -2852,8 +2865,8 @@ def incremental_ranked_data_task(self, realm=DEFAULT_REALM):
     try:
         call_command(
             'incremental_ranked_data',
-            state_file=os.getenv(
-                'RANKED_INCREMENTAL_STATE_FILE', 'logs/incremental_ranked_data_state.json'),
+            state_file=_realm_state_file(os.getenv(
+                'RANKED_INCREMENTAL_STATE_FILE', 'logs/incremental_ranked_data_state.json'), realm),
             limit=int(os.getenv('RANKED_INCREMENTAL_LIMIT', '150')),
             batch_size=int(os.getenv('RANKED_INCREMENTAL_BATCH_SIZE', '50')),
             skip_fresh_hours=int(

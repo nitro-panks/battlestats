@@ -41,6 +41,9 @@ def _env_int(name: str, default: int) -> int:
 def _default_state() -> dict:
     return {
         'version': 1,
+        # The realm whose players fill the queue. A checkpoint is only ever
+        # resumed by that realm; see handle().
+        'realm': None,
         'pending_player_ids': [],
         'next_index': 0,
         'processed_total': 0,
@@ -172,7 +175,10 @@ def _build_candidate_queue(
 
 def _refresh_player(player_id: int, realm: str = DEFAULT_REALM) -> None:
     """Refresh a single player through the durable crawler pipeline."""
-    player = Player.objects.filter(id=player_id).select_related('clan').first()
+    # Realm-filtered so a row from another realm is skipped before the WG call
+    # rather than after it.
+    player = Player.objects.filter(
+        id=player_id, realm=realm).select_related('clan').first()
     if player is None:
         return
 
@@ -306,8 +312,13 @@ class Command(BaseCommand):
         next_index = state.get('next_index', 0)
         failed_player_ids = state.get('failed_player_ids', [])
 
-        # Rebuild queue if exhausted or forced
-        if not pending_player_ids or (
+        # Rebuild queue if exhausted or forced, or if it belongs to another
+        # realm. A foreign queue does not fail here: WG answers null for an
+        # account on the wrong realm and the row is counted as a success, so a
+        # resumed foreign queue is silently discarded unrefreshed.
+        # runbook-incremental-refresh-shared-state-file-2026-10-04.md
+        foreign_queue = state.get('realm') != realm
+        if foreign_queue or not pending_player_ids or (
             next_index >= len(pending_player_ids) and not failed_player_ids
         ):
             pending_player_ids, tier_counts = _build_candidate_queue(
@@ -322,6 +333,7 @@ class Command(BaseCommand):
                 warm_lookback_days=max(int(options['warm_lookback_days']), 0),
                 realm=realm,
             )
+            state['realm'] = realm
             state['pending_player_ids'] = pending_player_ids
             state['next_index'] = 0
             state['failed_player_ids'] = []
@@ -440,3 +452,11 @@ class Command(BaseCommand):
             f'queue_remaining={max(len(state["pending_player_ids"]) - state["next_index"], 0)}, '
             f'failed_pending={len(state["failed_player_ids"])}'
         ))
+
+        # Raised after the checkpoint and the summary are written, so the run is
+        # still resumable. Without this the Celery task reports "completed" for
+        # a run that aborted.
+        if errors_this_run >= max_errors:
+            raise CommandError(
+                f'incremental_player_refresh aborted for realm={realm} after '
+                f'{errors_this_run} errors; last error: {state["last_error"]}')
