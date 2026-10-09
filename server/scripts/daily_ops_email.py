@@ -313,10 +313,11 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     # still catches a stalled crawl within a week.
     "crawl_max_age_hours": 168.0,
     # recapture: daily Beat at 10:10/10:30/10:50 UTC -> healthy age 0.7-1.4h.
-    # A single missed run lands at 24.7-25.4h, so the threshold must sit below
-    # 24.7 to catch it. NOTE the healthy margin is only ~40-80 minutes; a run
-    # that starts after ~11:15 will false-fire. Raise via env if that shows up.
-    "recapture_max_age_hours": 24.0,
+    # Widened 24 -> 26h (2026-10-08): the sweep start drifted to 11:35 UTC on
+    # 2026-10-07 and a 24h rule false-fired on a healthy run. Cost: a single
+    # missed run (age 24.7-25.4h at the 11:31 digest) no longer fires; it is
+    # next visible as a fresh run the following day. Env override remains.
+    "recapture_max_age_hours": 26.0,
 
     # --- observation floor, TOTAL scope (regime min .. max) ---
     "obs_coverage_min": 0.18,             # observed 0.2441 .. 0.3577

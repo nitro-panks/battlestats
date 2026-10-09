@@ -392,10 +392,17 @@ class TrippedConditionTests(OpsAlertTestCase):
             f.unlink()
         self.assert_fires("realm_snapshot_missing:recapture-lapsed:asia")
 
-    def test_recapture_stale_by_one_missed_daily_run_sends(self):
+    def test_recapture_stale_beyond_26h_sends(self):
         """The 2026-08-06 incident signature: EU/ASIA silently stopped writing."""
-        self.age_file("recapture-lapsed", 25.4, realm="eu")
+        self.age_file("recapture-lapsed", 26.5, realm="eu")
         self.assert_fires("snapshot_stale:recapture-lapsed:eu")
+
+    def test_recapture_single_missed_run_is_quiet_by_design(self):
+        """Widened 24 -> 26h on 2026-10-08: a late-but-healthy sweep (started
+        after ~11:15 UTC) must not false-fire. A single missed run (25.4h) is
+        accepted as silent until the next day's fresh run."""
+        self.age_file("recapture-lapsed", 25.4, realm="eu")
+        self.assertEqual(self.codes(), [])
 
     def test_recapture_one_day_old_but_inside_the_window_is_quiet(self):
         """23h is still same-cadence; only a genuinely missed run should fire."""
