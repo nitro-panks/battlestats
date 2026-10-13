@@ -1178,10 +1178,13 @@ or fell.
 comparable as parts of one whole. `ui_non_english_pct` is the share of \
 beacon-reporting visitors whose interface ran in Korean or Japanese; \
 `browser_ko_ja_pct` is the share of all visitors whose BROWSER asks for Korean \
-or Japanese, which is a ceiling, not usage. English is the default for every \
-new arrival, so a low first figure beside a high second one is the expected \
-state and not a fault. Mention them only when one has moved; never subtract \
-them, and never call the second one usage.
+or Japanese, which is a ceiling, not usage. The interface defaults to the \
+first supported language in the browser's list, so a ko/ja browser normally \
+gets a ko/ja interface without any action; never say English is the default. \
+A first figure below the second is still expected: the denominators differ, \
+a browser listing English ahead of Korean gets English, and some visitors have \
+chosen English explicitly. Mention them only when one has moved; never \
+subtract them, and never call the second one usage.
 - Do not recommend actions. Do not speculate about causes you cannot see.
 
 Output STRICT JSON only, no markdown fences: {"lead": "..."}"""
