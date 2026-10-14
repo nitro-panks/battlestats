@@ -57,7 +57,7 @@ from warships.data import (
     PLAYER_BATTLE_DATA_STALE_AFTER,
     refresh_player_explorer_summary,
 )
-from warships.visit_analytics import record_entity_visit
+from warships.visit_analytics import is_bot_user_agent, record_entity_visit
 from warships.client_ip import get_client_ip
 from .tasks import is_clan_battle_summary_refresh_pending, is_ranked_data_refresh_pending, update_clan_data_task, update_player_data_task, update_clan_members_task
 
@@ -238,7 +238,8 @@ class PlayerViewSet(viewsets.ModelViewSet):
             if player_id:
                 cached = get_cached_player_detail(player_id, realm=realm)
                 if cached is not None:
-                    self._record_player_view(player_id, realm=realm)
+                    if not self._is_bot_request():
+                        self._record_player_view(player_id, realm=realm)
                     if (
                         cached.get('actual_kdr') is None
                         and not cached.get('is_hidden')
@@ -284,6 +285,15 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 miss_player_id, resolved_realm)
             _set_player_refresh_headers(response, pending, next_refresh)
         return response
+
+    def _is_bot_request(self) -> bool:
+        """Crawler / link-preview user agents (same regex as the visit beacon).
+
+        A bot must not write ``last_lookup``: that field feeds the refresh hot
+        tier, and Meta's crawler built a ~16.8k asia tier through this endpoint
+        in 2026-10 (runbook-background-queue-stripe-latency-2026-10-13.md).
+        """
+        return is_bot_user_agent(self.request.META.get('HTTP_USER_AGENT', ''))
 
     def _record_player_view(self, player_id: int, update_last_lookup: bool = True, realm: str = DEFAULT_REALM) -> None:
         """Bump the page-visit timestamp + push to the recently-viewed list.
@@ -347,6 +357,10 @@ class PlayerViewSet(viewsets.ModelViewSet):
             )
             cache.delete(missing_lookup_cache_key)
         except Player.DoesNotExist:
+            if self._is_bot_request():
+                # Bots are refused WG hydration outright: no name lookup, no
+                # forced update_player_data. Stored players still serve above.
+                raise Http404("Player matching query does not exist.")
             if _cross_realm_fallback_enabled():
                 # Cross-realm fallback: probe the selected realm, then the
                 # others in fixed order (first hit wins). `realm` is reassigned
@@ -428,10 +442,14 @@ class PlayerViewSet(viewsets.ModelViewSet):
         self.check_object_permissions(self.request, obj)
 
         now = timezone.now()
+        is_bot = self._is_bot_request()
 
         # Record the last time this player profile was viewed via the API.
-        obj.last_lookup = now
-        update_fields = ["last_lookup"]
+        # Not for bots: last_lookup feeds the refresh hot tier.
+        update_fields = []
+        if not is_bot:
+            obj.last_lookup = now
+            update_fields.append("last_lookup")
 
         if obj.verdict is None and not obj.is_hidden:
             inferred_verdict = compute_player_verdict(
@@ -443,9 +461,11 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 obj.verdict = inferred_verdict
                 update_fields.append("verdict")
 
-        obj.save(update_fields=update_fields)
-        self._record_player_view(
-            obj.player_id, update_last_lookup=False, realm=realm)
+        if update_fields:
+            obj.save(update_fields=update_fields)
+        if not is_bot:
+            self._record_player_view(
+                obj.player_id, update_last_lookup=False, realm=realm)
 
         if not obj.is_hidden and explorer_summary_needs_refresh(obj):
             refresh_player_explorer_summary(obj)

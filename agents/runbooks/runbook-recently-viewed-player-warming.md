@@ -168,6 +168,8 @@ On a fresh boot (empty Redis), the cache key will also be empty — no recently-
 
 ```
 t=0h   Player visits → get_object() sets last_lookup, push_recently_viewed_player() adds to ZSET
+       (both skipped for bot user agents since v5.11.21: last_lookup feeds the refresh hot tier,
+        see runbook-background-queue-stripe-latency-2026-10-13.md)
        → Response serialized from DB (cache miss), lazy refresh enqueued if stale
        → Bulk cache key player:detail:v1:{id} written by normal response path? NO — only bulk loader writes these.
          But hot entity warmer may pick this player up via last_lookup at next 30m cycle.

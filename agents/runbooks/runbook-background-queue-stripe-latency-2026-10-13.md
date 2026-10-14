@@ -2,7 +2,7 @@
 
 _Created: 2026-10-13_
 _Context: `celery_task_realm_failing` fired six times across four ops alerts in one week (10-06, 10-07, 10-09, 10-12), every one a daily stripe on the `background` queue that completed after the 11:00 UTC service-health scan. A four-angle deep dive (dispatch latency, pool occupancy, task design, detector replay) plus an nginx access-log check found one root driver and two aggravators. Nothing has been changed; this runbook records the evidence and sequences the levers._
-_Status: **investigation complete, remedies pending the operator's choice.** Prod at v5.11.20; the three alert mails are archived._
+_Status: **N1 shipped (v5.11.21, 2026-10-14); N2-N7 pending.** The three alert mails are archived. Digest all clear 10-13 and 10-14._
 
 ## QA Notes
 
@@ -176,6 +176,8 @@ Three independent contributors, each sufficient for one of the observed fires: t
 One lever at a time, with an acknowledgement between each, per the standing rule. Ordered by leverage per unit of risk. None has been applied.
 
 ### N1 (code, patch release): gate the API-path `last_lookup` write on bot user agents
+
+**Implemented 2026-10-14 (v5.11.21).** `PlayerViewSet._is_bot_request()` wraps `is_bot_user_agent` on `HTTP_USER_AGENT`; the cache-hit `_record_player_view` call, the cache-miss `last_lookup` write and recently-viewed push are skipped for bots, and `get_object` raises `Http404` on `Player.DoesNotExist` for a bot before any WG call. Tests: `PlayerLookupBotGateTests` in `server/warships/tests/test_views.py` (cache hit, cache miss, never-stored, and a human control) with Meta's UA string. Validation is the crawler line under Validation below: a return visit must not move `Built candidate queue` for asia; the tier itself drains per N3 or by 14-day ageing.
 
 Stops the recurrence. In `server/warships/views.py` `PlayerViewSet.retrieve`, when `visit_analytics.is_bot_user_agent(request.META.get('HTTP_USER_AGENT', ''))` is true: skip the `:241` cache-hit call to `_record_player_view`, and on the cache-miss path leave `last_lookup` out of `update_fields` at `:433-434` (QA 2026-10-13: the `:447` call already passes `update_last_lookup=False`; gating it alone leaves the write in place). On the cache-miss path, bot agents are refused the hydration outright: raise `Http404` before the name lookup at `:361`/`:379`, so neither that lookup nor the forced `update_player_data` at `:399` spends a WG call for a crawler (decided 2026-10-14). A player we already store still serves from cache to a bot; only never-stored names are refused. The beacon path already does this; the two writers should agree. Add a test in `server/warships/tests/` with Meta's UA string. The `(bot|crawler|spider|...)` regex already matches it.
 

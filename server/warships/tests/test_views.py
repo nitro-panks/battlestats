@@ -611,6 +611,90 @@ class PlayerViewSetTests(TestCase):
         mock_update_clan_members_task.assert_not_called()
 
 
+META_CRAWLER_UA = (
+    "meta-externalagent/1.1 "
+    "(+https://developers.facebook.com/docs/sharing/webmasters/crawler)"
+)
+
+
+class PlayerLookupBotGateTests(TestCase):
+    """Bot user agents must not write ``last_lookup`` (it feeds the refresh
+    hot tier) and must not trigger WG hydration for never-stored names.
+    Runbook: runbook-background-queue-stripe-latency-2026-10-13.md, N1."""
+
+    def setUp(self):
+        cache.clear()
+
+    def _make_player(self, name, player_id):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=player_id, name=f"{name}Clan", members_count=1,
+            last_fetch=now,
+        )
+        return Player.objects.create(
+            name=name, player_id=player_id, clan=clan,
+            last_fetch=now, last_lookup=None,
+        )
+
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
+    def test_bot_cache_miss_serves_stored_player_without_last_lookup(
+        self, _p, _c, _m,
+    ):
+        player = self._make_player("BotMissPlayer", 9061)
+
+        response = self.client.get(
+            "/api/player/BotMissPlayer/", HTTP_USER_AGENT=META_CRAWLER_UA)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get('X-Player-Cache'), 'miss')
+        player.refresh_from_db()
+        self.assertIsNone(player.last_lookup)
+
+    def test_bot_cache_hit_serves_stored_player_without_last_lookup(self):
+        from warships.data import _bulk_cache_key_player
+        from warships.serializers import PlayerSerializer
+        player = self._make_player("BotHitPlayer", 9062)
+        cache.set(_bulk_cache_key_player(player.player_id),
+                  PlayerSerializer(player).data, 300)
+
+        response = self.client.get(
+            "/api/player/BotHitPlayer/", HTTP_USER_AGENT=META_CRAWLER_UA)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get('X-Player-Cache'), 'hit')
+        player.refresh_from_db()
+        self.assertIsNone(player.last_lookup)
+
+    @patch("warships.data.update_player_data")
+    @patch("warships.views._fetch_player_id_by_name", return_value="9063")
+    def test_bot_never_stored_player_is_refused_before_wg_lookup(
+        self, mock_fetch_player_id, mock_update_player_data,
+    ):
+        response = self.client.get(
+            "/api/player/BotUnknownPlayer/", HTTP_USER_AGENT=META_CRAWLER_UA)
+
+        self.assertEqual(response.status_code, 404)
+        mock_fetch_player_id.assert_not_called()
+        mock_update_player_data.assert_not_called()
+        self.assertFalse(Player.objects.filter(player_id=9063).exists())
+
+    @patch("warships.views.update_clan_members_task.apply_async")
+    @patch("warships.views.update_clan_data_task.apply_async")
+    @patch("warships.views.update_player_data_task.apply_async")
+    def test_human_cache_miss_still_writes_last_lookup(self, _p, _c, _m):
+        player = self._make_player("HumanMissPlayer", 9064)
+
+        response = self.client.get(
+            "/api/player/HumanMissPlayer/",
+            HTTP_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) Firefox/131.0")
+
+        self.assertEqual(response.status_code, 200)
+        player.refresh_from_db()
+        self.assertIsNotNone(player.last_lookup)
+
+
 class LandingWarmupViewTests(TestCase):
     @patch("warships.views.update_clan_members_task.apply_async")
     @patch("warships.views.update_clan_data_task.apply_async")
