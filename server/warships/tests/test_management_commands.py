@@ -258,6 +258,75 @@ class IncrementalPlayerRefreshCommandTests(TestCase):
         )
 
 
+class IncrementalPlayerRefreshBudgetTests(TestCase):
+    """N2 of runbook-background-queue-stripe-latency-2026-10-13.md: the hot
+    tier is capped and a run is bounded by wall clock, so one crawler-built
+    tier cannot hold a background slot for hours."""
+
+    def _hot_player(self, player_id, lookup_hours_ago):
+        from datetime import timedelta
+        now = timezone.now()
+        return Player.objects.create(
+            name=f"Hot{player_id}", player_id=player_id, realm="asia",
+            last_lookup=now - timedelta(hours=lookup_hours_ago),
+            last_fetch=now - timedelta(days=2),
+        )
+
+    def test_build_candidate_queue_caps_hot_tier_keeping_most_recent_lookups(self):
+        from warships.management.commands.incremental_player_refresh import (
+            _build_candidate_queue)
+        oldest = self._hot_player(7001, lookup_hours_ago=30)
+        newest = self._hot_player(7002, lookup_hours_ago=1)
+        middle = self._hot_player(7003, lookup_hours_ago=10)
+
+        ordered, tier_counts = _build_candidate_queue(
+            hot_stale_hours=12, active_stale_hours=24, warm_stale_hours=72,
+            hot_limit=2, active_limit=0, warm_limit=0,
+            hot_lookback_days=14, active_lookback_days=30,
+            warm_lookback_days=90, realm="asia",
+        )
+
+        self.assertEqual(tier_counts["hot"], 2)
+        self.assertEqual(ordered, [newest.id, middle.id])
+        self.assertNotIn(oldest.id, ordered)
+
+    @patch("warships.management.commands.incremental_player_refresh._monotonic")
+    @patch("warships.management.commands.incremental_player_refresh._refresh_player")
+    @patch("warships.management.commands.incremental_player_refresh._build_candidate_queue")
+    def test_run_stops_at_wall_clock_budget_and_stays_resumable(
+        self, mock_build_candidate_queue, mock_refresh_player, mock_monotonic,
+    ):
+        players = [
+            Player.objects.create(name=f"Budget{i}", player_id=7100 + i, realm="eu")
+            for i in range(3)
+        ]
+        mock_build_candidate_queue.return_value = (
+            [p.id for p in players], {"hot": 3, "active": 0, "warm": 0})
+        clock = {"now": 0.0}
+        mock_monotonic.side_effect = lambda: clock["now"]
+
+        def slow_refresh(player_id, realm="na"):
+            clock["now"] += 6.0
+
+        mock_refresh_player.side_effect = slow_refresh
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = Path(tmpdir) / "state.json"
+            out = StringIO()
+            call_command(
+                "incremental_player_refresh", realm="eu", limit=0,
+                run_budget_seconds=10, state_file=str(state_file), stdout=out,
+            )
+            state = json.loads(state_file.read_text())
+
+        self.assertEqual(mock_refresh_player.call_count, 2)
+        self.assertEqual(state["next_index"], 2)
+        self.assertEqual(len(state["pending_player_ids"]), 3)
+        self.assertIsNone(state["cycle_completed_at"])
+        self.assertIn("run budget", out.getvalue())
+        self.assertIn("queue_remaining=1", out.getvalue())
+
+
 class WarmPlayerEntityCachesTests(TestCase):
     @patch("warships.data.fetch_player_clan_battle_seasons")
     @patch("warships.data.refresh_player_explorer_summary")

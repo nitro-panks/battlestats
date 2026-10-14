@@ -63,7 +63,7 @@ Players are segmented into refresh tiers based on their activity signals:
 
 | Tier        | Definition                                       | Refresh Target                           | Estimated Population |
 | ----------- | ------------------------------------------------ | ---------------------------------------- | -------------------- |
-| **Hot**     | `last_lookup` within 14 days (site visitors)     | Every 12 hours                           | Small (hundreds)     |
+| **Hot**     | `last_lookup` within 14 days (site visitors; bot UAs excluded since v5.11.21) | Every 12 hours | Small (hundreds); capped by `PLAYER_REFRESH_HOT_LIMIT` since v5.11.22 |
 | **Active**  | `last_battle_date` within 30 days AND not Hot    | Every 24 hours                           | Medium (thousands)   |
 | **Warm**    | `last_battle_date` within 90 days AND not Active | Every 72 hours                           | Medium               |
 | **Dormant** | `last_battle_date` > 90 days ago OR null         | **Skip entirely** (refresh on page load) | Large (majority)     |
@@ -283,9 +283,11 @@ All new constants are env-configurable with sensible defaults:
 | `PLAYER_REFRESH_HOT_STALE_HOURS`      | `12`     | Staleness threshold for Hot tier           |
 | `PLAYER_REFRESH_ACTIVE_STALE_HOURS`   | `24`     | Staleness threshold for Active tier        |
 | `PLAYER_REFRESH_WARM_STALE_HOURS`     | `72`     | Staleness threshold for Warm tier          |
-| `PLAYER_REFRESH_ACTIVE_LIMIT`         | `500`    | Max Active-tier players per cycle          |
+| `PLAYER_REFRESH_HOT_LIMIT`            | `1500`   | Max Hot-tier players per cycle (0 = uncapped; added 2026-10-14, see `runbook-background-queue-stripe-latency-2026-10-13.md`) |
+| `PLAYER_REFRESH_ACTIVE_LIMIT`         | `500`    | Max Active-tier players per cycle (prod=1200, pinned in `deploy_to_droplet.sh`) |
 | `PLAYER_REFRESH_WARM_LIMIT`           | `200`    | Max Warm-tier players per cycle            |
 | `PLAYER_REFRESH_MAX_ERRORS`           | `25`     | Error budget before stopping               |
+| `PLAYER_REFRESH_RUN_BUDGET_SECONDS`   | `3000`   | Wall-clock budget per run (0 = unbounded); the checkpoint resumes next run |
 | `PLAYER_REFRESH_HOT_LOOKBACK_DAYS`    | `14`     | Hot tier: last_lookup recency              |
 | `PLAYER_REFRESH_ACTIVE_LOOKBACK_DAYS` | `30`     | Active tier: last_battle_date recency      |
 | `PLAYER_REFRESH_WARM_LOOKBACK_DAYS`   | `90`     | Warm tier: last_battle_date recency        |

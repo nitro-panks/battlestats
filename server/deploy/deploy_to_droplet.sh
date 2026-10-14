@@ -750,6 +750,21 @@ set_env_value ENRICH_DEFER_DURING_CRAWL 0
 set_env_value ENRICH_DELAY_DURING_CRAWL 0.5
 set_env_value ENRICH_PAUSE_BETWEEN_BATCHES 10
 set_env_value PLAYER_REFRESH_INTERVAL_MINUTES 180
+# Incremental player refresh sizing. TOTAL/ACTIVE/WARM/ACTIVE_STALE were hand-set
+# in /etc/battlestats-server.env with no pin (observed 2026-10-13); pinned here
+# at those live values so they have an authority. HOT_LIMIT + RUN_BUDGET_SECONDS
+# are N2 of runbook-background-queue-stripe-latency-2026-10-13.md: the hot tier
+# is built from last_lookup and a crawler inflated it to ~16.8k asia players,
+# making each run 2-4 h on a 60-min cross-realm stride. HOT_LIMIT caps the tier
+# at one run's worth; RUN_BUDGET_SECONDS stops a run under the stride (the
+# per-player checkpoint resumes it next fire), bounding slot-seconds regardless
+# of WG/PG latency.
+set_env_value PLAYER_REFRESH_TOTAL_LIMIT 1500
+set_env_value PLAYER_REFRESH_ACTIVE_LIMIT 1200
+set_env_value PLAYER_REFRESH_WARM_LIMIT 300
+set_env_value PLAYER_REFRESH_ACTIVE_STALE_HOURS 20
+set_env_value PLAYER_REFRESH_HOT_LIMIT 1500
+set_env_value PLAYER_REFRESH_RUN_BUDGET_SECONDS 3000
 set_env_value RANKED_REFRESH_INTERVAL_MINUTES 120
 set_env_value CELERY_BROKER_HEARTBEAT 0
 set_env_value ENABLE_CRAWLER_SCHEDULES 1

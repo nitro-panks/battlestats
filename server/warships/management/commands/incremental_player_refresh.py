@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -23,6 +24,9 @@ from warships.data import (
 from warships.models import DEFAULT_REALM, Player, PlayerExplorerSummary
 from warships.tasks import _clan_crawl_lock_key
 
+
+# Module alias so tests can drive the run budget with a fake clock.
+_monotonic = time.monotonic
 
 DEFAULT_STATE_FILE = Path(settings.BASE_DIR) / 'logs' / \
     'incremental_player_refresh_state.json'
@@ -104,6 +108,7 @@ def _build_candidate_queue(
     active_limit: int,
     warm_limit: int,
     hot_lookback_days: int,
+    hot_limit: int = 0,
     active_lookback_days: int,
     warm_lookback_days: int,
     realm: str = DEFAULT_REALM,
@@ -111,6 +116,11 @@ def _build_candidate_queue(
     """Build a prioritized candidate queue across Hot, Active, and Warm tiers.
 
     Returns (ordered_ids, tier_counts).
+
+    ``hot_limit`` caps the Hot tier (0 = uncapped). It exists because the tier
+    is built from ``last_lookup`` and a crawler inflated it to ~16.8k asia
+    players in 2026-10, which made each run hours long
+    (runbook-background-queue-stripe-latency-2026-10-13.md, N2).
     """
     now = timezone.now()
     today = now.date()
@@ -121,16 +131,17 @@ def _build_candidate_queue(
     # -- Hot tier: site visitors within lookback, stale > hot_stale_hours --
     hot_stale_cutoff = now - timedelta(hours=hot_stale_hours)
     hot_lookup_cutoff = now - timedelta(days=hot_lookback_days)
-    hot_ids = list(
-        base_qs.filter(
-            last_lookup__gte=hot_lookup_cutoff,
-        ).filter(
-            Q(last_fetch__isnull=True) | Q(last_fetch__lt=hot_stale_cutoff),
-        ).order_by(
-            F('last_lookup').desc(nulls_last=True),
-            F('last_fetch').asc(nulls_first=True),
-        ).values_list('id', flat=True)
-    )
+    hot_qs = base_qs.filter(
+        last_lookup__gte=hot_lookup_cutoff,
+    ).filter(
+        Q(last_fetch__isnull=True) | Q(last_fetch__lt=hot_stale_cutoff),
+    ).order_by(
+        F('last_lookup').desc(nulls_last=True),
+        F('last_fetch').asc(nulls_first=True),
+    ).values_list('id', flat=True)
+    if hot_limit > 0:
+        hot_qs = hot_qs[:hot_limit]
+    hot_ids = list(hot_qs)
     hot_set = set(hot_ids)
 
     # -- Active tier: battled within lookback, stale > active_stale_hours --
@@ -253,6 +264,11 @@ class Command(BaseCommand):
             help='Staleness threshold for Warm tier.',
         )
         parser.add_argument(
+            '--hot-limit', type=int,
+            default=_env_int('PLAYER_REFRESH_HOT_LIMIT', 1500),
+            help='Max Hot-tier players per cycle (0 = uncapped).',
+        )
+        parser.add_argument(
             '--active-limit', type=int,
             default=_env_int('PLAYER_REFRESH_ACTIVE_LIMIT', 500),
             help='Max Active-tier players per cycle.',
@@ -283,6 +299,12 @@ class Command(BaseCommand):
             help='Error budget before aborting the run.',
         )
         parser.add_argument(
+            '--run-budget-seconds', type=int,
+            default=_env_int('PLAYER_REFRESH_RUN_BUDGET_SECONDS', 3000),
+            help='Stop the run after this many seconds of wall clock '
+                 '(0 = unbounded); the checkpoint makes it resumable.',
+        )
+        parser.add_argument(
             '--dry-run', action='store_true',
             help='Print candidate queue without refreshing any players.',
         )
@@ -295,6 +317,8 @@ class Command(BaseCommand):
         limit = max(int(options['limit']), 0)
         batch_size = max(int(options['batch_size']), 1)
         max_errors = max(int(options['max_errors']), 1)
+        run_budget_seconds = max(int(options['run_budget_seconds']), 0)
+        run_started_at = _monotonic()
         dry_run = bool(options['dry_run'])
         realm = options.get('realm', DEFAULT_REALM) or DEFAULT_REALM
         state_path = Path(options['state_file']).expanduser().resolve()
@@ -325,6 +349,7 @@ class Command(BaseCommand):
                 hot_stale_hours=max(int(options['hot_stale_hours']), 0),
                 active_stale_hours=max(int(options['active_stale_hours']), 0),
                 warm_stale_hours=max(int(options['warm_stale_hours']), 0),
+                hot_limit=max(int(options['hot_limit']), 0),
                 active_limit=max(int(options['active_limit']), 0),
                 warm_limit=max(int(options['warm_limit']), 0),
                 hot_lookback_days=max(int(options['hot_lookback_days']), 0),
@@ -387,8 +412,18 @@ class Command(BaseCommand):
             state['failed_player_ids'] = failed_ids
             _save_state(state_path, state)
 
+        budget_exhausted = False
+
         def should_stop() -> bool:
-            return (limit and attempted_this_run >= limit) or errors_this_run >= max_errors
+            nonlocal budget_exhausted
+            if (limit and attempted_this_run >= limit) or errors_this_run >= max_errors:
+                return True
+            if run_budget_seconds and (
+                _monotonic() - run_started_at >= run_budget_seconds
+            ):
+                budget_exhausted = True
+                return True
+            return False
 
         # Retry previously failed players first
         failed_retry_ids = list(dict.fromkeys(
@@ -442,6 +477,11 @@ class Command(BaseCommand):
             self.stderr.write(self.style.WARNING(
                 f'Aborting after {errors_this_run} errors in this run. '
                 f'Resume with the same --state-file.'
+            ))
+        elif budget_exhausted:
+            self.stdout.write(self.style.WARNING(
+                f'Stopped at the run budget ({run_budget_seconds}s) after '
+                f'{attempted_this_run} attempt(s); the queue resumes next run.'
             ))
 
         self.stdout.write(self.style.SUCCESS(

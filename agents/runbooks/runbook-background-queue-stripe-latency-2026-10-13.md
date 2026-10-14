@@ -2,7 +2,7 @@
 
 _Created: 2026-10-13_
 _Context: `celery_task_realm_failing` fired six times across four ops alerts in one week (10-06, 10-07, 10-09, 10-12), every one a daily stripe on the `background` queue that completed after the 11:00 UTC service-health scan. A four-angle deep dive (dispatch latency, pool occupancy, task design, detector replay) plus an nginx access-log check found one root driver and two aggravators. Nothing has been changed; this runbook records the evidence and sequences the levers._
-_Status: **N1 shipped (v5.11.21, 2026-10-14); N2-N7 pending.** The three alert mails are archived. Digest all clear 10-13 and 10-14._
+_Status: **N1 shipped (v5.11.21) and N2 shipped (v5.11.22), both 2026-10-14; N3-N7 pending.** The three alert mails are archived. Digest all clear 10-13 and 10-14._
 
 ## QA Notes
 
@@ -184,6 +184,8 @@ Stops the recurrence. In `server/warships/views.py` `PlayerViewSet.retrieve`, wh
 Side effects accepted: a shared link previewed by a bot-UA client no longer refreshes the recently-viewed list, and a link preview (`facebookexternalhit` and `headless` match the same regex, `visit_analytics.py:24-27`) of a player we have never stored renders as not found until a human visits it first. The tests should cover both the cached-player and the never-stored case with Meta's UA.
 
 ### N2 (code + env, patch release): cap the hot tier and bound a refresh run by wall clock
+
+**Implemented 2026-10-14 (v5.11.22).** `--hot-limit` / `PLAYER_REFRESH_HOT_LIMIT` (1500) slices the hot query; `--run-budget-seconds` / `PLAYER_REFRESH_RUN_BUDGET_SECONDS` (3000) is checked in `should_stop()` against a module-level `_monotonic` clock and logs `Stopped at the run budget`. The four hand-set values and the two new ones are pinned in `deploy_to_droplet.sh` next to `PLAYER_REFRESH_INTERVAL_MINUTES`. Tests: `IncrementalPlayerRefreshBudgetTests` in `test_management_commands.py`. Validate per the Queue wait / Occupancy / Hot tier targets below once five days of journal have accrued.
 
 - Add `PLAYER_REFRESH_HOT_LIMIT` (suggest 1,500, i.e. one run's worth) as a `[:limit]` slice on the hot query at `incremental_player_refresh.py:124-133`, ordered as it already is by `last_lookup` desc. Makes queue depth predictable for every realm.
 - Add `PLAYER_REFRESH_RUN_BUDGET_SECONDS` (suggest 3,000, under the 3,600 s stride) to `should_stop()` at `:390-391`. The per-player checkpoint (`_save_state`) makes the stop resumable at `next_index` on the next Beat fire; no data is lost, the drain just takes more fires. This bounds slot-seconds regardless of WG or PG latency, which the count form cannot.
