@@ -4742,6 +4742,38 @@
                 "backfill-stamped-all-realms-and-verified",
                 "ranked-json-path-removed"
             ]
+        },
+        "agents/runbooks/runbook-background-queue-stripe-latency-2026-10-13.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "background queue stripe latency",
+                "realm-axis false fires",
+                "celery_task_realm_failing",
+                "asia hot tier",
+                "meta-externalagent crawl",
+                "WINDOW_HOURS 30"
+            ],
+            "tags": [
+                "celery",
+                "background-queue",
+                "beat",
+                "striping",
+                "ops-email",
+                "alerting",
+                "detector-gap",
+                "incremental-refresh",
+                "crawler",
+                "rabbitmq",
+                "unattended-upgrades"
+            ],
+            "archive_on": [
+                "background-queue-split-shipped",
+                "realm-axis-rule-replaced"
+            ]
         }
     }
 }
