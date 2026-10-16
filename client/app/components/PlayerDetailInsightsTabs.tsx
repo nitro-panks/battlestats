@@ -65,10 +65,11 @@ interface PlayerDetailInsightsTabsProps {
     refreshNonce?: number;
 }
 
-// The Profile tab's tier figure has two views. 'bars' is the default on both
-// server and first client render (deterministic SSR); the stored preference is
-// applied in a mount effect and written through on every switch, mirroring
-// RealmTopShipsTreemapSVG's Map/Plot persistence.
+// The Profile tab's tier figure has two views. 'map' is the default on both
+// server and first client render (deterministic SSR); a visitor's switch is
+// written to localStorage and restored in a mount effect on later visits, so
+// the choice is sticky per browser, mirroring RealmTopShipsTreemapSVG's
+// Map/Plot persistence.
 export type TierChartView = 'bars' | 'map';
 export const TIER_CHART_VIEW_KEY = 'bs-player-tier-view';
 
@@ -279,7 +280,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     // CB tab render independently. Defaults true so it shows while loading.
     const [showClanBattleHeatmap, setShowClanBattleHeatmap] = useState(true);
     const [profileChartPayload, setProfileChartPayload] = useState<TierTypePayload | null>(null);
-    const [tierChartView, setTierChartViewState] = useState<TierChartView>('bars');
+    const [tierChartView, setTierChartViewState] = useState<TierChartView>('map');
     useEffect(() => {
         const stored = readStoredTierChartView();
         if (stored) setTierChartViewState(stored);

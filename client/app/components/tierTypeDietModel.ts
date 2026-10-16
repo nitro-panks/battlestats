@@ -138,6 +138,26 @@ export const buildTierTypeDietModel = (payload: TierTypePayload): TierTypeDietMo
 
 export const formatWinPercent = (ratio: number): string => `${(ratio * 100).toFixed(0)}%`;
 
+// Vertical layout of the bar figure (TierTypeDietSVG). Exported so the Map
+// view can take exactly the same height for the same payload: switching
+// Bars <-> Map must not move anything below the figure.
+export const DIET_ROW_STEP = 26;
+export const DIET_TYPE_LABEL_BAND = 21;
+export const DIET_COL_BAR_MAX = 26;
+// Air between the grid's last tier row and the by-class margin below it, on
+// top of the class-label band. The two are different readings of the data —
+// individual cells above, class totals below — and need to look it.
+export const DIET_CLASS_MARGIN_GAP = 26;
+const DIET_TOP_PAD = 10;
+// Bottom pad only: the figure carries no legend, so this just keeps the class
+// margin's win-rate line off the SVG's bottom edge.
+const DIET_BOTTOM_PAD = 6;
+const DIET_MARGIN_BAND = DIET_TYPE_LABEL_BAND + DIET_CLASS_MARGIN_GAP + DIET_COL_BAR_MAX + 30;
+
+/** Total SVG height of the bar figure for a model with this many tier rows. */
+export const dietFigureHeight = (tierCount: number): number =>
+    DIET_TOP_PAD + tierCount * DIET_ROW_STEP + DIET_MARGIN_BAND + DIET_BOTTOM_PAD;
+
 // A tooltip line: plain muted text, or a value/label pair on the shared
 // two-column grid. Mirrors the contract BattleHistoryTreemaps established so
 // the overlays stay one pattern. Shared by the bar figure (TierTypeDietSVG)

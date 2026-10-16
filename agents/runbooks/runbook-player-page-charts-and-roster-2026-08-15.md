@@ -41,12 +41,18 @@ were that heatmap's own margins replotted. `TierTypeHeatmapSVG`, `TierSVG`,
 The figure now has two views, switched by a pill toggle on the heading row that
 copies the landing treemap's Map/Plot control (same classes, `role="group"`,
 `aria-pressed`). State lives in `PlayerDetailInsightsTabs` (`tierChartView`),
-defaults to `bars` on the server and first client render, and restores the
-stored choice from localStorage `bs-player-tier-view` in a mount effect, the
-way `RealmTopShipsTreemapSVG` restores `bs-landing-ship-view`. Switching fires
+defaults to `map` on the server and first client render, and restores a
+visitor's switch from localStorage `bs-player-tier-view` in a mount effect, the
+way `RealmTopShipsTreemapSVG` restores `bs-landing-ship-view`, so the choice is
+sticky per browser. Switching fires
 `player-tier-chart-view` with `{ view, realm }`; re-pressing the active pill
 does not.
 
+- **Same height as Bars, by construction**: the bar figure's vertical layout
+  constants and `dietFigureHeight(tierCount)` live in `tierTypeDietModel.ts`;
+  the Map block is a grid fixed to that height (panels divide it, caption
+  `PANEL_CAPTION_H` each; at phone width they stack inside the same total),
+  so toggling moves nothing below the figure. Change one, the other follows.
 - **Map = `TierTypeTreemapSVG`**: TWO treemaps side by side (stacked below
   sm), "Tier" and "Type", each aggregating the same cells along one axis: one
   tile per tier (`model.byTier`) and one per class (`model.byType`), AREA =

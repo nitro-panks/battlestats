@@ -8,10 +8,15 @@ import {
     type ChartTheme,
 } from '../lib/chartTheme';
 import {
+    DIET_CLASS_MARGIN_GAP,
+    DIET_COL_BAR_MAX,
+    DIET_ROW_STEP,
+    DIET_TYPE_LABEL_BAND,
     SHIP_TYPE_ABBREV,
     buildTierTypeDietModel,
     cellTooltipLines,
     confidenceFadedWrColor,
+    dietFigureHeight,
     formatWinPercent,
     type DietMarginTotal,
     type DietTooltipLine,
@@ -42,15 +47,14 @@ import type { TierTypePayload, TierTypePlayerCell } from './playerProfileChartDa
  * colour scale that fought it.
  */
 
-const ROW_STEP = 26;
+// Vertical layout constants live in tierTypeDietModel (dietFigureHeight) so
+// the Map view can match this figure's height exactly.
+const ROW_STEP = DIET_ROW_STEP;
 const TIER_LABEL_W = 26;
-const TYPE_LABEL_BAND = 21;
-const COL_BAR_MAX = 26;
+const TYPE_LABEL_BAND = DIET_TYPE_LABEL_BAND;
+const COL_BAR_MAX = DIET_COL_BAR_MAX;
 const CELL_BAR_H = 11;
-// Air between the grid's last tier row and the by-class margin below it, on
-// top of the class-label band. The two are different readings of the data —
-// individual cells above, class totals below — and need to look it.
-const CLASS_MARGIN_GAP = 26;
+const CLASS_MARGIN_GAP = DIET_CLASS_MARGIN_GAP;
 // Keeps the widest bar off the figure's right edge now that the grid runs the
 // full width.
 const GRID_RIGHT_PAD = 10;
@@ -111,16 +115,13 @@ const drawChart = (
     }
 
     const compact = svgWidth < COMPACT_BREAKPOINT;
-    // Bottom pad only: the figure carries no legend, so this just keeps the
-    // class margin's win-rate line off the SVG's bottom edge.
-    const bottomPad = 6;
 
     // The grid runs the full width: the per-tier totals that used to occupy a
     // right-hand panel are gone, and the cells are what the figure is for.
     const gridW = Math.max(120, svgWidth - TIER_LABEL_W - GRID_RIGHT_PAD);
     const gridH = model.tiers.length * ROW_STEP;
-    const marginBand = TYPE_LABEL_BAND + CLASS_MARGIN_GAP + COL_BAR_MAX + 30;
-    const height = 10 + gridH + marginBand + bottomPad;
+    // Shared with the Map view, which fills exactly this height.
+    const height = dietFigureHeight(model.tiers.length);
 
     svgRoot
         .attr('width', svgWidth)

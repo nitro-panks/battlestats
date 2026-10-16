@@ -42,8 +42,8 @@ export const en: Record<StringKey, string> = {
     'player.section.randomBattlesByTier': 'Random Battles by Tier',
     // The Profile tab's tier figure has two views, toggled top-right of its
     // heading the way the landing treemap's Map/Plot toggle is. Same compact
-    // pill vocabulary as landing.treemap.toggleMap; "Bars" names the default
-    // bar figure.
+    // pill vocabulary as landing.treemap.toggleMap; Map is the default view,
+    // "Bars" names the original bar figure.
     'player.tierChart.viewGroup': 'Chart view',
     'player.tierChart.toggleBars': 'Bars',
     'player.tierChart.toggleMap': 'Map',

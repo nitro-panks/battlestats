@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react';
-import TierTypeTreemapSVG, { treemapPanelHeightForWidth } from '../TierTypeTreemapSVG';
+import TierTypeTreemapSVG, { PANEL_CAPTION_H, treemapPanelHeight } from '../TierTypeTreemapSVG';
+import { dietFigureHeight } from '../tierTypeDietModel';
 import type { TierTypePayload, TierTypePlayerCell } from '../playerProfileChartData';
 
 const SHIP_TYPES = ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'];
@@ -56,7 +57,13 @@ describe('TierTypeTreemapSVG', () => {
 
         const svgs = container.querySelectorAll('svg');
         expect(svgs).toHaveLength(2);
-        expect(svgs[0].getAttribute('height')).toBe(String(treemapPanelHeightForWidth(400)));
+        // The whole Map block is exactly the bar figure's height for this
+        // payload (3 tier rows: 10, 9, 8), so toggling views moves nothing
+        // below it; each panel's SVG is that less its caption line.
+        const block = container.firstElementChild as HTMLElement;
+        expect(block.style.height).toBe(`${dietFigureHeight(3)}px`);
+        expect(svgs[0].getAttribute('height')).toBe(String(treemapPanelHeight(3)));
+        expect(treemapPanelHeight(3)).toBe(dietFigureHeight(3) - PANEL_CAPTION_H);
         expect(svgs[0].getAttribute('aria-label')).toContain('2 tiers over 800 random battles');
         expect(svgs[1].getAttribute('aria-label')).toContain('3 classes over 800 random battles');
     });

@@ -12,6 +12,7 @@ import {
     SHIP_TYPE_ABBREV,
     buildTierTypeDietModel,
     confidenceFadedWrColor,
+    dietFigureHeight,
     marginTooltipLines,
     type DietMarginTotal,
     type TierTypeDietModel,
@@ -66,9 +67,17 @@ interface TreemapLeaf {
 
 type PanelAxis = 'tier' | 'class';
 
-/** Panel height tracks its own width; two panels share a row on sm+. */
-export const treemapPanelHeightForWidth = (width: number): number =>
-    Math.max(200, Math.min(340, Math.round(width * 0.62)));
+// The whole Map block is exactly as tall as the bar figure for the same
+// payload (dietFigureHeight), so toggling Bars <-> Map moves nothing below
+// it. Each panel spends PANEL_CAPTION_H on its caption (h-4 + mb-1) and gives
+// the rest to its SVG; at phone width the two panels stack inside the same
+// total, separated by PANEL_STACK_GAP (gap-4).
+export const PANEL_CAPTION_H = 20;
+export const PANEL_STACK_GAP = 16;
+
+/** Height of one panel's SVG when the two panels share a row. */
+export const treemapPanelHeight = (tierCount: number): number =>
+    dietFigureHeight(tierCount) - PANEL_CAPTION_H;
 
 const tileLabel = (axis: PanelAxis, total: DietMarginTotal): string =>
     (axis === 'tier' ? `T${total.key}` : (SHIP_TYPE_ABBREV[total.key] ?? total.key));
@@ -86,13 +95,13 @@ const drawPanel = (
     totals: DietMarginTotal[],
     model: TierTypeDietModel,
     width: number,
+    height: number,
     theme: ChartTheme,
     handlers: DrawHandlers,
 ) => {
     const svgRoot = d3.select(svgElement);
     svgRoot.selectAll('*').remove();
 
-    const height = treemapPanelHeightForWidth(width);
     const played = totals.filter((total) => total.battles > 0);
     svgRoot
         .attr('width', width)
@@ -190,14 +199,17 @@ interface TreemapPanelProps {
     totals: DietMarginTotal[];
     model: TierTypeDietModel;
     svgWidth: number;
+    /** SVG height when the container cannot be measured (tests, SSR shells). */
+    fallbackHeight: number;
     theme: ChartTheme;
     onTileSelect?: (key: string) => void;
 }
 
-// One panel: a caption, its own measured width, its own hover overlay. Each
-// panel measures itself because the pair share a row on sm+ and stack below.
+// One panel: a caption, its own measured width AND height, its own hover
+// overlay. Each panel measures itself because the pair share a row on sm+ and
+// stack below; the outer grid fixes the total, the panel fills its share.
 const TreemapPanel: React.FC<TreemapPanelProps> = ({
-    axis, caption, totals, model, svgWidth, theme, onTileSelect,
+    axis, caption, totals, model, svgWidth, fallbackHeight, theme, onTileSelect,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const svgRef = useRef<SVGSVGElement>(null);
@@ -220,8 +232,9 @@ const TreemapPanel: React.FC<TreemapPanelProps> = ({
 
         const redraw = () => {
             const width = resolveContainerChartWidth(containerElement.clientWidth, svgWidth);
+            const height = containerElement.clientHeight > 0 ? containerElement.clientHeight : fallbackHeight;
             setMeasuredWidth(width);
-            drawPanel(svgElement, containerElement, axis, totals, model, width, theme, {
+            drawPanel(svgElement, containerElement, axis, totals, model, width, height, theme, {
                 onTileEnter: setHover,
                 onTileLeave: () => setHover(null),
                 onTileSelect: onTileSelectRef.current
@@ -242,15 +255,15 @@ const TreemapPanel: React.FC<TreemapPanelProps> = ({
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
             setHover(null);
         };
-    }, [axis, totals, model, svgWidth, theme]);
+    }, [axis, totals, model, svgWidth, fallbackHeight, theme]);
 
     return (
-        <div className="min-w-0">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        <div className="flex min-h-0 min-w-0 flex-col">
+            <div className="mb-1 h-4 text-[10px] font-semibold uppercase leading-4 tracking-wide text-[var(--text-muted)]">
                 {caption}
             </div>
-            <div ref={containerRef} className="relative w-full">
-                <svg ref={svgRef} role="img" />
+            <div ref={containerRef} className="relative min-h-0 w-full flex-1">
+                <svg ref={svgRef} role="img" className="block" />
                 {hover && <DietHoverTooltip hover={hover} containerWidth={measuredWidth} />}
             </div>
         </div>
@@ -292,14 +305,22 @@ const TierTypeTreemapSVG: React.FC<TierTypeTreemapSVGProps> = ({
         );
     }
 
+    // Fixed to the bar figure's height for this payload; the panels divide it.
+    const figureHeight = dietFigureHeight(model.tiers.length);
+    const panelHeight = treemapPanelHeight(model.tiers.length);
+
     return (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div
+            className="grid grid-cols-1 grid-rows-2 gap-4 sm:grid-cols-2 sm:grid-rows-1"
+            style={{ height: figureHeight }}
+        >
             <TreemapPanel
                 axis="tier"
                 caption={t('common.tier')}
                 totals={model.byTier}
                 model={model}
                 svgWidth={svgWidth}
+                fallbackHeight={panelHeight}
                 theme={theme}
                 onTileSelect={onTierSelect ? (key) => onTierSelect(Number(key)) : undefined}
             />
@@ -309,6 +330,7 @@ const TierTypeTreemapSVG: React.FC<TierTypeTreemapSVGProps> = ({
                 totals={model.byType}
                 model={model}
                 svgWidth={svgWidth}
+                fallbackHeight={panelHeight}
                 theme={theme}
                 onTileSelect={onClassSelect}
             />
