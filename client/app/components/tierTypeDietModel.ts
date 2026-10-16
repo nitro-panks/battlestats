@@ -76,6 +76,8 @@ export interface TierTypeDietModel {
     cells: TierTypePlayerCell[];
     /** Column margin: replaces the standalone "Performance by Ship Type" chart. */
     byType: DietMarginTotal[];
+    /** Row margin: one total per tier in `tiers` order (zeros kept, like byType). */
+    byTier: DietMarginTotal[];
     totalBattles: number;
     maxCellBattles: number;
 }
@@ -105,11 +107,16 @@ export const buildTierTypeDietModel = (payload: TierTypePayload): TierTypeDietMo
         .sort((a, b) => b - a);
 
     const typeAggregate = new Map<string, { battles: number; wins: number; }>();
+    const tierAggregate = new Map<number, { battles: number; wins: number; }>();
     cells.forEach((row) => {
         const type = typeAggregate.get(row.ship_type) ?? { battles: 0, wins: 0 };
         type.battles += row.pvp_battles;
         type.wins += row.wins;
         typeAggregate.set(row.ship_type, type);
+        const tier = tierAggregate.get(row.ship_tier) ?? { battles: 0, wins: 0 };
+        tier.battles += row.pvp_battles;
+        tier.wins += row.wins;
+        tierAggregate.set(row.ship_tier, tier);
     });
 
     return {
@@ -119,6 +126,10 @@ export const buildTierTypeDietModel = (payload: TierTypePayload): TierTypeDietMo
         byType: shipTypes.map((shipType) => {
             const aggregate = typeAggregate.get(shipType) ?? { battles: 0, wins: 0 };
             return marginTotal(shipType, aggregate.battles, aggregate.wins);
+        }),
+        byTier: tiers.map((tier) => {
+            const aggregate = tierAggregate.get(tier) ?? { battles: 0, wins: 0 };
+            return marginTotal(String(tier), aggregate.battles, aggregate.wins);
         }),
         totalBattles: d3.sum(cells, (row: TierTypePlayerCell) => row.pvp_battles),
         maxCellBattles: d3.max(cells, (row: TierTypePlayerCell) => row.pvp_battles) ?? 1,
@@ -151,6 +162,36 @@ export const cellTooltipLines = (
         { value: formatWinPercent(row.pvp_battles / Math.max(model.totalBattles, 1)), label: 'of your battles' },
     ];
     if (confidence < THIN_EVIDENCE_CONFIDENCE) {
+        lines.push('Too few battles here to read the win rate.');
+    }
+    if (drillable) {
+        lines.push('Click to see these ships');
+    }
+    return lines;
+};
+
+/**
+ * Tooltip for one margin total (a whole tier, or a whole class): the treemap
+ * panels' hover, on the same two-column contract as the per-cell lines.
+ */
+export const marginTooltipLines = (
+    axis: 'tier' | 'class',
+    total: DietMarginTotal,
+    model: TierTypeDietModel,
+    theme: ChartTheme,
+    drillable = false,
+): DietTooltipLine[] => {
+    const lines: DietTooltipLine[] = [
+        axis === 'tier' ? `Tier ${total.key}` : `All ${SHIP_TYPE_ABBREV[total.key] ?? total.key}`,
+        { value: formatCompactCount(total.battles), label: 'battles' },
+        {
+            value: `${(total.winRatio * 100).toFixed(1)}%`,
+            label: 'win rate',
+            color: confidenceFadedWrColor(total.winRatio, total.battles, theme),
+        },
+        { value: formatWinPercent(total.battles / Math.max(model.totalBattles, 1)), label: 'of your battles' },
+    ];
+    if (confidenceFromBattles(total.battles) < THIN_EVIDENCE_CONFIDENCE) {
         lines.push('Too few battles here to read the win rate.');
     }
     if (drillable) {

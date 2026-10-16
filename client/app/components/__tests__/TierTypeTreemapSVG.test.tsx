@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react';
-import TierTypeTreemapSVG, { treemapHeightForWidth } from '../TierTypeTreemapSVG';
+import TierTypeTreemapSVG, { treemapPanelHeightForWidth } from '../TierTypeTreemapSVG';
 import type { TierTypePayload, TierTypePlayerCell } from '../playerProfileChartData';
 
 const SHIP_TYPES = ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'];
@@ -24,63 +24,85 @@ const payloadWith = (cells: TierTypePlayerCell[]): TierTypePayload => ({
     player_cells: cells,
 });
 
+// Three cells, two tiers (10, 8), three classes. Tier 10 = 740 battles,
+// tier 8 = 60; BB 420, CA 320, DD 60.
 const DIET = payloadWith([
     cell('Battleship', 10, 420, 239),
     cell('Cruiser', 10, 320, 176),
     cell('Destroyer', 8, 60, 31),
 ]);
 
+const titleOf = (tile: Element): string => (tile.querySelector('title')!.textContent ?? '').split(':')[0];
+const areaOf = (tile: Element): number => {
+    const rect = tile.querySelector('rect')!;
+    return Number(rect.getAttribute('width')) * Number(rect.getAttribute('height'));
+};
+
 describe('TierTypeTreemapSVG', () => {
-    it('draws one tile per played tier x class cell, sized by battles', () => {
-        const { container } = render(<TierTypeTreemapSVG data={DIET} svgWidth={600} />);
-        const tiles = container.querySelectorAll('g.tile');
-        expect(tiles).toHaveLength(3);
+    it('draws two panels: one tile per played tier, one per played class, sized by battles', () => {
+        const { container } = render(<TierTypeTreemapSVG data={DIET} svgWidth={400} />);
+        const tierTiles = Array.from(container.querySelectorAll('g.tile[data-axis="tier"]'));
+        const classTiles = Array.from(container.querySelectorAll('g.tile[data-axis="class"]'));
+        expect(tierTiles.map(titleOf).sort()).toEqual(['T10', 'T8']);
+        expect(classTiles.map(titleOf).sort()).toEqual(['BB', 'CA', 'DD']);
 
-        // Additive areas: the 420-battle tile is the largest, the 60-battle
-        // tile the smallest. Read the rects back rather than trusting the sort.
-        const areaByLabel = new Map<string, number>();
-        tiles.forEach((tile) => {
-            const rect = tile.querySelector('rect')!;
-            const title = tile.querySelector('title')!.textContent ?? '';
-            areaByLabel.set(title.split(':')[0], Number(rect.getAttribute('width')) * Number(rect.getAttribute('height')));
-        });
-        expect(areaByLabel.get('T10 BB')!).toBeGreaterThan(areaByLabel.get('T10 CA')!);
-        expect(areaByLabel.get('T10 CA')!).toBeGreaterThan(areaByLabel.get('T8 DD')!);
+        // Additive areas within each panel: read the rects back rather than
+        // trusting the sort.
+        const tierArea = new Map(tierTiles.map((tile) => [titleOf(tile), areaOf(tile)]));
+        expect(tierArea.get('T10')!).toBeGreaterThan(tierArea.get('T8')!);
+        const classArea = new Map(classTiles.map((tile) => [titleOf(tile), areaOf(tile)]));
+        expect(classArea.get('BB')!).toBeGreaterThan(classArea.get('CA')!);
+        expect(classArea.get('CA')!).toBeGreaterThan(classArea.get('DD')!);
 
-        const svg = container.querySelector('svg')!;
-        expect(svg.getAttribute('height')).toBe(String(treemapHeightForWidth(600)));
-        expect(svg.getAttribute('aria-label')).toContain('3 tier and class combinations over 800 random battles');
+        const svgs = container.querySelectorAll('svg');
+        expect(svgs).toHaveLength(2);
+        expect(svgs[0].getAttribute('height')).toBe(String(treemapPanelHeightForWidth(400)));
+        expect(svgs[0].getAttribute('aria-label')).toContain('2 tiers over 800 random battles');
+        expect(svgs[1].getAttribute('aria-label')).toContain('3 classes over 800 random battles');
     });
 
-    it('labels tiles with room: tier + class, battles, win rate', () => {
-        const { container } = render(<TierTypeTreemapSVG data={DIET} svgWidth={600} />);
+    it('captions the panels Tier and Type and labels tiles with room', () => {
+        const { container, getByText } = render(<TierTypeTreemapSVG data={DIET} svgWidth={400} />);
+        expect(getByText('Tier')).toBeInTheDocument();
+        expect(getByText('Type')).toBeInTheDocument();
         const labels = Array.from(container.querySelectorAll('g.tile text')).map((node) => node.textContent);
-        expect(labels).toContain('T10 BB');
+        expect(labels).toContain('T10');
+        expect(labels).toContain('740 battles');
+        // Tier 10 WR = (239 + 176) / 740 over the whole group, not a mean of cell rates.
+        expect(labels).toContain('56.1% WR');
+        expect(labels).toContain('BB');
         expect(labels).toContain('420 battles');
-        expect(labels).toContain('56.9% WR');
     });
 
-    it('drills into the Ships tab on tile click with the tier and class', () => {
-        const onCellSelect = jest.fn();
-        const { container } = render(<TierTypeTreemapSVG data={DIET} svgWidth={600} onCellSelect={onCellSelect} />);
-        const rects = Array.from(container.querySelectorAll('g.tile rect'));
-        const ddRect = rects.find((rect) => rect.querySelector('title')?.textContent?.startsWith('T8 DD'))!;
-        fireEvent.click(ddRect);
-        expect(onCellSelect).toHaveBeenCalledWith('Destroyer', 8);
+    it('drills into the Ships tab: a tier tile hands back the tier, a class tile the class', () => {
+        const onTierSelect = jest.fn();
+        const onClassSelect = jest.fn();
+        const { container } = render(
+            <TierTypeTreemapSVG data={DIET} svgWidth={400} onTierSelect={onTierSelect} onClassSelect={onClassSelect} />,
+        );
+        const tiles = Array.from(container.querySelectorAll('g.tile'));
+        fireEvent.click(tiles.find((tile) => titleOf(tile) === 'T8')!.querySelector('rect')!);
+        expect(onTierSelect).toHaveBeenCalledWith(8);
+        fireEvent.click(tiles.find((tile) => titleOf(tile) === 'DD')!.querySelector('rect')!);
+        expect(onClassSelect).toHaveBeenCalledWith('Destroyer');
     });
 
-    it('shows the same shared tooltip lines as the bar view on hover', () => {
-        const { container, getByText } = render(<TierTypeTreemapSVG data={DIET} svgWidth={600} onCellSelect={jest.fn()} />);
-        const rects = Array.from(container.querySelectorAll('g.tile rect'));
-        const bbRect = rects.find((rect) => rect.querySelector('title')?.textContent?.startsWith('T10 BB'))!;
-        fireEvent.mouseMove(bbRect, { clientX: 40, clientY: 40 });
-        expect(getByText('Tier 10 BB')).toBeInTheDocument();
+    it('shows the shared two-column tooltip on hover, per axis', () => {
+        const { container, getByText } = render(
+            <TierTypeTreemapSVG data={DIET} svgWidth={400} onTierSelect={jest.fn()} onClassSelect={jest.fn()} />,
+        );
+        const tiles = Array.from(container.querySelectorAll('g.tile'));
+        fireEvent.mouseMove(tiles.find((tile) => titleOf(tile) === 'T10')!.querySelector('rect')!, { clientX: 40, clientY: 40 });
+        expect(getByText('Tier 10')).toBeInTheDocument();
         expect(getByText('of your battles')).toBeInTheDocument();
         expect(getByText('Click to see these ships')).toBeInTheDocument();
+
+        fireEvent.mouseMove(tiles.find((tile) => titleOf(tile) === 'CA')!.querySelector('rect')!, { clientX: 40, clientY: 40 });
+        expect(getByText('All CA')).toBeInTheDocument();
     });
 
     it('falls back to the not-enough-variety notice below two cells, like the bar view', () => {
-        const { container } = render(<TierTypeTreemapSVG data={payloadWith([cell('Cruiser', 10, 500, 250)])} svgWidth={600} />);
+        const { container } = render(<TierTypeTreemapSVG data={payloadWith([cell('Cruiser', 10, 500, 250)])} svgWidth={400} />);
         expect(container.querySelectorAll('g.tile')).toHaveLength(0);
         expect(container.querySelector('svg')!.getAttribute('aria-label')).toBe('Not enough ship variety to chart');
     });

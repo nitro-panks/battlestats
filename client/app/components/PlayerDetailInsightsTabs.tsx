@@ -604,7 +604,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     // a filter; `source` separates a tier×class cell click from a class-total
     // click so the two can be measured independently, the way the efficiency
     // filter's `source` already does.
-    const openShipsFiltered = useCallback((shipTypes: string[], tiers: number[], source: 'cell' | 'class') => {
+    const openShipsFiltered = useCallback((shipTypes: string[], tiers: number[], source: 'cell' | 'class' | 'tier') => {
         setShipsFilterRequest((current) => ({
             shipTypes,
             tiers,
@@ -621,6 +621,13 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     const handleDietClassSelect = useCallback(
         (shipType: string) => openShipsFiltered([shipType], [], 'class'),
         [openShipsFiltered],
+    );
+    // A whole-tier drill-down (the Map view's tier panel): every class the
+    // payload knows, one tier. Passing the full class list, not [], keeps the
+    // Ships tab's class pills from inheriting whatever was selected before.
+    const handleDietTierSelect = useCallback(
+        (shipTier: number) => openShipsFiltered(profileChartPayload?.x_labels ?? [], [shipTier], 'tier'),
+        [openShipsFiltered, profileChartPayload],
     );
 
     const activeConfig = TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
@@ -976,7 +983,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2 pt-2.5 pl-[15px]">
                                     <SectionHeadingWithTooltip
                                         title={t('player.section.randomBattlesByTier')}
-                                        description="Where this captain spends their random battles, and how they do there. Each mark is one tier and ship class. Bars: length is the battle count on a single scale shared across the whole chart, with totals for each class along the bottom. Map: each tile's area is its share of the captain's random battles. In both views colour is the win rate, fading toward grey where too few battles have been played for the win rate to mean much, so a lucky handful of games cannot pose as a strength. Click a cell to see those ships."
+                                        description="Where this captain spends their random battles, and how they do there. Each mark is one tier and ship class. Bars: length is the battle count on a single scale shared across the whole chart, with totals for each class along the bottom. Map: two treemaps, one tile per tier and one per class, each tile's area its share of the captain's random battles. In both views colour is the win rate, fading toward grey where too few battles have been played for the win rate to mean much, so a lucky handful of games cannot pose as a strength. Click a cell or tile to see those ships."
                                     />
                                     <div
                                         className="inline-flex items-center gap-0.5 rounded-md border border-[var(--border)] p-0.5"
@@ -1010,7 +1017,8 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                         <TierTypeTreemapSVG
                                             data={profileChartPayload}
                                             theme={theme}
-                                            onCellSelect={handleDietCellSelect}
+                                            onTierSelect={handleDietTierSelect}
+                                            onClassSelect={handleDietClassSelect}
                                         />
                                     ) : (
                                         <TierTypeDietSVG

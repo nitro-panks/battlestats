@@ -47,19 +47,21 @@ way `RealmTopShipsTreemapSVG` restores `bs-landing-ship-view`. Switching fires
 `player-tier-chart-view` with `{ view, realm }`; re-pressing the active pill
 does not.
 
-- **Map = `TierTypeTreemapSVG`**: one tile per played tier x class cell, AREA =
-  battles (additive, so the figure is the whole diet and each tile its share),
-  fill = the same confidence-damped win-rate colour the bars use. Tiles carry
-  up to three direct label lines (tier + class, battles, WR), each gated on both
-  tile height and an estimated text width so a narrow tile never bleeds its
-  label into a neighbour. Below two cells it shows the bar view's same
-  not-enough-variety notice.
-- **Shared, not duplicated**: `buildTierTypeDietModel`, `cellTooltipLines`
-  (moved into `tierTypeDietModel.ts`) and the hover panel (`DietHoverTooltip`)
-  are one implementation for both views, so a cell reads identically whichever
-  the visitor picked. Tile click drills into the Ships tab through the same
-  `handleDietCellSelect`; the Map has no class-total margin, so the class
-  drill-down exists only in Bars.
+- **Map = `TierTypeTreemapSVG`**: TWO treemaps side by side (stacked below
+  sm), "Tier" and "Type", each aggregating the same cells along one axis: one
+  tile per tier (`model.byTier`) and one per class (`model.byType`), AREA =
+  battles, fill = the group's wins ÷ battles on the same confidence-damped
+  ramp the bars use. The per-cell cross of the two axes lives only in Bars.
+  Tiles carry up to three direct label lines (T10 / BB, battles, WR), each
+  gated on both tile height and an estimated text width so a narrow tile never
+  bleeds its label into a neighbour. Below two cells it shows the bar view's
+  same not-enough-variety notice.
+- **Shared, not duplicated**: `buildTierTypeDietModel`, `cellTooltipLines` and
+  `marginTooltipLines` (in `tierTypeDietModel.ts`) and the hover panel
+  (`DietHoverTooltip`) are one implementation for both views. A tier tile
+  drills into the Ships tab via `handleDietTierSelect` (every class in the
+  payload, one tier; `source: 'tier'` on the drilldown event); a class tile
+  reuses `handleDietClassSelect`.
 - Translated pill labels: `player.tierChart.toggleBars` / `toggleMap` /
   `viewGroup` in en/ko/ja (ko 막대 / 트리맵, ja 棒グラフ / ツリーマップ, reusing
   the landing toggle's treemap vocabulary).
