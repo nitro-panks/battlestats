@@ -9,14 +9,14 @@ import {
 } from '../lib/chartTheme';
 import {
     SHIP_TYPE_ABBREV,
-    THIN_EVIDENCE_CONFIDENCE,
     buildTierTypeDietModel,
+    cellTooltipLines,
     confidenceFadedWrColor,
-    confidenceFromBattles,
     formatWinPercent,
     type DietMarginTotal,
-    type TierTypeDietModel,
+    type DietTooltipLine,
 } from './tierTypeDietModel';
+import DietHoverTooltip from './DietHoverTooltip';
 import type { TierTypePayload, TierTypePlayerCell } from './playerProfileChartData';
 
 /**
@@ -66,13 +66,8 @@ const barPath = (x: number, y: number, w: number, h: number): string => {
         + `v${h - radius * 2} a${radius},${radius} 0 0 1 ${-radius},${radius} h${-(w - radius)} Z`;
 };
 
-// A tooltip line: plain muted text, or a value/label pair on the shared
-// two-column grid. Mirrors the contract BattleHistoryTreemaps established so
-// the two overlays stay one pattern.
-type TooltipLine = string | { value: string; label: string; color?: string };
-
 interface HoverState {
-    lines: TooltipLine[];
+    lines: DietTooltipLine[];
     x: number;
     y: number;
 }
@@ -85,32 +80,6 @@ interface DrawHandlers {
     /** Drill down to the Ships tab filtered to one class, all tiers. */
     onClassSelect?: (shipType: string) => void;
 }
-
-const cellTooltipLines = (
-    row: TierTypePlayerCell,
-    model: TierTypeDietModel,
-    theme: ChartTheme,
-    drillable = false,
-): TooltipLine[] => {
-    const confidence = confidenceFromBattles(row.pvp_battles);
-    const lines: TooltipLine[] = [
-        `Tier ${row.ship_tier} ${SHIP_TYPE_ABBREV[row.ship_type] ?? row.ship_type}`,
-        { value: formatCompactCount(row.pvp_battles), label: 'battles' },
-        {
-            value: `${(row.win_ratio * 100).toFixed(1)}%`,
-            label: 'win rate',
-            color: confidenceFadedWrColor(row.win_ratio, row.pvp_battles, theme),
-        },
-        { value: formatWinPercent(row.pvp_battles / Math.max(model.totalBattles, 1)), label: 'of your battles' },
-    ];
-    if (confidence < THIN_EVIDENCE_CONFIDENCE) {
-        lines.push('Too few battles here to read the win rate.');
-    }
-    if (drillable) {
-        lines.push('Click to see these ships');
-    }
-    return lines;
-};
 
 const drawChart = (
     svgElement: SVGSVGElement,
@@ -468,36 +437,7 @@ const TierTypeDietSVG: React.FC<TierTypeDietSVGProps> = ({
     return (
         <div ref={containerRef} className="relative w-full">
             <svg ref={svgRef} role="img" />
-            {hover && (
-                <div
-                    className="pointer-events-none absolute z-10 rounded bg-[var(--bg-page)] px-2 py-1 text-xs shadow-md ring-1 ring-[var(--accent-faint)]"
-                    style={{
-                        left: Math.min(Math.max(hover.x + 10, 0), Math.max(measuredWidth - 170, 0)),
-                        top: Math.max(hover.y - 44, 0),
-                    }}
-                >
-                    <div className="pb-[3px] font-semibold text-[var(--text-strong)]">
-                        {typeof hover.lines[0] === 'string' ? hover.lines[0] : hover.lines[0].value}
-                    </div>
-                    <div className="grid grid-cols-[auto_1fr] gap-x-2">
-                        {hover.lines.slice(1).map((line, index) => (
-                            typeof line === 'string' ? (
-                                <div key={index} className="col-span-2 text-[var(--text-muted)]">{line}</div>
-                            ) : (
-                                <React.Fragment key={index}>
-                                    <span
-                                        className="text-right font-semibold tabular-nums text-[var(--text-strong)]"
-                                        style={line.color ? { color: line.color } : undefined}
-                                    >
-                                        {line.value}
-                                    </span>
-                                    <span className="text-[var(--text-muted)]">{line.label}</span>
-                                </React.Fragment>
-                            )
-                        ))}
-                    </div>
-                </div>
-            )}
+            {hover && <DietHoverTooltip hover={hover} containerWidth={measuredWidth} />}
         </div>
     );
 };

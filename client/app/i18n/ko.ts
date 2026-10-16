@@ -33,6 +33,9 @@ export const ko: Partial<Record<StringKey, string>> = {
 
     'player.section.rankedSeasons': '랭크전 시즌',
     'player.section.randomBattlesByTier': '티어별 랜덤전',
+    'player.tierChart.viewGroup': '차트 보기',
+    'player.tierChart.toggleBars': '막대',
+    'player.tierChart.toggleMap': '트리맵',
     'player.section.windowActivityVsShipHistory': '기간 활동과 함선 통산 전적',
 
     // Composed-template blocker (see the research doc + spec's "Known traps"

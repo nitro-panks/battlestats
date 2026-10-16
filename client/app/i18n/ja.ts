@@ -30,6 +30,9 @@ export const ja: Partial<Record<StringKey, string>> = {
 
     'player.section.rankedSeasons': 'ランク戦シーズン',
     'player.section.randomBattlesByTier': 'Tier別ランダム戦',
+    'player.tierChart.viewGroup': 'チャート表示',
+    'player.tierChart.toggleBars': '棒グラフ',
+    'player.tierChart.toggleMap': 'ツリーマップ',
     'player.section.windowActivityVsShipHistory': '期間の活動と艦艇の通算成績',
 
     // Composed-template blocker (see the research doc + spec's "Known traps"

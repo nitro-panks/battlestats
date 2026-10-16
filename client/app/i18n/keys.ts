@@ -30,6 +30,10 @@ export type StringKey =
     | 'player.section.rankedSeasonTimeline'
     | 'player.section.rankedSeasons'
     | 'player.section.randomBattlesByTier'
+    // — Profile tab tier figure: the Bars/Map view toggle (mirrors landing.treemap.toggle*) —
+    | 'player.tierChart.viewGroup'
+    | 'player.tierChart.toggleBars'
+    | 'player.tierChart.toggleMap'
     | 'player.section.windowActivityVsShipHistory'
     | 'player.section.winRateVsSurvival'
     | 'player.section.battlesPlayedDistribution'

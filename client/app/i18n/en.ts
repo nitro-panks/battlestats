@@ -40,6 +40,13 @@ export const en: Record<StringKey, string> = {
     'player.section.rankedSeasonTimeline': 'Ranked Season Timeline',
     'player.section.rankedSeasons': 'Ranked Seasons',
     'player.section.randomBattlesByTier': 'Random Battles by Tier',
+    // The Profile tab's tier figure has two views, toggled top-right of its
+    // heading the way the landing treemap's Map/Plot toggle is. Same compact
+    // pill vocabulary as landing.treemap.toggleMap; "Bars" names the default
+    // bar figure.
+    'player.tierChart.viewGroup': 'Chart view',
+    'player.tierChart.toggleBars': 'Bars',
+    'player.tierChart.toggleMap': 'Map',
     'player.section.windowActivityVsShipHistory': 'Window Activity vs Ship History',
     'player.section.winRateVsSurvival': 'Win Rate vs Survival',
     'player.section.battlesPlayedDistribution': 'Battles Played Distribution',

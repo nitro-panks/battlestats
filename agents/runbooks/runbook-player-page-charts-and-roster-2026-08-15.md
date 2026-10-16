@@ -36,6 +36,34 @@ standalone "Performance by Ship Type" and "Performance by Tier" bar charts, whic
 were that heatmap's own margins replotted. `TierTypeHeatmapSVG`, `TierSVG`,
 `TypeSVG` and `shipBarPlot` are deleted; do not restore them.
 
+### The Bars / Map toggle (2026-10-16, worktree `worktree-tier-treemap-toggle`)
+
+The figure now has two views, switched by a pill toggle on the heading row that
+copies the landing treemap's Map/Plot control (same classes, `role="group"`,
+`aria-pressed`). State lives in `PlayerDetailInsightsTabs` (`tierChartView`),
+defaults to `bars` on the server and first client render, and restores the
+stored choice from localStorage `bs-player-tier-view` in a mount effect, the
+way `RealmTopShipsTreemapSVG` restores `bs-landing-ship-view`. Switching fires
+`player-tier-chart-view` with `{ view, realm }`; re-pressing the active pill
+does not.
+
+- **Map = `TierTypeTreemapSVG`**: one tile per played tier x class cell, AREA =
+  battles (additive, so the figure is the whole diet and each tile its share),
+  fill = the same confidence-damped win-rate colour the bars use. Tiles carry
+  up to three direct label lines (tier + class, battles, WR), each gated on both
+  tile height and an estimated text width so a narrow tile never bleeds its
+  label into a neighbour. Below two cells it shows the bar view's same
+  not-enough-variety notice.
+- **Shared, not duplicated**: `buildTierTypeDietModel`, `cellTooltipLines`
+  (moved into `tierTypeDietModel.ts`) and the hover panel (`DietHoverTooltip`)
+  are one implementation for both views, so a cell reads identically whichever
+  the visitor picked. Tile click drills into the Ships tab through the same
+  `handleDietCellSelect`; the Map has no class-total margin, so the class
+  drill-down exists only in Bars.
+- Translated pill labels: `player.tierChart.toggleBars` / `toggleMap` /
+  `viewGroup` in en/ko/ja (ko 막대 / 트리맵, ja 棒グラフ / ツリーマップ, reusing
+  the landing toggle's treemap vocabulary).
+
 ### Drill-down, and the nonce that keeps it alive
 
 Clicking a bar opens the Ships tab pre-filtered to that tier x class; clicking a

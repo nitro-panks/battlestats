@@ -65,6 +65,23 @@ interface PlayerDetailInsightsTabsProps {
     refreshNonce?: number;
 }
 
+// The Profile tab's tier figure has two views. 'bars' is the default on both
+// server and first client render (deterministic SSR); the stored preference is
+// applied in a mount effect and written through on every switch, mirroring
+// RealmTopShipsTreemapSVG's Map/Plot persistence.
+export type TierChartView = 'bars' | 'map';
+export const TIER_CHART_VIEW_KEY = 'bs-player-tier-view';
+
+const readStoredTierChartView = (): TierChartView | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+        const raw = window.localStorage.getItem(TIER_CHART_VIEW_KEY);
+        return raw === 'bars' || raw === 'map' ? raw : null;
+    } catch {
+        return null;
+    }
+};
+
 const RandomsSVG = dynamic(() => resilientDynamicImport(() => import('./RandomsSVG'), 'PlayerDetailInsightsTabs-RandomsSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading top ships..." minHeight={500} />,
@@ -116,6 +133,13 @@ const PlayerClanBattleSeasons = dynamic(() => resilientDynamicImport(() => impor
 // distribution, the two bar charts its column and row margins, replotted. The
 // margins are attached to the grid now.
 const TierTypeDietSVG = dynamic(() => resilientDynamicImport(() => import('./TierTypeDietSVG'), 'PlayerDetailInsightsTabs-TierTypeDietSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading tier chart..." minHeight={420} />,
+});
+// The same figure as a treemap: tile area = battles, fill = win rate. The
+// Profile tab toggles between the two (Bars / Map) top-right of the heading,
+// mirroring the landing page's most-played-ships Map/Plot switch.
+const TierTypeTreemapSVG = dynamic(() => resilientDynamicImport(() => import('./TierTypeTreemapSVG'), 'PlayerDetailInsightsTabs-TierTypeTreemapSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading tier chart..." minHeight={420} />,
 });
@@ -255,6 +279,19 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     // CB tab render independently. Defaults true so it shows while loading.
     const [showClanBattleHeatmap, setShowClanBattleHeatmap] = useState(true);
     const [profileChartPayload, setProfileChartPayload] = useState<TierTypePayload | null>(null);
+    const [tierChartView, setTierChartViewState] = useState<TierChartView>('bars');
+    useEffect(() => {
+        const stored = readStoredTierChartView();
+        if (stored) setTierChartViewState(stored);
+    }, []);
+    const setTierChartView = useCallback((next: TierChartView) => {
+        setTierChartViewState(next);
+        try {
+            window.localStorage.setItem(TIER_CHART_VIEW_KEY, next);
+        } catch {
+            // Storage unavailable (private mode / quota): the view still switches.
+        }
+    }, []);
     const [profileChartState, setProfileChartState] = useState<'idle' | 'loading' | 'ready' | 'warming' | 'error'>('idle');
     // Gates the one-time tab-strip attention glow (see `.tab-attention-glow--armed`
     // in globals.css). We withhold it until the Activity sparkline's D3 entrance
@@ -933,18 +970,56 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             </p>
                         ) : profileChartPayload ? (
                             <>
-                                <SectionHeadingWithTooltip
-                                    title={t('player.section.randomBattlesByTier')}
-                                    description="Where this captain spends their random battles, and how they do there. Each bar is one tier and ship class: its length is the battle count, on a single scale shared across the whole chart, and its colour is the win rate. Colour fades toward grey where too few battles have been played for the win rate to mean much, so a lucky handful of games cannot pose as a strength. Totals for each class run along the bottom."
-                                    className="mb-2 pt-2.5 pl-[15px]"
-                                />
-                                <div className="pl-[15px]">
-                                    <TierTypeDietSVG
-                                        data={profileChartPayload}
-                                        theme={theme}
-                                        onCellSelect={handleDietCellSelect}
-                                        onClassSelect={handleDietClassSelect}
+                                {/* Heading row: title + info on the left, the Bars/Map
+                                    view toggle right-aligned by justify-between, the
+                                    way the landing treemap's Map/Plot toggle sits. */}
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 pt-2.5 pl-[15px]">
+                                    <SectionHeadingWithTooltip
+                                        title={t('player.section.randomBattlesByTier')}
+                                        description="Where this captain spends their random battles, and how they do there. Each mark is one tier and ship class. Bars: length is the battle count on a single scale shared across the whole chart, with totals for each class along the bottom. Map: each tile's area is its share of the captain's random battles. In both views colour is the win rate, fading toward grey where too few battles have been played for the win rate to mean much, so a lucky handful of games cannot pose as a strength. Click a cell to see those ships."
                                     />
+                                    <div
+                                        className="inline-flex items-center gap-0.5 rounded-md border border-[var(--border)] p-0.5"
+                                        role="group"
+                                        aria-label={t('player.tierChart.viewGroup')}
+                                    >
+                                        {(['bars', 'map'] as const).map((mode) => (
+                                            <button
+                                                key={mode}
+                                                type="button"
+                                                onClick={() => {
+                                                    if (mode !== tierChartView) {
+                                                        trackEvent('player-tier-chart-view', { view: mode, realm });
+                                                    }
+                                                    setTierChartView(mode);
+                                                }}
+                                                aria-pressed={tierChartView === mode}
+                                                className={`rounded px-2.5 py-1 text-xs font-semibold uppercase tracking-wide transition-colors ${
+                                                    tierChartView === mode
+                                                        ? 'bg-[var(--accent-faint)] text-[var(--accent-mid)]'
+                                                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                                                }`}
+                                            >
+                                                {t(mode === 'bars' ? 'player.tierChart.toggleBars' : 'player.tierChart.toggleMap')}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="pl-[15px]">
+                                    {tierChartView === 'map' ? (
+                                        <TierTypeTreemapSVG
+                                            data={profileChartPayload}
+                                            theme={theme}
+                                            onCellSelect={handleDietCellSelect}
+                                        />
+                                    ) : (
+                                        <TierTypeDietSVG
+                                            data={profileChartPayload}
+                                            theme={theme}
+                                            onCellSelect={handleDietCellSelect}
+                                            onClassSelect={handleDietClassSelect}
+                                        />
+                                    )}
                                 </div>
                             </>
                         ) : (

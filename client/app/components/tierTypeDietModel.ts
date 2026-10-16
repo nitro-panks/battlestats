@@ -8,7 +8,7 @@
  * captain, not the crowd.
  */
 import * as d3 from 'd3';
-import { wrColorByRatio, type ChartTheme } from '../lib/chartTheme';
+import { formatCompactCount, wrColorByRatio, type ChartTheme } from '../lib/chartTheme';
 import type { TierTypePayload, TierTypePlayerCell } from './playerProfileChartData';
 
 export const SHIP_TYPE_ABBREV: Record<string, string> = {
@@ -126,3 +126,35 @@ export const buildTierTypeDietModel = (payload: TierTypePayload): TierTypeDietMo
 };
 
 export const formatWinPercent = (ratio: number): string => `${(ratio * 100).toFixed(0)}%`;
+
+// A tooltip line: plain muted text, or a value/label pair on the shared
+// two-column grid. Mirrors the contract BattleHistoryTreemaps established so
+// the overlays stay one pattern. Shared by the bar figure (TierTypeDietSVG)
+// and its treemap view (TierTypeTreemapSVG), so a cell reads the same in both.
+export type DietTooltipLine = string | { value: string; label: string; color?: string };
+
+export const cellTooltipLines = (
+    row: TierTypePlayerCell,
+    model: TierTypeDietModel,
+    theme: ChartTheme,
+    drillable = false,
+): DietTooltipLine[] => {
+    const confidence = confidenceFromBattles(row.pvp_battles);
+    const lines: DietTooltipLine[] = [
+        `Tier ${row.ship_tier} ${SHIP_TYPE_ABBREV[row.ship_type] ?? row.ship_type}`,
+        { value: formatCompactCount(row.pvp_battles), label: 'battles' },
+        {
+            value: `${(row.win_ratio * 100).toFixed(1)}%`,
+            label: 'win rate',
+            color: confidenceFadedWrColor(row.win_ratio, row.pvp_battles, theme),
+        },
+        { value: formatWinPercent(row.pvp_battles / Math.max(model.totalBattles, 1)), label: 'of your battles' },
+    ];
+    if (confidence < THIN_EVIDENCE_CONFIDENCE) {
+        lines.push('Too few battles here to read the win rate.');
+    }
+    if (drillable) {
+        lines.push('Click to see these ships');
+    }
+    return lines;
+};

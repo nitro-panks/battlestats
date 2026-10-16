@@ -911,6 +911,84 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(mockFetchSharedJson).not.toHaveBeenCalledWith('/api/fetch/tier_data/202/?realm=na', expect.anything());
     });
 
+    it('toggles the Profile tier figure between Bars and Map, remembering the choice per browser', async () => {
+        mockFetchSharedJson.mockImplementation((url) => {
+            if (url.includes('/api/fetch/player_correlation/tier_type/')) {
+                return Promise.resolve({ data: readyTierTypePayload, headers: {} });
+            }
+            return Promise.resolve({ data: [], headers: {} });
+        });
+        window.localStorage.removeItem('bs-player-tier-view');
+
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData
+                efficiencyRows={BADGED_EFFICIENCY_ROWS}
+            />,
+        );
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('tab', { name: 'Profile' }));
+        });
+        await waitFor(() => expect(screen.getByRole('group', { name: 'Chart view' })).toBeInTheDocument());
+
+        // Bars is the default view; both pills live in one labelled group.
+        const bars = screen.getByRole('button', { name: 'Bars' });
+        const map = screen.getByRole('button', { name: 'Map' });
+        expect(bars).toHaveAttribute('aria-pressed', 'true');
+        expect(map).toHaveAttribute('aria-pressed', 'false');
+
+        fireEvent.click(map);
+        expect(map).toHaveAttribute('aria-pressed', 'true');
+        expect(bars).toHaveAttribute('aria-pressed', 'false');
+        expect(window.localStorage.getItem('bs-player-tier-view')).toBe('map');
+        expect(mockTrackEvent).toHaveBeenCalledWith('player-tier-chart-view', expect.objectContaining({ view: 'map' }));
+
+        // Re-pressing the active pill is a no-op for analytics.
+        mockTrackEvent.mockClear();
+        fireEvent.click(map);
+        expect(mockTrackEvent).not.toHaveBeenCalledWith('player-tier-chart-view', expect.anything());
+        window.localStorage.removeItem('bs-player-tier-view');
+    });
+
+    it('restores a stored Map preference for the Profile tier figure on mount', async () => {
+        mockFetchSharedJson.mockImplementation((url) => {
+            if (url.includes('/api/fetch/player_correlation/tier_type/')) {
+                return Promise.resolve({ data: readyTierTypePayload, headers: {} });
+            }
+            return Promise.resolve({ data: [], headers: {} });
+        });
+        window.localStorage.setItem('bs-player-tier-view', 'map');
+
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={101}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData
+                efficiencyRows={BADGED_EFFICIENCY_ROWS}
+            />,
+        );
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('tab', { name: 'Profile' }));
+        });
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Map' })).toHaveAttribute('aria-pressed', 'true'));
+        expect(screen.getByRole('button', { name: 'Bars' })).toHaveAttribute('aria-pressed', 'false');
+        window.localStorage.removeItem('bs-player-tier-view');
+    });
+
     it('retries pending profile charts instead of freezing the empty placeholder payload', async () => {
         let tierTypeRequestCount = 0;
 
